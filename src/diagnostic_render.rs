@@ -228,12 +228,10 @@ fn render_secondary_spans(out: &mut String, d: &Diagnostic, source_lines: &[&str
 /// becomes a bare `return;` from this `&mut String` accumulator helper,
 /// which is exactly equivalent since the caller returns `out` right after
 /// calling this regardless of how far it got.
-fn render_primary_span(out: &mut String, d: &Diagnostic, source_lines: &[&str], color: bool) {
-    let Some(line_num) = d.line else { return; };
-    let Some(source_line) = source_lines.get(line_num.saturating_sub(1)) else { return; };
-    let trimmed = source_line.trim_end();
-    if trimmed.is_empty() { return; }
-    let width = format!("{}", line_num).len();
+/// `render_primary_span`'s separator line between the previous rendering
+/// and this span: a plain gutter bar when the primary line has no distant
+/// secondary spans, or an ellipsis when there's a gap. Extracted verbatim.
+fn render_span_separator(out: &mut String, d: &Diagnostic, line_num: usize, width: usize, color: bool) {
     let gutter_pad = " ".repeat(width);
     // Separator between secondary and primary if they exist
     if d.secondary.is_empty() || d.secondary.iter().all(|s| s.line == line_num) {
@@ -251,14 +249,21 @@ fn render_primary_span(out: &mut String, d: &Diagnostic, source_lines: &[&str], 
             out.push_str(&format!("\n{}...", ellipsis_pad));
         }
     }
+}
+
+/// `render_primary_span`'s `NNN | source text` line. Extracted verbatim.
+fn render_span_source_line(out: &mut String, line_num: usize, trimmed: &str, width: usize, color: bool) {
     if color {
         out.push_str(&format!("\n{}{:>width$}{} {}|{} {}",
             BLUE, line_num, RESET, BLUE, RESET, trimmed, width = width));
     } else {
         out.push_str(&format!("\n{:>width$} | {}", line_num, trimmed, width = width));
     }
-    // Caret underline
-    let Some(col) = d.col else { return; };
+}
+
+/// `render_primary_span`'s caret-underline row. Extracted verbatim.
+fn render_span_carets(out: &mut String, d: &Diagnostic, col: usize, width: usize, color: bool) {
+    let gutter_pad = " ".repeat(width);
     let col0 = col.saturating_sub(1);
     let caret_len = match d.end_col {
         Some(end_col) => { let end0 = end_col.saturating_sub(1); if end0 > col0 { end0 - col0 } else { 1 } }
@@ -282,6 +287,21 @@ fn render_primary_span(out: &mut String, d: &Diagnostic, source_lines: &[&str], 
     } else {
         out.push_str(&format!("\n{} | {}{}", gutter_pad, pad, carets));
     }
+}
+
+fn render_primary_span(out: &mut String, d: &Diagnostic, source_lines: &[&str], color: bool) {
+    let Some(line_num) = d.line else { return; };
+    let Some(source_line) = source_lines.get(line_num.saturating_sub(1)) else { return; };
+    let trimmed = source_line.trim_end();
+    if trimmed.is_empty() { return; }
+    let width = format!("{}", line_num).len();
+
+    render_span_separator(out, d, line_num, width, color);
+    render_span_source_line(out, line_num, trimmed, width, color);
+
+    // Caret underline
+    let Some(col) = d.col else { return; };
+    render_span_carets(out, d, col, width, color);
 }
 
 pub fn display_with_source(d: &Diagnostic, source: &str) -> String {
