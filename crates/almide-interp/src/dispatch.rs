@@ -28,6 +28,19 @@ macro_rules! val {
     };
 }
 
+/// Like `val!`, but for helpers that return `Option<Flow>` (e.g. a
+/// name-router group fn) instead of a bare `Flow` — wraps the early-exit in
+/// `Some` so the caller's `if let Some(flow) = helper(..) { return flow; }`
+/// still sees the original non-Value `Flow` unchanged.
+macro_rules! val_opt {
+    ($flow:expr) => {
+        match $flow {
+            Flow::Value(v) => v,
+            other => return Some(other),
+        }
+    };
+}
+
 impl<'a> Interpreter<'a> {
     pub(crate) fn eval_call(
         &mut self,
@@ -76,70 +89,8 @@ impl<'a> Interpreter<'a> {
         let n = name.as_str();
 
         // 1. Builtins.
-        match n {
-            "println" | "print" => {
-                let mut evaled = Vec::with_capacity(args.len());
-                for a in args {
-                    evaled.push(val!(self.eval_expr(a, scope)));
-                }
-                let line = match evaled.first() {
-                    Some(v) => v.display_bare(),
-                    None => String::new(),
-                };
-                self.stdout.push_str(&line);
-                if n == "println" {
-                    self.stdout.push('\n');
-                }
-                return Flow::val(Value::Unit);
-            }
-            "eprintln" | "eprint" => {
-                let mut evaled = Vec::with_capacity(args.len());
-                for a in args {
-                    evaled.push(val!(self.eval_expr(a, scope)));
-                }
-                let line = evaled.first().map(|v| v.display_bare()).unwrap_or_default();
-                self.stderr.push_str(&line);
-                if n == "eprintln" {
-                    self.stderr.push('\n');
-                }
-                return Flow::val(Value::Unit);
-            }
-            "assert" => {
-                let v = val!(self.eval_expr(&args[0], scope));
-                return match v {
-                    Value::Bool(true) => Flow::val(Value::Unit),
-                    Value::Bool(false) => Flow::Abort("assertion failed".into()),
-                    other => Flow::Abort(format!(
-                        "internal: assert on {}",
-                        other.type_name()
-                    )),
-                };
-            }
-            "assert_eq" | "assert_ne" => {
-                let a = val!(self.eval_expr(&args[0], scope));
-                let b = val!(self.eval_expr(&args[1], scope));
-                let eq = a == b;
-                let ok = if n == "assert_eq" { eq } else { !eq };
-                return if ok {
-                    Flow::val(Value::Unit)
-                } else {
-                    // Mirror the native assert macro's panic message shape.
-                    Flow::Abort(format!(
-                        "assertion failed: {} {} {}",
-                        a.almide_repr(),
-                        if n == "assert_eq" { "==" } else { "!=" },
-                        b.almide_repr()
-                    ))
-                };
-            }
-            "panic" => {
-                let msg = match args.first() {
-                    Some(a) => val!(self.eval_expr(a, scope)).display_bare(),
-                    None => "explicit panic".to_string(),
-                };
-                return Flow::Abort(msg);
-            }
-            _ => {}
+        if let Some(flow) = self.eval_builtin_call(n, args, scope) {
+            return flow;
         }
 
         // 2. Variant constructor (Unit / Tuple). Record-variant ctors arrive
@@ -180,6 +131,90 @@ impl<'a> Interpreter<'a> {
         }
 
         Flow::Unsupported(format!("named call `{}`", n))
+    }
+
+    /// `eval_named_call`'s builtins group (println/print/eprintln/eprint/
+    /// assert/assert_eq/assert_ne/panic). `None` means `n` is not a builtin —
+    /// the caller falls through to variant-ctor / user-fn dispatch.
+    fn eval_builtin_call(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
+        match n {
+            "println" | "print" | "eprintln" | "eprint" => self.eval_builtin_print(n, args, scope),
+            _ => self.eval_builtin_assert(n, args, scope),
+        }
+    }
+
+    fn eval_builtin_print(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
+        match n {
+            "println" | "print" => {
+                let mut evaled = Vec::with_capacity(args.len());
+                for a in args {
+                    evaled.push(val_opt!(self.eval_expr(a, scope)));
+                }
+                let line = match evaled.first() {
+                    Some(v) => v.display_bare(),
+                    None => String::new(),
+                };
+                self.stdout.push_str(&line);
+                if n == "println" {
+                    self.stdout.push('\n');
+                }
+                Some(Flow::val(Value::Unit))
+            }
+            "eprintln" | "eprint" => {
+                let mut evaled = Vec::with_capacity(args.len());
+                for a in args {
+                    evaled.push(val_opt!(self.eval_expr(a, scope)));
+                }
+                let line = evaled.first().map(|v| v.display_bare()).unwrap_or_default();
+                self.stderr.push_str(&line);
+                if n == "eprintln" {
+                    self.stderr.push('\n');
+                }
+                Some(Flow::val(Value::Unit))
+            }
+            _ => None,
+        }
+    }
+
+    fn eval_builtin_assert(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
+        match n {
+            "assert" => {
+                let v = val_opt!(self.eval_expr(&args[0], scope));
+                Some(match v {
+                    Value::Bool(true) => Flow::val(Value::Unit),
+                    Value::Bool(false) => Flow::Abort("assertion failed".into()),
+                    other => Flow::Abort(format!(
+                        "internal: assert on {}",
+                        other.type_name()
+                    )),
+                })
+            }
+            "assert_eq" | "assert_ne" => {
+                let a = val_opt!(self.eval_expr(&args[0], scope));
+                let b = val_opt!(self.eval_expr(&args[1], scope));
+                let eq = a == b;
+                let ok = if n == "assert_eq" { eq } else { !eq };
+                Some(if ok {
+                    Flow::val(Value::Unit)
+                } else {
+                    // Mirror the native assert macro's panic message shape.
+                    Flow::Abort(format!(
+                        "assertion failed: {} {} {}",
+                        a.almide_repr(),
+                        if n == "assert_eq" { "==" } else { "!=" },
+                        b.almide_repr()
+                    ))
+                })
+            }
+            "panic" => {
+                let msg = match args.first() {
+                    Some(a) => val_opt!(self.eval_expr(a, scope)).display_bare(),
+                    None => "explicit panic".to_string(),
+                };
+                Some(Flow::Abort(msg))
+            }
+            _ => None,
+        }
     }
 
     // ── Module calls ────────────────────────────────────────────
