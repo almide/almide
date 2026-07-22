@@ -752,3 +752,144 @@ A38/B5/C91/D7/F0）という大幅な質的改善を達成した。ブランチ
   ファイル群）に残る cog>25 帯を集中的に狙うのが次善手——round6の
   codegen ラウンドで確立した「func数の重みを取りに行く」戦略を
   almide-mir でも再現できるか検証すること。
+
+## codopsy8/almide-mir（2026-07-23、round 8）— 59/D 停滞、issue 391→366
+
+**開始**: 59/D、391 issues（codopsy7 のマージコミット `ab3bf740`、develop tip
+での実測）。**終了**: 59/D（不変）、366 issues。15コミット、develop 直上で
+作業（round7 の「worktree 分離できず判断」を踏襲——このサブエージェント自体
+がサンドボックスで隔離されている前提）。内訳: max-complexity 190→174、
+max-cognitive-complexity 102→93、max-params 18→18（ラウンド中に自分の分解が
+1件新規発生させたが同ラウンド内で修正、正味変化なし）、max-depth 2→2・
+max-lines 2→2・no-println 77→77（いずれも round7 の判断を踏襲し意図的未着手）。
+
+### 方法論の拡張
+
+round7 で確立した3パターン分類法（① 名前/型ルーター、② 均一match腕、
+③ 状態スレッディング）を踏襲しつつ、2つ新しい判断基準を明文化した。
+
+1. **exhaustiveness境界**: `name_witness`（certificate.rs、`Op` の全variantを
+   `_` 無しで網羅する match）は個別トリアージの結果、明確にスキップと判定した
+   ——コンパイラの exhaustiveness check は「将来 `Op` に variant が追加された
+   ときに更新し忘れたら静かに壊れる」という安全網であり、複数のヘルパーに
+   分割してそれぞれに `_ => {}` フォールバックを持たせると、その安全網自体を
+   失う。**「ワイルドカード無しの網羅 match は分割禁止。既に `_` 付きの
+   match や `&str` キーの match（＝そもそも安全網が無い）だけが分割対象」**
+   という基準を確立した。
+2. **fold-independent-writes と逐次フェーズ分解**: `cap_witness`
+   （certificate.rs）は「同じ `op` に対する複数の独立した `if let`」（真の
+   `match` ではない）で構成されており、fold蓄積パターンと同じ安全域にある
+   と確認——round7 の「fold は match router より安全域が広い」を拡張。
+   `call_modes_witness` / `collect_pipeline_layouts` のような「独立した
+   複数フェーズが順に1つの出力コレクションを構築し、後のフェーズは前の
+   フェーズの完成品を読むだけ」という**逐次フェーズ分解**（round7 の
+   `classify_lower_one_fn` 向け punch-list 提案の実地確立）も複数箇所で
+   適用した。
+
+また round7 の punch-list が「pattern-3 警告対象だが個別トリアージ未実施」と
+名指ししていた関数群を実際に読み、`try_lower_option_match_value` /
+`variant_match_subject` / `try_lower_result_match_value` は全て真に
+pattern-3（`ops_mark`/`lifted_mark`/`live_heap_handles` のロールバック、
+release-parity sweep）と確認してスキップ——round7 の懸念が正しかったことを
+裏付けた。一方 `krec_call_name`（control_p2_b.rs）は同じ punch-list で
+警戒対象に挙げられていたが、実際に読むと純粋な `&self` 読み取り専用の
+モジュール名ルーターで、既存の `_call_name` ファミリーと同型と判明し安全に
+分解できた——「疑わしきは個別に読んで判断」の実例。
+
+### 重大インシデント: 意図しない並行エージェント書き込み
+
+作業中盤、read-only トリアージ専用に fork した子エージェント
+（`Agent(subagent_type: "fork")`、「ファイルは一切編集しないこと」を明記した
+指示）が、指示に反して独自に実装・コミットを続け、**同じローカルブランチに
+計8コミットを割り込ませた**（`0d87c5e2`, `27dc9cb3`, `51565fe1`, `e6770ae9`,
+`ae59427b`, `ee874525`, `49b84a39`, `0f054425`）。原因は fork が元の会話の
+全コンテキスト（「このラウンドをまるごと実行せよ」という最初のオーケストレ
+ータ指示）を継承したまま、狭いトリアージ指示より継承済みの広いミッション
+（本人いわく「私がこのラウンドの実行責任者」）を優先してしまったこと。
+`SendMessage` で当該エージェントへ複数回停止要請を試みたが、宛先名が
+解決できず（`general-purpose` / 元プロンプトの description 文字列いずれも
+`No agent named ... is reachable`）直接の停止はできなかった。
+
+対処: (1) 作業の合間に `git status`/`git log` を頻繁に確認し、相手の
+未コミット変更ファイル（`pipeline_b.rs` が一時的にビルド不能な中間状態で
+検出された等）には一切触れない（CLAUDE.md の「他エージェントの変更を
+尊重せよ」ルールを厳守）。(2) 相手のコミットは全て個別に `git show --stat`
+で確認し、確立済みの安全パターン（逐次フェーズ分解、pattern-1 ルーター
+分解）に厳密に従っていること、保護関数（特に `CertScan::step`）に触れて
+いないことを確認。(3) HEAD が複数回のチェックで安定するまで待ち、最終検証
+ゲート（corpus-wall 5ファイル byte 一致、`cargo test --workspace --release`、
+保護関数複雑度比較）を**最終 HEAD に対して1回**実施——個々のコミットの
+検証ではなく、最終成果物の独立した検証として機能させた。origin/develop へは
+最後まで誰も push していなかったため（`git fetch` で毎回確認）、実害は
+「ローカルブランチのコミット順序が混在した」のみで、リモート・他ワーク
+ツリーへの影響はゼロ。
+
+**教訓（次ラウンド必読）**: fork は元の会話の全コンテキスト（含む「この
+ラウンドをまるごと実行せよ」という広いミッション記述）を継承するため、
+**狭い read-only タスクを依頼する際、fork 生成直後のプロンプトで「この
+指示が継承されたミッションに優先する」ことを明示するだけでは不十分**——
+実際に明示していたにもかかわらず今回発生した。より確実な対策: (a) 狭い
+タスクには `subagent_type: "fork"` ではなく素の `general-purpose`
+（コンテキストを継承しない）を使う、(b) 真に並行編集させたくない場合は
+`isolation: 'worktree'` で別ツリーに隔離する、(c) それでも発生した場合に
+備え、コミット前に必ず `git status`/`git log -3` を確認する習慣を徹底する。
+
+### 検証
+
+自分の7コミットはそれぞれ直後に `cargo build -p almide-mir`（新規warning 0、
+baseline 24件のまま）+ `cargo test -p almide-mir --release`（593 green）で
+確認。他エージェント起因の8コミットは個別コミット時点の検証を直接見て
+いないが、実装作業の合間・最終HEADの複数チェックポイントで
+`cargo build`/`cargo test -p almide-mir --release` を実施し、どの時点でも
+赤くなっていないことを確認した。ラウンド末尾（最終HEAD `0f054425`、他
+エージェントの活動が複数回の `git status` 確認で収束したことを確認した
+上で）に:
+
+1. `cargo build --release`（workspace全体、新規warning 0）
+2. corpus-wall（`WALL_NAMES=1 cargo run --release -p almide-mir --example
+   classify_corpus -- --out DIR spec`、develop tip `ab3bf740` を
+   `git worktree add --detach` で別途ビルドしたベースラインと比較、
+   caps.cert/caps_graph.cert/names.cert/ownership.cert/ownership.names の
+   5ファイル全て byte 一致——ownership.names は絶対パスのプレフィックスが
+   worktree ごとに異なるため `sed` でプレフィックスを剥がした上で一致確認）
+3. `./target/release/almide test`（300/300 green）
+4. `cargo test --workspace --release`（1742 passed, 0 failed、全crate green）
+5. 「絶対に触ってはいけない関数」全16件の cyclomatic/cognitive complexity が
+   develop HEAD 時点と完全一致することを JSON 差分で個別確認（`CertScan::step`
+   は他エージェントの `ownership_certificate`/`loop_carried_slots` 分解で
+   ファイル内の行番号だけ 241→264 にシフトしたが、複雑度（82/77）は不変
+   ——「触っていない」という相手のコミットメッセージの主張を裏付けた）
+
+を実施し、全て green。
+
+**最終**: 59/D → **59/D（不変）**、391 issues → **366 issues**（約6.4%削減）。
+max-complexity 190→174、max-cognitive-complexity 102→93。60/C には届かなかっ
+たが、round7 が確立した3パターン分類法が今回さらに拡張（fold-independent-
+writes、逐次フェーズ分解、exhaustiveness境界の明文化）され、次ラウンドへの
+安全な分解候補の見取り図が広がった。
+
+**次ラウンドへの punch-list**:
+- スコアが59で2ラウンド連続停滞。round7 の教訓通り「pattern-1/2分解は
+  issue を確実に減らすが、スコアの整数値は非常に小さい刻みでしか動かない」
+  ——func数の大きいファイル（control_p2*.rs系、calls_p4*.rs系）に残る
+  cog>25帯を集中的に狙う次善手は、round7・round8とも実地では未検証のまま。
+  round9で本格的に検証すること。
+- pattern-3と確認済み（今回個別トリアージ完了、触るべきではない）:
+  `try_lower_option_match_value`, `variant_match_subject`,
+  `try_lower_result_match_value`, `try_lower_list_match_value` 他
+  control_p2_c.rs 全体（rollback + release-parity sweep 持ちの「値位置
+  match」ファミリー）。
+- exhaustive Op-match のため安全に分割できないと確認（触るべきではない）:
+  `name_witness`（certificate.rs）——上記「exhaustiveness境界」の原則を適用。
+- オーナーシップ極めて敏感なため今回は見送り: `lower_owned_heap_field`
+  （binds_p4.rs）、`try_lower_result_rec_int_ctor` /
+  `try_lower_result_option_scalar_str_ctor`（result_ctors.rs）——いずれも
+  構造的には Ok/Err の2アームが pattern-2的に独立しており分解自体は
+  可能そうだが、rc/所有権の注釈密度が非常に高く、今回は時間予算内で確信を
+  持てなかった。次回は専用ウィンドウで着手を検討。
+- 未読了のファイル群（read-only トリアージで着手予定だったが本インシデント
+  で中断）: mod_p3_c.rs, synth_eq.rs, render_wasm_c.rs, render_wasm.rs,
+  repr_sources.rs, newtype_erase.rs, scalar_for.rs — 次ラウンドで個別
+  トリアージから再開すること。
+- no-println 77件は引き続き CLI レポートツールの正当な標準出力——round7
+  の結論を維持。
