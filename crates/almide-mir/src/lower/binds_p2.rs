@@ -996,6 +996,24 @@ impl LowerCtx {
             result: Some(repr),
         });
         self.live_heap_handles.push(dst);
+        self.seed_call_named_heap_drop_route(dst, ty);
+        self.seed_call_named_heap_read_shape(dst, ty);
+        Ok(())
+    }
+
+    /// Extracted from `Self::lower_bind_heap_call_named` (second-round split, cog
+    /// reduction): the mutually-exclusive drop-route selection for a Named-call's fresh
+    /// heap result, verbatim (the original `if/else if` chain).
+    fn seed_call_named_heap_drop_route(&mut self, dst: ValueId, ty: &Ty) {
+        if !self.seed_call_named_heap_drop_route_a(dst, ty) {
+            self.seed_call_named_heap_drop_route_b(dst, ty);
+        }
+    }
+
+    /// Extracted from `Self::seed_call_named_heap_drop_route` (third-round split, cog
+    /// reduction): the first half of the mutually-exclusive `if/else if` chain, verbatim.
+    /// Returns whether a branch matched (the caller then skips the second half).
+    fn seed_call_named_heap_drop_route_a(&mut self, dst: ValueId, ty: &Ty) -> bool {
         if crate::lower::is_res_intlist_strlist_ty(ty) {
             // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
             // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
@@ -1030,7 +1048,17 @@ impl LowerCtx {
             // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
             // last-ref inner map's String slots (a flat rc_dec would leak them).
             self.variant_drop_handles.insert(dst, "map_msv".to_string());
-        } else if crate::lower::is_map_mlo_ty(ty) {
+        } else {
+            return false;
+        }
+        true
+    }
+
+    /// Extracted from `Self::seed_call_named_heap_drop_route` (third-round split, cog
+    /// reduction): the second half of the mutually-exclusive `if/else if` chain, verbatim
+    /// (only reached when the first half's chain did not match).
+    fn seed_call_named_heap_drop_route_b(&mut self, dst: ValueId, ty: &Ty) {
+        if crate::lower::is_map_mlo_ty(ty) {
             // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
             // last-ref value list's Option slots (a flat rc_dec would leak them).
             self.variant_drop_handles.insert(dst, "map_mlo".to_string());
@@ -1078,6 +1106,12 @@ impl LowerCtx {
             // add_item(data, 1)` then `data = __mp_buf; data[0]`).
             self.materialized_lists.insert(dst);
         }
+    }
+
+    /// Extracted from `Self::lower_bind_heap_call_named` (second-round split, cog
+    /// reduction): the independent (non-mutually-exclusive) read-shape tracking checks
+    /// for a Named-call's fresh heap result, verbatim.
+    fn seed_call_named_heap_read_shape(&mut self, dst: ValueId, ty: &Ty) {
         // A user fn returning `List[heap]` (`build_nested() -> List[List[Int]]`) is
         // likewise a REAL, POPULATED nested-ownership block, so admit the element
         // borrow `nested[i]` (LoadHandle at `$elem_addr`) over the bound var — the
@@ -1135,7 +1169,6 @@ impl LowerCtx {
                 self.variant_drop_handles.insert(dst, name);
             }
         }
-        Ok(())
     }
 
     /// Extracted from `Self::lower_bind_heap` (pattern-2 uniform-arm split, cog reduction):
@@ -1145,6 +1178,27 @@ impl LowerCtx {
         let dst =
             self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, ty)?;
         self.value_of.insert(var, dst);
+        let faithful = self.check_call_module_faithful(module.as_str(), func.as_str(), args)?;
+        self.seed_call_module_heap_read_shape(dst, ty, module.as_str(), func.as_str(), faithful);
+        self.seed_call_module_heap_drop_route(dst, ty);
+        // A `Value` result (value.str/int/… or a Value-returning combinator) drops via the
+        // runtime-tag-dispatched DropValue (a heap-payload Value owns one handle).
+        if crate::lower::is_value_ty(ty) {
+            self.value_handles.insert(dst);
+        }
+        Ok(())
+    }
+
+    /// Extracted from `Self::lower_bind_heap_call_module` (second-round split, cog
+    /// reduction): the HOF-faithfulness guard, verbatim. Returns whether the call is
+    /// FAITHFULLY executable (every closure arg lifted, no un-representable fn-typed data
+    /// arg); an unfaithful higher-order call still WALLS via `Err`, exactly as before.
+    fn check_call_module_faithful(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<bool, LowerError> {
         // A SCALAR-element `List[Int/Float/Bool]` result from a self-host list call is a REAL,
         // POPULATED block — admit a direct `xs[i]` — ONLY when the call is FAITHFULLY executable:
         //  (1) every closure arg LIFTED (an unlifted `list.map(fns, (f) => f(10))` runs the
@@ -1200,19 +1254,31 @@ impl LowerCtx {
             if std::env::var("ALMIDE_DBG_ANF").is_ok() {
                 eprintln!(
                     "[hof-guard] {}.{} unlifted={} data_arg_has_fn={}",
-                    module.as_str(),
-                    func.as_str(),
+                    module,
+                    func,
                     self.last_call_had_unlifted_closure,
                     data_arg_has_fn
                 );
             }
             return Err(LowerError::Unsupported(format!(
-                "{}.{} with an unliftable/closure-list higher-order argument \
-                 cannot execute faithfully in this brick (walled, not mis-valued)",
-                module.as_str(),
-                func.as_str()
+                "{module}.{func} with an unliftable/closure-list higher-order argument \
+                 cannot execute faithfully in this brick (walled, not mis-valued)"
             )));
         }
+        Ok(faithful)
+    }
+
+    /// Extracted from `Self::lower_bind_heap_call_module` (second-round split, cog
+    /// reduction): the `faithful`-gated + self-host fn-name read-shape tracking,
+    /// verbatim.
+    fn seed_call_module_heap_read_shape(
+        &mut self,
+        dst: ValueId,
+        ty: &Ty,
+        module: &str,
+        func: &str,
+        faithful: bool,
+    ) {
         if is_scalar_elem_list_ty(ty) && faithful {
             self.materialized_lists.insert(dst);
         }
@@ -1249,7 +1315,7 @@ impl LowerCtx {
         }
         // A self-host Option fn (`list.get`) returns a real materialized Option —
         // track the bound result so a later `match` over the var EXECUTES.
-        if is_self_host_option_module_fn(module.as_str(), func.as_str()) {
+        if is_self_host_option_module_fn(module, func) {
             self.materialized_options.insert(dst);
         }
         // A FUNCTION-valued module-call result (`let f = map.get_or(m, k, d)` —
@@ -1262,14 +1328,14 @@ impl LowerCtx {
         }
         // A self-host Result fn (`int.parse`) returns a real materialized Result — track it
         // so a later `match r { Ok(v) => …, Err(e) => … }` over the var EXECUTES.
-        if is_self_host_result_module_fn(module.as_str(), func.as_str()) {
+        if is_self_host_result_module_fn(module, func) {
             self.materialized_results.insert(dst);
         }
         // A self-host HEAP-Ok Result fn (`value.as_string`/`value.as_array`) — track it in the
         // cap-as-tag set so a `match` reads tag @16 + binds the @12 payload. The DROP differs
         // by Ok-arm: a `List[Value]` Ok (`value.as_array`) frees recursively
         // (`value_result_lists` → `DropResultListValue`), else a String Ok flat (`DropListStr`).
-        if crate::lower::is_self_host_result_str_module_fn(module.as_str(), func.as_str()) {
+        if crate::lower::is_self_host_result_str_module_fn(module, func) {
             self.materialized_results_str.insert(dst);
             if crate::lower::is_result_listval_ty(ty) {
                 self.value_result_lists.insert(dst);
@@ -1281,6 +1347,23 @@ impl LowerCtx {
                 self.heap_elem_lists.insert(dst);
             }
         }
+    }
+
+    /// Extracted from `Self::lower_bind_heap_call_module` (second-round split, cog
+    /// reduction): the mutually-exclusive drop-route selection for a Module-call's fresh
+    /// heap result, verbatim (the original `if/else if` chain — NOT the same helper as
+    /// `Self::seed_call_named_heap_drop_route`: this one omits the `is_scalar_elem_list_ty`
+    /// tail arm, already handled above via the `faithful` gate).
+    fn seed_call_module_heap_drop_route(&mut self, dst: ValueId, ty: &Ty) {
+        if !self.seed_call_module_heap_drop_route_a(dst, ty) {
+            self.seed_call_module_heap_drop_route_b(dst, ty);
+        }
+    }
+
+    /// Extracted from `Self::seed_call_module_heap_drop_route` (third-round split, cog
+    /// reduction): the first half of the mutually-exclusive `if/else if` chain, verbatim.
+    /// Returns whether a branch matched (the caller then skips the second half).
+    fn seed_call_module_heap_drop_route_a(&mut self, dst: ValueId, ty: &Ty) -> bool {
         // A `List[String]` result (string.split / a List[String] combinator) is a
         // nested-ownership list — its scope-end drop must recursively free elements.
         if crate::lower::is_res_intlist_strlist_ty(ty) {
@@ -1313,7 +1396,17 @@ impl LowerCtx {
             // `Map[String, <record/variant>]` — the desugared map literal's
             // from_list result (type-driven sweep; see `map_named_value_drop`).
             self.variant_drop_handles.insert(dst, hname);
-        } else if crate::lower::is_map_msv_ty(ty) {
+        } else {
+            return false;
+        }
+        true
+    }
+
+    /// Extracted from `Self::seed_call_module_heap_drop_route` (third-round split, cog
+    /// reduction): the second half of the mutually-exclusive `if/else if` chain, verbatim
+    /// (only reached when the first half's chain did not match).
+    fn seed_call_module_heap_drop_route_b(&mut self, dst: ValueId, ty: &Ty) {
+        if crate::lower::is_map_msv_ty(ty) {
             // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
             // last-ref inner map's String slots (a flat rc_dec would leak them).
             self.variant_drop_handles.insert(dst, "map_msv".to_string());
@@ -1356,12 +1449,6 @@ impl LowerCtx {
         } else if is_heap_elem_list_ty(ty) {
             self.heap_elem_lists.insert(dst);
         }
-        // A `Value` result (value.str/int/… or a Value-returning combinator) drops via the
-        // runtime-tag-dispatched DropValue (a heap-payload Value owns one handle).
-        if crate::lower::is_value_ty(ty) {
-            self.value_handles.insert(dst);
-        }
-        Ok(())
     }
 
     /// Extracted from `Self::lower_bind_heap` (pattern-2 uniform-arm split, cog reduction):
