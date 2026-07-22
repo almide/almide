@@ -569,8 +569,7 @@ pub fn call_modes_witness(
         &index_of,
         unknown,
         is_known_convention,
-        &table_targets,
-        table_unseeable,
+        (&table_targets, table_unseeable),
     );
     format!("{}|{}", sigs.join(";"), sites.join(";"))
 }

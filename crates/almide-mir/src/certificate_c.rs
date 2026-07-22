@@ -46,18 +46,18 @@ fn call_modes_witness_func_table<'p>(
 
 /// Extracted from `call_modes_witness` (codopsy8 complexity sweep, phase 3 of 3): the
 /// per-call-site rows, one per `Op::CallFn`/`Op::CallIndirect` in the program — reads the
-/// (already-finished) `table_targets`/`table_unseeable` from phase 2, never writes them.
-/// Verbatim.
-#[allow(clippy::too_many_arguments)]
+/// (already-finished) `func_table = (table_targets, table_unseeable)` from phase 2, never
+/// writes it. `func_table` is bundled into one tuple param (rather than two) to keep this
+/// at 6 params (the codopsy max-params threshold). Verbatim otherwise.
 fn call_modes_witness_sites(
     program: &BTreeMap<String, MirFunction>,
     names: &[&str],
     index_of: &BTreeMap<&str, usize>,
     unknown: usize,
     is_known_convention: &dyn Fn(&str) -> bool,
-    table_targets: &[&str],
-    table_unseeable: bool,
+    func_table: (&[&str], bool),
 ) -> Vec<String> {
+    let (table_targets, table_unseeable) = func_table;
     let mut sites: Vec<String> = Vec::new();
     for name in names {
         for op in &program[*name].ops {
