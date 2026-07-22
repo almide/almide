@@ -678,16 +678,13 @@ fn bounded_from_structural_generics(func: &IrFunction) -> (Vec<BoundedParam>, st
 /// vars already covered by パターン A.
 fn bounded_from_protocol_generics(func: &IrFunction, seen_tvars: &std::collections::HashSet<Sym>) -> Vec<BoundedParam> {
     let mut bounded = Vec::new();
-    if let Some(ref generics) = func.generics {
-        for g in generics.iter() {
-            if let Some(ref bounds) = g.bounds {
-                if !bounds.is_empty() && !seen_tvars.contains(&g.name) {
-                    for (i, param) in func.params.iter().enumerate() {
-                        if ty_contains_typevar(&param.ty, &g.name) {
-                            bounded.push(BoundedParam { param_idx: i, type_var: g.name.to_string() });
-                        }
-                    }
-                }
+    let Some(ref generics) = func.generics else { return bounded };
+    for g in generics.iter() {
+        let Some(ref bounds) = g.bounds else { continue };
+        if bounds.is_empty() || seen_tvars.contains(&g.name) { continue; }
+        for (i, param) in func.params.iter().enumerate() {
+            if ty_contains_typevar(&param.ty, &g.name) {
+                bounded.push(BoundedParam { param_idx: i, type_var: g.name.to_string() });
             }
         }
     }
