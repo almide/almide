@@ -561,87 +561,100 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
             };
 
             for method_sig in &proto_def.methods {
-                let fn_key = format!("{}.{}", type_name, method_sig.name);
-                let Some(sig) = env.functions.get(&sym(&fn_key)) else {
-                    let is_builtin = matches!(proto_name.as_str(),
-                        "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode"
-                        | "Numeric");
-                    if !is_builtin {
-                        diagnostics.push(err(
-                            format!("type '{}' declares protocol '{}' but missing method '{}'",
-                                type_name, proto_name, method_sig.name),
-                            format!("Add: fn {}.{}({}) -> {}",
-                                type_name, method_sig.name,
-                                method_sig.params.iter()
-                                    .map(|(n, t)| {
-                                        let display_ty = if *t == Ty::TypeVar(sym("Self")) {
-                                            type_name.to_string()
-                                        } else {
-                                            t.display()
-                                        };
-                                        format!("{}: {}", n, display_ty)
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(", "),
-                                {
-                                    let ret = &method_sig.ret;
-                                    if *ret == Ty::TypeVar(sym("Self")) {
-                                        type_name.to_string()
-                                    } else {
-                                        ret.display()
-                                    }
-                                }),
-                            format!("type {} : {}", type_name, proto_name),
-                        ));
-                    }
-                    continue;
-                };
-                if is_generic {
-                    continue;
-                }
-
-                let expected_params: Vec<Ty> = method_sig.params.iter()
-                    .map(|(_, ty)| env.resolve_named(&substitute_self(ty, &type_ty)))
-                    .collect();
-                let expected_ret = env.resolve_named(&substitute_self(&method_sig.ret, &type_ty));
-                let actual_params: Vec<Ty> = sig.params.iter().map(|(_, t)| env.resolve_named(t)).collect();
-                let actual_ret = env.resolve_named(&sig.ret);
-
-                if actual_params.len() != expected_params.len() {
-                    diagnostics.push(err(
-                        format!("method '{}' on type '{}' has {} parameter(s), expected {} to satisfy protocol '{}'",
-                            method_sig.name, type_name, actual_params.len(), expected_params.len(), proto_name),
-                        format!("Protocol '{}' defines: fn {}({})", proto_name, method_sig.name,
-                            method_sig.params.iter().map(|(n, t)| {
-                                format!("{}: {}", n, substitute_self(t, &type_ty).display())
-                            }).collect::<Vec<_>>().join(", ")),
-                        format!("fn {}.{}", type_name, method_sig.name),
-                    ));
-                    continue;
-                }
-                for (i, (actual_ty, expected_ty)) in actual_params.iter().zip(expected_params.iter()).enumerate() {
-                    let matches = strip_module_qualifier(actual_ty) == strip_module_qualifier(expected_ty);
-                    if !matches && *expected_ty != Ty::Unknown && *actual_ty != Ty::Unknown {
-                        let param_name = &sig.params[i].0;
-                        diagnostics.push(err(
-                            format!("method '{}.{}' parameter '{}' has type '{}', expected '{}' to satisfy protocol '{}'",
-                                type_name, method_sig.name, param_name, actual_ty.display(), expected_ty.display(), proto_name),
-                            format!("Change type to '{}'", expected_ty.display()),
-                            format!("fn {}.{}", type_name, method_sig.name),
-                        ));
-                    }
-                }
-                let ret_matches = strip_module_qualifier(&actual_ret) == strip_module_qualifier(&expected_ret);
-                if !ret_matches && expected_ret != Ty::Unknown && actual_ret != Ty::Unknown {
-                    diagnostics.push(err(
-                        format!("method '{}.{}' returns '{}', expected '{}' to satisfy protocol '{}'",
-                            type_name, method_sig.name, actual_ret.display(), expected_ret.display(), proto_name),
-                        format!("Change return type to '{}'", expected_ret.display()),
-                        format!("fn {}.{}", type_name, method_sig.name),
-                    ));
-                }
+                validate_protocol_method_impl(env, diagnostics, *type_name, *proto_name, is_generic, &type_ty, method_sig);
             }
         }
+    }
+}
+
+/// Validate a single protocol method's implementation on `type_name`:
+/// presence (missing-method E023 unless it's a builtin-derived protocol),
+/// then — for non-generic types — arity, parameter types, and return type
+/// against the protocol's declared signature (`Self` substituted for
+/// `type_ty`). Verbatim text move out of [`validate_protocol_impls`].
+fn validate_protocol_method_impl(
+    env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
+    type_name: Sym, proto_name: Sym, is_generic: bool, type_ty: &Ty,
+    method_sig: &crate::types::ProtocolMethodSig,
+) {
+    let fn_key = format!("{}.{}", type_name, method_sig.name);
+    let Some(sig) = env.functions.get(&sym(&fn_key)) else {
+        let is_builtin = matches!(proto_name.as_str(),
+            "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode"
+            | "Numeric");
+        if !is_builtin {
+            diagnostics.push(err(
+                format!("type '{}' declares protocol '{}' but missing method '{}'",
+                    type_name, proto_name, method_sig.name),
+                format!("Add: fn {}.{}({}) -> {}",
+                    type_name, method_sig.name,
+                    method_sig.params.iter()
+                        .map(|(n, t)| {
+                            let display_ty = if *t == Ty::TypeVar(sym("Self")) {
+                                type_name.to_string()
+                            } else {
+                                t.display()
+                            };
+                            format!("{}: {}", n, display_ty)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    {
+                        let ret = &method_sig.ret;
+                        if *ret == Ty::TypeVar(sym("Self")) {
+                            type_name.to_string()
+                        } else {
+                            ret.display()
+                        }
+                    }),
+                format!("type {} : {}", type_name, proto_name),
+            ));
+        }
+        return;
+    };
+    if is_generic {
+        return;
+    }
+
+    let expected_params: Vec<Ty> = method_sig.params.iter()
+        .map(|(_, ty)| env.resolve_named(&substitute_self(ty, type_ty)))
+        .collect();
+    let expected_ret = env.resolve_named(&substitute_self(&method_sig.ret, type_ty));
+    let actual_params: Vec<Ty> = sig.params.iter().map(|(_, t)| env.resolve_named(t)).collect();
+    let actual_ret = env.resolve_named(&sig.ret);
+
+    if actual_params.len() != expected_params.len() {
+        diagnostics.push(err(
+            format!("method '{}' on type '{}' has {} parameter(s), expected {} to satisfy protocol '{}'",
+                method_sig.name, type_name, actual_params.len(), expected_params.len(), proto_name),
+            format!("Protocol '{}' defines: fn {}({})", proto_name, method_sig.name,
+                method_sig.params.iter().map(|(n, t)| {
+                    format!("{}: {}", n, substitute_self(t, type_ty).display())
+                }).collect::<Vec<_>>().join(", ")),
+            format!("fn {}.{}", type_name, method_sig.name),
+        ));
+        return;
+    }
+    for (i, (actual_ty, expected_ty)) in actual_params.iter().zip(expected_params.iter()).enumerate() {
+        let matches = strip_module_qualifier(actual_ty) == strip_module_qualifier(expected_ty);
+        if !matches && *expected_ty != Ty::Unknown && *actual_ty != Ty::Unknown {
+            let param_name = &sig.params[i].0;
+            diagnostics.push(err(
+                format!("method '{}.{}' parameter '{}' has type '{}', expected '{}' to satisfy protocol '{}'",
+                    type_name, method_sig.name, param_name, actual_ty.display(), expected_ty.display(), proto_name),
+                format!("Change type to '{}'", expected_ty.display()),
+                format!("fn {}.{}", type_name, method_sig.name),
+            ));
+        }
+    }
+    let ret_matches = strip_module_qualifier(&actual_ret) == strip_module_qualifier(&expected_ret);
+    if !ret_matches && expected_ret != Ty::Unknown && actual_ret != Ty::Unknown {
+        diagnostics.push(err(
+            format!("method '{}.{}' returns '{}', expected '{}' to satisfy protocol '{}'",
+                type_name, method_sig.name, actual_ret.display(), expected_ret.display(), proto_name),
+            format!("Change return type to '{}'", expected_ret.display()),
+            format!("fn {}.{}", type_name, method_sig.name),
+        ));
     }
 }
 
