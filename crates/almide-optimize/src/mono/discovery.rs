@@ -189,13 +189,8 @@ pub(super) fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str
         (Ty::Named(n, _), _) if n == var_name => arg_ty.clone(),
         (Ty::OpenRecord { .. }, _) if var_name.starts_with("__open_") => arg_ty.clone(),
         (Ty::Named(_, _), _) if var_name.starts_with("__open_") => arg_ty.clone(),
-        (Ty::Fn { params: p_params, ret: p_ret }, Ty::Fn { params: a_params, ret: a_ret }) if p_params.len() == a_params.len() => {
-            for (p, a) in p_params.iter().zip(a_params.iter()) {
-                let r = extract_typevar_binding(p, a, var_name);
-                if !matches!(r, Ty::Unknown) { return r; }
-            }
-            extract_typevar_binding(p_ret, a_ret, var_name)
-        }
+        (Ty::Fn { params: p_params, ret: p_ret }, Ty::Fn { params: a_params, ret: a_ret }) if p_params.len() == a_params.len() =>
+            extract_typevar_binding_fn(p_params, p_ret, a_params, a_ret, var_name),
         // A QUALIFIED/bare Named pair (`cell.Cell[T]` param vs a bare `Cell[Int]`
         // arg, or vice versa) is the SAME nominal type under the checker's
         // names_match doctrine — descend into the type args instead of letting
@@ -206,35 +201,47 @@ pub(super) fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str
             if p_args.len() == a_args.len()
                 && !p_args.is_empty()
                 && pn.as_str().rsplit('.').next() == an.as_str().rsplit('.').next() =>
-        {
-            for (p, a) in p_args.iter().zip(a_args.iter()) {
-                let r = extract_typevar_binding(p, a, var_name);
-                if !matches!(r, Ty::Unknown) {
-                    return r;
-                }
-            }
-            Ty::Unknown
-        }
-        _ => {
-            if param_ty.constructor_id() == arg_ty.constructor_id() {
-                let p_args = param_ty.type_args();
-                let a_args = arg_ty.type_args();
-                if p_args.len() == a_args.len() {
-                    for (p, a) in p_args.iter().zip(a_args.iter()) {
-                        let r = extract_typevar_binding(p, a, var_name);
-                        if !matches!(r, Ty::Unknown) { return r; }
-                    }
-                }
-            }
-            if let (Ty::Tuple(pts), Ty::Tuple(ats)) = (param_ty, arg_ty) {
-                if pts.len() == ats.len() {
-                    for (p, a) in pts.iter().zip(ats.iter()) {
-                        let r = extract_typevar_binding(p, a, var_name);
-                        if !matches!(r, Ty::Unknown) { return r; }
-                    }
-                }
-            }
-            Ty::Unknown
+            extract_typevar_binding_named_pair(p_args, a_args, var_name),
+        _ => extract_typevar_binding_fallback(param_ty, arg_ty, var_name),
+    }
+}
+
+fn extract_typevar_binding_fn(p_params: &[Ty], p_ret: &Ty, a_params: &[Ty], a_ret: &Ty, var_name: &str) -> Ty {
+    for (p, a) in p_params.iter().zip(a_params.iter()) {
+        let r = extract_typevar_binding(p, a, var_name);
+        if !matches!(r, Ty::Unknown) { return r; }
+    }
+    extract_typevar_binding(p_ret, a_ret, var_name)
+}
+
+fn extract_typevar_binding_named_pair(p_args: &[Ty], a_args: &[Ty], var_name: &str) -> Ty {
+    for (p, a) in p_args.iter().zip(a_args.iter()) {
+        let r = extract_typevar_binding(p, a, var_name);
+        if !matches!(r, Ty::Unknown) {
+            return r;
         }
     }
+    Ty::Unknown
+}
+
+fn extract_typevar_binding_fallback(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
+    if param_ty.constructor_id() == arg_ty.constructor_id() {
+        let p_args = param_ty.type_args();
+        let a_args = arg_ty.type_args();
+        if p_args.len() == a_args.len() {
+            for (p, a) in p_args.iter().zip(a_args.iter()) {
+                let r = extract_typevar_binding(p, a, var_name);
+                if !matches!(r, Ty::Unknown) { return r; }
+            }
+        }
+    }
+    if let (Ty::Tuple(pts), Ty::Tuple(ats)) = (param_ty, arg_ty) {
+        if pts.len() == ats.len() {
+            for (p, a) in pts.iter().zip(ats.iter()) {
+                let r = extract_typevar_binding(p, a, var_name);
+                if !matches!(r, Ty::Unknown) { return r; }
+            }
+        }
+    }
+    Ty::Unknown
 }
