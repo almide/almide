@@ -556,24 +556,42 @@ pub fn bridge_cross_module_toplets(
     // real storage, not an init alias).
     mutable_aliases: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
 ) {
+    // Sequential-phase split (codopsy8 complexity sweep): phase 1 builds the by-name/
+    // by-bare lookup maps (self-contained — never touches globals/global_inits/
+    // mutable_aliases); phase 2 reads those FINISHED, read-only maps to populate the 3
+    // output maps. Pure text-move, no logic change.
+    let (by_name, by_bare) = bridge_cross_module_toplets_build_lookup(ir);
+    bridge_cross_module_toplets_apply(ir, &by_name, &by_bare, globals, global_inits, mutable_aliases);
+}
+
+/// Extracted from `bridge_cross_module_toplets` (codopsy8 complexity sweep, phase 1 of
+/// 2): the by-name/by-bare lookup maps of every module top-let. Verbatim.
+///
+/// The main-side reference entry is SYNTHESIZED by the frontend with an UPPERCASED
+/// name (`m.count` → a main var named "COUNT", `module_origin` set — the v0 Rust-const
+/// naming convention, expressions.rs's cross-module top-let path). So the bridge keys
+/// BOTH maps by the UPPERCASED module-side name: an all-caps `let SYSTEM` matched
+/// before by accident; a lowercase `let title`/`var count` silently MISSED the bridge
+/// and fell through to the raw numeric-id collision below (reading an UNRELATED
+/// top-let's init — a confirmed silent wrong value, `let N = 7; var count = 0` printed
+/// 7 for `m.count`; a heap-typed collider surfaced as invalid i64/i32 wasm instead).
+/// MUTABILITY: only immutable `let`s are bridged — aliasing a `var` reference to its
+/// INIT would const-fold reads across mutations (read-after-`bump()` returning 0).
+/// A `var` reference instead has its collided raw entry REMOVED below, so it is
+/// honestly UNBOUND → the reference site walls → `--verified` falls back to v0.
+/// Keyed by (SOURCE MODULE, UPPERCASED NAME): the ref entry's `module_origin`
+/// names which module it points at, so a name defined in TWO modules (view.ROW
+/// and layout.ROW — the ceangal zip class) resolves per-module instead of
+/// dropping as ambiguous. A bare-name fallback map keeps the pre-existing
+/// behavior for refs whose module_origin the frontend left unset.
+#[allow(clippy::type_complexity)]
+fn bridge_cross_module_toplets_build_lookup(
+    ir: &almide_ir::IrProgram,
+) -> (
+    std::collections::HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>>,
+    std::collections::HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>>,
+) {
     use std::collections::HashMap;
-    // The main-side reference entry is SYNTHESIZED by the frontend with an UPPERCASED
-    // name (`m.count` → a main var named "COUNT", `module_origin` set — the v0 Rust-const
-    // naming convention, expressions.rs's cross-module top-let path). So the bridge keys
-    // BOTH maps by the UPPERCASED module-side name: an all-caps `let SYSTEM` matched
-    // before by accident; a lowercase `let title`/`var count` silently MISSED the bridge
-    // and fell through to the raw numeric-id collision below (reading an UNRELATED
-    // top-let's init — a confirmed silent wrong value, `let N = 7; var count = 0` printed
-    // 7 for `m.count`; a heap-typed collider surfaced as invalid i64/i32 wasm instead).
-    // MUTABILITY: only immutable `let`s are bridged — aliasing a `var` reference to its
-    // INIT would const-fold reads across mutations (read-after-`bump()` returning 0).
-    // A `var` reference instead has its collided raw entry REMOVED below, so it is
-    // honestly UNBOUND → the reference site walls → `--verified` falls back to v0.
-    // Keyed by (SOURCE MODULE, UPPERCASED NAME): the ref entry's `module_origin`
-    // names which module it points at, so a name defined in TWO modules (view.ROW
-    // and layout.ROW — the ceangal zip class) resolves per-module instead of
-    // dropping as ambiguous. A bare-name fallback map keeps the pre-existing
-    // behavior for refs whose module_origin the frontend left unset.
     let mut by_name: HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>> =
         HashMap::new();
     let mut by_bare: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>> = HashMap::new();
@@ -650,9 +668,24 @@ pub fn bridge_cross_module_toplets(
                 .or_insert(entry);
         }
     }
-    // OVERRIDES an existing (module-raw, possibly colliding) entry — callers order the
-    // composition as: module union → this bridge → main top-lets re-inserted last, so the
-    // precedence is main > bridged-name > raw module id.
+    (by_name, by_bare)
+}
+
+/// Extracted from `bridge_cross_module_toplets` (codopsy8 complexity sweep, phase 2 of
+/// 2): reads the (already-finished, read-only) `by_name`/`by_bare` lookup maps from
+/// phase 1 to populate `globals`/`global_inits`/`mutable_aliases`. OVERRIDES an existing
+/// (module-raw, possibly colliding) entry — callers order the composition as: module
+/// union → this bridge → main top-lets re-inserted last, so the precedence is main >
+/// bridged-name > raw module id. Verbatim.
+#[allow(clippy::type_complexity)]
+fn bridge_cross_module_toplets_apply(
+    ir: &almide_ir::IrProgram,
+    by_name: &std::collections::HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>>,
+    by_bare: &std::collections::HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>>,
+    globals: &mut std::collections::HashMap<almide_ir::VarId, Ty>,
+    global_inits: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    mutable_aliases: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+) {
     for (i, info) in ir.var_table.entries.iter().enumerate() {
         let id = almide_ir::VarId(i as u32);
         // Only the frontend-synthesized cross-module reference entries participate
