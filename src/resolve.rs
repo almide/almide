@@ -8,6 +8,7 @@ use crate::parser;
 use crate::project;
 
 use crate::stdlib;
+use crate::err;
 
 pub struct ResolvedModules {
     /// Modules in dependency order (leaves first).
@@ -350,8 +351,8 @@ fn load_module(
     // If this module was loaded from mod.almd (or lib.almd), also load sibling .almd files as sub-namespaces
     let file_name = file_path.file_name().and_then(|f| f.to_str()).unwrap_or("");
     if file_name == "lib.almd" {
-        eprintln!("warning: 'lib.almd' is deprecated as package entry point, rename to 'mod.almd'");
-        eprintln!("  --> {}", file_path.display());
+        err(&format!("warning: 'lib.almd' is deprecated as package entry point, rename to 'mod.almd'"));
+        err(&format!("  --> {}", file_path.display()));
     }
     if file_name == "mod.almd" || file_name == "lib.almd" {
         if let Some(src_dir) = file_path.parent() {
