@@ -664,6 +664,7 @@ include!("mod_p4_c.rs");
 include!("mod_p4_f.rs");
 include!("mod_p4_d.rs");
 include!("mod_p4_e.rs");
+include!("mod_p4_g.rs");
 include!("mod_p5.rs");
 include!("mod_p5_b.rs");
 // The desugar family (formerly one 4.8k-line mod_p6.rs), split by concern:

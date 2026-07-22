@@ -384,73 +384,8 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
     }
 }
 
-/// The generated container-repr callee for a `${List[<record>]}` / `${Option[<record>]}` /
-/// `${List[<variant>]}` interp part, or `None` for every other type (falls to the
-/// `interp_to_string_call` table). Record-vs-variant discrimination mirrors the bare-part
-/// arms: a `Named` that resolves in the record registry is a record, else a variant.
-fn container_repr_name(ty: &Ty, registry: &RecordLayouts) -> Option<String> {
-    use almide_lang::types::constructor::TypeConstructorId;
-    let named = |t: &Ty| -> Option<(String, bool)> {
-        let Ty::Named(n, _) = t else { return None };
-        Some((n.as_str().to_string(), resolve_aggregate(t, registry).is_some()))
-    };
-    match ty {
-        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-            // A generic-variant INSTANTIATION element (`${forest}` over
-            // `List[Tree[Int]]` — C-010): the instantiation-KEYED walker.
-            if let Ty::Named(n, args) = &a[0] {
-                if !args.is_empty() && resolve_aggregate(&a[0], registry).is_none() {
-                    return Some(format!(
-                        "__repr_list_{}",
-                        crate::lower::repr_inst_ident(n.as_str(), args)
-                    ));
-                }
-            }
-            let (n, is_rec) = named(&a[0])?;
-            let n_fn = crate::lower::drop_fn_ident(&n);
-            Some(if is_rec {
-                format!("__repr_list_rec_{n_fn}")
-            } else {
-                format!("__repr_list_{n_fn}")
-            })
-        }
-        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-            // An instantiation payload (`${opt}` over `Option[Tree[String]]`).
-            if let Ty::Named(n, args) = &a[0] {
-                if !args.is_empty() && resolve_aggregate(&a[0], registry).is_none() {
-                    return Some(format!(
-                        "__repr_opt_{}",
-                        crate::lower::repr_inst_ident(n.as_str(), args)
-                    ));
-                }
-            }
-            let (n, is_rec) = named(&a[0])?;
-            let n_fn = crate::lower::drop_fn_ident(&n);
-            if !is_rec {
-                // A CUSTOM-variant payload (`${opt_tree}` over `Option[Tree]` — C-009):
-                // the generated `__repr_opt_<V>` (some/none over the variant repr).
-                // Option/Result payloads keep their existing table routing.
-                if matches!(&a[0], Ty::Named(vn, _)
-                    if !matches!(vn.as_str(), "Option" | "Result" | "Value"))
-                {
-                    return Some(format!("__repr_opt_{n_fn}"));
-                }
-                return None;
-            }
-            Some(format!("__repr_opt_rec_{n_fn}"))
-        }
-        // `${Map[String, <record/variant>]}` — the paired-slot map repr (quoted keys,
-        // element repr values, `[:]` when empty).
-        Ty::Applied(TypeConstructorId::Map, a)
-            if a.len() == 2 && matches!(a[0], Ty::String) =>
-        {
-            let (n, _is_rec) = named(&a[1])?;
-            let n_fn = crate::lower::drop_fn_ident(&n);
-            Some(format!("__repr_map_{n_fn}"))
-        }
-        _ => None,
-    }
-}
+// `container_repr_name` and its helpers moved to `mod_p4_g.rs` (codopsy8 complexity sweep:
+// the pattern-2 decomposition above grew this file past the 800-line `max-lines` threshold).
 
 /// Desugar a STRING INTERPOLATION `"…${e}…"` into a left-nested `ConcatStr` fold,
 /// seeded by an empty `""` literal: `(((("" ++ p0) ++ p1) … ) ++ p_{K-1})`. Each
@@ -663,20 +598,51 @@ pub(crate) fn list_heap_call_name(
     // (fuzz B-198's or_else). The instantiation's types are already in
     // `arg_tys`/`result_ty` — the suffix carries no information the router needs.
     let func = func.split_once("__").map_or(func, |(base, _)| base);
-    // #781: the monolithic 780-line dispatch (cog 324) is decomposed into
-    // per-module routers. Routing ORDER is load-bearing and preserved: the
+    // #781/codopsy8: the monolithic 780-line dispatch (cog 324) is decomposed into
+    // a special-case pre-router (fold/random/fan) then a per-module router — a
+    // pure text-move split of the original two-phase structure (the ORIGINAL code
+    // already ran the 3 special-case `if`s BEFORE the per-module `match`; this
+    // just names that boundary). Routing ORDER is load-bearing and preserved: the
     // heap-accumulator `fold` guard fires BEFORE the per-module tables (a
     // scalar-acc fold over heap elements falls through to `list.fold_str`).
+    let routed = list_heap_call_name_special_cases(module, func, arg_tys, result_ty).or_else(
+        || list_heap_call_name_module_routed(module, func, arg_tys, result_ty, map_key_nullary, map_key_scalar_rec),
+    );
+    routed.unwrap_or_else(|| format!("{module}.{func}"))
+}
+
+/// Extracted from `list_heap_call_name` (codopsy8 complexity sweep, phase 1 of 2): the 3
+/// special-case guards that fire BEFORE the per-module router (`random.choice`/`shuffle`
+/// hval sharing, `fan.map`, and the heap-accumulator `fold` intercept). Verbatim.
+fn list_heap_call_name_special_cases(
+    module: &str,
+    func: &str,
+    arg_tys: &[Ty],
+    result_ty: &Ty,
+) -> Option<String> {
     if module == "random" && matches!(func, "choice" | "shuffle") {
-        return random_call_name(func, arg_tys);
+        return Some(random_call_name(func, arg_tys));
     }
     if module == "fan" && func == "map" {
-        return fan_map_call_name(arg_tys, result_ty);
+        return Some(fan_map_call_name(arg_tys, result_ty));
     }
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
-        return heap_fold_call_name(module, arg_tys, result_ty);
+        return Some(heap_fold_call_name(module, arg_tys, result_ty));
     }
-    let routed = match module {
+    None
+}
+
+/// Extracted from `list_heap_call_name` (codopsy8 complexity sweep, phase 2 of 2): the
+/// per-module table, tried after the special cases above have declined. Verbatim.
+fn list_heap_call_name_module_routed(
+    module: &str,
+    func: &str,
+    arg_tys: &[Ty],
+    result_ty: &Ty,
+    map_key_nullary: bool,
+    map_key_scalar_rec: bool,
+) -> Option<String> {
+    match module {
         "list" => list_call_name(func, arg_tys, result_ty),
         "set" => set_call_name(func, arg_tys, result_ty),
         "map" => map_call_name(func, arg_tys, result_ty, map_key_nullary, map_key_scalar_rec),
@@ -687,8 +653,7 @@ pub(crate) fn list_heap_call_name(
         // registered self-host; every other value.* rides its own dotted name.
         "value" if func == "keys" => Some("json.keys".to_string()),
         _ => None,
-    };
-    routed.unwrap_or_else(|| format!("{module}.{func}"))
+    }
 }
 
 /// Route the payload-polymorphic `option` combinators by PAYLOAD/RESULT repr. The
@@ -701,28 +666,45 @@ pub(crate) fn list_heap_call_name(
 /// an UNREGISTERED wall suffix instead — the fn walls, v0 runs the shape correctly
 /// (the same honest-wall pattern as the map `_skv_wall` family).
 fn option_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    // Pattern-1/2 split (codopsy8 complexity sweep): the `to_list` payload check and the
+    // closure-result-repr match are two independent phases of the original top-to-bottom
+    // `if` + `match` — a pure text-move split, no logic change.
+    option_call_name_to_list(func, arg_tys)
+        .or_else(|| option_call_name_closure_result_repr(func, arg_tys, result_ty))
+}
+
+/// Extracted from `option_call_name` (codopsy8 complexity sweep, phase 1 of 2):
+/// `option.to_list` keys on the PAYLOAD: a flat heap payload (String /
+/// List[scalar] / scalar tuple) rides the co-owning `_rc` variant (the raw slot
+/// copy aliased the payload un-owned — double free); a richer payload walls. Verbatim.
+fn option_call_name_to_list(func: &str, arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId as TC;
-    // `option.to_list` keys on the PAYLOAD: a flat heap payload (String /
-    // List[scalar] / scalar tuple) rides the co-owning `_rc` variant (the raw slot
-    // copy aliased the payload un-owned — double free); a richer payload walls.
-    if func == "to_list" {
-        if let Some(Ty::Applied(TC::Option, a)) = arg_tys.first() {
-            if a.len() == 1 && is_heap_ty(&a[0]) {
-                if matches!(a[0], Ty::String) || is_flat_scalar_block_ty(&a[0]) {
-                    return Some("option.to_list_rc".to_string());
-                }
-                return Some("option.to_list_x".to_string());
+    if func != "to_list" {
+        return None;
+    }
+    if let Some(Ty::Applied(TC::Option, a)) = arg_tys.first() {
+        if a.len() == 1 && is_heap_ty(&a[0]) {
+            if matches!(a[0], Ty::String) || is_flat_scalar_block_ty(&a[0]) {
+                return Some("option.to_list_rc".to_string());
             }
+            return Some("option.to_list_x".to_string());
         }
     }
-    // ONE mismatch axis is the CLOSURE's RESULT repr: params always ride the
-    // widened i64 slots, and an Option-returning closure uses the same `_h` table
-    // type the impl declares (flat_map / or_else match by construction; filter's
-    // pred is scalar-result; flatten / zip take no closure at all). The two shapes
-    // whose USER closure result repr can diverge from the scalar-typed impl:
-    //   - `option.map` with a HEAP mapped payload (impl `f: (Int) -> Int` = i64
-    //     result; a `(s) => s + "!"` closure declares the i32 `_h` type)
-    //   - `option.unwrap_or_else` with a HEAP payload (impl `f: () -> Int`)
+    None
+}
+
+/// Extracted from `option_call_name` (codopsy8 complexity sweep, phase 2 of 2): ONE mismatch
+/// axis is the CLOSURE's RESULT repr: params always ride the
+/// widened i64 slots, and an Option-returning closure uses the same `_h` table
+/// type the impl declares (flat_map / or_else match by construction; filter's
+/// pred is scalar-result; flatten / zip take no closure at all). The two shapes
+/// whose USER closure result repr can diverge from the scalar-typed impl:
+///   - `option.map` with a HEAP mapped payload (impl `f: (Int) -> Int` = i64
+///     result; a `(s) => s + "!"` closure declares the i32 `_h` type)
+///   - `option.unwrap_or_else` with a HEAP payload (impl `f: () -> Int`)
+/// Verbatim.
+fn option_call_name_closure_result_repr(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
     let heap_option =
         |t: &Ty| matches!(t, Ty::Applied(TC::Option, a) if a.len() == 1 && is_heap_ty(&a[0]));
     match func {
