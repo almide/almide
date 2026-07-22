@@ -9,16 +9,40 @@
 /// (deep-copies the kept payload so result + source can both drop). Keyed on the Option
 /// payload being String. Verbatim.
 fn unwrap_or_call_name_option(arg_tys: &[Ty]) -> Option<String> {
+    // Pattern-1/2 split (codopsy8 complexity sweep): the 4 groups below are independent
+    // payload-shape classifications of the SAME `Option[T]` first arg, called in the
+    // SAME order via `.or_else()` — a pure text-move of the original top-to-bottom `if`
+    // chain, no logic change (each helper re-derives the shared `a` destructure, a cheap
+    // pure re-read with no side effects to duplicate).
+    unwrap_or_call_name_option_string(arg_tys)
+        .or_else(|| unwrap_or_call_name_option_value_family(arg_tys))
+        .or_else(|| unwrap_or_call_name_option_flat_scalar(arg_tys))
+        .or_else(|| unwrap_or_call_name_option_heap_fallback(arg_tys))
+}
+
+/// Extracted from `unwrap_or_call_name_option` (codopsy8 complexity sweep, group 1 of 4):
+/// `option.unwrap_or(o, d)` over an `Option[String]` — the generic `option.unwrap_or` takes
+/// its default as an i64 SCALAR (`Option[Int]`), so a String fallback (an i32 handle) and a
+/// String result repr-mismatch it — invalid wasm (`expected i64, found i32`).
+/// `option.unwrap_or_str` (param i32 i32) (result i32) is the rc-correct String variant
+/// (deep-copies the kept payload so result + source can both drop). Verbatim.
+fn unwrap_or_call_name_option_string(arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
     let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() else { return None };
     if a.len() == 1 && matches!(a[0], Ty::String) {
         return Some("option.unwrap_or_str".to_string());
     }
-    // The remaining heap payloads route to their rc-correct self-hosts
-    // (already registered for the `??` desugar): Value / List[Value] /
-    // List[String]. The generic unwrap_or takes an i64 scalar default,
-    // so a handle default (`json.get_array(v,k) |> option.unwrap_or([])`,
-    // json_gltf_walk's count_floats) repr-mismatched — invalid wasm.
+    None
+}
+
+/// Extracted from `unwrap_or_call_name_option` (codopsy8 complexity sweep, group 2 of 4):
+/// the "hval" payload family — Value / List[Value] / List[String] — routes to their
+/// rc-correct self-hosts (already registered for the `??` desugar). The generic unwrap_or
+/// takes an i64 scalar default, so a handle default (`json.get_array(v,k) |>
+/// option.unwrap_or([])`, json_gltf_walk's count_floats) repr-mismatched — invalid wasm. Verbatim.
+fn unwrap_or_call_name_option_value_family(arg_tys: &[Ty]) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() else { return None };
     if a.len() == 1 && is_value_ty(&a[0]) {
         return Some("option.value_unwrap_or".to_string());
     }
@@ -34,25 +58,36 @@ fn unwrap_or_call_name_option(arg_tys: &[Ty]) -> Option<String> {
     {
         return Some("option.liststr_unwrap_or".to_string());
     }
-    // A FLAT scalar-element list payload (`map.get(groups, "0") ?? []` —
-    // Option[List[Int]], the group_by class): the rc-correct flat variant.
-    // A scalar TUPLE or Bytes payload is the SAME flat block shape (uniform
-    // slots / raw bytes @12, flat rc_dec drop) — bytes.chunks' element class.
+    None
+}
+
+/// Extracted from `unwrap_or_call_name_option` (codopsy8 complexity sweep, group 3 of 4): a
+/// FLAT scalar-element list payload (`map.get(groups, "0") ?? []` — Option[List[Int]], the
+/// group_by class): the rc-correct flat variant. A scalar TUPLE, a NESTED `Option[<scalar>]`
+/// payload (C-149), or a Bytes payload is the SAME flat block shape (uniform slots / raw
+/// bytes @12, flat rc_dec drop) — bytes.chunks' element class. Verbatim.
+fn unwrap_or_call_name_option_flat_scalar(arg_tys: &[Ty]) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() else { return None };
     if a.len() == 1
         && (matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
                 if e.len() == 1 && !is_heap_ty(&e[0]))
             || matches!(&a[0], Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
-            // A NESTED `Option[<scalar>]` payload (`option.unwrap_or(
-            // result.to_option(v3), none)` — C-149) is the SAME flat block
-            // (len-as-tag + one scalar slot, flat rc_dec).
             || matches!(&a[0], Ty::Applied(TypeConstructorId::Option, e)
                 if e.len() == 1 && !is_heap_ty(&e[0]))
             || matches!(a[0], Ty::Bytes))
     {
         return Some("option.listint_unwrap_or".to_string());
     }
-    // Any OTHER heap payload: no registered rc-correct variant — wall honestly
-    // (the generic impl's i64 scalar default repr-mismatches a handle).
+    None
+}
+
+/// Extracted from `unwrap_or_call_name_option` (codopsy8 complexity sweep, group 4 of 4):
+/// any OTHER heap payload — no registered rc-correct variant — wall honestly (the generic
+/// impl's i64 scalar default repr-mismatches a handle). Verbatim.
+fn unwrap_or_call_name_option_heap_fallback(arg_tys: &[Ty]) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() else { return None };
     if a.len() == 1 && is_heap_ty(&a[0]) {
         return Some("option.unwrap_or_hx".to_string());
     }
