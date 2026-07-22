@@ -27,6 +27,7 @@ pub use fix::cmd_fix;
 pub use docs_gen::cmd_docs_gen;
 
 use std::hash::{Hash, Hasher};
+use crate::err;
 
 /// Check that all effects used in the program are allowed by [permissions].allow in almide.toml.
 /// Returns Ok(()) if no violations, or Err with a description of violations.
@@ -55,15 +56,15 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
             .filter(|e| !allowed.contains(e))
             .collect();
         if !forbidden.is_empty() {
-            eprintln!("error: capability violation in `{}`", name);
+            err(&format!("error: capability violation in `{}`", name));
             for e in &forbidden {
-                eprintln!("  {} is not in [permissions].allow", e);
+                err(&format!("  {} is not in [permissions].allow", e));
             }
             violations += 1;
         }
     }
     if violations > 0 {
-        eprintln!("\n{} capability violation(s)", violations);
+        err(&format!("\n{} capability violation(s)", violations));
         return Err(format!("{} capability violation(s)", violations));
     }
     Ok(())
