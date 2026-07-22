@@ -923,3 +923,194 @@ writes、逐次フェーズ分解、exhaustiveness境界の明文化）され、
   トリアージから再開すること。
 - no-println 77件は引き続き CLI レポートツールの正当な標準出力——round7
   の結論を維持。
+
+## codopsy9/almide-mir（2026-07-23、round 9）— スコア式の完全解明 + issue 366→355、59/D で着地
+
+**開始**: 59/D、366 issues（develop tip `6fd3dd85`、プロンプト提示の内訳と一致）。
+**終了**: 59/D（整数値不変）、355 issues。11 English commits、develop へ直接コミット。
+内訳: max-complexity 174→171、max-cognitive-complexity 93→85、no-println 77→77
+（未着手）、max-params 18→18（未着手）、max-lines 2→2・max-depth 2→2（新規
+発生を都度その場で file-split して吸収、正味変化なし）。
+
+### 方法論のブレークスルー: スコア計算式をソースから完全に逆算
+
+round7/8 は「issue 数を減らせばスコアも動くはず」という前提で進めていたが、
+2ラウンド連続で整数値が動かなかった。今回、`codopsy`（Rust実装、
+`~/workspace/github.com/O6lvl4/codopsy`、インストール済みバイナリと同じ
+v1.1.0系）の `src/scorer.rs`/`src/defaults.rs` を直接読み、スコア計算式を
+完全に特定した:
+
+```
+score_complexity(file) = clamp_min_0(35 - Σ_fn [min((cyc-10)*2, 15) + min((cog-15)*1.5, 12)])
+score_issues(file)     = clamp_min_0(round(40 - Σ_rule penalty(rule)))  # max-complexity/cognitive/lines/depth/params は除外
+score_structure(file)  = clamp_min_0(25 - Σ_{max-lines,max-depth,max-params} min(per*count, cap))
+file_score             = round(score_complexity + score_issues + score_structure)
+
+weight(file) = sqrt(func_count + 1)
+base_score   = round(Σ file_score*weight / Σ weight)
+density_penalty = min(round(sqrt(total_issues)*0.8), 15)
+project_score   = max(base_score - density_penalty, 0)
+```
+
+Python で再実装し、144ファイル中142ファイルが reported score と厳密一致
+（残り2件は Rust `round()` と Python `round()` の銀行丸め差、無視できる誤差）
+することを確認済み——この式を信頼して以後の全ターゲティングに使用した。
+
+**重大発見1: `.codopsyrc.json` の緩和はスコア計算に効いていない**。プロジェクト
+設定は max-complexity/max-cognitive-complexity の **issue発行しきい値**を
+20/30に緩和しているが、`score_complexity` は常にハードコードされた `defaults::
+CC_THRESHOLD=10.0`/`COG_THRESHOLD=15.0` を使う（config を一切見ない）。つまり
+cyc 11-20 / cog 16-30 の関数は「issueとして表示されない」のに「スコアは
+削られている」——round7/8 が可視issueだけを追っていたため、この帯域
+（今回計測時点で260関数、ペナルティ合計約2470点）が完全に見落とされていた。
+
+**重大発見2: ペナルティは関数単位で27点キャップ、ファイル単位で35点フロア**。
+1関数のペナルティは cyc超過分*2(最大15)+cog超過分*1.5(最大12)=最大27点に
+キャップされる。しかし `score_complexity` はファイル内の**全該当関数の
+ペナルティ合計**を35から引く方式で、合計が35を超えるとファイルの複雑度
+スコアは**完全に0でフロア**され、それ以上ペナルティを減らしても（35を
+割り込むまでは）**ファイルスコアが一切動かない**。逆に35を割り込んだ瞬間
+急激にスコアが跳ね上がる（例: `newtype_erase.rs` 65→72、`mod_p4_b.rs`
+65→**82**、`mod_p4_h.rs` 65→72——いずれも合計ペナルティが35を割った回の
+コミットで一気に動いた）。**「浅く広く」複数関数を少しずつ削るより、
+1ファイルの合計ペナルティを35未満まで掘り切る方が遥かに効果的**——round9
+最大の実務教訓。
+
+**重大発見3（ラウンド中盤で発覚した罠）: 部分的な分解は正味マイナスになり
+得る**。プロジェクトスコアは `weight=sqrt(func_count+1)` による加重平均。
+あるファイルの合計ペナルティが35を割らないまま関数を分割すると、
+ファイル自身のスコアは変わらないのに重み（func_count）だけが増える——
+そのファイルのスコアが現在のプロジェクト平均（実測 base_score の小数部
+≈73.5）を下回っている限り、**重みの増加だけで加重平均を押し下げる**。
+実際に `base_score` の小数部が 73.550→73.494 と一時的に悪化した（複数の
+実質改善コミットにもかかわらず）。教訓: **「func数の重みを稼ぐ」戦略
+（round6由来、round9プロンプトの主戦略）は、35点フロアを実際に割った
+ときにのみ有効**。割らないまま関数を増やし続けるのは逆効果。
+
+### 新技法1: 純粋な静的テーブルの「グループ化 or_else チェーン」
+
+round7/8 は `interp_option_to_string` 系（cyc53/cog40 の巨大な `match
+inner { Ty::X => (固定文字列,固定文字列), .. }`）を「cog<cycのarm-count
+floor、グルーピングしても複雑度の総量は変わらない」として見送っていたが、
+これは「複雑度の総量」という誤った軸で判断していた。正しい軸は
+「**個々の分割後関数がcyc10/cog15の閾値を下回るか**」——閾値を下回れば
+ペナルティは0になる（線形ペナルティなので、キャップ前の関数は「総量」通り
+だが、キャップされていた1関数を「多数の0ペナルティ関数」に変えれば
+**正味大幅減**になる）。
+
+技法: `match` の各アームを個別の `Option` 返却ヘルパへ分割し、
+`.or_else()` チェーンで順に試す。1グループあたり2〜3アームまで削ると
+確実に閾値を下回る（4アームでもまだ超過することがあった——
+`interp_option_to_string_list`(4アーム)がcyc15のままだったため、
+実際には2アームずつまで刻んで初めてペナルティ0を達成した）。
+
+適用例: `interp_option_to_string`(cyc53/cog40)/`interp_result_to_string`
+(cyc41/cog31) を各6グループ×2〜3アームに分割、`interp_part_leaf`
+(cyc33/cog35)の9アームを個別ヘルパへ、`interp_synthetic_call_names`の
+ループ本体を fold パターンで抽出。
+
+### 重大な安全上の教訓: `.or_else()` チェーンは「アーム本体が失敗し得る」場合は不健全
+
+上記の技法を安全なパターンと誤認し、`try_lower_opt_tuple_and_variant_
+payloads`(binds_p4_b.rs)と `interp_part_leaf_expr`(mod_p4_b.rs)にも
+同じ `.or_else()` 変換を適用した——**これは重大な意味論バグだった**。
+純粋な静的テーブル（各アームが無条件に `Some(固定値)` を返す）では
+"ガード成立→本体は必ずSome" が保証されるため `.or_else()` チェーンは
+`match` の「最初に成立したガードで確定」と完全に等価だが、
+`try_lower_opt_tuple_and_variant_payloads` 等のアーム本体は内部に `?`
+（`repr_of(ty).ok()?` 等）を持ち、**ガードが成立してもアーム本体自体が
+Noneを返し得る**。元の `match` はこの場合「関数全体がNoneを返して確定」
+だが、`.or_else()` は「このアームは不成立とみなし次のアームを試す」——
+異なる意味論になる。さらに `try_lower_opt_tuple_and_variant_payloads`
+の9アーム中、Recordベースの3アーム（aggregate/drop/scalar_fields）は
+実際に**ガード条件が互いに排他ではない**（`aggregate`のガードは
+`scalar_fields`のガードの厳密なスーパーセット）ことも判明——ドミノで
+誤動作し得る実例だった。`interp_part_leaf_expr` 側も、フォールバック
+アーム（`interp_to_string_call`の `_ => ("compound","to_string")`
+キャッチオール）が、先行アーム（`interp_part_leaf_aggregate`の
+非展開時フォールバック）と**同じ `compound.to_string` を生成し得る**
+ことをソースを辿って確認——同じ罠が実在した。
+
+**本番へコミットする前にこの2件を発見し、正しい技法へ書き直した**（同一
+ラウンド内、build+test+corpus-wall+almide test全green確認済みの上で）:
+`match`/`if`構造と「ガード成立で確定」の意味論は完全に維持したまま、
+**ガードの式だけ**を名前付き述語メソッドへ抽出する（本体は元のmatchアーム
+に残す）。これなら述語関数の複雑度は0近辺まで下がり、ルータ自身の複雑度も
+下がるが、意味論は一切変わらない——`opt_heap_general_piece`はこの安全な
+技法で最初から実装していた（教訓が後から他2箇所で破られたのを発見・是正）。
+
+**次ラウンドへの絶対原則**: 「アーム本体が `?`/`Option`返却の失敗し得る
+呼び出しを含むか」を必ず確認すること。含む場合は `.or_else()` 禁止、
+ガード抽出のみ許可。含まない場合（固定値を無条件に返す静的テーブルのみ）
+は `.or_else()` 化してよい。
+
+### 今回の分解対象と結果
+
+- `newtype_erase.rs`: `erase_transparent_newtypes`(逐次フェーズ分解＋
+  `NewtypeEraser`構造体のモジュールスコープへの移動)、`inline_pure_call_
+  globals`(purity registry builder抽出)、`subst`(Ty variantごとの
+  ヘルパ分割)、`run_region`(fold蓄積パターンでの内側二重ループ統合)。
+  **65C→72C**。
+- `binds_p4_b.rs`+`binds_p4_b_b.rs`(max-lines分割で新設): heap-payload
+  系の巨大match（`try_lower_opt_tuple_and_variant_payloads`、
+  `opt_heap_general_piece`、`result_ok_heap_piece`等）をアーム別ヘルパへ
+  分割。合計ペナルティ140.5→約75まで削減したが**35点フロアは未達**
+  （2ファイルとも65C据え置き）——次ラウンドの最有力候補。
+- `mod_p4_b.rs`+`mod_p4_h.rs`(max-lines分割で新設): `interp_option_to_
+  string`/`interp_result_to_string`の細粒度or_elseチェーン化、
+  `interp_part_leaf`の9アーム分割、`interp_synthetic_call_names`の
+  ループ本体抽出。**mod_p4_b.rs: 65C→82B**、**mod_p4_h.rs: 65C→72C**
+  ——今回唯一、35点フロアを完全に割った2ファイル。
+
+### 検証
+
+各コミット後 `cargo build -p almide-mir`(新規warning 0、baseline 24件
+のまま)+ `cargo test -p almide-mir --release`(593 green)。ownership/
+ロジックに触れる変更(binds_p4_b*.rs系、mod_p4_b/h.rs系)は追加で
+corpus-wall(`WALL_NAMES=1 cargo run --release -p almide-mir --example
+classify_corpus -- --out DIR spec`、develop tip `6fd3dd85` を
+`git worktree add --detach` で別途ビルドしたベースラインと比較、
+caps.cert/caps_graph.cert/names.cert/ownership.cert/ownership.names の
+5ファイル全て byte-identical)と `./target/release/almide test`
+(300/300 green)を実施——高リスクな変更のたび都度確認し、まとめて最後に
+1回ではなく毎コミット直後に検証するサイクルを徹底した。ラウンド末尾に
+`cargo build --release`(workspace全体、新規warning 0)+
+`cargo test --workspace --release`(全crate green)を実施。「絶対に
+触ってはいけない関数」全18件の cyclomatic/cognitive complexity が
+develop HEAD時点と完全一致することを個別確認。
+
+**最終**: 59/D → **59/D（不変）**、366 issues → **355 issues**（約3%削減、
+round7/8より小さいが今回は「幅」より「1ファイルを完全に掘り切る」検証に
+時間を配分した結果）。60/C には届かなかったが、**スコア計算式そのものを
+初めて完全に解明**したことで、次ラウンド以降は「なぜ動かないか」を推測
+ではなく計算で判断できるようになった——これが今回最大の成果。
+
+**次ラウンドへの punch-list**:
+- **最優先**: `binds_p4_b.rs`(合計ペナルティ約60台まで詰めた
+  `try_lower_opt_tuple_and_variant_payloads`27点分は guardをこれ以上
+  削っても構造上ほぼ下限、`opt_heap_general_piece`は既にguard抽出済み
+  だが依然27点キャップ付近——アームの2〜3個をさらに`is_heap_ty`系の
+  述語へ切り出せば35点を割れる可能性が高い)と`binds_p4_b_b.rs`
+  (`result_err_heap_ok_result_body`/`result_err_heap_fallback_piece`
+  合計27点、guard複雑度がボトルネック)を仕上げること——round9で
+  最も投資した割に35点フロアを割れなかった悔しい未完了。
+- `mod_p4_h.rs`の`option_call_name_closure_result_repr`(cyc16/cog15、
+  pen12)、`aggregate_synthetic_names`(pen8)を仕上げれば同ファイルの
+  スコアをさらに押し上げられる（既に35未満だが、余地あり）。
+  `list_heap_call_name_special_cases`/`_module_routed`も残っている。
+- 今回発見した「.or_else()チェーンの安全条件」（アーム本体が`?`等で
+  失敗し得るか、ガード同士が排他か）を、既存の全`.or_else()`変換箇所
+  （interp_option/result_to_string系、interp_part_leaf の各サブ関数、
+  mod_p4_h.rsのpush_synthetic_call_names系）に対して**もう一度個別に
+  再監査**すること——今回は2件発見・是正したが、時間切れで全数監査は
+  できていない。特にinterp_option_to_string/interp_result_to_stringの
+  各グループ関数は「常にSomeを返す固定値テーブル」であることを目視
+  確認したが、より厳密には自動チェックのしくみが望ましい。
+- round8までのpunch-list項目（`try_lower_option_match_value`等の
+  pattern-3ファミリー、`name_witness`のexhaustive Op-match、
+  `lower_owned_heap_field`/`result_ctors.rs`のrc/所有権高密度案件、
+  未読了ファイル群 mod_p3_c.rs/synth_eq.rs/render_wasm_c.rs/
+  render_wasm.rs/repr_sources.rs/scalar_for.rs）は今回も未着手——
+  round9はスコア式解明と安全性検証に時間を優先配分したため。
+- no-println 77件は引き続き CLI レポートツールの正当な標準出力
+  ——round7の結論を維持。
