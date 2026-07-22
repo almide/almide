@@ -8,6 +8,52 @@ fn render_op(
     floats: &BTreeSet<ValueId>,
     fuser: &mut Fuser,
 ) -> String {
+    // Router split out for codopsy cognitive-complexity (pure text-move, no behavior
+    // change): the original single ~1100-line exhaustive match over every `Op` variant
+    // is now 4 group helpers by variant family (alloc/list-literal, call/binop, the
+    // recursive Drop* family, and the misc tail incl. Prim). `Op` has no OR-guards
+    // duplicating a variant across groups (unlike the IrExprKind matches elsewhere in
+    // this crate), so each group is a fully independent, order-irrelevant subset —
+    // grouping here carries none of the "guarded arm committed elsewhere" risk that
+    // rules out grouping for a guard-heavy match.
+    match op {
+        Op::Alloc { .. }
+        | Op::ListLit { .. }
+        | Op::ListGetScalar { .. }
+        | Op::ListSetScalar { .. } => render_op_alloc_lit(op, floats),
+        Op::Dup { .. }
+        | Op::Call { .. }
+        | Op::IntBinOp { .. }
+        | Op::CallIndirect { .. }
+        | Op::CallFn { .. }
+        | Op::CallImport { .. } => render_op_call(op, label_off, param_counts, reprs, fuser),
+        Op::Drop { .. }
+        | Op::DropListStr { .. }
+        | Op::DropListListStr { .. }
+        | Op::DropValue { .. }
+        | Op::DropListValue { .. }
+        | Op::DropListStrValue { .. }
+        | Op::DropListStrStr { .. }
+        | Op::DropListIntStr { .. }
+        | Op::DropListStrInt { .. }
+        | Op::DropResultListValue { .. }
+        | Op::DropResultValue { .. }
+        | Op::DropResultStrInt { .. }
+        | Op::DropResultValueInt { .. }
+        | Op::DropResultListValueInt { .. }
+        | Op::DropResultListStrInt { .. }
+        | Op::DropResultListStr { .. }
+        | Op::DropVariant { .. }
+        | Op::DropWrapperRec { .. } => render_op_drop(op, masks),
+        _ => render_op_misc(op, func_slots, floats, fuser),
+    }
+}
+
+/// Group 1 of [`render_op`]: heap-block allocation (`Alloc` — String/Bytes/DynStr/
+/// OptSome/DynList-DynListStr/OptNone/the generic init fallback) and the flat-list
+/// scalar ops (`ListLit`/`ListGetScalar`/`ListSetScalar`). Verbatim subset of the
+/// original single match.
+fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
     match op {
         // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
         // as a list; len/cap are BYTE counts). $alloc the block, set the header, store
@@ -226,6 +272,41 @@ fn render_op(
             }
             s
         }
+        _ => unreachable!("render_op_alloc_lit: {op:?} is not in this group"),
+    }
+}
+
+
+/// Group 2 of [`render_op`]: reference/aliasing (`Dup`) and every CALL shape.
+/// Split further into `_light` (`Dup`/`Call`/`CallIndirect`/`CallFn`/`CallImport`)
+/// and `_intbinop` (`IntBinOp` alone — it was the dominant share of this group's
+/// complexity) — `Op` has no repeated variant across the two, so the split
+/// carries none of the guard-order risk a duplicated-discriminant match would.
+fn render_op_call(
+    op: &Op,
+    label_off: &BTreeMap<String, (u32, u32)>,
+    param_counts: &BTreeMap<String, usize>,
+    reprs: &BTreeMap<ValueId, Repr>,
+    fuser: &mut Fuser,
+) -> String {
+    match op {
+        Op::Dup { .. }
+        | Op::Call { .. }
+        | Op::CallIndirect { .. }
+        | Op::CallFn { .. }
+        | Op::CallImport { .. } => render_op_call_light(op, label_off, param_counts, reprs),
+        Op::IntBinOp { .. } => render_op_call_intbinop(op, fuser),
+        _ => unreachable!("render_op_call: {op:?} is not in this group"),
+    }
+}
+
+fn render_op_call_light(
+    op: &Op,
+    label_off: &BTreeMap<String, (u32, u32)>,
+    param_counts: &BTreeMap<String, usize>,
+    reprs: &BTreeMap<ValueId, Repr>,
+) -> String {
+    match op {
         // An alias SHARES the object and bumps its refcount (A1.3-render): dst and
         // src become two handles to the SAME block, rc += 1 — matching the cert's
         // Alias = +1 and exercising the proven rc machine on a shared cell (whereas
@@ -237,95 +318,6 @@ fn render_op(
         ),
         // A runtime call → a wasm `call` of the (bootstrap) runtime function.
         Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off),
-        Op::IntBinOp { dst, op, a, b } => {
-            // #806 step 3c: splice pending single-use defs into the operands
-            // (Div/Mod below read operands several times, so they stay plain
-            // `local.get` — the caller flushed any pending among them).
-            let args = if matches!(op, IntOp::Div | IntOp::Mod) {
-                format!("(local.get {}) (local.get {})", local(*a), local(*b))
-            } else {
-                format!("{} {}", fuser.operand(*a), fuser.operand(*b))
-            };
-            // CHECKED division/remainder: divisor 0 / MIN÷-1 abort via $__div_trap
-            // with the native-identical stderr line + exit 1 (C-001/C-035) — never a
-            // bare i64.div_s hard trap (exit 134, no message). The checks + op are
-            // INLINE-EXPANDED (#806): the old `call $__chk_div` put a function call
-            // in every hot-loop `/`/`%` (wasmtime does not inline across wasm
-            // calls); the expansion is instruction-for-instruction the SAME
-            // semantics as `$__chk_div`/`$__chk_rem`. Operands are locals, so the
-            // re-evaluations cost nothing and no scratch local is needed.
-            if matches!(op, IntOp::Div | IntOp::Mod) {
-                let instr = if matches!(op, IntOp::Div) { "i64.div_s" } else { "i64.rem_s" };
-                // #806 step 3c: a CONSTANT nonzero divisor decides both checks
-                // statically — elide them (zero-check vacuous; MIN÷-1 only when
-                // c == -1). `÷ 2^k` (k ≥ 1) additionally strength-reduces to the
-                // EXACT correction-shift sequence (valid for every dividend,
-                // negative included) — Cranelift does neither, and the hardware
-                // sdiv alone cost ~25% of spectralnorm's inner loop.
-                match fuser.const_of(*b) {
-                    Some(c) if c != 0 && c != -1 => {
-                        if matches!(op, IntOp::Div) && c > 1 && (c as u64).is_power_of_two() {
-                            let k = (c as u64).trailing_zeros();
-                            return format!(
-                                "    (local.set {d} (i64.shr_s (i64.add (local.get {a})\n\
-                                 \x20       (i64.shr_u (i64.shr_s (local.get {a}) (i64.const 63)) (i64.const {nk})))\n\
-                                 \x20       (i64.const {k})))\n",
-                                a = local(*a),
-                                d = local(*dst),
-                                nk = 64 - k,
-                            );
-                        }
-                        return format!(
-                            "    (local.set {d} ({instr} {args}))\n",
-                            d = local(*dst),
-                        );
-                    }
-                    Some(-1) => {
-                        return format!(
-                            "    (if (i32.and (i64.eq (local.get {a}) (i64.const -9223372036854775808))\n\
-                             \x20                (i64.eq (local.get {b}) (i64.const -1)))\n\
-                             \x20     (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))\n\
-                             \x20   (local.set {d} ({instr} {args}))\n",
-                            a = local(*a),
-                            b = local(*b),
-                            d = local(*dst),
-                        );
-                    }
-                    _ => {}
-                }
-                return format!(
-                    "    (if (i64.eqz (local.get {b}))\n\
-                     \x20     (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))\n\
-                     \x20   (if (i32.and (i64.eq (local.get {a}) (i64.const -9223372036854775808))\n\
-                     \x20                (i64.eq (local.get {b}) (i64.const -1)))\n\
-                     \x20     (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))\n\
-                     \x20   (local.set {d} ({instr} {args}))\n",
-                    a = local(*a),
-                    b = local(*b),
-                    d = local(*dst),
-                );
-            }
-            // A comparison yields an i32 0/1 → zero-extend to the i64 scalar model.
-            let expr = match op {
-                IntOp::Add => format!("(i64.add {args})"),
-                IntOp::Sub => format!("(i64.sub {args})"),
-                IntOp::Mul => format!("(i64.mul {args})"),
-                IntOp::Div | IntOp::Mod => unreachable!("inline-expanded above"),
-                IntOp::Lt => format!("(i64.extend_i32_u (i64.lt_s {args}))"),
-                IntOp::Le => format!("(i64.extend_i32_u (i64.le_s {args}))"),
-                IntOp::Gt => format!("(i64.extend_i32_u (i64.gt_s {args}))"),
-                IntOp::Ge => format!("(i64.extend_i32_u (i64.ge_s {args}))"),
-                IntOp::Eq => format!("(i64.extend_i32_u (i64.eq {args}))"),
-                IntOp::Ne => format!("(i64.extend_i32_u (i64.ne {args}))"),
-                IntOp::And => format!("(i64.and {args})"),
-                IntOp::Or => format!("(i64.or {args})"),
-                IntOp::Xor => format!("(i64.xor {args})"),
-                IntOp::Shl => format!("(i64.shl {args})"),
-                IntOp::Shr => format!("(i64.shr_s {args})"),
-                IntOp::ShrU => format!("(i64.shr_u {args})"),
-            };
-            format!("    (local.set {d} {expr})\n", d = local(*dst))
-        }
         // An indirect (closure) call: push the args, then the table index, and dispatch
         // through the module function table with the closure signature OF THIS ARITY
         // (`$closure_fnN`, N = arg count). The table + every `(type $closure_fnN)` are
@@ -427,10 +419,117 @@ fn render_op(
                 _ => format!("    {call}\n"),
             }
         }
-        // A release: decrement the refcount cell (RuntimeModel.v's rt_dec). The
-        // `$rc_dec` primitive traps if the cell is already 0 — the double-free /
-        // use-after-free sentinel. This is the byte the perceus V binds each
-        // witness drop to (the leak-freedom realization on the artifact).
+        _ => unreachable!("render_op_call_light: {op:?} is not in this group"),
+    }
+}
+
+fn render_op_call_intbinop(op: &Op, fuser: &mut Fuser) -> String {
+    match op {
+        Op::IntBinOp { dst, op, a, b } => {
+            // #806 step 3c: splice pending single-use defs into the operands
+            // (Div/Mod below read operands several times, so they stay plain
+            // `local.get` — the caller flushed any pending among them).
+            let args = if matches!(op, IntOp::Div | IntOp::Mod) {
+                format!("(local.get {}) (local.get {})", local(*a), local(*b))
+            } else {
+                format!("{} {}", fuser.operand(*a), fuser.operand(*b))
+            };
+            // CHECKED division/remainder: divisor 0 / MIN÷-1 abort via $__div_trap
+            // with the native-identical stderr line + exit 1 (C-001/C-035) — never a
+            // bare i64.div_s hard trap (exit 134, no message). The checks + op are
+            // INLINE-EXPANDED (#806): the old `call $__chk_div` put a function call
+            // in every hot-loop `/`/`%` (wasmtime does not inline across wasm
+            // calls); the expansion is instruction-for-instruction the SAME
+            // semantics as `$__chk_div`/`$__chk_rem`. Operands are locals, so the
+            // re-evaluations cost nothing and no scratch local is needed.
+            if matches!(op, IntOp::Div | IntOp::Mod) {
+                let instr = if matches!(op, IntOp::Div) { "i64.div_s" } else { "i64.rem_s" };
+                // #806 step 3c: a CONSTANT nonzero divisor decides both checks
+                // statically — elide them (zero-check vacuous; MIN÷-1 only when
+                // c == -1). `÷ 2^k` (k ≥ 1) additionally strength-reduces to the
+                // EXACT correction-shift sequence (valid for every dividend,
+                // negative included) — Cranelift does neither, and the hardware
+                // sdiv alone cost ~25% of spectralnorm's inner loop.
+                match fuser.const_of(*b) {
+                    Some(c) if c != 0 && c != -1 => {
+                        if matches!(op, IntOp::Div) && c > 1 && (c as u64).is_power_of_two() {
+                            let k = (c as u64).trailing_zeros();
+                            return format!(
+                                "    (local.set {d} (i64.shr_s (i64.add (local.get {a})\n\
+                                 \x20       (i64.shr_u (i64.shr_s (local.get {a}) (i64.const 63)) (i64.const {nk})))\n\
+                                 \x20       (i64.const {k})))\n",
+                                a = local(*a),
+                                d = local(*dst),
+                                nk = 64 - k,
+                            );
+                        }
+                        return format!(
+                            "    (local.set {d} ({instr} {args}))\n",
+                            d = local(*dst),
+                        );
+                    }
+                    Some(-1) => {
+                        return format!(
+                            "    (if (i32.and (i64.eq (local.get {a}) (i64.const -9223372036854775808))\n\
+                             \x20                (i64.eq (local.get {b}) (i64.const -1)))\n\
+                             \x20     (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))\n\
+                             \x20   (local.set {d} ({instr} {args}))\n",
+                            a = local(*a),
+                            b = local(*b),
+                            d = local(*dst),
+                        );
+                    }
+                    _ => {}
+                }
+                return format!(
+                    "    (if (i64.eqz (local.get {b}))\n\
+                     \x20     (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))\n\
+                     \x20   (if (i32.and (i64.eq (local.get {a}) (i64.const -9223372036854775808))\n\
+                     \x20                (i64.eq (local.get {b}) (i64.const -1)))\n\
+                     \x20     (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))\n\
+                     \x20   (local.set {d} ({instr} {args}))\n",
+                    a = local(*a),
+                    b = local(*b),
+                    d = local(*dst),
+                );
+            }
+            // A comparison yields an i32 0/1 → zero-extend to the i64 scalar model.
+            let expr = match op {
+                IntOp::Add => format!("(i64.add {args})"),
+                IntOp::Sub => format!("(i64.sub {args})"),
+                IntOp::Mul => format!("(i64.mul {args})"),
+                IntOp::Div | IntOp::Mod => unreachable!("inline-expanded above"),
+                IntOp::Lt => format!("(i64.extend_i32_u (i64.lt_s {args}))"),
+                IntOp::Le => format!("(i64.extend_i32_u (i64.le_s {args}))"),
+                IntOp::Gt => format!("(i64.extend_i32_u (i64.gt_s {args}))"),
+                IntOp::Ge => format!("(i64.extend_i32_u (i64.ge_s {args}))"),
+                IntOp::Eq => format!("(i64.extend_i32_u (i64.eq {args}))"),
+                IntOp::Ne => format!("(i64.extend_i32_u (i64.ne {args}))"),
+                IntOp::And => format!("(i64.and {args})"),
+                IntOp::Or => format!("(i64.or {args})"),
+                IntOp::Xor => format!("(i64.xor {args})"),
+                IntOp::Shl => format!("(i64.shl {args})"),
+                IntOp::Shr => format!("(i64.shr_s {args})"),
+                IntOp::ShrU => format!("(i64.shr_u {args})"),
+            };
+            format!("    (local.set {d} {expr})\n", d = local(*dst))
+        }
+        _ => unreachable!("render_op_call_intbinop: {op:?} is not in this group"),
+    }
+}
+
+
+/// Group 3 of [`render_op`]: the plain `Drop` release plus every RECURSIVE drop
+/// shape. Split further into `_a` (the flat-element list family) and `_b` (the
+/// Result/Variant/Wrapper family) — `Op` has no repeated variant across the two,
+/// so the split carries none of the guard-order risk a duplicated-discriminant
+/// match would.
+fn render_op_drop(op: &Op, masks: &BTreeMap<ValueId, Vec<usize>>) -> String {
+    render_op_drop_a(op, masks).unwrap_or_else(|| render_op_drop_b(op))
+}
+
+fn render_op_drop_a(op: &Op, masks: &BTreeMap<ValueId, Vec<usize>>) -> Option<String> {
+    Some(match op {
         Op::Drop { v } => format!("    (call $rc_dec (local.get {}))\n", local(*v)),
         // RECURSIVE drop of a List[String]: IFF this is the last reference (rc==1), free each
         // element handle first (an aliased list keeps its elements alive), THEN rc_dec the
@@ -597,6 +696,12 @@ fn render_op(
                  \x20   (call $rc_dec (local.get {p}))\n"
             )
         }
+        _ => return None,
+    })
+}
+
+fn render_op_drop_b(op: &Op) -> String {
+    match op {
         // RECURSIVE drop of a `value.as_array` Result `Result[List[Value], String]` — the self-hosted
         // `$__drop_result_lv` (value_core.almd) tag-dispatches at the last ref: Ok frees the
         // `List[Value]` payload recursively, Err frees the String, then the block. A flat `DropListStr`
@@ -769,6 +874,22 @@ fn render_op(
                 )
             }
         }
+        _ => unreachable!("render_op_drop_b: {op:?} is not in this group"),
+    }
+}
+
+
+/// Group 4 of [`render_op`]: COW (`MakeUnique`), `FuncRef`, `ConstInt`, the scalar
+/// `Prim` dispatch (IntOp/FloatOp/comparisons/conversions), `SetLocal`, and the
+/// no-op tail (`Consume`/`Borrow`/`Const`/`Pure`/the if- and loop-markers rendered
+/// stateful by `render_wasm_fn`). Verbatim subset of the original single match.
+fn render_op_misc(
+    op: &Op,
+    func_slots: &BTreeMap<String, u32>,
+    floats: &BTreeSet<ValueId>,
+    fuser: &mut Fuser,
+) -> String {
+    match op {
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
         // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the
@@ -807,9 +928,64 @@ fn render_op(
         // i64-uniform; wrap to i32 at the wasm memory boundary, zero-extend a loaded /
         // returned i32 back to i64. This is the whole trusted floor for raw memory +
         // the fd_write host call — everything else (print_str) is Almide over it.
-        Op::Prim { kind, dst, args } => {
-            let w = |i: usize| format!("(i32.wrap_i64 (local.get {}))", local(args[i]));
-            let body = match kind {
+        Op::Prim { kind, dst, args } => render_op_prim(kind, dst, args, floats, fuser),
+        // A scalar reassignment of a stable local — the loop-carried state. Reads `src`,
+        // writes the var's own local (reusing the same wasm local is legal: read then set).
+        Op::SetLocal { local: l, src } => {
+            format!("    (local.set {} {})\n", local(*l), fuser.operand(*src))
+        }
+        Op::Consume { .. }
+        | Op::Borrow { .. }
+        | Op::Const { .. }
+        | Op::Pure { .. }
+        // The if- and loop-markers are rendered STATEFULLY by render_wasm_fn (the
+        // flat→nested wasm `if`/`else` and `block`/`loop`); render_op never sees them.
+        | Op::IfThen { .. }
+        | Op::Else { .. }
+        | Op::EndIf { .. }
+        | Op::LoopStart
+        | Op::LoopBreakUnless { .. }
+        | Op::LoopEnd => String::new(),
+        _ => unreachable!("render_op_misc: {op:?} is not in this group"),
+    }
+}
+
+/// The `Op::Prim` arm of [`render_op_misc`], split out separately (it alone was
+/// ~290 lines / the dominant share of that group's complexity): a primitive-floor
+/// op, hand-mapped INLINE (no preamble func) — memory load/store, WASI syscalls,
+/// refcount raw ops, and the full int/float/f32 scalar-op dispatch. Verbatim body,
+/// moved wholesale.
+fn render_op_prim(
+    kind: &PrimKind,
+    dst: &Option<ValueId>,
+    args: &[ValueId],
+    floats: &BTreeSet<ValueId>,
+    fuser: &mut Fuser,
+) -> String {
+    let body = render_op_prim_mem_io(kind, args)
+        .unwrap_or_else(|| render_op_prim_float(kind, dst, args, floats, fuser));
+    match dst {
+        Some(d) => format!("    (local.set {} {body})\n", local(*d)),
+        None => format!("    {body}\n"),
+    }
+}
+
+
+/// The memory/syscall/refcount half of [`render_op_prim`]: raw `Handle`/`Load`/
+/// `Store`/`ElemAddr`, the WASI syscall floor (`Die`/`ProcExit`/`FdWrite`/
+/// `RandomGet`/`ClockTimeGet`/`ArgsGet*`/`EnvGet`/fs ops/`ReadLine`/`ReadNBytes`),
+/// and raw `RcDec`/`RcInc`. Split further into `_a` (mem/random/clock) and `_b`
+/// (WASI CLI-args/env/fs/refcount) — `PrimKind` has no repeated variant across any
+/// of these groups, so the split carries none of the guard-order risk a
+/// duplicated-discriminant match would. `None` defers to [`render_op_prim_float`]
+/// for the remaining (float/f32 arithmetic) `PrimKind`s.
+fn render_op_prim_mem_io(kind: &PrimKind, args: &[ValueId]) -> Option<String> {
+    render_op_prim_mem_io_a(kind, args).or_else(|| render_op_prim_mem_io_b(kind, args))
+}
+
+fn render_op_prim_mem_io_a(kind: &PrimKind, args: &[ValueId]) -> Option<String> {
+    let w = |i: usize| format!("(i32.wrap_i64 (local.get {}))", local(args[i]));
+    Some(match kind {
                 PrimKind::Handle => format!("(i64.extend_i32_u (local.get {}))", local(args[0])),
                 PrimKind::Load { width: 1 } => format!("(i64.extend_i32_u (i32.load8_u {}))", w(0)),
                 PrimKind::Load { width: 4 } => format!("(i64.extend_i32_u (i32.load {}))", w(0)),
@@ -852,6 +1028,13 @@ fn render_op(
                         w(2)
                     )
                 }
+        _ => return None,
+    })
+}
+
+fn render_op_prim_mem_io_b(kind: &PrimKind, args: &[ValueId]) -> Option<String> {
+    let w = |i: usize| format!("(i32.wrap_i64 (local.get {}))", local(args[i]));
+    Some(match kind {
                 // args_get_list() — the WASI CLI-args floor; builds a fresh owned
                 // `List[String]` of argv[1..] in the preamble helper. dst is a heap Ptr
                 // (i32 handle, value_reprs_wasm), so the call result sets the local DIRECTLY
@@ -944,6 +1127,40 @@ fn render_op(
                 // emits the call as a STATEMENT (no local.set).
                 PrimKind::RcDec => format!("(call $rc_dec {})", w(0)),
                 PrimKind::RcInc => format!("(call $rc_inc {})", w(0)),
+        _ => return None,
+    })
+}
+
+
+/// The float/f32 arithmetic half of [`render_op_prim`]: `F64FromInt`/`FloatUn`/
+/// `FloatBin`/`FloatCmp`/`FloatToInt`/`IntToFloat`/`FloatBits`, and the f32-narrow
+/// mirror (`F32Demote`/`F32Promote`/`IntToF32`/`F32Bits`/`F32Bin`/`F32Cmp`/`F32Un`).
+
+/// The float/f32 arithmetic half of [`render_op_prim`], split further into `_f64`
+/// (`F64FromInt`/`FloatUn`/`FloatBin`/`FloatCmp`/`FloatToInt`/`IntToFloat`/
+/// `FloatBits`) and `_f32` (the f32-narrow mirror: `F32Demote`/`F32Promote`/
+/// `IntToF32`/`F32Bits`/`F32Bin`/`F32Cmp`/`F32Un`) — `PrimKind` has no repeated
+/// variant across the two, so the split carries none of the guard-order risk a
+/// duplicated-discriminant match would.
+fn render_op_prim_float(
+    kind: &PrimKind,
+    dst: &Option<ValueId>,
+    args: &[ValueId],
+    floats: &BTreeSet<ValueId>,
+    fuser: &mut Fuser,
+) -> String {
+    render_op_prim_f64(kind, dst, args, floats, fuser)
+        .unwrap_or_else(|| render_op_prim_f32(kind, args))
+}
+
+fn render_op_prim_f64(
+    kind: &PrimKind,
+    dst: &Option<ValueId>,
+    args: &[ValueId],
+    floats: &BTreeSet<ValueId>,
+    fuser: &mut Fuser,
+) -> Option<String> {
+    Some(match kind {
                 // `float.from_int` — the single-instruction sitofp floor (#806).
                 // An f64-classified dst (step 3a) takes the convert result directly.
                 PrimKind::F64FromInt => {
@@ -1025,6 +1242,12 @@ fn render_op(
                 }
                 // to_bits / bits_to_float: the value IS the bits — identity pass-through.
                 PrimKind::FloatBits => format!("(local.get {})", local(args[0])),
+        _ => return None,
+    })
+}
+
+fn render_op_prim_f32(kind: &PrimKind, args: &[ValueId]) -> String {
+    match kind {
                 // f64 → f32 (demote, round-to-nearest), held as the low-32 f32 bit pattern.
                 PrimKind::F32Demote => format!(
                     "(i64.extend_i32_u (i32.reinterpret_f32 (f32.demote_f64 (f64.reinterpret_i64 (local.get {})))))",
@@ -1090,28 +1313,7 @@ fn render_op(
                     };
                     format!("(i64.extend_i32_u (i32.reinterpret_f32 {inner}))")
                 }
-            };
-            match dst {
-                Some(d) => format!("    (local.set {} {body})\n", local(*d)),
-                None => format!("    {body}\n"),
-            }
-        }
-        // A scalar reassignment of a stable local — the loop-carried state. Reads `src`,
-        // writes the var's own local (reusing the same wasm local is legal: read then set).
-        Op::SetLocal { local: l, src } => {
-            format!("    (local.set {} {})\n", local(*l), fuser.operand(*src))
-        }
-        Op::Consume { .. }
-        | Op::Borrow { .. }
-        | Op::Const { .. }
-        | Op::Pure { .. }
-        // The if- and loop-markers are rendered STATEFULLY by render_wasm_fn (the
-        // flat→nested wasm `if`/`else` and `block`/`loop`); render_op never sees them.
-        | Op::IfThen { .. }
-        | Op::Else { .. }
-        | Op::EndIf { .. }
-        | Op::LoopStart
-        | Op::LoopBreakUnless { .. }
-        | Op::LoopEnd => String::new(),
+        _ => unreachable!("render_op_prim_f32: {kind:?} is not in this group"),
     }
 }
+

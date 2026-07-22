@@ -34,6 +34,28 @@ impl LowerCtx {
                 return Some(obj);
             }
         }
+        self.lower_heap_result_arm_literal(arm, result_ty)
+            .or_else(|| self.lower_heap_result_arm_option(arm, result_ty))
+            .or_else(|| self.lower_heap_result_arm_result(arm, result_ty))
+            .or_else(|| self.lower_heap_result_arm_ctrl(arm, result_ty))
+    }
+
+    /// Router for [`Self::lower_heap_result_arm`]'s four arm-kind groups (split out for
+    /// codopsy cognitive-complexity — pure text-move, no behavior change): `_literal` (control/
+    /// concat/aggregate-literal arms), `_option` (all `OptionSome`/`OptionNone` guards),
+    /// `_result` (all `ResultOk`/`ResultErr` guards), `_ctrl` (Match/Block/Call/field-projection
+    /// arms + the trailing catch-all). Groups are non-overlapping by `IrExprKind` discriminant
+    /// EXCEPT `Match{..}` and `Call{target: Computed{..}, ..}`, which each appear TWICE (a
+    /// guarded fast path + a generic fallback) and are co-located inside `_ctrl` in their
+    /// original relative order — Rust's match "first true guard commits" semantics requires
+    /// both arms of such a pair to live in the SAME `match` statement, so they were kept
+    /// together rather than split by textual position.
+    /// Control/concat/aggregate-literal arms: `Unwrap`/`Try` pass-through, `UnwrapOr`,
+    /// `LitStr`, `Var` (Result-Ok-context + generic), string/list concat, `StringInterp`,
+    /// nested `If`, and the `List`/`Tuple`/`Record`/`SpreadRecord` literal constructors.
+    /// Verbatim subset of the original single match — each arm owns its own `arm_mark`/
+    /// `drop_arm_locals` frame, no state crosses arm boundaries.
+    fn lower_heap_result_arm_literal(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         match &arm.kind {
             // An `e!` arm (`if c then parse_sequence(..)! else ..`) — effect-fn error
             // propagation: `e!` returns e's Result unchanged (Ok→Ok, Err→Err), so strip the
@@ -198,160 +220,16 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
-            // A BLOCK arm (`else { let c = string.get(s, pos) ?? ""; <heap-tail> }` — the
-            // dominant real-parser shape): lower its statements as effects in a per-arm frame,
-            // then its tail as the arm's moved-out heap value (recursing into this same arm
-            // lowering, which `Consume`s the tail). The block's own heap let-locals (tracked in
-            // `live_heap_handles` since `arm_mark`) are freed WITHIN the arm via
-            // `drop_arm_locals`; the moved-out value is `Consume`d (never in that set), so it is
-            // not double-freed. Same per-arm balance the scalar block arm proves.
-            // A heap-result MATCH arm — the monadic `!`-desugar inside a tail-duplicated
-            // `if` (`let xs = if c then load(p)! else []; ok(xs + t)` becomes
-            // `if c then { match load(p) { err(e)=>err(e), ok(xs)=>ok(xs+t) } } else …`,
-            // porta resolve_env/serve/validate). Delegate to the SAME variant value-match
-            // machinery the fn-tail position already uses (rollback-safe: a shape outside
-            // its subset returns None and the caller keeps the wall — never invalid wasm).
-            IrExprKind::Match { subject, arms }
-                if crate::lower::is_variant_ty(&subject.ty)
-                    || self.custom_variant_type_name(&subject.ty).is_some() =>
-            {
-                let arm_mark = self.live_heap_handles.len();
-                // Option/Result subjects via the value match; a CUSTOM-variant subject (the
-                // regrouped `err($q)` INNER match over a borrowed variant payload — the
-                // `compute` class) via the tag@slot0 dispatcher, which accepts a heap result
-                // over a BORROWED subject (the recursive-to_string precedent).
-                let obj = match self.try_lower_variant_value_match(subject, arms, result_ty) {
-                    Some(v) => v,
-                    // An `Option[<heap>]` inner subject (the fold-step nested match over
-                    // `list.last(stack)`) — the merge-based Option twin, then the custom
-                    // tag@slot0 dispatcher.
-                    _ => match self.try_lower_option_match_value(subject, arms, result_ty) {
-                        Some(v) => v,
-                        _ => self.try_lower_custom_variant_match(subject, arms, result_ty)?,
-                    },
-                };
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            IrExprKind::Block { stmts, expr } => {
-                let tail = expr.as_deref()?;
-                let arm_mark = self.live_heap_handles.len();
-                self.in_frame += 1;
-                let mut ok = true;
-                for stmt in stmts {
-                    if self.lower_stmt(stmt).is_err() {
-                        ok = false;
-                        break;
-                    }
-                }
-                let obj = if ok {
-                    self.lower_heap_result_arm(tail, result_ty)
-                } else {
-                    None
-                };
-                self.drop_arm_locals(arm_mark);
-                self.in_frame -= 1;
-                obj
-            }
-            // A direct user-call arm (`if c then f(x) else "d"`): the callee returns a
-            // FRESH owned heap value (CallFn-with-heap-result = cert `i`), moved out by the
-            // arm's `Consume` (cert `m`) — the same `"im"` balance as a literal arm. Any
-            // heap arg the call MATERIALIZES (a heap-literal/fresh-value arg) is dropped
-            // WITHIN the arm (`drop_arm_locals`), NOT at function scope: a per-arm temp
-            // freed at function scope would `Drop` an uninitialized local when the OTHER arm
-            // ran (garbage rc_dec → trap). Per-arm, the temp is freed only if this arm
-            // executes — the same per-iteration-balance discipline the loops use.
-            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                // A DIRECT SELF-RECURSIVE call arm (`name == fn_name`) is the unbounded-
-                // stack tail-recursion shape (`fn spin = if … then acc else spin(…)`).
-                // v1 has NO TCO, so EXECUTING it deeply overflows the wasm call stack
-                // (a fail-stop trap). Executing the heap-result if here would convert a
-                // shallow-correct / deep-trapping recursion — a NET LOSS over the sound
-                // Opaque fallback for the canonical 2M-deep TCO acceptance fixture. WALL
-                // it (→ `None`): the function keeps its memory-safe linearized form until
-                // real TCO lands. (A non-self call recurses no deeper than the caller, so
-                // it stays admitted.)
-                // EXCEPTION: inside a defunctionalized `list.map` body (`children |> list.map((c) =>
-                // render_el(c, …))`) the self-call is BOUNDED — it recurses to the tree's DEPTH, not
-                // the unbounded linear depth of a tail loop — so executing it is correct (matches v0's
-                // own recursion) and is admitted. The wall applies only to a function-TAIL self-call.
-                // EXPERIMENT (toml): allow a function-tail self-call to lower as a REAL recursive
-                // CallFn (matches v0's own native recursion exactly — same call-stack depth, same
-                // bytes). The previous unconditional wall kept a sound Opaque/linearized fallback to
-                // avoid a 2M-deep tail-loop wasm stack overflow; but a TCO-able tail loop is already
-                // rewritten by try_tco_rewrite BEFORE here (never reaches this arm), so what remains
-                // is a general-arg recursion (toml parse_doc/set_nested/append_aot) whose depth is
-                // bounded by the input exactly as v0's is. Gated by the full test (the 2M-deep TCO
-                // acceptance fixture is TCO'd, not executed here — if it regresses, this is reverted).
-                let _ = name;
-                // A VARIANT-CTOR arm (`else Para(line)` / `then Blank` — the parse_line
-                // if-chain): the "call" is a CONSTRUCTOR, not a function — emitting a
-                // `CallFn $Para` dangles (caught at render as unlinked, walling the whole
-                // file). Build the tagged block (`try_lower_variant_ctor`, the binds_p2
-                // guard's exact twin) and MOVE it out — the same per-arm `"im"` balance;
-                // field temps the ctor materializes are moved into the block, and any
-                // stray arm temp is freed by `drop_arm_locals`.
-                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
-                    let arm_mark = self.live_heap_handles.len();
-                    let obj = self.try_lower_variant_ctor(arm)?;
-                    self.live_heap_handles.retain(|x| *x != obj);
-                    self.ops.push(Op::Consume { v: obj });
-                    self.drop_arm_locals(arm_mark);
-                    return Some(obj);
-                }
-                let repr = repr_of(result_ty).ok()?;
-                let arm_mark = self.live_heap_handles.len();
-                let lowered = self.lower_call_args(args).ok()?;
-                let obj = self.fresh_value();
-                self.ops.push(Op::CallFn {
-                    dst: Some(obj),
-                    name: name.as_str().to_string(),
-                    args: lowered,
-                    result: Some(repr),
-                });
-                self.ops.push(Op::Consume { v: obj });
-                // Free materialized arg temps inside the arm (obj is moved out, never in
-                // `live_heap_handles`, so it is not among them).
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            // A PURE stdlib `Module`-call arm (`match n { 0 => "a", _ => int.to_string(n) }` —
-            // the single most common real-program shape). Same per-arm `"im"` balance as the
-            // Named-call arm: the pure call returns a FRESH owned heap value (`i`), the arm's
-            // `Consume` moves it out (`m`); any heap arg it materializes is freed within the arm
-            // (`drop_arm_locals`). The purity gate lives in `lower_pure_module_value_call` (an
-            // impure/HO/unsupported call errors → `None` → the caller keeps the sound Opaque
-            // fallback). Was the gap that dropped a real-program `match → stdlib-call` to Opaque.
-            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-                let arm_mark = self.live_heap_handles.len();
-                let obj = self
-                    .lower_pure_module_value_call(module.as_str(), func.as_str(), args, result_ty)
-                    .ok()?;
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
-            // A heap-result call through a KNOWN funcref arm (`Leaf(v) => leaf(v)`,
-            // `Node(l, r) => merge(…)` — tree_fold's arms call fn-typed PARAMS): execute
-            // via the closure-table call, the tail-position machinery ported per-arm
-            // (tail.rs's Computed case). Same per-arm `"im"` balance as the Named-call
-            // arm: the indirect call returns a FRESH owned heap value (`i`), the arm's
-            // `Consume` moves it out (`m`); arg temps free within the arm. An UNKNOWN
-            // callee falls through to the C1 direct-lambda inline case below.
-            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                if is_heap_ty(&arm.ty) && self.closure_value_of(callee).is_some() =>
-            {
-                let arm_mark = self.live_heap_handles.len();
-                let blk = self.closure_value_of(callee)?;
-                let lowered = self.lower_call_args(args).ok()?;
-                let obj = self.fresh_value();
-                let repr = repr_of(result_ty).ok()?;
-                self.emit_closure_call(blk, Some(obj), lowered, Some(repr));
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
-            }
+            _ => None,
+        }
+    }
+
+    /// Every `OptionSome` payload-shape guard (record / variant-ctor payload / tuple
+    /// combos / generic heap / generic scalar) plus `OptionNone`. Guard order is
+    /// load-bearing (most-specific payload shape first) — kept verbatim from the original
+    /// single match, unchanged relative order.
+    fn lower_heap_result_arm_option(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        match &arm.kind {
             // A direct Option ctor arm (`if c then Some(x*2) else None` — the filter_map / map
             // closure body): materialize the 0-or-1-element Option block + Consume (move-out)
             // — the SAME per-arm `"im"` balance as a literal arm (init-agnostic `Alloc` = `i`,
@@ -603,6 +481,18 @@ impl LowerCtx {
                 self.ops.push(Op::Consume { v: obj });
                 Some(obj)
             }
+            _ => None,
+        }
+    }
+
+    /// Every `ResultOk`/`ResultErr` shape guard (Value / (String,Int) / (record,Int) /
+    /// (Value,Int) / (List[String],Int) / (List[Value],Int) / record / structured-variant-
+    /// error / custom-variant / Option[record] / Option[scalar|String] / plain heap String /
+    /// Unit-Ok / heap Err). Guard order is load-bearing (most specific result-shape first,
+    /// generic heap-String fallback last) — kept as ONE atomic match, verbatim, so the
+    /// original commit-on-first-true-guard semantics are preserved exactly.
+    fn lower_heap_result_arm_result(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        match &arm.kind {
             // `Ok(int)` / `Err(string)` arms of a `Result[Int, String]`-returning heap `if` (the
             // parse-family shape `if ok then Ok(v) else Err("msg")`). Result reuses the Option[String]
             // DynListStr layout with len-AS-TAG: `Ok` = a cap-1/len-0 block (the int sits in slot 0
@@ -884,6 +774,171 @@ impl LowerCtx {
                 // teardown frees only the interpolation's intermediates, never the moved-in message.
                 self.live_heap_handles.retain(|h| *h != piece);
                 let obj = self.materialize_opt_str_some(piece, repr);
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
+            _ => None,
+        }
+    }
+
+    /// The heap-result `Match` arm (BOTH the variant-subject-guarded fast path and its
+    /// generic fallback — co-located, see the router doc comment), `Block`, the `Call`
+    /// arms (Named/Module, plus BOTH `Computed`-callee arms for the same co-location
+    /// reason), the borrowed-field `Member`/`TupleIndex` projections, and the trailing
+    /// generic scalar-Ok catch-all. Verbatim subset of the original single match.
+    fn lower_heap_result_arm_ctrl(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        match &arm.kind {
+            // A BLOCK arm (`else { let c = string.get(s, pos) ?? ""; <heap-tail> }` — the
+            // dominant real-parser shape): lower its statements as effects in a per-arm frame,
+            // then its tail as the arm's moved-out heap value (recursing into this same arm
+            // lowering, which `Consume`s the tail). The block's own heap let-locals (tracked in
+            // `live_heap_handles` since `arm_mark`) are freed WITHIN the arm via
+            // `drop_arm_locals`; the moved-out value is `Consume`d (never in that set), so it is
+            // not double-freed. Same per-arm balance the scalar block arm proves.
+            // A heap-result MATCH arm — the monadic `!`-desugar inside a tail-duplicated
+            // `if` (`let xs = if c then load(p)! else []; ok(xs + t)` becomes
+            // `if c then { match load(p) { err(e)=>err(e), ok(xs)=>ok(xs+t) } } else …`,
+            // porta resolve_env/serve/validate). Delegate to the SAME variant value-match
+            // machinery the fn-tail position already uses (rollback-safe: a shape outside
+            // its subset returns None and the caller keeps the wall — never invalid wasm).
+            IrExprKind::Match { subject, arms }
+                if crate::lower::is_variant_ty(&subject.ty)
+                    || self.custom_variant_type_name(&subject.ty).is_some() =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                // Option/Result subjects via the value match; a CUSTOM-variant subject (the
+                // regrouped `err($q)` INNER match over a borrowed variant payload — the
+                // `compute` class) via the tag@slot0 dispatcher, which accepts a heap result
+                // over a BORROWED subject (the recursive-to_string precedent).
+                let obj = match self.try_lower_variant_value_match(subject, arms, result_ty) {
+                    Some(v) => v,
+                    // An `Option[<heap>]` inner subject (the fold-step nested match over
+                    // `list.last(stack)`) — the merge-based Option twin, then the custom
+                    // tag@slot0 dispatcher.
+                    _ => match self.try_lower_option_match_value(subject, arms, result_ty) {
+                        Some(v) => v,
+                        _ => self.try_lower_custom_variant_match(subject, arms, result_ty)?,
+                    },
+                };
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
+            IrExprKind::Block { stmts, expr } => {
+                let tail = expr.as_deref()?;
+                let arm_mark = self.live_heap_handles.len();
+                self.in_frame += 1;
+                let mut ok = true;
+                for stmt in stmts {
+                    if self.lower_stmt(stmt).is_err() {
+                        ok = false;
+                        break;
+                    }
+                }
+                let obj = if ok {
+                    self.lower_heap_result_arm(tail, result_ty)
+                } else {
+                    None
+                };
+                self.drop_arm_locals(arm_mark);
+                self.in_frame -= 1;
+                obj
+            }
+            // A direct user-call arm (`if c then f(x) else "d"`): the callee returns a
+            // FRESH owned heap value (CallFn-with-heap-result = cert `i`), moved out by the
+            // arm's `Consume` (cert `m`) — the same `"im"` balance as a literal arm. Any
+            // heap arg the call MATERIALIZES (a heap-literal/fresh-value arg) is dropped
+            // WITHIN the arm (`drop_arm_locals`), NOT at function scope: a per-arm temp
+            // freed at function scope would `Drop` an uninitialized local when the OTHER arm
+            // ran (garbage rc_dec → trap). Per-arm, the temp is freed only if this arm
+            // executes — the same per-iteration-balance discipline the loops use.
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                // A DIRECT SELF-RECURSIVE call arm (`name == fn_name`) is the unbounded-
+                // stack tail-recursion shape (`fn spin = if … then acc else spin(…)`).
+                // v1 has NO TCO, so EXECUTING it deeply overflows the wasm call stack
+                // (a fail-stop trap). Executing the heap-result if here would convert a
+                // shallow-correct / deep-trapping recursion — a NET LOSS over the sound
+                // Opaque fallback for the canonical 2M-deep TCO acceptance fixture. WALL
+                // it (→ `None`): the function keeps its memory-safe linearized form until
+                // real TCO lands. (A non-self call recurses no deeper than the caller, so
+                // it stays admitted.)
+                // EXCEPTION: inside a defunctionalized `list.map` body (`children |> list.map((c) =>
+                // render_el(c, …))`) the self-call is BOUNDED — it recurses to the tree's DEPTH, not
+                // the unbounded linear depth of a tail loop — so executing it is correct (matches v0's
+                // own recursion) and is admitted. The wall applies only to a function-TAIL self-call.
+                // EXPERIMENT (toml): allow a function-tail self-call to lower as a REAL recursive
+                // CallFn (matches v0's own native recursion exactly — same call-stack depth, same
+                // bytes). The previous unconditional wall kept a sound Opaque/linearized fallback to
+                // avoid a 2M-deep tail-loop wasm stack overflow; but a TCO-able tail loop is already
+                // rewritten by try_tco_rewrite BEFORE here (never reaches this arm), so what remains
+                // is a general-arg recursion (toml parse_doc/set_nested/append_aot) whose depth is
+                // bounded by the input exactly as v0's is. Gated by the full test (the 2M-deep TCO
+                // acceptance fixture is TCO'd, not executed here — if it regresses, this is reverted).
+                let _ = name;
+                // A VARIANT-CTOR arm (`else Para(line)` / `then Blank` — the parse_line
+                // if-chain): the "call" is a CONSTRUCTOR, not a function — emitting a
+                // `CallFn $Para` dangles (caught at render as unlinked, walling the whole
+                // file). Build the tagged block (`try_lower_variant_ctor`, the binds_p2
+                // guard's exact twin) and MOVE it out — the same per-arm `"im"` balance;
+                // field temps the ctor materializes are moved into the block, and any
+                // stray arm temp is freed by `drop_arm_locals`.
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+                    let arm_mark = self.live_heap_handles.len();
+                    let obj = self.try_lower_variant_ctor(arm)?;
+                    self.live_heap_handles.retain(|x| *x != obj);
+                    self.ops.push(Op::Consume { v: obj });
+                    self.drop_arm_locals(arm_mark);
+                    return Some(obj);
+                }
+                let repr = repr_of(result_ty).ok()?;
+                let arm_mark = self.live_heap_handles.len();
+                let lowered = self.lower_call_args(args).ok()?;
+                let obj = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(obj),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(repr),
+                });
+                self.ops.push(Op::Consume { v: obj });
+                // Free materialized arg temps inside the arm (obj is moved out, never in
+                // `live_heap_handles`, so it is not among them).
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
+            // A PURE stdlib `Module`-call arm (`match n { 0 => "a", _ => int.to_string(n) }` —
+            // the single most common real-program shape). Same per-arm `"im"` balance as the
+            // Named-call arm: the pure call returns a FRESH owned heap value (`i`), the arm's
+            // `Consume` moves it out (`m`); any heap arg it materializes is freed within the arm
+            // (`drop_arm_locals`). The purity gate lives in `lower_pure_module_value_call` (an
+            // impure/HO/unsupported call errors → `None` → the caller keeps the sound Opaque
+            // fallback). Was the gap that dropped a real-program `match → stdlib-call` to Opaque.
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self
+                    .lower_pure_module_value_call(module.as_str(), func.as_str(), args, result_ty)
+                    .ok()?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
+            // A heap-result call through a KNOWN funcref arm (`Leaf(v) => leaf(v)`,
+            // `Node(l, r) => merge(…)` — tree_fold's arms call fn-typed PARAMS): execute
+            // via the closure-table call, the tail-position machinery ported per-arm
+            // (tail.rs's Computed case). Same per-arm `"im"` balance as the Named-call
+            // arm: the indirect call returns a FRESH owned heap value (`i`), the arm's
+            // `Consume` moves it out (`m`); arg temps free within the arm. An UNKNOWN
+            // callee falls through to the C1 direct-lambda inline case below.
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                if is_heap_ty(&arm.ty) && self.closure_value_of(callee).is_some() =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let blk = self.closure_value_of(callee)?;
+                let lowered = self.lower_call_args(args).ok()?;
+                let obj = self.fresh_value();
+                let repr = repr_of(result_ty).ok()?;
+                self.emit_closure_call(blk, Some(obj), lowered, Some(repr));
                 self.ops.push(Op::Consume { v: obj });
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
