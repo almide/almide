@@ -923,7 +923,20 @@ fn dispatch(cli: Cli) {
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, !no_verified, !no_verified);
+            cli::cmd_build(cli::BuildArgs {
+                file: &file,
+                output: o.as_deref(),
+                target: target.as_deref(),
+                release: release || fast,
+                fast,
+                unchecked_index,
+                no_check,
+                repr_c,
+                cdylib,
+                emit_unverified,
+                verified: !no_verified,
+                native_verified: !no_verified,
+            });
         }
         Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),
         Commands::Check { file, deny_warnings, json, explain, effects } => dispatch_check(file, deny_warnings, json, explain, effects),

@@ -1,7 +1,33 @@
 use std::process::Command;
 use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch, err};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool, emit_unverified: bool, verified: bool, native_verified: bool) {
+/// Flags for [`cmd_build`] — bundled into one struct (was 12 positional
+/// params, a max-params violation on its own) so the function signature
+/// stays under the params threshold. Field names match `Commands::Build`'s
+/// clap fields 1:1, so the call site in `main.rs` builds it directly from
+/// the destructured match arm.
+pub struct BuildArgs<'a> {
+    pub file: &'a str,
+    pub output: Option<&'a str>,
+    pub target: Option<&'a str>,
+    pub release: bool,
+    pub fast: bool,
+    pub unchecked_index: bool,
+    pub no_check: bool,
+    pub repr_c: bool,
+    pub cdylib: bool,
+    pub emit_unverified: bool,
+    pub verified: bool,
+    pub native_verified: bool,
+}
+
+pub fn cmd_build(args: BuildArgs) {
+    // Destructured immediately so the function body below is untouched
+    // (verbatim) — this is purely a call-site params bundling.
+    let BuildArgs {
+        file, output, target, release, fast, unchecked_index: _unchecked_index,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified,
+    } = args;
     // The npm/JavaScript target was removed with the TS backend; reject it with a
     // clear pointer instead of emitting a non-functional stub package.
     if matches!(target, Some("npm" | "js" | "ts" | "javascript" | "typescript")) {

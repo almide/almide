@@ -15,7 +15,7 @@ mod fix;
 mod docs_gen;
 
 pub use run::{cmd_run, cmd_run_inner};
-pub use build::cmd_build;
+pub use build::{cmd_build, BuildArgs};
 pub use compile::cmd_compile;
 pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};

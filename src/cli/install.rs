@@ -103,20 +103,20 @@ pub fn cmd_install(
     }
 
     let install_path_str = install_path.to_string_lossy().to_string();
-    crate::cli::cmd_build(
-        entry_rel,
-        Some(&install_path_str),
+    crate::cli::cmd_build(crate::cli::BuildArgs {
+        file: entry_rel,
+        output: Some(&install_path_str),
         target,
-        true,  // release
-        false, // fast
-        false, // unchecked_index
-        false, // no_check
-        false, // repr_c
-        false, // cdylib
-        false, // emit_unverified
-        false, // verified (v0 codegen for install)
-        false, // native_verified (v0 codegen for install)
-    );
+        release: true,
+        fast: false,
+        unchecked_index: false,
+        no_check: false,
+        repr_c: false,
+        cdylib: false,
+        emit_unverified: false,
+        verified: false,         // v0 codegen for install
+        native_verified: false,  // v0 codegen for install
+    });
 
     let _ = std::env::set_current_dir(&prev_cwd);
 
