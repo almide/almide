@@ -79,6 +79,36 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
         edges: Vec<String>,
         native_call: bool,
     }
+    // net.* (any func) / the no-wasm process fns / http.request / zlib.* — the tight,
+    // enumerated no-wasm set. process.args is EXCLUDED (WASI args_get exists AND v0's
+    // emit_wasm implements it — calls_process.rs handles exactly exit/stdin_lines/
+    // args). spawn/kill/is_alive/exec_status/env have NO v0 wasm form (the fixture
+    // headers declare them native-only: "wasm:skip — process.env/spawn/kill are
+    // native-only" / "process.exec_status is native-only"), and WASI preview1 has no
+    // child-process API — structural, not a v1 gap. zlib has NO v0 wasm runtime at
+    // all ("wasm:skip — OS/native-only"). http.serve is a TCP LISTENER ("wasm:skip —
+    // http.serve is native-only", effect_intrinsic_tail_test) — the same no-wasm
+    // class as net.*. random is deliberately NOT here: v0's emit_wasm implements it
+    // over WASI random_get (calls_random.rs) — a REAL v1 gap. testing.assert_throws
+    // needs `std::panic::catch_unwind` (runtime/rs/src/testing.rs) — WASM's
+    // `unreachable` trap is NOT catchable (no unwind mechanism in the WASI MVP ABI v0
+    // targets). v0's OWN emit_wasm has no wasm form either (calls_p2.rs's
+    // `assert_throws` arm is native-only) — the fixture header says so verbatim
+    // ("wasm:skip — WASM cannot catch panics"), matching CHANGELOG.md and
+    // wasm_dispatch_coverage_test.rs's independent documentation of the same
+    // limitation. Structural, not a v1 lowering gap — the E3/E4/E5 native-root
+    // precedent. Named (codopsy cc), split out of `Collector::visit_expr` below.
+    fn is_native_only_stdlib_call(module: &str, func: &str) -> bool {
+        module == "net"
+            || module == "zlib"
+            || (module == "process"
+                && matches!(
+                    func,
+                    "exec" | "exit" | "run" | "spawn" | "kill" | "is_alive" | "exec_status" | "env"
+                ))
+            || (module == "http" && matches!(func, "request" | "serve"))
+            || (module == "testing" && func == "assert_throws")
+    }
     impl almide_ir::visit::IrVisitor for Collector {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
             use almide_ir::IrExprKind::{Call, TailCall};
@@ -90,39 +120,7 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                 match t {
                     CallTarget::Named { name } => self.edges.push(name.as_str().to_string()),
                     CallTarget::Module { module, func, .. } => {
-                        let (m, fname) = (module.as_str(), func.as_str());
-                        // net.* (any func) / the no-wasm process fns / http.request / zlib.* —
-                        // the tight, enumerated no-wasm set. process.args is EXCLUDED (WASI
-                        // args_get exists AND v0's emit_wasm implements it — calls_process.rs
-                        // handles exactly exit/stdin_lines/args). spawn/kill/is_alive/
-                        // exec_status/env have NO v0 wasm form (the fixture headers declare
-                        // them native-only: "wasm:skip — process.env/spawn/kill are
-                        // native-only" / "process.exec_status is native-only"), and WASI
-                        // preview1 has no child-process API — structural, not a v1 gap.
-                        // zlib has NO v0 wasm runtime at all ("wasm:skip — OS/native-only").
-                        // http.serve is a TCP LISTENER ("wasm:skip — http.serve is native-only",
-                        // effect_intrinsic_tail_test) — the same no-wasm class as net.*.
-                        // random is deliberately NOT here: v0's emit_wasm implements it over
-                        // WASI random_get (calls_random.rs) — a REAL v1 gap.
-                        // testing.assert_throws needs `std::panic::catch_unwind` (runtime/rs/src/
-                        // testing.rs) — WASM's `unreachable` trap is NOT catchable (no unwind
-                        // mechanism in the WASI MVP ABI v0 targets). v0's OWN emit_wasm has no
-                        // wasm form either (calls_p2.rs's `assert_throws` arm is native-only) —
-                        // the fixture header says so verbatim ("wasm:skip — WASM cannot catch
-                        // panics"), matching CHANGELOG.md and wasm_dispatch_coverage_test.rs's
-                        // independent documentation of the same limitation. Structural, not a v1
-                        // lowering gap — the E3/E4/E5 native-root precedent.
-                        if m == "net"
-                            || m == "zlib"
-                            || (m == "process"
-                                && matches!(
-                                    fname,
-                                    "exec" | "exit" | "run" | "spawn" | "kill" | "is_alive"
-                                        | "exec_status" | "env"
-                                ))
-                            || (m == "http" && matches!(fname, "request" | "serve"))
-                            || (m == "testing" && fname == "assert_throws")
-                        {
+                        if is_native_only_stdlib_call(module.as_str(), func.as_str()) {
                             self.native_call = true;
                         }
                     }
@@ -173,6 +171,28 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
 /// surfaces its capability transitively, exactly like any user call — never the
 /// accept-but-unsafe omission the Module-call purity wall guarded against. STDLIB modules are
 /// NOT rewritten. No-op when there are no linked user modules.
+/// Every top-level expression (fn bodies + top-let inits) in `ir`, main AND every
+/// module, MUTABLY, in the SAME order a 4-loop nest would visit them (main
+/// functions, main top-lets, then per module: that module's functions, that
+/// module's top-lets) — the mutable twin of `for_each_program_expr` (mir/lower/
+/// drop_sources.rs; not shared across crate-boundary/example-binary here, so
+/// duplicated locally). An iterator-chain rewrite of nested `for` loops (codopsy
+/// cog: nested `for` costs more cognitive complexity per level than a flat
+/// `.chain()`/`.flat_map()` pipeline). Disjoint field borrows (`ir.functions` /
+/// `ir.top_lets` / `ir.modules`), so chaining them is a plain borrow-checker-legal
+/// split, not an aliasing risk.
+fn for_each_program_expr_mut(
+    ir: &mut almide_ir::IrProgram,
+    mut visit: impl FnMut(&mut almide_ir::IrExpr),
+) {
+    let main =
+        ir.functions.iter_mut().map(|f| &mut f.body).chain(ir.top_lets.iter_mut().map(|tl| &mut tl.value));
+    let modules = ir.modules.iter_mut().flat_map(|m| {
+        m.functions.iter_mut().map(|f| &mut f.body).chain(m.top_lets.iter_mut().map(|tl| &mut tl.value))
+    });
+    main.chain(modules).for_each(visit);
+}
+
 fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     use almide_ir::{CallTarget, IrExprKind, IrMutVisitor, walk_expr_mut};
     use almide_lang::intern::sym;
@@ -207,20 +227,7 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
         }
     }
     let mut rw = Rw { user_mods: &user_mods };
-    for func in &mut ir.functions {
-        rw.visit_expr_mut(&mut func.body);
-    }
-    for tl in &mut ir.top_lets {
-        rw.visit_expr_mut(&mut tl.value);
-    }
-    for m in &mut ir.modules {
-        for func in &mut m.functions {
-            rw.visit_expr_mut(&mut func.body);
-        }
-        for tl in &mut m.top_lets {
-            rw.visit_expr_mut(&mut tl.value);
-        }
-    }
+    for_each_program_expr_mut(ir, |e| rw.visit_expr_mut(e));
 }
 
 /// Drive source → linked IR with NO `die()` — every failure becomes a value, so
