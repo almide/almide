@@ -59,7 +59,17 @@ impl LowerCtx {
     /// (rather than left nested) so neither function's guard-clause chain re-exceeds the
     /// depth this extraction exists to fix. Verbatim extraction, no behavior change.
     fn list_elem_eq_call_name(elem_ty: &Ty) -> Option<&'static str> {
-        use almide_lang::types::constructor::TypeConstructorId as TC;
+        // Pattern-1/2 split (codopsy8 complexity sweep): the flat-scalar checks and the
+        // 3 nested-container checks are independent, self-contained classifications with
+        // no shared state — a pure text-move split of the original guard-clause chain,
+        // called in the SAME order via `.or_else()`, no logic change.
+        Self::list_elem_eq_call_name_scalar(elem_ty)
+            .or_else(|| Self::list_elem_eq_call_name_container(elem_ty))
+    }
+
+    /// Extracted from `list_elem_eq_call_name` (codopsy8 complexity sweep, phase 1 of 2):
+    /// the flat-scalar element classes. Verbatim.
+    fn list_elem_eq_call_name_scalar(elem_ty: &Ty) -> Option<&'static str> {
         if matches!(elem_ty, Ty::Int) {
             return Some("list.eq_int");
         }
@@ -75,44 +85,65 @@ impl LowerCtx {
         if crate::lower::is_value_ty(elem_ty) {
             return Some("list.eq_value");
         }
-        if let Ty::Applied(TC::List, inner) = elem_ty {
-            // Nested lists — the element-wise recursion into the flat list eq
-            // (value_core `list_eq_list_*`).
-            if inner.len() == 1 && matches!(inner[0], Ty::Int) {
-                return Some("list.eq_list_int");
-            }
-            if inner.len() == 1 && matches!(inner[0], Ty::Float) {
-                return Some("list.eq_list_float");
-            }
-            if inner.len() == 1 && matches!(inner[0], Ty::String) {
-                return Some("list.eq_list_str");
-            }
-            return None;
+        None
+    }
+
+    /// Extracted from `list_elem_eq_call_name` (codopsy8 complexity sweep, phase 2 of 2):
+    /// the 3 nested-container element classes (List/Option/Tuple), further split by
+    /// container kind (codopsy8 follow-up: the merged version still exceeded the
+    /// max-complexity threshold) — a pure text-move, no logic change.
+    fn list_elem_eq_call_name_container(elem_ty: &Ty) -> Option<&'static str> {
+        Self::list_elem_eq_call_name_nested_list(elem_ty)
+            .or_else(|| Self::list_elem_eq_call_name_nested_option(elem_ty))
+            .or_else(|| Self::list_elem_eq_call_name_nested_tuple(elem_ty))
+    }
+
+    /// Extracted from `list_elem_eq_call_name_container` (codopsy8 complexity sweep,
+    /// container group 1 of 3): nested lists — the element-wise recursion into the flat
+    /// list eq (value_core `list_eq_list_*`). Verbatim.
+    fn list_elem_eq_call_name_nested_list(elem_ty: &Ty) -> Option<&'static str> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let Ty::Applied(TC::List, inner) = elem_ty else { return None };
+        if inner.len() == 1 && matches!(inner[0], Ty::Int) {
+            return Some("list.eq_list_int");
         }
-        if let Ty::Applied(TC::Option, inner) = elem_ty {
-            // List[Option[Int/Bool]] — element-wise len-as-tag + i64 payload
-            // compare (value_core `list_eq_opt_int`). Scalar payloads only: a
-            // Float payload's slot is f64 BITS (bit-eq ≠ `==` on -0.0/NaN).
-            if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
-                return Some("list.eq_opt_int");
-            }
-            return None;
+        if inner.len() == 1 && matches!(inner[0], Ty::Float) {
+            return Some("list.eq_list_float");
         }
-        if let Ty::Tuple(ts) = elem_ty {
-            // List[Tuple[scalar…]] — a scalar tuple block is LAYOUT-IDENTICAL to a
-            // same-arity List of its slot class (len@4 = arity, 8-byte slots @12),
-            // so the nested-list eq of the matching class compares it exactly:
-            // Int/Bool slots bit-compare (list.eq_list_int), all-Float slots
-            // float-compare per slot (list.eq_list_float). A MIXED Int/Float
-            // tuple has no matching flat class (a bit-compare on the Float slot
-            // is wrong on -0.0/NaN) — decline, the eq site walls honestly.
-            if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Int | Ty::Bool)) {
-                return Some("list.eq_list_int");
-            }
-            if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Float)) {
-                return Some("list.eq_list_float");
-            }
-            return None;
+        if inner.len() == 1 && matches!(inner[0], Ty::String) {
+            return Some("list.eq_list_str");
+        }
+        None
+    }
+
+    /// Extracted from `list_elem_eq_call_name_container` (codopsy8 complexity sweep,
+    /// container group 2 of 3): `List[Option[Int/Bool]]` — element-wise len-as-tag + i64
+    /// payload compare (value_core `list_eq_opt_int`). Scalar payloads only: a Float
+    /// payload's slot is f64 BITS (bit-eq ≠ `==` on -0.0/NaN). Verbatim.
+    fn list_elem_eq_call_name_nested_option(elem_ty: &Ty) -> Option<&'static str> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let Ty::Applied(TC::Option, inner) = elem_ty else { return None };
+        if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
+            return Some("list.eq_opt_int");
+        }
+        None
+    }
+
+    /// Extracted from `list_elem_eq_call_name_container` (codopsy8 complexity sweep,
+    /// container group 3 of 3): `List[Tuple[scalar…]]` — a scalar tuple block is
+    /// LAYOUT-IDENTICAL to a same-arity List of its slot class (len@4 = arity, 8-byte
+    /// slots @12), so the nested-list eq of the matching class compares it exactly:
+    /// Int/Bool slots bit-compare (list.eq_list_int), all-Float slots float-compare per
+    /// slot (list.eq_list_float). A MIXED Int/Float tuple has no matching flat class (a
+    /// bit-compare on the Float slot is wrong on -0.0/NaN) — decline, the eq site walls
+    /// honestly. Verbatim.
+    fn list_elem_eq_call_name_nested_tuple(elem_ty: &Ty) -> Option<&'static str> {
+        let Ty::Tuple(ts) = elem_ty else { return None };
+        if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Int | Ty::Bool)) {
+            return Some("list.eq_list_int");
+        }
+        if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Float)) {
+            return Some("list.eq_list_float");
         }
         None
     }
