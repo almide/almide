@@ -6,7 +6,7 @@
 
 ## Active
 
-65 items
+66 items
 
 | Item | Description |
 |------|-------------|
@@ -33,6 +33,7 @@
 | [Flight Keystone (い) — v1 MIR → Rust → Ferrocene(忠実性束縛)](active/flight-rust-ferrocene.md) | Concrete implementation design for flight keystone (い) — G-F3: a production v1 MIR→Rust renderer + a rust_pattern faithfulness layer, making Rust→Ferrocene the flight target. The proof is cheap (~75% of the spine is target-agnostic; the faithfulness theorem is `exact eager_copy_refines_safety`); the real cost is the production renderer (~5x render_wasm). Ferrocene owns Rust→machine, so the flight path bypasses the hardest wasm byte-binding proof (Gap 1). |
 | [Almide Flight Profile — 規範仕様(Normative Subset)](active/flight-subset-spec.md) | The normative Almide Flight Profile — the SPARK/Ravenscar-class language subset for flight-grade code, machine-enforced by the per-build certificate (by proof, not review). Feature IN/OUT/RESTRICTED classification, the resolved keystone open questions (Dup-in-loop IN, break/continue OUT, recursion=acyclicity-reject, nested loops IN), the @flight enforcement architecture, the MISRA/Ravenscar mapping, and honest language residuals. |
 | [Flight Keystone (あ) — Counted Loops + Bounded Allocation(WCET-by-construction)](active/flight-wcet-loops.md) | Concrete implementation design for flight keystone (あ) — G-F1/G-F2: counted-loop flight subset + lifting loops into Coq to prove bounded allocation (WCET-by-construction). The counted loop is a SEPARATE structural witness (preserving the flat-fold RC invariant), two Subset.v-shaped properties prove it, and try_lower_scalar_for_range already knows the trip count. |
+| [Fuzz Findings Triage: Re-green the Nightly Differential Gate](active/fuzz-findings-triage.md) | Fuzz (nightly) is red — triage the differential findings to zero and re-green the workflow |
 | [StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`](active/interp-is-desugar-to-tostring.md) |  |
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) |  |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
