@@ -28,10 +28,11 @@ macro_rules! val {
     };
 }
 
-/// Like `val!`, but for the `Option<Flow>` return type of `eval_builtin_call`
-/// (a name-router phase that returns `None` to fall through to the next
-/// phase, so a non-Value `Flow` must be wrapped in `Some` to short-circuit).
-macro_rules! opt_val {
+/// Like `val!`, but for helpers that return `Option<Flow>` (e.g. a
+/// name-router group fn) instead of a bare `Flow` — wraps the early-exit in
+/// `Some` so the caller's `if let Some(flow) = helper(..) { return flow; }`
+/// still sees the original non-Value `Flow` unchanged.
+macro_rules! val_opt {
     ($flow:expr) => {
         match $flow {
             Flow::Value(v) => v,
@@ -132,15 +133,22 @@ impl<'a> Interpreter<'a> {
         Flow::Unsupported(format!("named call `{}`", n))
     }
 
-    /// The fixed-name builtins (`println`/`assert`/`panic`/…). Returns `None`
-    /// when `n` isn't one of them, so `eval_named_call` falls through to the
-    /// variant-ctor / user-fn phases.
+    /// `eval_named_call`'s builtins group (println/print/eprintln/eprint/
+    /// assert/assert_eq/assert_ne/panic). `None` means `n` is not a builtin —
+    /// the caller falls through to variant-ctor / user-fn dispatch.
     fn eval_builtin_call(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
+        match n {
+            "println" | "print" | "eprintln" | "eprint" => self.eval_builtin_print(n, args, scope),
+            _ => self.eval_builtin_assert(n, args, scope),
+        }
+    }
+
+    fn eval_builtin_print(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
         match n {
             "println" | "print" => {
                 let mut evaled = Vec::with_capacity(args.len());
                 for a in args {
-                    evaled.push(opt_val!(self.eval_expr(a, scope)));
+                    evaled.push(val_opt!(self.eval_expr(a, scope)));
                 }
                 let line = match evaled.first() {
                     Some(v) => v.display_bare(),
@@ -155,7 +163,7 @@ impl<'a> Interpreter<'a> {
             "eprintln" | "eprint" => {
                 let mut evaled = Vec::with_capacity(args.len());
                 for a in args {
-                    evaled.push(opt_val!(self.eval_expr(a, scope)));
+                    evaled.push(val_opt!(self.eval_expr(a, scope)));
                 }
                 let line = evaled.first().map(|v| v.display_bare()).unwrap_or_default();
                 self.stderr.push_str(&line);
@@ -164,8 +172,14 @@ impl<'a> Interpreter<'a> {
                 }
                 Some(Flow::val(Value::Unit))
             }
+            _ => None,
+        }
+    }
+
+    fn eval_builtin_assert(&mut self, n: &str, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
+        match n {
             "assert" => {
-                let v = opt_val!(self.eval_expr(&args[0], scope));
+                let v = val_opt!(self.eval_expr(&args[0], scope));
                 Some(match v {
                     Value::Bool(true) => Flow::val(Value::Unit),
                     Value::Bool(false) => Flow::Abort("assertion failed".into()),
@@ -176,8 +190,8 @@ impl<'a> Interpreter<'a> {
                 })
             }
             "assert_eq" | "assert_ne" => {
-                let a = opt_val!(self.eval_expr(&args[0], scope));
-                let b = opt_val!(self.eval_expr(&args[1], scope));
+                let a = val_opt!(self.eval_expr(&args[0], scope));
+                let b = val_opt!(self.eval_expr(&args[1], scope));
                 let eq = a == b;
                 let ok = if n == "assert_eq" { eq } else { !eq };
                 Some(if ok {
@@ -194,7 +208,7 @@ impl<'a> Interpreter<'a> {
             }
             "panic" => {
                 let msg = match args.first() {
-                    Some(a) => opt_val!(self.eval_expr(a, scope)).display_bare(),
+                    Some(a) => val_opt!(self.eval_expr(a, scope)).display_bare(),
                     None => "explicit panic".to_string(),
                 };
                 Some(Flow::Abort(msg))

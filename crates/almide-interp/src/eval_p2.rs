@@ -234,7 +234,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    // ── Statement helpers (assign-family) ──────────────────────────
+    // ── exec_stmt's assign-family arms ─────────────────────────
 
     fn exec_stmt_index_assign(
         &mut self,
@@ -314,7 +314,7 @@ impl<'a> Interpreter<'a> {
         match cur {
             Value::Record { name, fields } => {
                 let mut new = (*fields).clone();
-                if let Some(slot) = new.iter_mut().find(|(k, _)| k == &field) {
+                if let Some(slot) = new.iter_mut().find(|(k, _)| *k == field) {
                     slot.1 = vv;
                 } else {
                     new.push((field, vv));

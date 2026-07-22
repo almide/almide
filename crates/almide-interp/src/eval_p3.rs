@@ -100,9 +100,9 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    /// The `RecordPattern` arm of `try_match`: matches a record/record-variant
-    /// value's fields against the pattern's field list (structurally when a
-    /// field has no sub-pattern, recursively otherwise).
+    /// `try_match`'s `RecordPattern` arm, split out as its own method — see
+    /// the caller for why the mid-body `return false`s are behavior-preserving
+    /// here (each was already a same-call-boundary early exit of `try_match`).
     fn try_match_record(
         &mut self,
         name: &str,

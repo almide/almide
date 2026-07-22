@@ -146,28 +146,10 @@ impl<'a> Interpreter<'a> {
             }
             IrExprKind::EmptyMap => Flow::val(Value::Map(Rc::new(Vec::new()))),
             IrExprKind::Record { name, fields } => {
-                self.eval_record_literal(*name, fields, &expr.ty, scope)
+                self.eval_record_literal(name, fields, &expr.ty, scope)
             }
             IrExprKind::SpreadRecord { base, fields } => {
-                let base_v = val!(self.eval_expr(base, scope));
-                let (name, mut merged) = match base_v {
-                    Value::Record { name, fields } => (name, (*fields).clone()),
-                    other => {
-                        return Flow::Abort(format!(
-                            "internal: spread base is {} not Record",
-                            other.type_name()
-                        ))
-                    }
-                };
-                for (k, v) in fields {
-                    let vv = val!(self.eval_expr(v, scope));
-                    if let Some(slot) = merged.iter_mut().find(|(fk, _)| fk == k) {
-                        slot.1 = vv;
-                    } else {
-                        merged.push((*k, vv));
-                    }
-                }
-                Flow::val(Value::Record { name, fields: Rc::new(merged) })
+                self.eval_spread_record(base, fields, scope)
             }
             IrExprKind::Range { start, end, inclusive } => {
                 let s = val!(self.eval_expr(start, scope));
@@ -247,20 +229,7 @@ impl<'a> Interpreter<'a> {
             IrExprKind::OptionNone => Flow::val(Value::Option(None)),
             // `?` / `!` — short-circuit the enclosing fn on Err/None.
             IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
-                let v = val!(self.eval_expr(expr, scope));
-                match v {
-                    Value::Result(Ok(inner)) => Flow::val(*inner),
-                    Value::Result(Err(e)) => Flow::Return(Value::Result(Err(e))),
-                    Value::Option(Some(inner)) => Flow::val(*inner),
-                    // #556: `expr!` on a None propagates an Err whose message is
-                    // "none" on BOTH backends (the codegen lowers Option `!` to
-                    // `ok_or("none")?`). Returning a bare Option(None) made the
-                    // main-error path print the Rust-internal "called
-                    // Option::unwrap() on a None value" — a wrong third vote
-                    // against the native==wasm "Error: none".
-                    Value::Option(None) => Flow::Return(Value::Result(Err(Box::new(Value::str("none".to_string()))))),
-                    other => Flow::val(other),
-                }
+                self.eval_try_unwrap(expr, scope)
             }
             // `??` — unwrap with a fallback value.
             IrExprKind::UnwrapOr { expr, fallback } => {
@@ -285,18 +254,7 @@ impl<'a> Interpreter<'a> {
             }
             // `?.field` — optional chaining.
             IrExprKind::OptionalChain { expr, field } => {
-                let v = val!(self.eval_expr(expr, scope));
-                match v {
-                    Value::Option(None) => Flow::val(Value::Option(None)),
-                    Value::Option(Some(inner)) => match self.eval_member(*inner, *field) {
-                        Flow::Value(m) => Flow::val(Value::Option(Some(Box::new(m)))),
-                        other => other,
-                    },
-                    other => match self.eval_member(other, *field) {
-                        Flow::Value(m) => Flow::val(Value::Option(Some(Box::new(m)))),
-                        other => other,
-                    },
-                }
+                self.eval_optional_chain(expr, *field, scope)
             }
             // The interp is synchronous: await is identity over the value.
             IrExprKind::Await { expr } => self.eval_expr(expr, scope),
@@ -350,11 +308,48 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    // ── Record literal ─────────────────────────────────────────
+    // ── `?` / `!` / `?.field` ───────────────────────────────────
+
+    /// `Try`/`Unwrap` — short-circuit the enclosing fn on Err/None.
+    fn eval_try_unwrap(&mut self, expr: &IrExpr, scope: &Scope) -> Flow {
+        let v = val!(self.eval_expr(expr, scope));
+        match v {
+            Value::Result(Ok(inner)) => Flow::val(*inner),
+            Value::Result(Err(e)) => Flow::Return(Value::Result(Err(e))),
+            Value::Option(Some(inner)) => Flow::val(*inner),
+            // #556: `expr!` on a None propagates an Err whose message is
+            // "none" on BOTH backends (the codegen lowers Option `!` to
+            // `ok_or("none")?`). Returning a bare Option(None) made the
+            // main-error path print the Rust-internal "called
+            // Option::unwrap() on a None value" — a wrong third vote
+            // against the native==wasm "Error: none".
+            Value::Option(None) => {
+                Flow::Return(Value::Result(Err(Box::new(Value::str("none".to_string())))))
+            }
+            other => Flow::val(other),
+        }
+    }
+
+    fn eval_optional_chain(&mut self, expr: &IrExpr, field: Sym, scope: &Scope) -> Flow {
+        let v = val!(self.eval_expr(expr, scope));
+        match v {
+            Value::Option(None) => Flow::val(Value::Option(None)),
+            Value::Option(Some(inner)) => match self.eval_member(*inner, field) {
+                Flow::Value(m) => Flow::val(Value::Option(Some(Box::new(m)))),
+                other => other,
+            },
+            other => match self.eval_member(other, field) {
+                Flow::Value(m) => Flow::val(Value::Option(Some(Box::new(m)))),
+                other => other,
+            },
+        }
+    }
+
+    // ── Record literal / spread ────────────────────────────────
 
     fn eval_record_literal(
         &mut self,
-        name: Option<Sym>,
+        name: &Option<Sym>,
         fields: &[(Sym, IrExpr)],
         ty: &Ty,
         scope: &Scope,
@@ -369,10 +364,10 @@ impl<'a> Interpreter<'a> {
         // type stays a `Record`. Empirically (probe /tmp/repr_probe),
         // both display identically as `Name { f: v }`.
         if let Some(n) = name {
-            if let Some((ty_name, crate::dispatch::CtorKind::Record)) = self.variant_ctor(n) {
+            if let Some((ty_name, crate::dispatch::CtorKind::Record)) = self.variant_ctor(*n) {
                 return Flow::val(Value::Variant {
                     ty: Some(ty_name),
-                    ctor: n,
+                    ctor: *n,
                     payload: VariantPayload::Record(out),
                 });
             }
@@ -394,7 +389,7 @@ impl<'a> Interpreter<'a> {
         //      sort here to match the backends' repr.
         let resolved_name;
         if let Some(n) = name {
-            resolved_name = Some(n);
+            resolved_name = Some(*n);
         } else {
             match ty {
                 Ty::Named(n, _) => resolved_name = Some(*n),
@@ -422,6 +417,28 @@ impl<'a> Interpreter<'a> {
             }
         }
         Flow::val(Value::Record { name: resolved_name, fields: Rc::new(out) })
+    }
+
+    fn eval_spread_record(&mut self, base: &IrExpr, fields: &[(Sym, IrExpr)], scope: &Scope) -> Flow {
+        let base_v = val!(self.eval_expr(base, scope));
+        let (name, mut merged) = match base_v {
+            Value::Record { name, fields } => (name, (*fields).clone()),
+            other => {
+                return Flow::Abort(format!(
+                    "internal: spread base is {} not Record",
+                    other.type_name()
+                ))
+            }
+        };
+        for (k, v) in fields {
+            let vv = val!(self.eval_expr(v, scope));
+            if let Some(slot) = merged.iter_mut().find(|(fk, _)| fk == k) {
+                slot.1 = vv;
+            } else {
+                merged.push((*k, vv));
+            }
+        }
+        Flow::val(Value::Record { name, fields: Rc::new(merged) })
     }
 
     // ── Member / index access ──────────────────────────────────
