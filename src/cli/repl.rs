@@ -127,7 +127,8 @@ impl Session {
     fn compile(&self, source: &str) -> Result<String, String> {
         let path = self.source_path();
         std::fs::write(&path, source).map_err(|e| e.to_string())?;
-        crate::try_compile(path.to_str().unwrap(), false)
+        let path_str = path.to_str().ok_or_else(|| format!("REPL source path is not valid UTF-8: {}", path.display()))?;
+        crate::try_compile(path_str, false)
     }
 
     fn compile_quiet(&self, source: &str) -> Result<String, String> {
