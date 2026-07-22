@@ -287,20 +287,36 @@ fn find_user_ident(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     None
 }
 
+/// `find_node`'s AST-based declaration lookups (steps 4a-4c): variant
+/// constructor, type declaration, function declaration, top-level let.
+/// Extracted verbatim — same early-return-on-first-match order.
+fn find_node_decl_lookup(doc: &AnalyzedDoc, word: &str, sym: &crate::intern::Sym) -> Option<Located> {
+    if let Some(loc) = find_variant_constructor(doc, word) {
+        return Some(loc);
+    }
+    if let Some(loc) = find_type_decl(doc, word) {
+        return Some(loc);
+    }
+    if let Some(loc) = find_fn_decl(doc, word, sym) {
+        return Some(loc);
+    }
+    find_top_let(doc, word, sym)
+}
+
+/// `find_node`'s remaining lookups (steps 4d-4e): function parameters, then
+/// ExprId-based ident type lookup. Extracted verbatim.
+fn find_node_usage_lookup(doc: &AnalyzedDoc, word: &str, line: u32) -> Option<Located> {
+    if let Some(loc) = find_fn_param(doc, word, line) {
+        return Some(loc);
+    }
+    find_user_ident(doc, word)
+}
+
 fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
     let source = &doc.source;
     let lines: Vec<&str> = source.lines().collect();
     let line_text = lines.get(line as usize)?;
-    let col_usize = col as usize;
-    if col_usize >= line_text.len() { return None; }
-
-    // Extract word at cursor
-    let start = line_text[..col_usize].rfind(|c: char| !c.is_alphanumeric() && c != '_')
-        .map(|i| i + 1).unwrap_or(0);
-    let end = col_usize + line_text[col_usize..].find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(line_text.len() - col_usize);
-    let word = &line_text[start..end];
-    if word.is_empty() { return None; }
+    let (word, start, end) = word_at(line_text, col as usize)?;
 
     // 1. Keywords
     if let Some(info) = lookup_keyword_info(word) {
@@ -324,34 +340,11 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
 
     // 4. AST-based lookup — walk declarations
     let sym = crate::intern::sym(word);
-
-    // 4a. Variant constructors
-    if let Some(loc) = find_variant_constructor(doc, word) {
+    if let Some(loc) = find_node_decl_lookup(doc, word, &sym) {
         return Some(loc);
     }
 
-    // 4b. Type declarations — show variants/fields
-    if let Some(loc) = find_type_decl(doc, word) {
-        return Some(loc);
-    }
-
-    // 4c. Function declarations
-    if let Some(loc) = find_fn_decl(doc, word, &sym) {
-        return Some(loc);
-    }
-
-    // 4c. Top-level lets
-    if let Some(loc) = find_top_let(doc, word, &sym) {
-        return Some(loc);
-    }
-
-    // 4d. Function parameters — check if cursor is inside a fn body
-    if let Some(loc) = find_fn_param(doc, word, line) {
-        return Some(loc);
-    }
-
-    // 4e. ExprId-based type lookup — walk expressions to find matching Ident
-    find_user_ident(doc, word)
+    find_node_usage_lookup(doc, word, line)
 }
 
 fn find_expr_type_by_name(
@@ -430,10 +423,9 @@ fn find_ident_in_stmt(stmt: &crate::ast::Stmt, name: &str, type_map: &crate::typ
 // LSP Server
 // ══════════════════════════════════════════════════════════════
 
-pub fn run_lsp() {
-    let (connection, io_threads) = Connection::stdio();
-
-    let server_capabilities = serde_json::to_value(ServerCapabilities {
+/// `run_lsp`'s server-capabilities declaration. Extracted verbatim.
+fn lsp_server_capabilities() -> ServerCapabilities {
+    ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         completion_provider: Some(CompletionOptions {
@@ -452,16 +444,66 @@ pub fn run_lsp() {
         rename_provider: Some(OneOf::Left(true)),
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
         ..Default::default()
-    }).unwrap();
+    }
+}
+
+/// `run_lsp`'s workspace-root derivation from `initialize`'s `root_uri`,
+/// falling back to CWD. Extracted verbatim.
+fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> {
+    init.root_uri.as_ref()
+        .and_then(|u| u.path().to_string().strip_prefix('/').or(Some(u.path().as_str())).map(|s| std::path::PathBuf::from(s.to_string())))
+        .or_else(|| std::env::current_dir().ok())
+}
+
+/// `run_lsp`'s notification dispatch (`didOpen`/`didChange`/`didClose`).
+/// Extracted verbatim.
+fn handle_notification(notif: Notification, connection: &Connection, documents: &mut HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>) {
+    match notif.method.as_str() {
+        "textDocument/didOpen" => {
+            if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params) {
+                let uri = params.text_document.uri.clone();
+                let source = params.text_document.text;
+                let file_path = uri_to_path(&uri);
+                let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
+                publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
+                documents.insert(uri.clone(), source);
+                analyzed.insert(uri, doc);
+            }
+        }
+        "textDocument/didChange" => {
+            if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
+                let uri = params.text_document.uri.clone();
+                if let Some(change) = params.content_changes.into_iter().last() {
+                    let source = change.text;
+                    let file_path = uri_to_path(&uri);
+                    let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
+                    publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
+                    documents.insert(uri.clone(), source);
+                    analyzed.insert(uri, doc);
+                }
+            }
+        }
+        "textDocument/didClose" => {
+            if let Ok(params) = serde_json::from_value::<DidCloseTextDocumentParams>(notif.params) {
+                documents.remove(&params.text_document.uri);
+                analyzed.remove(&params.text_document.uri);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn run_lsp() {
+    let (connection, io_threads) = Connection::stdio();
+
+    let server_capabilities = serde_json::to_value(lsp_server_capabilities()).unwrap();
 
     let init_params = match connection.initialize(server_capabilities) {
         Ok(it) => it,
         Err(e) => { err(&format!("LSP init failed: {}", e)); return; }
     };
     let init: InitializeParams = serde_json::from_value(init_params).unwrap();
-    let workspace_root = init.root_uri.as_ref()
-        .and_then(|u| u.path().to_string().strip_prefix('/').or(Some(u.path().as_str())).map(|s| std::path::PathBuf::from(s.to_string())))
-        .or_else(|| std::env::current_dir().ok());
+    let workspace_root = derive_workspace_root(&init);
 
     let mut documents: HashMap<Uri, String> = HashMap::new();
     let mut analyzed: HashMap<Uri, AnalyzedDoc> = HashMap::new();
@@ -475,41 +517,7 @@ pub fn run_lsp() {
                     connection.sender.send(Message::Response(r)).ok();
                 }
             }
-            Message::Notification(notif) => {
-                match notif.method.as_str() {
-                    "textDocument/didOpen" => {
-                        if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params) {
-                            let uri = params.text_document.uri.clone();
-                            let source = params.text_document.text;
-                            let file_path = uri_to_path(&uri);
-                            let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
-                            publish_diagnostics(&connection, &uri, &doc.lsp_diagnostics);
-                            documents.insert(uri.clone(), source);
-                            analyzed.insert(uri, doc);
-                        }
-                    }
-                    "textDocument/didChange" => {
-                        if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
-                            let uri = params.text_document.uri.clone();
-                            if let Some(change) = params.content_changes.into_iter().last() {
-                                let source = change.text;
-                                let file_path = uri_to_path(&uri);
-                                let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
-                                publish_diagnostics(&connection, &uri, &doc.lsp_diagnostics);
-                                documents.insert(uri.clone(), source);
-                                analyzed.insert(uri, doc);
-                            }
-                        }
-                    }
-                    "textDocument/didClose" => {
-                        if let Ok(params) = serde_json::from_value::<DidCloseTextDocumentParams>(notif.params) {
-                            documents.remove(&params.text_document.uri);
-                            analyzed.remove(&params.text_document.uri);
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            Message::Notification(notif) => handle_notification(notif, &connection, &mut documents, &mut analyzed),
             Message::Response(_) => {}
         }
     }
