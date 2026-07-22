@@ -143,78 +143,79 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
 // match arms. Each re-narrows `stmt.kind` via `let-else` and returns the
 // exact String the inline arm used to produce — no behavior change.
 
-fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
-    let IrStmtKind::Bind { var, ty, value, mutability } = &stmt.kind else { unreachable!() };
-    // Shared-mut local (`Rc<Cell<T>>`, Closure v2 P3): a fresh cell at the
-    // declaration, or an `Rc::clone` of the original for the `__cap_*`
-    // capture rename (so the closure shares the cell).
-    if ctx.ann.is_shared_mut(var) {
-        let name_s = ctx.var_name(*var).to_string();
-        // Copy scalars use `Rc<Cell<T>>` (P3); non-Copy values use `SharedMut`
-        // (`Rc<RefCell<T>>`, P6). A `__cap_*` capture rename is an `Rc::clone`
-        // of the original for either kind, so the closure shares the SAME cell.
-        let is_copy = almide_ir::top_let_storage::capture_copy_cell(ty);
-        let fresh_cell = |ctx: &RenderContext| if is_copy {
-            format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
-        } else {
-            format!("SharedMut::new({})", render_expr(ctx, value))
-        };
-        // A `__cap_N` capture rename is an `Rc::clone` of the original shared
-        // cell. Its value is a bare `Var` or a `Clone{Var}` (CloneInsertionPass
-        // wraps non-Copy values) — either way emit a single `.clone()` of the
-        // cell so the closure shares it rather than allocating a fresh one.
-        let cap_orig = if name_s.starts_with("__cap_") {
-            match &value.kind {
-                IrExprKind::Var { id } => Some(*id),
-                IrExprKind::Clone { expr: inner } => match &inner.kind {
-                    IrExprKind::Var { id } => Some(*id),
-                    _ => None,
-                },
-                _ => None,
-            }
-        } else { None };
-        let val_s = match cap_orig {
-            Some(id) => format!("{}.clone()", ctx.var_name(id)),
-            None => fresh_cell(ctx),
-        };
-        return format!("let {} = {};", name_s, val_s);
-    }
+/// Shared-mut local (`Rc<Cell<T>>`, Closure v2 P3): a fresh cell at the
+/// declaration, or an `Rc::clone` of the original for the `__cap_*`
+/// capture rename (so the closure shares the cell). Extracted from
+/// `render_stmt_bind` (cog>30 decomposition): `Some` mirrors the
+/// original's early `return`, `None` means "not shared-mut, fall through".
+fn try_render_bind_shared_mut(ctx: &RenderContext, var: &VarId, ty: &Ty, value: &IrExpr) -> Option<String> {
+    if !ctx.ann.is_shared_mut(var) { return None; }
     let name_s = ctx.var_name(*var).to_string();
-    // Bindings whose runtime representation is a borrow the `Ty` system
-    // cannot spell (TCO borrow-preserved `Bytes` temps): render the
-    // annotation as `_` and let Rust infer — the IR type stays real for
-    // the ConcretizeTypes postcondition.
-    let ty = if ctx.ann.is_infer_binding(var) { &Ty::Unknown } else { ty };
+    // Copy scalars use `Rc<Cell<T>>` (P3); non-Copy values use `SharedMut`
+    // (`Rc<RefCell<T>>`, P6). A `__cap_*` capture rename is an `Rc::clone`
+    // of the original for either kind, so the closure shares the SAME cell.
+    let is_copy = almide_ir::top_let_storage::capture_copy_cell(ty);
+    let fresh_cell = |ctx: &RenderContext| if is_copy {
+        format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
+    } else {
+        format!("SharedMut::new({})", render_expr(ctx, value))
+    };
+    // A `__cap_N` capture rename is an `Rc::clone` of the original shared
+    // cell. Its value is a bare `Var` or a `Clone{Var}` (CloneInsertionPass
+    // wraps non-Copy values) — either way emit a single `.clone()` of the
+    // cell so the closure shares it rather than allocating a fresh one.
+    let cap_orig = if name_s.starts_with("__cap_") {
+        match &value.kind {
+            IrExprKind::Var { id } => Some(*id),
+            IrExprKind::Clone { expr: inner } => match &inner.kind {
+                IrExprKind::Var { id } => Some(*id),
+                _ => None,
+            },
+            _ => None,
+        }
+    } else { None };
+    let val_s = match cap_orig {
+        Some(id) => format!("{}.clone()", ctx.var_name(id)),
+        None => fresh_cell(ctx),
+    };
+    Some(format!("let {} = {};", name_s, val_s))
+}
+
+/// Resolve the `Ty` to render for a Bind statement: erase Fn types (Rust
+/// can't write `impl Fn` in let position), aliases that resolve to Fn,
+/// named typevars not in scope, and Fn types nested in containers.
+/// Extracted from `render_stmt_bind` (cog>30 decomposition). The original
+/// threaded a `&Ty` through several owned-buffer + reference-rebind steps
+/// (relying on rvalue static promotion for `&Ty::Unknown`); this returns a
+/// plain owned `Ty` at each step instead — same final value, no promotion
+/// trick needed.
+fn erase_bind_ty(ctx: &RenderContext, ty: &Ty) -> Ty {
     // List[Fn] Rc wrapping is now handled by RustLoweringPass
     // which inserts RcWrap nodes into the IR.
     // Erase Fn types in bindings (Rust can't write `impl Fn` in let position; TS gets `any`)
     // Also resolve aliases first — `type Handler = Fn(String) -> String` should erase too
-    let resolved_owned;
-    let ty = if matches!(ty, Ty::Fn { .. }) {
-        &Ty::Unknown
+    let ty: Ty = if matches!(ty, Ty::Fn { .. }) {
+        Ty::Unknown
     } else if let Ty::Named(name, args) = ty {
         if args.is_empty() {
             if let Some(target) = ctx.type_aliases.get(name) {
                 if matches!(target, Ty::Fn { .. }) {
-                    &Ty::Unknown
+                    Ty::Unknown
                 } else {
-                    resolved_owned = target.clone();
-                    &resolved_owned
+                    target.clone()
                 }
             } else {
-                ty
+                ty.clone()
             }
         } else {
-            ty
+            ty.clone()
         }
     } else {
-        ty
+        ty.clone()
     };
     // Erase named TypeVars (K, V, B) — not in scope for bindings
-    let ty_owned;
-    let ty = if ty_has_named_typevar(ty) {
-        ty_owned = erase_named_typevars(ty.clone());
-        &ty_owned
+    let ty = if ty_has_named_typevar(&ty) {
+        erase_named_typevars(ty)
     } else {
         ty
     };
@@ -224,66 +225,113 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     // Fn subtree to `_` (-> `(_, i64)`) and let Rust infer the concrete
     // closure type from the RHS. A top-level Fn was already turned into
     // Ty::Unknown above, so this only touches the nested-container case.
-    let fn_erased_owned;
-    let ty = if matches!(ty, Ty::Tuple(_) | Ty::Applied(..) | Ty::Named(_, _) | Ty::Record { .. } | Ty::OpenRecord { .. })
+    if matches!(&ty, Ty::Tuple(_) | Ty::Applied(..) | Ty::Named(_, _) | Ty::Record { .. } | Ty::OpenRecord { .. })
         && ty.any_child_recursive(&|t| matches!(t, Ty::Fn { .. }))
     {
-        fn_erased_owned = erase_fn_types(ty.clone());
-        &fn_erased_owned
+        erase_fn_types(ty)
     } else {
         ty
-    };
-    let type_s = render_type(ctx, ty);
-    // When binding a lambda to a Fn-typed variable (e.g. type alias Handler = (String) -> String),
-    // the let type is erased to `_` but the lambda params have no type annotations either,
-    // causing Rust type inference failure. Render lambda params with explicit types in this case.
-    let annotate_lambda = |params: &[(VarId, Ty)], body: &IrExpr| -> String {
-        let params_str = params.iter()
-            .map(|(id, pty)| {
-                let name = ctx.var_name(*id).to_string();
-                if matches!(pty, Ty::Unknown) {
-                    name
-                } else if matches!(pty, Ty::Fn { .. }) {
-                    // A closure can't take an `impl Fn` parameter (E0562);
-                    // a function-typed param is `Rc<dyn Fn>` (callers box
-                    // the closure they pass — see render_generic_call).
-                    format!("{}: {}", name, super::helpers::render_type_field_fn(ctx, pty))
-                } else {
-                    format!("{}: {}", name, super::types::render_type(ctx, pty))
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        let body_str = render_expr(ctx, body);
-        ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
-            .unwrap_or_else(|| format!("move |{}| {}", params_str, body_str))
-    };
-    let has_typed = |params: &[(VarId, Ty)]| params.iter().any(|(_, t)| !matches!(t, Ty::Unknown));
-    let value_s = if matches!(ty, Ty::Unknown) {
-        match &value.kind {
-            IrExprKind::Lambda { params, body, .. } if has_typed(params) => annotate_lambda(params, body),
-            // Capture-clone-wrapped closure: a shared-mut-capturing raw closure
-            // lowers to `{ let __cap = x.clone(); move |k| … }`. The wrapping
-            // block hides the lambda from the bare-Lambda case above, so a typed
-            // param rendered `move |k|` with no type → E0282. Annotate the tail
-            // lambda's params, keeping the capture prologue. HOF-arg lambdas
-            // never reach here (render_iter_chain splices them inline), so this
-            // is safe. (Closure v2 P6.)
-            IrExprKind::Block { stmts, expr: Some(tail) }
-                if matches!(&tail.kind, IrExprKind::Lambda { params, .. } if has_typed(params)) =>
-            {
-                if let IrExprKind::Lambda { params, body, .. } = &tail.kind {
-                    let stmts_s = stmts.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
-                    format!("{{\n{}\n{}\n}}", stmts_s, annotate_lambda(params, body))
-                } else {
-                    render_expr(ctx, value)
-                }
+    }
+}
+
+/// When binding a lambda to a Fn-typed variable (e.g. type alias Handler = (String) -> String),
+/// the let type is erased to `_` but the lambda params have no type annotations either,
+/// causing Rust type inference failure. Render lambda params with explicit types in this case.
+/// Extracted from `render_stmt_bind`'s local closure of the same name — a
+/// closure that already took `ctx` as an explicit param is just a named
+/// function that hasn't been given a name yet.
+fn annotate_bind_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr) -> String {
+    let params_str = params.iter()
+        .map(|(id, pty)| {
+            let name = ctx.var_name(*id).to_string();
+            if matches!(pty, Ty::Unknown) {
+                name
+            } else if matches!(pty, Ty::Fn { .. }) {
+                // A closure can't take an `impl Fn` parameter (E0562);
+                // a function-typed param is `Rc<dyn Fn>` (callers box
+                // the closure they pass — see render_generic_call).
+                format!("{}: {}", name, super::helpers::render_type_field_fn(ctx, pty))
+            } else {
+                format!("{}: {}", name, super::types::render_type(ctx, pty))
             }
-            _ => render_expr(ctx, value),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let body_str = render_expr(ctx, body);
+    ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
+        .unwrap_or_else(|| format!("move |{}| {}", params_str, body_str))
+}
+
+/// Render a Bind's RHS value expression, annotating an erased-to-`Unknown`
+/// binding's lambda tail with explicit param types where needed (see
+/// `annotate_bind_lambda`). Extracted from `render_stmt_bind`.
+fn render_bind_value_str(ctx: &RenderContext, ty: &Ty, value: &IrExpr) -> String {
+    let has_typed = |params: &[(VarId, Ty)]| params.iter().any(|(_, t)| !matches!(t, Ty::Unknown));
+    if !matches!(ty, Ty::Unknown) {
+        return render_expr(ctx, value);
+    }
+    match &value.kind {
+        IrExprKind::Lambda { params, body, .. } if has_typed(params) => annotate_bind_lambda(ctx, params, body),
+        // Capture-clone-wrapped closure: a shared-mut-capturing raw closure
+        // lowers to `{ let __cap = x.clone(); move |k| … }`. The wrapping
+        // block hides the lambda from the bare-Lambda case above, so a typed
+        // param rendered `move |k|` with no type → E0282. Annotate the tail
+        // lambda's params, keeping the capture prologue. HOF-arg lambdas
+        // never reach here (render_iter_chain splices them inline), so this
+        // is safe. (Closure v2 P6.)
+        IrExprKind::Block { stmts, expr: Some(tail) }
+            if matches!(&tail.kind, IrExprKind::Lambda { params, .. } if has_typed(params)) =>
+        {
+            if let IrExprKind::Lambda { params, body, .. } = &tail.kind {
+                let stmts_s = stmts.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
+                format!("{{\n{}\n{}\n}}", stmts_s, annotate_bind_lambda(ctx, params, body))
+            } else {
+                render_expr(ctx, value)
+            }
         }
-    } else {
-        render_expr(ctx, value)
+        _ => render_expr(ctx, value),
+    }
+}
+
+/// Val-wrap: var of non-Copy type → RcCow<T> with RcCow::new(value) for
+/// COW. Extracted from `render_stmt_bind`: `Some` mirrors the original's
+/// early `return`, `None` means "not RcCow, fall through".
+fn try_render_bind_rc_cow(ctx: &RenderContext, var: &VarId, name_s: &str, type_s: &str, value: &IrExpr, value_s: &str) -> Option<String> {
+    if !ctx.ann.is_rc_cow(var) { return None; }
+    let val_type = format!("RcCow<{}>", type_s);
+    // If the value is a fn param passed by reference (&Vec<u8>, &[T]),
+    // clone it to get an owned value for RcCow::new().
+    let needs_clone = match &value.kind {
+        IrExprKind::Var { id } => ctx.ref_params.contains(id),
+        IrExprKind::Clone { expr: inner } => match &inner.kind {
+            IrExprKind::Var { id } => ctx.ref_params.contains(id),
+            _ => false,
+        },
+        _ => false,
     };
+    let val_value = if needs_clone {
+        format!("RcCow::new({}.clone())", value_s)
+    } else {
+        format!("RcCow::new({})", value_s)
+    };
+    Some(ctx.templates.render_with("var_binding", None, &[], &[("name", name_s), ("type", val_type.as_str()), ("value", val_value.as_str())])
+        .unwrap_or_else(|| if name_s == "_" { format!("let {}: {} = {};", name_s, val_type, val_value) } else { format!("let mut {}: {} = {};", name_s, val_type, val_value) }))
+}
+
+fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
+    let IrStmtKind::Bind { var, ty, value, mutability } = &stmt.kind else { unreachable!() };
+    if let Some(rendered) = try_render_bind_shared_mut(ctx, var, ty, value) {
+        return rendered;
+    }
+    let name_s = ctx.var_name(*var).to_string();
+    // Bindings whose runtime representation is a borrow the `Ty` system
+    // cannot spell (TCO borrow-preserved `Bytes` temps): render the
+    // annotation as `_` and let Rust infer — the IR type stays real for
+    // the ConcretizeTypes postcondition.
+    let ty_owned = if ctx.ann.is_infer_binding(var) { Ty::Unknown } else { erase_bind_ty(ctx, ty) };
+    let ty = &ty_owned;
+    let type_s = render_type(ctx, ty);
+    let value_s = render_bind_value_str(ctx, ty, value);
     // Check if value comes from a RcCow-wrapped var (Clone or direct)
     let is_val_clone = match &value.kind {
         IrExprKind::Clone { expr: inner } => {
@@ -322,26 +370,8 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
             // exactly like the raw spellings above.
             || ty_str.starts_with("RcCow<")
     };
-    // Val-wrap: var of non-Copy type → RcCow<T> with RcCow::new(value) for COW
-    if ctx.ann.is_rc_cow(var) {
-        let val_type = format!("RcCow<{}>", type_s);
-        // If the value is a fn param passed by reference (&Vec<u8>, &[T]),
-        // clone it to get an owned value for RcCow::new().
-        let needs_clone = match &value.kind {
-            IrExprKind::Var { id } => ctx.ref_params.contains(id),
-            IrExprKind::Clone { expr: inner } => match &inner.kind {
-                IrExprKind::Var { id } => ctx.ref_params.contains(id),
-                _ => false,
-            },
-            _ => false,
-        };
-        let val_value = if needs_clone {
-            format!("RcCow::new({}.clone())", value_s)
-        } else {
-            format!("RcCow::new({})", value_s)
-        };
-        return ctx.templates.render_with("var_binding", None, &[], &[("name", name_s.as_str()), ("type", val_type.as_str()), ("value", val_value.as_str())])
-            .unwrap_or_else(|| if name_s == "_" { format!("let {}: {} = {};", name_s, val_type, val_value) } else { format!("let mut {}: {} = {};", name_s, val_type, val_value) });
+    if let Some(rendered) = try_render_bind_rc_cow(ctx, var, &name_s, &type_s, value, &value_s) {
+        return rendered;
     }
     // Non-RcCow binding whose initializer reads a borrowed param: the
     // binding's type is the OWNED form, so convert the borrow to an
