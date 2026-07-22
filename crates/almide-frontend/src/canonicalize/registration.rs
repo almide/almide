@@ -11,41 +11,18 @@ use almide_base::intern::{Sym, sym};
 use almide_lang::types::TypeConstructorId;
 use crate::types::{Ty, TypeEnv, FnSig, ProtocolDef, ProtocolMethodSig, VariantPayload};
 use super::resolve::resolve_type_expr;
-
 fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
     Diagnostic::error(msg, hint, ctx)
 }
-
 /// Resolve an AST type expression using the current type environment.
 fn resolve(env: &TypeEnv, te: &ast::TypeExpr) -> Ty {
     resolve_type_expr(te, Some(&env.types))
 }
-
-/// Like `resolve`, but pins a user module's own-type references to the qualified
-/// canonical name `mod.Type` (#433). `cur_mod` is the module being registered.
+/// Like `resolve`, but pins a user module's own-type references to the qualified canonical name `mod.Type` (#433). `cur_mod` is the module being registered.
 fn resolve_in(env: &TypeEnv, te: &ast::TypeExpr, cur_mod: Option<&str>) -> Ty {
     crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&env.types), cur_mod)
 }
-
-/// Infer type from a literal expression (for top-level `let` without annotation).
-///
-/// Used at registration time — before the full checker runs — so module
-/// top_lets have a concrete `env.top_lets` entry the moment the main
-/// program's inference looks them up. A shallow scalar-only version
-/// regresses records / lists / maps to `Ty::Unknown`, which later surfaces
-/// as `LazyLock<_>` in generated Rust and `ConcretizeTypes` post-condition
-/// failures on WASM. Recurse structurally through record / list / tuple /
-/// map literals so the cross-module user sees the right type.
-/// Seed type for an UNANNOTATED top-let. `infer_literal_type` covers
-/// literals and anonymous records only; a NAMED constructor (`Cfg { … }`)
-/// fell to `Ty::Unknown`, and because every driver checks MAIN before the
-/// modules, main's inference read that stale Unknown for a cross-module
-/// `m.CFG` — a spread of it then carried Unknown into the AllTypesConcrete
-/// refusal (#502). Resolve the ctor name through the SAME #433 predicate an
-/// explicit `: Cfg` annotation uses, so both spellings seed identically.
-/// Generic decls (unresolved type params) deliberately stay Unknown — the
-/// ctor args are not inferable here and the later module-check writeback
-/// only corrects exact-Unknown seeds.
+/// Infer type from a literal expression (for top-level `let` without annotation). Used at registration time — before the full checker runs — so module top_lets have a concrete `env.top_lets` entry the moment the main program's inference looks them up. A shallow scalar-only version regresses records / lists / maps to `Ty::Unknown`, which later surfaces as `LazyLock<_>` in generated Rust and `ConcretizeTypes` post-condition failures on WASM. Recurse structurally through record / list / tuple / map literals so the cross-module user sees the right type. Seed type for an UNANNOTATED top-let. `infer_literal_type` covers literals and anonymous records only; a NAMED constructor (`Cfg { … }`) fell to `Ty::Unknown`, and because every driver checks MAIN before the modules, main's inference read that stale Unknown for a cross-module `m.CFG` — a spread of it then carried Unknown into the AllTypesConcrete refusal (#502). Resolve the ctor name through the SAME #433 predicate an explicit `: Cfg` annotation uses, so both spellings seed identically. Generic decls (unresolved type params) deliberately stay Unknown — the ctor args are not inferable here and the later module-check writeback only corrects exact-Unknown seeds.
 pub fn infer_top_let_seed(env: &TypeEnv, prefix: Option<&str>, value: &ast::Expr) -> Ty {
     match &value.kind {
         ast::ExprKind::Paren { expr } => infer_top_let_seed(env, prefix, expr),
@@ -60,7 +37,6 @@ pub fn infer_top_let_seed(env: &TypeEnv, prefix: Option<&str>, value: &ast::Expr
         _ => infer_literal_type(value),
     }
 }
-
 pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
     match &expr.kind {
         ast::ExprKind::Int { .. } => Ty::Int,
@@ -69,10 +45,7 @@ pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
         ast::ExprKind::Bool { .. } => Ty::Bool,
         ast::ExprKind::Unit => Ty::Unit,
         ast::ExprKind::Paren { expr } => infer_literal_type(expr),
-        // A signed literal is a literal: `let MARGIN_AUTO = -2.0` must seed
-        // Float, not Unknown (#784 — the Unknown seed leaked into every
-        // cross-module reader of the constant). `-` keeps the operand's
-        // numeric type; `not` is Bool.
+        // A signed literal is a literal: `let MARGIN_AUTO = -2.0` must seed Float, not Unknown (#784 — the Unknown seed leaked into every cross-module reader of the constant). `-` keeps the operand's numeric type; `not` is Bool.
         ast::ExprKind::Unary { op, operand } => match op.as_str() {
             "-" => infer_literal_type(operand),
             "not" | "!" => Ty::Bool,
@@ -115,12 +88,10 @@ pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
         _ => Ty::Unknown,
     }
 }
-
 /// Build a prefixed key: "module.name" or just "name".
 pub fn prefixed_key(prefix: Option<&str>, name: &str) -> String {
     prefix.map(|p| format!("{}.{}", p, name)).unwrap_or_else(|| name.to_string())
 }
-
 /// Substitute `Self` → concrete type in a protocol method type.
 fn substitute_self(ty: &Ty, replacement: &Ty) -> Ty {
     match ty {
@@ -128,12 +99,7 @@ fn substitute_self(ty: &Ty, replacement: &Ty) -> Ty {
         _ => ty.map_children(&|child| substitute_self(child, replacement)),
     }
 }
-
-/// Strip module qualification from every `Named` type anywhere in the tree
-/// (`m.Pigment` → `Pigment`), so a protocol-satisfaction signature check
-/// doesn't false-positive on a cross-module type that's spelled bare on one
-/// side and qualified on the other. Mirrors `leaf_satisfies`'s bare-name
-/// leniency, generalized to nested/compound types via `map_children`.
+/// Strip module qualification from every `Named` type anywhere in the tree (`m.Pigment` → `Pigment`), so a protocol-satisfaction signature check doesn't false-positive on a cross-module type that's spelled bare on one side and qualified on the other. Mirrors `leaf_satisfies`'s bare-name leniency, generalized to nested/compound types via `map_children`.
 fn strip_module_qualifier(ty: &Ty) -> Ty {
     match ty {
         Ty::Named(name, args) => {
@@ -143,7 +109,6 @@ fn strip_module_qualifier(ty: &Ty) -> Ty {
         _ => ty.map_children(&strip_module_qualifier),
     }
 }
-
 /// Collect structural bounds from generic params: Record → OpenRecord conversion.
 pub fn collect_structural_bounds(env: &TypeEnv, generics: &Option<Vec<ast::GenericParam>>) -> HashMap<Sym, Ty> {
     let mut sb = HashMap::new();
@@ -155,7 +120,6 @@ pub fn collect_structural_bounds(env: &TypeEnv, generics: &Option<Vec<ast::Gener
     }
     sb
 }
-
 /// Scalar type names that indicate a compile-time value parameter (not a protocol bound).
 pub const SCALAR_TYPE_NAMES: &[&str] = &[
     "Int", "Float", "Bool", "String",
@@ -163,10 +127,7 @@ pub const SCALAR_TYPE_NAMES: &[&str] = &[
     "UInt8", "UInt16", "UInt32", "UInt64",
     "Float32", "Float64",
 ];
-
-/// Identify const (value) parameters in generic params.
-/// A param `N: Int` where `Int` is a scalar type (not a protocol) becomes a const param.
-/// Returns: param name → scalar Ty.
+/// Identify const (value) parameters in generic params. A param `N: Int` where `Int` is a scalar type (not a protocol) becomes a const param. Returns: param name → scalar Ty.
 pub fn collect_const_params(generics: &Option<Vec<ast::GenericParam>>) -> HashMap<Sym, Ty> {
     let mut cp = HashMap::new();
     let gs = match generics { Some(gs) => gs, None => return cp };
@@ -195,9 +156,7 @@ pub fn collect_const_params(generics: &Option<Vec<ast::GenericParam>>) -> HashMa
     }
     cp
 }
-
-/// Collect protocol bounds from generic params: TypeVar name → list of protocol names.
-/// Excludes const params (scalar type bounds like `N: Int`).
+/// Collect protocol bounds from generic params: TypeVar name → list of protocol names. Excludes const params (scalar type bounds like `N: Int`).
 pub fn collect_protocol_bounds(generics: &Option<Vec<ast::GenericParam>>) -> HashMap<Sym, Vec<Sym>> {
     let mut pb = HashMap::new();
     let gs = match generics { Some(gs) => gs, None => return pb };
@@ -214,7 +173,6 @@ pub fn collect_protocol_bounds(generics: &Option<Vec<ast::GenericParam>>) -> Has
     }
     pb
 }
-
 pub fn register_fn_sig(
     env: &mut TypeEnv,
     name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
@@ -233,12 +191,7 @@ pub fn register_fn_sig(
             env.types.insert(*gn, Ty::TypeVar(*gn));
         }
     }
-    // A bare `self` first parameter is sugar for `self: Self` (the parser
-    // always types it `TypeExpr::Simple { name: "Self" }`). Inside a
-    // `protocol { ... }` declaration `Self` is a legitimate unresolved
-    // placeholder, but on a real convention method (`fn Type.method(self, ...)`)
-    // it must resolve to the enclosing type, the same way `Self` in a
-    // protocol's own signature gets substituted when checked against one.
+    // A bare `self` first parameter is sugar for `self: Self` (the parser always types it `TypeExpr::Simple { name: "Self" }`). Inside a `protocol { ... }` declaration `Self` is a legitimate unresolved placeholder, but on a real convention method (`fn Type.method(self, ...)`) it must resolve to the enclosing type, the same way `Self` in a protocol's own signature gets substituted when checked against one.
     let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
     let ptys: Vec<(Sym, Ty)> = params.iter().enumerate().map(|(i, p)| {
         if i == 0 && p.name.as_str() == "self" {
@@ -261,10 +214,7 @@ pub fn register_fn_sig(
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
     env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, mut_params });
-    // Record visibility so `resolve_module_call` can reject cross-module access
-    // to `mod fn` / `local fn`. Only non-Public entries need to be stored — the
-    // lookup in the checker treats "missing" as Public (stdlib, impl methods,
-    // derived stubs).
+    // Record visibility so `resolve_module_call` can reject cross-module access to `mod fn` / `local fn`. Only non-Public entries need to be stored — the lookup in the checker treats "missing" as Public (stdlib, impl methods, derived stubs).
     if !matches!(visibility, ast::Visibility::Public) {
         env.fn_visibility.insert(sym(&key), visibility);
     }
@@ -275,7 +225,6 @@ pub fn register_fn_sig(
         env.fn_min_params.insert(sym(&key), min_p);
     }
 }
-
 pub fn validate_protocols(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>, derives: &[Sym], type_name: &str) {
     for d in derives {
         if !env.protocols.contains_key(&sym(d)) {
@@ -290,13 +239,8 @@ pub fn validate_protocols(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>, deri
         }
     }
 }
-
 pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str, prefix: Option<&str>) {
-    // #433: the VALUE type in derived signatures must carry the canonical
-    // qualified name for a user module's type — `Pigment.decode`'s
-    // `Result[Pigment, String]` with a bare name leaked into callers' var
-    // tables (found by the NameResolutionTotal gate). The fn KEYS stay as
-    // they were (separate resolution system).
+    // #433: the VALUE type in derived signatures must carry the canonical qualified name for a user module's type — `Pigment.decode`'s `Result[Pigment, String]` with a bare name leaked into callers' var tables (found by the NameResolutionTotal gate). The fn KEYS stay as they were (separate resolution system).
     let canonical = match prefix {
         Some(m) if !almide_lang::stdlib_info::is_bundled_module(m) => format!("{}.{}", m, type_name),
         _ => type_name.to_string(),
@@ -333,7 +277,6 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
         }
     }
 }
-
 /// Register a user-defined protocol declaration into env.protocols.
 pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<Vec<ast::GenericParam>>, methods: &[ast::ProtocolMethod]) {
     let gnames: Vec<Sym> = generics.as_ref()
@@ -370,18 +313,9 @@ pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<V
         methods: method_sigs,
     });
 }
-
-/// Protocols whose auto-derive RECURSES INTO EACH FIELD'S TYPE: deriving them
-/// on a struct/variant emits per-field work that requires the field type to
-/// ALSO satisfy the protocol. `Codec` calls `Field.encode` / `Field.decode`;
-/// `Ord`/`Hash` lower to a Rust `#[derive(Ord/Hash)]` that needs the field's
-/// Rust type to impl it. `Eq`/`Repr` are excluded — every generated struct
-/// gets `PartialEq` + a repr path unconditionally, so a field need not declare
-/// them (gating those would be a false positive).
+/// Protocols whose auto-derive RECURSES INTO EACH FIELD'S TYPE: deriving them on a struct/variant emits per-field work that requires the field type to ALSO satisfy the protocol. `Codec` calls `Field.encode` / `Field.decode`; `Ord`/`Hash` lower to a Rust `#[derive(Ord/Hash)]` that needs the field's Rust type to impl it. `Eq`/`Repr` are excluded — every generated struct gets `PartialEq` + a repr path unconditionally, so a field need not declare them (gating those would be a false positive).
 const FIELD_RECURSIVE_PROTOCOLS: &[&str] = &["Codec", "Ord", "Hash"];
-
-/// The field-type slots a structural type exposes to its derive: record fields,
-/// and every variant case's payload (tuple positions / record fields).
+/// The field-type slots a structural type exposes to its derive: record fields, and every variant case's payload (tuple positions / record fields).
 fn type_field_slots(ty: &Ty) -> Vec<(String, Ty)> {
     match ty {
         Ty::Record { fields } | Ty::OpenRecord { fields } =>
@@ -404,11 +338,7 @@ fn type_field_slots(ty: &Ty) -> Vec<(String, Ty)> {
         _ => Vec::new(),
     }
 }
-
-/// The nominal leaf types a derive must recurse into for one field type,
-/// descending through the standard containers (List/Option/Set/Map/Result via
-/// `Applied`, tuples, nested anon records). A `List[Pigment]` field under a
-/// `: Codec` type requires `Pigment` to be Codec, so the leaf is `Pigment`.
+/// The nominal leaf types a derive must recurse into for one field type, descending through the standard containers (List/Option/Set/Map/Result via `Applied`, tuples, nested anon records). A `List[Pigment]` field under a `: Codec` type requires `Pigment` to be Codec, so the leaf is `Pigment`.
 fn collect_leaf_nominals(ty: &Ty, out: &mut Vec<Sym>) {
     match ty {
         Ty::Named(n, args) => {
@@ -423,12 +353,7 @@ fn collect_leaf_nominals(ty: &Ty, out: &mut Vec<Sym>) {
         _ => {}
     }
 }
-
-/// Does user type `leaf` satisfy protocol `proto`? Keyed leniently: `type_protocols`
-/// is interned bare, but a cross-module field type may carry a qualified
-/// `mod.Type` name — accept either spelling. For `Codec`, a hand-written
-/// `Type.encode`/`Type.decode` pair (without a `: Codec` declaration) also
-/// satisfies the requirement, since the derive only needs those functions to exist.
+/// Does user type `leaf` satisfy protocol `proto`? Keyed leniently: `type_protocols` is interned bare, but a cross-module field type may carry a qualified `mod.Type` name — accept either spelling. For `Codec`, a hand-written `Type.encode`/`Type.decode` pair (without a `: Codec` declaration) also satisfies the requirement, since the derive only needs those functions to exist.
 fn leaf_satisfies(env: &TypeEnv, leaf: Sym, proto: &str) -> bool {
     let bare = leaf.as_str().rsplit('.').next().unwrap_or(leaf.as_str());
     let declares = |name: &str| env.type_protocols.get(&sym(name))
@@ -443,15 +368,7 @@ fn leaf_satisfies(env: &TypeEnv, leaf: Sym, proto: &str) -> bool {
     }
     false
 }
-
-/// The Codec derive serializes a field by structural recursion over
-/// String/Int/Float/Bool/Option/List/Named — it has NO Map or Set arm, so a
-/// `Map[K,V]` / `Set[T]` field silently falls through to the `Value`-as-String
-/// fallback: invalid Rust natively (E0614/E0308) and wrong/silent on wasm
-/// (#655). Detect such a container anywhere in the field type (under
-/// List/Option/Result/Tuple/anon-record). A `Map`/`Set` reached only through a
-/// NAMED type is that type's own concern (its `: Codec` is checked by the leaf
-/// rule), so we stop at `Ty::Named`.
+/// The Codec derive serializes a field by structural recursion over String/Int/Float/Bool/Option/List/Named — it has NO Map or Set arm, so a `Map[K,V]` / `Set[T]` field silently falls through to the `Value`-as-String fallback: invalid Rust natively (E0614/E0308) and wrong/silent on wasm (#655). Detect such a container anywhere in the field type (under List/Option/Result/Tuple/anon-record). A `Map`/`Set` reached only through a NAMED type is that type's own concern (its `: Codec` is checked by the leaf rule), so we stop at `Ty::Named`.
 fn codec_unsupported_container(ty: &Ty) -> Option<&'static str> {
     use almide_lang::types::TypeConstructorId as TC;
     match ty {
@@ -464,13 +381,7 @@ fn codec_unsupported_container(ty: &Ty) -> Option<&'static str> {
         _ => None,
     }
 }
-
-/// A type that derives a field-recursive protocol (Codec/Ord/Hash) requires
-/// every field type to ALSO satisfy it — otherwise the derive emits a call to a
-/// non-existent `Field.encode` (Codec) or a Rust `#[derive(Ord/Hash)]` over a
-/// field whose Rust type lacks the impl, both of which the checker previously
-/// accepted and codegen then rejected as "invalid Rust" (#611). This validates
-/// the requirement structurally, at the checker, independent of target.
+/// A type that derives a field-recursive protocol (Codec/Ord/Hash) requires every field type to ALSO satisfy it — otherwise the derive emits a call to a non-existent `Field.encode` (Codec) or a Rust `#[derive(Ord/Hash)]` over a field whose Rust type lacks the impl, both of which the checker previously accepted and codegen then rejected as "invalid Rust" (#611). This validates the requirement structurally, at the checker, independent of target.
 fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>) {
     let pairs: Vec<(Sym, Vec<Sym>)> = env.type_protocols.iter()
         .map(|(ty, protos)| (*ty, protos.iter().copied().collect()))
@@ -489,21 +400,13 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
         }
     }
 }
-
-/// Per-field derive-support check for a single (type, protocol, field)
-/// triple: the Codec-unsupported-container check, plus recursively
-/// requiring every leaf nominal in the field's type to derive the same
-/// protocol. `reported` dedupes diagnostics across (type, protocol, leaf)
-/// triples seen by earlier fields/protocols/types in the caller's loop
-/// nest. Verbatim text move out of [`validate_derive_field_support`].
+/// Per-field derive-support check for a single (type, protocol, field) triple: the Codec-unsupported-container check, plus recursively requiring every leaf nominal in the field's type to derive the same protocol. `reported` dedupes diagnostics across (type, protocol, leaf) triples seen by earlier fields/protocols/types in the caller's loop nest. Verbatim text move out of [`validate_derive_field_support`].
 fn validate_derive_field(
     env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
     reported: &mut std::collections::HashSet<(Sym, Sym, Sym)>,
     type_name: Sym, proto: Sym, p: &str, field_name: &str, field_ty: &Ty,
 ) {
-    // #655: the Codec derive has no Map/Set arm — reject such a
-    // field here rather than emitting invalid Rust / silent-wrong
-    // wasm. Same E023 family (a field that cannot satisfy Codec).
+    // #655: the Codec derive has no Map/Set arm — reject such a field here rather than emitting invalid Rust / silent-wrong wasm. Same E023 family (a field that cannot satisfy Codec).
     if p == "Codec" {
         if let Some(container) = codec_unsupported_container(field_ty) {
             if reported.insert((type_name, proto, sym(container))) {
@@ -533,18 +436,7 @@ fn validate_derive_field(
         ).with_code("E023"));
     }
 }
-
-/// Validate that types declaring `: ProtocolName` have all required convention
-/// methods, AND that each present method's signature actually matches the
-/// protocol's declared signature (arity, parameter types, return type) —
-/// `Self` substituted for the declaring type. Called after all declarations
-/// are registered so all `Type.method` functions are available.
-///
-/// Signature checking is skipped for generic types (`contains_typevar`):
-/// `Self` would need to carry the type's own type arguments (e.g. `Self` for
-/// `Container[X]` must resolve to `Container[X]`, not bare `Container`), and
-/// nothing currently threads a user type's declared generic parameters back
-/// in here. Presence is still required either way.
+/// Validate that types declaring `: ProtocolName` have all required convention methods, AND that each present method's signature actually matches the protocol's declared signature (arity, parameter types, return type) — `Self` substituted for the declaring type. Called after all declarations are registered so all `Type.method` functions are available. Signature checking is skipped for generic types (`contains_typevar`): `Self` would need to carry the type's own type arguments (e.g. `Self` for `Container[X]` must resolve to `Container[X]`, not bare `Container`), and nothing currently threads a user type's declared generic parameters back in here. Presence is still required either way.
 pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>) {
     let type_protocols: Vec<(Sym, Vec<Sym>)> = env.type_protocols.iter()
         .map(|(ty, protos)| (*ty, protos.iter().copied().collect()))
@@ -566,12 +458,7 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
         }
     }
 }
-
-/// Validate a single protocol method's implementation on `type_name`:
-/// presence (missing-method E023 unless it's a builtin-derived protocol),
-/// then — for non-generic types — arity, parameter types, and return type
-/// against the protocol's declared signature (`Self` substituted for
-/// `type_ty`). Verbatim text move out of [`validate_protocol_impls`].
+/// Validate a single protocol method's implementation on `type_name`: presence (missing-method E023 unless it's a builtin-derived protocol), then — for non-generic types — arity, parameter types, and return type against the protocol's declared signature (`Self` substituted for `type_ty`). Verbatim text move out of [`validate_protocol_impls`].
 fn validate_protocol_method_impl(
     env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
     type_name: Sym, proto_name: Sym, is_generic: bool, type_ty: &Ty,
@@ -657,7 +544,6 @@ fn validate_protocol_method_impl(
         ));
     }
 }
-
 pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>,
                        generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>, visibility: ast::Visibility) {
     if let Some(derives) = deriving {
@@ -677,12 +563,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         register_derive_sigs(env, derives, name, prefix);
     }
 }
-
-/// `mod`/local type alias → nominal newtype (opaque constructor), when the
-/// declared visibility isn't Public and the resolved shape isn't already a
-/// Record/Variant. Registers the opaque-alias bookkeeping and returns the
-/// (possibly rewritten) resolved type. Verbatim text move out of
-/// [`register_type_decl`].
+/// `mod`/local type alias → nominal newtype (opaque constructor), when the declared visibility isn't Public and the resolved shape isn't already a Record/Variant. Registers the opaque-alias bookkeeping and returns the (possibly rewritten) resolved type. Verbatim text move out of [`register_type_decl`].
 fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, gnames: &[Sym], prefix: Option<&str>, visibility: ast::Visibility) -> Ty {
     let is_opaque_alias = !matches!(visibility, ast::Visibility::Public)
         && !matches!(resolved, Ty::Variant { .. })
@@ -700,19 +581,11 @@ fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, 
     env.opaque_alias_module.insert(sym(name), prefix.map(|p| sym(p)));
     resolved
 }
-
-/// Fix up a `Variant`'s registered name to the DECLARED name, and register
-/// each of its constructors. Verbatim text move out of
-/// [`register_type_decl`].
+/// Fix up a `Variant`'s registered name to the DECLARED name, and register each of its constructors. Verbatim text move out of [`register_type_decl`].
 fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Option<&str>, resolved: &mut Ty) {
     if let Ty::Variant { name: vn, cases } = resolved {
         *vn = sym(name);
-        // Push (not overwrite) so a constructor name declared in multiple variant
-        // types keeps ALL candidates — needed to detect ambiguity (#413) instead of
-        // silently letting the last-registered type win.
-        // #413: record each candidate's OWNING MODULE so a shared ctor name can be
-        // disambiguated by the current module (`lookup_ctor_in`). type_name stays
-        // BARE here — other consumers expect that; `lookup_ctor_in` qualifies on demand.
+        // Push (not overwrite) so a constructor name declared in multiple variant types keeps ALL candidates — needed to detect ambiguity (#413) instead of silently letting the last-registered type win. #413: record each candidate's OWNING MODULE so a shared ctor name can be disambiguated by the current module (`lookup_ctor_in`). type_name stays BARE here — other consumers expect that; `lookup_ctor_in` qualifies on demand.
         let owner_mod = prefix.map(sym);
         for case in cases.iter() {
             let entry = env.constructors.entry(case.name).or_default();
@@ -722,31 +595,11 @@ fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Optio
         }
     }
 }
-
-/// #433: a DIFFERENT structural type already holds this BARE name — two
-/// distinct types (a local type and a dependency's, or two sub-modules')
-/// sharing a name. Type identity is by bare name through link + codegen, so
-/// the second silently shadows the first and the function that used the
-/// shadowed type fails with a cryptic generated-Rust E0560/E0609. Until types
-/// are namespaced per package, surface the collision at the source so the user
-/// renames one. Structurally-identical re-registration (the diamond case: same
-/// package via two import paths) compares equal and is NOT flagged.
-/// #433: types are now namespaced per (user) package — `dep_a.Config` and
-/// `dep_b.Config` coexist as distinct qualified names. So a collision is only a
-/// real error when the SAME canonical key is re-declared with a different
-/// structure (a duplicate within one module/file), which we detect on the
-/// prefixed key. Structurally-identical re-registration (the diamond case) is
-/// equal and not flagged. Verbatim text move out of [`register_type_decl`].
+/// #433: a DIFFERENT structural type already holds this BARE name — two distinct types (a local type and a dependency's, or two sub-modules') sharing a name. Type identity is by bare name through link + codegen, so the second silently shadows the first and the function that used the shadowed type fails with a cryptic generated-Rust E0560/E0609. Until types are namespaced per package, surface the collision at the source so the user renames one. Structurally-identical re-registration (the diamond case: same package via two import paths) compares equal and is NOT flagged. #433: types are now namespaced per (user) package — `dep_a.Config` and `dep_b.Config` coexist as distinct qualified names. So a collision is only a real error when the SAME canonical key is re-declared with a different structure (a duplicate within one module/file), which we detect on the prefixed key. Structurally-identical re-registration (the diamond case) is equal and not flagged. Verbatim text move out of [`register_type_decl`].
 fn register_type_decl_check_duplicate(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, prefix: Option<&str>, resolved: &Ty) {
     if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
         let canonical_key = prefixed_key(prefix, name);
-        // A LOCAL type (main program, no prefix) is allowed to SHADOW a
-        // dependency's bare-name dual-registration rather than collide with it
-        // (#433): the existing bare `Persona` mirrors some `dep.Persona`, and a
-        // local `type Persona` should win for unqualified use (the dep stays
-        // reachable via `dep.Persona`). Only flag E020 for a genuine duplicate —
-        // another type registered under the SAME canonical key that is NOT just a
-        // dependency's bare alias being shadowed by a local.
+        // A LOCAL type (main program, no prefix) is allowed to SHADOW a dependency's bare-name dual-registration rather than collide with it (#433): the existing bare `Persona` mirrors some `dep.Persona`, and a local `type Persona` should win for unqualified use (the dep stays reachable via `dep.Persona`). Only flag E020 for a genuine duplicate — another type registered under the SAME canonical key that is NOT just a dependency's bare alias being shadowed by a local.
         let shadows_dep_alias = prefix.is_none() && env.prefixed_bare_aliases.contains(&sym(&canonical_key));
         if !shadows_dep_alias {
             if let Some(existing) = env.types.get(&sym(&canonical_key)) {
@@ -763,15 +616,10 @@ fn register_type_decl_check_duplicate(env: &TypeEnv, diagnostics: &mut Vec<Diagn
         }
     }
 }
-
-/// Register field defaults (both plain and record-payload variant cases),
-/// insert the resolved type under its canonical key, and — for a prefixed
-/// (imported/sub-module) type — dual-register the bare name for
-/// unqualified access. Verbatim text move out of [`register_type_decl`].
+/// Register field defaults (both plain and record-payload variant cases), insert the resolved type under its canonical key, and — for a prefixed (imported/sub-module) type — dual-register the bare name for unqualified access. Verbatim text move out of [`register_type_decl`].
 fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr, prefix: Option<&str>, resolved: Ty) {
     let key = prefixed_key(prefix, name);
-    // Field defaults, keyed like `types` (both keys when prefixed), so
-    // record-construction validation knows which fields may be omitted (#488).
+    // Field defaults, keyed like `types` (both keys when prefixed), so record-construction validation knows which fields may be omitted (#488).
     if let ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } = ty {
         let defaults: std::collections::HashSet<Sym> =
             fields.iter().filter(|f| f.default.is_some()).map(|f| f.name).collect();
@@ -780,9 +628,7 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
             env.record_field_defaults.insert(sym(name), defaults);
         }
     }
-    // Record-payload variant cases carry field defaults too
-    // (`| Rect { color: String = "" }`) — harvest them from the AST, since
-    // the resolved `VariantPayload::Record` keeps only (name, ty).
+    // Record-payload variant cases carry field defaults too (`| Rect { color: String = "" }`) — harvest them from the AST, since the resolved `VariantPayload::Record` keeps only (name, ty).
     if let ast::TypeExpr::Variant { cases } = ty {
         for c in cases {
             if let ast::VariantCase::Record { name: cname, fields } = c {
@@ -795,22 +641,17 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
     }
     env.types.insert(sym(&key), resolved.clone());
     if prefix.is_some() {
-        // Bare-name dual-registration of a prefixed type, for unqualified access.
-        // Record it so a local same-name type may shadow it (#433).
+        // Bare-name dual-registration of a prefixed type, for unqualified access. Record it so a local same-name type may shadow it (#433).
         env.types.insert(sym(name), resolved);
         env.prefixed_bare_aliases.insert(sym(name));
     } else {
-        // A local type owns the bare name now — it is no longer a dependency
-        // alias, so a later genuine local duplicate is still caught by E020.
+        // A local type owns the bare name now — it is no longer a dependency alias, so a later genuine local duplicate is still caught by E020.
         env.prefixed_bare_aliases.remove(&sym(name));
     }
 }
-
 /// Walk all declarations and register them into the type environment.
 pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decls: &[ast::Decl], prefix: Option<&str>) {
-    // Catch duplicate `fn <name>` / `test "<name>"` at the Almide stage so that
-    // rustc's E0428 "defined multiple times" never leaks to the user with a
-    // src/main.rs span. Tracked per (kind, name), remembering the first span.
+    // Catch duplicate `fn <name>` / `test "<name>"` at the Almide stage so that rustc's E0428 "defined multiple times" never leaks to the user with a src/main.rs span. Tracked per (kind, name), remembering the first span.
     let mut seen_fn: HashMap<String, Option<ast::Span>> = HashMap::new();
     let mut seen_test: HashMap<String, Option<ast::Span>> = HashMap::new();
 
@@ -829,12 +670,7 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     validate_protocol_impls(env, diagnostics);
     validate_derive_field_support(env, diagnostics);
 }
-
-/// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function
-/// diagnostic (skipped for `@extern` re-exports), signature registration,
-/// and DefTable registration. Verbatim text move; `continue` in the
-/// original loop becomes an early `return` here (both simply skip the rest
-/// of this decl's registration and move on to the next `decl`).
+/// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function diagnostic (skipped for `@extern` re-exports), signature registration, and DefTable registration. Verbatim text move; `continue` in the original loop becomes an early `return` here (both simply skip the rest of this decl's registration and move on to the next `decl`).
 fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_fn: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl, prefix: Option<&str>) {
     let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, visibility, extern_attrs, .. } = decl else { unreachable!() };
     // Skip duplicates that come from @extern re-export (name may appear twice by design).
@@ -871,10 +707,7 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
     let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Function, ret);
     env.def_map.insert(sym(&fn_key), did);
 }
-
-/// `ast::Decl::Test` arm of [`register_decls`] — E012 duplicate-test
-/// diagnostic. Verbatim text move; `continue` becomes an early `return`
-/// (see [`register_decl_fn`]).
+/// `ast::Decl::Test` arm of [`register_decls`] — E012 duplicate-test diagnostic. Verbatim text move; `continue` becomes an early `return` (see [`register_decl_fn`]).
 fn register_decl_test(diagnostics: &mut Vec<Diagnostic>, seen_test: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl) {
     let ast::Decl::Test { name, span, .. } = decl else { unreachable!() };
     let test_key = name.to_string();
@@ -900,10 +733,7 @@ fn register_decl_test(diagnostics: &mut Vec<Diagnostic>, seen_test: &mut HashMap
     }
     seen_test.insert(test_key, span.clone());
 }
-
-/// `ast::Decl::Type` arm of [`register_decls`] — type registration plus
-/// DefTable and `type_protocols` bookkeeping. Verbatim text move out of
-/// [`register_decls`].
+/// `ast::Decl::Type` arm of [`register_decls`] — type registration plus DefTable and `type_protocols` bookkeeping. Verbatim text move out of [`register_decls`].
 fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl: &ast::Decl, prefix: Option<&str>) {
     let ast::Decl::Type { name, ty, deriving, generics, visibility, .. } = decl else { unreachable!() };
     register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix, *visibility);
@@ -923,22 +753,13 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         }
     }
 }
-
-/// `ast::Decl::TopLet` arm of [`register_decls`] — top-level `let` type
-/// seeding (or reuse of a fully-inferred prior entry) and DefTable
-/// registration. Verbatim text move out of [`register_decls`].
+/// `ast::Decl::TopLet` arm of [`register_decls`] — top-level `let` type seeding (or reuse of a fully-inferred prior entry) and DefTable registration. Verbatim text move out of [`register_decls`].
 fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&str>) {
     let ast::Decl::TopLet { name, ty, value, .. } = decl else { unreachable!() };
     let rt = ty.as_ref().map(|te| resolve(env, te))
         .unwrap_or_else(|| infer_top_let_seed(env, prefix, value));
     let key = prefixed_key(prefix, name);
-    // A PREFIXED key names exactly one decl program-wide, and
-    // registration re-runs per driver leg over a persistent env —
-    // re-seeding must not downgrade a fully inferred entry (the
-    // post-solve flush's `Option[Cfg]`) back to the seed's partial
-    // `Option[Unknown]`. Unprefixed keys stay unconditional: they
-    // are scoped aliases (main program / intra-module temp) where
-    // an entry may legitimately describe a DIFFERENT decl.
+    // A PREFIXED key names exactly one decl program-wide, and registration re-runs per driver leg over a persistent env — re-seeding must not downgrade a fully inferred entry (the post-solve flush's `Option[Cfg]`) back to the seed's partial `Option[Unknown]`. Unprefixed keys stay unconditional: they are scoped aliases (main program / intra-module temp) where an entry may legitimately describe a DIFFERENT decl.
     let keep_existing = prefix.is_some()
         && (rt.contains_unknown() || rt.contains_typevar())
         && env.top_lets.get(&sym(&key)).is_some_and(|t| {
