@@ -115,6 +115,43 @@ fn collect_var_id(id: VarId, out: &mut Vec<VarId>) {
 fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
     match &expr.kind {
         IrExprKind::Var { id } => collect_var_id(*id, out),
+        IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } | IrExprKind::If { .. }
+        | IrExprKind::While { .. } => collect_varids_in_control(expr, out),
+        IrExprKind::Match { .. } => collect_varids_in_match(expr, out),
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts { collect_varids_in_stmt(s, out); }
+            if let Some(e) = expr { collect_varids_in_expr(e, out); }
+        }
+        IrExprKind::Call { .. } => collect_varids_in_call(expr, out),
+        IrExprKind::ForIn { .. } => collect_varids_in_for_in(expr, out),
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::Range { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::RustMacro { .. } => collect_varids_in_containers(expr, out),
+        IrExprKind::Lambda { params, body, .. } => {
+            for (id, _) in params { collect_var_id(*id, out); }
+            collect_varids_in_expr(body, out);
+        }
+        IrExprKind::ClosureCreate { captures, .. } => {
+            for (id, _) in captures { collect_var_id(*id, out); }
+        }
+        IrExprKind::EnvLoad { env_var, .. } => collect_var_id(*env_var, out),
+        IrExprKind::IterChain { .. } => collect_varids_in_iter_chain(expr, out),
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::Try { .. }
+        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::UnwrapOr { .. } => collect_varids_in_wrap(expr, out),
+        _ => {} // literals, unit, break, continue, etc.
+    }
+}
+
+/// BinOp/UnOp/If/While: collect from operands, condition, and bodies.
+fn collect_varids_in_control(expr: &IrExpr, out: &mut Vec<VarId>) {
+    match &expr.kind {
         IrExprKind::BinOp { left, right, .. } => { collect_varids_in_expr(left, out); collect_varids_in_expr(right, out); }
         IrExprKind::UnOp { operand, .. } => collect_varids_in_expr(operand, out),
         IrExprKind::If { cond, then, else_ } => {
@@ -122,28 +159,37 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
             collect_varids_in_expr(then, out);
             collect_varids_in_expr(else_, out);
         }
-        IrExprKind::Match { .. } => collect_varids_in_match(expr, out),
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { collect_varids_in_stmt(s, out); }
-            if let Some(e) = expr { collect_varids_in_expr(e, out); }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => collect_varids_in_expr(object, out),
-                _ => {}
-            }
-            for a in args { collect_varids_in_expr(a, out); }
-        }
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            collect_var_id(*var, out);
-            if let Some(tvs) = var_tuple { for tv in tvs { collect_var_id(*tv, out); } }
-            collect_varids_in_expr(iterable, out);
-            for s in body { collect_varids_in_stmt(s, out); }
-        }
         IrExprKind::While { cond, body } => {
             collect_varids_in_expr(cond, out);
             for s in body { collect_varids_in_stmt(s, out); }
         }
+        _ => unreachable!(),
+    }
+}
+
+/// Call: collect from the receiver (if any) and arguments.
+fn collect_varids_in_call(expr: &IrExpr, out: &mut Vec<VarId>) {
+    let IrExprKind::Call { target, args, .. } = &expr.kind else { unreachable!() };
+    match target {
+        CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => collect_varids_in_expr(object, out),
+        _ => {}
+    }
+    for a in args { collect_varids_in_expr(a, out); }
+}
+
+/// ForIn: collect the loop var(s), the iterable, and the body.
+fn collect_varids_in_for_in(expr: &IrExpr, out: &mut Vec<VarId>) {
+    let IrExprKind::ForIn { var, var_tuple, iterable, body } = &expr.kind else { unreachable!() };
+    collect_var_id(*var, out);
+    if let Some(tvs) = var_tuple { for tv in tvs { collect_var_id(*tv, out); } }
+    collect_varids_in_expr(iterable, out);
+    for s in body { collect_varids_in_stmt(s, out); }
+}
+
+/// List/Tuple/Fan/Record/SpreadRecord/MapLiteral/Range/Member/TupleIndex/OptionalChain/
+/// IndexAccess/MapAccess/StringInterp/RustMacro: collect from each child expression.
+fn collect_varids_in_containers(expr: &IrExpr, out: &mut Vec<VarId>) {
+    match &expr.kind {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
             for e in elements { collect_varids_in_expr(e, out); }
         }
@@ -158,18 +204,18 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
         | IrExprKind::OptionalChain { expr: object, .. } => collect_varids_in_expr(object, out),
         IrExprKind::IndexAccess { object, index } => { collect_varids_in_expr(object, out); collect_varids_in_expr(index, out); }
         IrExprKind::MapAccess { object, key } => { collect_varids_in_expr(object, out); collect_varids_in_expr(key, out); }
-        IrExprKind::Lambda { params, body, .. } => {
-            for (id, _) in params { collect_var_id(*id, out); }
-            collect_varids_in_expr(body, out);
-        }
         IrExprKind::StringInterp { parts } => {
             for p in parts { if let IrStringPart::Expr { expr } = p { collect_varids_in_expr(expr, out); } }
         }
-        IrExprKind::ClosureCreate { captures, .. } => {
-            for (id, _) in captures { collect_var_id(*id, out); }
-        }
-        IrExprKind::EnvLoad { env_var, .. } => collect_var_id(*env_var, out),
-        IrExprKind::IterChain { .. } => collect_varids_in_iter_chain(expr, out),
+        IrExprKind::RustMacro { args, .. } => { for a in args { collect_varids_in_expr(a, out); } }
+        _ => unreachable!(),
+    }
+}
+
+/// ResultOk/ResultErr/OptionSome/Try/Await/Clone/Deref/Borrow/BoxNew/RcWrap/ToVec/Unwrap/ToOption/UnwrapOr:
+/// collect from the wrapped expression(s).
+fn collect_varids_in_wrap(expr: &IrExpr, out: &mut Vec<VarId>) {
+    match &expr.kind {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
@@ -181,8 +227,7 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
             collect_varids_in_expr(expr, out);
             collect_varids_in_expr(fallback, out);
         }
-        IrExprKind::RustMacro { args, .. } => { for a in args { collect_varids_in_expr(a, out); } }
-        _ => {} // literals, unit, break, continue, etc.
+        _ => unreachable!(),
     }
 }
 
