@@ -481,12 +481,18 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
 /// raw VarId would hit unrelated locals (the bridge owns cross-module reads).
 /// Self-referencing inits never substitute into their own init (cycle guard); chained
 /// call-globals resolve by a bounded fixpoint.
-pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
-    use almide_ir::{CallTarget, IrExpr, IrExprKind};
+/// The purity-registry builder shared by both of [`inline_pure_call_globals`]'s
+/// regions — extracted (was the nested double loop at the top of the
+/// function body: program-level functions, then each module's functions).
+/// Pure data collection into two disjoint maps, no behavior change.
+fn build_purity_registry(
+    program: &almide_ir::IrProgram,
+) -> (
+    std::collections::HashMap<String, almide_ir::IrExpr>,
+    std::collections::HashSet<String>,
+) {
     use std::collections::{HashMap, HashSet};
-
-    // Function registry by name (program + modules) for the transitive purity scan.
-    let mut fns_by_name: HashMap<String, IrExpr> = HashMap::new();
+    let mut fns_by_name: HashMap<String, almide_ir::IrExpr> = HashMap::new();
     let mut effect_fns: HashSet<String> = HashSet::new();
     for f in &program.functions {
         fns_by_name.insert(f.name.as_str().to_string(), f.body.clone());
@@ -505,6 +511,14 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
             }
         }
     }
+    (fns_by_name, effect_fns)
+}
+
+pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
+    use almide_ir::{CallTarget, IrExpr, IrExprKind};
+    use std::collections::{HashMap, HashSet};
+
+    let (fns_by_name, effect_fns) = build_purity_registry(program);
 
     fn expr_is_pure(
         e: &IrExpr,
