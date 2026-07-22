@@ -180,17 +180,11 @@ impl LowerCtx {
                 if let almide_ir::IrPattern::Tuple { elements } = &arms[0].pattern {
                     let mark = self.ops.len();
                     let lhh = self.live_heap_handles.len();
-                    // Materialize the tuple subject as a borrowed handle (its slots are real).
-                    if let Ok(Some(CallArg::Handle(subj))) = self
-                        .lower_call_args(std::slice::from_ref(subject))
-                        .map(|v| v.into_iter().next())
+                    if let Some(dst) =
+                        self.try_lower_scalar_tuple_bind_component(subject, elements, &arms[0].body)
                     {
-                        if self.try_lower_tuple_destructure(elements, subj, Some(&subject.ty)) {
-                            if let Some(dst) = self.lower_scalar_value(&arms[0].body) {
-                                self.value_of.insert(var, dst);
-                                return Ok(());
-                            }
-                        }
+                        self.value_of.insert(var, dst);
+                        return Ok(());
                     }
                     self.ops.truncate(mark);
                     self.live_heap_handles.truncate(lhh);
@@ -286,6 +280,34 @@ impl LowerCtx {
         self.ops.push(Op::Const { dst });
         self.record_elided_calls(value);
         return Ok(());
+    }
+
+    /// The single-arm tuple-destructure scalar-component-extraction attempt used by
+    /// `lower_bind_scalar`'s `let r = match t { (a, b) => <body> }` case: materialize the
+    /// tuple `subject` as a borrowed handle, bind its component patterns to the real slots,
+    /// then lower the arm `body` as the bound scalar value. Returns `None` on any miss (an
+    /// unresolvable subject, a destructure that can't execute, or a non-scalar body) — the
+    /// caller rolls back `self.ops`/`self.live_heap_handles` to its own pre-call marks, so
+    /// this performs no cleanup itself. Verbatim extraction (guard-clause flattening) of the
+    /// former 4-deep nested-if body, no behavior change — see `lower_bind_scalar` history in
+    /// docs/roadmap/active/code-health-codopsy.md.
+    fn try_lower_scalar_tuple_bind_component(
+        &mut self,
+        subject: &IrExpr,
+        elements: &[almide_ir::IrPattern],
+        body: &IrExpr,
+    ) -> Option<ValueId> {
+        // Materialize the tuple subject as a borrowed handle (its slots are real).
+        let Ok(Some(CallArg::Handle(subj))) = self
+            .lower_call_args(std::slice::from_ref(subject))
+            .map(|v| v.into_iter().next())
+        else {
+            return None;
+        };
+        if !self.try_lower_tuple_destructure(elements, subj, Some(&subject.ty)) {
+            return None;
+        }
+        self.lower_scalar_value(body)
     }
 
     /// The HEAP half of [`Self::lower_bind`]: the heap-`??` executable subset,
@@ -1486,6 +1508,59 @@ impl LowerCtx {
         }
     }
 
+    /// The `lower_destructure` tuple-pattern seed: for an owned, still-live, not-yet-
+    /// materialized tuple `subj`, records its heap-slot mask (or the `value_tuple` recursive
+    /// drop route) and marks it `materialized_aggregates`, so the destructure that follows
+    /// reads each element from its OWN slot instead of the container-grain alias. Verbatim
+    /// extraction (guard-clause flattening of the former 4-deep-nested if/else-if), no
+    /// behavior change — see `lower_destructure` history in
+    /// docs/roadmap/active/code-health-codopsy.md.
+    fn seed_tuple_destructure_masked_aggregate(
+        &mut self,
+        subj: ValueId,
+        value: &IrExpr,
+        elements: &[IrPattern],
+    ) {
+        // The tuple's element types: from value.ty when it is a Tuple, ELSE (brick 5) — an
+        // effect-fn `let (v,p) = f()!` whose `!` Unwrap render_program strips to a Call, so
+        // value.ty is the effect Result, NOT a Ty::Tuple — from the PATTERN's bound types.
+        // Without the pattern fallback the seed misses and the destructure container-grains
+        // (reads slot 0 as the whole handle + slot 1 as Const 0 — the `8212 / 0` garbage).
+        let elem_tys: Option<Vec<Ty>> = if let Ty::Tuple(tys) = &value.ty {
+            Some(tys.clone())
+        } else if matches!(&value.kind, IrExprKind::Unwrap { .. } | IrExprKind::Call { .. }) {
+            Some(
+                elements
+                    .iter()
+                    .map(|p| match p {
+                        IrPattern::Bind { ty, .. } => ty.clone(),
+                        _ => Ty::Unit,
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
+        let Some(tys) = elem_tys else {
+            return;
+        };
+        // A (Value, scalar) tuple's Value slot needs the RECURSIVE __drop_value_tuple
+        // (a flat record_masks rc_dec leaks the Value's nested payload → 10⁴ OOM) — the
+        // same routing brick 3's construct uses.
+        let value_tuple =
+            tys.len() == 2 && crate::lower::is_value_ty(&tys[0]) && !is_heap_ty(&tys[1]);
+        if value_tuple {
+            self.variant_drop_handles.insert(subj, "value_tuple".to_string());
+            self.materialized_aggregates.insert(subj);
+            return;
+        }
+        let heap_slots: Vec<usize> = (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
+        if !heap_slots.is_empty() {
+            self.record_masks.insert(subj, heap_slots);
+            self.materialized_aggregates.insert(subj);
+        }
+    }
+
     /// `let (a, b) = …` — a TUPLE destructuring bind. Two sound shapes:
     ///
     /// 1. From a tuple LITERAL `(x, y)` of the same arity — lowered COMPONENT-WISE
@@ -1565,46 +1640,7 @@ impl LowerCtx {
                 if !self.materialized_aggregates.contains(&subj)
                     && self.live_heap_handles.contains(&subj)
                 {
-                    // The tuple's element types: from value.ty when it is a Tuple, ELSE (brick 5) — an
-                    // effect-fn `let (v,p) = f()!` whose `!` Unwrap render_program strips to a Call, so
-                    // value.ty is the effect Result, NOT a Ty::Tuple — from the PATTERN's bound types.
-                    // Without the pattern fallback the seed misses and the destructure container-grains
-                    // (reads slot 0 as the whole handle + slot 1 as Const 0 — the `8212 / 0` garbage).
-                    let elem_tys: Option<Vec<Ty>> = if let Ty::Tuple(tys) = &value.ty {
-                        Some(tys.clone())
-                    } else if matches!(
-                        &value.kind,
-                        IrExprKind::Unwrap { .. } | IrExprKind::Call { .. }
-                    ) {
-                        Some(
-                            elements
-                                .iter()
-                                .map(|p| match p {
-                                    IrPattern::Bind { ty, .. } => ty.clone(),
-                                    _ => Ty::Unit,
-                                })
-                                .collect(),
-                        )
-                    } else {
-                        None
-                    };
-                    if let Some(tys) = elem_tys {
-                        // A (Value, scalar) tuple's Value slot needs the RECURSIVE __drop_value_tuple
-                        // (a flat record_masks rc_dec leaks the Value's nested payload → 10⁴ OOM) — the
-                        // same routing brick 3's construct uses.
-                        let value_tuple = tys.len() == 2
-                            && crate::lower::is_value_ty(&tys[0])
-                            && !is_heap_ty(&tys[1]);
-                        let heap_slots: Vec<usize> =
-                            (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
-                        if value_tuple {
-                            self.variant_drop_handles.insert(subj, "value_tuple".to_string());
-                            self.materialized_aggregates.insert(subj);
-                        } else if !heap_slots.is_empty() {
-                            self.record_masks.insert(subj, heap_slots);
-                            self.materialized_aggregates.insert(subj);
-                        }
-                    }
+                    self.seed_tuple_destructure_masked_aggregate(subj, value, elements);
                 }
                 if self.try_lower_tuple_destructure(elements, subj, Some(&value.ty)) {
                     return Ok(());
