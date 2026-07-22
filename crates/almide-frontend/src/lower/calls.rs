@@ -415,212 +415,220 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             }
             CallTarget::Named { name: *name }
         }
-        ast::ExprKind::Member { object, field, .. } => {
-            // `module.Type.method(...)` — a cross-module type's convention/Codec
-            // method (`shapes.Dot.encode`). Resolve to the bare `Type.method` Named
-            // call; the module prefix is reattached at codegen (#411-B). Mirrors the
-            // checker's `resolve_static_member` (新①).
-            if let ast::ExprKind::Member { object: inner, field: type_name } = &object.kind {
-                if let ast::ExprKind::Ident { name: module, .. } = &inner.kind {
-                    if ctx.lookup_var(module).is_none()
-                        && ctx.env.import_table.resolve(module).is_some()
-                    {
-                        let key = sym(&format!("{}.{}", type_name, field));
-                        if ctx.env.functions.contains_key(&key) {
-                            return CallTarget::Named { name: key };
-                        }
-                    }
-                }
-            }
-            // Check if this is a module call (e.g., string.trim, list.map)
-            if let ast::ExprKind::Ident { name: module, .. } = &object.kind {
-                // Local variables take precedence over module names
-                if ctx.lookup_var(module).is_none() && (module == "fan"
-                    || crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
-                    || ctx.env.user_modules.contains(module)
-                    || ctx.env.import_table.aliases.contains_key(module))
-                {
-                    // Cross-module variant constructor call: binary.ImportFunc(0)
-                    if let Some((type_name, _)) = ctx.env.lookup_ctor(field) {
-                        let resolved = ctx.env.import_table.aliases.get(module).copied()
-                            .unwrap_or(*module);
-                        let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
-                        if ctx.env.types.contains_key(&sym(&qualified)) {
-                            return CallTarget::Named { name: *field };
-                        }
-                    }
-                    let resolved = ctx.env.import_table.aliases.get(module).copied()
-                        .unwrap_or(*module);
-                    return CallTarget::Module { module: resolved, func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", resolved, field))).copied() };
-                }
-                // Ident that's not a module: check if Type.method (protocol impl, e.g. Val.double)
-                if ctx.lookup_var(module).is_none() {
-                    let key = format!("{}.{}", module, field);
-                    if ctx.env.functions.contains_key(&sym(&key))
-                        || ctx.find_convention_fn(&Ty::Named(sym(module), vec![]), field).is_some()
-                    {
-                        return CallTarget::Named { name: sym(&key) };
-                    }
-                }
-            }
-            // Dot-chain submodule fallback: still resolve so codegen doesn't break
-            // (checker emits error for these, but lowering must still produce valid IR)
-            if let Some(dotted) = ctx.env.import_table.resolve_dotted_path(&object.kind) {
-                return CallTarget::Module { module: sym(&dotted), func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", dotted, field))).copied() };
-            }
-            // TypeName.method(args) → direct named call (not UFCS, no object prepend)
-            if let ast::ExprKind::TypeName { name: type_name, .. } = &object.kind {
-                let key = format!("{}.{}", type_name, field);
-                if ctx.env.functions.contains_key(&sym(&key))
-                    || ctx.find_convention_fn(&Ty::Named(sym(type_name), vec![]), field).is_some()
-                {
-                    return CallTarget::Named { name: sym(&key) };
-                }
-            }
-            // Record field call: h.run("hello") where run is a Fn-typed field
-            // Must check before UFCS so field-access + call takes priority
-            let obj_ty = ctx.expr_ty(object);
-            {
-                let resolved = ctx.env.resolve_named(&obj_ty);
-                let fn_field = match &resolved {
-                    Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                        fields.iter().find(|(n, _)| *n == *field)
-                            .and_then(|(_, t)| if matches!(t, Ty::Fn { .. }) { Some(()) } else { None })
-                    }
-                    _ => None,
-                };
-                if fn_field.is_some() {
-                    let ir_obj = lower_expr(ctx, object);
-                    let field_ty = ctx.expr_ty(callee);
-                    let member = ctx.mk(IrExprKind::Member { object: Box::new(ir_obj), field: *field }, field_ty, callee.span);
-                    return CallTarget::Computed { callee: Box::new(member) };
-                }
-            }
-            // Built-in generic types: xs.len() → list.len(xs) for List, Map, etc.
-            let builtin_module = match &obj_ty {
-                Ty::Applied(TypeConstructorId::List, _) => Some("list"),
-                Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
-                Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
-                Ty::String => Some("string"),
-                Ty::Int => Some("int"),
-                Ty::Float => Some("float"),
-                // Sized numeric types (Stage 3 of the sized-numeric-types arc).
-                Ty::Int8 => Some("int8"),
-                Ty::Int16 => Some("int16"),
-                Ty::Int32 => Some("int32"),
-                Ty::UInt8 => Some("uint8"),
-                Ty::UInt16 => Some("uint16"),
-                Ty::UInt32 => Some("uint32"),
-                Ty::UInt64 => Some("uint64"),
-                Ty::Float32 => Some("float32"),
-                Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
-                Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
-                _ => None,
-            };
-            if let Some(module) = builtin_module {
-                let key = format!("{}.{}", module, field);
-                if ctx.env.functions.contains_key(&sym(&key))
-                    || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
-                {
-                    let ir_obj = lower_expr(ctx, object);
-                    return CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) };
-                }
-            }
-            // Check for convention method: dog.repr() → Dog.repr(dog)
-            let type_name_opt = match &obj_ty {
-                Ty::Named(name, _) => Some(name.to_string()),
-                Ty::Record { .. } | Ty::Variant { .. } => {
-                    ctx.env.types.iter().find_map(|(name, ty)| {
-                        if ty == &obj_ty && name.chars().next().map_or(false, |c| c.is_uppercase()) {
-                            Some(name.to_string())
-                        } else { None }
-                    })
-                }
-                _ => None,
-            };
-            if let Some(type_name) = type_name_opt {
-                let convention_key = format!("{}.{}", type_name, field);
-                if ctx.env.functions.contains_key(&sym(&convention_key))
-                    || ctx.find_convention_fn(&Ty::Named(sym(&type_name), vec![]), field).is_some()
-                {
-                    let ir_obj = lower_expr(ctx, object);
-                    return CallTarget::Method { object: Box::new(ir_obj), method: sym(&convention_key) };
-                }
-            }
-            // Protocol method on TypeVar: item.show() where item: T, T: Showable
-            // Lower as "T.show" convention key — monomorphizer will substitute T → ConcreteType
-            // Also check variable's declared type: inside lambdas, the type checker may
-            // resolve the expression type to Fn (partial application), but the variable's
-            // declared type retains the TypeVar.
-            // Also check for TypeVar behind Fn wrapper: inside lambdas, the type checker
-            // may assign Fn type to the parameter (partial application of protocol method),
-            // but the generic function's param list may have the real TypeVar.
-            let tv_from_obj = match &obj_ty {
-                Ty::TypeVar(tv) => Some(tv.clone()),
-                _ => {
-                    // Check all protocol bounds to see if this method belongs to one,
-                    // and identify which TypeVar it corresponds to.
-                    let mut found = None;
-                    for (tv, protos) in ctx.protocol_bounds.iter() {
-                        for proto_name in protos {
-                            if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
-                                if proto_def.methods.iter().any(|m| m.name == *field) {
-                                    found = Some(tv.clone());
-                                    break;
-                                }
-                            }
-                        }
-                        if found.is_some() { break; }
-                    }
-                    found
-                }
-            };
-            if let Some(tv) = tv_from_obj {
-                if let Some(proto_names) = ctx.protocol_bounds.get(&tv).cloned() {
-                    for proto_name in &proto_names {
-                        if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
-                            if proto_def.methods.iter().any(|m| m.name == *field) {
-                                let ir_obj = lower_expr(ctx, object);
-                                let convention_key = sym(&format!("{}.{}", tv, field));
-                                return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
-                            }
-                        }
-                    }
-                }
-            }
-            // Cross-module UFCS: object type is Named → find defining module
-            if let Ty::Named(type_name, _) = &obj_ty {
-                // A pinned QUALIFIED name (`box.Box`) carries its defining
-                // module directly (same repair as the checker's UFCS arm —
-                // the suffix scan only matched historical bare names).
-                let defining_module = match type_name.as_str().rsplit_once('.') {
-                    Some((m, _)) => Some(m.to_string()),
-                    None => ctx.env.types.keys()
-                        .find(|k| {
-                            let s = k.as_str();
-                            s.ends_with(&format!(".{}", type_name.as_str()))
-                                && s.len() > type_name.as_str().len() + 1
-                        })
-                        .map(|k| k.as_str()[..k.as_str().len() - type_name.as_str().len() - 1].to_string()),
-                };
-                if let Some(module) = defining_module {
-                    let key = format!("{}.{}", module, field);
-                    if ctx.env.functions.contains_key(&sym(&key)) {
-                        let ir_obj = lower_expr(ctx, object);
-                        // Return Method with "module.func" key — lower_call converts to Module target
-                        return CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) };
-                    }
-                }
-            }
-            // Generic method call: obj.method(args) → UFCS
-            let ir_obj = lower_expr(ctx, object);
-            CallTarget::Method { object: Box::new(ir_obj), method: *field }
-        }
+        ast::ExprKind::Member { object, field, .. } => lower_call_target_member(ctx, callee, object, field),
         _ => {
             let ir_callee = lower_expr(ctx, callee);
             CallTarget::Computed { callee: Box::new(ir_callee) }
         }
     }
+}
+
+/// The `Member { object, field }` arm of [`lower_call_target`] — resolves
+/// `object.field(...)` to a module call, UFCS method, convention method,
+/// protocol dispatch, or cross-module UFCS. Verbatim text move: each check is
+/// an independent guard that either returns a resolved `CallTarget` or falls
+/// through to the next, with no state shared across checks (codopsy pass,
+/// mirrors `resolve_static_member`'s guard-chain shape).
+fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast::Expr, field: &Sym) -> CallTarget {
+    // `module.Type.method(...)` — a cross-module type's convention/Codec
+    // method (`shapes.Dot.encode`). Resolve to the bare `Type.method` Named
+    // call; the module prefix is reattached at codegen (#411-B). Mirrors the
+    // checker's `resolve_static_member` (新①).
+    if let ast::ExprKind::Member { object: inner, field: type_name } = &object.kind {
+        if let ast::ExprKind::Ident { name: module, .. } = &inner.kind {
+            if ctx.lookup_var(module).is_none()
+                && ctx.env.import_table.resolve(module).is_some()
+            {
+                let key = sym(&format!("{}.{}", type_name, field));
+                if ctx.env.functions.contains_key(&key) {
+                    return CallTarget::Named { name: key };
+                }
+            }
+        }
+    }
+    // Check if this is a module call (e.g., string.trim, list.map)
+    if let ast::ExprKind::Ident { name: module, .. } = &object.kind {
+        // Local variables take precedence over module names
+        if ctx.lookup_var(module).is_none() && (module == "fan"
+            || crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
+            || ctx.env.user_modules.contains(module)
+            || ctx.env.import_table.aliases.contains_key(module))
+        {
+            // Cross-module variant constructor call: binary.ImportFunc(0)
+            if let Some((type_name, _)) = ctx.env.lookup_ctor(field) {
+                let resolved = ctx.env.import_table.aliases.get(module).copied()
+                    .unwrap_or(*module);
+                let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
+                if ctx.env.types.contains_key(&sym(&qualified)) {
+                    return CallTarget::Named { name: *field };
+                }
+            }
+            let resolved = ctx.env.import_table.aliases.get(module).copied()
+                .unwrap_or(*module);
+            return CallTarget::Module { module: resolved, func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", resolved, field))).copied() };
+        }
+        // Ident that's not a module: check if Type.method (protocol impl, e.g. Val.double)
+        if ctx.lookup_var(module).is_none() {
+            let key = format!("{}.{}", module, field);
+            if ctx.env.functions.contains_key(&sym(&key))
+                || ctx.find_convention_fn(&Ty::Named(sym(module), vec![]), field).is_some()
+            {
+                return CallTarget::Named { name: sym(&key) };
+            }
+        }
+    }
+    // Dot-chain submodule fallback: still resolve so codegen doesn't break
+    // (checker emits error for these, but lowering must still produce valid IR)
+    if let Some(dotted) = ctx.env.import_table.resolve_dotted_path(&object.kind) {
+        return CallTarget::Module { module: sym(&dotted), func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", dotted, field))).copied() };
+    }
+    // TypeName.method(args) → direct named call (not UFCS, no object prepend)
+    if let ast::ExprKind::TypeName { name: type_name, .. } = &object.kind {
+        let key = format!("{}.{}", type_name, field);
+        if ctx.env.functions.contains_key(&sym(&key))
+            || ctx.find_convention_fn(&Ty::Named(sym(type_name), vec![]), field).is_some()
+        {
+            return CallTarget::Named { name: sym(&key) };
+        }
+    }
+    // Record field call: h.run("hello") where run is a Fn-typed field
+    // Must check before UFCS so field-access + call takes priority
+    let obj_ty = ctx.expr_ty(object);
+    {
+        let resolved = ctx.env.resolve_named(&obj_ty);
+        let fn_field = match &resolved {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().find(|(n, _)| *n == *field)
+                    .and_then(|(_, t)| if matches!(t, Ty::Fn { .. }) { Some(()) } else { None })
+            }
+            _ => None,
+        };
+        if fn_field.is_some() {
+            let ir_obj = lower_expr(ctx, object);
+            let field_ty = ctx.expr_ty(callee);
+            let member = ctx.mk(IrExprKind::Member { object: Box::new(ir_obj), field: *field }, field_ty, callee.span);
+            return CallTarget::Computed { callee: Box::new(member) };
+        }
+    }
+    // Built-in generic types: xs.len() → list.len(xs) for List, Map, etc.
+    let builtin_module = match &obj_ty {
+        Ty::Applied(TypeConstructorId::List, _) => Some("list"),
+        Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
+        Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
+        Ty::String => Some("string"),
+        Ty::Int => Some("int"),
+        Ty::Float => Some("float"),
+        // Sized numeric types (Stage 3 of the sized-numeric-types arc).
+        Ty::Int8 => Some("int8"),
+        Ty::Int16 => Some("int16"),
+        Ty::Int32 => Some("int32"),
+        Ty::UInt8 => Some("uint8"),
+        Ty::UInt16 => Some("uint16"),
+        Ty::UInt32 => Some("uint32"),
+        Ty::UInt64 => Some("uint64"),
+        Ty::Float32 => Some("float32"),
+        Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
+        Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
+        _ => None,
+    };
+    if let Some(module) = builtin_module {
+        let key = format!("{}.{}", module, field);
+        if ctx.env.functions.contains_key(&sym(&key))
+            || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
+        {
+            let ir_obj = lower_expr(ctx, object);
+            return CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) };
+        }
+    }
+    // Check for convention method: dog.repr() → Dog.repr(dog)
+    let type_name_opt = match &obj_ty {
+        Ty::Named(name, _) => Some(name.to_string()),
+        Ty::Record { .. } | Ty::Variant { .. } => {
+            ctx.env.types.iter().find_map(|(name, ty)| {
+                if ty == &obj_ty && name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                    Some(name.to_string())
+                } else { None }
+            })
+        }
+        _ => None,
+    };
+    if let Some(type_name) = type_name_opt {
+        let convention_key = format!("{}.{}", type_name, field);
+        if ctx.env.functions.contains_key(&sym(&convention_key))
+            || ctx.find_convention_fn(&Ty::Named(sym(&type_name), vec![]), field).is_some()
+        {
+            let ir_obj = lower_expr(ctx, object);
+            return CallTarget::Method { object: Box::new(ir_obj), method: sym(&convention_key) };
+        }
+    }
+    // Protocol method on TypeVar: item.show() where item: T, T: Showable
+    // Lower as "T.show" convention key — monomorphizer will substitute T → ConcreteType
+    // Also check variable's declared type: inside lambdas, the type checker may
+    // resolve the expression type to Fn (partial application), but the variable's
+    // declared type retains the TypeVar.
+    // Also check for TypeVar behind Fn wrapper: inside lambdas, the type checker
+    // may assign Fn type to the parameter (partial application of protocol method),
+    // but the generic function's param list may have the real TypeVar.
+    let tv_from_obj = match &obj_ty {
+        Ty::TypeVar(tv) => Some(tv.clone()),
+        _ => {
+            // Check all protocol bounds to see if this method belongs to one,
+            // and identify which TypeVar it corresponds to.
+            let mut found = None;
+            for (tv, protos) in ctx.protocol_bounds.iter() {
+                for proto_name in protos {
+                    if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
+                        if proto_def.methods.iter().any(|m| m.name == *field) {
+                            found = Some(tv.clone());
+                            break;
+                        }
+                    }
+                }
+                if found.is_some() { break; }
+            }
+            found
+        }
+    };
+    if let Some(tv) = tv_from_obj {
+        if let Some(proto_names) = ctx.protocol_bounds.get(&tv).cloned() {
+            for proto_name in &proto_names {
+                if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
+                    if proto_def.methods.iter().any(|m| m.name == *field) {
+                        let ir_obj = lower_expr(ctx, object);
+                        let convention_key = sym(&format!("{}.{}", tv, field));
+                        return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
+                    }
+                }
+            }
+        }
+    }
+    // Cross-module UFCS: object type is Named → find defining module
+    if let Ty::Named(type_name, _) = &obj_ty {
+        // A pinned QUALIFIED name (`box.Box`) carries its defining
+        // module directly (same repair as the checker's UFCS arm —
+        // the suffix scan only matched historical bare names).
+        let defining_module = match type_name.as_str().rsplit_once('.') {
+            Some((m, _)) => Some(m.to_string()),
+            None => ctx.env.types.keys()
+                .find(|k| {
+                    let s = k.as_str();
+                    s.ends_with(&format!(".{}", type_name.as_str()))
+                        && s.len() > type_name.as_str().len() + 1
+                })
+                .map(|k| k.as_str()[..k.as_str().len() - type_name.as_str().len() - 1].to_string()),
+        };
+        if let Some(module) = defining_module {
+            let key = format!("{}.{}", module, field);
+            if ctx.env.functions.contains_key(&sym(&key)) {
+                let ir_obj = lower_expr(ctx, object);
+                // Return Method with "module.func" key — lower_call converts to Module target
+                return CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) };
+            }
+        }
+    }
+    // Generic method call: obj.method(args) → UFCS
+    let ir_obj = lower_expr(ctx, object);
+    CallTarget::Method { object: Box::new(ir_obj), method: *field }
 }
 
 /// Replace each `Ident { name }` that names a call parameter with the AST of the
