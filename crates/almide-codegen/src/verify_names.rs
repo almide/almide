@@ -408,21 +408,55 @@ fn repair_decl_kind(kind: &mut IrTypeDeclKind, map: &std::collections::HashMap<S
         IrTypeDeclKind::Alias { target } => *target = repair_ty(target, map),
         IrTypeDeclKind::Variant { cases, .. } => {
             for c in cases {
-                match &mut c.kind {
-                    IrVariantKind::Unit => {}
-                    IrVariantKind::Tuple { fields } => {
-                        for t in fields {
-                            *t = repair_ty(t, map);
-                        }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields {
-                            f.ty = repair_ty(&f.ty, map);
-                        }
-                    }
-                }
+                repair_variant_case_kind(&mut c.kind, map);
             }
         }
+    }
+}
+
+/// `IrVariantKind` case of `repair_decl_kind`'s `Variant` arm, extracted
+/// verbatim (cog>30 decomposition).
+fn repair_variant_case_kind(kind: &mut IrVariantKind, map: &std::collections::HashMap<Sym, Sym>) {
+    match kind {
+        IrVariantKind::Unit => {}
+        IrVariantKind::Tuple { fields } => {
+            for t in fields {
+                *t = repair_ty(t, map);
+            }
+        }
+        IrVariantKind::Record { fields } => {
+            for f in fields {
+                f.ty = repair_ty(&f.ty, map);
+            }
+        }
+    }
+}
+
+/// One traversal scope (root program or a module) of `repair_bare_type_names`,
+/// extracted (cog>30 decomposition, sequential-phase pattern — the same
+/// four loops were duplicated verbatim for `program` and for every entry of
+/// `program.modules`; factored into one fn reused by both call sites). The
+/// root-only `def_table` pass stays at the call site since modules have no
+/// `def_table`.
+fn repair_scope(
+    type_decls: &mut [IrTypeDecl],
+    functions: &mut [IrFunction],
+    top_lets: &mut [IrTopLet],
+    var_table: &mut VarTable,
+    map: &std::collections::HashMap<Sym, Sym>,
+) {
+    for td in type_decls {
+        repair_decl_kind(&mut td.kind, map);
+    }
+    for f in functions {
+        repair_fn(f, map);
+    }
+    for tl in top_lets {
+        tl.ty = repair_ty(&tl.ty, map);
+        repair_expr_in_place(&mut tl.value, map);
+    }
+    for v in &mut var_table.entries {
+        v.ty = repair_ty(&v.ty, map);
     }
 }
 
@@ -439,36 +473,12 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
     if map.is_empty() {
         return;
     }
-    for td in &mut program.type_decls {
-        repair_decl_kind(&mut td.kind, &map);
-    }
-    for f in &mut program.functions {
-        repair_fn(f, &map);
-    }
-    for tl in &mut program.top_lets {
-        tl.ty = repair_ty(&tl.ty, &map);
-        repair_expr_in_place(&mut tl.value, &map);
-    }
-    for v in &mut program.var_table.entries {
-        v.ty = repair_ty(&v.ty, &map);
-    }
+    repair_scope(&mut program.type_decls, &mut program.functions, &mut program.top_lets, &mut program.var_table, &map);
     for d in &mut program.def_table.entries {
         d.ty = repair_ty(&d.ty, &map);
     }
     for m in &mut program.modules {
-        for td in &mut m.type_decls {
-            repair_decl_kind(&mut td.kind, &map);
-        }
-        for f in &mut m.functions {
-            repair_fn(f, &map);
-        }
-        for tl in &mut m.top_lets {
-            tl.ty = repair_ty(&tl.ty, &map);
-            repair_expr_in_place(&mut tl.value, &map);
-        }
-        for v in &mut m.var_table.entries {
-            v.ty = repair_ty(&v.ty, &map);
-        }
+        repair_scope(&mut m.type_decls, &mut m.functions, &mut m.top_lets, &mut m.var_table, &map);
     }
 }
 
