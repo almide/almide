@@ -325,17 +325,59 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
 /// checks in the same order via function calls is behaviorally identical —
 /// the first one whose guard holds is the one that ever constructs a
 /// result, exactly as the original single match.
+/// SAME arm order/guards as the original `match p { .. }` (no `.or_else()`
+/// chain here — deliberately NOT the pure-lookup-table technique used by
+/// `interp_option_to_string`/`interp_result_to_string` above): at least one
+/// arm body (`interp_part_leaf_aggregate`'s non-expandable-non-anon-non-
+/// named fallthrough) and the LAST arm (`interp_part_leaf_fallback`'s
+/// `Ty`-catch-all) can BOTH produce a `compound.to_string` wrapper for the
+/// same aggregate shape — an `.or_else()` chain would silently re-try the
+/// fallback if an earlier arm's guard held but its body returned `None`
+/// (e.g. `display_aggregate` declining), changing which `compound.to_string`
+/// call (if any) gets emitted. Each `if guard { return f(..); }` below
+/// COMMITS once its guard is true — `f`'s result (Some OR None) is returned
+/// directly, exactly reproducing the original match's "first satisfied
+/// guard wins, no fallthrough on a None body" semantics.
 fn interp_part_leaf_expr(expr: &IrExpr, registry: &RecordLayouts) -> Option<IrExpr> {
     if matches!(expr.ty, Ty::String) {
         return Some(expr.clone());
     }
-    interp_part_leaf_aggregate(expr, registry)
-        .or_else(|| interp_part_leaf_variant(expr, registry))
-        .or_else(|| interp_part_leaf_container(expr, registry))
-        .or_else(|| interp_part_leaf_scalar_tuple_list_container(expr))
-        .or_else(|| interp_part_leaf_scalar_tuple_option_container(expr))
-        .or_else(|| interp_part_leaf_anon_record_list(expr))
-        .or_else(|| interp_part_leaf_fallback(expr))
+    if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
+        && resolve_aggregate(&expr.ty, registry).is_some()
+    {
+        return interp_part_leaf_aggregate(expr, registry);
+    }
+    if matches!(&expr.ty, Ty::Named(..)) && resolve_aggregate(&expr.ty, registry).is_none() {
+        return interp_part_leaf_variant(expr, registry);
+    }
+    if container_repr_name(&expr.ty, registry).is_some() {
+        return interp_part_leaf_container(expr, registry);
+    }
+    if matches!(&expr.ty,
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts)
+                    if crate::lower::tuple_repr_ident(ts).is_some()
+                        && !(ts.len() == 2
+                            && matches!(ts[0], Ty::String)
+                            && matches!(ts[1], Ty::Int))))
+    {
+        return interp_part_leaf_scalar_tuple_list_container(expr);
+    }
+    if matches!(&expr.ty,
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts) if crate::lower::tuple_repr_ident(ts).is_some()))
+    {
+        return interp_part_leaf_scalar_tuple_option_container(expr);
+    }
+    if matches!(&expr.ty,
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+            if a.len() == 1 && matches!(a[0], Ty::Record { .. }))
+    {
+        return interp_part_leaf_anon_record_list(expr);
+    }
+    interp_part_leaf_fallback(expr)
 }
 
 /// A record/tuple part: EXPAND if the lowering will materialize it; else wrap in the

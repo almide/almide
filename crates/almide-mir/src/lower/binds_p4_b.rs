@@ -1,82 +1,83 @@
 impl LowerCtx {
-    /// Name router over `value.kind`'s guard family — each arm's condition is
-    /// UNCHANGED (still evaluated by `match` exactly as before, in the same
-    /// order, so arm SELECTION is byte-identical); only the arm BODY moved
-    /// into a named helper (a verbatim cut, no logic change). Each guard
-    /// gates a distinct, non-overlapping payload shape (a different `Ty`
-    /// literal pattern), so this is the established "uniform match arm"
-    /// split, not the value-position-match family that must stay whole.
+    /// Name router over `value.kind`'s guard family — SAME match structure,
+    /// order, and `_ => None` tail as the original (arm SELECTION is
+    /// untouched); only each arm's GUARD EXPRESSION moved into a named
+    /// predicate method. This is deliberately NOT a `.or_else()` chain of
+    /// "try each arm, take the first Some": several of the arm bodies below
+    /// (`try_opt_*_payload`) can themselves return `None` via an internal
+    /// `?` even when their OWN guard held (e.g. `repr_of` or
+    /// `try_lower_record_construct` declining) — and at least two guards
+    /// here are NOT mutually exclusive (`try_opt_record_aggregate_arm`'s
+    /// condition is a strict superset of `try_opt_record_scalar_fields_arm`'s).
+    /// The original semantics is "commit to the first satisfied guard;
+    /// if ITS body then returns None, the whole function returns None" — a
+    /// sequential `.or_else()` would silently re-try later arms instead.
+    /// Keeping the real `match` preserves that commit-once behavior exactly.
     fn try_lower_opt_tuple_and_variant_payloads(
         &mut self,
         value: &IrExpr,
         ty: &Ty,
     ) -> Option<ValueId> {
-        match &value.kind {
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
-            {
-                self.try_opt_int_str_tuple_payload(expr, ty)
-            }
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind,
-                    IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                        if self.variant_layouts.ctor_to_type.contains_key(name.as_str())) =>
-            {
-                self.try_opt_variant_ctor_payload(expr, ty)
-            }
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind, IrExprKind::Record { .. })
-                    && self.aggregate_field_tys(&expr.ty).is_some() =>
-            {
+        let IrExprKind::OptionSome { expr } = &value.kind else {
+            return None;
+        };
+        match &expr.kind {
+            _ if Self::is_int_str_tuple(&expr.ty) => self.try_opt_int_str_tuple_payload(expr, ty),
+            _ if self.is_variant_ctor_call(&expr.kind) => self.try_opt_variant_ctor_payload(expr, ty),
+            IrExprKind::Record { .. } if self.aggregate_field_tys(&expr.ty).is_some() => {
                 self.try_opt_record_aggregate_payload(expr, ty)
             }
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind, IrExprKind::Tuple { .. })
-                    && matches!(&expr.ty,
-                        Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t))) =>
-            {
+            IrExprKind::Tuple { .. } if Self::is_all_scalar_tuple(&expr.ty) => {
                 self.try_opt_scalar_tuple_payload(expr, ty)
             }
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind, IrExprKind::Tuple { .. })
-                    && matches!(&expr.ty,
-                        Ty::Tuple(tys) if tys.len() == 2
-                            && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
-            {
+            IrExprKind::Tuple { .. } if Self::is_str_str_tuple(&expr.ty) => {
                 self.try_opt_str_str_tuple_payload(expr, ty)
             }
-            IrExprKind::OptionSome { expr }
-                if matches!(&expr.kind, IrExprKind::Tuple { .. })
-                    && matches!(&expr.ty,
-                        Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1])) =>
-            {
+            IrExprKind::Tuple { .. } if Self::is_str_int_tuple(&expr.ty) => {
                 self.try_opt_str_int_tuple_payload(expr, ty)
             }
-            IrExprKind::OptionSome { expr }
-                if crate::lower::is_value_ty(&expr.ty)
-                    || matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
-                        if e.len() == 1 && matches!(e[0], Ty::String)) =>
-            {
-                self.try_opt_value_or_liststr_payload(expr, ty)
-            }
-            IrExprKind::OptionSome { expr }
-                if matches!(expr.kind, IrExprKind::Record { .. })
-                    && self.record_or_anon_drop_type_name(&expr.ty).is_some() =>
-            {
+            _ if Self::is_value_or_liststr(&expr.ty) => self.try_opt_value_or_liststr_payload(expr, ty),
+            IrExprKind::Record { .. } if self.record_or_anon_drop_type_name(&expr.ty).is_some() => {
                 self.try_opt_record_drop_payload(expr, ty)
             }
-            IrExprKind::OptionSome { expr }
-                if matches!(expr.kind, IrExprKind::Record { .. })
-                    && matches!(&expr.ty, Ty::Named(..))
-                    && self
-                        .aggregate_field_tys(&expr.ty)
-                        .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t))) =>
-            {
+            IrExprKind::Record { .. } if self.is_named_all_scalar_record(&expr.ty) => {
                 self.try_opt_record_scalar_fields_payload(expr, ty)
             }
             _ => None,
         }
+    }
+
+    fn is_int_str_tuple(ty: &Ty) -> bool {
+        matches!(ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String))
+    }
+
+    fn is_variant_ctor_call(&self, kind: &IrExprKind) -> bool {
+        matches!(kind,
+            IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()))
+    }
+
+    fn is_all_scalar_tuple(ty: &Ty) -> bool {
+        matches!(ty, Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)))
+    }
+
+    fn is_str_str_tuple(ty: &Ty) -> bool {
+        matches!(ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String))
+    }
+
+    fn is_str_int_tuple(ty: &Ty) -> bool {
+        matches!(ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1]))
+    }
+
+    fn is_value_or_liststr(ty: &Ty) -> bool {
+        crate::lower::is_value_ty(ty)
+            || matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
+                if e.len() == 1 && matches!(e[0], Ty::String))
+    }
+
+    fn is_named_all_scalar_record(&self, ty: &Ty) -> bool {
+        matches!(ty, Ty::Named(..))
+            && self.aggregate_field_tys(ty).is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t)))
     }
 
     fn try_opt_int_str_tuple_payload(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
@@ -211,22 +212,21 @@ impl LowerCtx {
     /// deeper). The router keeps every pattern/guard verbatim, in the same
     /// order, so arm SELECTION — including `_ => return None` — is
     /// byte-identical.
+    /// Same match STRUCTURE/ORDER/`_ => return None` tail as before (arm
+    /// SELECTION is untouched — critical here, since several arm bodies can
+    /// themselves return `None` via an internal `?` even after their guard
+    /// matched, and the ORIGINAL semantics is "the whole function returns
+    /// None then" — NOT "try the next arm". A `.or_else()` chain would
+    /// silently change that, so unlike the pure-lookup-table splits above,
+    /// only the GUARD EXPRESSIONS move into named predicate methods here;
+    /// the match itself, and what runs when an arm is selected, is
+    /// unchanged bit-for-bit.
     fn opt_heap_general_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
         let piece = match &expr.kind {
-            IrExprKind::Var { id }
-                if self
-                    .value_for(*id)
-                    .map(|v| self.live_heap_handles.contains(&v))
-                    .unwrap_or(false) =>
-            {
+            IrExprKind::Var { id } if self.is_live_heap_var(*id) => {
                 self.piece_from_live_heap_var(*id)?
             }
-            IrExprKind::Var { id }
-                if self
-                    .value_for(*id)
-                    .map(|v| self.param_values.contains(&v))
-                    .unwrap_or(false) =>
-            {
+            IrExprKind::Var { id } if self.is_borrowed_param_var(*id) => {
                 self.piece_from_borrowed_param_var(*id)?
             }
             IrExprKind::LitStr { value } => self.piece_from_lit_str(&expr.ty, value)?,
@@ -245,9 +245,7 @@ impl LowerCtx {
             | IrExprKind::OptionNone
             | IrExprKind::ResultOk { .. }
             | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
-            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
-                if matches!(expr.ty, Ty::String) =>
-            {
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } if matches!(expr.ty, Ty::String) => {
                 self.piece_from_heap_field_projection(expr)?
             }
             IrExprKind::BinOp {
@@ -257,42 +255,48 @@ impl LowerCtx {
             IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
                 self.piece_from_string_interp(parts)?
             }
-            IrExprKind::List { elements }
-                if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                            if a.len() == 1 && !is_heap_ty(&a[0])) =>
-            {
+            IrExprKind::List { elements } if Self::is_scalar_list_ty(&expr.ty) => {
                 self.try_lower_scalar_list_slots(elements)?
             }
-            IrExprKind::Call {
-                target: CallTarget::Module { .. },
-                ..
-            }
-            | IrExprKind::BinOp {
-                op: almide_ir::BinOp::ConcatList,
-                ..
-            } if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                            if a.len() == 1 && !is_heap_ty(&a[0])) =>
+            IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+            | IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. }
+                if Self::is_scalar_list_ty(&expr.ty) =>
             {
                 self.piece_from_computed_scalar_list(expr)?
             }
-            IrExprKind::Call {
-                target: CallTarget::Module { .. },
-                ..
-            } if matches!(expr.ty, Ty::String) => self.piece_from_module_string_call(expr)?,
+            IrExprKind::Call { target: CallTarget::Module { .. }, .. } if matches!(expr.ty, Ty::String) => {
+                self.piece_from_module_string_call(expr)?
+            }
             IrExprKind::If { .. } | IrExprKind::Match { .. } if matches!(expr.ty, Ty::String) => {
                 self.piece_from_heap_result_if_match(expr)?
             }
-            IrExprKind::Call {
-                target: CallTarget::Module { .. },
-                ..
-            } if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
-                            if a.len() == 2 && is_heap_ty(&a[0]) && !is_heap_ty(&a[1])) =>
-            {
+            IrExprKind::Call { target: CallTarget::Module { .. }, .. } if Self::is_str_int_map_ty(&expr.ty) => {
                 self.piece_from_computed_map(expr)?
             }
             _ => return None,
         };
         Some(piece)
+    }
+
+    fn is_live_heap_var(&self, id: almide_ir::VarId) -> bool {
+        self.value_for(id).map(|v| self.live_heap_handles.contains(&v)).unwrap_or(false)
+    }
+
+    fn is_borrowed_param_var(&self, id: almide_ir::VarId) -> bool {
+        self.value_for(id).map(|v| self.param_values.contains(&v)).unwrap_or(false)
+    }
+
+    /// A SCALAR-element `List[T]` — used by both the literal and computed-list
+    /// arms of [`Self::opt_heap_general_piece`] (they shared this identical guard).
+    fn is_scalar_list_ty(ty: &Ty) -> bool {
+        matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+            if a.len() == 1 && !is_heap_ty(&a[0]))
+    }
+
+    /// A `Map[String, Int]` (map_skv) — [`Self::opt_heap_general_piece`]'s Map arm guard.
+    fn is_str_int_map_ty(ty: &Ty) -> bool {
+        matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+            if a.len() == 2 && is_heap_ty(&a[0]) && !is_heap_ty(&a[1]))
     }
 
     /// Dup, do NOT move: the ctor gets its OWN co-owned reference and the var
