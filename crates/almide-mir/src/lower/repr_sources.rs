@@ -132,72 +132,15 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
                     let almide_ir::IrStringPart::Expr { expr } = p else { continue };
                     match &expr.ty {
                         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                            if let Ty::Named(n, args) = &a[0] {
-                                if self.rec_names.contains(n.as_str()) {
-                                    self.out.rec_lists.insert(n.as_str().to_string());
-                                } else if self.var_names.contains(n.as_str()) {
-                                    if args.is_empty() {
-                                        self.out.var_lists.insert(n.as_str().to_string());
-                                    } else {
-                                        // A generic-variant INSTANTIATION element
-                                        // (`${forest}` over List[Tree[Int]]): the walker
-                                        // needs the element's instantiation-keyed repr too.
-                                        self.out
-                                            .var_inst_lists
-                                            .push((n.as_str().to_string(), args.clone()));
-                                        self.out
-                                            .var_insts
-                                            .push((n.as_str().to_string(), args.clone()));
-                                    }
-                                }
-                            }
-                            // `${List[(Int, String)]}` — a scalar-component tuple
-                            // element: the generator emits its `__repr_list_tup_<key>`.
-                            if let Ty::Tuple(ts) = &a[0] {
-                                if let Some(key) = tuple_repr_ident(ts) {
-                                    if !self.out.tup_lists.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
-                                        self.out.tup_lists.push(ts.clone());
-                                    }
-                                }
-                            }
+                            self.note_list_interp_part(a);
                         }
                         Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                            if let Ty::Named(n, args) = &a[0] {
-                                if self.rec_names.contains(n.as_str()) {
-                                    self.out.rec_opts.insert(n.as_str().to_string());
-                                } else if self.var_names.contains(n.as_str()) {
-                                    if args.is_empty() {
-                                        self.out.var_opts.insert(n.as_str().to_string());
-                                    } else {
-                                        self.out
-                                            .var_inst_opts
-                                            .push((n.as_str().to_string(), args.clone()));
-                                        self.out
-                                            .var_insts
-                                            .push((n.as_str().to_string(), args.clone()));
-                                    }
-                                }
-                            }
-                            // `${Option[(Bool, Bool)]}` (a list.min/max result) — the
-                            // generator emits its `__repr_opt_tup_<key>`.
-                            if let Ty::Tuple(ts) = &a[0] {
-                                if let Some(key) = tuple_repr_ident(ts) {
-                                    if !self.out.tup_opts.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
-                                        self.out.tup_opts.push(ts.clone());
-                                    }
-                                }
-                            }
+                            self.note_option_interp_part(a);
                         }
                         Ty::Applied(TypeConstructorId::Map, a)
                             if a.len() == 2 && matches!(a[0], Ty::String) =>
                         {
-                            if let Ty::Named(n, _) = &a[1] {
-                                if self.rec_names.contains(n.as_str()) {
-                                    self.out.rec_maps.insert(n.as_str().to_string());
-                                } else if self.var_names.contains(n.as_str()) {
-                                    self.out.var_maps.insert(n.as_str().to_string());
-                                }
-                            }
+                            self.note_map_interp_part(a);
                         }
                         // A GENERIC-variant instance part (`${l}` over
                         // `ReprEither[Int, String]`) — record the instantiation so the
@@ -217,6 +160,74 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
                 }
             }
             walk_expr(self, e);
+        }
+    }
+    impl C {
+        /// The `List[_]` interp-part arm of [`C::visit_expr`]'s match — a
+        /// record/variant element type registers its list-repr container, and a
+        /// scalar-component tuple element registers its `__repr_list_tup_<key>`.
+        fn note_list_interp_part(&mut self, a: &[Ty]) {
+            if let Ty::Named(n, args) = &a[0] {
+                if self.rec_names.contains(n.as_str()) {
+                    self.out.rec_lists.insert(n.as_str().to_string());
+                } else if self.var_names.contains(n.as_str()) {
+                    if args.is_empty() {
+                        self.out.var_lists.insert(n.as_str().to_string());
+                    } else {
+                        // A generic-variant INSTANTIATION element
+                        // (`${forest}` over List[Tree[Int]]): the walker
+                        // needs the element's instantiation-keyed repr too.
+                        self.out.var_inst_lists.push((n.as_str().to_string(), args.clone()));
+                        self.out.var_insts.push((n.as_str().to_string(), args.clone()));
+                    }
+                }
+            }
+            // `${List[(Int, String)]}` — a scalar-component tuple
+            // element: the generator emits its `__repr_list_tup_<key>`.
+            if let Ty::Tuple(ts) = &a[0] {
+                if let Some(key) = tuple_repr_ident(ts) {
+                    if !self.out.tup_lists.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
+                        self.out.tup_lists.push(ts.clone());
+                    }
+                }
+            }
+        }
+
+        /// The `Option[_]` interp-part arm of [`C::visit_expr`]'s match —
+        /// the `List[_]` arm's sibling over `Option`.
+        fn note_option_interp_part(&mut self, a: &[Ty]) {
+            if let Ty::Named(n, args) = &a[0] {
+                if self.rec_names.contains(n.as_str()) {
+                    self.out.rec_opts.insert(n.as_str().to_string());
+                } else if self.var_names.contains(n.as_str()) {
+                    if args.is_empty() {
+                        self.out.var_opts.insert(n.as_str().to_string());
+                    } else {
+                        self.out.var_inst_opts.push((n.as_str().to_string(), args.clone()));
+                        self.out.var_insts.push((n.as_str().to_string(), args.clone()));
+                    }
+                }
+            }
+            // `${Option[(Bool, Bool)]}` (a list.min/max result) — the
+            // generator emits its `__repr_opt_tup_<key>`.
+            if let Ty::Tuple(ts) = &a[0] {
+                if let Some(key) = tuple_repr_ident(ts) {
+                    if !self.out.tup_opts.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
+                        self.out.tup_opts.push(ts.clone());
+                    }
+                }
+            }
+        }
+
+        /// The `Map[String, _]` interp-part arm of [`C::visit_expr`]'s match.
+        fn note_map_interp_part(&mut self, a: &[Ty]) {
+            if let Ty::Named(n, _) = &a[1] {
+                if self.rec_names.contains(n.as_str()) {
+                    self.out.rec_maps.insert(n.as_str().to_string());
+                } else if self.var_names.contains(n.as_str()) {
+                    self.out.var_maps.insert(n.as_str().to_string());
+                }
+            }
         }
     }
     use almide_ir::IrTypeDeclKind;
