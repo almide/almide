@@ -4,7 +4,18 @@
 fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<String> {
     let mut used = std::collections::HashSet::new();
 
+    // Router: dispatches to a group helper by expr kind. Each helper handles
+    // an independent subset of `IrExprKind` and returns whether it matched —
+    // `used` is a write-only accumulator (no arm ever reads back what an
+    // earlier arm wrote), so grouping is behavior-preserving.
     fn scan_expr(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        if scan_expr_calls(expr, used) { return; }
+        if scan_expr_control(expr, used) { return; }
+        scan_expr_containers(expr, used);
+    }
+
+    // Call-like nodes: the only arms that can add a module name to `used`.
+    fn scan_expr_calls(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
         match &expr.kind {
             IrExprKind::Call { target, args, .. } => {
                 if let CallTarget::Module { module, .. } = target {
@@ -14,6 +25,7 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
                     scan_expr(object, used);
                 }
                 for a in args { scan_expr(a, used); }
+                true
             }
             IrExprKind::RuntimeCall { symbol, args } => {
                 // Extract module from runtime symbol: almide_rt_{module}_{fn}
@@ -23,13 +35,29 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
                     }
                 }
                 for a in args { scan_expr(a, used); }
+                true
             }
+            _ => false,
+        }
+    }
+
+    // Control-flow nodes: recurse into sub-blocks/statements/arms.
+    fn scan_expr_control(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        if scan_expr_block_like(expr, used) { return true; }
+        scan_expr_loop_like(expr, used)
+    }
+
+    // Block/If/Match: nodes that carry statement lists or arms.
+    fn scan_expr_block_like(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        match &expr.kind {
             IrExprKind::Block { stmts, expr: tail } => {
                 for s in stmts { scan_stmt(s, used); }
                 if let Some(e) = tail { scan_expr(e, used); }
+                true
             }
             IrExprKind::If { cond, then, else_ } => {
                 scan_expr(cond, used); scan_expr(then, used); scan_expr(else_, used);
+                true
             }
             IrExprKind::Match { subject, arms } => {
                 scan_expr(subject, used);
@@ -37,28 +65,76 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
                     if let Some(g) = &arm.guard { scan_expr(g, used); }
                     scan_expr(&arm.body, used);
                 }
+                true
             }
-            IrExprKind::Lambda { body, .. } => scan_expr(body, used),
+            _ => false,
+        }
+    }
+
+    // Lambda/ForIn/While: nodes with a body and (for loops) an iterable/cond.
+    fn scan_expr_loop_like(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        match &expr.kind {
+            IrExprKind::Lambda { body, .. } => { scan_expr(body, used); true }
             IrExprKind::ForIn { iterable, body, .. } => {
                 scan_expr(iterable, used);
                 for s in body { scan_stmt(s, used); }
+                true
             }
             IrExprKind::While { cond, body } => {
                 scan_expr(cond, used);
                 for s in body { scan_stmt(s, used); }
+                true
             }
-            IrExprKind::BinOp { left, right, .. } => { scan_expr(left, used); scan_expr(right, used); }
-            IrExprKind::UnOp { operand, .. } => scan_expr(operand, used),
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-                for e in elements { scan_expr(e, used); }
-            }
-            IrExprKind::Record { fields, .. } => { for (_, v) in fields { scan_expr(v, used); } }
+            _ => false,
+        }
+    }
+
+    // Plain container/wrapper nodes: straight recursive descent, no module
+    // names to record here.
+    fn scan_expr_containers(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        if scan_expr_wrappers(expr, used) { return; }
+        scan_expr_collections(expr, used);
+    }
+
+    // Single/dual-child wrapper nodes: unwrap-like variants, UnOp, IndexAccess,
+    // Range, UnwrapOr — each recurses directly into its 1-2 sub-expressions.
+    fn scan_expr_wrappers(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        match &expr.kind {
+            IrExprKind::UnOp { operand, .. } => { scan_expr(operand, used); true }
             IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
             | IrExprKind::OptionSome { expr: e } | IrExprKind::Unwrap { expr: e }
             | IrExprKind::Try { expr: e } | IrExprKind::ToOption { expr: e }
             | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-            | IrExprKind::Member { object: e, .. } => scan_expr(e, used),
-            IrExprKind::UnwrapOr { expr: e, fallback } => { scan_expr(e, used); scan_expr(fallback, used); }
+            | IrExprKind::Member { object: e, .. } => { scan_expr(e, used); true }
+            IrExprKind::UnwrapOr { expr: e, fallback } => { scan_expr(e, used); scan_expr(fallback, used); true }
+            IrExprKind::IndexAccess { object, index } => { scan_expr(object, used); scan_expr(index, used); true }
+            IrExprKind::Range { start, end, .. } => { scan_expr(start, used); scan_expr(end, used); true }
+            _ => false,
+        }
+    }
+
+    // Collection-literal nodes: recurse over a list/map of sub-expressions.
+    fn scan_expr_collections(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        if scan_expr_seq_literals(expr, used) { return; }
+        scan_expr_keyed_literals(expr, used);
+    }
+
+    // BinOp/List/Tuple/Fan/Record: sequence-shaped literals and BinOp.
+    fn scan_expr_seq_literals(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        match &expr.kind {
+            IrExprKind::BinOp { left, right, .. } => { scan_expr(left, used); scan_expr(right, used); true }
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+                for e in elements { scan_expr(e, used); }
+                true
+            }
+            IrExprKind::Record { fields, .. } => { for (_, v) in fields { scan_expr(v, used); } true }
+            _ => false,
+        }
+    }
+
+    // StringInterp/SpreadRecord/MapLiteral: keyed/mixed literal forms.
+    fn scan_expr_keyed_literals(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        match &expr.kind {
             IrExprKind::StringInterp { parts } => {
                 for p in parts { if let IrStringPart::Expr { expr } = p { scan_expr(expr, used); } }
             }
@@ -66,11 +142,9 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
                 scan_expr(base, used);
                 for (_, v) in fields { scan_expr(v, used); }
             }
-            IrExprKind::IndexAccess { object, index } => { scan_expr(object, used); scan_expr(index, used); }
             IrExprKind::MapLiteral { entries } => {
                 for (k, v) in entries { scan_expr(k, used); scan_expr(v, used); }
             }
-            IrExprKind::Range { start, end, .. } => { scan_expr(start, used); scan_expr(end, used); }
             _ => {}
         }
     }
