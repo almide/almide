@@ -529,8 +529,25 @@ fn apply_lambda_param_types(
     vt: &mut VarTable,
 ) {
     let IrExprKind::Lambda { params, body, .. } = &mut arg.kind else { return };
-    // Update designated param(s) — use has_deep_unresolved to catch
-    // Applied(List, [TypeVar(A)]) which is_unresolved_structural() misses.
+    apply_lambda_param_types_update_params(params, elem_param_indices, elem_ty, acc_ty, vt);
+    // Infer return type from body + resolved params
+    let body_ret = infer_body_result_ty(body, params);
+    apply_lambda_fn_ty_wrapper(&mut arg.ty, elem_param_indices, elem_ty, acc_ty, body_ret);
+}
+
+/// First phase of `apply_lambda_param_types`: update the Lambda's own
+/// param bindings (and their `VarTable` entries) — extracted verbatim
+/// (cog>30 decomposition, sequential-phase pattern, no match statement so
+/// no arm-count floor concern). Uses `has_unresolved_deep` (not
+/// `is_unresolved_structural`) to catch `Applied(List, [TypeVar(A)])`.
+fn apply_lambda_param_types_update_params(
+    params: &mut [(VarId, Ty)],
+    elem_param_indices: &[usize],
+    elem_ty: &Ty,
+    acc_ty: &Option<Ty>,
+    vt: &mut VarTable,
+) {
+    // Update designated param(s).
     for &pidx in elem_param_indices {
         if let Some((vid, pty)) = params.get_mut(pidx) {
             if pty.has_unresolved_deep() {
@@ -552,25 +569,34 @@ fn apply_lambda_param_types(
             }
         }
     }
-    // Infer return type from body + resolved params
-    let body_ret = infer_body_result_ty(body, params);
-    // Update Ty::Fn wrapper
-    if let Ty::Fn { params: fparams, ret } = &mut arg.ty {
-        for &pidx in elem_param_indices {
-            if let Some(fp) = fparams.get_mut(pidx) {
-                if fp.has_unresolved_deep() { *fp = elem_ty.clone(); }
-            }
+}
+
+/// Second phase of `apply_lambda_param_types`: update the Lambda arg's own
+/// `Ty::Fn` wrapper to match — extracted verbatim (cog>30 decomposition).
+/// One-way dependency on phase 1 only through the already-computed
+/// `body_ret` value, not through any shared mutable state.
+fn apply_lambda_fn_ty_wrapper(
+    arg_ty: &mut Ty,
+    elem_param_indices: &[usize],
+    elem_ty: &Ty,
+    acc_ty: &Option<Ty>,
+    body_ret: Option<Ty>,
+) {
+    let Ty::Fn { params: fparams, ret } = arg_ty else { return };
+    for &pidx in elem_param_indices {
+        if let Some(fp) = fparams.get_mut(pidx) {
+            if fp.has_unresolved_deep() { *fp = elem_ty.clone(); }
         }
-        if let Some(a_ty) = acc_ty {
-            if let Some(fp) = fparams.get_mut(0) {
-                if fp.has_unresolved_deep() { *fp = a_ty.clone(); }
-            }
-            // The lambda's return is also the accumulator type.
-            if ret.has_unresolved_deep() { **ret = a_ty.clone(); }
+    }
+    if let Some(a_ty) = acc_ty {
+        if let Some(fp) = fparams.get_mut(0) {
+            if fp.has_unresolved_deep() { *fp = a_ty.clone(); }
         }
-        if ret.has_unresolved_deep() {
-            if let Some(r) = body_ret { **ret = r; }
-        }
+        // The lambda's return is also the accumulator type.
+        if ret.has_unresolved_deep() { **ret = a_ty.clone(); }
+    }
+    if ret.has_unresolved_deep() {
+        if let Some(r) = body_ret { **ret = r; }
     }
 }
 
