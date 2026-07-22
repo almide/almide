@@ -479,6 +479,16 @@ impl Checker {
             Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
             _ => Ty::Unknown,
         };
+        self.bind_for_in_var(var, var_tuple, elem_ty);
+        for stmt in body.iter_mut() { self.check_stmt(stmt); }
+        self.env.pop_scope();
+        Ty::Unit
+    }
+
+    /// Bind the loop variable(s) of a `for` statement: a plain `var` name,
+    /// or `var_tuple` destructuring (`for (a, b) in xs`) against a Tuple
+    /// element type. Verbatim text move out of [`Self::infer_for_in`].
+    fn bind_for_in_var(&mut self, var: &str, var_tuple: &Option<Vec<almide_base::intern::Sym>>, elem_ty: Ty) {
         if let Some(names) = var_tuple {
             // Destructure tuple: for (a, b) in xs
             if let Ty::Tuple(tys) = &elem_ty {
@@ -491,9 +501,6 @@ impl Checker {
         } else {
             self.env.define_var(var, elem_ty);
         }
-        for stmt in body.iter_mut() { self.check_stmt(stmt); }
-        self.env.pop_scope();
-        Ty::Unit
     }
 
     // ── Statement checking ──
