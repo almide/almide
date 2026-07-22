@@ -142,6 +142,53 @@ pub fn cmd_check_json(file: &str) {
     }
 }
 
+/// `cmd_check_effects`'s `[permissions].allow` enforcement block. Extracted
+/// verbatim — reads only its parameters, exits the process exactly where
+/// the original code did.
+fn enforce_effect_permissions(
+    proj: &project::Project,
+    entries: &[(&String, &almide::codegen::pass_effect_inference::FunctionEffects)],
+) {
+    use almide::codegen::pass_effect_inference::Effect;
+    let allowed: std::collections::HashSet<Effect> = proj.permissions.iter()
+        .filter_map(|s| match s.as_str() {
+            "IO" => Some(Effect::IO),
+            "Net" => Some(Effect::Net),
+            "Env" => Some(Effect::Env),
+            "Time" => Some(Effect::Time),
+            "Rand" => Some(Effect::Rand),
+            "Fan" => Some(Effect::Fan),
+            _ => None,
+        })
+        .collect();
+
+    let mut violations = 0;
+    for (name, fe) in entries {
+        let forbidden: Vec<_> = fe.transitive.iter()
+            .filter(|e| !allowed.contains(e))
+            .collect();
+        if !forbidden.is_empty() {
+            eprintln!(
+                "\nerror: capability violation in `{}`",
+                name
+            );
+            for e in &forbidden {
+                eprintln!("  {} is not in [permissions].allow", e);
+            }
+            eprintln!(
+                "  hint: add {} to [permissions].allow in almide.toml",
+                forbidden.iter().map(|e| format!("\"{}\"", e)).collect::<Vec<_>>().join(", ")
+            );
+            violations += 1;
+        }
+    }
+    if violations > 0 {
+        eprintln!("\n{} capability violation(s) found", violations);
+        std::process::exit(1);
+    }
+    eprintln!("\nPermissions OK: all effects within [permissions].allow = {:?}", proj.permissions);
+}
+
 pub fn cmd_check_effects(file: &str) {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
@@ -222,44 +269,7 @@ pub fn cmd_check_effects(file: &str) {
     if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             if !proj.permissions.is_empty() {
-                use almide::codegen::pass_effect_inference::Effect;
-                let allowed: std::collections::HashSet<Effect> = proj.permissions.iter()
-                    .filter_map(|s| match s.as_str() {
-                        "IO" => Some(Effect::IO),
-                        "Net" => Some(Effect::Net),
-                        "Env" => Some(Effect::Env),
-                        "Time" => Some(Effect::Time),
-                        "Rand" => Some(Effect::Rand),
-                        "Fan" => Some(Effect::Fan),
-                        _ => None,
-                    })
-                    .collect();
-
-                let mut violations = 0;
-                for (name, fe) in &entries {
-                    let forbidden: Vec<_> = fe.transitive.iter()
-                        .filter(|e| !allowed.contains(e))
-                        .collect();
-                    if !forbidden.is_empty() {
-                        eprintln!(
-                            "\nerror: capability violation in `{}`",
-                            name
-                        );
-                        for e in &forbidden {
-                            eprintln!("  {} is not in [permissions].allow", e);
-                        }
-                        eprintln!(
-                            "  hint: add {} to [permissions].allow in almide.toml",
-                            forbidden.iter().map(|e| format!("\"{}\"", e)).collect::<Vec<_>>().join(", ")
-                        );
-                        violations += 1;
-                    }
-                }
-                if violations > 0 {
-                    eprintln!("\n{} capability violation(s) found", violations);
-                    std::process::exit(1);
-                }
-                eprintln!("\nPermissions OK: all effects within [permissions].allow = {:?}", proj.permissions);
+                enforce_effect_permissions(&proj, &entries);
             }
         }
     }
