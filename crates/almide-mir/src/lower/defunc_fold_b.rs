@@ -372,18 +372,38 @@ fn substitute_state_members(
         n_var: VarId,
         bad: bool,
     }
+    // Pure decision, no traversal state — which slot var replaces `st.<field>`, or
+    // None if `field` is neither state field (the "other field" bad case). Extracted
+    // out of the trait method below so the recursive walk's own branching (the state-
+    // threaded traversal itself, left untouched per the "no mechanical decomposition
+    // of state-threading walkers" rule) isn't tangled up with this unrelated pure
+    // field-to-var mapping.
+    fn member_replacement_var(
+        field: almide_lang::intern::Sym,
+        list_field: almide_lang::intern::Sym,
+        scalar_field: almide_lang::intern::Sym,
+        acc_var: VarId,
+        n_var: VarId,
+    ) -> Option<VarId> {
+        if field == list_field {
+            Some(acc_var)
+        } else if field == scalar_field {
+            Some(n_var)
+        } else {
+            None
+        }
+    }
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             if let IrExprKind::Member { object, field } = &e.kind {
                 if matches!(&object.kind, IrExprKind::Var { id } if *id == self.state) {
-                    let new_var = if *field == self.list_field {
-                        Some(self.acc_var)
-                    } else if *field == self.scalar_field {
-                        Some(self.n_var)
-                    } else {
-                        None
-                    };
-                    match new_var {
+                    match member_replacement_var(
+                        *field,
+                        self.list_field,
+                        self.scalar_field,
+                        self.acc_var,
+                        self.n_var,
+                    ) {
                         Some(v) => {
                             e.kind = IrExprKind::Var { id: v };
                             return; // no need to walk the replaced node
