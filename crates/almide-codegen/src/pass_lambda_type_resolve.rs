@@ -709,37 +709,54 @@ fn refresh_lambda_fn_ty(expr: &mut IrExpr, _vt: &VarTable) {
 /// Checks: direct expr.ty → VarTable → list.zip inference.
 /// Rejects types with deep unresolved components.
 fn resolve_list_elem_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
-    // Direct type
-    if let Some(elem) = extract_list_elem(&expr.ty) {
-        if !(elem).has_unresolved_deep() { return Some(elem); }
-    }
-    // VarTable lookup for Var/EnvLoad
+    resolve_list_elem_ty_direct(expr)
+        .or_else(|| resolve_list_elem_ty_var_table(expr, vt))
+        .or_else(|| resolve_list_elem_ty_tuple_index(expr, vt))
+        .or_else(|| resolve_list_elem_ty_zip(expr, vt))
+}
+
+/// Direct-type phase of `resolve_list_elem_ty`, extracted verbatim (cog>30
+/// decomposition, pattern 1 — the four phases share no state and each
+/// independently returns `Some`/`None`).
+fn resolve_list_elem_ty_direct(expr: &IrExpr) -> Option<Ty> {
+    let elem = extract_list_elem(&expr.ty)?;
+    if elem.has_unresolved_deep() { return None; }
+    Some(elem)
+}
+
+/// VarTable-lookup phase (for `Var`/`EnvLoad`) of `resolve_list_elem_ty`,
+/// extracted verbatim (cog>30 decomposition).
+fn resolve_list_elem_ty_var_table(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
     let vid = match &expr.kind {
         IrExprKind::Var { id } => Some(*id),
         IrExprKind::EnvLoad { env_var, .. } => Some(*env_var),
         _ => None,
     };
-    if let Some(id) = vid {
-        if (id.0 as usize) < vt.len() {
-            if let Some(elem) = extract_list_elem(&vt.get(id).ty) {
-                if !(elem).has_unresolved_deep() { return Some(elem); }
-            }
-        }
-    }
-    // TupleIndex: `pair.0` where pair: Tuple([List[A], List[B]]) → List[A]'s elem = A
-    if let IrExprKind::TupleIndex { object, index } = &expr.kind {
-        if let Some(tuple_elem) = resolve_tuple_elem_ty(object, *index, vt) {
-            if let Some(elem) = extract_list_elem(&tuple_elem) {
-                if !(elem).has_unresolved_deep() { return Some(elem); }
-            }
-        }
-    }
-    // list.zip(xs, ys) → Tuple(xs_elem, ys_elem).
-    // Match every call-target shape the frontend / ResolveCalls /
-    // IntrinsicLowering produce for stdlib `list.zip`: pre-lowering
-    // `Module { list, zip }`, frontend-mangled or post-ResolveCalls
-    // `Named { "almide_rt_list_zip" }`, and post-IntrinsicLowering
-    // `RuntimeCall { symbol: "almide_rt_list_zip", .. }`.
+    let id = vid?;
+    if !((id.0 as usize) < vt.len()) { return None; }
+    let elem = extract_list_elem(&vt.get(id).ty)?;
+    if elem.has_unresolved_deep() { return None; }
+    Some(elem)
+}
+
+/// `TupleIndex` phase of `resolve_list_elem_ty`, extracted verbatim
+/// (cog>30 decomposition): `pair.0` where `pair: Tuple([List[A], List[B]])`
+/// → `List[A]`'s elem = `A`.
+fn resolve_list_elem_ty_tuple_index(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
+    let IrExprKind::TupleIndex { object, index } = &expr.kind else { return None };
+    let tuple_elem = resolve_tuple_elem_ty(object, *index, vt)?;
+    let elem = extract_list_elem(&tuple_elem)?;
+    if elem.has_unresolved_deep() { return None; }
+    Some(elem)
+}
+
+/// `list.zip` phase of `resolve_list_elem_ty`, extracted verbatim (cog>30
+/// decomposition): `list.zip(xs, ys)` → `Tuple(xs_elem, ys_elem)`. Matches
+/// every call-target shape the frontend / ResolveCalls / IntrinsicLowering
+/// produce for stdlib `list.zip`: pre-lowering `Module { list, zip }`,
+/// frontend-mangled or post-ResolveCalls `Named { "almide_rt_list_zip" }`,
+/// and post-IntrinsicLowering `RuntimeCall { symbol: "almide_rt_list_zip", .. }`.
+fn resolve_list_elem_ty_zip(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
     let zip_args: Option<&Vec<IrExpr>> = match &expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
             if module.as_str() == "list" && func.as_str() == "zip" => Some(args),
@@ -749,16 +766,15 @@ fn resolve_list_elem_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
             if symbol.as_str() == "almide_rt_list_zip" => Some(args),
         _ => None,
     };
-    if let Some(args) = zip_args {
-        if args.len() >= 2 {
-            let a = resolve_list_elem_ty(&args[0], vt);
-            let b = resolve_list_elem_ty(&args[1], vt);
-            if let (Some(a), Some(b)) = (a, b) {
-                return Some(Ty::Tuple(vec![a, b]));
-            }
-        }
+    let args = zip_args?;
+    if args.len() < 2 { return None; }
+    let a = resolve_list_elem_ty(&args[0], vt);
+    let b = resolve_list_elem_ty(&args[1], vt);
+    if let (Some(a), Some(b)) = (a, b) {
+        Some(Ty::Tuple(vec![a, b]))
+    } else {
+        None
     }
-    None
 }
 
 /// Extract element type from Applied(List, [elem]).
