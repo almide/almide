@@ -5,67 +5,13 @@
 /// 3. Stdlib `list.*` polymorphic ops — compute from lambda return types
 ///
 /// Returning `None` is fine; the emit layer still has its fallbacks.
-fn resolve_call_ret_ty(
-    target: &CallTarget,
-    args: &[IrExpr],
-    _vt: &VarTable,
-    symbols: &SymbolTable,
-) -> Option<Ty> {
+/// Stdlib `list.*` polymorphic ops whose return type needs the lambda
+/// argument's `Fn::ret` (not expressible in the TOML template) — phase 3 of
+/// [`resolve_call_ret_ty`], extracted as its own name-router (cog>25
+/// decomposition): a pure per-`func`-name dispatch table with no state
+/// shared across arms.
+fn resolve_list_poly_ret_ty(func: &str, args: &[IrExpr]) -> Option<Ty> {
     use almide_lang::types::constructor::TypeConstructorId as TCI;
-
-    // 1. User-defined function lookup
-    match target {
-        CallTarget::Module { module, func, .. } => {
-            if let Some(ret) = symbols.lookup_module(module.as_str(), func.as_str()) {
-                if !ret.has_unresolved_deep() {
-                    return Some(ret.clone());
-                }
-            }
-        }
-        CallTarget::Named { name } => {
-            if let Some(ret) = symbols.lookup_named(name.as_str()) {
-                if !ret.has_unresolved_deep() {
-                    return Some(ret.clone());
-                }
-            }
-        }
-        // Calling a closure VALUE (`f(x)` where `f` is a Fn-typed var/expr — e.g.
-        // a HOF lambda parameter): the call's type is the callee's RETURN type, not
-        // its whole Fn type. Without this the node keeps the `fn(..) -> T` type and
-        // a later `acc + f(x)` trips the IR verifier (AddInt on a function value).
-        CallTarget::Computed { callee } => {
-            if let Ty::Fn { ret, .. } = &callee.ty {
-                if !ret.has_unresolved_deep() {
-                    return Some((**ret).clone());
-                }
-            }
-        }
-        _ => {}
-    }
-
-    // Decode (module, func) from every stdlib call-target shape:
-    //   - `Module { list, map }`                 — pre-lowering
-    //   - `Named { "almide_rt_list_map" }`       — post-ResolveCalls or
-    //                                              frontend mangling
-    let (module_owned, func_owned): (String, String) = match target {
-        CallTarget::Module { module, func, .. } => (module.as_str().to_string(), func.as_str().to_string()),
-        CallTarget::Named { name } => {
-            let s = name.as_str();
-            if let Some(rest) = s.strip_prefix("almide_rt_") {
-                if let Some(under) = rest.find('_') {
-                    (rest[..under].to_string(), rest[under+1..].to_string())
-                } else { return None }
-            } else { return None }
-        }
-        _ => return None,
-    };
-    let module = module_owned.as_str();
-    let func = func_owned.as_str();
-
-    // 2. Stdlib polymorphic list operations with lambda return types.
-    //    These need the lambda argument's Fn::ret, which isn't expressible
-    //    in the TOML template.
-    if module != "list" { return None; }
 
     // Helper: get the element type of List[T] argument at given index.
     let list_elem = |idx: usize| -> Option<Ty> {
@@ -149,6 +95,66 @@ fn resolve_call_ret_ty(
         }
         _ => None,
     }
+}
+
+fn resolve_call_ret_ty(
+    target: &CallTarget,
+    args: &[IrExpr],
+    _vt: &VarTable,
+    symbols: &SymbolTable,
+) -> Option<Ty> {
+    // 1. User-defined function lookup
+    match target {
+        CallTarget::Module { module, func, .. } => {
+            if let Some(ret) = symbols.lookup_module(module.as_str(), func.as_str()) {
+                if !ret.has_unresolved_deep() {
+                    return Some(ret.clone());
+                }
+            }
+        }
+        CallTarget::Named { name } => {
+            if let Some(ret) = symbols.lookup_named(name.as_str()) {
+                if !ret.has_unresolved_deep() {
+                    return Some(ret.clone());
+                }
+            }
+        }
+        // Calling a closure VALUE (`f(x)` where `f` is a Fn-typed var/expr — e.g.
+        // a HOF lambda parameter): the call's type is the callee's RETURN type, not
+        // its whole Fn type. Without this the node keeps the `fn(..) -> T` type and
+        // a later `acc + f(x)` trips the IR verifier (AddInt on a function value).
+        CallTarget::Computed { callee } => {
+            if let Ty::Fn { ret, .. } = &callee.ty {
+                if !ret.has_unresolved_deep() {
+                    return Some((**ret).clone());
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Decode (module, func) from every stdlib call-target shape:
+    //   - `Module { list, map }`                 — pre-lowering
+    //   - `Named { "almide_rt_list_map" }`       — post-ResolveCalls or
+    //                                              frontend mangling
+    let (module_owned, func_owned): (String, String) = match target {
+        CallTarget::Module { module, func, .. } => (module.as_str().to_string(), func.as_str().to_string()),
+        CallTarget::Named { name } => {
+            let s = name.as_str();
+            if let Some(rest) = s.strip_prefix("almide_rt_") {
+                if let Some(under) = rest.find('_') {
+                    (rest[..under].to_string(), rest[under+1..].to_string())
+                } else { return None }
+            } else { return None }
+        }
+        _ => return None,
+    };
+
+    // 2. Stdlib polymorphic list operations with lambda return types.
+    //    These need the lambda argument's Fn::ret, which isn't expressible
+    //    in the TOML template.
+    if module_owned != "list" { return None; }
+    resolve_list_poly_ret_ty(&func_owned, args)
 }
 
 /// Get the effective type of an expression, preferring VarTable for Var/EnvLoad
