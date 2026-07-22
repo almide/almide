@@ -88,53 +88,59 @@ fn build_mutation_map(program: &IrProgram) -> MutationMap {
 
 /// Recursively walk the expression tree looking for loops, hoisting invariants.
 /// Returns true if any hoisting was performed.
-fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> bool {
+/// `IrExprKind::Block` case of `hoist_loops`, extracted verbatim (cog>30
+/// decomposition, pattern 2: uniform match arms, mirrors the
+/// `lower_expr`/`infer_expr_inner` extraction shape).
+fn hoist_loops_block(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> bool {
+    let IrExprKind::Block { stmts, expr: tail } = &mut expr.kind else { unreachable!() };
     let mut changed = false;
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            let mut new_stmts: Vec<IrStmt> = Vec::new();
-            for mut stmt in std::mem::take(stmts) {
-                if hoist_loops_stmt(&mut stmt, vt, pure_fns, mm) {
-                    changed = true;
-                }
-                if let IrStmtKind::Expr { expr: ref mut loop_expr } = stmt.kind {
-                    let hoisted = try_hoist_from_loop(loop_expr, vt, pure_fns, mm);
-                    if !hoisted.is_empty() {
-                        changed = true;
-                        new_stmts.extend(hoisted);
-                    }
-                }
-                new_stmts.push(stmt);
-            }
-            *stmts = new_stmts;
-            if let Some(e) = tail {
-                if hoist_loops(e, vt, pure_fns, mm) { changed = true; }
+    let mut new_stmts: Vec<IrStmt> = Vec::new();
+    for mut stmt in std::mem::take(stmts) {
+        changed |= hoist_loops_stmt(&mut stmt, vt, pure_fns, mm);
+        if let IrStmtKind::Expr { expr: ref mut loop_expr } = stmt.kind {
+            let hoisted = try_hoist_from_loop(loop_expr, vt, pure_fns, mm);
+            if !hoisted.is_empty() {
+                changed = true;
+                new_stmts.extend(hoisted);
             }
         }
+        new_stmts.push(stmt);
+    }
+    *stmts = new_stmts;
+    if let Some(e) = tail {
+        changed |= hoist_loops(e, vt, pure_fns, mm);
+    }
+    changed
+}
+
+fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> bool {
+    match &mut expr.kind {
+        IrExprKind::Block { .. } => hoist_loops_block(expr, vt, pure_fns, mm),
         IrExprKind::If { cond, then, else_ } => {
-            if hoist_loops(cond, vt, pure_fns, mm) { changed = true; }
-            if hoist_loops(then, vt, pure_fns, mm) { changed = true; }
-            if hoist_loops(else_, vt, pure_fns, mm) { changed = true; }
+            hoist_loops(cond, vt, pure_fns, mm)
+                | hoist_loops(then, vt, pure_fns, mm)
+                | hoist_loops(else_, vt, pure_fns, mm)
         }
         IrExprKind::Match { subject, arms } => {
-            if hoist_loops(subject, vt, pure_fns, mm) { changed = true; }
+            let mut changed = hoist_loops(subject, vt, pure_fns, mm);
             for arm in arms {
                 if let Some(g) = &mut arm.guard {
-                    if hoist_loops(g, vt, pure_fns, mm) { changed = true; }
+                    changed |= hoist_loops(g, vt, pure_fns, mm);
                 }
-                if hoist_loops(&mut arm.body, vt, pure_fns, mm) { changed = true; }
+                changed |= hoist_loops(&mut arm.body, vt, pure_fns, mm);
             }
+            changed
         }
-        IrExprKind::Lambda { body, .. } => {
-            if hoist_loops(body, vt, pure_fns, mm) { changed = true; }
-        }
+        IrExprKind::Lambda { body, .. } => hoist_loops(body, vt, pure_fns, mm),
         IrExprKind::ForIn { body, iterable, .. } => {
-            if hoist_loops(iterable, vt, pure_fns, mm) { changed = true; }
-            for s in body { if hoist_loops_stmt(s, vt, pure_fns, mm) { changed = true; } }
+            let mut changed = hoist_loops(iterable, vt, pure_fns, mm);
+            for s in body { changed |= hoist_loops_stmt(s, vt, pure_fns, mm); }
+            changed
         }
         IrExprKind::While { cond, body } => {
-            if hoist_loops(cond, vt, pure_fns, mm) { changed = true; }
-            for s in body { if hoist_loops_stmt(s, vt, pure_fns, mm) { changed = true; } }
+            let mut changed = hoist_loops(cond, vt, pure_fns, mm);
+            for s in body { changed |= hoist_loops_stmt(s, vt, pure_fns, mm); }
+            changed
         }
         // Explicit-preserve: hoisting is selective — these node kinds are
         // not descended for loop discovery here. Listing every remaining
@@ -163,9 +169,8 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm
         | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::IterChain { .. } | IrExprKind::Hole
-        | IrExprKind::Todo { .. } => {}
+        | IrExprKind::Todo { .. } => false,
     }
-    changed
 }
 
 fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> bool {
