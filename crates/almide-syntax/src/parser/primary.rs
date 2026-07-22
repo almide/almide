@@ -407,51 +407,8 @@ impl Parser {
                 if !lit.is_empty() {
                     parts.push(StringPart::Lit { value: std::mem::take(&mut lit) });
                 }
-                let expr_col_start = col_offset + 2; // past ${
-                i += 2; // skip ${
-                col_offset += 2;
-                let mut depth = 1;
-                let mut expr_str = String::new();
-                while i < chars.len() && depth > 0 {
-                    if chars[i] == '{' { depth += 1; }
-                    if chars[i] == '}' { depth -= 1; if depth == 0 { break; } }
-                    expr_str.push(chars[i]);
-                    i += 1;
-                    col_offset += 1;
-                }
-                i += 1; // skip }
-                col_offset += 1;
-                // Sub-parse the expression with current id counter
-                let mut tokens = crate::lexer::Lexer::tokenize(&expr_str);
-                // Adjust spans: sub-lexer produces line=1,col=1-based; remap to parent source
-                for t in &mut tokens {
-                    t.line = str_line;
-                    // col: sub-lexer 1-based → 0-based offset + parent string position
-                    // str_col is the opening quote col, +1 for quote char, + template offset
-                    t.col = str_col + 1 + expr_col_start + (t.col - 1);
-                }
-                let id_offset = self.expr_id_counter();
-                let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset);
-                match sub_parser.parse_single_expr() {
-                    Ok(parsed) => {
-                        // Advance our id counter past sub-parser's allocations
-                        self.next_expr_id = sub_parser.expr_id_counter();
-                        parts.push(StringPart::Expr { expr: Box::new(parsed) });
-                    }
-                    Err(e) => {
-                        // Error recovery: keep as literal, report diagnostic
-                        let mut diag = crate::diagnostic::Diagnostic::error(
-                            format!("invalid expression in interpolation: {}", e),
-                            "Check the expression syntax inside ${...}",
-                            format!("${{{}}}", expr_str),
-                        );
-                        diag.file = self.file.clone();
-                        diag.line = Some(str_line);
-                        diag.col = Some(str_col + 1 + expr_col_start);
-                        self.errors.push(diag);
-                        parts.push(StringPart::Lit { value: format!("${{{}}}", expr_str) });
-                    }
-                }
+                let part = self.parse_interpolation_expr_part(&chars, &mut i, &mut col_offset, str_line, str_col);
+                parts.push(part);
             } else {
                 col_offset += 1;
                 lit.push(chars[i]);
@@ -462,5 +419,65 @@ impl Parser {
             parts.push(StringPart::Lit { value: lit });
         }
         Ok(parts)
+    }
+
+    /// Parses one `${ .. }` interpolation hole, starting at `chars[*i] == '$'`.
+    /// Advances `*i`/`*col_offset` past the whole `${..}` span (brace-depth
+    /// scan, then sub-parse) and returns the resulting `StringPart` — either
+    /// the parsed sub-expression, or (on a parse error) the raw text kept as
+    /// a literal with a diagnostic recorded on `self.errors`.
+    fn parse_interpolation_expr_part(
+        &mut self,
+        chars: &[char],
+        i: &mut usize,
+        col_offset: &mut usize,
+        str_line: usize,
+        str_col: usize,
+    ) -> StringPart {
+        let expr_col_start = *col_offset + 2; // past ${
+        *i += 2; // skip ${
+        *col_offset += 2;
+        let mut depth = 1;
+        let mut expr_str = String::new();
+        while *i < chars.len() && depth > 0 {
+            if chars[*i] == '{' { depth += 1; }
+            if chars[*i] == '}' { depth -= 1; if depth == 0 { break; } }
+            expr_str.push(chars[*i]);
+            *i += 1;
+            *col_offset += 1;
+        }
+        *i += 1; // skip }
+        *col_offset += 1;
+        // Sub-parse the expression with current id counter
+        let mut tokens = crate::lexer::Lexer::tokenize(&expr_str);
+        // Adjust spans: sub-lexer produces line=1,col=1-based; remap to parent source
+        for t in &mut tokens {
+            t.line = str_line;
+            // col: sub-lexer 1-based → 0-based offset + parent string position
+            // str_col is the opening quote col, +1 for quote char, + template offset
+            t.col = str_col + 1 + expr_col_start + (t.col - 1);
+        }
+        let id_offset = self.expr_id_counter();
+        let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset);
+        match sub_parser.parse_single_expr() {
+            Ok(parsed) => {
+                // Advance our id counter past sub-parser's allocations
+                self.next_expr_id = sub_parser.expr_id_counter();
+                StringPart::Expr { expr: Box::new(parsed) }
+            }
+            Err(e) => {
+                // Error recovery: keep as literal, report diagnostic
+                let mut diag = crate::diagnostic::Diagnostic::error(
+                    format!("invalid expression in interpolation: {}", e),
+                    "Check the expression syntax inside ${...}",
+                    format!("${{{}}}", expr_str),
+                );
+                diag.file = self.file.clone();
+                diag.line = Some(str_line);
+                diag.col = Some(str_col + 1 + expr_col_start);
+                self.errors.push(diag);
+                StringPart::Lit { value: format!("${{{}}}", expr_str) }
+            }
+        }
     }
 }
