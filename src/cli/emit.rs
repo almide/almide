@@ -1,4 +1,4 @@
-use crate::{parse_file, canonicalize, codegen, check, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, canonicalize, codegen, check, diagnostic, resolve, project, project_fetch, out, out_no_nl, err};
 
 /// Print parse errors (if any) and exit. Extracted verbatim from `cmd_emit`'s
 /// leading parse-error gate — a pure diagnostics-formatting step with no
@@ -6,9 +6,9 @@ use crate::{parse_file, canonicalize, codegen, check, diagnostic, resolve, proje
 fn exit_on_parse_errors(parse_errors: &[diagnostic::Diagnostic], source_text: &str) {
     if !parse_errors.is_empty() {
         for e in parse_errors {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(e, source_text));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(e, source_text)));
         }
-        eprintln!("\n{} parse error(s) found", parse_errors.len());
+        err(&format!("\n{} parse error(s) found", parse_errors.len()));
         std::process::exit(1);
     }
 }
@@ -44,13 +44,13 @@ fn run_checker_for_emit(
         .collect();
     if !errors.is_empty() {
         for d in &errors {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(d, source_text));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, source_text)));
         }
-        eprintln!("\n{} error(s) found", errors.len());
+        err(&format!("\n{} error(s) found", errors.len()));
         std::process::exit(1);
     }
     for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-        eprintln!("{}", crate::diagnostic_render::display_with_source(d, source_text));
+        err(&format!("{}", crate::diagnostic_render::display_with_source(d, source_text)));
     }
     Some(checker)
 }
@@ -62,7 +62,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
                 .collect()
@@ -74,7 +74,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
     };
 
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 
     // Run checker if needed (always for emit_ir, otherwise when !no_check && !emit_ast)
     let run_check = emit_ir || emit_dialect || (!no_check && !emit_ast);
@@ -106,25 +106,25 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
         let errors = almide_dialect::verify::verify_module(&module);
         if !errors.is_empty() {
             for e in &errors {
-                eprintln!("dialect verify: {} (in {})", e.message, e.context);
+                err(&format!("dialect verify: {} (in {})", e.message, e.context));
             }
         }
         if target == "rust" || target == "rs" {
-            print!("{}", almide_dialect::emit_rust::emit_module(&module));
+            out_no_nl(&format!("{}", almide_dialect::emit_rust::emit_module(&module)));
         } else {
-            print!("{}", almide_dialect::dump::dump_module(&module));
+            out_no_nl(&format!("{}", almide_dialect::dump::dump_module(&module)));
         }
         return;
     }
     if emit_ir {
         let ir = ir_program.expect("checker must have run for emit_ir");
         let json = serde_json::to_string_pretty(&ir)
-            .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
-        println!("{}", json);
+            .unwrap_or_else(|e| { err(&format!("JSON serialize error: {}", e)); std::process::exit(1); });
+        out(&format!("{}", json));
     } else if emit_ast {
         let json = serde_json::to_string_pretty(&program)
-            .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
-        println!("{}", json);
+            .unwrap_or_else(|e| { err(&format!("JSON serialize error: {}", e)); std::process::exit(1); });
+        out(&format!("{}", json));
     } else {
         let ir = ir_program.as_mut().expect("IR required for codegen");
         almide::ir_link::ir_link(ir);
@@ -132,11 +132,11 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
             let t = match target {
                 "rust" | "rs" => codegen::pass::Target::Rust,
                 "wgsl" => codegen::pass::Target::Wgsl,
-                other => { eprintln!("Unknown target: {}. Use rust, wgsl.", other); std::process::exit(1); }
+                other => { err(&format!("Unknown target: {}. Use rust, wgsl.", other)); std::process::exit(1); }
             };
             let opts = codegen::CodegenOptions { repr_c, allow_unverified: false };
             match codegen::codegen_with(ir, t, &opts) {
-                codegen::CodegenOutput::Source(code) => print!("{}", code),
+                codegen::CodegenOutput::Source(code) => out_no_nl(&format!("{}", code)),
                 codegen::CodegenOutput::Binary(_) => unreachable!(),
             }
         }
