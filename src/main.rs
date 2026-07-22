@@ -836,7 +836,15 @@ fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Opt
     // honest wall falls back to v0). `--no-verified` opts out of BOTH legs;
     // `--verified` is kept as a no-op for compatibility.
     warn_no_verified_deprecated(no_verified);
-    cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), !no_verified, !no_verified);
+    cli::cmd_run(cli::RunArgs {
+        file: &file,
+        program_args: &program_args,
+        no_check,
+        release,
+        target: target.as_deref(),
+        verified: !no_verified,
+        native_verified: !no_verified,
+    });
 }
 
 /// `dispatch`'s `Commands::Test` arm. Extracted verbatim.
