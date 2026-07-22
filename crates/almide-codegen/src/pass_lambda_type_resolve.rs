@@ -93,34 +93,77 @@ fn check_lambda_params_resolved(program: &IrProgram) -> Vec<String> {
 // then recurse into children. This means outer lambdas' params are
 // resolved before inner lambdas are visited.
 
-fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
-    match &mut expr.kind {
-        IrExprKind::Call { target, args, .. } => {
-            // 1. Resolve lambda params from call-site list element type
-            resolve_call_lambdas(target, args, vt);
-            // 2. Recurse into target
-            match target {
-                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => {
-                    resolve_expr(object, vt);
-                }
-                _ => {}
+// ── resolve_expr arm extraction (cog>100 decomposition, pattern 2) ──
+//
+// 1:1 text-moves of the two largest `resolve_expr` match arms. Each
+// re-narrows `expr.kind` via `let-else` and mutates `expr`/`vt` exactly as
+// the inline arm did — no behavior change.
+
+fn resolve_expr_call(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
+    // 1. Resolve lambda params from call-site list element type
+    resolve_call_lambdas(target, args, vt);
+    // 2. Recurse into target
+    match target {
+        CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => {
+            resolve_expr(object, vt);
+        }
+        _ => {}
+    }
+    // 3. Recurse into args (including lambda bodies)
+    for a in args.iter_mut() {
+        resolve_expr(a, vt);
+    }
+    // 4. Update Call's own return type from resolved args for a
+    //    few stdlib list ops whose generic signature left
+    //    TypeVars unsubstituted. Without this, a `let zipped =
+    //    list.zip(filter, spectrum)` inside a closure keeps
+    //    `List[Tuple[TypeVar, Float]]` and the fold callback
+    //    that follows fails to resolve `pair: (Float, Float)`.
+    if expr.ty.has_unresolved_deep() {
+        if let Some(new_ty) = compute_stdlib_call_ret(target, args, vt) {
+            expr.ty = new_ty;
+        }
+    }
+}
+
+fn resolve_expr_lambda(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::Lambda { params, .. } = &mut expr.kind else { unreachable!() };
+    // Sync param types: VarTable ↔ IR annotation (concrete wins)
+    // Use .has_unresolved_deep() to catch Applied(List, [TypeVar(A)])
+    for (vid, pty) in params.iter_mut() {
+        if (vid.0 as usize) < vt.len() {
+            let vt_ty = vt.get(*vid).ty.clone();
+            if pty.has_unresolved_deep() && !(vt_ty).has_unresolved_deep() {
+                *pty = vt_ty;
+            } else if !pty.has_unresolved_deep() && (vt_ty).has_unresolved_deep() {
+                vt.entries[vid.0 as usize].ty = pty.clone();
             }
-            // 3. Recurse into args (including lambda bodies)
-            for a in args.iter_mut() {
-                resolve_expr(a, vt);
-            }
-            // 4. Update Call's own return type from resolved args for a
-            //    few stdlib list ops whose generic signature left
-            //    TypeVars unsubstituted. Without this, a `let zipped =
-            //    list.zip(filter, spectrum)` inside a closure keeps
-            //    `List[Tuple[TypeVar, Float]]` and the fold callback
-            //    that follows fails to resolve `pair: (Float, Float)`.
-            if expr.ty.has_unresolved_deep() {
-                if let Some(new_ty) = compute_stdlib_call_ret(target, args, vt) {
-                    expr.ty = new_ty;
+        }
+    }
+    // Update Ty::Fn wrapper to match resolved params
+    refresh_lambda_fn_ty(expr, vt);
+    // Recurse into body (params are now resolved for inner lambdas to see)
+    if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
+        resolve_expr(body, vt);
+    }
+    // Bottom-up: infer still-Unknown params from body usage
+    if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
+        for (vid, pty) in params.iter_mut() {
+            if pty.has_unresolved_deep() {
+                if let Some(inferred) = super::pass_concretize_types::infer_var_type_from_body(body, *vid) {
+                    *pty = inferred.clone();
+                    vt.entries[vid.0 as usize].ty = inferred;
                 }
             }
         }
+        refresh_lambda_fn_ty(expr, vt);
+    }
+}
+
+fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
+    match &mut expr.kind {
+        IrExprKind::Call { .. } => resolve_expr_call(expr, vt),
         IrExprKind::RuntimeCall { symbol, args } => {
             for a in args.iter_mut() {
                 resolve_expr(a, vt);
@@ -132,38 +175,7 @@ fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
                 }
             }
         }
-        IrExprKind::Lambda { params, .. } => {
-            // Sync param types: VarTable ↔ IR annotation (concrete wins)
-            // Use .has_unresolved_deep() to catch Applied(List, [TypeVar(A)])
-            for (vid, pty) in params.iter_mut() {
-                if (vid.0 as usize) < vt.len() {
-                    let vt_ty = vt.get(*vid).ty.clone();
-                    if pty.has_unresolved_deep() && !(vt_ty).has_unresolved_deep() {
-                        *pty = vt_ty;
-                    } else if !pty.has_unresolved_deep() && (vt_ty).has_unresolved_deep() {
-                        vt.entries[vid.0 as usize].ty = pty.clone();
-                    }
-                }
-            }
-            // Update Ty::Fn wrapper to match resolved params
-            refresh_lambda_fn_ty(expr, vt);
-            // Recurse into body (params are now resolved for inner lambdas to see)
-            if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
-                resolve_expr(body, vt);
-            }
-            // Bottom-up: infer still-Unknown params from body usage
-            if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
-                for (vid, pty) in params.iter_mut() {
-                    if pty.has_unresolved_deep() {
-                        if let Some(inferred) = super::pass_concretize_types::infer_var_type_from_body(body, *vid) {
-                            *pty = inferred.clone();
-                            vt.entries[vid.0 as usize].ty = inferred;
-                        }
-                    }
-                }
-                refresh_lambda_fn_ty(expr, vt);
-            }
-        }
+        IrExprKind::Lambda { .. } => resolve_expr_lambda(expr, vt),
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts.iter_mut() { resolve_stmt(s, vt); }
             if let Some(e) = tail { resolve_expr(e, vt); }
