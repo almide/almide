@@ -1190,6 +1190,33 @@ fn render_expr_spread_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| "{ ...spread }".into())
 }
 
+/// `render_expr_unwrap`'s error-coercion-template-attr computation,
+/// extracted verbatim (cog>30 decomposition) — `Option<&'static str>`
+/// return, no state, safe to hoist out of the surrounding function.
+/// For Result with a non-String error, choose the `map_err` variant the
+/// template needs (the template decides whether/how to coerce —
+/// target-agnostic). `None` for `Option` unwraps (no error to coerce).
+fn unwrap_err_coerce_attr(ctx: &RenderContext, inner_ty: &Ty) -> Option<&'static str> {
+    if inner_ty.is_option() { return None; }
+    let (_, err_ty) = inner_ty.inner2()?;
+    // When the source error type already matches the enclosing fn's
+    // propagated error type, `?` carries it through unchanged — no
+    // coercion. This preserves a custom variant error (e.g.
+    // `Result[_, AppErr]` !-ed inside a fn that also returns
+    // `Result[_, AppErr]`) instead of stringifying it via Debug (which
+    // would need `From<String>` and fail to compile). #630
+    let matches_fn_err = ctx.fn_err_ty.as_ref() == Some(err_ty);
+    if matches_fn_err {
+        None
+    } else if matches!(err_ty, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && matches!(args[0], Ty::String)) {
+        Some("map_err_join")
+    } else if !matches!(err_ty, Ty::String) {
+        Some("map_err_debug")
+    } else {
+        None
+    }
+}
+
 fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Unwrap { expr: inner } = &expr.kind else { unreachable!() };
     // Short-circuit: ok(x)! = x, some(x)! = x — the unwrap is a no-op.
@@ -1210,27 +1237,7 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
         // For Result with non-String error, use map_err variants
         // (the template decides whether/how to coerce — target-agnostic).
         let when_type = if inner.ty.is_option() { Some("Option") } else { None };
-        let err_coerce_attr = if !inner.ty.is_option() {
-            if let Some((_, err_ty)) = inner.ty.inner2() {
-                // When the source error type already matches the
-                // enclosing fn's propagated error type, `?` carries it
-                // through unchanged — no coercion. This preserves a
-                // custom variant error (e.g. `Result[_, AppErr]` !-ed
-                // inside a fn that also returns `Result[_, AppErr]`)
-                // instead of stringifying it via Debug (which would
-                // need `From<String>` and fail to compile). #630
-                let matches_fn_err = ctx.fn_err_ty.as_ref() == Some(err_ty);
-                if matches_fn_err {
-                    None
-                } else if matches!(err_ty, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && matches!(args[0], Ty::String)) {
-                    Some("map_err_join")
-                } else if !matches!(err_ty, Ty::String) {
-                    Some("map_err_debug")
-                } else {
-                    None
-                }
-            } else { None }
-        } else { None };
+        let err_coerce_attr = unwrap_err_coerce_attr(ctx, &inner.ty);
         let attrs: Vec<&str> = err_coerce_attr.into_iter().collect();
         ctx.templates.render_with("unwrap_expr", when_type, &attrs, &[("inner", s.as_str())])
             .unwrap_or_else(|| format!("({})?", s))
