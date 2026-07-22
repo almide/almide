@@ -6,7 +6,7 @@
 //! Accepts `@stdlib/<module>` as `<target>` to query built-in APIs without
 //! needing a source file. Supports `--json` for tool integration.
 
-use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch, out, err};
 use serde::Serialize;
 
 const STDLIB_PREFIX: &str = "@stdlib/";
@@ -72,18 +72,18 @@ pub fn cmd_ide_stdlib_snapshot(modules: Option<&str>, json: bool) {
 
     let outlines: Vec<Outline> = modules.iter()
         .map(|m| collect_stdlib_outline(m).unwrap_or_else(|e| {
-            eprintln!("{}", e);
+            err(&format!("{}", e));
             std::process::exit(1);
         }))
         .collect();
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&outlines).unwrap());
+        out(&format!("{}", serde_json::to_string_pretty(&outlines).unwrap()));
     } else {
         for outline in &outlines {
-            println!("# @stdlib/{}", outline.module);
+            out(&format!("# @stdlib/{}", outline.module));
             print_outline_text(outline);
-            println!();
+            out("");
         }
     }
 }
@@ -93,12 +93,12 @@ pub fn cmd_ide_stdlib_snapshot(modules: Option<&str>, json: bool) {
 pub fn cmd_ide_outline(target: &str, filter: Option<&str>, json: bool) {
     let outline = if let Some(module) = target.strip_prefix(STDLIB_PREFIX) {
         collect_stdlib_outline(module).unwrap_or_else(|e| {
-            eprintln!("{}", e);
+            err(&format!("{}", e));
             std::process::exit(1);
         })
     } else {
         collect_file_outline(target).unwrap_or_else(|e| {
-            eprintln!("{}", e);
+            err(&format!("{}", e));
             std::process::exit(1);
         })
     };
@@ -106,8 +106,8 @@ pub fn cmd_ide_outline(target: &str, filter: Option<&str>, json: bool) {
     let filtered = apply_filter(outline, filter);
 
     if json {
-        let out = serde_json::to_string_pretty(&filtered).unwrap();
-        println!("{}", out);
+        let json_str = serde_json::to_string_pretty(&filtered).unwrap();
+        out(&format!("{}", json_str));
     } else {
         print_outline_text(&filtered);
     }
@@ -130,24 +130,24 @@ pub fn cmd_ide_doc(symbol: &str, file: &str) {
                 .map(|(n, t)| format!("{}: {}", n.as_str(), t.display()))
                 .collect::<Vec<_>>().join(", ");
             let effect = if sig.is_effect { "effect fn " } else { "fn " };
-            println!("{}{}.{}({}) -> {}", effect, module, fname, params, sig.ret.display());
+            out(&format!("{}{}.{}({}) -> {}", effect, module, fname, params, sig.ret.display()));
             return;
         }
     }
 
     let iface = match build_interface(file) {
         Ok(i) => i,
-        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+        Err(e) => { err(&format!("{}", e)); std::process::exit(1); }
     };
     if let Some(f) = iface.functions.iter().find(|f| f.name == symbol) {
         let params = f.params.iter()
             .map(|p| format!("{}: {}", p.name, format_tref(&p.ty)))
             .collect::<Vec<_>>().join(", ");
         let effect_kw = if f.effect { "effect fn " } else { "fn " };
-        println!("{}{}({}) -> {}", effect_kw, f.name, params, format_tref(&f.ret));
+        out(&format!("{}{}({}) -> {}", effect_kw, f.name, params, format_tref(&f.ret)));
         if let Some(doc) = &f.doc {
-            println!();
-            for line in doc.lines() { println!("{}", line); }
+            out("");
+            for line in doc.lines() { out(&format!("{}", line)); }
         }
         return;
     }
@@ -158,31 +158,31 @@ pub fn cmd_ide_doc(symbol: &str, file: &str) {
             .unwrap_or_default();
         match &t.kind {
             almide::interface::TypeKindExport::Record { fields } => {
-                println!("type {}{} {{", t.name, generics);
+                out(&format!("type {}{} {{", t.name, generics));
                 for f in fields {
-                    println!("    {}: {}", f.name, format_tref(&f.ty));
+                    out(&format!("    {}: {}", f.name, format_tref(&f.ty)));
                 }
-                println!("}}");
+                out(&format!("}}"));
             }
             almide::interface::TypeKindExport::Variant { cases } => {
-                println!("type {}{}", t.name, generics);
+                out(&format!("type {}{}", t.name, generics));
                 for c in cases {
-                    println!("    | {}", c.name);
+                    out(&format!("    | {}", c.name));
                 }
             }
             almide::interface::TypeKindExport::Alias { target } => {
-                println!("type {}{} = {}", t.name, generics, format_tref(target));
+                out(&format!("type {}{} = {}", t.name, generics, format_tref(target)));
             }
         }
         if let Some(doc) = &t.doc {
-            println!();
-            for line in doc.lines() { println!("{}", line); }
+            out("");
+            for line in doc.lines() { out(&format!("{}", line)); }
         }
         return;
     }
 
-    eprintln!("error: symbol '{}' not found", symbol);
-    eprintln!("  hint: try `almide ide outline {}` to list available symbols", file);
+    err(&format!("error: symbol '{}' not found", symbol));
+    err(&format!("  hint: try `almide ide outline {}` to list available symbols", file));
     std::process::exit(1);
 }
 
@@ -275,10 +275,10 @@ fn print_outline_text(outline: &Outline) {
     for t in &outline.types {
         let generics = if t.generics.is_empty() { String::new() }
             else { format!("[{}]", t.generics.join(", ")) };
-        println!("type {}{} = {}", t.name, generics, t.shape);
+        out(&format!("type {}{} = {}", t.name, generics, t.shape));
     }
     for c in &outline.constants {
-        println!("let {}: {}", c.name, c.ty);
+        out(&format!("let {}: {}", c.name, c.ty));
     }
     let prefix = if outline.source == "stdlib" {
         format!("{}.", outline.module)
@@ -292,7 +292,7 @@ fn print_outline_text(outline: &Outline) {
             .map(|p| format!("{}: {}", p.name, p.ty))
             .collect::<Vec<_>>().join(", ");
         let effect_kw = if f.effect { "effect fn " } else { "fn " };
-        println!("{}{}{}{}({}) -> {}", effect_kw, prefix, f.name, generics, params, f.ret);
+        out(&format!("{}{}{}{}({}) -> {}", effect_kw, prefix, f.name, generics, params, f.ret));
     }
 }
 
