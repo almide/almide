@@ -32,18 +32,7 @@ impl NanoPass for LICMPass {
         // Analyze purity: user functions (fixpoint) + stdlib modules (IR attrs)
         let mut pure_fns = analyze_pure_functions(&program);
         // Add pure stdlib module functions as "module.func" keys
-        for module in &program.modules {
-            for func in &module.functions {
-                if !func.is_effect && !func.is_async
-                    && func.mutated_params.is_empty()
-                    && !has_mut_in_inline_rust(&func.attrs)
-                {
-                    pure_fns.insert(almide_base::intern::sym(
-                        &format!("{}.{}", module.name, func.name),
-                    ));
-                }
-            }
-        }
+        collect_pure_stdlib_module_fns(&program, &mut pure_fns);
         let mut changed = false;
         let IrProgram { functions, modules, var_table, .. } = &mut program;
         for func in functions.iter_mut() {
@@ -62,6 +51,24 @@ impl NanoPass for LICMPass {
             program.codegen_annotations.always_clone_vars.insert(VarId(i as u32));
         }
         PassResult { program, changed }
+    }
+}
+
+/// Stdlib-module purity scan phase of `LICMPass::run`, extracted verbatim
+/// (cog>30 decomposition, pattern 1 — `pure_fns` is a write-only
+/// accumulator, same safety class as `check_needs_ownership`'s `needs`).
+fn collect_pure_stdlib_module_fns(program: &IrProgram, pure_fns: &mut HashSet<Sym>) {
+    for module in &program.modules {
+        for func in &module.functions {
+            if !func.is_effect && !func.is_async
+                && func.mutated_params.is_empty()
+                && !has_mut_in_inline_rust(&func.attrs)
+            {
+                pure_fns.insert(almide_base::intern::sym(
+                    &format!("{}.{}", module.name, func.name),
+                ));
+            }
+        }
     }
 }
 
