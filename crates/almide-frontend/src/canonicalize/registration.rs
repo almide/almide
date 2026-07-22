@@ -484,39 +484,53 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
             let p = proto.as_str();
             if !FIELD_RECURSIVE_PROTOCOLS.contains(&p) { continue; }
             for (field_name, field_ty) in &slots {
-                // #655: the Codec derive has no Map/Set arm — reject such a
-                // field here rather than emitting invalid Rust / silent-wrong
-                // wasm. Same E023 family (a field that cannot satisfy Codec).
-                if p == "Codec" {
-                    if let Some(container) = codec_unsupported_container(field_ty) {
-                        if reported.insert((*type_name, *proto, sym(container))) {
-                            diagnostics.push(err(
-                                format!("type '{}' derives 'Codec' but field '{}' has a '{}' type, which the Codec derive cannot encode",
-                                    type_name, field_name, container),
-                                format!("The Codec derive serializes a {} as a String, which is wrong. Use a List[(K, V)] field (or List[T] for a Set), or implement encode/decode manually.",
-                                    container),
-                                format!("type {} : Codec", type_name),
-                            ).with_code("E023"));
-                        }
-                    }
-                }
-                let mut leaves = Vec::new();
-                collect_leaf_nominals(field_ty, &mut leaves);
-                for leaf in leaves {
-                    if leaf == *type_name { continue; }          // self-reference is fine
-                    if !env.types.contains_key(&leaf) { continue; } // not a user nominal → native support
-                    if leaf_satisfies(env, leaf, p) { continue; }
-                    if !reported.insert((*type_name, *proto, leaf)) { continue; }
-                    diagnostics.push(err(
-                        format!("type '{}' derives '{}' but field '{}' has type '{}', which does not derive '{}'",
-                            type_name, p, field_name, leaf, p),
-                        format!("Add `: {}` to the declaration of type '{}' (every field of a `: {}` type must itself be `{}`)",
-                            p, leaf, p, p),
-                        format!("type {} : {}", type_name, p),
-                    ).with_code("E023"));
-                }
+                validate_derive_field(env, diagnostics, &mut reported, *type_name, *proto, p, field_name, field_ty);
             }
         }
+    }
+}
+
+/// Per-field derive-support check for a single (type, protocol, field)
+/// triple: the Codec-unsupported-container check, plus recursively
+/// requiring every leaf nominal in the field's type to derive the same
+/// protocol. `reported` dedupes diagnostics across (type, protocol, leaf)
+/// triples seen by earlier fields/protocols/types in the caller's loop
+/// nest. Verbatim text move out of [`validate_derive_field_support`].
+fn validate_derive_field(
+    env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
+    reported: &mut std::collections::HashSet<(Sym, Sym, Sym)>,
+    type_name: Sym, proto: Sym, p: &str, field_name: &str, field_ty: &Ty,
+) {
+    // #655: the Codec derive has no Map/Set arm — reject such a
+    // field here rather than emitting invalid Rust / silent-wrong
+    // wasm. Same E023 family (a field that cannot satisfy Codec).
+    if p == "Codec" {
+        if let Some(container) = codec_unsupported_container(field_ty) {
+            if reported.insert((type_name, proto, sym(container))) {
+                diagnostics.push(err(
+                    format!("type '{}' derives 'Codec' but field '{}' has a '{}' type, which the Codec derive cannot encode",
+                        type_name, field_name, container),
+                    format!("The Codec derive serializes a {} as a String, which is wrong. Use a List[(K, V)] field (or List[T] for a Set), or implement encode/decode manually.",
+                        container),
+                    format!("type {} : Codec", type_name),
+                ).with_code("E023"));
+            }
+        }
+    }
+    let mut leaves = Vec::new();
+    collect_leaf_nominals(field_ty, &mut leaves);
+    for leaf in leaves {
+        if leaf == type_name { continue; }          // self-reference is fine
+        if !env.types.contains_key(&leaf) { continue; } // not a user nominal → native support
+        if leaf_satisfies(env, leaf, p) { continue; }
+        if !reported.insert((type_name, proto, leaf)) { continue; }
+        diagnostics.push(err(
+            format!("type '{}' derives '{}' but field '{}' has type '{}', which does not derive '{}'",
+                type_name, p, field_name, leaf, p),
+            format!("Add `: {}` to the declaration of type '{}' (every field of a `: {}` type must itself be `{}`)",
+                p, leaf, p, p),
+            format!("type {} : {}", type_name, p),
+        ).with_code("E023"));
     }
 }
 
