@@ -242,6 +242,17 @@ impl LowerCtx {
     /// verbatim. Returns `Err` for the one WALL case (a never-err lifted-effect-fn subject
     /// outside the `ok(x)` shape); the caller propagates it with `?`.
     fn seed_match_subject_read_shape(&mut self, subject: &IrExpr, v: ValueId) -> Result<(), LowerError> {
+        self.seed_match_subject_field_shape(subject, v);
+        self.seed_match_subject_option_call_shape(subject, v);
+        self.seed_match_subject_result_call_shape(subject, v);
+        self.wall_match_subject_never_err_lifted_call(subject)?;
+        self.seed_match_subject_user_call_shape(subject, v);
+        Ok(())
+    }
+
+    /// Extracted from `Self::seed_match_subject_read_shape` (second-round split, cog
+    /// reduction): the record/tuple FIELD subject block, verbatim.
+    fn seed_match_subject_field_shape(&mut self, subject: &IrExpr, v: ValueId) {
         // A `match` whose SUBJECT is a record/tuple FIELD that is an Option/Result
         // (`match n.next { some(x) => … }` over `next: Option[Int]`): the field-borrow
         // already loaded the field's owned handle into `v` (a real 0-or-1-element Option
@@ -264,6 +275,11 @@ impl LowerCtx {
                 }
             }
         }
+    }
+
+    /// Extracted from `Self::seed_match_subject_read_shape` (second-round split, cog
+    /// reduction): the self-host Option-call subject block, verbatim.
+    fn seed_match_subject_option_call_shape(&mut self, subject: &IrExpr, v: ValueId) {
         if is_self_host_option_call(subject) {
             self.materialized_options.insert(v);
             // An `Option[heap]` (e.g. `Option[(Int,Int)]` from option.zip) OWNS its
@@ -300,6 +316,11 @@ impl LowerCtx {
                 }
             }
         }
+    }
+
+    /// Extracted from `Self::seed_match_subject_read_shape` (second-round split, cog
+    /// reduction): the self-host Result-call subject blocks, verbatim.
+    fn seed_match_subject_result_call_shape(&mut self, subject: &IrExpr, v: ValueId) {
         if is_self_host_result_call(subject) {
             self.materialized_results.insert(v);
         }
@@ -322,6 +343,11 @@ impl LowerCtx {
                 self.heap_elem_lists.insert(v);
             }
         }
+    }
+
+    /// Extracted from `Self::seed_match_subject_read_shape` (second-round split, cog
+    /// reduction): the never-err lifted-effect-fn WALL check, verbatim.
+    fn wall_match_subject_never_err_lifted_call(&mut self, subject: &IrExpr) -> Result<(), LowerError> {
         // A USER Named-call returning Result (`match char_to_val(c) { ok(v)=>.., err(e)=>.. }`
         // — the TCO loop body the unwrap-`!` desugar produces, base64 decode_chunks). Track
         // it like the value-match subject: a SCALAR-Ok `Result[scalar,String]` reads len-tag
@@ -347,6 +373,14 @@ impl LowerCtx {
                 ));
             }
         }
+        Ok(())
+    }
+
+    /// Extracted from `Self::seed_match_subject_read_shape` (second-round split, cog
+    /// reduction): the user Named-call / pure Module-call subject's Option/Result read-shape
+    /// tracking — computes `result_call_subject` once, verbatim, then delegates to the
+    /// Option and Result read-shape sub-blocks (second split of the same extraction).
+    fn seed_match_subject_user_call_shape(&mut self, subject: &IrExpr, v: ValueId) {
         // A PURE heap-result MODULE call (`json.parse` — resolved by the
         // self-host registry, so its Result is BUILT by the same
         // materialize_result_str layout a user fn uses) is tracked exactly
@@ -359,6 +393,17 @@ impl LowerCtx {
                 crate::purity::is_pure(module.as_str(), func.as_str()),
             _ => false,
         };
+        if !result_call_subject {
+            return;
+        }
+        self.seed_match_subject_user_call_option_shape(subject, v);
+        self.seed_match_subject_user_call_result_shape(subject, v);
+    }
+
+    /// Extracted from `Self::seed_match_subject_user_call_shape` (third-round split, cog
+    /// reduction): the OPTION-returning branch, verbatim (only called when
+    /// `result_call_subject` is true).
+    fn seed_match_subject_user_call_option_shape(&mut self, subject: &IrExpr, v: ValueId) {
         // A user Named-call (or pure Module-call) subject returning OPTION
         // (`match get_profile(1) { some(p) => …, none => … }` — the
         // optional-chain desugar's shape after the let-bind continuation
@@ -371,62 +416,64 @@ impl LowerCtx {
         // (`optrec:<R>` → `$__drop_<R>` — checked BEFORE heap_elem_lists in
         // drop_op_for, the map.find precedent); the heap_elem_lists entry
         // additionally opens the Some-arm heap-payload borrow gate.
-        if result_call_subject {
+        if let Ty::Applied(
+            almide_lang::types::constructor::TypeConstructorId::Option,
+            a,
+        ) = &subject.ty
+        {
+            if a.len() == 1 {
+                self.materialized_options.insert(v);
+                if let Some(rn) = self.record_or_anon_drop_type_name(&a[0]) {
+                    self.variant_drop_handles.insert(v, format!("optrec:{rn}"));
+                    self.heap_elem_lists.insert(v);
+                } else if is_heap_ty(&a[0]) {
+                    self.heap_elem_lists.insert(v);
+                }
+            }
+        }
+    }
+
+    /// Extracted from `Self::seed_match_subject_user_call_shape` (third-round split, cog
+    /// reduction): the RESULT-returning branch, verbatim (only called when
+    /// `result_call_subject` is true).
+    fn seed_match_subject_user_call_result_shape(&mut self, subject: &IrExpr, v: ValueId) {
+        if !crate::lower::is_result_ty(&subject.ty) {
+            return;
+        }
+        if Self::is_heap_ok_result(&subject.ty) {
+            // A USER heap-Ok Result is CONSTRUCTED by the heap-Ok ResultOk arm via
+            // materialize_result_str(value_ok=false) → cap-tag @16 + heap_elem_lists
+            // (DropListStr). The match MUST agree: track materialized_results_str (read
+            // tag @16) + heap_elem_lists (the err-arm String bind gate AND the flat
+            // DropListStr the construction uses for the List[Int]/String Ok payload).
+            self.materialized_results_str.insert(v);
+            // A `Result[(String, Int), String]` (toml parse_key_part) needs the
+            // RECURSIVE DropResultStrInt (frees the Ok tuple's String + block) — a
+            // flat DropListStr would rc_dec the @12 tuple HANDLE only, leaking its
+            // String. Other heap-Ok shapes keep the flat heap_elem_lists/DropListStr.
+            if crate::lower::is_str_int_result_ty(&subject.ty) {
+                self.str_int_result_results.insert(v);
+            } else if crate::lower::is_value_int_result_ty(&subject.ty) {
+                self.value_int_result_results.insert(v);
+            } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
+                self.list_str_int_result_results.insert(v);
+            } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
+                self.list_value_int_result_results.insert(v);
+            } else {
+                self.heap_elem_lists.insert(v);
+            }
+        } else {
+            self.materialized_results.insert(v);
             if let Ty::Applied(
-                almide_lang::types::constructor::TypeConstructorId::Option,
+                almide_lang::types::constructor::TypeConstructorId::Result,
                 a,
             ) = &subject.ty
             {
-                if a.len() == 1 {
-                    self.materialized_options.insert(v);
-                    if let Some(rn) = self.record_or_anon_drop_type_name(&a[0]) {
-                        self.variant_drop_handles.insert(v, format!("optrec:{rn}"));
-                        self.heap_elem_lists.insert(v);
-                    } else if is_heap_ty(&a[0]) {
-                        self.heap_elem_lists.insert(v);
-                    }
-                }
-            }
-        }
-        if result_call_subject
-            && crate::lower::is_result_ty(&subject.ty)
-        {
-            if Self::is_heap_ok_result(&subject.ty) {
-                // A USER heap-Ok Result is CONSTRUCTED by the heap-Ok ResultOk arm via
-                // materialize_result_str(value_ok=false) → cap-tag @16 + heap_elem_lists
-                // (DropListStr). The match MUST agree: track materialized_results_str (read
-                // tag @16) + heap_elem_lists (the err-arm String bind gate AND the flat
-                // DropListStr the construction uses for the List[Int]/String Ok payload).
-                self.materialized_results_str.insert(v);
-                // A `Result[(String, Int), String]` (toml parse_key_part) needs the
-                // RECURSIVE DropResultStrInt (frees the Ok tuple's String + block) — a
-                // flat DropListStr would rc_dec the @12 tuple HANDLE only, leaking its
-                // String. Other heap-Ok shapes keep the flat heap_elem_lists/DropListStr.
-                if crate::lower::is_str_int_result_ty(&subject.ty) {
-                    self.str_int_result_results.insert(v);
-                } else if crate::lower::is_value_int_result_ty(&subject.ty) {
-                    self.value_int_result_results.insert(v);
-                } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
-                    self.list_str_int_result_results.insert(v);
-                } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
-                    self.list_value_int_result_results.insert(v);
-                } else {
+                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
                     self.heap_elem_lists.insert(v);
                 }
-            } else {
-                self.materialized_results.insert(v);
-                if let Ty::Applied(
-                    almide_lang::types::constructor::TypeConstructorId::Result,
-                    a,
-                ) = &subject.ty
-                {
-                    if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                        self.heap_elem_lists.insert(v);
-                    }
-                }
             }
         }
-        Ok(())
     }
 
     /// Lower ONE branch arm into the flat op stream with a PER-ARM SCOPE FRAME:
