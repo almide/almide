@@ -964,119 +964,112 @@ fn inline_and_classify_cross_module_fns(
     CrossModuleFns { module_fn_sibs, inlined_fns, all_fns }
 }
 
-fn try_render_wasm_source_impl_rest(
-    ir: &mut almide_ir::IrProgram,
-    verbose: bool,
-) -> Result<String, LowerError> {
-    let PipelineLayouts {
-        globals,
-        global_inits,
-        main_globals,
-        main_global_inits,
-        mutable_toplet_aliases,
-        record_layouts,
-        variant_layouts,
-    } = collect_pipeline_layouts(ir);
-
-    let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
-        inline_and_classify_cross_module_fns(ir, &main_globals, &record_layouts);
-
-    // Cross-module DERIVED-METHOD name bridge (#790 codec row, piece 2 of the pinned
-    // design): a MAIN-region `T.encode` / `T.decode` reference whose type `T` is
-    // declared by exactly ONE linked module (and not by main) resolves to that
-    // module's MANGLED derived fn (`almide_rt_<m>_T.encode`) — the same unique-owner
-    // rule the variant-layout bridging above uses. Without this the reference stays
-    // unlinked and the whole program walls (honest, but the direct-method shapes are
-    // fully lowerable). Container helpers (`__encode_list_<m>.T`) stay walled — their
-    // v1 lowering is the recorded remainder of the bridge design.
-    {
-        let main_types: std::collections::HashSet<&str> =
-            ir.type_decls.iter().map(|td| td.name.as_str()).collect();
-        let mut owners: std::collections::HashMap<&str, Vec<&str>> =
-            std::collections::HashMap::new();
-        for m in &ir.modules {
-            if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
-                continue;
-            }
-            for td in &m.type_decls {
-                // Module type names may arrive QUALIFIED (`varlib.Pigment`) — key the
-                // owner map by the BASE name (the same normalization the variant-layout
-                // bridging above applies).
-                let base = td.name.as_str().rsplit('.').next().unwrap_or(td.name.as_str());
-                owners.entry(base).or_default().push(m.name.as_str());
-            }
+/// Phase 4: cross-module DERIVED-METHOD name bridge (#790 codec row, piece 2 of the
+/// pinned design): a MAIN-region `T.encode` / `T.decode` reference whose type `T` is
+/// declared by exactly ONE linked module (and not by main) resolves to that module's
+/// MANGLED derived fn (`almide_rt_<m>_T.encode`) — the same unique-owner rule the
+/// variant-layout bridging above uses. Without this the reference stays unlinked and
+/// the whole program walls (honest, but the direct-method shapes are fully lowerable).
+/// Container helpers (`__encode_list_<m>.T`) stay walled — their v1 lowering is the
+/// recorded remainder of the bridge design. Rewrites `inlined_fns`/`module_fn_sibs`
+/// bodies in place (both regions: main's derived fns reference the imported payload
+/// type's codec methods, and the OWNING module's own derived fns reference their
+/// sibling types' methods by the same bare `T.method` names).
+fn bridge_cross_module_derived_methods(
+    ir: &almide_ir::IrProgram,
+    inlined_fns: &mut [almide_ir::IrFunction],
+    module_fn_sibs: &mut [almide_ir::IrFunction],
+) {
+    let main_types: std::collections::HashSet<&str> =
+        ir.type_decls.iter().map(|td| td.name.as_str()).collect();
+    let mut owners: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+    for m in &ir.modules {
+        if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+            continue;
         }
-        struct Rw<'a> {
-            main_types: &'a std::collections::HashSet<&'a str>,
-            owners: &'a std::collections::HashMap<&'a str, Vec<&'a str>>,
+        for td in &m.type_decls {
+            // Module type names may arrive QUALIFIED (`varlib.Pigment`) — key the
+            // owner map by the BASE name (the same normalization the variant-layout
+            // bridging above applies).
+            let base = td.name.as_str().rsplit('.').next().unwrap_or(td.name.as_str());
+            owners.entry(base).or_default().push(m.name.as_str());
         }
-        impl almide_ir::IrMutVisitor for Rw<'_> {
-            fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
-                almide_ir::walk_expr_mut(self, e);
-                if let almide_ir::IrExprKind::Call {
-                    target: almide_ir::CallTarget::Named { name },
-                    ..
-                } = &mut e.kind
-                {
-                    let n = name.as_str();
-                    if n.starts_with("almide_rt_") || n.starts_with("__") {
-                        return;
-                    }
-                    let Some((ty_name, method)) = n.rsplit_once('.') else { return };
-                    if method != "encode" && method != "decode" {
-                        return;
-                    }
-                    // `varlib.Pigment.decode` → qualifier "varlib" + base "Pigment";
-                    // `Pigment.decode` → base only. A qualified ref must match the
-                    // owner; a bare ref must not shadow a MAIN type of the same name.
-                    let (qualifier, base) = match ty_name.rsplit_once('.') {
-                        Some((q, b)) => (Some(q), b),
-                        None => (None, ty_name),
-                    };
-                    if qualifier.is_none() && self.main_types.contains(base) {
-                        return;
-                    }
-                    if let Some(ms) = self.owners.get(base) {
-                        if let [only] = ms.as_slice() {
-                            if qualifier.is_none() || qualifier == Some(only) {
-                                *name = almide_lang::intern::sym(&user_module_fn_name(
-                                    only,
-                                    &format!("{base}.{method}"),
-                                ));
-                            }
+    }
+    struct Rw<'a> {
+        main_types: &'a std::collections::HashSet<&'a str>,
+        owners: &'a std::collections::HashMap<&'a str, Vec<&'a str>>,
+    }
+    impl almide_ir::IrMutVisitor for Rw<'_> {
+        fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+            almide_ir::walk_expr_mut(self, e);
+            if let almide_ir::IrExprKind::Call {
+                target: almide_ir::CallTarget::Named { name },
+                ..
+            } = &mut e.kind
+            {
+                let n = name.as_str();
+                if n.starts_with("almide_rt_") || n.starts_with("__") {
+                    return;
+                }
+                let Some((ty_name, method)) = n.rsplit_once('.') else { return };
+                if method != "encode" && method != "decode" {
+                    return;
+                }
+                // `varlib.Pigment.decode` → qualifier "varlib" + base "Pigment";
+                // `Pigment.decode` → base only. A qualified ref must match the
+                // owner; a bare ref must not shadow a MAIN type of the same name.
+                let (qualifier, base) = match ty_name.rsplit_once('.') {
+                    Some((q, b)) => (Some(q), b),
+                    None => (None, ty_name),
+                };
+                if qualifier.is_none() && self.main_types.contains(base) {
+                    return;
+                }
+                if let Some(ms) = self.owners.get(base) {
+                    if let [only] = ms.as_slice() {
+                        if qualifier.is_none() || qualifier == Some(only) {
+                            *name = almide_lang::intern::sym(&user_module_fn_name(
+                                only,
+                                &format!("{base}.{method}"),
+                            ));
                         }
                     }
                 }
             }
         }
-        let mut rw = Rw { main_types: &main_types, owners: &owners };
-        // BOTH regions: main's derived fns reference the imported payload type's codec
-        // methods, and the OWNING module's own derived fns reference their sibling
-        // types' methods by the same bare `T.method` names (the derive emits Named
-        // targets directly — no Method desugar ever re-forms them).
-        for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
-            almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut f.body);
-        }
-        // …and publish the unique-owner map for the DESUGAR-time resolution: the
-        // `T.method` Named names are FORMED inside the per-fn lowering (from Method
-        // targets), after this pipeline pass — the registry is how they see it.
-        let derived_owners: std::collections::HashMap<String, String> = owners
-            .iter()
-            .filter(|(t, ms)| ms.len() == 1 && !main_types.contains(*t))
-            .map(|(t, ms)| (t.to_string(), ms[0].to_string()))
-            .collect();
-        crate::lower::set_derived_type_owners(derived_owners);
     }
-    // MUTABLE module-level `var`s (program + modules): assign each a linear-memory
-    // storage slot (declaration order = VarId order, the same ordering `__global_init`
-    // uses) and publish the VarId → (slot, Ty) map — reads/assigns then route through the
-    // slot (`Load`/`$__mg_get`/`$__mg_take`+`Store`). A VarId collision across regions or
-    // an over-cap count WALLS the program (honest, never a mis-routed slot).
+    let mut rw = Rw { main_types: &main_types, owners: &owners };
+    for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
+        almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut f.body);
+    }
+    // …and publish the unique-owner map for the DESUGAR-time resolution: the
+    // `T.method` Named names are FORMED inside the per-fn lowering (from Method
+    // targets), after this pipeline pass — the registry is how they see it.
+    let derived_owners: std::collections::HashMap<String, String> = owners
+        .iter()
+        .filter(|(t, ms)| ms.len() == 1 && !main_types.contains(*t))
+        .map(|(t, ms)| (t.to_string(), ms[0].to_string()))
+        .collect();
+    crate::lower::set_derived_type_owners(derived_owners);
+}
+
+/// Phase 5: MUTABLE module-level `var`s (program + modules) — assign each a
+/// linear-memory storage slot (declaration order = VarId order, the same ordering
+/// `__global_init` uses) and publish the VarId → (slot, Ty) map — reads/assigns then
+/// route through the slot (`Load`/`$__mg_get`/`$__mg_take`+`Store`). A VarId collision
+/// across regions or an over-cap count WALLS the program (honest, never a mis-routed
+/// slot). Returns the sorted mutable top-lets (their declaration order IS the slot
+/// order, needed again by `__mg_init` synthesis below).
+fn assign_mutable_global_slots(
+    ir: &almide_ir::IrProgram,
+    mutable_toplet_aliases: &std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+) -> Result<Vec<almide_ir::IrTopLet>, LowerError> {
     let mut mutable_tls: Vec<_> = ir
         .top_lets
         .iter()
         .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
         .filter(|tl| tl.mutable)
+        .cloned()
         .collect();
     mutable_tls.sort_by_key(|tl| tl.var.0);
     if mutable_tls.len() > 64 {
@@ -1096,7 +1089,6 @@ fn try_render_wasm_source_impl_rest(
             }
         }
     }
-    let mutable_global_count = mutable_tls.len() as u32;
     let mut mutable_global_map: std::collections::HashMap<u32, (u32, almide_lang::types::Ty)> = mutable_tls
         .iter()
         .enumerate()
@@ -1105,12 +1097,36 @@ fn try_render_wasm_source_impl_rest(
     // #782: alias each main-side synthesized ref onto its module var's slot —
     // the retired v0 fallback used to absorb these as walls; now `m.count`
     // reads and assigns route through the SAME storage the owning module uses.
-    for (main_id, mod_id) in &mutable_toplet_aliases {
+    for (main_id, mod_id) in mutable_toplet_aliases {
         if let Some(entry) = mutable_global_map.get(&mod_id.0).cloned() {
             mutable_global_map.insert(main_id.0, entry);
         }
     }
     crate::lower::set_mutable_global_vars(mutable_global_map);
+    Ok(mutable_tls)
+}
+
+fn try_render_wasm_source_impl_rest(
+    ir: &mut almide_ir::IrProgram,
+    verbose: bool,
+) -> Result<String, LowerError> {
+    let PipelineLayouts {
+        globals,
+        global_inits,
+        main_globals,
+        main_global_inits,
+        mutable_toplet_aliases,
+        record_layouts,
+        variant_layouts,
+    } = collect_pipeline_layouts(ir);
+
+    let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
+        inline_and_classify_cross_module_fns(ir, &main_globals, &record_layouts);
+
+    bridge_cross_module_derived_methods(ir, &mut inlined_fns, &mut module_fn_sibs);
+
+    let mutable_tls = assign_mutable_global_slots(ir, &mutable_toplet_aliases)?;
+    let mutable_global_count = mutable_tls.len() as u32;
 
     // CROSS-MODULE global refs carry UNKNOWN expr types the frontend never infers
     // (`v.white` — the ceangal theme class): repair them from the bridged globals
