@@ -615,32 +615,37 @@ pub fn desugar_unit_if_heap_reassign(body: &IrExpr, next_var: &mut u32) -> Optio
         }
         Some(Some((pre.to_vec(), value.clone())))
     }
-    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
-        return None;
-    };
-    for (i, s) in stmts.iter().enumerate() {
-        let IrStmtKind::Expr { expr: ife } = &s.kind else { continue };
-        let IrExprKind::If { cond, then, else_ } = &ife.kind else { continue };
+    // The per-candidate-`if` guard cascade, named (codopsy cc) — a sibling nested fn,
+    // in the same block as `arm_split`/`assigns_to`/`heap_assigned_vars` so it shares
+    // them. Returns the single heap var the arms conditionally reassign + its type,
+    // or `None` if `stmts[i]` doesn't qualify (any guard below declines) — the SAME
+    // sequence of checks, in the SAME order, as the original inline `continue` chain.
+    fn qualifying_reassign_target(
+        stmts: &[IrStmt],
+        tail: &Option<Box<IrExpr>>,
+        i: usize,
+        cond: &IrExpr,
+        then: &IrExpr,
+        else_: &IrExpr,
+    ) -> Option<(VarId, Ty)> {
         let mut assigned = std::collections::HashSet::new();
         heap_assigned_vars(then, &mut assigned);
         heap_assigned_vars(else_, &mut assigned);
         if assigned.len() != 1 {
-            continue;
+            return None;
         }
         let r = *assigned.iter().next().expect("assigned.len() == 1, checked immediately above");
         // `r` must be bound earlier in THIS block.
-        let Some(rty) = stmts[..i].iter().find_map(|b| match &b.kind {
+        let rty = stmts[..i].iter().find_map(|b| match &b.kind {
             IrStmtKind::Bind { var, ty, .. } if *var == r => Some(ty.clone()),
             _ => Option::None,
-        }) else {
-            continue;
-        };
+        })?;
         if !is_heap_ty(&rty) {
-            continue;
+            return None;
         }
         // The condition is evaluated before the arms — it must not assign r.
         if assigns_to(cond, r) {
-            continue;
+            return None;
         }
         // No LATER assign to r after this if.
         let later = IrExpr {
@@ -650,8 +655,20 @@ pub fn desugar_unit_if_heap_reassign(body: &IrExpr, next_var: &mut u32) -> Optio
             def_id: Option::None,
         };
         if assigns_to(&later, r) {
-            continue;
+            return None;
         }
+        Some((r, rty))
+    }
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    for (i, s) in stmts.iter().enumerate() {
+        let IrStmtKind::Expr { expr: ife } = &s.kind else { continue };
+        let IrExprKind::If { cond, then, else_ } = &ife.kind else { continue };
+        let Some((r, rty)) = qualifying_reassign_target(stmts, tail, i, cond, then, else_)
+        else {
+            continue;
+        };
         let (Some(then_split), Some(else_split)) = (arm_split(then, r), arm_split(else_, r))
         else {
             continue;
