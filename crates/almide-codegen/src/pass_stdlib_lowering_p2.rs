@@ -302,7 +302,23 @@ fn try_inline_intrinsic_exp_log(module: &str, func: &str, args: &[IrExpr], ty: &
 
 /// Try to lower a list.* call into an IterChain IR node.
 /// Returns None if the operation isn't iterator-eligible.
-fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+fn try_lower_to_iter_chain(func: &str, args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+    match func {
+        "map" | "filter" | "flat_map" | "filter_map" =>
+            try_lower_to_iter_chain_transform(func, args, ty, span),
+        "fold" | "find" | "any" | "all" | "count" =>
+            try_lower_to_iter_chain_collector(func, args, ty, span),
+        _ => None,
+    }
+}
+
+/// `map`/`filter`/`flat_map`/`filter_map` group of `try_lower_to_iter_chain`
+/// (all "consuming operations (into_iter) → produce Vec"), extracted
+/// (cog>30 decomposition, pattern 1 — independent name-router arms,
+/// mirrors the `list_call_name` recipe). `args` is taken by value and
+/// consumed entirely within whichever single arm matches — no state
+/// shared across arms/groups.
+fn try_lower_to_iter_chain_transform(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
     match func {
         // ── Consuming operations (into_iter) → produce Vec ──
         "map" if args.len() >= 2 => {
@@ -357,6 +373,15 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                 ty: ty.clone(), span, def_id: None,
             })
         }
+        _ => None,
+    }
+}
+
+/// `fold`/`find`/`any`/`all`/`count` group of `try_lower_to_iter_chain`
+/// (all producing a scalar, via `IterCollector` rather than `steps`),
+/// extracted (cog>30 decomposition).
+fn try_lower_to_iter_chain_collector(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+    match func {
         "fold" if args.len() >= 3 => {
             let lambda = prepare_lambda(args.remove(2));
             let init = args.remove(1);
