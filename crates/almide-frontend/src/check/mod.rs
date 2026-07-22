@@ -204,22 +204,32 @@ pub(crate) fn int_literal_overflows_i64(raw: &str) -> bool {
 /// the magnitude bound is `MAX` (or `MAX+1` when `negated`, reaching `MIN`); for
 /// an unsigned type it is the unsigned `MAX`. Non-integer types return false
 /// (the literal does not belong there — left for the normal type checker).
-pub(crate) fn int_literal_fits_type(raw: &str, ty: &Ty, negated: bool) -> bool {
-    let clean = raw.replace('_', "");
-    let (radix, digits) = if let Some(r) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) { (16, r) }
-        else if let Some(r) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) { (2, r) }
-        else if let Some(r) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) { (8, r) }
-        else { (10, clean.as_str()) };
-    let Ok(mag) = u128::from_str_radix(digits, radix) else { return true };
-    // (signed, bit-width) for each integer type; None for non-integer.
-    let limits: Option<(bool, u32)> = match ty {
+// Strip an int literal's `0x`/`0b`/`0o` prefix (case-insensitive) and return
+// (radix, remaining digits); defaults to base 10 with no prefix.
+fn parse_int_literal_radix(clean: &str) -> (u32, &str) {
+    if let Some(r) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) { (16, r) }
+    else if let Some(r) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) { (2, r) }
+    else if let Some(r) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) { (8, r) }
+    else { (10, clean) }
+}
+
+// (signed, bit-width) for each sized integer type; None for non-integer types
+// (not our diagnostic).
+fn int_type_signed_bits(ty: &Ty) -> Option<(bool, u32)> {
+    match ty {
         Ty::Int | Ty::Int64 => Some((true, 64)),
         Ty::Int8 => Some((true, 8)), Ty::Int16 => Some((true, 16)), Ty::Int32 => Some((true, 32)),
         Ty::UInt8 => Some((false, 8)), Ty::UInt16 => Some((false, 16)),
         Ty::UInt32 => Some((false, 32)), Ty::UInt64 => Some((false, 64)),
         _ => None,
-    };
-    match limits {
+    }
+}
+
+pub(crate) fn int_literal_fits_type(raw: &str, ty: &Ty, negated: bool) -> bool {
+    let clean = raw.replace('_', "");
+    let (radix, digits) = parse_int_literal_radix(&clean);
+    let Ok(mag) = u128::from_str_radix(digits, radix) else { return true };
+    match int_type_signed_bits(ty) {
         None => true, // not an integer context — not our diagnostic
         Some((signed, bits)) => {
             let max: u128 = if signed {
@@ -415,6 +425,14 @@ impl Checker {
     /// because a successful unify may unblock another deferral whose
     /// `obj_ty` was itself the parked result of an earlier one.
     pub(crate) fn resolve_deferred_tuple_indices(&mut self) {
+        self.drain_deferred_tuple_indices();
+        self.drain_deferred_field_accesses();
+    }
+
+    // Fixpoint-drain `self.deferred_tuple_indices`: retries each pending
+    // `(obj_ty, index, result_ty)` until either the queue is empty or a full
+    // pass makes no progress.
+    fn drain_deferred_tuple_indices(&mut self) {
         loop {
             let pending = std::mem::take(&mut self.deferred_tuple_indices);
             if pending.is_empty() { break; }
@@ -433,9 +451,12 @@ impl Checker {
             self.deferred_tuple_indices = still_pending;
             if !progressed { break; }
         }
-        // Drain deferred field accesses: `obj.field` where `obj` was an
-        // unresolved inference var at inference time. Now that constraints
-        // are solved, resolve the field type and unify.
+    }
+
+    // Drain deferred field accesses: `obj.field` where `obj` was an
+    // unresolved inference var at inference time. Now that constraints
+    // are solved, resolve the field type and unify.
+    fn drain_deferred_field_accesses(&mut self) {
         loop {
             let pending = std::mem::take(&mut self.deferred_field_accesses);
             if pending.is_empty() { break; }
@@ -905,60 +926,14 @@ impl Checker {
                 self.check_fn_decl(name, params, return_type, body, effect, generics);
             }
             ast::Decl::Test { body, where_clauses, .. } => {
-                let wcs = where_clauses.clone();
-                self.env.push_scope();
-                let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
-                let prev_test = self.env.in_test_block; self.env.in_test_block = true;
-                // ONE bind-type map across the whole clause list, so same-name
-                // bindings in DIFFERENT `where [...]` cases unify (see
-                // `infer_test_where_collect`'s Bind arm).
-                let mut seen_binds = std::collections::HashMap::new();
-                for wc in &wcs { self.infer_test_where_collect(wc, &mut seen_binds); }
-                self.infer_expr(body);
-                self.env.in_test_block = prev_test;
-                self.env.can_call_effect = prev_call;
-                self.env.pop_scope();
+                self.check_decl_test(body, where_clauses);
             }
             ast::Decl::TestWhereDef { clauses, .. } => {
                 let wcs = clauses.clone();
                 for wc in &wcs { self.infer_test_where_inner(wc); }
             }
             ast::Decl::TopLet { name, ty, value, mutable, .. } => {
-                if *mutable { self.env.mutable_vars.insert(sym(name)); }
-                let ity = self.infer_expr(value);
-                // A declared type annotation on a top-level `let`/`var` is the
-                // source of truth — flow it into the value so an annotated empty
-                // collection (`var items: List[Int] = []`) pins its element, the
-                // same as a local typed `let` binding. (Was dropped here, so the
-                // element stayed undecidable and tripped E018.)
-                if let Some(te) = ty {
-                    let declared = self.resolve_type_expr(te);
-                    self.constrain(declared, ity.clone(), format!("top let {}", name));
-                }
-                let resolved = resolve_ty(&ity, &self.uf);
-                // Update env.top_lets with the fully inferred type.
-                // `register_decls` seeds module top_lets under the
-                // prefixed key (`util.ANON`), so without this we'd only
-                // refresh the unprefixed intra-module alias — lowering
-                // reads the prefixed key and gets `Ty::Unknown`.
-                let prefixed_key = self.current_module_prefix.as_ref()
-                    .map(|p| sym(&format!("{}.{}", p, name)));
-                if std::env::var_os("ALMIDE_TOPLET_DEBUG").is_some() {
-                    eprintln!("[toplet-debug] refresh: name={} prefix={:?} resolved={:?} existing_prefixed={:?}",
-                        name, self.current_module_prefix,
-                        resolved,
-                        prefixed_key.as_ref().map(|k| self.env.top_lets.get(k)));
-                }
-                if let Some(k) = prefixed_key {
-                    if matches!(self.env.top_lets.get(&k), Some(Ty::Unknown) | None) {
-                        self.env.top_lets.insert(k, resolved.clone());
-                    }
-                    self.pending_toplet_tys.push((k, ity.clone()));
-                }
-                if matches!(self.env.top_lets.get(&sym(name)), Some(Ty::Unknown) | None) {
-                    self.env.top_lets.insert(sym(name), resolved);
-                }
-                self.pending_toplet_tys.push((sym(name), ity));
+                self.check_decl_top_let(name, ty, value, *mutable);
             }
             ast::Decl::Type { ty, .. } => {
                 // Infer types for default value expressions in variant record fields
@@ -966,6 +941,64 @@ impl Checker {
             }
             _ => {}
         }
+    }
+
+    // `Test` arm of `check_decl`: infer the where-clauses (shared bind-type
+    // map across the whole clause list, see `infer_test_where_collect`'s
+    // Bind arm) then the test body, under effect-call and in-test-block
+    // permissions scoped to this test.
+    fn check_decl_test(&mut self, body: &mut ast::Expr, where_clauses: &Vec<ast::TestWhere>) {
+        let wcs = where_clauses.clone();
+        self.env.push_scope();
+        let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
+        let prev_test = self.env.in_test_block; self.env.in_test_block = true;
+        let mut seen_binds = std::collections::HashMap::new();
+        for wc in &wcs { self.infer_test_where_collect(wc, &mut seen_binds); }
+        self.infer_expr(body);
+        self.env.in_test_block = prev_test;
+        self.env.can_call_effect = prev_call;
+        self.env.pop_scope();
+    }
+
+    // `TopLet` arm of `check_decl`: infer the value, constrain it against a
+    // declared annotation (pins e.g. an empty-collection element, #…), then
+    // refresh `env.top_lets` under both the bare and module-prefixed keys.
+    fn check_decl_top_let(&mut self, name: &Sym, ty: &Option<ast::TypeExpr>, value: &mut ast::Expr, mutable: bool) {
+        if mutable { self.env.mutable_vars.insert(sym(name)); }
+        let ity = self.infer_expr(value);
+        // A declared type annotation on a top-level `let`/`var` is the
+        // source of truth — flow it into the value so an annotated empty
+        // collection (`var items: List[Int] = []`) pins its element, the
+        // same as a local typed `let` binding. (Was dropped here, so the
+        // element stayed undecidable and tripped E018.)
+        if let Some(te) = ty {
+            let declared = self.resolve_type_expr(te);
+            self.constrain(declared, ity.clone(), format!("top let {}", name));
+        }
+        let resolved = resolve_ty(&ity, &self.uf);
+        // Update env.top_lets with the fully inferred type.
+        // `register_decls` seeds module top_lets under the
+        // prefixed key (`util.ANON`), so without this we'd only
+        // refresh the unprefixed intra-module alias — lowering
+        // reads the prefixed key and gets `Ty::Unknown`.
+        let prefixed_key = self.current_module_prefix.as_ref()
+            .map(|p| sym(&format!("{}.{}", p, name)));
+        if std::env::var_os("ALMIDE_TOPLET_DEBUG").is_some() {
+            eprintln!("[toplet-debug] refresh: name={} prefix={:?} resolved={:?} existing_prefixed={:?}",
+                name, self.current_module_prefix,
+                resolved,
+                prefixed_key.as_ref().map(|k| self.env.top_lets.get(k)));
+        }
+        if let Some(k) = prefixed_key {
+            if matches!(self.env.top_lets.get(&k), Some(Ty::Unknown) | None) {
+                self.env.top_lets.insert(k, resolved.clone());
+            }
+            self.pending_toplet_tys.push((k, ity.clone()));
+        }
+        if matches!(self.env.top_lets.get(&sym(name)), Some(Ty::Unknown) | None) {
+            self.env.top_lets.insert(sym(name), resolved);
+        }
+        self.pending_toplet_tys.push((sym(name), ity));
     }
 
     // ── Exhaustiveness ──
