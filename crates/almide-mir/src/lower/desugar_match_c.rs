@@ -81,7 +81,7 @@ pub fn desugar_tuple_empty_list_match(body: &IrExpr) -> Option<IrExpr> {
             {
                 return;
             }
-            let (last, init) = arms.split_last().unwrap();
+            let (last, init) = arms.split_last().expect("arms.len() >= 3, guarded above, so split_last() is Some");
             if !matches!(last.pattern, IrPattern::Wildcard) {
                 return;
             }
@@ -278,7 +278,7 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
             if arms.len() < 2 {
                 return;
             }
-            let (last, init) = arms.split_last().unwrap();
+            let (last, init) = arms.split_last().expect("arms.len() >= 2, guarded above, so split_last() is Some");
             if last.guard.is_some() || !matches!(last.pattern, IrPattern::Wildcard) {
                 return;
             }

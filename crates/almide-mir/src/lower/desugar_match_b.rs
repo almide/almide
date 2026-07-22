@@ -147,7 +147,7 @@ fn rewrite_tuple_match(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Opti
                 span: None,
                 def_id: None,
             })
-            .unwrap();
+            .expect("conds is non-empty: the is_empty() early-return above already handled that case");
         let else_ = build(rest, n, subject, elem, result_ty)?;
         Some(IrExpr {
             kind: IrExprKind::If {

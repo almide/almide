@@ -245,7 +245,7 @@ pub fn desugar_scalar_tuple_literal_match(body: &IrExpr) -> Option<IrExpr> {
                 });
             }
             *e = IrExpr {
-                kind: IrExprKind::Block { stmts, expr: Some(Box::new(chain.unwrap())) },
+                kind: IrExprKind::Block { stmts, expr: Some(Box::new(chain.expect("chain is Some: the loop above ran at least once (arm_parts.len() == arms.len() >= 2, guarded above) and always assigns Some"))) },
                 ty: e.ty.clone(),
                 span: span.clone(),
                 def_id: e.def_id,
@@ -286,7 +286,7 @@ pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
             }
             // Every arm but the last must be a GUARDED Bind/Wildcard; the last an UNGUARDED
             // Bind/Wildcard catch-all. Literal/ctor patterns stay for the other paths.
-            let (last, init) = arms.split_last().unwrap();
+            let (last, init) = arms.split_last().expect("arms.len() >= 2, guarded above, so split_last() is Some");
             if last.guard.is_some()
                 || !matches!(last.pattern, IrPattern::Wildcard | IrPattern::Bind { .. })
                 || init.iter().any(|a| {
@@ -332,7 +332,7 @@ pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
             for arm in init.iter().rev() {
                 chain = IrExpr {
                     kind: IrExprKind::If {
-                        cond: Box::new(arm.guard.clone().unwrap()),
+                        cond: Box::new(arm.guard.clone().expect("every `init` arm has a guard: the early-return above already rejected any init arm with guard.is_none()")),
                         then: Box::new(arm.body.clone()),
                         else_: Box::new(chain),
                     },
@@ -569,10 +569,10 @@ fn group_option_result_arms(
     };
     let rebuild = |key: &CKey, args: Vec<IrPattern>| -> IrPattern {
         match key {
-            CKey::Some_ => IrPattern::Some { inner: Box::new(args.into_iter().next().unwrap()) },
+            CKey::Some_ => IrPattern::Some { inner: Box::new(args.into_iter().next().expect("Some_ groups always carry exactly 1 field (`parse` only ever produces vec![inner] for Some)")) },
             CKey::None_ => IrPattern::None,
-            CKey::Ok_ => IrPattern::Ok { inner: Box::new(args.into_iter().next().unwrap()) },
-            CKey::Err_ => IrPattern::Err { inner: Box::new(args.into_iter().next().unwrap()) },
+            CKey::Ok_ => IrPattern::Ok { inner: Box::new(args.into_iter().next().expect("Ok_ groups always carry exactly 1 field (`parse` only ever produces vec![inner] for Ok)")) },
+            CKey::Err_ => IrPattern::Err { inner: Box::new(args.into_iter().next().expect("Err_ groups always carry exactly 1 field (`parse` only ever produces vec![inner] for Err)")) },
             CKey::User(name) => IrPattern::Constructor { name: name.clone(), args },
         }
     };
@@ -592,7 +592,7 @@ fn group_option_result_arms(
             if bucket.len() != 1 {
                 return Option::None;
             }
-            let (fields, guard, body) = bucket.into_iter().next().unwrap();
+            let (fields, guard, body) = bucket.into_iter().next().expect("bucket.len() == 1, checked immediately above");
             new_arms.push(IrMatchArm { pattern: rebuild(&key, fields), guard, body });
             continue;
         }
@@ -636,7 +636,7 @@ fn group_option_result_arms(
             .into_iter()
             .map(|(fields, guard, body)| IrMatchArm {
                 pattern: if arity == 1 {
-                    fields.into_iter().next().unwrap()
+                    fields.into_iter().next().expect("arity == 1, checked above, and every bucket entry shares this key's fixed field count")
                 } else {
                     IrPattern::Tuple { elements: fields }
                 },
