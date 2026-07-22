@@ -258,196 +258,234 @@ pub(crate) fn aggregate_part_expandable(expr: &IrExpr, registry: &RecordLayouts)
 fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr> {
     match p {
         IrStringPart::Lit { value } => Some(lit_str(value)),
-        IrStringPart::Expr { expr } if matches!(expr.ty, Ty::String) => Some(expr.clone()),
-        // A record/tuple part: EXPAND if the lowering will materialize it; else wrap in the
-        // unlinked `compound.to_string` so the function walls (the SAME decision the gate makes).
-        IrStringPart::Expr { expr }
-            if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
-                && resolve_aggregate(&expr.ty, registry).is_some() =>
-        {
-            // An ANONYMOUS record ALWAYS takes the generated sorted-field repr: v0 sorts
-            // anon fields by name, while the inline display_aggregate expansion reads the
-            // STRUCTURAL (source) order — expanding it would emit wrong bytes.
-            if let Ty::Record { fields } = &expr.ty {
-                // An ANONYMOUS record part — route to the generated
-                // `__repr_anonrec_<hash>` (sorted-field render); an unemitted shape
-                // (a nested payload) leaves the call unlinked = the honest wall.
-                Some(IrExpr {
-                    kind: IrExprKind::Call {
-                        target: CallTarget::Named {
-                            name: sym(&format!(
-                                "__repr_{}",
-                                crate::lower::anon_record_drop_name(fields)
-                            )),
-                        },
-                        args: vec![expr.clone()],
-                        type_args: Vec::new(),
-                    },
-                    ty: Ty::String,
-                    span: None,
-                    def_id: None,
-                })
-            } else if aggregate_part_expandable(expr, registry) {
-                display_aggregate(expr, &expr.ty, registry)
-            } else if let Ty::Named(name, _) = &expr.ty {
-                // A NAMED record outside the inline-expand subset (a recursive record, a
-                // List[record] field — the compound_repr class): route to the GENERATED
-                // `__repr_rec_<R>` (render-pipeline-injected). A record the generator does
-                // not emit leaves the call unlinked — the same honest render wall the
-                // `compound.to_string` wrapper gives, with the SAME call-count (one node).
-                Some(IrExpr {
-                    kind: IrExprKind::Call {
-                        target: CallTarget::Named {
-                            name: sym(&format!(
-                                "__repr_rec_{}",
-                                crate::lower::drop_fn_ident(name.as_str())
-                            )),
-                        },
-                        args: vec![expr.clone()],
-                        type_args: Vec::new(),
-                    },
-                    ty: Ty::String,
-                    span: None,
-                    def_id: None,
-                })
-            } else {
-                Some(to_string_call("compound", "to_string", expr.clone()))
-            }
-        }
-        // A custom-VARIANT part (`"${Overflow(\"x\")}"` / a bound variant var): route
-        // to the GENERATED `__repr_<V>` (render-pipeline-injected; the classify gate
-        // counts the same call node). A variant the generator does not emit (a field
-        // outside Int/Bool/String/nested-variant) leaves an unlinked call — the same
-        // honest render wall the `compound.to_string` wrapper gives records.
-        IrStringPart::Expr { expr }
-            if matches!(&expr.ty, Ty::Named(..))
-                && resolve_aggregate(&expr.ty, registry).is_none() =>
-        {
-            let Ty::Named(name, targs) = &expr.ty else { unreachable!() };
-            // A GENERIC-variant instance (`${l}` over `ReprEither[Int, String]`) takes
-            // the INSTANTIATION-KEYED repr — the exact key the generator derives
-            // (`repr_inst_ident`), so the call links iff the instantiation is emitted.
-            let rname = if targs.is_empty() {
-                format!("__repr_{}", crate::lower::drop_fn_ident(name.as_str()))
-            } else {
-                format!("__repr_{}", crate::lower::repr_inst_ident(name.as_str(), targs))
-            };
-            Some(IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: sym(&rname) },
-                    args: vec![expr.clone()],
-                    type_args: Vec::new(),
-                },
-                ty: Ty::String,
-                span: None,
-                def_id: None,
-            })
-        }
-        // A CONTAINER of a named record/variant (`${pts}` over List[Point], `${op}` over
-        // Option[Point], `${shapes}` over List[Shape]) — route to the GENERATED container
-        // repr (`__repr_list_rec_<R>` / `__repr_opt_rec_<R>` / `__repr_list_<V>`, emitted by
-        // `generate_variant_repr_sources` for exactly the container/element pairs collected
-        // from interp parts). An unemitted pair leaves the call unlinked — the honest wall
-        // (same contract as the bare `__repr_rec_<R>` arm above).
-        IrStringPart::Expr { expr }
-            if container_repr_name(&expr.ty, registry).is_some() =>
-        {
-            let name = container_repr_name(&expr.ty, registry).expect("this arm's guard already proved container_repr_name(..).is_some() for the same &expr.ty");
-            Some(IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: sym(&name) },
-                    args: vec![expr.clone()],
-                    type_args: Vec::new(),
-                },
-                ty: Ty::String,
-                span: None,
-                def_id: None,
-            })
-        }
-        // `${List[(Int, String)]}` / `${Option[(Bool, Bool)]}` — SCALAR-component
-        // tuple containers (list.sort / list.min/max results, the C-053 class): route
-        // to the generated `__repr_list_tup_<key>` / `__repr_opt_tup_<key>` walkers.
-        // A component outside Int/Bool/String keeps the existing `_x` wall routing.
-        // `(String, Int)` is EXCLUDED on the List side — `${List[(String, Int)]}`
-        // keeps its established `list.to_string_lsi` route (string_rle).
-        IrStringPart::Expr { expr }
-            if matches!(&expr.ty,
-                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                    if a.len() == 1
-                        && matches!(&a[0], Ty::Tuple(ts)
-                            if crate::lower::tuple_repr_ident(ts).is_some()
-                                && !(ts.len() == 2
-                                    && matches!(ts[0], Ty::String)
-                                    && matches!(ts[1], Ty::Int)))) =>
-        {
-            let Ty::Applied(_, a) = &expr.ty else { unreachable!() };
-            let Ty::Tuple(ts) = &a[0] else { unreachable!() };
-            let key = crate::lower::tuple_repr_ident(ts).expect("this arm's guard already proved tuple_repr_ident(ts).is_some() for the same ts");
-            Some(IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: sym(&format!("__repr_list_tup_{key}")) },
-                    args: vec![expr.clone()],
-                    type_args: Vec::new(),
-                },
-                ty: Ty::String,
-                span: None,
-                def_id: None,
-            })
-        }
-        IrStringPart::Expr { expr }
-            if matches!(&expr.ty,
-                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
-                    if a.len() == 1
-                        && matches!(&a[0], Ty::Tuple(ts)
-                            if crate::lower::tuple_repr_ident(ts).is_some())) =>
-        {
-            let Ty::Applied(_, a) = &expr.ty else { unreachable!() };
-            let Ty::Tuple(ts) = &a[0] else { unreachable!() };
-            let key = crate::lower::tuple_repr_ident(ts).expect("this arm's guard already proved tuple_repr_ident(ts).is_some() for the same ts");
-            Some(IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: sym(&format!("__repr_opt_tup_{key}")) },
-                    args: vec![expr.clone()],
-                    type_args: Vec::new(),
-                },
-                ty: Ty::String,
-                span: None,
-                def_id: None,
-            })
-        }
-        // `${[a]}` over a List[<STRUCTURAL record>] (an inferred literal element — the
-        // r5 C-072 class): route to the generated `__repr_list_anonrec_<hash>` walker
-        // (its element repr renders NOMINALLY when the shape resolves to a declared
-        // record, sorted-anonymous otherwise). An unemitted shape (a nested payload)
-        // leaves the call unlinked — the honest wall.
-        IrStringPart::Expr { expr }
-            if matches!(&expr.ty,
-                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                    if a.len() == 1 && matches!(a[0], Ty::Record { .. })) =>
-        {
-            let Ty::Applied(_, a) = &expr.ty else { unreachable!() };
-            let Ty::Record { fields } = &a[0] else { unreachable!() };
-            Some(IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Named {
-                        name: sym(&format!(
-                            "__repr_list_{}",
-                            crate::lower::anon_record_drop_name(fields)
-                        )),
-                    },
-                    args: vec![expr.clone()],
-                    type_args: Vec::new(),
-                },
-                ty: Ty::String,
-                span: None,
-                def_id: None,
-            })
-        }
-        IrStringPart::Expr { expr } => {
-            let (module, func) = interp_to_string_call(&expr.ty)?;
-            Some(to_string_call(module, func, expr.clone()))
-        }
+        IrStringPart::Expr { expr } => interp_part_leaf_expr(expr, registry),
     }
+}
+
+/// The `IrStringPart::Expr` arm family of [`interp_part_leaf`] — each of the
+/// original match arm's guards keyed on a DISTINCT `expr.ty`/`expr.kind`
+/// shape (String passthrough, aggregate, bare variant, container, scalar-
+/// tuple container, anon-record list, fallback). Converted to a sequential
+/// `.or_else()` chain: since `match` already tries arms top-to-bottom and
+/// each guard here is a pure, side-effect-free check, trying the same
+/// checks in the same order via function calls is behaviorally identical —
+/// the first one whose guard holds is the one that ever constructs a
+/// result, exactly as the original single match.
+fn interp_part_leaf_expr(expr: &IrExpr, registry: &RecordLayouts) -> Option<IrExpr> {
+    if matches!(expr.ty, Ty::String) {
+        return Some(expr.clone());
+    }
+    interp_part_leaf_aggregate(expr, registry)
+        .or_else(|| interp_part_leaf_variant(expr, registry))
+        .or_else(|| interp_part_leaf_container(expr, registry))
+        .or_else(|| interp_part_leaf_scalar_tuple_list_container(expr))
+        .or_else(|| interp_part_leaf_scalar_tuple_option_container(expr))
+        .or_else(|| interp_part_leaf_anon_record_list(expr))
+        .or_else(|| interp_part_leaf_fallback(expr))
+}
+
+/// A record/tuple part: EXPAND if the lowering will materialize it; else wrap in the
+/// unlinked `compound.to_string` so the function walls (the SAME decision the gate makes).
+fn interp_part_leaf_aggregate(expr: &IrExpr, registry: &RecordLayouts) -> Option<IrExpr> {
+    if !(matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
+        && resolve_aggregate(&expr.ty, registry).is_some())
+    {
+        return None;
+    }
+    // An ANONYMOUS record ALWAYS takes the generated sorted-field repr: v0 sorts
+    // anon fields by name, while the inline display_aggregate expansion reads the
+    // STRUCTURAL (source) order — expanding it would emit wrong bytes.
+    if let Ty::Record { fields } = &expr.ty {
+        // An ANONYMOUS record part — route to the generated
+        // `__repr_anonrec_<hash>` (sorted-field render); an unemitted shape
+        // (a nested payload) leaves the call unlinked = the honest wall.
+        Some(IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Named {
+                    name: sym(&format!(
+                        "__repr_{}",
+                        crate::lower::anon_record_drop_name(fields)
+                    )),
+                },
+                args: vec![expr.clone()],
+                type_args: Vec::new(),
+            },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        })
+    } else if aggregate_part_expandable(expr, registry) {
+        display_aggregate(expr, &expr.ty, registry)
+    } else if let Ty::Named(name, _) = &expr.ty {
+        // A NAMED record outside the inline-expand subset (a recursive record, a
+        // List[record] field — the compound_repr class): route to the GENERATED
+        // `__repr_rec_<R>` (render-pipeline-injected). A record the generator does
+        // not emit leaves the call unlinked — the same honest render wall the
+        // `compound.to_string` wrapper gives, with the SAME call-count (one node).
+        Some(IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Named {
+                    name: sym(&format!(
+                        "__repr_rec_{}",
+                        crate::lower::drop_fn_ident(name.as_str())
+                    )),
+                },
+                args: vec![expr.clone()],
+                type_args: Vec::new(),
+            },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        })
+    } else {
+        Some(to_string_call("compound", "to_string", expr.clone()))
+    }
+}
+
+/// A custom-VARIANT part (`"${Overflow(\"x\")}"` / a bound variant var): route
+/// to the GENERATED `__repr_<V>` (render-pipeline-injected; the classify gate
+/// counts the same call node). A variant the generator does not emit (a field
+/// outside Int/Bool/String/nested-variant) leaves an unlinked call — the same
+/// honest render wall the `compound.to_string` wrapper gives records.
+fn interp_part_leaf_variant(expr: &IrExpr, registry: &RecordLayouts) -> Option<IrExpr> {
+    if !(matches!(&expr.ty, Ty::Named(..)) && resolve_aggregate(&expr.ty, registry).is_none()) {
+        return None;
+    }
+    let Ty::Named(name, targs) = &expr.ty else { unreachable!() };
+    // A GENERIC-variant instance (`${l}` over `ReprEither[Int, String]`) takes
+    // the INSTANTIATION-KEYED repr — the exact key the generator derives
+    // (`repr_inst_ident`), so the call links iff the instantiation is emitted.
+    let rname = if targs.is_empty() {
+        format!("__repr_{}", crate::lower::drop_fn_ident(name.as_str()))
+    } else {
+        format!("__repr_{}", crate::lower::repr_inst_ident(name.as_str(), targs))
+    };
+    Some(IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Named { name: sym(&rname) },
+            args: vec![expr.clone()],
+            type_args: Vec::new(),
+        },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    })
+}
+
+/// A CONTAINER of a named record/variant (`${pts}` over List[Point], `${op}` over
+/// Option[Point], `${shapes}` over List[Shape]) — route to the GENERATED container
+/// repr (`__repr_list_rec_<R>` / `__repr_opt_rec_<R>` / `__repr_list_<V>`, emitted by
+/// `generate_variant_repr_sources` for exactly the container/element pairs collected
+/// from interp parts). An unemitted pair leaves the call unlinked — the honest wall
+/// (same contract as the bare `__repr_rec_<R>` arm above).
+fn interp_part_leaf_container(expr: &IrExpr, registry: &RecordLayouts) -> Option<IrExpr> {
+    let name = container_repr_name(&expr.ty, registry)?;
+    Some(IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Named { name: sym(&name) },
+            args: vec![expr.clone()],
+            type_args: Vec::new(),
+        },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    })
+}
+
+/// `${List[(Int, String)]}` / `${Option[(Bool, Bool)]}` — SCALAR-component
+/// tuple containers (list.sort / list.min/max results, the C-053 class): route
+/// to the generated `__repr_list_tup_<key>` walker. A component outside
+/// Int/Bool/String keeps the existing `_x` wall routing. `(String, Int)` is
+/// EXCLUDED — `${List[(String, Int)]}` keeps its established
+/// `list.to_string_lsi` route (string_rle).
+fn interp_part_leaf_scalar_tuple_list_container(expr: &IrExpr) -> Option<IrExpr> {
+    if !matches!(&expr.ty,
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts)
+                    if crate::lower::tuple_repr_ident(ts).is_some()
+                        && !(ts.len() == 2
+                            && matches!(ts[0], Ty::String)
+                            && matches!(ts[1], Ty::Int))))
+    {
+        return None;
+    }
+    let Ty::Applied(_, a) = &expr.ty else { unreachable!() };
+    let Ty::Tuple(ts) = &a[0] else { unreachable!() };
+    let key = crate::lower::tuple_repr_ident(ts).expect("this arm's guard already proved tuple_repr_ident(ts).is_some() for the same ts");
+    Some(IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Named { name: sym(&format!("__repr_list_tup_{key}")) },
+            args: vec![expr.clone()],
+            type_args: Vec::new(),
+        },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    })
+}
+
+/// The `Option[(scalar, scalar)]` sibling of
+/// [`interp_part_leaf_scalar_tuple_list_container`] — routes to
+/// `__repr_opt_tup_<key>`.
+fn interp_part_leaf_scalar_tuple_option_container(expr: &IrExpr) -> Option<IrExpr> {
+    if !matches!(&expr.ty,
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts)
+                    if crate::lower::tuple_repr_ident(ts).is_some()))
+    {
+        return None;
+    }
+    let Ty::Applied(_, a) = &expr.ty else { unreachable!() };
+    let Ty::Tuple(ts) = &a[0] else { unreachable!() };
+    let key = crate::lower::tuple_repr_ident(ts).expect("this arm's guard already proved tuple_repr_ident(ts).is_some() for the same ts");
+    Some(IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Named { name: sym(&format!("__repr_opt_tup_{key}")) },
+            args: vec![expr.clone()],
+            type_args: Vec::new(),
+        },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    })
+}
+
+/// `${[a]}` over a List[<STRUCTURAL record>] (an inferred literal element — the
+/// r5 C-072 class): route to the generated `__repr_list_anonrec_<hash>` walker
+/// (its element repr renders NOMINALLY when the shape resolves to a declared
+/// record, sorted-anonymous otherwise). An unemitted shape (a nested payload)
+/// leaves the call unlinked — the honest wall.
+fn interp_part_leaf_anon_record_list(expr: &IrExpr) -> Option<IrExpr> {
+    if !matches!(&expr.ty,
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+            if a.len() == 1 && matches!(a[0], Ty::Record { .. }))
+    {
+        return None;
+    }
+    let Ty::Applied(_, a) = &expr.ty else { unreachable!() };
+    let Ty::Record { fields } = &a[0] else { unreachable!() };
+    Some(IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Named {
+                name: sym(&format!(
+                    "__repr_list_{}",
+                    crate::lower::anon_record_drop_name(fields)
+                )),
+            },
+            args: vec![expr.clone()],
+            type_args: Vec::new(),
+        },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    })
+}
+
+fn interp_part_leaf_fallback(expr: &IrExpr) -> Option<IrExpr> {
+    let (module, func) = interp_to_string_call(&expr.ty)?;
+    Some(to_string_call(module, func, expr.clone()))
 }
 
 // `container_repr_name` and its helpers moved to `mod_p4_g.rs` (codopsy8 complexity sweep:
