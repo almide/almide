@@ -75,11 +75,41 @@ fn propagate_expr(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
     }
     // Recurse into subexpressions
     match &mut expr.kind {
+        IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } => propagate_expr_binop(expr, constants),
+        IrExprKind::Block { .. } | IrExprKind::If { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. } => propagate_expr_control(expr, constants),
+        IrExprKind::Match { .. } => propagate_expr_match(expr, constants),
+        IrExprKind::Call { .. } => propagate_expr_call(expr, constants),
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::MapLiteral { .. } | IrExprKind::StringInterp { .. } => propagate_expr_containers(expr, constants),
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. }
+        | IrExprKind::Try { .. } | IrExprKind::Await { .. } => propagate_expr_wrap(expr, constants),
+        // Do NOT propagate into lambda bodies — closures capture by value,
+        // and replacing captured vars with literals breaks use-count tracking
+        // (the captured var's use_count drops to 0, DCE removes the binding,
+        // but CallTarget::Named still references the closure by name).
+        IrExprKind::Lambda { .. } => {},
+        _ => {}
+    }
+}
+
+/// BinOp / UnOp: propagate into operands.
+fn propagate_expr_binop(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
+    match &mut expr.kind {
         IrExprKind::BinOp { left, right, .. } => {
             propagate_expr(left, constants);
             propagate_expr(right, constants);
         }
         IrExprKind::UnOp { operand, .. } => propagate_expr(operand, constants),
+        _ => unreachable!(),
+    }
+}
+
+/// Block / If / ForIn / While: propagate into control-flow subexpressions and bodies.
+fn propagate_expr_control(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
+    match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts { propagate_stmt(s, constants); }
             if let Some(t) = tail { propagate_expr(t, constants); }
@@ -89,30 +119,44 @@ fn propagate_expr(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
             propagate_expr(then, constants);
             propagate_expr(else_, constants);
         }
-        IrExprKind::Match { subject, arms } => {
-            propagate_expr(subject, constants);
-            for a in arms {
-                if let Some(g) = &mut a.guard { propagate_expr(g, constants); }
-                propagate_expr(&mut a.body, constants);
-            }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            propagate_expr(iterable, constants);
+            for s in body { propagate_stmt(s, constants); }
         }
-        IrExprKind::Call { target, args, .. } => {
-            if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
-                propagate_expr(object, constants);
-            }
-            for a in args { propagate_expr(a, constants); }
+        IrExprKind::While { cond, body } => {
+            propagate_expr(cond, constants);
+            for s in body { propagate_stmt(s, constants); }
         }
+        _ => unreachable!(),
+    }
+}
+
+/// Match: propagate into subject, guards, and arm bodies.
+fn propagate_expr_match(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    propagate_expr(subject, constants);
+    for a in arms {
+        if let Some(g) = &mut a.guard { propagate_expr(g, constants); }
+        propagate_expr(&mut a.body, constants);
+    }
+}
+
+/// Call: propagate into the receiver (if any) and arguments.
+fn propagate_expr_call(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
+    let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
+    if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
+        propagate_expr(object, constants);
+    }
+    for a in args { propagate_expr(a, constants); }
+}
+
+/// List/Tuple/Record/SpreadRecord/Range/IndexAccess/MapAccess/Member/TupleIndex/MapLiteral/StringInterp:
+/// propagate into each child expression.
+fn propagate_expr_containers(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
+    match &mut expr.kind {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { propagate_expr(e, constants); }
         }
-        // Do NOT propagate into lambda bodies — closures capture by value,
-        // and replacing captured vars with literals breaks use-count tracking
-        // (the captured var's use_count drops to 0, DCE removes the binding,
-        // but CallTarget::Named still references the closure by name).
-        IrExprKind::Lambda { .. } => {},
-        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Await { expr: e } => propagate_expr(e, constants),
         IrExprKind::Record { fields, .. } => { for (_, v) in fields { propagate_expr(v, constants); } }
         IrExprKind::SpreadRecord { base, fields } => {
             propagate_expr(base, constants);
@@ -141,16 +185,16 @@ fn propagate_expr(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
                 if let IrStringPart::Expr { expr: e } = p { propagate_expr(e, constants); }
             }
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            propagate_expr(iterable, constants);
-            for s in body { propagate_stmt(s, constants); }
-        }
-        IrExprKind::While { cond, body } => {
-            propagate_expr(cond, constants);
-            for s in body { propagate_stmt(s, constants); }
-        }
-        _ => {}
+        _ => unreachable!(),
     }
+}
+
+/// ResultOk/ResultErr/OptionSome/Try/Await: propagate into the wrapped expression.
+fn propagate_expr_wrap(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
+    let (IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Await { expr: e }) = &mut expr.kind else { unreachable!() };
+    propagate_expr(e, constants);
 }
 
 fn propagate_stmt(stmt: &mut IrStmt, constants: &HashMap<VarId, IrExpr>) {
