@@ -49,8 +49,14 @@ pub fn cmd_init() {
     err(&format!("  CLAUDE.md"));
 }
 
-pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
-    let test_files: Vec<String> = if !file.is_empty() {
+/// Shared "resolve `almide test [file]`'s target file list" logic — used by
+/// `cmd_test`/`cmd_test_fast` (search `spec/` and `exercises/`, `.`
+/// fallback) and `cmd_test_wasm` (search `.` directly, i.e. an empty
+/// `fallback_dirs`). Extracted verbatim from `cmd_test`'s identical block —
+/// exits the process on an empty result, exactly as all three call sites
+/// already did.
+fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
+    if !file.is_empty() {
         let path = std::path::Path::new(file);
         if path.is_dir() {
             let mut files = collect_test_files(path);
@@ -64,9 +70,10 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
             vec![file.to_string()]
         }
     } else {
-        // Default: recursively find test files in spec/ and exercises/ (standard test directories)
+        // Default: recursively find test files in the given standard
+        // directories (e.g. spec/, exercises/); "." otherwise.
         let mut files = Vec::new();
-        for dir in &["spec", "exercises"] {
+        for dir in fallback_dirs {
             let path = std::path::Path::new(dir);
             if path.exists() {
                 files.extend(collect_test_files(path));
@@ -82,7 +89,11 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
             std::process::exit(1);
         }
         files
-    };
+    }
+}
+
+pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
+    let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let mut program_args: Vec<String> = Vec::new();
     if let Some(filter) = run_filter {
@@ -406,28 +417,7 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
 }
 
 pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
-    let test_files: Vec<String> = if !file.is_empty() {
-        let path = std::path::Path::new(file);
-        if path.is_dir() {
-            let mut files = collect_test_files(path);
-            files.sort();
-            if files.is_empty() {
-                err(&format!("No .almd files with test blocks found in {}", file));
-                std::process::exit(1);
-            }
-            files
-        } else {
-            vec![file.to_string()]
-        }
-    } else {
-        let mut files = collect_test_files(std::path::Path::new("."));
-        files.sort();
-        if files.is_empty() {
-            err(&format!("No .almd files with test blocks found."));
-            std::process::exit(1);
-        }
-        files
-    };
+    let test_files: Vec<String> = discover_test_files(file, &[]);
 
     let tmp_dir = std::env::temp_dir().join("almide-wasm-test");
     std::fs::create_dir_all(&tmp_dir).ok();
@@ -498,68 +488,81 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
     }
 }
 
+/// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
+/// path, in parallel (bounded by `cpus`). Extracted verbatim.
+fn run_wasm_test_phase(test_files: &[String], tmp_dir: &std::sync::Arc<std::path::PathBuf>, cpus: usize) -> Vec<WasmTestOutcome> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+    for _ in 0..cpus { let _ = sem_tx.send(()); }
+    let sem_tx = std::sync::Arc::new(sem_tx);
+    let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+    let mut handles = Vec::new();
+    for tf in test_files.to_vec() {
+        let tx = tx.clone();
+        let td = tmp_dir.clone();
+        let sr = sem_rx.clone();
+        let st = sem_tx.clone();
+        handles.push(std::thread::spawn(move || {
+            let _ = sr.lock().unwrap().recv();
+            let o = compile_and_run_wasm_test(&tf, &td);
+            let _ = st.send(());
+            let _ = tx.send(o);
+        }));
+    }
+    drop(tx);
+    let v: Vec<_> = rx.iter().collect();
+    for h in handles { let _ = h.join(); }
+    v
+}
+
+/// `cmd_test_fast`'s Phase 2: native rustc fallback (authoritative) for
+/// everything the WASM path didn't pass, parallel with per-file scratch
+/// dirs. Extracted verbatim.
+fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize) -> Vec<(String, i32)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+    for _ in 0..cpus { let _ = sem_tx.send(()); }
+    let sem_tx = std::sync::Arc::new(sem_tx);
+    let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+    let mut handles = Vec::new();
+    for tf in fallback.to_vec() {
+        let tx = tx.clone();
+        let args = program_args.clone();
+        let sr = sem_rx.clone();
+        let st = sem_tx.clone();
+        handles.push(std::thread::spawn(move || {
+            let _ = sr.lock().unwrap().recv();
+            let worker_dir = std::env::temp_dir()
+                .join("almide-test")
+                .join(tf.replace('/', "_").replace('.', "_"));
+            let code = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
+                Ok(bin) => super::run::run_binary(&bin, &args),
+                Err(e) => { err(&format!("Compile error for {}:\n{}", tf, e)); 1 }
+            };
+            let _ = st.send(());
+            let _ = tx.send((tf, code));
+        }));
+    }
+    drop(tx);
+    let mut v: Vec<(String, i32)> = rx.iter().collect();
+    for h in handles { let _ = h.join(); }
+    v.sort_by(|a, b| a.0.cmp(&b.0));
+    v
+}
+
 /// Default `almide test`: run each file on the fast rustc-free WASM path; for
 /// any file the WASM path can't pass (emitter gap, wasm:skip, or a trap), fall
 /// back to the native rustc path, which is authoritative. The common case (most
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
 pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
-    let test_files: Vec<String> = if !file.is_empty() {
-        let path = std::path::Path::new(file);
-        if path.is_dir() {
-            let mut files = collect_test_files(path);
-            files.sort();
-            if files.is_empty() {
-                err(&format!("No .almd files with test blocks found in {}", file));
-                std::process::exit(1);
-            }
-            files
-        } else {
-            vec![file.to_string()]
-        }
-    } else {
-        let mut files = Vec::new();
-        for dir in &["spec", "exercises"] {
-            let path = std::path::Path::new(dir);
-            if path.exists() { files.extend(collect_test_files(path)); }
-        }
-        if files.is_empty() { files = collect_test_files(std::path::Path::new(".")); }
-        files.sort();
-        if files.is_empty() {
-            err(&format!("No .almd files with test blocks found."));
-            std::process::exit(1);
-        }
-        files
-    };
+    let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let tmp_dir = std::sync::Arc::new(std::env::temp_dir().join("almide-wasm-test"));
     std::fs::create_dir_all(&*tmp_dir).ok();
 
     // Phase 1: WASM (fast, rustc-free), parallel.
-    let wasm_outcomes: Vec<WasmTestOutcome> = {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
-        for _ in 0..cpus { let _ = sem_tx.send(()); }
-        let sem_tx = std::sync::Arc::new(sem_tx);
-        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
-        let mut handles = Vec::new();
-        for tf in test_files.clone() {
-            let tx = tx.clone();
-            let td = tmp_dir.clone();
-            let sr = sem_rx.clone();
-            let st = sem_tx.clone();
-            handles.push(std::thread::spawn(move || {
-                let _ = sr.lock().unwrap().recv();
-                let o = compile_and_run_wasm_test(&tf, &td);
-                let _ = st.send(());
-                let _ = tx.send(o);
-            }));
-        }
-        drop(tx);
-        let v: Vec<_> = rx.iter().collect();
-        for h in handles { let _ = h.join(); }
-        v
-    };
+    let wasm_outcomes = run_wasm_test_phase(&test_files, &tmp_dir, cpus);
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
@@ -576,37 +579,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     if let Some(f) = run_filter { program_args.push(f.to_string()); }
     let program_args = std::sync::Arc::new(program_args);
 
-    let native_results: Vec<(String, i32)> = {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
-        for _ in 0..cpus { let _ = sem_tx.send(()); }
-        let sem_tx = std::sync::Arc::new(sem_tx);
-        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
-        let mut handles = Vec::new();
-        for tf in fallback.clone() {
-            let tx = tx.clone();
-            let args = program_args.clone();
-            let sr = sem_rx.clone();
-            let st = sem_tx.clone();
-            handles.push(std::thread::spawn(move || {
-                let _ = sr.lock().unwrap().recv();
-                let worker_dir = std::env::temp_dir()
-                    .join("almide-test")
-                    .join(tf.replace('/', "_").replace('.', "_"));
-                let code = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                    Ok(bin) => super::run::run_binary(&bin, &args),
-                    Err(e) => { err(&format!("Compile error for {}:\n{}", tf, e)); 1 }
-                };
-                let _ = st.send(());
-                let _ = tx.send((tf, code));
-            }));
-        }
-        drop(tx);
-        let mut v: Vec<(String, i32)> = rx.iter().collect();
-        for h in handles { let _ = h.join(); }
-        v.sort_by(|a, b| a.0.cmp(&b.0));
-        v
-    };
+    let native_results = run_native_fallback_phase(&fallback, &program_args, no_check, cpus);
 
     let mut failed = 0;
     for (file, code) in &native_results {
