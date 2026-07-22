@@ -59,10 +59,7 @@ fn lift_effect_fn_signatures(program: &mut IrProgram, wrap_non_result: bool) -> 
     let mut lifted_fns: HashMap<String, Ty> = HashMap::new();
 
     for func in &mut program.functions {
-        if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
-            && func.extern_attrs.is_empty()
-            && !is_template_dispatch(&func.attrs)
-        {
+        if should_lift_effect_fn_ret(func, wrap_non_result) {
             let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
             func.ret_ty = Ty::result(orig, Ty::String);
             lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
@@ -70,29 +67,42 @@ fn lift_effect_fn_signatures(program: &mut IrProgram, wrap_non_result: bool) -> 
     }
 
     for module in &mut program.modules {
-        let mod_name = module.versioned_name
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| module.name.to_string());
-        let mod_ident = mod_name.replace('.', "_");
-        for func in &mut module.functions {
-            if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
-                && func.extern_attrs.is_empty()
-                && !is_template_dispatch(&func.attrs)
-            {
-                let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
-                func.ret_ty = Ty::result(orig, Ty::String);
-                let bare = func.name.to_string();
-                lifted_fns.insert(bare.clone(), func.ret_ty.clone());
-                let sanitized = bare
-                    .replace(' ', "_")
-                    .replace('-', "_")
-                    .replace('.', "_");
-                let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
-                lifted_fns.insert(mangled, func.ret_ty.clone());
-            }
-        }
+        lift_module_effect_fn_signatures(module, wrap_non_result, &mut lifted_fns);
     }
     lifted_fns
+}
+
+/// Shared predicate of `lift_effect_fn_signatures`'s two loops, extracted
+/// verbatim (cog>30 decomposition) — the two loops' `if` conditions were
+/// byte-identical.
+fn should_lift_effect_fn_ret(func: &IrFunction, wrap_non_result: bool) -> bool {
+    func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
+        && func.extern_attrs.is_empty()
+        && !is_template_dispatch(&func.attrs)
+}
+
+/// Module-scope loop body of `lift_effect_fn_signatures`, extracted
+/// verbatim (cog>30 decomposition, sequential-phase pattern — `lifted_fns`
+/// is a write-only accumulator shared with the root-scope loop above).
+fn lift_module_effect_fn_signatures(module: &mut IrModule, wrap_non_result: bool, lifted_fns: &mut HashMap<String, Ty>) {
+    let mod_name = module.versioned_name
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| module.name.to_string());
+    let mod_ident = mod_name.replace('.', "_");
+    for func in &mut module.functions {
+        if should_lift_effect_fn_ret(func, wrap_non_result) {
+            let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
+            func.ret_ty = Ty::result(orig, Ty::String);
+            let bare = func.name.to_string();
+            lifted_fns.insert(bare.clone(), func.ret_ty.clone());
+            let sanitized = bare
+                .replace(' ', "_")
+                .replace('-', "_")
+                .replace('.', "_");
+            let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
+            lifted_fns.insert(mangled, func.ret_ty.clone());
+        }
+    }
 }
 
 /// An `@intrinsic effect fn` (e.g. `http.serve`) compiles to a runtime
