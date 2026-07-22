@@ -141,37 +141,198 @@ fn erase_newtypes_in_type_decls(
     map: &std::collections::HashMap<String, almide_lang::types::Ty>,
 ) {
     for td in type_decls.iter_mut() {
-        match &mut td.kind {
-            almide_ir::IrTypeDeclKind::Record { fields } => {
-                for f in fields.iter_mut() {
-                    f.ty = subst(&f.ty, map);
-                }
+        erase_newtypes_in_one_type_decl(td, map);
+    }
+}
+
+/// One `td.kind` arm of [`erase_newtypes_in_type_decls`] — extracted, each
+/// arm is self-contained (reads only its own `td`, writes only its own
+/// fields), so this is a pure name-router split, no behavior change.
+fn erase_newtypes_in_one_type_decl(
+    td: &mut almide_ir::IrTypeDecl,
+    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
+) {
+    match &mut td.kind {
+        almide_ir::IrTypeDeclKind::Record { fields } => {
+            for f in fields.iter_mut() {
+                f.ty = subst(&f.ty, map);
             }
-            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
-                for c in cases.iter_mut() {
-                    match &mut c.kind {
-                        almide_ir::IrVariantKind::Unit => {}
-                        almide_ir::IrVariantKind::Tuple { fields } => {
-                            for t in fields.iter_mut() {
-                                *t = subst(t, map);
-                            }
-                        }
-                        almide_ir::IrVariantKind::Record { fields } => {
-                            for f in fields.iter_mut() {
-                                f.ty = subst(&f.ty, map);
-                            }
-                        }
-                    }
-                }
+        }
+        almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+            for c in cases.iter_mut() {
+                erase_newtypes_in_variant_case(c, map);
             }
-            almide_ir::IrTypeDeclKind::Alias { .. } => {}
+        }
+        almide_ir::IrTypeDeclKind::Alias { .. } => {}
+    }
+}
+
+/// The `c.kind` arm of [`erase_newtypes_in_one_type_decl`]'s `Variant` case —
+/// extracted for the same reason (uniform, self-contained match arms).
+fn erase_newtypes_in_variant_case(
+    c: &mut almide_ir::IrVariantDecl,
+    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
+) {
+    match &mut c.kind {
+        almide_ir::IrVariantKind::Unit => {}
+        almide_ir::IrVariantKind::Tuple { fields } => {
+            for t in fields.iter_mut() {
+                *t = subst(t, map);
+            }
+        }
+        almide_ir::IrVariantKind::Record { fields } => {
+            for f in fields.iter_mut() {
+                f.ty = subst(&f.ty, map);
+            }
         }
     }
 }
 
-pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
-    use almide_ir::visit_mut::{walk_expr_mut, walk_pattern_mut, walk_stmt_mut, IrMutVisitor};
-    use almide_ir::{IrExpr, IrPattern, IrStmt, IrTypeDeclKind};
+/// The eraser's read-only substitution context — hoisted to module scope (was
+/// a local `struct`/`impl` nested in [`erase_transparent_newtypes`]) so the
+/// sequential-phase helpers below ([`build_newtype_substitution_map`],
+/// [`erase_newtypes_in_program_body`]) can share it without threading it as a
+/// closure. Depends on nothing local to the caller (`map` is a plain
+/// borrowed field), so hoisting is a pure move, no behavior change.
+struct NewtypeEraser<'a> {
+    map: &'a std::collections::HashMap<String, almide_lang::types::Ty>,
+}
+impl NewtypeEraser<'_> {
+    fn subst(&self, ty: &almide_lang::types::Ty) -> almide_lang::types::Ty {
+        subst(ty, self.map)
+    }
+}
+impl almide_ir::visit_mut::IrMutVisitor for NewtypeEraser<'_> {
+    fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+        almide_ir::visit_mut::walk_expr_mut(self, e);
+        e.ty = self.subst(&e.ty);
+        self.subst_lambda_param_tys(e);
+        self.erase_newtype_ctor_call(e);
+        self.erase_unit_bind_match(e);
+    }
+    fn visit_stmt_mut(&mut self, s: &mut almide_ir::IrStmt) {
+        use almide_ir::IrStmtKind;
+        almide_ir::visit_mut::walk_stmt_mut(self, s);
+        if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
+            *ty = self.subst(ty);
+        }
+    }
+    fn visit_pattern_mut(&mut self, p: &mut almide_ir::IrPattern) {
+        use almide_ir::IrPattern;
+        almide_ir::visit_mut::walk_pattern_mut(self, p);
+        if let IrPattern::Bind { ty, .. } = p {
+            *ty = self.subst(ty);
+        }
+        // The 1-arg newtype ctor PATTERN always matches — it IS the inner pattern.
+        let inner = if let IrPattern::Constructor { name, args } = p {
+            if args.len() == 1 && self.map.contains_key(name.as_str()) {
+                Some(args.remove(0))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(ip) = inner {
+            *p = ip;
+        }
+    }
+}
+impl NewtypeEraser<'_> {
+    /// `visit_expr_mut`'s Lambda-param-type substitution — extracted (one of
+    /// 3 independent phases run in sequence on the SAME `e`, each re-reading
+    /// `e.kind` fresh; none depends on another's outcome except through `e`
+    /// itself, which each phase already re-checks). No behavior change.
+    fn subst_lambda_param_tys(&self, e: &mut almide_ir::IrExpr) {
+        if let almide_ir::IrExprKind::Lambda { params, .. } = &mut e.kind {
+            for (_, ty) in params.iter_mut() {
+                *ty = self.subst(ty);
+            }
+        }
+    }
+
+    /// The 1-arg newtype ctor CALL is the payload itself (same block, same
+    /// ownership — the arg was already erased/visited by the caller).
+    fn erase_newtype_ctor_call(&self, e: &mut almide_ir::IrExpr) {
+        use almide_ir::{CallTarget, IrExprKind};
+        let is_newtype_ctor = matches!(&e.kind,
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                if args.len() == 1 && self.map.contains_key(name.as_str()));
+        if is_newtype_ctor {
+            if let IrExprKind::Call { args, .. } = &mut e.kind {
+                let payload = args.pop().expect("1-arg ctor");
+                *e = payload;
+            }
+        }
+    }
+
+    /// A match REDUCED to one bare-Bind arm by the pattern erasure
+    /// (`match h { SafeHtml(s) => s }` → `match h { s => s }`) is a `let`:
+    /// `{ let s = h; body }`. Count-invariant (subject + body appear once).
+    fn erase_unit_bind_match(&self, e: &mut almide_ir::IrExpr) {
+        use almide_ir::{IrExpr, IrExprKind, IrPattern, IrStmt};
+        let is_unit_bind_match = matches!(&e.kind,
+            IrExprKind::Match { arms, .. }
+                if arms.len() == 1
+                    && arms[0].guard.is_none()
+                    && matches!(arms[0].pattern, IrPattern::Bind { .. }));
+        if is_unit_bind_match {
+            if let IrExprKind::Match { subject, arms } = &mut e.kind {
+                let arm = arms.pop().expect("1 arm");
+                if let IrPattern::Bind { var, ty } = arm.pattern {
+                    let span = e.span.clone();
+                    let bind = IrStmt {
+                        kind: almide_ir::IrStmtKind::Bind {
+                            var,
+                            ty,
+                            value: (**subject).clone(),
+                            mutability: almide_ir::Mutability::Let,
+                        },
+                        span: span.clone(),
+                    };
+                    let body_ty = arm.body.ty.clone();
+                    let def_id = arm.body.def_id;
+                    *e = IrExpr {
+                        kind: IrExprKind::Block {
+                            stmts: vec![bind],
+                            expr: Some(Box::new(arm.body)),
+                        },
+                        ty: body_ty,
+                        span,
+                        def_id,
+                    };
+                }
+            }
+        }
+    }
+}
+
+/// [`erase_transparent_newtypes`]'s per-`IrFunction` rewrite (hoisted, was a
+/// local fn — needs no local state, a pure move).
+fn rewrite_newtype_erased_fns(
+    v: &mut NewtypeEraser<'_>,
+    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
+    fns: &mut [almide_ir::IrFunction],
+) {
+    use almide_ir::visit_mut::IrMutVisitor;
+    for f in fns.iter_mut() {
+        for p in f.params.iter_mut() {
+            p.ty = subst(&p.ty, map);
+        }
+        f.ret_ty = subst(&f.ret_ty, map);
+        v.visit_expr_mut(&mut f.body);
+    }
+}
+
+/// Phase 1 of [`erase_transparent_newtypes`]: collect every transparent-alias
+/// mapping (program + module type decls + the self-host opaque-nominal
+/// table) and resolve alias-of-alias chains to a fixpoint. Extracted
+/// verbatim — an empty result short-circuits the caller exactly as the
+/// inlined `if map.is_empty() { return; }` did.
+fn build_newtype_substitution_map(
+    program: &almide_ir::IrProgram,
+) -> std::collections::HashMap<String, almide_lang::types::Ty> {
+    use almide_ir::IrTypeDeclKind;
     use almide_lang::types::Ty;
     use std::collections::HashMap;
 
@@ -203,7 +364,7 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
         .collect();
     seed_selfhost_newtype_reps(&mut map, &declared);
     if map.is_empty() {
-        return;
+        return map;
     }
     // Resolve alias-of-alias chains to a fixpoint (bounded — a cycle would be a
     // frontend error; the bound just keeps this total).
@@ -221,129 +382,44 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
             break;
         }
     }
+    map
+}
 
-    struct Eraser<'a> {
-        map: &'a HashMap<String, Ty>,
-    }
-    impl Eraser<'_> {
-        fn subst(&self, ty: &Ty) -> Ty {
-            subst(ty, self.map)
-        }
-    }
-    impl IrMutVisitor for Eraser<'_> {
-        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-            use almide_ir::{CallTarget, IrExprKind};
-            walk_expr_mut(self, e);
-            e.ty = self.subst(&e.ty);
-            if let IrExprKind::Lambda { params, .. } = &mut e.kind {
-                for (_, ty) in params.iter_mut() {
-                    *ty = self.subst(ty);
-                }
-            }
-            // The 1-arg newtype ctor CALL is the payload itself (same block, same
-            // ownership — the arg was already erased/visited above).
-            let is_newtype_ctor = matches!(&e.kind,
-                IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-                    if args.len() == 1 && self.map.contains_key(name.as_str()));
-            if is_newtype_ctor {
-                if let IrExprKind::Call { args, .. } = &mut e.kind {
-                    let payload = args.pop().expect("1-arg ctor");
-                    *e = payload;
-                }
-            }
-            // A match REDUCED to one bare-Bind arm by the pattern erasure
-            // (`match h { SafeHtml(s) => s }` → `match h { s => s }`) is a `let`:
-            // `{ let s = h; body }`. Count-invariant (subject + body appear once).
-            let is_unit_bind_match = matches!(&e.kind,
-                IrExprKind::Match { arms, .. }
-                    if arms.len() == 1
-                        && arms[0].guard.is_none()
-                        && matches!(arms[0].pattern, IrPattern::Bind { .. }));
-            if is_unit_bind_match {
-                if let IrExprKind::Match { subject, arms } = &mut e.kind {
-                    let arm = arms.pop().expect("1 arm");
-                    if let IrPattern::Bind { var, ty } = arm.pattern {
-                        let span = e.span.clone();
-                        let bind = IrStmt {
-                            kind: almide_ir::IrStmtKind::Bind {
-                                var,
-                                ty,
-                                value: (**subject).clone(),
-                                mutability: almide_ir::Mutability::Let,
-                            },
-                            span: span.clone(),
-                        };
-                        let body_ty = arm.body.ty.clone();
-                        let def_id = arm.body.def_id;
-                        *e = IrExpr {
-                            kind: IrExprKind::Block {
-                                stmts: vec![bind],
-                                expr: Some(Box::new(arm.body)),
-                            },
-                            ty: body_ty,
-                            span,
-                            def_id,
-                        };
-                    }
-                }
-            }
-        }
-        fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
-            use almide_ir::IrStmtKind;
-            walk_stmt_mut(self, s);
-            if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
-                *ty = self.subst(ty);
-            }
-        }
-        fn visit_pattern_mut(&mut self, p: &mut IrPattern) {
-            walk_pattern_mut(self, p);
-            if let IrPattern::Bind { ty, .. } = p {
-                *ty = self.subst(ty);
-            }
-            // The 1-arg newtype ctor PATTERN always matches — it IS the inner pattern.
-            let inner = if let IrPattern::Constructor { name, args } = p {
-                if args.len() == 1 && self.map.contains_key(name.as_str()) {
-                    Some(args.remove(0))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            if let Some(ip) = inner {
-                *p = ip;
-            }
-        }
-    }
-
-    let mut v = Eraser { map: &map };
-    fn rewrite_fns(
-        v: &mut Eraser<'_>,
-        map: &HashMap<String, Ty>,
-        fns: &mut [almide_ir::IrFunction],
-    ) {
-        for f in fns.iter_mut() {
-            for p in f.params.iter_mut() {
-                p.ty = subst(&p.ty, map);
-            }
-            f.ret_ty = subst(&f.ret_ty, map);
-            v.visit_expr_mut(&mut f.body);
-        }
-    }
-    rewrite_fns(&mut v, &map, &mut program.functions);
+/// Phase 2 of [`erase_transparent_newtypes`]: apply the substitution to every
+/// region of the program (top-level functions, then each module's functions
+/// + top-lets, then the program's own top-lets). Each region is disjoint
+/// (writes only its own `program`/`m` field) and reads only the shared
+/// read-only `map`/`v` — the established sequential-phase-decomposition
+/// pattern, no shared mutable accumulator threaded across regions.
+fn erase_newtypes_in_program_body(
+    v: &mut NewtypeEraser<'_>,
+    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
+    program: &mut almide_ir::IrProgram,
+) {
+    use almide_ir::visit_mut::IrMutVisitor;
+    rewrite_newtype_erased_fns(v, map, &mut program.functions);
     let mut modules = std::mem::take(&mut program.modules);
     for m in modules.iter_mut() {
-        rewrite_fns(&mut v, &map, &mut m.functions);
+        rewrite_newtype_erased_fns(v, map, &mut m.functions);
         for tl in m.top_lets.iter_mut() {
-            tl.ty = subst(&tl.ty, &map);
+            tl.ty = subst(&tl.ty, map);
             v.visit_expr_mut(&mut tl.value);
         }
     }
     program.modules = modules;
     for tl in program.top_lets.iter_mut() {
-        tl.ty = subst(&tl.ty, &map);
+        tl.ty = subst(&tl.ty, map);
         v.visit_expr_mut(&mut tl.value);
     }
+}
+
+pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
+    let map = build_newtype_substitution_map(program);
+    if map.is_empty() {
+        return;
+    }
+    let mut v = NewtypeEraser { map: &map };
+    erase_newtypes_in_program_body(&mut v, &map, program);
     // Other type decls may carry alias-typed fields (a record holding a SafeHtml).
     erase_newtypes_in_type_decls(&mut program.type_decls, &map);
 }
@@ -528,28 +604,45 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
         for _ in 0..4 {
             let mut changed = false;
             for (var, init) in &qualifying {
-                for f in fn_bodies.iter_mut() {
-                    let nb = almide_ir::substitute_var_in_expr(&f.body, *var, init);
-                    if !exprs_eq_shallow(&nb, &f.body) {
-                        f.body = nb;
-                        changed = true;
-                    }
-                }
-                for tl in top_lets.iter_mut() {
-                    if tl.var == *var {
-                        continue;
-                    }
-                    let nv = almide_ir::substitute_var_in_expr(&tl.value, *var, init);
-                    if !exprs_eq_shallow(&nv, &tl.value) {
-                        tl.value = nv;
-                        changed = true;
-                    }
+                if substitute_one_global_in_region(*var, init, fn_bodies, top_lets) {
+                    changed = true;
                 }
             }
             if !changed {
                 break;
             }
         }
+    }
+    // One `(var, init)` substitution pass over BOTH regions ([`run_region`]'s
+    // former inner two `for` loops) — extracted so the fixpoint driver above
+    // only sees a single per-var step. Returns whether anything changed,
+    // exactly the OR the inlined `changed = true` writes accumulated —
+    // same mutation order, same convergence criterion, no behavior change.
+    fn substitute_one_global_in_region(
+        var: almide_ir::VarId,
+        init: &IrExpr,
+        fn_bodies: &mut [almide_ir::IrFunction],
+        top_lets: &mut [almide_ir::IrTopLet],
+    ) -> bool {
+        let mut changed = false;
+        for f in fn_bodies.iter_mut() {
+            let nb = almide_ir::substitute_var_in_expr(&f.body, var, init);
+            if !exprs_eq_shallow(&nb, &f.body) {
+                f.body = nb;
+                changed = true;
+            }
+        }
+        for tl in top_lets.iter_mut() {
+            if tl.var == var {
+                continue;
+            }
+            let nv = almide_ir::substitute_var_in_expr(&tl.value, var, init);
+            if !exprs_eq_shallow(&nv, &tl.value) {
+                tl.value = nv;
+                changed = true;
+            }
+        }
+        changed
     }
     // Cheap change detector: substitution either changes the tree or returns an
     // identical clone — compare the debug forms (bounded corpora; not hot).
