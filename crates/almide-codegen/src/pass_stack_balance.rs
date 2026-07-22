@@ -52,6 +52,72 @@ fn void_wrap(expr: &mut IrExpr) -> bool {
     true
 }
 
+/// `IrExprKind::Block` case of `balance_expr`, extracted verbatim (cog>30
+/// decomposition, pattern 2: uniform match arms, mirrors the
+/// `lower_expr`/`infer_expr_inner` extraction shape). Every
+/// `if X() { changed = true; }` became `changed |= X()` — provably
+/// equivalent (see `pass_capture_clone::transform_expr`'s precedent for
+/// the same rewrite) — except the unconditional `changed = true;` after
+/// the tail-demotion, which stays literal since it doesn't depend on the
+/// recursive call's own result.
+fn balance_expr_block(expr: &mut IrExpr, expected_void: bool) -> bool {
+    let IrExprKind::Block { stmts, expr: tail } = &mut expr.kind else { unreachable!() };
+    let mut changed = false;
+    // Process existing statements
+    for stmt in stmts.iter_mut() {
+        changed |= balance_stmt(stmt);
+    }
+
+    if expected_void {
+        if let Some(tail_expr) = tail.take() {
+            // Recurse into tail with void context before demoting.
+            // This handles nested If/Match/Block inside the tail.
+            let mut t = *tail_expr;
+            changed |= balance_expr(&mut t, true);
+            // Demote: move tail to Expr statement.
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Expr { expr: t },
+                span: None,
+            });
+            expr.ty = Ty::Unit;
+            changed = true;
+        }
+    } else if let Some(t) = tail {
+        // Non-void context: recurse into tail for nested structures
+        changed |= balance_expr(t, false);
+    }
+    changed
+}
+
+/// `IrExprKind::If` case of `balance_expr`, extracted verbatim.
+fn balance_expr_if(expr: &mut IrExpr, expected_void: bool) -> bool {
+    let IrExprKind::If { cond, then, else_ } = &mut expr.kind else { unreachable!() };
+    let mut changed = balance_expr(cond, false);
+    // Propagate void context into branches
+    changed |= balance_expr(then, expected_void);
+    changed |= balance_expr(else_, expected_void);
+    // Update If type so WASM emitter uses BlockType::Empty
+    if expected_void && !is_void(&expr.ty) {
+        expr.ty = Ty::Unit;
+        changed = true;
+    }
+    changed
+}
+
+/// `IrExprKind::Match` case of `balance_expr`, extracted verbatim.
+fn balance_expr_match(expr: &mut IrExpr, expected_void: bool) -> bool {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    let mut changed = balance_expr(subject, false);
+    for arm in arms.iter_mut() {
+        changed |= balance_expr(&mut arm.body, expected_void);
+    }
+    if expected_void && !is_void(&expr.ty) {
+        expr.ty = Ty::Unit;
+        changed = true;
+    }
+    changed
+}
+
 /// Balance an expression given its context.
 ///
 /// `expected_void`: true if the enclosing context expects no stack value
@@ -59,79 +125,38 @@ fn void_wrap(expr: &mut IrExpr) -> bool {
 ///
 /// Returns true if any IR was modified.
 fn balance_expr(expr: &mut IrExpr, expected_void: bool) -> bool {
-    let mut changed = false;
     match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            // Process existing statements
-            for stmt in stmts.iter_mut() {
-                if balance_stmt(stmt) { changed = true; }
-            }
-
-            if expected_void {
-                if let Some(tail_expr) = tail.take() {
-                    // Recurse into tail with void context before demoting.
-                    // This handles nested If/Match/Block inside the tail.
-                    let mut t = *tail_expr;
-                    if balance_expr(&mut t, true) { changed = true; }
-                    // Demote: move tail to Expr statement.
-                    stmts.push(IrStmt {
-                        kind: IrStmtKind::Expr { expr: t },
-                        span: None,
-                    });
-                    expr.ty = Ty::Unit;
-                    changed = true;
-                }
-            } else if let Some(t) = tail {
-                // Non-void context: recurse into tail for nested structures
-                if balance_expr(t, false) { changed = true; }
-            }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            if balance_expr(cond, false) { changed = true; }
-            // Propagate void context into branches
-            if balance_expr(then, expected_void) { changed = true; }
-            if balance_expr(else_, expected_void) { changed = true; }
-            // Update If type so WASM emitter uses BlockType::Empty
-            if expected_void && !is_void(&expr.ty) {
-                expr.ty = Ty::Unit;
-                changed = true;
-            }
-        }
-        IrExprKind::Match { subject, arms } => {
-            if balance_expr(subject, false) { changed = true; }
-            for arm in arms.iter_mut() {
-                if balance_expr(&mut arm.body, expected_void) { changed = true; }
-            }
-            if expected_void && !is_void(&expr.ty) {
-                expr.ty = Ty::Unit;
-                changed = true;
-            }
-        }
+        IrExprKind::Block { .. } => balance_expr_block(expr, expected_void),
+        IrExprKind::If { .. } => balance_expr_if(expr, expected_void),
+        IrExprKind::Match { .. } => balance_expr_match(expr, expected_void),
         IrExprKind::While { cond, body } => {
-            if balance_expr(cond, false) { changed = true; }
+            let mut changed = balance_expr(cond, false);
             for stmt in body.iter_mut() {
-                if balance_stmt(stmt) { changed = true; }
+                changed |= balance_stmt(stmt);
             }
+            changed
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            if balance_expr(iterable, false) { changed = true; }
+            let mut changed = balance_expr(iterable, false);
             for stmt in body.iter_mut() {
-                if balance_stmt(stmt) { changed = true; }
+                changed |= balance_stmt(stmt);
             }
+            changed
         }
         IrExprKind::Lambda { body, .. } => {
             // Lambda bodies are expression context (return their value)
-            if balance_expr(body, false) { changed = true; }
+            balance_expr(body, false)
         }
         _ => {
             // Leaf expression in void context that produces a value:
             // wrap in Block { Expr(original) } so the emitter drops it.
             if expected_void {
-                if void_wrap(expr) { changed = true; }
+                void_wrap(expr)
+            } else {
+                false
             }
         }
     }
-    changed
 }
 
 /// Balance statements. Dispatches to balance_expr with appropriate context.
