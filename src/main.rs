@@ -350,6 +350,152 @@ pub(crate) fn try_compile(file: &str, no_check: bool) -> Result<String, String> 
     try_compile_with_ir(file, no_check, &codegen::CodegenOptions::default()).map(|(code, _)| code)
 }
 
+/// Combine parse + checker errors and print them; returns `Err` if either
+/// would abort compilation. Also prints (non-fatal) warnings when not
+/// suppressed. Extracted from `try_compile_with_ir`'s error-reporting block —
+/// a pure diagnostics-formatting step with no shared mutable state; the
+/// original early `return` is preserved via `?` at the call site.
+fn report_check_diagnostics(
+    parse_errors: &[diagnostic::Diagnostic],
+    diagnostics: &[diagnostic::Diagnostic],
+    source_text: &str,
+) -> Result<(), String> {
+    let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
+    let checker_errors: Vec<_> = diagnostics.iter()
+        .filter(|d| d.level == diagnostic::Level::Error)
+        .collect();
+    all_errors.extend(checker_errors);
+    if !all_errors.is_empty() {
+        for d in &all_errors {
+            eprintln!("{}", diagnostic_render::display_with_source(d, source_text));
+        }
+        eprintln!("\n{} error(s) found", all_errors.len());
+        return Err(format!("{} error(s) found", all_errors.len()));
+    }
+    if !warnings_suppressed() {
+        for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
+            eprintln!("{}", diagnostic_render::display_with_source(d, source_text));
+        }
+    }
+    Ok(())
+}
+
+/// Register each resolved module's versioned name (dependency modules get a
+/// `pkg_id`-derived prefix) before root lowering. Extracted verbatim from
+/// `try_compile_with_ir`'s pre-registration loop — writes only to
+/// `checker.env.module_versioned_names`, reads only `resolved_modules`.
+fn register_versioned_module_names(
+    checker: &mut check::Checker,
+    resolved_modules: &[(String, ast::Program, Option<project::PkgId>, bool)],
+) {
+    for (name, _, pkg_id, _) in resolved_modules {
+        if let Some(pid) = pkg_id.as_ref() {
+            let base = pid.mod_name();
+            let versioned = if let Some(suffix) = name.strip_prefix(&pid.name) {
+                format!("{}{}", base, suffix)
+            } else {
+                base
+            };
+            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&versioned));
+        }
+    }
+}
+
+/// Lower the root program to IR once parsing succeeded, printing unused-var
+/// warnings along the way. Extracted verbatim from `try_compile_with_ir`'s
+/// root-lowering block — reads only its parameters, returns the new IR
+/// (`None` when parse errors already blocked lowering) instead of mutating a
+/// shared `Option` in place.
+fn lower_root_program_if_ready(
+    has_parse_errors: bool,
+    program: &ast::Program,
+    checker: &check::Checker,
+    source_text: &str,
+    file: &str,
+) -> Option<almide::ir::IrProgram> {
+    if has_parse_errors {
+        return None;
+    }
+    let ir = almide::lower::lower_program(program, &checker.env, &checker.type_map);
+    if !warnings_suppressed() {
+        let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
+        for d in &unused_warnings {
+            eprintln!("{}", diagnostic_render::display_with_source(d, source_text));
+        }
+    }
+    Some(ir)
+}
+
+/// Verify IR integrity, printing internal-compiler-error diagnostics and
+/// returning `Err` on failure. Extracted verbatim from
+/// `try_compile_with_ir`'s post-optimization verification block.
+/// Type-check and lower a single user (non-stdlib) module discovered by
+/// import resolution, appending its IR onto `ir_program` and `module_irs`.
+/// Extracted from `try_compile_with_ir`'s per-module loop body — same
+/// checker/env mutation order, `continue` becomes an early `return`. Shared
+/// with `cmd_emit`, which ran an identical loop body.
+fn lower_one_user_module(
+    checker: &mut check::Checker,
+    name: &mut String,
+    mod_prog: &mut ast::Program,
+    pkg_id: &mut Option<project::PkgId>,
+    module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
+    ir_program: &mut Option<almide::ir::IrProgram>,
+) {
+    if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { return; }
+    // For dependency modules, temporarily set self_module_name to the package root
+    // so `import self` in sub-modules resolves to the dependency, not the main project
+    let saved_self = checker.env.self_module_name;
+    if let Some(pid) = pkg_id.as_ref() {
+        checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+    }
+    checker.infer_module(mod_prog, name);
+    let versioned = pkg_id.as_ref().map(|pid| {
+        let base = pid.mod_name();
+        if let Some(suffix) = name.strip_prefix(&pid.name) {
+            format!("{}{}", base, suffix)
+        } else {
+            base
+        }
+    });
+    if let Some(ref v) = versioned {
+        checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
+    }
+    // Set module's import table for lowering, then restore
+    let self_name = checker.env.self_module_name.map(|s| s.to_string());
+    let import_table_name = self_name.as_deref().unwrap_or(name);
+    let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+    let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
+    let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+    // Stdlib Declarative Unification arc complete: stdlib/defs/ is
+    // gone, every stdlib fn lives in `stdlib/<m>.almd`. Fns with
+    // `@inline_rust` / `@wasm_intrinsic` carry no real body (the
+    // Rust walker / WASM emitter skip them), but their attributes
+    // are consumed by `StdlibLoweringPass` to rewrite call sites
+    // into `IrExprKind::InlineRust`. Fns without those attrs
+    // (e.g. helpers like `split_at`) emit normally. No prune.
+    let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
+    checker.env.import_table = saved_table;
+    checker.env.self_module_name = saved_self;
+    module_irs.insert(name.clone(), mod_ir_program);
+    if let Some(ir) = ir_program {
+        ir.modules.push(mod_ir_module);
+    }
+}
+
+fn verify_ir_or_err(ir_program: &Option<almide::ir::IrProgram>) -> Result<(), String> {
+    if let Some(ir) = ir_program {
+        let verify_errors = almide::ir::verify_program(ir);
+        if !verify_errors.is_empty() {
+            for e in &verify_errors {
+                eprintln!("internal compiler error: {}", e);
+            }
+            return Err(format!("{} IR verification error(s)", verify_errors.len()));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
     let (mut program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
@@ -393,91 +539,17 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         // readers see the registration seed — Unknown for non-literal inits).
         almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
         let diagnostics = checker.infer_program(&mut program);
-        // Combine parse errors + checker errors
-        let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
-        let checker_errors: Vec<_> = diagnostics.iter()
-            .filter(|d| d.level == diagnostic::Level::Error)
-            .collect();
-        all_errors.extend(checker_errors);
-        if !all_errors.is_empty() {
-            for d in &all_errors {
-                eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
-            }
-            eprintln!("\n{} error(s) found", all_errors.len());
-            return Err(format!("{} error(s) found", all_errors.len()));
-        }
-        if !warnings_suppressed() {
-            for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-                eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
-            }
-        }
+        report_check_diagnostics(&parse_errors, &diagnostics, &source_text)?;
         // Pre-register versioned names BEFORE root lowering so cross-module
         // top_let references (mc_bot.DEFAULT_CONFIG) get correct V0 prefix.
-        for (name, _, pkg_id, _) in &resolved.modules {
-            if let Some(pid) = pkg_id.as_ref() {
-                let base = pid.mod_name();
-                let versioned = if let Some(suffix) = name.strip_prefix(&pid.name) {
-                    format!("{}{}", base, suffix)
-                } else {
-                    base
-                };
-                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&versioned));
-            }
-        }
+        register_versioned_module_names(&mut checker, &resolved.modules);
 
         // Lower root program (versioned names now available)
-        if !has_parse_errors {
-            let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-            if !warnings_suppressed() {
-                let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
-                for d in &unused_warnings {
-                    eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
-                }
-            }
-            ir_program = Some(ir);
-        }
+        ir_program = lower_root_program_if_ready(has_parse_errors, &program, &checker, &source_text, file);
 
         // Lower user modules
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
-            // For dependency modules, temporarily set self_module_name to the package root
-            // so `import self` in sub-modules resolves to the dependency, not the main project
-            let saved_self = checker.env.self_module_name;
-            if let Some(pid) = pkg_id.as_ref() {
-                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
-            }
-            checker.infer_module(mod_prog, name);
-            let versioned = pkg_id.as_ref().map(|pid| {
-                let base = pid.mod_name();
-                if let Some(suffix) = name.strip_prefix(&pid.name) {
-                    format!("{}{}", base, suffix)
-                } else {
-                    base
-                }
-            });
-            if let Some(ref v) = versioned {
-                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
-            }
-            // Set module's import table for lowering, then restore
-            let self_name = checker.env.self_module_name.map(|s| s.to_string());
-            let import_table_name = self_name.as_deref().unwrap_or(name);
-            let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
-            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-            // Stdlib Declarative Unification arc complete: stdlib/defs/ is
-            // gone, every stdlib fn lives in `stdlib/<m>.almd`. Fns with
-            // `@inline_rust` / `@wasm_intrinsic` carry no real body (the
-            // Rust walker / WASM emitter skip them), but their attributes
-            // are consumed by `StdlibLoweringPass` to rewrite call sites
-            // into `IrExprKind::InlineRust`. Fns without those attrs
-            // (e.g. helpers like `split_at`) emit normally. No prune.
-            let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
-            checker.env.import_table = saved_table;
-            checker.env.self_module_name = saved_self;
-            module_irs.insert(name.clone(), mod_ir_program);
-            if let Some(ref mut ir) = ir_program {
-                ir.modules.push(mod_ir_module);
-            }
+            lower_one_user_module(&mut checker, name, mod_prog, pkg_id, &mut module_irs, &mut ir_program);
         }
     }
 
@@ -489,15 +561,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
     }
 
     // Verify IR integrity
-    if let Some(ref ir) = ir_program {
-        let verify_errors = almide::ir::verify_program(ir);
-        if !verify_errors.is_empty() {
-            for e in &verify_errors {
-                eprintln!("internal compiler error: {}", e);
-            }
-            return Err(format!("{} IR verification error(s)", verify_errors.len()));
-        }
-    }
+    verify_ir_or_err(&ir_program)?;
 
     // Security Layer 2: check permissions if defined in almide.toml
     if let Some(ref proj) = parsed_project {
