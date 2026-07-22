@@ -764,6 +764,150 @@ fn run_main() {
     dispatch(cli);
 }
 
+/// `dispatch`'s `Commands::Run` arm. Extracted verbatim.
+fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Option<String>, no_verified: bool, program_args: Vec<String>) {
+    let file = resolve_file(file);
+    // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out.
+    // 0.30.0 (#764 rung-5 complete): the v1 NATIVE trust-spine renderer is
+    // likewise the DEFAULT (byte-identical to v0 where it lowers — the
+    // differential rows + the 18/18 wasm_cross native byte sweep — and an
+    // honest wall falls back to v0). `--no-verified` opts out of BOTH legs;
+    // `--verified` is kept as a no-op for compatibility.
+    warn_no_verified_deprecated(no_verified);
+    cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), !no_verified, !no_verified);
+}
+
+/// `dispatch`'s `Commands::Test` arm. Extracted verbatim.
+fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json: bool, target: Option<String>) {
+    let file_str = file.as_deref().unwrap_or("");
+    if target.as_deref() == Some("wasm") {
+        cli::cmd_test_wasm(file_str, run.as_deref());
+    } else if json {
+        cli::cmd_test_json(file_str, run.as_deref());
+    } else if matches!(target.as_deref(), Some("rust" | "native")) {
+        // Explicit pure-native run (e.g. CI's "Test Rust" job).
+        cli::cmd_test(file_str, no_check, run.as_deref());
+    } else {
+        // Default: fast rustc-free WASM path, native fallback for gaps.
+        cli::cmd_test_fast(file_str, no_check, run.as_deref());
+    }
+}
+
+/// `dispatch`'s `Commands::Check` arm. Extracted verbatim — `explain` still
+/// returns early into the caller via its own `bool` return (`true` = already
+/// handled, caller should return).
+fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool) {
+    if let Some(code) = explain {
+        print_error_explanation(&code);
+        return;
+    }
+    let file = resolve_file(file);
+    if effects {
+        cli::cmd_check_effects(&file);
+    } else if json {
+        cli::cmd_check_json(&file);
+    } else {
+        cli::cmd_check(&file, deny_warnings);
+    }
+}
+
+/// `dispatch`'s `Commands::Ide` arm (nested `IdeCommand` match). Extracted verbatim.
+fn dispatch_ide(cmd: IdeCommand) {
+    match cmd {
+        IdeCommand::Outline { target, filter, json } => {
+            let target = match target {
+                Some(t) if t.starts_with("@stdlib/") => t,
+                other => resolve_file(other),
+            };
+            cli::cmd_ide_outline(&target, filter.as_deref(), json);
+        }
+        IdeCommand::Doc { symbol, file } => {
+            let file = resolve_file(file);
+            cli::cmd_ide_doc(&symbol, &file);
+        }
+        IdeCommand::StdlibSnapshot { modules, json } => {
+            cli::cmd_ide_stdlib_snapshot(modules.as_deref(), json);
+        }
+    }
+}
+
+/// `dispatch`'s `Commands::Fmt` arm. Extracted verbatim.
+fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool) {
+    let write_back = !check && !dry_run;
+    let fmt_files = if files.is_empty() {
+        let mut found = Vec::new();
+        if std::path::Path::new("src").is_dir() {
+            collect_almd_files(std::path::Path::new("src"), &mut found);
+        }
+        if found.is_empty() {
+            err(&format!("No .almd files found in src/"));
+            std::process::exit(1);
+        }
+        found
+    } else {
+        files
+    };
+    cli::cmd_fmt(&fmt_files, write_back);
+}
+
+/// `dispatch`'s `Commands::Add` arm. Extracted verbatim.
+fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>) {
+    let (name, git_url, tag) = if let Some(git_url) = git {
+        (pkg, git_url, tag)
+    } else {
+        project_fetch::resolve_package_spec(&pkg)
+    };
+    project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    let dep = project::Dependency {
+        name: name.clone(),
+        git: git_url,
+        tag,
+        branch: None,
+        version: None,
+        path: None,
+    };
+    project_fetch::fetch_dep(&dep)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+}
+
+/// `dispatch`'s `Commands::Deps` arm. Extracted verbatim.
+fn dispatch_deps() {
+    if std::path::Path::new("almide.toml").exists() {
+        let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+            .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        if proj.dependencies.is_empty() {
+            out(&format!("No dependencies"));
+        } else {
+            for dep in &proj.dependencies {
+                let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+                out(&format!("{} = {} ({})", dep.name, dep.git, ref_name));
+            }
+        }
+    } else {
+        err(&format!("No almide.toml found"));
+    }
+}
+
+/// `dispatch`'s `Commands::DepPath` arm. Extracted verbatim.
+fn dispatch_dep_path(name: String) {
+    if !std::path::Path::new("almide.toml").exists() {
+        err(&format!("No almide.toml found"));
+        std::process::exit(1);
+    }
+    let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    let fetched = project_fetch::fetch_all_deps(&proj)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    match fetched.iter().find(|fd| fd.pkg_id.name == name) {
+        Some(fd) => out(&format!("{}", fd.source_dir.display())),
+        None => {
+            err(&format!("Dependency '{}' not found in almide.toml", name));
+            std::process::exit(1);
+        }
+    }
+}
+
 fn dispatch(cli: Cli) {
     let command = match cli.command {
         Some(cmd) => cmd,
@@ -774,50 +918,15 @@ fn dispatch(cli: Cli) {
     };
     match command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, release, target, verified: _, no_verified, program_args } => {
-            let file = resolve_file(file);
-            // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out.
-            // 0.30.0 (#764 rung-5 complete): the v1 NATIVE trust-spine renderer is
-            // likewise the DEFAULT (byte-identical to v0 where it lowers — the
-            // differential rows + the 18/18 wasm_cross native byte sweep — and an
-            // honest wall falls back to v0). `--no-verified` opts out of BOTH legs;
-            // `--verified` is kept as a no-op for compatibility.
-            warn_no_verified_deprecated(no_verified);
-            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), !no_verified, !no_verified);
-        }
+        Commands::Run { file, no_check, release, target, verified: _, no_verified, program_args } =>
+            dispatch_run(file, no_check, release, target, no_verified, program_args),
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, !no_verified, !no_verified);
         }
-        Commands::Test { file, run, no_check, json, target } => {
-            let file_str = file.as_deref().unwrap_or("");
-            if target.as_deref() == Some("wasm") {
-                cli::cmd_test_wasm(file_str, run.as_deref());
-            } else if json {
-                cli::cmd_test_json(file_str, run.as_deref());
-            } else if matches!(target.as_deref(), Some("rust" | "native")) {
-                // Explicit pure-native run (e.g. CI's "Test Rust" job).
-                cli::cmd_test(file_str, no_check, run.as_deref());
-            } else {
-                // Default: fast rustc-free WASM path, native fallback for gaps.
-                cli::cmd_test_fast(file_str, no_check, run.as_deref());
-            }
-        }
-        Commands::Check { file, deny_warnings, json, explain, effects } => {
-            if let Some(code) = explain {
-                print_error_explanation(&code);
-                return;
-            }
-            let file = resolve_file(file);
-            if effects {
-                cli::cmd_check_effects(&file);
-            } else if json {
-                cli::cmd_check_json(&file);
-            } else {
-                cli::cmd_check(&file, deny_warnings);
-            }
-        }
+        Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),
+        Commands::Check { file, deny_warnings, json, explain, effects } => dispatch_check(file, deny_warnings, json, explain, effects),
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
             cli::cmd_fix(&file, dry_run, json);
@@ -831,97 +940,15 @@ fn dispatch(cli: Cli) {
         Commands::Explain { code } => {
             print_error_explanation(&code);
         }
-        Commands::Ide { cmd } => {
-            match cmd {
-                IdeCommand::Outline { target, filter, json } => {
-                    let target = match target {
-                        Some(t) if t.starts_with("@stdlib/") => t,
-                        other => resolve_file(other),
-                    };
-                    cli::cmd_ide_outline(&target, filter.as_deref(), json);
-                }
-                IdeCommand::Doc { symbol, file } => {
-                    let file = resolve_file(file);
-                    cli::cmd_ide_doc(&symbol, &file);
-                }
-                IdeCommand::StdlibSnapshot { modules, json } => {
-                    cli::cmd_ide_stdlib_snapshot(modules.as_deref(), json);
-                }
-            }
-        }
-        Commands::Fmt { files, check, dry_run } => {
-            let write_back = !check && !dry_run;
-            let fmt_files = if files.is_empty() {
-                let mut found = Vec::new();
-                if std::path::Path::new("src").is_dir() {
-                    collect_almd_files(std::path::Path::new("src"), &mut found);
-                }
-                if found.is_empty() {
-                    err(&format!("No .almd files found in src/"));
-                    std::process::exit(1);
-                }
-                found
-            } else {
-                files
-            };
-            cli::cmd_fmt(&fmt_files, write_back);
-        }
+        Commands::Ide { cmd } => dispatch_ide(cmd),
+        Commands::Fmt { files, check, dry_run } => dispatch_fmt(files, check, dry_run),
         Commands::Compile { module, json, dry_run, output } => {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
         Commands::Clean => cli::cmd_clean(),
-        Commands::Add { pkg, git, tag } => {
-            let (name, git_url, tag) = if let Some(git_url) = git {
-                (pkg, git_url, tag)
-            } else {
-                project_fetch::resolve_package_spec(&pkg)
-            };
-            project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-            let dep = project::Dependency {
-                name: name.clone(),
-                git: git_url,
-                tag,
-                branch: None,
-                version: None,
-                path: None,
-            };
-            project_fetch::fetch_dep(&dep)
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-        }
-        Commands::Deps => {
-            if std::path::Path::new("almide.toml").exists() {
-                let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-                    .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-                if proj.dependencies.is_empty() {
-                    out(&format!("No dependencies"));
-                } else {
-                    for dep in &proj.dependencies {
-                        let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
-                        out(&format!("{} = {} ({})", dep.name, dep.git, ref_name));
-                    }
-                }
-            } else {
-                err(&format!("No almide.toml found"));
-            }
-        }
-        Commands::DepPath { name } => {
-            if !std::path::Path::new("almide.toml").exists() {
-                err(&format!("No almide.toml found"));
-                std::process::exit(1);
-            }
-            let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-            let fetched = project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-            match fetched.iter().find(|fd| fd.pkg_id.name == name) {
-                Some(fd) => out(&format!("{}", fd.source_dir.display())),
-                None => {
-                    err(&format!("Dependency '{}' not found in almide.toml", name));
-                    std::process::exit(1);
-                }
-            }
-        }
+        Commands::Add { pkg, git, tag } => dispatch_add(pkg, git, tag),
+        Commands::Deps => dispatch_deps(),
+        Commands::DepPath { name } => dispatch_dep_path(name),
         Commands::Install { spec, tag, branch, name, bin_dir, target } => {
             cli::cmd_install(
                 &spec,
