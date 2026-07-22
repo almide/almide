@@ -513,6 +513,33 @@ fn is_var(expr: &IrExpr, var: VarId) -> bool {
     matches!(&expr.kind, IrExprKind::Var { id } if *id == var)
 }
 
+/// `IrExprKind::Call` case of `uses_var`, extracted verbatim (cog>30
+/// decomposition, second round). Pure boolean-search function — no
+/// shared mutable state at all, the safest possible extraction shape.
+fn call_uses_var(target: &CallTarget, args: &[IrExpr], var: VarId) -> bool {
+    match target {
+        CallTarget::Method { object, .. } => { if uses_var(object, var) { return true; } }
+        CallTarget::Computed { callee } => { if uses_var(callee, var) { return true; } }
+        _ => {}
+    }
+    args.iter().any(|a| uses_var(a, var))
+}
+
+/// `IrExprKind::IterChain` case of `uses_var`, extracted verbatim.
+fn iter_chain_uses_var(source: &IrExpr, steps: &[IterStep], collector: &IterCollector, var: VarId) -> bool {
+    uses_var(source, var)
+    || steps.iter().any(|s| match s {
+        IterStep::Map { lambda } | IterStep::Filter { lambda }
+        | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => uses_var(lambda, var),
+    })
+    || match collector {
+        IterCollector::Collect => false,
+        IterCollector::Fold { init, lambda } => uses_var(init, var) || uses_var(lambda, var),
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => uses_var(lambda, var),
+    }
+}
+
 fn uses_var(expr: &IrExpr, var: VarId) -> bool {
     match &expr.kind {
         IrExprKind::Var { id } => *id == var,
@@ -521,14 +548,7 @@ fn uses_var(expr: &IrExpr, var: VarId) -> bool {
             || expr.as_ref().map_or(false, |e| uses_var(e, var))
         }
         IrExprKind::If { cond, then, else_ } => uses_var(cond, var) || uses_var(then, var) || uses_var(else_, var),
-        IrExprKind::Call { args, target, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => { if uses_var(object, var) { return true; } }
-                CallTarget::Computed { callee } => { if uses_var(callee, var) { return true; } }
-                _ => {}
-            }
-            args.iter().any(|a| uses_var(a, var))
-        }
+        IrExprKind::Call { args, target, .. } => call_uses_var(target, args, var),
         IrExprKind::BinOp { left, right, .. } => uses_var(left, var) || uses_var(right, var),
         IrExprKind::UnOp { operand, .. } => uses_var(operand, var),
         IrExprKind::Lambda { body, .. } => uses_var(body, var),
@@ -564,19 +584,7 @@ fn uses_var(expr: &IrExpr, var: VarId) -> bool {
         IrExprKind::SpreadRecord { base, fields } => {
             uses_var(base, var) || fields.iter().any(|(_, v)| uses_var(v, var))
         }
-        IrExprKind::IterChain { source, steps, collector, .. } => {
-            uses_var(source, var)
-            || steps.iter().any(|s| match s {
-                IterStep::Map { lambda } | IterStep::Filter { lambda }
-                | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => uses_var(lambda, var),
-            })
-            || match collector {
-                IterCollector::Collect => false,
-                IterCollector::Fold { init, lambda } => uses_var(init, var) || uses_var(lambda, var),
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => uses_var(lambda, var),
-            }
-        }
+        IrExprKind::IterChain { source, steps, collector, .. } => iter_chain_uses_var(source, steps, collector, var),
         IrExprKind::RustMacro { args, .. } => args.iter().any(|a| uses_var(a, var)),
         IrExprKind::RuntimeCall { args, .. } => args.iter().any(|a| uses_var(a, var)),
         IrExprKind::Range { start, end, .. } => uses_var(start, var) || uses_var(end, var),
