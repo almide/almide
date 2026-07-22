@@ -64,38 +64,44 @@ struct FixOutcome<'a> {
     any_change: bool,
 }
 
+/// `print_fix_human_summary`'s operator/letin/return detail lines — shared
+/// by both the dry-run preview (sink `out`) and the diff summary (sink
+/// `err`), which had identical copies of these 3 conditional lines.
+/// Extracted verbatim.
+fn print_fix_detail_lines(outcome: &FixOutcome, print: fn(&str)) {
+    if outcome.operator_count > 0 {
+        print(&format!(
+            "  Rewrote {} comparison function call(s) to operator form (int.gt/lt/eq/... → > < == ...)",
+            outcome.operator_count
+        ));
+    }
+    if outcome.letin_count > 0 {
+        print(&format!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", outcome.letin_count));
+    }
+    if outcome.return_count > 0 {
+        print(&format!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", outcome.return_count));
+    }
+}
+
 /// `report_fix_result`'s human dry-run preview / human diff summary.
 /// Extracted verbatim — reads only `outcome`, writes only stdout/stderr.
 fn print_fix_human_summary(outcome: &FixOutcome, dry_run: bool) {
-    let op_msg = |n: usize| format!(
-        "Rewrote {} comparison function call(s) to operator form (int.gt/lt/eq/... → > < == ...)", n
-    );
     if dry_run {
         if !outcome.any_change {
             out(&format!("no auto-applicable fixes"));
-        } else {
-            out(&format!("--- would apply ---"));
-            for m in outcome.import_messages { out(&format!("  {}", m)); }
-            if outcome.operator_count > 0 { out(&format!("  {}", op_msg(outcome.operator_count))); }
-            if outcome.letin_count > 0 {
-                out(&format!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", outcome.letin_count));
-            }
-            if outcome.return_count > 0 {
-                out(&format!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", outcome.return_count));
-            }
-            out(&format!("\n--- new file contents ---"));
-            out(&format!("{}", outcome.working));
+            return;
         }
-    } else if outcome.any_change {
+        out(&format!("--- would apply ---"));
+        for m in outcome.import_messages { out(&format!("  {}", m)); }
+        print_fix_detail_lines(outcome, out);
+        out(&format!("\n--- new file contents ---"));
+        out(&format!("{}", outcome.working));
+        return;
+    }
+    if outcome.any_change {
         err(&format!("{}:", outcome.file));
         for m in outcome.import_messages { err(&format!("  {}", m)); }
-        if outcome.operator_count > 0 { err(&format!("  {}", op_msg(outcome.operator_count))); }
-        if outcome.letin_count > 0 {
-            err(&format!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", outcome.letin_count));
-        }
-        if outcome.return_count > 0 {
-            err(&format!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", outcome.return_count));
-        }
+        print_fix_detail_lines(outcome, err);
     }
 }
 
