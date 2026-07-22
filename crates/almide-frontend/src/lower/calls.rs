@@ -219,54 +219,77 @@ fn lower_call_fill_defaults(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, args:
 /// codegen mismatch. Verbatim text move; mutates `ir_args` in place.
 fn lower_call_coerce_args(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, target: &CallTarget) {
     if let CallTarget::Named { name } = target {
-        // Builtin comparison macros (assert_eq / assert_ne) aren't
-        // registered in env.functions, but their semantics demand
-        // width-matched operands on both targets. Coerce literal-side
-        // args toward their typed peer here, before the target-specific
-        // lowering picks up a Macro / RustMacro / direct-emit path.
-        if matches!(name.as_str(), "assert_eq" | "assert_ne") && ir_args.len() == 2 {
-            let l_ty = ir_args[0].ty.clone();
-            let r_ty = ir_args[1].ty.clone();
-            super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty, ctx.env);
-            super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty, ctx.env);
-        }
-        if let Some(sig) = ctx.env.functions.get(name).cloned() {
-            for (i, (_, param_ty)) in sig.params.iter().enumerate() {
-                if let Some(arg) = ir_args.get_mut(i) {
-                    super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-                }
-            }
-        } else if let Some((_, case)) = ctx.env.lookup_ctor(&almide_base::intern::sym(name)) {
-            // Tuple-payload variant constructor (`Click(Int32, Int)`): narrow each
-            // bare-literal arg to its declared payload type so `Click(42, 9)` emits
-            // `Click(42i32, 9i64)` — without this the `42` stays `i64`, which native
-            // rustc rejects (E0308) and WASM writes at the wrong byte width,
-            // corrupting the next payload field. Mirrors the record-construction
-            // coercion in `expressions.rs` (`declared_record_ty` path).
-            if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
-                for (i, param_ty) in param_tys.iter().enumerate() {
-                    if let Some(arg) = ir_args.get_mut(i) {
-                        super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-                    }
-                }
-            }
-        } else if let Some((module, func)) = name.as_str().split_once('.') {
-            if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
-                for (i, (_, param_ty)) in sig.params.iter().enumerate() {
-                    if let Some(arg) = ir_args.get_mut(i) {
-                        super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-                    }
-                }
-            }
-        }
+        lower_call_coerce_args_named(ctx, ir_args, name);
     } else if let CallTarget::Module { module, func, .. } = target {
-        if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
-            for (i, (_, param_ty)) in sig.params.iter().enumerate() {
-                if let Some(arg) = ir_args.get_mut(i) {
-                    super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-                }
+        lower_call_coerce_args_module(ctx, ir_args, module, func);
+    }
+}
+
+/// `CallTarget::Named` branch of [`lower_call_coerce_args`]: the
+/// assert_eq/assert_ne width-matching special case, then coercion sourced
+/// from a user fn's signature, a variant constructor's tuple payload, or a
+/// dotted stdlib fn's signature. Verbatim text move.
+fn lower_call_coerce_args_named(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, name: &Sym) {
+    lower_call_coerce_assert_macro(ctx, ir_args, name);
+    if let Some(sig) = ctx.env.functions.get(name).cloned() {
+        lower_call_coerce_from_sig(ctx, ir_args, &sig);
+    } else if let Some((_, case)) = ctx.env.lookup_ctor(&almide_base::intern::sym(name)) {
+        lower_call_coerce_from_ctor(ctx, ir_args, &case);
+    } else if let Some((module, func)) = name.as_str().split_once('.') {
+        if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
+            lower_call_coerce_from_sig(ctx, ir_args, &sig);
+        }
+    }
+}
+
+/// Builtin comparison macros (assert_eq / assert_ne) aren't registered in
+/// env.functions, but their semantics demand width-matched operands on
+/// both targets. Coerce literal-side args toward their typed peer here,
+/// before the target-specific lowering picks up a Macro / RustMacro /
+/// direct-emit path. Verbatim text move out of [`lower_call_coerce_args_named`].
+fn lower_call_coerce_assert_macro(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, name: &Sym) {
+    if matches!(name.as_str(), "assert_eq" | "assert_ne") && ir_args.len() == 2 {
+        let l_ty = ir_args[0].ty.clone();
+        let r_ty = ir_args[1].ty.clone();
+        super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty, ctx.env);
+        super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty, ctx.env);
+    }
+}
+
+/// Coerce each arg to its corresponding declared param type from a fn
+/// signature. Shared by the by-name and dotted-stdlib branches of
+/// [`lower_call_coerce_args_named`] (identical logic, two lookup sources)
+/// and by [`lower_call_coerce_args_module`]. Verbatim text move.
+fn lower_call_coerce_from_sig(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, sig: &crate::types::FnSig) {
+    for (i, (_, param_ty)) in sig.params.iter().enumerate() {
+        if let Some(arg) = ir_args.get_mut(i) {
+            super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
+        }
+    }
+}
+
+/// Tuple-payload variant constructor (`Click(Int32, Int)`): narrow each
+/// bare-literal arg to its declared payload type so `Click(42, 9)` emits
+/// `Click(42i32, 9i64)` — without this the `42` stays `i64`, which native
+/// rustc rejects (E0308) and WASM writes at the wrong byte width,
+/// corrupting the next payload field. Mirrors the record-construction
+/// coercion in `expressions.rs` (`declared_record_ty` path). Verbatim text
+/// move out of [`lower_call_coerce_args_named`].
+fn lower_call_coerce_from_ctor(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, case: &crate::types::VariantCase) {
+    if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
+        for (i, param_ty) in param_tys.iter().enumerate() {
+            if let Some(arg) = ir_args.get_mut(i) {
+                super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
             }
         }
+    }
+}
+
+/// `CallTarget::Module` branch of [`lower_call_coerce_args`]. Verbatim
+/// text move.
+fn lower_call_coerce_args_module(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, module: &Sym, func: &Sym) {
+    if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
+        lower_call_coerce_from_sig(ctx, ir_args, &sig);
     }
 }
 
