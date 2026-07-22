@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "no-any": "warning",
+    "no-console": "warning",
+    "no-var": "warning",
+    "eqeqeq": "warning",
+    "no-empty-function": "warning",
+    "no-nested-ternary": "warning",
+    "no-debugger": "error",
+    "no-duplicate-case": "error",
+    "no-self-assign": "warning",
+    "no-eval": "error",
+    "no-unreachable": "error",
+    "max-lines": { "severity": "warning", "max": 800 },
+    "max-depth": { "severity": "warning", "max": 6 },
+    "max-params": { "severity": "warning", "max": 6 },
+    "max-complexity": { "severity": "warning", "max": 20 },
+    "max-cognitive-complexity": { "severity": "warning", "max": 30 }
+  }
+}
