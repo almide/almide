@@ -734,14 +734,43 @@ impl IrVisitor for MutatedCollector {
 /// per-closure cell. Run before conversion rewrites captures to `EnvLoad`s.
 fn detect_mutated_captures(program: &IrProgram) -> HashSet<VarId> {
     // (1) every var mutated anywhere in the program
-    let mut mutated = MutatedCollector { out: HashSet::new() };
-    for f in &program.functions { mutated.visit_expr(&f.body); }
-    for tl in &program.top_lets { mutated.visit_expr(&tl.value); }
-    for m in &program.modules {
-        for f in &m.functions { mutated.visit_expr(&f.body); }
-        for tl in &m.top_lets { mutated.visit_expr(&tl.value); }
-    }
+    let mutated = collect_mutated_vars(program);
     // (2) every var captured (free in some lambda body)
+    let captured = collect_captured_vars(program);
+    // (3) top-level globals are stored as Cell/RefCell, not per-closure cells
+    let top_vars: HashSet<VarId> = program.top_lets.iter().map(|tl| tl.var)
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
+        .collect();
+    captured.intersection(&mutated).copied()
+        .filter(|v| !top_vars.contains(v))
+        .collect()
+}
+
+/// Every top-level/module function body and top-let initializer in the
+/// program, extracted verbatim (cog>30 decomposition — this exact 8-line
+/// traversal was duplicated once for the mutated-vars visitor and once for
+/// the captured-vars visitor in `detect_mutated_captures`; factored into
+/// one fn reused by both).
+fn visit_all_program_bodies<V: IrVisitor>(program: &IrProgram, visitor: &mut V) {
+    for f in &program.functions { visitor.visit_expr(&f.body); }
+    for tl in &program.top_lets { visitor.visit_expr(&tl.value); }
+    for m in &program.modules {
+        for f in &m.functions { visitor.visit_expr(&f.body); }
+        for tl in &m.top_lets { visitor.visit_expr(&tl.value); }
+    }
+}
+
+/// Phase (1) of `detect_mutated_captures`, extracted verbatim (further
+/// split of the same decomposition).
+fn collect_mutated_vars(program: &IrProgram) -> HashSet<VarId> {
+    let mut mutated = MutatedCollector { out: HashSet::new() };
+    visit_all_program_bodies(program, &mut mutated);
+    mutated.out
+}
+
+/// Phase (2) of `detect_mutated_captures`, extracted verbatim (further
+/// split of the same decomposition) — every var free in some lambda body.
+fn collect_captured_vars(program: &IrProgram) -> HashSet<VarId> {
     struct CapW { out: HashSet<VarId> }
     impl IrVisitor for CapW {
         fn visit_expr(&mut self, expr: &IrExpr) {
@@ -755,19 +784,8 @@ fn detect_mutated_captures(program: &IrProgram) -> HashSet<VarId> {
         }
     }
     let mut cap = CapW { out: HashSet::new() };
-    for f in &program.functions { cap.visit_expr(&f.body); }
-    for tl in &program.top_lets { cap.visit_expr(&tl.value); }
-    for m in &program.modules {
-        for f in &m.functions { cap.visit_expr(&f.body); }
-        for tl in &m.top_lets { cap.visit_expr(&tl.value); }
-    }
-    // (3) top-level globals are stored as Cell/RefCell, not per-closure cells
-    let top_vars: HashSet<VarId> = program.top_lets.iter().map(|tl| tl.var)
-        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
-        .collect();
-    cap.out.intersection(&mutated.out).copied()
-        .filter(|v| !top_vars.contains(v))
-        .collect()
+    visit_all_program_bodies(program, &mut cap);
+    cap.out
 }
 
 /// Does `body` mutate `var` (assignment, `&mut`-borrow, or in-place mutator call)?
