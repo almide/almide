@@ -540,6 +540,20 @@ fn try_render_wasm_source_impl(
     verbose: bool,
     test_mode: bool,
 ) -> Result<String, LowerError> {
+    let mut ir = build_ir_with_drops(source, self_modules, test_mode)?;
+    try_render_wasm_source_impl_rest(&mut ir, verbose)
+}
+
+/// Phase 1: synthesize the recursive-drop / repr source text this program's linked
+/// types need, splice it into the source, and re-lower (v1-trust-spine-only — v0
+/// manages its own memory). In `test_mode`, promote `test "…"` fns to a synthesized
+/// runner `main`. Returns the FINAL linked `IrProgram` the rest of the pipeline
+/// (globals, layouts, MIR lowering) continues from.
+fn build_ir_with_drops(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+    test_mode: bool,
+) -> Result<almide_ir::IrProgram, LowerError> {
     // STRICT VALUE MODE: this is an OUTPUT path — a deferred Const-0 must never be executable
     // (flight-evidence-gaps F2, the prim.handle literal address-0 class).
     crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -697,8 +711,30 @@ fn try_render_wasm_source_impl(
     if test_mode {
         synthesize_test_runner_main(&mut ir)?;
     }
+    Ok(ir)
+}
 
-    // Top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs, union of program + modules.
+/// The rest of the pipeline after [`build_ir_with_drops`]: collect globals/layouts,
+/// lower every fn to MIR (main + linked module siblings), synthesize the global-init
+/// and self-host-runtime auto-link fns, then render the final wasm module.
+/// The four lookup tables [`collect_pipeline_layouts`] builds: globals (both the shared
+/// program+modules union and the MAIN-region-bridged view), and the record/variant
+/// layout registries — everything the fn-lowering calls below consult by reference.
+struct PipelineLayouts {
+    globals: HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    main_globals: HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    main_global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+    record_layouts: crate::lower::RecordLayouts,
+    variant_layouts: crate::lower::VariantLayouts,
+}
+
+/// Phase 2: collect top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs
+/// (union of program + modules), bridge the MAIN-region view across cross-module
+/// references, and build the record/variant layout registries (aliasing each
+/// UNIQUELY-owned base name onto its qualified layout).
+fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
     let mut global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr> = HashMap::new();
     // An UNANNOTATED option-ctor top-let (`let MAYBE = some(Cfg { .. })`) leaves
@@ -728,7 +764,7 @@ fn try_render_wasm_source_impl(
     let mut main_global_inits = global_inits.clone();
     let mut mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
         std::collections::HashMap::new();
-    crate::lower::bridge_cross_module_toplets(&ir, &mut main_globals, &mut main_global_inits, &mut mutable_toplet_aliases);
+    crate::lower::bridge_cross_module_toplets(ir, &mut main_globals, &mut main_global_inits, &mut mutable_toplet_aliases);
     for tl in &ir.top_lets {
         main_globals.insert(tl.var, toplet_ty(tl));
         main_global_inits.insert(tl.var, tl.value.clone());
@@ -779,16 +815,42 @@ fn try_render_wasm_source_impl(
         }
     }
 
-    // PROGRAM pre-pass: inline mutual-recursive tail siblings (semantics-preserving TCO exposure).
-    // The input is the WHOLE program — main's functions PLUS every linked user-module sibling
-    // under its MANGLED `almide_rt_<m>_<f>` name (bodies already reference siblings by that
-    // name, post-`resolve_user_module_calls`). Without the siblings, the never-err/auto-wrap
-    // ABI registries were populated from MAIN's functions only: a cross-module effect callee
-    // (`m.estep`) was UNCLASSIFIED, so the caller kept its auto-`?` Try (expecting a heap
-    // Result handle) while the separately-lowered callee returned its raw scalar — the
-    // crossmod_shape_matrix i64/i32 invalid-wasm class. One combined classification makes
-    // caller and callee agree by construction; the returned rewritten bodies are then split
-    // back into the main / module lowering regions (each keeps its own globals union).
+    PipelineLayouts {
+        globals,
+        global_inits,
+        main_globals,
+        main_global_inits,
+        mutable_toplet_aliases,
+        record_layouts,
+        variant_layouts,
+    }
+}
+
+/// The [`inline_and_classify_cross_module_fns`] outputs: the mangled linked-module
+/// sibling fns, MAIN's tail-inlined fns, and the union of both (the whole-program set
+/// the ABI-registry classification needs).
+struct CrossModuleFns {
+    module_fn_sibs: Vec<almide_ir::IrFunction>,
+    inlined_fns: Vec<almide_ir::IrFunction>,
+    all_fns: Vec<almide_ir::IrFunction>,
+}
+
+/// Phase 3: PROGRAM pre-pass — inline mutual-recursive tail siblings (semantics-preserving
+/// TCO exposure). The input is the WHOLE program — main's functions PLUS every linked
+/// user-module sibling under its MANGLED `almide_rt_<m>_<f>` name (bodies already
+/// reference siblings by that name, post-`resolve_user_module_calls`). Without the
+/// siblings, the never-err/auto-wrap ABI registries were populated from MAIN's functions
+/// only: a cross-module effect callee (`m.estep`) was UNCLASSIFIED, so the caller kept
+/// its auto-`?` Try (expecting a heap Result handle) while the separately-lowered callee
+/// returned its raw scalar — the crossmod_shape_matrix i64/i32 invalid-wasm class. One
+/// combined classification makes caller and callee agree by construction; the returned
+/// rewritten bodies are then split back into the main / module lowering regions (each
+/// keeps its own globals union) — iterated to a FIXPOINT (the #485 effect_assign shape).
+fn inline_and_classify_cross_module_fns(
+    ir: &almide_ir::IrProgram,
+    main_globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    record_layouts: &crate::lower::RecordLayouts,
+) -> CrossModuleFns {
     let mut module_fn_sibs: Vec<almide_ir::IrFunction> = ir
         .modules
         .iter()
@@ -842,14 +904,14 @@ fn try_render_wasm_source_impl(
     // wasm stack — wasm_same_name_crossmod_test), and the registries alone are what the
     // module-side lowering consults by MANGLED name.
     let mut inlined_fns =
-        crate::lower::inline_mutual_tail_recursion(&ir.functions, &main_globals, &record_layouts);
+        crate::lower::inline_mutual_tail_recursion(&ir.functions, main_globals, record_layouts);
     // WIDEN the ABI registries over the whole program AFTER the main pre-pass (whose own
     // population is main-only, the pre-batch behavior its rewrites were verified under):
     // every LOWERING-time keyed lookup (never-err strip exclusions, AUTO_WRAP body.ty
     // override, `ret_is_result_abi`) then sees module callees by their mangled names —
     // the crossmod caller/callee ABI agreement — without the pre-pass rewrites ever
     // touching module bodies.
-    crate::lower::populate_abi_registries(&all_fns, &record_layouts);
+    crate::lower::populate_abi_registries(&all_fns, record_layouts);
     // The registries above are program-wide, but the never-err REWRITES ran with MAIN-ONLY
     // sets (inside the pre-pass) and never touched module bodies at all. So a MAIN caller of
     // a cross-module never-err callee kept its lifted `Try`/Result-typed call, and a MODULE
@@ -873,7 +935,7 @@ fn try_render_wasm_source_impl(
     for _ in 0..8 {
         let mut all_rewritten: Vec<almide_ir::IrFunction> = inlined_fns.clone();
         all_rewritten.extend(module_fn_sibs.iter().cloned());
-        crate::lower::populate_abi_registries(&all_rewritten, &record_layouts);
+        crate::lower::populate_abi_registries(&all_rewritten, record_layouts);
         let cur = crate::lower::auto_wrap_abi_snapshot();
         if prev_auto_wrap.as_ref() == Some(&cur) {
             break;
@@ -895,106 +957,119 @@ fn try_render_wasm_source_impl(
                 &mut f.body,
                 &wide_can_err,
                 &wide_lifted,
-                &record_layouts,
+                record_layouts,
             );
         }
     }
-    // Cross-module DERIVED-METHOD name bridge (#790 codec row, piece 2 of the pinned
-    // design): a MAIN-region `T.encode` / `T.decode` reference whose type `T` is
-    // declared by exactly ONE linked module (and not by main) resolves to that
-    // module's MANGLED derived fn (`almide_rt_<m>_T.encode`) — the same unique-owner
-    // rule the variant-layout bridging above uses. Without this the reference stays
-    // unlinked and the whole program walls (honest, but the direct-method shapes are
-    // fully lowerable). Container helpers (`__encode_list_<m>.T`) stay walled — their
-    // v1 lowering is the recorded remainder of the bridge design.
-    {
-        let main_types: std::collections::HashSet<&str> =
-            ir.type_decls.iter().map(|td| td.name.as_str()).collect();
-        let mut owners: std::collections::HashMap<&str, Vec<&str>> =
-            std::collections::HashMap::new();
-        for m in &ir.modules {
-            if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
-                continue;
-            }
-            for td in &m.type_decls {
-                // Module type names may arrive QUALIFIED (`varlib.Pigment`) — key the
-                // owner map by the BASE name (the same normalization the variant-layout
-                // bridging above applies).
-                let base = td.name.as_str().rsplit('.').next().unwrap_or(td.name.as_str());
-                owners.entry(base).or_default().push(m.name.as_str());
-            }
+    CrossModuleFns { module_fn_sibs, inlined_fns, all_fns }
+}
+
+/// Phase 4: cross-module DERIVED-METHOD name bridge (#790 codec row, piece 2 of the
+/// pinned design): a MAIN-region `T.encode` / `T.decode` reference whose type `T` is
+/// declared by exactly ONE linked module (and not by main) resolves to that module's
+/// MANGLED derived fn (`almide_rt_<m>_T.encode`) — the same unique-owner rule the
+/// variant-layout bridging above uses. Without this the reference stays unlinked and
+/// the whole program walls (honest, but the direct-method shapes are fully lowerable).
+/// Container helpers (`__encode_list_<m>.T`) stay walled — their v1 lowering is the
+/// recorded remainder of the bridge design. Rewrites `inlined_fns`/`module_fn_sibs`
+/// bodies in place (both regions: main's derived fns reference the imported payload
+/// type's codec methods, and the OWNING module's own derived fns reference their
+/// sibling types' methods by the same bare `T.method` names).
+fn bridge_cross_module_derived_methods(
+    ir: &almide_ir::IrProgram,
+    inlined_fns: &mut [almide_ir::IrFunction],
+    module_fn_sibs: &mut [almide_ir::IrFunction],
+) {
+    let main_types: std::collections::HashSet<&str> =
+        ir.type_decls.iter().map(|td| td.name.as_str()).collect();
+    let mut owners: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+    for m in &ir.modules {
+        if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+            continue;
         }
-        struct Rw<'a> {
-            main_types: &'a std::collections::HashSet<&'a str>,
-            owners: &'a std::collections::HashMap<&'a str, Vec<&'a str>>,
+        for td in &m.type_decls {
+            // Module type names may arrive QUALIFIED (`varlib.Pigment`) — key the
+            // owner map by the BASE name (the same normalization the variant-layout
+            // bridging above applies).
+            let base = td.name.as_str().rsplit('.').next().unwrap_or(td.name.as_str());
+            owners.entry(base).or_default().push(m.name.as_str());
         }
-        impl almide_ir::IrMutVisitor for Rw<'_> {
-            fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
-                almide_ir::walk_expr_mut(self, e);
-                if let almide_ir::IrExprKind::Call {
-                    target: almide_ir::CallTarget::Named { name },
-                    ..
-                } = &mut e.kind
-                {
-                    let n = name.as_str();
-                    if n.starts_with("almide_rt_") || n.starts_with("__") {
-                        return;
-                    }
-                    let Some((ty_name, method)) = n.rsplit_once('.') else { return };
-                    if method != "encode" && method != "decode" {
-                        return;
-                    }
-                    // `varlib.Pigment.decode` → qualifier "varlib" + base "Pigment";
-                    // `Pigment.decode` → base only. A qualified ref must match the
-                    // owner; a bare ref must not shadow a MAIN type of the same name.
-                    let (qualifier, base) = match ty_name.rsplit_once('.') {
-                        Some((q, b)) => (Some(q), b),
-                        None => (None, ty_name),
-                    };
-                    if qualifier.is_none() && self.main_types.contains(base) {
-                        return;
-                    }
-                    if let Some(ms) = self.owners.get(base) {
-                        if let [only] = ms.as_slice() {
-                            if qualifier.is_none() || qualifier == Some(only) {
-                                *name = almide_lang::intern::sym(&user_module_fn_name(
-                                    only,
-                                    &format!("{base}.{method}"),
-                                ));
-                            }
+    }
+    struct Rw<'a> {
+        main_types: &'a std::collections::HashSet<&'a str>,
+        owners: &'a std::collections::HashMap<&'a str, Vec<&'a str>>,
+    }
+    impl almide_ir::IrMutVisitor for Rw<'_> {
+        fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+            almide_ir::walk_expr_mut(self, e);
+            if let almide_ir::IrExprKind::Call {
+                target: almide_ir::CallTarget::Named { name },
+                ..
+            } = &mut e.kind
+            {
+                let n = name.as_str();
+                if n.starts_with("almide_rt_") || n.starts_with("__") {
+                    return;
+                }
+                let Some((ty_name, method)) = n.rsplit_once('.') else { return };
+                if method != "encode" && method != "decode" {
+                    return;
+                }
+                // `varlib.Pigment.decode` → qualifier "varlib" + base "Pigment";
+                // `Pigment.decode` → base only. A qualified ref must match the
+                // owner; a bare ref must not shadow a MAIN type of the same name.
+                let (qualifier, base) = match ty_name.rsplit_once('.') {
+                    Some((q, b)) => (Some(q), b),
+                    None => (None, ty_name),
+                };
+                if qualifier.is_none() && self.main_types.contains(base) {
+                    return;
+                }
+                if let Some(ms) = self.owners.get(base) {
+                    if let [only] = ms.as_slice() {
+                        if qualifier.is_none() || qualifier == Some(only) {
+                            *name = almide_lang::intern::sym(&user_module_fn_name(
+                                only,
+                                &format!("{base}.{method}"),
+                            ));
                         }
                     }
                 }
             }
         }
-        let mut rw = Rw { main_types: &main_types, owners: &owners };
-        // BOTH regions: main's derived fns reference the imported payload type's codec
-        // methods, and the OWNING module's own derived fns reference their sibling
-        // types' methods by the same bare `T.method` names (the derive emits Named
-        // targets directly — no Method desugar ever re-forms them).
-        for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
-            almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut f.body);
-        }
-        // …and publish the unique-owner map for the DESUGAR-time resolution: the
-        // `T.method` Named names are FORMED inside the per-fn lowering (from Method
-        // targets), after this pipeline pass — the registry is how they see it.
-        let derived_owners: std::collections::HashMap<String, String> = owners
-            .iter()
-            .filter(|(t, ms)| ms.len() == 1 && !main_types.contains(*t))
-            .map(|(t, ms)| (t.to_string(), ms[0].to_string()))
-            .collect();
-        crate::lower::set_derived_type_owners(derived_owners);
     }
-    // MUTABLE module-level `var`s (program + modules): assign each a linear-memory
-    // storage slot (declaration order = VarId order, the same ordering `__global_init`
-    // uses) and publish the VarId → (slot, Ty) map — reads/assigns then route through the
-    // slot (`Load`/`$__mg_get`/`$__mg_take`+`Store`). A VarId collision across regions or
-    // an over-cap count WALLS the program (honest, never a mis-routed slot).
+    let mut rw = Rw { main_types: &main_types, owners: &owners };
+    for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
+        almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut f.body);
+    }
+    // …and publish the unique-owner map for the DESUGAR-time resolution: the
+    // `T.method` Named names are FORMED inside the per-fn lowering (from Method
+    // targets), after this pipeline pass — the registry is how they see it.
+    let derived_owners: std::collections::HashMap<String, String> = owners
+        .iter()
+        .filter(|(t, ms)| ms.len() == 1 && !main_types.contains(*t))
+        .map(|(t, ms)| (t.to_string(), ms[0].to_string()))
+        .collect();
+    crate::lower::set_derived_type_owners(derived_owners);
+}
+
+/// Phase 5: MUTABLE module-level `var`s (program + modules) — assign each a
+/// linear-memory storage slot (declaration order = VarId order, the same ordering
+/// `__global_init` uses) and publish the VarId → (slot, Ty) map — reads/assigns then
+/// route through the slot (`Load`/`$__mg_get`/`$__mg_take`+`Store`). A VarId collision
+/// across regions or an over-cap count WALLS the program (honest, never a mis-routed
+/// slot). Returns the sorted mutable top-lets (their declaration order IS the slot
+/// order, needed again by `__mg_init` synthesis below).
+fn assign_mutable_global_slots(
+    ir: &almide_ir::IrProgram,
+    mutable_toplet_aliases: &std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+) -> Result<Vec<almide_ir::IrTopLet>, LowerError> {
     let mut mutable_tls: Vec<_> = ir
         .top_lets
         .iter()
         .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
         .filter(|tl| tl.mutable)
+        .cloned()
         .collect();
     mutable_tls.sort_by_key(|tl| tl.var.0);
     if mutable_tls.len() > 64 {
@@ -1014,7 +1089,6 @@ fn try_render_wasm_source_impl(
             }
         }
     }
-    let mutable_global_count = mutable_tls.len() as u32;
     let mut mutable_global_map: std::collections::HashMap<u32, (u32, almide_lang::types::Ty)> = mutable_tls
         .iter()
         .enumerate()
@@ -1023,192 +1097,219 @@ fn try_render_wasm_source_impl(
     // #782: alias each main-side synthesized ref onto its module var's slot —
     // the retired v0 fallback used to absorb these as walls; now `m.count`
     // reads and assigns route through the SAME storage the owning module uses.
-    for (main_id, mod_id) in &mutable_toplet_aliases {
+    for (main_id, mod_id) in mutable_toplet_aliases {
         if let Some(entry) = mutable_global_map.get(&mod_id.0).cloned() {
             mutable_global_map.insert(main_id.0, entry);
         }
     }
     crate::lower::set_mutable_global_vars(mutable_global_map);
+    Ok(mutable_tls)
+}
 
-    // CROSS-MODULE global refs carry UNKNOWN expr types the frontend never infers
-    // (`v.white` — the ceangal theme class): repair them from the bridged globals
-    // maps BEFORE lowering, or the AllTypesConcrete precondition walls the whole fn.
+/// Phase 6: repair CROSS-MODULE global refs whose expr type the frontend never
+/// inferred (`v.white` — the ceangal theme class) from the bridged globals maps
+/// BEFORE lowering (or the AllTypesConcrete precondition walls the whole fn), then
+/// SUBSTITUTE every BRIDGED cross-module ref whose module-side init is a pure call
+/// or heap ctor (`v.black` → view's `let black = rgb(0,0,0)`) into the referencing fn
+/// bodies — a lowering-time CallFn there would break the classify `mir == ir` count,
+/// so the call must exist in the IR itself instead (the `inline_pure_call_globals`
+/// discipline, extended across the cross-module bridge). Purity gate: every call
+/// inside the init is a pure stdlib call or a RESOLVED user fn that is itself
+/// call-transitively clean (effect fns were mangled through the resolver and appear
+/// in no pure set). MAIN-region readers take the BIND form (a fn-top `let __g_init =
+/// …` plus a `Var` reference — a call spliced into an arbitrary position, e.g. a
+/// record field, would render as an invalid dst-less bare call); module siblings keep
+/// the raw substitution (their separate VarId region cannot carry a main-region bind
+/// id).
+fn repair_and_substitute_globals(
+    ir: &mut almide_ir::IrProgram,
+    inlined_fns: &mut [almide_ir::IrFunction],
+    module_fn_sibs: &mut [almide_ir::IrFunction],
+    layouts: &PipelineLayouts,
+    all_fns: &[almide_ir::IrFunction],
+) {
     for f in inlined_fns.iter_mut() {
-        crate::lower::repair_unknown_global_ref_tys(f, &main_globals);
-        crate::lower::repair_member_field_tys(f, &record_layouts);
+        crate::lower::repair_unknown_global_ref_tys(f, &layouts.main_globals);
+        crate::lower::repair_member_field_tys(f, &layouts.record_layouts);
     }
     for f in module_fn_sibs.iter_mut() {
-        crate::lower::repair_unknown_global_ref_tys(f, &globals);
-        crate::lower::repair_member_field_tys(f, &record_layouts);
+        crate::lower::repair_unknown_global_ref_tys(f, &layouts.globals);
+        crate::lower::repair_member_field_tys(f, &layouts.record_layouts);
     }
 
-    // A BRIDGED cross-module ref whose module-side init is a PURE CALL (`v.black` →
-    // view's `let black = rgb(0,0,0)`, the ceangal theme class) cannot materialize in
-    // `value_or_global` (a lowering-time CallFn would break the classify `mir == ir`
-    // count). SUBSTITUTE the init into the fn bodies instead — the call then exists in
-    // the IR itself, so every count and cap sees it (the exact discipline
-    // `inline_pure_call_globals` applies within one region, extended to the refs the
-    // bridge resolves across regions). Purity gate: every call inside the init is a
-    // pure stdlib call or a RESOLVED user fn that is itself call-transitively clean
-    // (effect fns were mangled through the resolver and appear in no pure set).
-    {
-        use almide_ir::visit::{walk_expr, IrVisitor};
-        struct HasImpure<'a> {
-            impure: bool,
-            effectish: &'a std::collections::HashSet<String>,
-        }
-        impl IrVisitor for HasImpure<'_> {
-            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-                match &e.kind {
-                    almide_ir::IrExprKind::RuntimeCall { .. } => self.impure = true,
-                    almide_ir::IrExprKind::Call { target, .. } => match target {
-                        almide_ir::CallTarget::Module { module, func, .. } => {
-                            if !crate::purity::is_pure(module.as_str(), func.as_str()) {
-                                self.impure = true;
-                            }
-                        }
-                        almide_ir::CallTarget::Named { name } => {
-                            if self.effectish.contains(name.as_str()) {
-                                self.impure = true;
-                            }
-                        }
-                        _ => self.impure = true,
-                    },
-                    _ => {}
-                }
-                walk_expr(self, e);
-            }
-        }
-        let effectish: std::collections::HashSet<String> = all_fns
-            .iter()
-            .filter(|f| f.is_effect)
-            .map(|f| f.name.as_str().to_string())
-            .collect();
-        let mut subs: Vec<(almide_ir::VarId, almide_ir::IrExpr)> = Vec::new();
-        for (i, info) in ir.var_table.entries.iter().enumerate() {
-            if info.module_origin.is_none() {
-                continue;
-            }
-            let id = almide_ir::VarId(i as u32);
-            let Some(init) = main_global_inits.get(&id) else { continue };
-            // #782: with the v0 fallback retired, a HEAP toplet whose init is a
-            // CTOR form (tuple/record/variant/some/ok — `let PAIR = ("a", 1)`,
-            // `let MOOD = Happy`) must ALSO substitute: value_or_global's CONST
-            // path only materializes flat literals (LitStr / all-literal List),
-            // and the old "computed init" wall used to fall back to v0. The
-            // bind-form substitution evaluates the pure ctor at fn-top — same
-            // discipline as the pure-call inits below.
-            let heap_ctor_init = crate::lower::is_heap_ty(&init.ty)
-                && !matches!(
-                    &init.kind,
-                    almide_ir::IrExprKind::LitStr { .. } | almide_ir::IrExprKind::List { .. }
-                );
-            if !crate::lower::expr_contains_call(init) && !heap_ctor_init {
-                continue;
-            }
-            let mut h = HasImpure { impure: false, effectish: &effectish };
-            h.visit_expr(init);
-            if !h.impure {
-                subs.push((id, init.clone()));
-            }
-        }
-        for (id, init) in &subs {
-            // MAIN-region readers take the BIND form instead of the raw expression
-            // substitution: `let __g_init = default_gap(); …Var(__g_init)…` — a call
-            // spliced into an arbitrary position (a record FIELD — the #785 shape)
-            // rendered as a dst-less bare call (invalid wasm), while a call in BIND
-            // position plus a Var reference is the proven single-file form. The bind
-            // goes at the fn-body top (the init is pure, so hoisting its evaluation
-            // is unobservable); fns that never reference the global are untouched.
-            for f in inlined_fns.iter_mut() {
-                fn references(e: &almide_ir::IrExpr, id: almide_ir::VarId) -> bool {
-                    use almide_ir::visit::{walk_expr, IrVisitor};
-                    struct V(almide_ir::VarId, bool);
-                    impl IrVisitor for V {
-                        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-                            if matches!(&e.kind, almide_ir::IrExprKind::Var { id } if *id == self.0)
-                            {
-                                self.1 = true;
-                            }
-                            walk_expr(self, e);
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct HasImpure<'a> {
+        impure: bool,
+        effectish: &'a std::collections::HashSet<String>,
+    }
+    impl IrVisitor for HasImpure<'_> {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            match &e.kind {
+                almide_ir::IrExprKind::RuntimeCall { .. } => self.impure = true,
+                almide_ir::IrExprKind::Call { target, .. } => match target {
+                    almide_ir::CallTarget::Module { module, func, .. } => {
+                        if !crate::purity::is_pure(module.as_str(), func.as_str()) {
+                            self.impure = true;
                         }
                     }
-                    let mut v = V(id, false);
-                    v.visit_expr(e);
-                    v.1
-                }
-                if !references(&f.body, *id) {
-                    continue;
-                }
-                let nv = ir.var_table.alloc(
-                    almide_lang::intern::sym("__g_init"),
-                    init.ty.clone(),
-                    almide_ir::Mutability::Let,
-                    None,
-                );
-                let nv_ref = almide_ir::IrExpr {
-                    kind: almide_ir::IrExprKind::Var { id: nv },
-                    ty: init.ty.clone(),
-                    span: None,
-                    def_id: None,
-                };
-                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, &nv_ref);
-                let bind_stmt = almide_ir::IrStmt {
-                    kind: almide_ir::IrStmtKind::Bind {
-                        var: nv,
-                        mutability: almide_ir::Mutability::Let,
-                        ty: init.ty.clone(),
-                        value: init.clone(),
-                    },
-                    span: None,
-                };
-                if let almide_ir::IrExprKind::Block { stmts, .. } = &mut f.body.kind {
-                    stmts.insert(0, bind_stmt);
-                } else {
-                    // An EXPRESSION-form body (`effect fn main() -> Unit =
-                    // println(m.CFG.name)`) has no statement list — wrap it in a
-                    // Block so the fn-top bind exists. Without this the
-                    // substitution left `Var(__g_init)` UNBOUND (#782, the
-                    // record/variant toplet matrix cells).
-                    let old_ty = f.body.ty.clone();
-                    let old_span = f.body.span.clone();
-                    let old = std::mem::replace(
-                        &mut f.body,
-                        almide_ir::IrExpr {
-                            kind: almide_ir::IrExprKind::Unit,
-                            ty: almide_lang::types::Ty::Unit,
-                            span: None,
-                            def_id: None,
-                        },
-                    );
-                    f.body = almide_ir::IrExpr {
-                        kind: almide_ir::IrExprKind::Block {
-                            stmts: vec![bind_stmt],
-                            expr: Some(Box::new(old)),
-                        },
-                        ty: old_ty,
-                        span: old_span,
-                        def_id: None,
-                    };
-                }
+                    almide_ir::CallTarget::Named { name } => {
+                        if self.effectish.contains(name.as_str()) {
+                            self.impure = true;
+                        }
+                    }
+                    _ => self.impure = true,
+                },
+                _ => {}
             }
-            // Module siblings keep the raw substitution (their separate VarId
-            // numbering region cannot carry a main-region bind id) — the ceangal
-            // in-module reader class this path has always served.
-            for f in module_fn_sibs.iter_mut() {
-                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
-            }
-        }
-        if !subs.is_empty() {
-            for f in inlined_fns.iter_mut() {
-                crate::lower::repair_record_literal_field_tys(f);
-            }
+            walk_expr(self, e);
         }
     }
+    let effectish: std::collections::HashSet<String> = all_fns
+        .iter()
+        .filter(|f| f.is_effect)
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let mut subs: Vec<(almide_ir::VarId, almide_ir::IrExpr)> = Vec::new();
+    for (i, info) in ir.var_table.entries.iter().enumerate() {
+        if info.module_origin.is_none() {
+            continue;
+        }
+        let id = almide_ir::VarId(i as u32);
+        let Some(init) = layouts.main_global_inits.get(&id) else { continue };
+        // #782: with the v0 fallback retired, a HEAP toplet whose init is a
+        // CTOR form (tuple/record/variant/some/ok — `let PAIR = ("a", 1)`,
+        // `let MOOD = Happy`) must ALSO substitute: value_or_global's CONST
+        // path only materializes flat literals (LitStr / all-literal List),
+        // and the old "computed init" wall used to fall back to v0. The
+        // bind-form substitution evaluates the pure ctor at fn-top — same
+        // discipline as the pure-call inits below.
+        let heap_ctor_init = crate::lower::is_heap_ty(&init.ty)
+            && !matches!(
+                &init.kind,
+                almide_ir::IrExprKind::LitStr { .. } | almide_ir::IrExprKind::List { .. }
+            );
+        if !crate::lower::expr_contains_call(init) && !heap_ctor_init {
+            continue;
+        }
+        let mut h = HasImpure { impure: false, effectish: &effectish };
+        h.visit_expr(init);
+        if !h.impure {
+            subs.push((id, init.clone()));
+        }
+    }
+    for (id, init) in &subs {
+        // MAIN-region readers take the BIND form instead of the raw expression
+        // substitution: `let __g_init = default_gap(); …Var(__g_init)…` — a call
+        // spliced into an arbitrary position (a record FIELD — the #785 shape)
+        // rendered as a dst-less bare call (invalid wasm), while a call in BIND
+        // position plus a Var reference is the proven single-file form. The bind
+        // goes at the fn-body top (the init is pure, so hoisting its evaluation
+        // is unobservable); fns that never reference the global are untouched.
+        for f in inlined_fns.iter_mut() {
+            fn references(e: &almide_ir::IrExpr, id: almide_ir::VarId) -> bool {
+                use almide_ir::visit::{walk_expr, IrVisitor};
+                struct V(almide_ir::VarId, bool);
+                impl IrVisitor for V {
+                    fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                        if matches!(&e.kind, almide_ir::IrExprKind::Var { id } if *id == self.0)
+                        {
+                            self.1 = true;
+                        }
+                        walk_expr(self, e);
+                    }
+                }
+                let mut v = V(id, false);
+                v.visit_expr(e);
+                v.1
+            }
+            if !references(&f.body, *id) {
+                continue;
+            }
+            let nv = ir.var_table.alloc(
+                almide_lang::intern::sym("__g_init"),
+                init.ty.clone(),
+                almide_ir::Mutability::Let,
+                None,
+            );
+            let nv_ref = almide_ir::IrExpr {
+                kind: almide_ir::IrExprKind::Var { id: nv },
+                ty: init.ty.clone(),
+                span: None,
+                def_id: None,
+            };
+            f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, &nv_ref);
+            let bind_stmt = almide_ir::IrStmt {
+                kind: almide_ir::IrStmtKind::Bind {
+                    var: nv,
+                    mutability: almide_ir::Mutability::Let,
+                    ty: init.ty.clone(),
+                    value: init.clone(),
+                },
+                span: None,
+            };
+            if let almide_ir::IrExprKind::Block { stmts, .. } = &mut f.body.kind {
+                stmts.insert(0, bind_stmt);
+            } else {
+                // An EXPRESSION-form body (`effect fn main() -> Unit =
+                // println(m.CFG.name)`) has no statement list — wrap it in a
+                // Block so the fn-top bind exists. Without this the
+                // substitution left `Var(__g_init)` UNBOUND (#782, the
+                // record/variant toplet matrix cells).
+                let old_ty = f.body.ty.clone();
+                let old_span = f.body.span.clone();
+                let old = std::mem::replace(
+                    &mut f.body,
+                    almide_ir::IrExpr {
+                        kind: almide_ir::IrExprKind::Unit,
+                        ty: almide_lang::types::Ty::Unit,
+                        span: None,
+                        def_id: None,
+                    },
+                );
+                f.body = almide_ir::IrExpr {
+                    kind: almide_ir::IrExprKind::Block {
+                        stmts: vec![bind_stmt],
+                        expr: Some(Box::new(old)),
+                    },
+                    ty: old_ty,
+                    span: old_span,
+                    def_id: None,
+                };
+            }
+        }
+        // Module siblings keep the raw substitution (their separate VarId
+        // numbering region cannot carry a main-region bind id) — the ceangal
+        // in-module reader class this path has always served.
+        for f in module_fn_sibs.iter_mut() {
+            f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+        }
+    }
+    if !subs.is_empty() {
+        for f in inlined_fns.iter_mut() {
+            crate::lower::repair_record_literal_field_tys(f);
+        }
+    }
+}
 
+/// Phase 7: lower every non-test MAIN fn to MIR (a fn that walls is silently skipped,
+/// listed to stderr under `verbose`), then lower every linked USER-module sibling the
+/// target's resolved `almide_rt_<m>_<f>` references — under the SAME mangled name, so
+/// every keyed lookup (never-err strip, AUTO_WRAP ABI, `ret_is_result_abi`) sees what
+/// callers use via the combined registry population. Each module fn lowers SEPARATELY
+/// (its own VarId region + shared globals); one already defined (from `inlined_fns`,
+/// the main-region tail-inlining pass) or one that itself walls is silently skipped
+/// (the caller then fails the unlinked-call render wall if it truly needed it — stdlib
+/// modules stay out, self-host-linked below).
+fn lower_main_and_sibling_fns(
+    inlined_fns: &[almide_ir::IrFunction],
+    module_fn_sibs: &[almide_ir::IrFunction],
+    layouts: &PipelineLayouts,
+    total_ir_fn_count: usize,
+    verbose: bool,
+) -> Vec<crate::MirFunction> {
     let mut functions = Vec::new();
     let mut walled = Vec::new();
-    for func in &inlined_fns {
+    for func in inlined_fns {
         // `test "…"` blocks lower to fns calling the test harness (no wasm def) — never reachable
         // from `_start`/`main`, so skip them (rendering one would pull a dangling `(call $assert_eq)`).
         if func.is_test {
@@ -1216,10 +1317,10 @@ fn try_render_wasm_source_impl(
         }
         match crate::lower::lower_function_all_with_globals(
             func,
-            &main_globals,
-            &main_global_inits,
-            &record_layouts,
-            &variant_layouts,
+            &layouts.main_globals,
+            &layouts.main_global_inits,
+            &layouts.record_layouts,
+            &layouts.variant_layouts,
         ) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => walled.push(format!("{}: {e:?}", func.name.as_str())),
@@ -1229,20 +1330,16 @@ fn try_render_wasm_source_impl(
         eprintln!(
             "[render_program] {} of {} function(s) outside the lowering subset (NOT rendered):",
             walled.len(),
-            ir.functions.len()
+            total_ir_fn_count
         );
         for w in &walled {
             eprintln!("  {w}");
         }
     }
 
-    // Lower the linked USER-module functions the target's resolved `almide_rt_<m>_<f>` references,
-    // renamed to the SAME mangled name. Each lowered SEPARATELY (its own VarId region + shared
-    // globals). A sibling that itself WALLS is silently skipped (the target then fails the
-    // unlinked-call render wall if it truly needed it). Stdlib modules stay out (self-host below).
     let already: std::collections::HashSet<String> =
         functions.iter().map(|f| f.name.clone()).collect();
-    for func in &module_fn_sibs {
+    for func in module_fn_sibs {
         // ORIGINAL bodies under the mangled name — every keyed lookup (never-err strip,
         // AUTO_WRAP ABI, `ret_is_result_abi`) sees the SAME name callers use via the
         // combined registry population above.
@@ -1251,21 +1348,35 @@ fn try_render_wasm_source_impl(
         }
         if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
             func,
-            &globals,
-            &global_inits,
-            &record_layouts,
-            &variant_layouts,
+            &layouts.globals,
+            &layouts.global_inits,
+            &layouts.record_layouts,
+            &layouts.variant_layouts,
         ) {
             functions.extend(mirs);
         }
     }
+    functions
+}
 
-    // MUTABLE-GLOBAL INITIALIZATION: synthesize `__mg_init` assigning each mutable
-    // top-let its declared initializer (declaration order), lowered through the SAME
-    // slot-routed Assign path user code uses (minus the old-value take/drop — the slots
-    // start zeroed). `_start` calls it before `__global_init`/`main`. A non-lowerable
-    // initializer WALLS the whole program: shipping zeroed globals would be a silent
-    // miscompile, and the v0 fallback initializes them correctly.
+/// Phase 8: synthesize `__mg_init` (assigns each mutable top-let its declared
+/// initializer, declaration order, through the SAME slot-routed Assign path user code
+/// uses — `_start` calls it before `__global_init`/`main`; a non-lowerable initializer
+/// WALLS the whole program, since shipping zeroed globals would be a silent
+/// miscompile), then auto-link the self-hosted stdlib runtime (int.to_string,
+/// string.concat, `print_str`, …): when a registry entry is called but not defined,
+/// its impl fn is lowered and renamed to the call name — iterated to a FIXPOINT since
+/// a linked impl may itself call ANOTHER registry entry. A self-hosted fn calling
+/// another registered impl by its IMPL name (pre-rename) is rewritten to the call name
+/// afterward, and `print_str` is force-linked last (`println` → `PrintStr` → `(call
+/// $print_str)`).
+#[allow(clippy::too_many_arguments)]
+fn synthesize_and_link_runtime_fns(
+    functions: &mut Vec<crate::MirFunction>,
+    mutable_tls: &[almide_ir::IrTopLet],
+    layouts: &PipelineLayouts,
+    verbose: bool,
+) -> Result<(), LowerError> {
     if !mutable_tls.is_empty() {
         let stmts: Vec<almide_ir::IrStmt> = mutable_tls
             .iter()
@@ -1301,10 +1412,10 @@ fn try_render_wasm_source_impl(
         };
         match crate::lower::lower_function_all_with_globals(
             &init_fn,
-            &main_globals,
-            &main_global_inits,
-            &record_layouts,
-            &variant_layouts,
+            &layouts.main_globals,
+            &layouts.main_global_inits,
+            &layouts.record_layouts,
+            &layouts.variant_layouts,
         ) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => {
@@ -1314,7 +1425,6 @@ fn try_render_wasm_source_impl(
             }
         }
     }
-
 
     // Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an entry is
     // called but not defined, renaming its impl fn to the call name. A linked impl may call ANOTHER
@@ -1361,24 +1471,23 @@ fn try_render_wasm_source_impl(
             if any_called && !any_defined {
                 let rt = source_to_ir(rt_source)?;
                 for f in &rt.functions {
-                    let lowered = crate::lower::lower_function(f, &globals);
-                    let debug_this_fn = verbose
-                        && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
-                            || f.name.as_str().starts_with("__"));
-                    // A single tuple-pattern `if let` (not two nested ifs) — identical to
-                    // `if debug_this_fn { if let Err(e) = &lowered { .. } }`, just flatter.
-                    if let (true, Err(e)) = (debug_this_fn, &lowered) {
-                        eprintln!("[self-host] {} failed to lower: {:?}", f.name.as_str(), e);
+                    let lowered = crate::lower::lower_function(f, &layouts.globals);
+                    if let Err(e) = &lowered {
+                        if verbose
+                            && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
+                                || f.name.as_str().starts_with("__"))
+                        {
+                            eprintln!("[self-host] {} failed to lower: {:?}", f.name.as_str(), e);
+                        }
                     }
-                    // Guard-clause flattening: `if let Ok(mut mir) = lowered { .. }` was the
-                    // LAST statement in this loop body, so an `Err` falling through to the
-                    // next `f` is unchanged by `continue` here. No behavior change.
-                    let Ok(mut mir) = lowered else { continue };
-                    if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn)
-                    {
-                        mir.name = call.to_string();
+                    if let Ok(mut mir) = lowered {
+                        if let Some((_, call)) =
+                            entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn)
+                        {
+                            mir.name = call.to_string();
+                        }
+                        functions.push(mir);
                     }
-                    functions.push(mir);
                 }
             }
         }
@@ -1396,7 +1505,7 @@ fn try_render_wasm_source_impl(
         .iter()
         .flat_map(|(_, es)| es.iter().map(|(i, c)| (*i, *c)))
         .collect();
-    for f in &mut functions {
+    for f in functions.iter_mut() {
         for op in &mut f.ops {
             if let crate::Op::CallFn { name, .. } = op {
                 if let Some(&c) = impl_to_call.get(name.as_str()) {
@@ -1410,11 +1519,39 @@ fn try_render_wasm_source_impl(
     if !functions.iter().any(|f| f.name == "print_str") {
         let rt = source_to_ir(include_str!("../../../stdlib/print_str.almd"))?;
         for f in &rt.functions {
-            if let Ok(mir) = crate::lower::lower_function(f, &globals) {
+            if let Ok(mir) = crate::lower::lower_function(f, &layouts.globals) {
                 functions.push(mir);
             }
         }
     }
+    Ok(())
+}
+
+fn try_render_wasm_source_impl_rest(
+    ir: &mut almide_ir::IrProgram,
+    verbose: bool,
+) -> Result<String, LowerError> {
+    let layouts = collect_pipeline_layouts(ir);
+
+    let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
+        inline_and_classify_cross_module_fns(ir, &layouts.main_globals, &layouts.record_layouts);
+
+    bridge_cross_module_derived_methods(ir, &mut inlined_fns, &mut module_fn_sibs);
+
+    let mutable_tls = assign_mutable_global_slots(ir, &layouts.mutable_toplet_aliases)?;
+    let mutable_global_count = mutable_tls.len() as u32;
+
+    repair_and_substitute_globals(ir, &mut inlined_fns, &mut module_fn_sibs, &layouts, &all_fns);
+
+    let mut functions = lower_main_and_sibling_fns(
+        &inlined_fns,
+        &module_fn_sibs,
+        &layouts,
+        ir.functions.len(),
+        verbose,
+    );
+
+    synthesize_and_link_runtime_fns(&mut functions, &mutable_tls, &layouts, verbose)?;
 
     // EAGER GLOBAL-INIT semantics (C-007): v0 evaluates every ABORTABLE top-let initializer at
     // startup. Synthesize `__global_init` binding each CALL-FREE SCALAR initializer and have
@@ -1439,7 +1576,7 @@ fn try_render_wasm_source_impl(
             c.0
         }
         let mut max_var = 0u32;
-        for (v, _) in &globals {
+        for (v, _) in &layouts.globals {
             max_var = max_var.max(v.0);
         }
         {
@@ -1516,7 +1653,7 @@ fn try_render_wasm_source_impl(
                 module_origin: None,
                 mutated_params: vec![],
             };
-            if let Ok(mir) = crate::lower::lower_function(&init_fn, &globals) {
+            if let Ok(mir) = crate::lower::lower_function(&init_fn, &layouts.globals) {
                 functions.push(mir);
             }
         }
