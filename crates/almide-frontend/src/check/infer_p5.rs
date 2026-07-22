@@ -57,67 +57,128 @@ fn collect_in_match_expr(subject: &ast::Expr, arms: &[ast::MatchArm], out: &mut 
     }
 }
 
+// Router: dispatches to a group helper by expr kind. Each helper handles an
+// independent subset of `ExprKind` and returns whether it matched — `out` is
+// a write-only accumulator (no arm ever reads back what an earlier arm
+// wrote), so grouping is behavior-preserving.
 fn collect_in_expr(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
+    if collect_in_expr_control(expr, out) { return; }
+    if collect_in_expr_operators(expr, out) { return; }
+    if collect_in_expr_access(expr, out) { return; }
+    collect_in_expr_collections(expr, out);
+}
+
+// Match/Block/If/IfLet/ForIn/While: nodes that carry statement lists or arms.
+fn collect_in_expr_control(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) -> bool {
     match &expr.kind {
-        ExprKind::Match { subject, arms, .. } => collect_in_match_expr(subject, arms, out),
+        ExprKind::Match { subject, arms, .. } => { collect_in_match_expr(subject, arms, out); true }
         ExprKind::Block { stmts, expr: tail, .. } => {
             for s in stmts { collect_in_stmt(s, out); }
             if let Some(t) = tail { collect_in_expr(t, out); }
+            true
         }
         ExprKind::If { cond, then, else_, .. } => {
             collect_in_expr(cond, out);
             collect_in_expr(then, out);
             collect_in_expr(else_, out);
+            true
         }
         ExprKind::IfLet { scrutinee, then, else_, .. } => {
             collect_in_expr(scrutinee, out);
             collect_in_expr(then, out);
             collect_in_expr(else_, out);
+            true
         }
         ExprKind::ForIn { iterable, body, .. } => {
             collect_in_expr(iterable, out);
             for s in body { collect_in_stmt(s, out); }
+            true
         }
         ExprKind::While { cond, body, .. } => {
             collect_in_expr(cond, out);
             for s in body { collect_in_stmt(s, out); }
+            true
         }
+        _ => false,
+    }
+}
+
+// Single/dual-child operator-like nodes: unwrap-like wrappers, Unary,
+// Binary/Pipe/Compose, Range, UnwrapOr.
+fn collect_in_expr_operators(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) -> bool {
+    match &expr.kind {
         ExprKind::Paren { expr: inner, .. } | ExprKind::Some { expr: inner, .. }
         | ExprKind::Ok { expr: inner, .. } | ExprKind::Err { expr: inner, .. }
         | ExprKind::Try { expr: inner, .. } | ExprKind::Unwrap { expr: inner, .. }
         | ExprKind::ToOption { expr: inner, .. } | ExprKind::Await { expr: inner, .. }
         | ExprKind::TypeAscription { expr: inner, .. }
-        | ExprKind::OptionalChain { expr: inner, .. } => collect_in_expr(inner, out),
+        | ExprKind::OptionalChain { expr: inner, .. } => { collect_in_expr(inner, out); true }
         ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
             collect_in_expr(inner, out);
             collect_in_expr(fallback, out);
+            true
         }
-        ExprKind::Unary { operand, .. } => collect_in_expr(operand, out),
+        ExprKind::Unary { operand, .. } => { collect_in_expr(operand, out); true }
         ExprKind::Binary { left, right, .. } | ExprKind::Pipe { left, right, .. }
         | ExprKind::Compose { left, right, .. } => {
             collect_in_expr(left, out);
             collect_in_expr(right, out);
+            true
         }
         ExprKind::Range { start, end, .. } => {
             collect_in_expr(start, out);
             collect_in_expr(end, out);
+            true
         }
+        _ => false,
+    }
+}
+
+// Call/Member/TupleIndex/IndexAccess: callee/object-shaped access nodes.
+fn collect_in_expr_access(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) -> bool {
+    match &expr.kind {
         ExprKind::Call { callee, args, named_args, .. } => {
             collect_in_expr(callee, out);
             for a in args { collect_in_expr(a, out); }
             for (_, a) in named_args { collect_in_expr(a, out); }
+            true
         }
-        ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. } => collect_in_expr(object, out),
+        ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. } => { collect_in_expr(object, out); true }
         ExprKind::IndexAccess { object, index, .. } => {
             collect_in_expr(object, out);
             collect_in_expr(index, out);
+            true
         }
+        _ => false,
+    }
+}
+
+// List/Tuple/Fan/MapLiteral/Record/SpreadRecord/Lambda/InterpolatedString:
+// collection-literal nodes, recursing over a list/map of sub-expressions.
+fn collect_in_expr_collections(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
+    if collect_in_expr_seq_literals(expr, out) { return; }
+    collect_in_expr_keyed_literals(expr, out);
+}
+
+// List/Tuple/Fan/Lambda: sequence-shaped literals and the lambda body.
+fn collect_in_expr_seq_literals(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) -> bool {
+    match &expr.kind {
         ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
             for e in elements { collect_in_expr(e, out); }
+            true
         }
         ExprKind::Fan { exprs, .. } => {
             for e in exprs { collect_in_expr(e, out); }
+            true
         }
+        ExprKind::Lambda { body, .. } => { collect_in_expr(body, out); true }
+        _ => false,
+    }
+}
+
+// MapLiteral/Record/SpreadRecord/InterpolatedString: keyed/mixed literal forms.
+fn collect_in_expr_keyed_literals(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
+    match &expr.kind {
         ExprKind::MapLiteral { entries, .. } => {
             for (k, v) in entries { collect_in_expr(k, out); collect_in_expr(v, out); }
         }
@@ -128,7 +189,6 @@ fn collect_in_expr(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
             collect_in_expr(base, out);
             for f in fields { collect_in_expr(&f.value, out); }
         }
-        ExprKind::Lambda { body, .. } => collect_in_expr(body, out),
         ExprKind::InterpolatedString { parts, .. } => {
             for p in parts {
                 if let ast::StringPart::Expr { expr } = p { collect_in_expr(expr, out); }
