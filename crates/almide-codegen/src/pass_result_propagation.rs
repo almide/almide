@@ -245,42 +245,54 @@ fn resolve_err_types(body: &mut IrExpr, ok_ty: &Ty) {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             // Bottom-up: resolve children first
             walk_expr_mut(self, expr);
-
-            // ResultErr with unresolved Ok slot → fill from function ret_ty
-            if matches!(&expr.kind, IrExprKind::ResultErr { .. }) {
-                if expr.ty.has_unresolved_deep() {
-                    expr.ty = Ty::result(self.ok_ty.clone(), Ty::String);
-                }
-            }
-
-            // Try/Unwrap wrapping ResultErr: Ok type is unresolved → fill
-            match &expr.kind {
-                IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } => {
-                    if matches!(&inner.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
-                        expr.ty = self.ok_ty.clone();
-                    }
-                }
-                _ => {}
-            }
-
-            // Block wrapping a single Try/Unwrap { ResultErr } or bare ResultErr
-            if let IrExprKind::Block { stmts, expr: Some(tail) } = &expr.kind {
-                if stmts.is_empty() && expr.ty.has_unresolved_deep() {
-                    let is_err_wrapper = match &tail.kind {
-                        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
-                            => matches!(&inner.kind, IrExprKind::ResultErr { .. }),
-                        IrExprKind::ResultErr { .. } => true,
-                        _ => false,
-                    };
-                    if is_err_wrapper {
-                        expr.ty = tail.ty.clone();
-                    }
-                }
-            }
+            resolve_err_ty_direct(expr, self.ok_ty);
+            resolve_err_ty_try_unwrap(expr, self.ok_ty);
+            resolve_err_ty_block_wrapper(expr);
         }
     }
 
     ErrResolver { ok_ty }.visit_expr_mut(body);
+}
+
+/// `ResultErr`-with-unresolved-Ok-slot check of `resolve_err_types`'s
+/// visitor, extracted verbatim (cog>30 decomposition, pattern 1 — three
+/// independent checks in sequence, each only ever writes `expr.ty`, no
+/// state shared between them).
+fn resolve_err_ty_direct(expr: &mut IrExpr, ok_ty: &Ty) {
+    if matches!(&expr.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
+        expr.ty = Ty::result(ok_ty.clone(), Ty::String);
+    }
+}
+
+/// `Try`/`Unwrap`-wrapping-`ResultErr` check of `resolve_err_types`'s
+/// visitor, extracted verbatim (cog>30 decomposition).
+fn resolve_err_ty_try_unwrap(expr: &mut IrExpr, ok_ty: &Ty) {
+    match &expr.kind {
+        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } => {
+            if matches!(&inner.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
+                expr.ty = ok_ty.clone();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Block-wrapping-a-single-`Try`/`Unwrap`{`ResultErr`}-or-bare-`ResultErr`
+/// check of `resolve_err_types`'s visitor, extracted verbatim (cog>30
+/// decomposition).
+fn resolve_err_ty_block_wrapper(expr: &mut IrExpr) {
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &expr.kind else { return };
+    if stmts.is_empty() && expr.ty.has_unresolved_deep() {
+        let is_err_wrapper = match &tail.kind {
+            IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
+                => matches!(&inner.kind, IrExprKind::ResultErr { .. }),
+            IrExprKind::ResultErr { .. } => true,
+            _ => false,
+        };
+        if is_err_wrapper {
+            expr.ty = tail.ty.clone();
+        }
+    }
 }
 
 /// Wrap the tail expression of an effect fn body in Ok(...).
