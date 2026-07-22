@@ -786,107 +786,25 @@ fn collect_used_modules(program: &IrProgram) -> std::collections::HashSet<String
     used
 }
 
+/// Scan an expression tree for `CallTarget::Module` references, recording
+/// every module name touched. Rewritten (cog>30 decomposition) onto the
+/// shared `almide_ir::visit::IrVisitor`/`walk_expr` exhaustive traversal —
+/// the same infrastructure `contains_aborting_int_div` uses elsewhere in
+/// this crate — instead of a 90-line hand-rolled recursive match. `used`
+/// is a write-only accumulator. `scan_stmt_modules` (the old hand-rolled
+/// statement-level counterpart) is gone: `IrVisitor`'s default
+/// `visit_stmt` → `walk_stmt` already routes every statement's
+/// sub-expressions back through `visit_expr` below.
 fn scan_expr_modules(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
-    match &expr.kind {
-        IrExprKind::Call { target, args, .. } => {
-            if let CallTarget::Module { module, .. } = target {
-                used.insert(module.to_string());
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct ModuleScanner<'a> { used: &'a mut std::collections::HashSet<String> }
+    impl IrVisitor for ModuleScanner<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } = &expr.kind {
+                self.used.insert(module.to_string());
             }
-            if let CallTarget::Method { object, .. } = target {
-                scan_expr_modules(object, used);
-            }
-            for a in args { scan_expr_modules(a, used); }
+            walk_expr(self, expr);
         }
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts { scan_stmt_modules(s, used); }
-            if let Some(e) = tail { scan_expr_modules(e, used); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            scan_expr_modules(cond, used);
-            scan_expr_modules(then, used);
-            scan_expr_modules(else_, used);
-        }
-        IrExprKind::Lambda { body, .. } => scan_expr_modules(body, used),
-        IrExprKind::BinOp { left, right, .. } => {
-            scan_expr_modules(left, used);
-            scan_expr_modules(right, used);
-        }
-        IrExprKind::UnOp { operand, .. } => scan_expr_modules(operand, used),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { scan_expr_modules(e, used); }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            scan_expr_modules(iterable, used);
-            for s in body { scan_stmt_modules(s, used); }
-        }
-        IrExprKind::While { cond, body } => {
-            scan_expr_modules(cond, used);
-            for s in body { scan_stmt_modules(s, used); }
-        }
-        IrExprKind::Match { subject, arms } => {
-            scan_expr_modules(subject, used);
-            for arm in arms {
-                scan_expr_modules(&arm.body, used);
-                if let Some(g) = &arm.guard { scan_expr_modules(g, used); }
-            }
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::OptionalChain { expr: object, .. } => {
-            scan_expr_modules(object, used);
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { scan_expr_modules(v, used); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            scan_expr_modules(base, used);
-            for (_, v) in fields { scan_expr_modules(v, used); }
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr } = p { scan_expr_modules(expr, used); }
-            }
-        }
-        IrExprKind::ResultOk { expr: inner } | IrExprKind::ResultErr { expr: inner }
-        | IrExprKind::OptionSome { expr: inner } | IrExprKind::Try { expr: inner }
-        | IrExprKind::Unwrap { expr: inner } | IrExprKind::ToOption { expr: inner } => {
-            scan_expr_modules(inner, used);
-        }
-        IrExprKind::UnwrapOr { expr: inner, fallback } => {
-            scan_expr_modules(inner, used);
-            scan_expr_modules(fallback, used);
-        }
-        IrExprKind::IndexAccess { object, index } => {
-            scan_expr_modules(object, used);
-            scan_expr_modules(index, used);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            scan_expr_modules(object, used);
-            scan_expr_modules(key, used);
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { scan_expr_modules(k, used); scan_expr_modules(v, used); }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            scan_expr_modules(start, used);
-            scan_expr_modules(end, used);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { scan_expr_modules(a, used); }
-        }
-        IrExprKind::TupleIndex { object, .. } => scan_expr_modules(object, used),
-        _ => {}
     }
-}
-
-fn scan_stmt_modules(stmt: &IrStmt, used: &mut std::collections::HashSet<String>) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } => scan_expr_modules(value, used),
-        IrStmtKind::Assign { value, .. } => scan_expr_modules(value, used),
-        IrStmtKind::Expr { expr } => scan_expr_modules(expr, used),
-        IrStmtKind::Guard { cond, else_ } => {
-            scan_expr_modules(cond, used);
-            scan_expr_modules(else_, used);
-        }
-        IrStmtKind::BindDestructure { value, .. } => scan_expr_modules(value, used),
-        _ => {}
-    }
+    ModuleScanner { used }.visit_expr(expr);
 }
