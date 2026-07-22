@@ -247,35 +247,7 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             out.push_str(&format!("{}let {} = ();\n", pad, result_name));
         }
 
-        OpKind::BinOp { op, lhs, rhs } => {
-            let op_str = match op {
-                almide_ir::BinOp::AddInt | almide_ir::BinOp::AddFloat => "+",
-                almide_ir::BinOp::SubInt | almide_ir::BinOp::SubFloat => "-",
-                almide_ir::BinOp::MulInt | almide_ir::BinOp::MulFloat => "*",
-                almide_ir::BinOp::DivInt | almide_ir::BinOp::DivFloat => "/",
-                almide_ir::BinOp::ModInt | almide_ir::BinOp::ModFloat => "%",
-                almide_ir::BinOp::Eq => "==",
-                almide_ir::BinOp::Neq => "!=",
-                almide_ir::BinOp::Lt => "<",
-                almide_ir::BinOp::Gt => ">",
-                almide_ir::BinOp::Lte => "<=",
-                almide_ir::BinOp::Gte => ">=",
-                almide_ir::BinOp::And => "&&",
-                almide_ir::BinOp::Or => "||",
-                almide_ir::BinOp::ConcatStr => {
-                    out.push_str(&format!("{}let {} = format!(\"{{}}{{}}\", {}, {});\n",
-                        pad, result_name, names.get(*lhs), names.get(*rhs)));
-                    return;
-                }
-                almide_ir::BinOp::ConcatList => {
-                    out.push_str(&format!("{}let {} = [{}, {}].concat();\n",
-                        pad, result_name, names.get(*lhs), names.get(*rhs)));
-                    return;
-                }
-                _ => "/* TODO */",
-            };
-            out.push_str(&format!("{}let {} = {} {} {};\n", pad, result_name, names.get(*lhs), op_str, names.get(*rhs)));
-        }
+        OpKind::BinOp { .. } => emit_op_binop(out, op, &pad, &result_name, names),
         OpKind::UnOp { op, operand } => {
             let op_str = match op {
                 almide_ir::UnOp::NegInt | almide_ir::UnOp::NegFloat => "-",
@@ -284,37 +256,7 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             out.push_str(&format!("{}let {} = {}{};\n", pad, result_name, op_str, names.get(*operand)));
         }
 
-        OpKind::CallOp { callee, args } => {
-            let callee_str = callee.as_str();
-            // Check if callee is a variant constructor
-            let variant_parent = names.variants.get(callee_str).cloned();
-            if let Some(parent) = variant_parent {
-                let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
-                if args_str.is_empty() {
-                    out.push_str(&format!("{}let {} = {}::{};\n", pad, result_name, parent, callee_str));
-                } else {
-                    out.push_str(&format!("{}let {} = {}::{}({});\n", pad, result_name, parent, callee_str, args_str.join(", ")));
-                }
-                return;
-            }
-            if callee_str == "println" {
-                let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
-                out.push_str(&format!("{}println!(\"{{}}\", {});\n", pad, args_str.join(", ")));
-                out.push_str(&format!("{}let {} = ();\n", pad, result_name));
-            } else {
-                let resolved = resolve_call(callee_str);
-                let is_user_fn = !callee_str.contains('.');
-                let args_str: Vec<_> = args.iter().enumerate().map(|(i, a)| {
-                    let name = names.get(*a);
-                    if resolved.borrow_args.contains(&i) {
-                        format!("&{}", name)
-                    } else {
-                        name
-                    }
-                }).collect();
-                out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, resolved.rust_name, args_str.join(", ")));
-            }
-        }
+        OpKind::CallOp { .. } => emit_op_call(out, op, &pad, &result_name, names),
         OpKind::ComputedCallOp { callee, args } => {
             let callee_name = names.get(*callee);
             let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
@@ -343,13 +285,7 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             out.push_str(&format!("{}let {} = ({});\n", pad, result_name, vals.join(", ")));
         }
 
-        OpKind::IfOp { cond, then_region, else_region } => {
-            out.push_str(&format!("{}let {} = if {} {{\n", pad, result_name, names.get(*cond)));
-            for b in then_region { emit_block(out, b, indent + 1, names); }
-            out.push_str(&format!("{}}} else {{\n", pad));
-            for b in else_region { emit_block(out, b, indent + 1, names); }
-            out.push_str(&format!("{}}};\n", pad));
-        }
+        OpKind::IfOp { .. } => emit_op_if(out, op, &pad, &result_name, indent, names),
 
         OpKind::ResultOkOp { value } => {
             out.push_str(&format!("{}let {} = Ok({});\n", pad, result_name, names.get(*value)));
@@ -374,56 +310,15 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             out.push_str(&format!("{}{} = {};\n", pad, names.get(*slot), names.get(*value)));
         }
 
-        OpKind::MatchOp { subject, arms } => {
-            out.push_str(&format!("{}let {} = match {} {{\n", pad, result_name, names.get(*subject)));
-            for arm in arms {
-                let pat = emit_pattern(&arm.pattern, names);
-                indent_str(out, indent + 1);
-                out.push_str(&format!("{} => {{\n", pat));
-                for b in &arm.body { emit_block(out, b, indent + 2, names); }
-                indent_str(out, indent + 1);
-                out.push_str("},\n");
-            }
-            out.push_str(&format!("{}}};\n", pad));
-        }
+        OpKind::MatchOp { .. } => emit_op_match(out, op, &pad, &result_name, indent, names),
 
-        OpKind::LambdaOp { params, body } => {
-            let ps: Vec<_> = params.iter().map(|(v, ty)| {
-                let name = format!("v{}", v.0);
-                names.set(*v, name.clone());
-                format!("{}: {}", name, emit_rust_type(ty))
-            }).collect();
-            out.push_str(&format!("{}let {} = move |{}| {{\n", pad, result_name, ps.join(", ")));
-            for b in body { emit_block(out, b, indent + 1, names); }
-            out.push_str(&format!("{}}};\n", pad));
-        }
+        OpKind::LambdaOp { .. } => emit_op_lambda(out, op, &pad, &result_name, indent, names),
 
-        OpKind::ForOp { var, iterable, body } => {
-            let var_name = format!("v{}", var.0);
-            names.set(*var, var_name.clone());
-            out.push_str(&format!("{}for {} in {} {{\n", pad, var_name, names.get(*iterable)));
-            for b in body { emit_block(out, b, indent + 1, names); }
-            out.push_str(&format!("{}}}\n", pad));
-            out.push_str(&format!("{}let {} = ();\n", pad, result_name));
-        }
+        OpKind::ForOp { .. } => emit_op_for(out, op, &pad, &result_name, indent, names),
 
-        OpKind::WhileOp { cond_region, body } => {
-            out.push_str(&format!("{}while {{\n", pad));
-            // Emit cond as block that yields bool
-            for b in cond_region { emit_block(out, b, indent + 1, names); }
-            out.push_str(&format!("{}}} {{\n", pad));
-            for b in body { emit_block(out, b, indent + 1, names); }
-            out.push_str(&format!("{}}}\n", pad));
-            out.push_str(&format!("{}let {} = ();\n", pad, result_name));
-        }
+        OpKind::WhileOp { .. } => emit_op_while(out, op, &pad, &result_name, indent, names),
 
-        OpKind::FanOp { regions } => {
-            // Fan: emit each region sequentially (TODO: actual concurrency)
-            for region in regions {
-                for b in region { emit_block(out, b, indent, names); }
-            }
-            out.push_str(&format!("{}let {} = ();\n", pad, result_name));
-        }
+        OpKind::FanOp { regions } => emit_op_fan(out, regions, &pad, &result_name, indent, names),
 
         OpKind::UnwrapOp { value } => {
             out.push_str(&format!("{}let {} = {}.unwrap();\n", pad, result_name, names.get(*value)));
@@ -461,6 +356,134 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             out.push_str(&format!("{}let {} = (); // TODO: {:?}\n", pad, result_name, std::mem::discriminant(&op.kind)));
         }
     }
+}
+
+fn emit_op_binop(out: &mut String, op: &Operation, pad: &str, result_name: &str, names: &mut NameMap) {
+    let OpKind::BinOp { op, lhs, rhs } = &op.kind else { unreachable!() };
+    let op_str = match op {
+        almide_ir::BinOp::AddInt | almide_ir::BinOp::AddFloat => "+",
+        almide_ir::BinOp::SubInt | almide_ir::BinOp::SubFloat => "-",
+        almide_ir::BinOp::MulInt | almide_ir::BinOp::MulFloat => "*",
+        almide_ir::BinOp::DivInt | almide_ir::BinOp::DivFloat => "/",
+        almide_ir::BinOp::ModInt | almide_ir::BinOp::ModFloat => "%",
+        almide_ir::BinOp::Eq => "==",
+        almide_ir::BinOp::Neq => "!=",
+        almide_ir::BinOp::Lt => "<",
+        almide_ir::BinOp::Gt => ">",
+        almide_ir::BinOp::Lte => "<=",
+        almide_ir::BinOp::Gte => ">=",
+        almide_ir::BinOp::And => "&&",
+        almide_ir::BinOp::Or => "||",
+        almide_ir::BinOp::ConcatStr => {
+            out.push_str(&format!("{}let {} = format!(\"{{}}{{}}\", {}, {});\n",
+                pad, result_name, names.get(*lhs), names.get(*rhs)));
+            return;
+        }
+        almide_ir::BinOp::ConcatList => {
+            out.push_str(&format!("{}let {} = [{}, {}].concat();\n",
+                pad, result_name, names.get(*lhs), names.get(*rhs)));
+            return;
+        }
+        _ => "/* TODO */",
+    };
+    out.push_str(&format!("{}let {} = {} {} {};\n", pad, result_name, names.get(*lhs), op_str, names.get(*rhs)));
+}
+
+fn emit_op_call(out: &mut String, op: &Operation, pad: &str, result_name: &str, names: &mut NameMap) {
+    let OpKind::CallOp { callee, args } = &op.kind else { unreachable!() };
+    let callee_str = callee.as_str();
+    // Check if callee is a variant constructor
+    let variant_parent = names.variants.get(callee_str).cloned();
+    if let Some(parent) = variant_parent {
+        let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
+        if args_str.is_empty() {
+            out.push_str(&format!("{}let {} = {}::{};\n", pad, result_name, parent, callee_str));
+        } else {
+            out.push_str(&format!("{}let {} = {}::{}({});\n", pad, result_name, parent, callee_str, args_str.join(", ")));
+        }
+        return;
+    }
+    if callee_str == "println" {
+        let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
+        out.push_str(&format!("{}println!(\"{{}}\", {});\n", pad, args_str.join(", ")));
+        out.push_str(&format!("{}let {} = ();\n", pad, result_name));
+    } else {
+        let resolved = resolve_call(callee_str);
+        let is_user_fn = !callee_str.contains('.');
+        let args_str: Vec<_> = args.iter().enumerate().map(|(i, a)| {
+            let name = names.get(*a);
+            if resolved.borrow_args.contains(&i) {
+                format!("&{}", name)
+            } else {
+                name
+            }
+        }).collect();
+        out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, resolved.rust_name, args_str.join(", ")));
+    }
+}
+
+fn emit_op_if(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) {
+    let OpKind::IfOp { cond, then_region, else_region } = &op.kind else { unreachable!() };
+    out.push_str(&format!("{}let {} = if {} {{\n", pad, result_name, names.get(*cond)));
+    for b in then_region { emit_block(out, b, indent + 1, names); }
+    out.push_str(&format!("{}}} else {{\n", pad));
+    for b in else_region { emit_block(out, b, indent + 1, names); }
+    out.push_str(&format!("{}}};\n", pad));
+}
+
+fn emit_op_match(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) {
+    let OpKind::MatchOp { subject, arms } = &op.kind else { unreachable!() };
+    out.push_str(&format!("{}let {} = match {} {{\n", pad, result_name, names.get(*subject)));
+    for arm in arms {
+        let pat = emit_pattern(&arm.pattern, names);
+        indent_str(out, indent + 1);
+        out.push_str(&format!("{} => {{\n", pat));
+        for b in &arm.body { emit_block(out, b, indent + 2, names); }
+        indent_str(out, indent + 1);
+        out.push_str("},\n");
+    }
+    out.push_str(&format!("{}}};\n", pad));
+}
+
+fn emit_op_lambda(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) {
+    let OpKind::LambdaOp { params, body } = &op.kind else { unreachable!() };
+    let ps: Vec<_> = params.iter().map(|(v, ty)| {
+        let name = format!("v{}", v.0);
+        names.set(*v, name.clone());
+        format!("{}: {}", name, emit_rust_type(ty))
+    }).collect();
+    out.push_str(&format!("{}let {} = move |{}| {{\n", pad, result_name, ps.join(", ")));
+    for b in body { emit_block(out, b, indent + 1, names); }
+    out.push_str(&format!("{}}};\n", pad));
+}
+
+fn emit_op_for(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) {
+    let OpKind::ForOp { var, iterable, body } = &op.kind else { unreachable!() };
+    let var_name = format!("v{}", var.0);
+    names.set(*var, var_name.clone());
+    out.push_str(&format!("{}for {} in {} {{\n", pad, var_name, names.get(*iterable)));
+    for b in body { emit_block(out, b, indent + 1, names); }
+    out.push_str(&format!("{}}}\n", pad));
+    out.push_str(&format!("{}let {} = ();\n", pad, result_name));
+}
+
+fn emit_op_while(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) {
+    let OpKind::WhileOp { cond_region, body } = &op.kind else { unreachable!() };
+    out.push_str(&format!("{}while {{\n", pad));
+    // Emit cond as block that yields bool
+    for b in cond_region { emit_block(out, b, indent + 1, names); }
+    out.push_str(&format!("{}}} {{\n", pad));
+    for b in body { emit_block(out, b, indent + 1, names); }
+    out.push_str(&format!("{}}}\n", pad));
+    out.push_str(&format!("{}let {} = ();\n", pad, result_name));
+}
+
+fn emit_op_fan(out: &mut String, regions: &[Vec<Block>], pad: &str, result_name: &str, indent: usize, names: &mut NameMap) {
+    // Fan: emit each region sequentially (TODO: actual concurrency)
+    for region in regions {
+        for b in region { emit_block(out, b, indent, names); }
+    }
+    out.push_str(&format!("{}let {} = ();\n", pad, result_name));
 }
 
 /// Resolved stdlib call info.
