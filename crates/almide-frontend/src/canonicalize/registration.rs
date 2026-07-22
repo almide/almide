@@ -667,21 +667,45 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     for gn in &gnames { env.types.insert(*gn, Ty::TypeVar(*gn)); }
     let mut resolved = resolve(env, ty);
     for gn in &gnames { env.types.remove(gn); }
-    // mod/local type alias → nominal newtype (opaque constructor)
+
+    resolved = register_type_decl_opaque_alias(env, name, resolved, &gnames, prefix, visibility);
+    register_type_decl_variant_ctors(env, name, prefix, &mut resolved);
+    register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);
+    register_type_decl_finalize(env, name, ty, prefix, resolved);
+
+    if let Some(derives) = deriving {
+        register_derive_sigs(env, derives, name, prefix);
+    }
+}
+
+/// `mod`/local type alias → nominal newtype (opaque constructor), when the
+/// declared visibility isn't Public and the resolved shape isn't already a
+/// Record/Variant. Registers the opaque-alias bookkeeping and returns the
+/// (possibly rewritten) resolved type. Verbatim text move out of
+/// [`register_type_decl`].
+fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, gnames: &[Sym], prefix: Option<&str>, visibility: ast::Visibility) -> Ty {
     let is_opaque_alias = !matches!(visibility, ast::Visibility::Public)
         && !matches!(resolved, Ty::Variant { .. })
         && !matches!(resolved, Ty::Record { .. });
-    if is_opaque_alias {
-        // Store the inner target type for codegen
-        env.opaque_alias_targets.insert(sym(name), resolved.clone());
-        // Register as nominal type (not transparent alias)
-        let generic_args: Vec<Ty> = gnames.iter().map(|g| Ty::TypeVar(*g)).collect();
-        resolved = Ty::Named(sym(name), generic_args);
-        // Register constructor with visibility restriction
-        env.opaque_alias_visibility.insert(sym(name), visibility);
-        env.opaque_alias_module.insert(sym(name), prefix.map(|p| sym(p)));
+    if !is_opaque_alias {
+        return resolved;
     }
-    if let Ty::Variant { name: ref mut vn, ref cases } = resolved {
+    // Store the inner target type for codegen
+    env.opaque_alias_targets.insert(sym(name), resolved.clone());
+    // Register as nominal type (not transparent alias)
+    let generic_args: Vec<Ty> = gnames.iter().map(|g| Ty::TypeVar(*g)).collect();
+    let resolved = Ty::Named(sym(name), generic_args);
+    // Register constructor with visibility restriction
+    env.opaque_alias_visibility.insert(sym(name), visibility);
+    env.opaque_alias_module.insert(sym(name), prefix.map(|p| sym(p)));
+    resolved
+}
+
+/// Fix up a `Variant`'s registered name to the DECLARED name, and register
+/// each of its constructors. Verbatim text move out of
+/// [`register_type_decl`].
+fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Option<&str>, resolved: &mut Ty) {
+    if let Ty::Variant { name: vn, cases } = resolved {
         *vn = sym(name);
         // Push (not overwrite) so a constructor name declared in multiple variant
         // types keeps ALL candidates — needed to detect ambiguity (#413) instead of
@@ -690,27 +714,30 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         // disambiguated by the current module (`lookup_ctor_in`). type_name stays
         // BARE here — other consumers expect that; `lookup_ctor_in` qualifies on demand.
         let owner_mod = prefix.map(sym);
-        for case in cases {
+        for case in cases.iter() {
             let entry = env.constructors.entry(case.name).or_default();
             if !entry.iter().any(|(t, m, _)| *t == sym(name) && *m == owner_mod) {
                 entry.push((sym(name), owner_mod, case.clone()));
             }
         }
     }
-    // #433: a DIFFERENT structural type already holds this BARE name — two
-    // distinct types (a local type and a dependency's, or two sub-modules')
-    // sharing a name. Type identity is by bare name through link + codegen, so
-    // the second silently shadows the first and the function that used the
-    // shadowed type fails with a cryptic generated-Rust E0560/E0609. Until types
-    // are namespaced per package, surface the collision at the source so the user
-    // renames one. Structurally-identical re-registration (the diamond case: same
-    // package via two import paths) compares equal and is NOT flagged.
-    // #433: types are now namespaced per (user) package — `dep_a.Config` and
-    // `dep_b.Config` coexist as distinct qualified names. So a collision is only a
-    // real error when the SAME canonical key is re-declared with a different
-    // structure (a duplicate within one module/file), which we detect on the
-    // prefixed key. Structurally-identical re-registration (the diamond case) is
-    // equal and not flagged.
+}
+
+/// #433: a DIFFERENT structural type already holds this BARE name — two
+/// distinct types (a local type and a dependency's, or two sub-modules')
+/// sharing a name. Type identity is by bare name through link + codegen, so
+/// the second silently shadows the first and the function that used the
+/// shadowed type fails with a cryptic generated-Rust E0560/E0609. Until types
+/// are namespaced per package, surface the collision at the source so the user
+/// renames one. Structurally-identical re-registration (the diamond case: same
+/// package via two import paths) compares equal and is NOT flagged.
+/// #433: types are now namespaced per (user) package — `dep_a.Config` and
+/// `dep_b.Config` coexist as distinct qualified names. So a collision is only a
+/// real error when the SAME canonical key is re-declared with a different
+/// structure (a duplicate within one module/file), which we detect on the
+/// prefixed key. Structurally-identical re-registration (the diamond case) is
+/// equal and not flagged. Verbatim text move out of [`register_type_decl`].
+fn register_type_decl_check_duplicate(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, prefix: Option<&str>, resolved: &Ty) {
     if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
         let canonical_key = prefixed_key(prefix, name);
         // A LOCAL type (main program, no prefix) is allowed to SHADOW a
@@ -723,7 +750,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         let shadows_dep_alias = prefix.is_none() && env.prefixed_bare_aliases.contains(&sym(&canonical_key));
         if !shadows_dep_alias {
             if let Some(existing) = env.types.get(&sym(&canonical_key)) {
-                if existing != &resolved
+                if existing != resolved
                     && matches!(existing, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
                 {
                     diagnostics.push(err(
@@ -735,6 +762,13 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
             }
         }
     }
+}
+
+/// Register field defaults (both plain and record-payload variant cases),
+/// insert the resolved type under its canonical key, and — for a prefixed
+/// (imported/sub-module) type — dual-register the bare name for
+/// unqualified access. Verbatim text move out of [`register_type_decl`].
+fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr, prefix: Option<&str>, resolved: Ty) {
     let key = prefixed_key(prefix, name);
     // Field defaults, keyed like `types` (both keys when prefixed), so
     // record-construction validation knows which fields may be omitted (#488).
@@ -769,9 +803,6 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         // A local type owns the bare name now — it is no longer a dependency
         // alias, so a later genuine local duplicate is still caught by E020.
         env.prefixed_bare_aliases.remove(&sym(name));
-    }
-    if let Some(derives) = deriving {
-        register_derive_sigs(env, derives, name, prefix);
     }
 }
 
