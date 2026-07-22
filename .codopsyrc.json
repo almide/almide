@@ -1,7 +1,7 @@
 {
   "rules": {
     "no-any": "warning",
-    "no-console": "warning",
+    "no-console": "info",
     "no-var": "warning",
     "eqeqeq": "warning",
     "no-empty-function": "warning",
