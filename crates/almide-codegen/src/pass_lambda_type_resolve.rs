@@ -396,13 +396,17 @@ const LIST_ELEM_SECOND_METHODS: &[&str] = &[
 /// List callback methods where elem is BOTH params (reduce: (elem, elem) -> elem).
 const LIST_ELEM_BOTH_METHODS: &[&str] = &["reduce"];
 
-fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut VarTable) {
-    // Extract (module, method) from every call-target shape the
-    // frontend / ResolveCalls / IntrinsicLowering produce:
-    //   - `Method { method }`                    — UFCS, unresolved module
-    //   - `Module { <mod>, func }`               — pre-ResolveCalls
-    //   - `Named { "almide_rt_<mod>_<func>" }`   — post-ResolveCalls
-    let resolved: Option<(Option<&str>, String)> = match target {
+/// Which position(s) of an Option/Result/collection's type args a lambda's
+/// param(s) should be resolved from.
+enum ElemSource { ListElem, OptionInner, ResultOk, ResultErr }
+
+/// Extract (module, method) from every call-target shape the
+/// frontend / ResolveCalls / IntrinsicLowering produce:
+///   - `Method { method }`                    — UFCS, unresolved module
+///   - `Module { <mod>, func }`               — pre-ResolveCalls
+///   - `Named { "almide_rt_<mod>_<func>" }`   — post-ResolveCalls
+fn resolve_call_target_module_method(target: &CallTarget) -> Option<(Option<&str>, String)> {
+    match target {
         CallTarget::Method { method, .. } => Some((None, method.as_str().to_string())),
         CallTarget::Module { module, func, .. } => {
             let m = module.as_str();
@@ -425,109 +429,124 @@ fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut Va
             }
         }
         _ => None,
-    };
-    let Some((module, name)) = resolved else { return };
+    }
+}
+
+/// Decide (param-elem source, lambda-param indices) based on (module, method).
+fn resolve_elem_source(module: Option<&str>, name: &str) -> Option<(ElemSource, &'static [usize])> {
+    match module {
+        Some("option") if OPTION_INNER_METHODS.iter().any(|m| *m == name) => Some((ElemSource::OptionInner, &[0])),
+        Some("result") if RESULT_OK_METHODS.iter().any(|m| *m == name) => Some((ElemSource::ResultOk, &[0])),
+        Some("result") if RESULT_ERR_METHODS.iter().any(|m| *m == name) => Some((ElemSource::ResultErr, &[0])),
+        // list (or unresolved Method — fallback to list semantics, matching the original behavior)
+        _ if LIST_ELEM_FIRST_METHODS.iter().any(|m| *m == name) => Some((ElemSource::ListElem, &[0])),
+        _ if LIST_ELEM_SECOND_METHODS.iter().any(|m| *m == name) => Some((ElemSource::ListElem, &[1])),
+        _ if LIST_ELEM_BOTH_METHODS.iter().any(|m| *m == name) => Some((ElemSource::ListElem, &[0, 1])),
+        _ => None,
+    }
+}
+
+/// Resolve the callback param type from the call's first arg.
+fn resolve_call_elem_ty(source: &ElemSource, args: &[IrExpr], vt: &VarTable) -> Option<Ty> {
+    let a = args.first()?;
+    match source {
+        ElemSource::ListElem    => resolve_list_elem_ty(a, vt),
+        ElemSource::OptionInner => resolve_option_inner_ty(a, vt),
+        ElemSource::ResultOk    => resolve_result_ok_ty(a, vt),
+        ElemSource::ResultErr   => resolve_result_err_ty(a, vt),
+    }
+}
+
+/// For `fold(xs, init, f)` and `scan`, the accumulator's type is whatever
+/// `init` resolves to — propagated into lambda param 0 in addition to the
+/// elem-type propagation.
+fn resolve_fold_acc_ty(module: Option<&str>, name: &str, args: &[IrExpr], vt: &VarTable) -> Option<Ty> {
+    if !(module == Some("list") && (name == "fold" || name == "scan")) {
+        return None;
+    }
+    args.get(1).and_then(|a| {
+        if !a.ty.has_unresolved_deep() {
+            Some(a.ty.clone())
+        } else if let IrExprKind::Var { id } = &a.kind {
+            if (id.0 as usize) < vt.len() {
+                let t = &vt.get(*id).ty;
+                if !t.has_unresolved_deep() { Some(t.clone()) } else { None }
+            } else { None }
+        } else { None }
+    })
+}
+
+/// Propagate the resolved elem/accumulator types into one Lambda argument's
+/// params, Fn-type wrapper, and infer its return type from the body. A
+/// no-op for non-Lambda args (the original loop's `continue` for those).
+fn apply_lambda_param_types(
+    arg: &mut IrExpr,
+    elem_param_indices: &[usize],
+    elem_ty: &Ty,
+    acc_ty: &Option<Ty>,
+    vt: &mut VarTable,
+) {
+    let IrExprKind::Lambda { params, body, .. } = &mut arg.kind else { return };
+    // Update designated param(s) — use has_deep_unresolved to catch
+    // Applied(List, [TypeVar(A)]) which is_unresolved_structural() misses.
+    for &pidx in elem_param_indices {
+        if let Some((vid, pty)) = params.get_mut(pidx) {
+            if pty.has_unresolved_deep() {
+                *pty = elem_ty.clone();
+                if (vid.0 as usize) < vt.len() && vt.get(*vid).ty.has_unresolved_deep() {
+                    vt.entries[vid.0 as usize].ty = elem_ty.clone();
+                }
+            }
+        }
+    }
+    // For fold/scan, the accumulator (param 0) takes init's type.
+    if let Some(a_ty) = acc_ty {
+        if let Some((vid, pty)) = params.get_mut(0) {
+            if pty.has_unresolved_deep() {
+                *pty = a_ty.clone();
+                if (vid.0 as usize) < vt.len() && vt.get(*vid).ty.has_unresolved_deep() {
+                    vt.entries[vid.0 as usize].ty = a_ty.clone();
+                }
+            }
+        }
+    }
+    // Infer return type from body + resolved params
+    let body_ret = infer_body_result_ty(body, params);
+    // Update Ty::Fn wrapper
+    if let Ty::Fn { params: fparams, ret } = &mut arg.ty {
+        for &pidx in elem_param_indices {
+            if let Some(fp) = fparams.get_mut(pidx) {
+                if fp.has_unresolved_deep() { *fp = elem_ty.clone(); }
+            }
+        }
+        if let Some(a_ty) = acc_ty {
+            if let Some(fp) = fparams.get_mut(0) {
+                if fp.has_unresolved_deep() { *fp = a_ty.clone(); }
+            }
+            // The lambda's return is also the accumulator type.
+            if ret.has_unresolved_deep() { **ret = a_ty.clone(); }
+        }
+        if ret.has_unresolved_deep() {
+            if let Some(r) = body_ret { **ret = r; }
+        }
+    }
+}
+
+fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut VarTable) {
+    let Some((module, name)) = resolve_call_target_module_method(target) else { return };
     // Monomorphization rewrites e.g. `fold` → `fold__String_CollapseAcc`.
     // Strip the `__suffix` so all the lookups below operate on the bare
     // method name.
     let bare_name = name.split("__").next().unwrap_or(&name).to_string();
     let name = bare_name.as_str();
 
-    // Decide (param-elem source, lambda-param indices) based on (module, method)
-    enum ElemSource { ListElem, OptionInner, ResultOk, ResultErr }
-    let (source, elem_param_indices): (ElemSource, &[usize]) = match module {
-        Some("option") if OPTION_INNER_METHODS.iter().any(|m| *m == name) => (ElemSource::OptionInner, &[0]),
-        Some("result") if RESULT_OK_METHODS.iter().any(|m| *m == name) => (ElemSource::ResultOk, &[0]),
-        Some("result") if RESULT_ERR_METHODS.iter().any(|m| *m == name) => (ElemSource::ResultErr, &[0]),
-        // list (or unresolved Method — fallback to list semantics, matching the original behavior)
-        _ if LIST_ELEM_FIRST_METHODS.iter().any(|m| *m == name) => (ElemSource::ListElem, &[0]),
-        _ if LIST_ELEM_SECOND_METHODS.iter().any(|m| *m == name) => (ElemSource::ListElem, &[1]),
-        _ if LIST_ELEM_BOTH_METHODS.iter().any(|m| *m == name) => (ElemSource::ListElem, &[0, 1]),
-        _ => return,
-    };
-
-    // Resolve callback param type from first arg
-    let elem_ty = match args.first() {
-        Some(a) => match source {
-            ElemSource::ListElem    => resolve_list_elem_ty(a, vt),
-            ElemSource::OptionInner => resolve_option_inner_ty(a, vt),
-            ElemSource::ResultOk    => resolve_result_ok_ty(a, vt),
-            ElemSource::ResultErr   => resolve_result_err_ty(a, vt),
-        }
-        None => None,
-    };
-    let Some(elem_ty) = elem_ty else { return };
-
-    // For fold(xs, init, f) and scan, the accumulator's type is whatever
-    // init resolves to — propagate that into lambda param 0 in addition
-    // to the elem-type propagation below.
-    let acc_ty: Option<Ty> = if module == Some("list")
-        && (name == "fold" || name == "scan")
-    {
-        args.get(1).and_then(|a| {
-            if !a.ty.has_unresolved_deep() {
-                Some(a.ty.clone())
-            } else if let IrExprKind::Var { id } = &a.kind {
-                if (id.0 as usize) < vt.len() {
-                    let t = &vt.get(*id).ty;
-                    if !t.has_unresolved_deep() { Some(t.clone()) } else { None }
-                } else { None }
-            } else { None }
-        })
-    } else {
-        None
-    };
+    let Some((source, elem_param_indices)) = resolve_elem_source(module, name) else { return };
+    let Some(elem_ty) = resolve_call_elem_ty(&source, args.as_slice(), vt) else { return };
+    let acc_ty = resolve_fold_acc_ty(module, name, args.as_slice(), vt);
 
     // Propagate to inline Lambda params
     for arg in args.iter_mut() {
-        let is_lambda = matches!(&arg.kind, IrExprKind::Lambda { .. });
-        if !is_lambda { continue }
-
-        if let IrExprKind::Lambda { params, body, .. } = &mut arg.kind {
-            // Update designated param(s) — use has_deep_unresolved to catch
-            // Applied(List, [TypeVar(A)]) which is_unresolved_structural() misses.
-            for &pidx in elem_param_indices {
-                if let Some((vid, pty)) = params.get_mut(pidx) {
-                    if pty.has_unresolved_deep() {
-                        *pty = elem_ty.clone();
-                        if (vid.0 as usize) < vt.len() && vt.get(*vid).ty.has_unresolved_deep() {
-                            vt.entries[vid.0 as usize].ty = elem_ty.clone();
-                        }
-                    }
-                }
-            }
-            // For fold/scan, the accumulator (param 0) takes init's type.
-            if let Some(ref a_ty) = acc_ty {
-                if let Some((vid, pty)) = params.get_mut(0) {
-                    if pty.has_unresolved_deep() {
-                        *pty = a_ty.clone();
-                        if (vid.0 as usize) < vt.len() && vt.get(*vid).ty.has_unresolved_deep() {
-                            vt.entries[vid.0 as usize].ty = a_ty.clone();
-                        }
-                    }
-                }
-            }
-            // Infer return type from body + resolved params
-            let body_ret = infer_body_result_ty(body, params);
-            // Update Ty::Fn wrapper
-            if let Ty::Fn { params: fparams, ret } = &mut arg.ty {
-                for &pidx in elem_param_indices {
-                    if let Some(fp) = fparams.get_mut(pidx) {
-                        if fp.has_unresolved_deep() { *fp = elem_ty.clone(); }
-                    }
-                }
-                if let Some(ref a_ty) = acc_ty {
-                    if let Some(fp) = fparams.get_mut(0) {
-                        if fp.has_unresolved_deep() { *fp = a_ty.clone(); }
-                    }
-                    // The lambda's return is also the accumulator type.
-                    if ret.has_unresolved_deep() { **ret = a_ty.clone(); }
-                }
-                if ret.has_unresolved_deep() {
-                    if let Some(r) = body_ret { **ret = r; }
-                }
-            }
-        }
+        apply_lambda_param_types(arg, elem_param_indices, &elem_ty, &acc_ty, vt);
     }
 }
 
