@@ -50,6 +50,70 @@ fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
 fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::intern::sym;
+
+    fn is_matrix_ty(t: &Ty) -> bool {
+        matches!(t, Ty::Matrix)
+            || matches!(t, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _))
+    }
+
+    /// `m * k` / `k * m` (ScaleMatrix — one Matrix, one scalar) → matrix.scale with the
+    /// Matrix normalized to the FIRST arg (the self-host's signature). Split out of
+    /// `matrix_binop_rewrite` below (codopsy cc) — a disjoint `op` case (`ScaleMatrix`
+    /// only), tried first in the same order the original single function checked it.
+    fn matrix_scale_rewrite(op: &almide_ir::BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
+        if !matches!(op, almide_ir::BinOp::ScaleMatrix) {
+            return None;
+        }
+        let (m, k) = if is_matrix_ty(&left.ty) {
+            (left.clone(), right.clone())
+        } else {
+            (right.clone(), left.clone())
+        };
+        Some(IrExprKind::Call {
+            target: CallTarget::Module { module: sym("matrix"), func: sym("scale"), def_id: None },
+            args: vec![m, k],
+            type_args: Vec::new(),
+        })
+    }
+
+    // The frontend's dispatch: `a * b` (both Matrix) → MulMatrix; `m * k` → ScaleMatrix
+    // (handled by `matrix_scale_rewrite` above); `a + b`/`a - b` fall through the
+    // NUMERIC arms as AddInt/SubInt (neither operand is Float), so those are matched
+    // here by the MATRIX operand types, not the op class. A NON-arithmetic op (the
+    // wildcard) is out of subset — `None`, not a wall (the caller keeps the original
+    // BinOp verbatim). Pure name lookup, split out of `matrix_binop_rewrite` (cc).
+    fn matrix_binop_func_name(op: &almide_ir::BinOp) -> Option<&'static str> {
+        Some(match op {
+            almide_ir::BinOp::MulMatrix => "mul",
+            almide_ir::BinOp::AddMatrix => "add",
+            almide_ir::BinOp::SubMatrix => "sub",
+            almide_ir::BinOp::AddInt | almide_ir::BinOp::AddFloat => "add",
+            almide_ir::BinOp::SubInt | almide_ir::BinOp::SubFloat => "sub",
+            almide_ir::BinOp::DivInt | almide_ir::BinOp::DivFloat => "div",
+            almide_ir::BinOp::MulInt | almide_ir::BinOp::MulFloat => "mul",
+            _ => return None,
+        })
+    }
+
+    // Pure decision, no visitor state — `self.changed` below is an OUTPUT flag the
+    // caller reads after the fact, never fed back into this decision, so (unlike a
+    // real state-threading walker) the whole rewrite computation is safe to extract
+    // as a free function of `(op, left, right)` returning the replacement `IrExprKind`.
+    fn matrix_binop_rewrite(op: &almide_ir::BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
+        if let Some(k) = matrix_scale_rewrite(op, left, right) {
+            return Some(k);
+        }
+        if !is_matrix_ty(&left.ty) || !is_matrix_ty(&right.ty) {
+            return None;
+        }
+        let func = matrix_binop_func_name(op)?;
+        Some(IrExprKind::Call {
+            target: CallTarget::Module { module: sym("matrix"), func: sym(func), def_id: None },
+            args: vec![left.clone(), right.clone()],
+            type_args: Vec::new(),
+        })
+    }
+
     struct S {
         changed: bool,
     }
@@ -57,58 +121,10 @@ fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             let IrExprKind::BinOp { op, left, right } = &e.kind else { return };
-            let is_matrix = |t: &Ty| {
-                matches!(t, Ty::Matrix)
-                    || matches!(t, Ty::Applied(
-                        almide_lang::types::constructor::TypeConstructorId::Matrix, _))
-            };
-            // `m * k` / `k * m` (ScaleMatrix — one Matrix, one scalar) → matrix.scale
-            // with the Matrix normalized to the FIRST arg (the self-host's signature).
-            if matches!(op, almide_ir::BinOp::ScaleMatrix) {
-                let (m, k) = if is_matrix(&left.ty) {
-                    ((**left).clone(), (**right).clone())
-                } else {
-                    ((**right).clone(), (**left).clone())
-                };
-                e.kind = IrExprKind::Call {
-                    target: CallTarget::Module {
-                        module: sym("matrix"),
-                        func: sym("scale"),
-                        def_id: None,
-                    },
-                    args: vec![m, k],
-                    type_args: Vec::new(),
-                };
+            if let Some(new_kind) = matrix_binop_rewrite(op, left, right) {
+                e.kind = new_kind;
                 self.changed = true;
-                return;
             }
-            if !is_matrix(&left.ty) || !is_matrix(&right.ty) {
-                return;
-            }
-            // The frontend's dispatch: `a * b` (both Matrix) → MulMatrix; `m * k` →
-            // ScaleMatrix (handled by the two-typed arm below); `a + b`/`a - b` fall
-            // through the NUMERIC arms as AddInt/SubInt (neither operand is Float),
-            // so those are matched here by the MATRIX operand types, not the op class.
-            let func = match op {
-                almide_ir::BinOp::MulMatrix => "mul",
-                almide_ir::BinOp::AddMatrix => "add",
-                almide_ir::BinOp::SubMatrix => "sub",
-                almide_ir::BinOp::AddInt | almide_ir::BinOp::AddFloat => "add",
-                almide_ir::BinOp::SubInt | almide_ir::BinOp::SubFloat => "sub",
-                almide_ir::BinOp::DivInt | almide_ir::BinOp::DivFloat => "div",
-                almide_ir::BinOp::MulInt | almide_ir::BinOp::MulFloat => "mul",
-                _ => return,
-            };
-            e.kind = IrExprKind::Call {
-                target: CallTarget::Module {
-                    module: sym("matrix"),
-                    func: sym(func),
-                    def_id: None,
-                },
-                args: vec![(**left).clone(), (**right).clone()],
-                type_args: Vec::new(),
-            };
-            self.changed = true;
         }
     }
     let mut s = S { changed: false };
