@@ -44,7 +44,7 @@ type Color: Eq, Repr = Red | Green | Blue   // convention after type name with :
 
 **Variant serialization — recommended pattern.** When a variant type
 crosses a serialization boundary (JSON / file IO / dojo fixtures),
-use `deriving Codec` to auto-generate `Type.encode` / `Type.decode`
+declare `: Codec` to auto-generate `Type.encode` / `Type.decode`
 instead of hand-writing `match` ladders. The auto-derived Codec emits
 tagged-JSON with the ctor name as the tag and payload fields under
 `value`:
@@ -53,7 +53,7 @@ type Event: Codec = | Click(Int, Int) | Scroll{dy: Int}
 // Event.encode(Click(10, 20)) → {"tag": "Click", "value": [10, 20]}
 // Event.encode(Scroll { dy: 5 }) → {"tag": "Scroll", "value": {"dy": 5}}
 ```
-Skip the `deriving Codec` only for variants that never serialize
+Skip `: Codec` only for variants that never serialize
 (internal enums like `Endian` in `stdlib/bytes.almd`). Every other
 variant should opt in — the roundtrip code is LLM-error prone when
 hand-written.
@@ -83,6 +83,16 @@ effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
 fn parse(text: String) -> Ast = _                     // hole (type-checked stub)
 fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 ```
+
+### Mutable parameters
+```
+fn incr(mut x: Int) -> Unit = { x = x + 1 }
+var n = 5
+incr(n)          // n is now 6 -- mutated in place, not returned
+```
+Caller must pass a `var` binding (`let` or a temporary is E007). `mut` can be
+on any parameter, any position. This is how in-place stdlib ops work
+(`list.push`, `list.pop`, `list.clear`, …).
 
 ## Built-in Protocols
 Eq and Hash are automatic (compiler-derived from type structure). No annotation needed.
@@ -414,8 +424,8 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - The stdlib functions listed above are exhaustive — no other functions exist
 - Use `for x in xs { ... }` for iteration
 - **No nested functions.** All `fn` must be at the top level. Use lambdas for local helpers
-- **No `mut` keyword.** Use `var` for mutable bindings, not `let mut`
-- Almide is NOT Rust. No `&`, `mut`, `trait` (use `protocol`), `impl` (use convention methods: `fn Type.method(...)`), `pub`, `mod` (as declaration)
+- **No `let mut`.** Use `var` for mutable bindings. `mut` itself is a real keyword, but only as a parameter modifier (`fn f(mut x: Int)`) — see Functions
+- Almide is NOT Rust. No `&`, `trait` (use `protocol`), `impl` (use convention methods: `fn Type.method(...)`), `pub`, `mod` (as declaration)
 
 ## Naming conventions across stdlib
 
@@ -436,7 +446,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - `println(x)` where x is Int → **WRONG**. Write `println(int.to_string(x))`. No implicit conversion
 - `1 :: 2 :: []` → **WRONG**. Write `[1, 2]`. There is no cons operator `::`
 - `fn foo<T>(x: T)` → **WRONG**. Write `fn foo[T](x: T)`. Use `[]` for generics, not `<>`
-- `let mut x = 1` → **WRONG**. Write `var x = 1`. No `mut` keyword
+- `let mut x = 1` → **WRONG**. Write `var x = 1`. `mut` is only a parameter modifier (`fn f(mut x: Int)`), not a binding modifier
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
 
