@@ -166,7 +166,14 @@ impl IrVisitor for TyChecker<'_> {
 }
 
 fn expr_kind_tag(k: &IrExprKind) -> &'static str {
-    match k {
+    expr_kind_tag_group_a(k).unwrap_or_else(|| expr_kind_tag_group_b(k))
+}
+
+/// First half of `expr_kind_tag`'s arms, extracted (cog>30 decomposition,
+/// pattern 1 — independent name-router arms split into two groups; mirrors
+/// the `list_call_name` recipe).
+fn expr_kind_tag_group_a(k: &IrExprKind) -> Option<&'static str> {
+    Some(match k {
         IrExprKind::Var { .. } => "Var",
         IrExprKind::Call { .. } => "Call",
         IrExprKind::RuntimeCall { .. } => "RuntimeCall",
@@ -176,6 +183,13 @@ fn expr_kind_tag(k: &IrExprKind) -> &'static str {
         IrExprKind::Block { .. } => "Block",
         IrExprKind::Member { .. } => "Member",
         IrExprKind::IndexAccess { .. } => "IndexAccess",
+        _ => return None,
+    })
+}
+
+/// Second half of `expr_kind_tag`'s arms, extracted (cog>30 decomposition).
+fn expr_kind_tag_group_b(k: &IrExprKind) -> &'static str {
+    match k {
         IrExprKind::List { .. } => "List",
         IrExprKind::Record { .. } => "Record",
         IrExprKind::Lambda { .. } => "Lambda",

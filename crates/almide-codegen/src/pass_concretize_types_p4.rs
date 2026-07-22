@@ -76,8 +76,17 @@ pub fn collect_unresolved_sites(program: &IrProgram) -> Vec<UnresolvedSite> {
             walk_stmt(self, stmt);
         }
     }
+    /// Split into 4 groups (cog>30 decomposition, pattern 1 — independent
+    /// name-router arms, mirrors the `list_call_name` recipe) since the
+    /// original 57-arm match was itself the whole complexity source.
     fn kind_name(k: &IrExprKind) -> &'static str {
-        match k {
+        kind_name_group_a(k)
+            .or_else(|| kind_name_group_b(k))
+            .or_else(|| kind_name_group_c(k))
+            .unwrap_or_else(|| kind_name_group_d(k))
+    }
+    fn kind_name_group_a(k: &IrExprKind) -> Option<&'static str> {
+        Some(match k {
             IrExprKind::LitInt { .. } => "LitInt",
             IrExprKind::LitFloat { .. } => "LitFloat",
             IrExprKind::LitStr { .. } => "LitStr",
@@ -92,6 +101,11 @@ pub fn collect_unresolved_sites(program: &IrProgram) -> Vec<UnresolvedSite> {
             IrExprKind::Block { .. } => "Block",
             IrExprKind::Fan { .. } => "Fan",
             IrExprKind::ForIn { .. } => "ForIn",
+            _ => return None,
+        })
+    }
+    fn kind_name_group_b(k: &IrExprKind) -> Option<&'static str> {
+        Some(match k {
             IrExprKind::While { .. } => "While",
             IrExprKind::Call { .. } => "Call",
             IrExprKind::TailCall { .. } => "TailCall",
@@ -106,6 +120,11 @@ pub fn collect_unresolved_sites(program: &IrProgram) -> Vec<UnresolvedSite> {
             IrExprKind::IndexAccess { .. } => "IndexAccess",
             IrExprKind::MapAccess { .. } => "MapAccess",
             IrExprKind::Lambda { .. } => "Lambda",
+            _ => return None,
+        })
+    }
+    fn kind_name_group_c(k: &IrExprKind) -> Option<&'static str> {
+        Some(match k {
             IrExprKind::ClosureCreate { .. } => "ClosureCreate",
             IrExprKind::EnvLoad { .. } => "EnvLoad",
             IrExprKind::ResultOk { .. } => "ResultOk",
@@ -120,6 +139,11 @@ pub fn collect_unresolved_sites(program: &IrProgram) -> Vec<UnresolvedSite> {
             IrExprKind::Break => "Break",
             IrExprKind::Continue => "Continue",
             IrExprKind::StringInterp { .. } => "StringInterp",
+            _ => return None,
+        })
+    }
+    fn kind_name_group_d(k: &IrExprKind) -> &'static str {
+        match k {
             IrExprKind::RenderedCall { .. } => "RenderedCall",
             IrExprKind::RuntimeCall { .. } => "RuntimeCall",
             IrExprKind::InlineRust { .. } => "InlineRust",
