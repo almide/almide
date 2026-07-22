@@ -586,22 +586,97 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
 
 // ── Variable replacement ──
 
-fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, VarId>) {
+type Renames = std::collections::HashMap<VarId, VarId>;
+
+fn replace_vars_list(exprs: &mut [IrExpr], renames: &Renames) {
+    for e in exprs { replace_vars(e, renames); }
+}
+
+fn replace_vars_pairs(pairs: &mut [(Sym, IrExpr)], renames: &Renames) {
+    for (_, e) in pairs { replace_vars(e, renames); }
+}
+
+fn replace_vars_kv_pairs(entries: &mut [(IrExpr, IrExpr)], renames: &Renames) {
+    for (k, v) in entries { replace_vars(k, renames); replace_vars(v, renames); }
+}
+
+/// Shared by `Call` and `TailCall`: only `Method`/`Computed` targets carry a
+/// child `IrExpr` to descend into.
+fn replace_call_target(target: &mut CallTarget, renames: &Renames) {
+    match target {
+        CallTarget::Method { object, .. } => replace_vars(object, renames),
+        CallTarget::Computed { callee } => replace_vars(callee, renames),
+        CallTarget::Named { .. } | CallTarget::Module { .. } => {}
+    }
+}
+
+fn replace_vars_block(expr: &mut IrExpr, renames: &Renames) {
+    let IrExprKind::Block { stmts, expr: tail } = &mut expr.kind else { unreachable!() };
+    for s in stmts { replace_vars_stmt(s, renames); }
+    if let Some(e) = tail { replace_vars(e, renames); }
+}
+
+fn replace_vars_match(expr: &mut IrExpr, renames: &Renames) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    replace_vars(subject, renames);
+    for arm in arms {
+        if let Some(g) = &mut arm.guard { replace_vars(g, renames); }
+        replace_vars(&mut arm.body, renames);
+    }
+}
+
+fn replace_vars_for_in(expr: &mut IrExpr, renames: &Renames) {
+    let IrExprKind::ForIn { iterable, body, .. } = &mut expr.kind else { unreachable!() };
+    replace_vars(iterable, renames);
+    for s in body { replace_vars_stmt(s, renames); }
+}
+
+fn replace_vars_while(expr: &mut IrExpr, renames: &Renames) {
+    let IrExprKind::While { cond, body } = &mut expr.kind else { unreachable!() };
+    replace_vars(cond, renames);
+    for s in body { replace_vars_stmt(s, renames); }
+}
+
+fn replace_vars_string_parts(parts: &mut [IrStringPart], renames: &Renames) {
+    for p in parts {
+        if let IrStringPart::Expr { expr: e } = p { replace_vars(e, renames); }
+    }
+}
+
+fn replace_vars_iter_chain(expr: &mut IrExpr, renames: &Renames) {
+    let IrExprKind::IterChain { source, steps, collector, .. } = &mut expr.kind else { unreachable!() };
+    replace_vars(source, renames);
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                replace_vars(lambda, renames);
+            }
+        }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => {
+            replace_vars(init, renames);
+            replace_vars(lambda, renames);
+        }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+            replace_vars(lambda, renames);
+        }
+    }
+}
+
+fn replace_vars(expr: &mut IrExpr, renames: &Renames) {
     match &mut expr.kind {
         IrExprKind::Var { id } => {
             if let Some(&new_id) = renames.get(id) { *id = new_id; }
         }
         IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => replace_vars(object, renames),
-                CallTarget::Computed { callee } => replace_vars(callee, renames),
-                _ => {}
-            }
-            for a in args { replace_vars(a, renames); }
+            replace_call_target(target, renames);
+            replace_vars_list(args, renames);
         }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { replace_vars(a, renames); }
-        }
+        IrExprKind::RuntimeCall { args, .. } => replace_vars_list(args, renames),
         IrExprKind::BinOp { left, right, .. } => {
             replace_vars(left, renames); replace_vars(right, renames);
         }
@@ -609,27 +684,14 @@ fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, Va
         IrExprKind::If { cond, then, else_ } => {
             replace_vars(cond, renames); replace_vars(then, renames); replace_vars(else_, renames);
         }
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts { replace_vars_stmt(s, renames); }
-            if let Some(e) = tail { replace_vars(e, renames); }
-        }
+        IrExprKind::Block { .. } => replace_vars_block(expr, renames),
         IrExprKind::Lambda { body, .. } => replace_vars(body, renames),
-        IrExprKind::Match { subject, arms } => {
-            replace_vars(subject, renames);
-            for arm in arms {
-                if let Some(g) = &mut arm.guard { replace_vars(g, renames); }
-                replace_vars(&mut arm.body, renames);
-            }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            for e in elements { replace_vars(e, renames); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { replace_vars(v, renames); }
-        }
+        IrExprKind::Match { .. } => replace_vars_match(expr, renames),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => replace_vars_list(elements, renames),
+        IrExprKind::Record { fields, .. } => replace_vars_pairs(fields, renames),
         IrExprKind::SpreadRecord { base, fields } => {
             replace_vars(base, renames);
-            for (_, v) in fields { replace_vars(v, renames); }
+            replace_vars_pairs(fields, renames);
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
         | IrExprKind::OptionalChain { expr: object, .. } => replace_vars(object, renames),
@@ -643,71 +705,28 @@ fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, Va
         IrExprKind::UnwrapOr { expr: e, fallback: f } => {
             replace_vars(e, renames); replace_vars(f, renames);
         }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr: e } = p { replace_vars(e, renames); }
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            replace_vars(iterable, renames);
-            for s in body { replace_vars_stmt(s, renames); }
-        }
-        IrExprKind::While { cond, body } => {
-            replace_vars(cond, renames);
-            for s in body { replace_vars_stmt(s, renames); }
-        }
+        IrExprKind::StringInterp { parts } => replace_vars_string_parts(parts, renames),
+        IrExprKind::ForIn { .. } => replace_vars_for_in(expr, renames),
+        IrExprKind::While { .. } => replace_vars_while(expr, renames),
         IrExprKind::Range { start, end, .. } => {
             replace_vars(start, renames); replace_vars(end, renames);
         }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { replace_vars(k, renames); replace_vars(v, renames); }
-        }
+        IrExprKind::MapLiteral { entries } => replace_vars_kv_pairs(entries, renames),
         IrExprKind::Borrow { expr: e, .. }
         | IrExprKind::BoxNew { expr: e }
         | IrExprKind::ToVec { expr: e }
         | IrExprKind::Await { expr: e } => {
             replace_vars(e, renames);
         }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { replace_vars(a, renames); }
-        }
-        IrExprKind::Fan { exprs } => {
-            for e in exprs { replace_vars(e, renames); }
-        }
-        IrExprKind::IterChain { source, steps, collector, .. } => {
-            replace_vars(source, renames);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                        replace_vars(lambda, renames);
-                    }
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => {
-                    replace_vars(init, renames);
-                    replace_vars(lambda, renames);
-                }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-                    replace_vars(lambda, renames);
-                }
-            }
-        }
+        IrExprKind::RustMacro { args, .. } => replace_vars_list(args, renames),
+        IrExprKind::Fan { exprs } => replace_vars_list(exprs, renames),
+        IrExprKind::IterChain { .. } => replace_vars_iter_chain(expr, renames),
         IrExprKind::TailCall { target, args } => {
-            match target {
-                CallTarget::Method { object, .. } => replace_vars(object, renames),
-                CallTarget::Computed { callee } => replace_vars(callee, renames),
-                CallTarget::Named { .. } | CallTarget::Module { .. } => {}
-            }
-            for a in args { replace_vars(a, renames); }
+            replace_call_target(target, renames);
+            replace_vars_list(args, renames);
         }
         IrExprKind::RcWrap { expr: e, .. } => replace_vars(e, renames),
-        IrExprKind::InlineRust { args, .. } => {
-            for (_, a) in args { replace_vars(a, renames); }
-        }
+        IrExprKind::InlineRust { args, .. } => replace_vars_pairs(args, renames),
         // True leaves (no child `IrExpr`); `Var` is renamed above. Listed
         // explicitly so a new child-bearing IrExprKind is a compile error.
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
