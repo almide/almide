@@ -39,17 +39,24 @@ fn compute_hover(doc: &AnalyzedDoc, pos: Position) -> Option<Hover> {
 // Go to Definition — dispatches on Located word, walks AST for declaration
 // ══════════════════════════════════════════════════════════════
 
-fn compute_definition(doc: &AnalyzedDoc, pos: Position, uri: &Uri) -> Option<Location> {
-    let lines: Vec<&str> = doc.source.lines().collect();
-    let line = lines.get(pos.line as usize)?;
-    let col = pos.character as usize;
+/// Extract the identifier word (`[A-Za-z0-9_]+`) touching column `col` in
+/// `line`, plus its `[start, end)` byte range. Shared by `compute_definition`
+/// and `compute_rename`, which had identical copies of this word-boundary
+/// scan.
+fn word_at(line: &str, col: usize) -> Option<(&str, usize, usize)> {
     if col >= line.len() { return None; }
     let start = line[..col].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
     let end = col + line[col..].find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(line.len() - col);
     let word = &line[start..end];
     if word.is_empty() { return None; }
+    Some((word, start, end))
+}
 
-    for decl in &doc.program.decls {
+/// `compute_definition`'s first phase: search the current file's own
+/// declarations (fn/type/top-let name, or a variant constructor name) for
+/// a match. Extracted verbatim.
+fn find_decl_definition(program: &crate::ast::Program, word: &str, uri: &Uri) -> Option<Location> {
+    for decl in &program.decls {
         let (name, span) = match decl {
             crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), span),
             crate::ast::Decl::Type { name, span, .. } => (name.as_str(), span),
@@ -73,7 +80,14 @@ fn compute_definition(doc: &AnalyzedDoc, pos: Position, uri: &Uri) -> Option<Loc
             }
         }
     }
+    None
+}
 
+/// `compute_definition`'s second phase: when the word isn't a local
+/// declaration, treat it as a stdlib type name, or the module/func half of
+/// a `module.func` stdlib call, and jump into the bundled stdlib source.
+/// Extracted verbatim.
+fn find_stdlib_definition(line: &str, word: &str, start: usize, end: usize) -> Option<Location> {
     // Stdlib module jump: type name → stdlib source, module.func → specific fn line
     let (module_name, func_name) = if let Some(m) = type_to_module(word) {
         (Some(m), None)
@@ -90,22 +104,32 @@ fn compute_definition(doc: &AnalyzedDoc, pos: Position, uri: &Uri) -> Option<Loc
     } else {
         (None, None)
     };
-    if let Some(module) = module_name {
-        if let Some(path) = find_stdlib_path(&module) {
-            let target_line = func_name.as_ref()
-                .and_then(|f| find_fn_line_in_file(&path, f))
-                .unwrap_or(0);
-            let file_uri = Uri::from_str(&format!("file://{}", path.display())).ok()?;
-            return Some(Location {
-                uri: file_uri,
-                range: Range {
-                    start: Position { line: target_line, character: 0 },
-                    end: Position { line: target_line, character: 0 },
-                },
-            });
-        }
+    let module = module_name?;
+    let path = find_stdlib_path(&module)?;
+    let target_line = func_name.as_ref()
+        .and_then(|f| find_fn_line_in_file(&path, f))
+        .unwrap_or(0);
+    let file_uri = Uri::from_str(&format!("file://{}", path.display())).ok()?;
+    Some(Location {
+        uri: file_uri,
+        range: Range {
+            start: Position { line: target_line, character: 0 },
+            end: Position { line: target_line, character: 0 },
+        },
+    })
+}
+
+fn compute_definition(doc: &AnalyzedDoc, pos: Position, uri: &Uri) -> Option<Location> {
+    let lines: Vec<&str> = doc.source.lines().collect();
+    let line = lines.get(pos.line as usize)?;
+    let col = pos.character as usize;
+    let (word, start, end) = word_at(line, col)?;
+
+    if let Some(loc) = find_decl_definition(&doc.program, word, uri) {
+        return Some(loc);
     }
-    None
+
+    find_stdlib_definition(line, word, start, end)
 }
 
 fn span_to_location(span: &Option<crate::ast::Span>, uri: &Uri) -> Option<Location> {
@@ -205,23 +229,29 @@ fn compute_formatting(doc: &AnalyzedDoc) -> Vec<TextEdit> {
 // Signature Help
 // ══════════════════════════════════════════════════════════════
 
+/// Scan `prefix` (the text before the cursor) backward for the nearest
+/// unmatched `(`, counting `,` at depth 0 to determine the active
+/// parameter index. Extracted verbatim from `compute_signature_help`.
+fn find_active_call(prefix: &str) -> Option<(usize, u32)> {
+    let mut depth = 0i32;
+    let mut active_param = 0u32;
+    for (i, ch) in prefix.char_indices().rev() {
+        match ch {
+            ')' => depth += 1,
+            '(' => { if depth == 0 { return Some((i, active_param)); } depth -= 1; }
+            ',' if depth == 0 => active_param += 1,
+            _ => {}
+        }
+    }
+    None
+}
+
 fn compute_signature_help(source: &str, pos: Position, doc: Option<&AnalyzedDoc>) -> Option<SignatureHelp> {
     let lines: Vec<&str> = source.lines().collect();
     let line = lines.get(pos.line as usize)?;
     let prefix = &line[..pos.character as usize];
 
-    let mut depth = 0i32;
-    let mut call_end = None;
-    let mut active_param = 0u32;
-    for (i, ch) in prefix.char_indices().rev() {
-        match ch {
-            ')' => depth += 1,
-            '(' => { if depth == 0 { call_end = Some(i); break; } depth -= 1; }
-            ',' if depth == 0 => active_param += 1,
-            _ => {}
-        }
-    }
-    let paren_pos = call_end?;
+    let (paren_pos, active_param) = find_active_call(prefix)?;
     let before = prefix[..paren_pos].trim_end();
     let name_start = before.rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '.').map(|i| i + 1).unwrap_or(0);
     let func_name = &before[name_start..];
@@ -275,11 +305,7 @@ fn compute_rename(source: &str, pos: Position, uri: &Uri, new_name: &str) -> Opt
     let lines: Vec<&str> = source.lines().collect();
     let line = lines.get(pos.line as usize)?;
     let col = pos.character as usize;
-    if col >= line.len() { return None; }
-    let start = line[..col].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
-    let end = col + line[col..].find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(line.len() - col);
-    let old_name = &line[start..end];
-    if old_name.is_empty() { return None; }
+    let (old_name, _, _) = word_at(line, col)?;
 
     let mut edits = Vec::new();
     for (line_idx, line_text) in lines.iter().enumerate() {

@@ -136,6 +136,59 @@ fn apply_native_deps_line(line: &str, acc: &mut TomlAccum) {
     }
 }
 
+/// `parse_toml`'s `[section]` header detection. Extracted verbatim (the
+/// original if/else-if chain nested inside the section-header `if`, which
+/// pushed that branch past the max-depth threshold).
+fn detect_section(line: &str) -> &'static str {
+    match line {
+        "[package]" => "package",
+        "[dependencies]" => "dependencies",
+        "[permissions]" => "permissions",
+        "[native-deps]" => "native-deps",
+        _ => "",
+    }
+}
+
+/// `parse_toml`'s per-line dispatch within the current `[section]`.
+/// Extracted verbatim.
+fn apply_toml_line(section: &str, line: &str, acc: &mut TomlAccum) {
+    match section {
+        "package" => apply_package_line(line, acc),
+        "dependencies" => {
+            if let Some(dep) = parse_dep_line(line) {
+                acc.deps.push(dep);
+            }
+        }
+        "permissions" => apply_permissions_line(line, acc),
+        "native-deps" => apply_native_deps_line(line, acc),
+        _ => {}
+    }
+}
+
+/// Validate that a package name is a valid Almide identifier (no hyphens).
+/// Like Go, the package name IS the import name — no implicit conversion.
+/// Extracted verbatim.
+fn validate_package_name(name: &str) -> Result<(), String> {
+    if name.contains('-') {
+        return Err(format!(
+            "package name '{}' contains hyphens — use underscores instead\n  \
+             hint: rename to '{}' in [package] name. The package name is the import name.",
+            name,
+            name.replace('-', "_"),
+        ));
+    }
+    Ok(())
+}
+
+/// The project root is the directory containing `almide.toml` — `.` when
+/// that directory is empty (a bare relative filename). Extracted verbatim.
+fn project_root_from_toml_path(path: &Path) -> PathBuf {
+    match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
 pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
@@ -149,47 +202,15 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
             continue;
         }
         if line.starts_with('[') && line.ends_with(']') {
-            section = if line == "[package]" {
-                "package"
-            } else if line == "[dependencies]" {
-                "dependencies"
-            } else if line == "[permissions]" {
-                "permissions"
-            } else if line == "[native-deps]" {
-                "native-deps"
-            } else {
-                ""
-            };
+            section = detect_section(line);
             continue;
         }
-        match section {
-            "package" => apply_package_line(line, &mut acc),
-            "dependencies" => {
-                if let Some(dep) = parse_dep_line(line) {
-                    acc.deps.push(dep);
-                }
-            }
-            "permissions" => apply_permissions_line(line, &mut acc),
-            "native-deps" => apply_native_deps_line(line, &mut acc),
-            _ => {}
-        }
+        apply_toml_line(section, line, &mut acc);
     }
 
-    // Validate package name: must be a valid Almide identifier (no hyphens).
-    // Like Go, the package name IS the import name. No implicit conversion.
-    if acc.name.contains('-') {
-        return Err(format!(
-            "package name '{}' contains hyphens — use underscores instead\n  \
-             hint: rename to '{}' in [package] name. The package name is the import name.",
-            acc.name,
-            acc.name.replace('-', "_"),
-        ));
-    }
+    validate_package_name(&acc.name)?;
 
-    let root = match path.parent() {
-        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
-        _ => PathBuf::from("."),
-    };
+    let root = project_root_from_toml_path(path);
     Ok(Project {
         package: Package { name: acc.name, version: acc.version, almide_min: acc.almide_min },
         dependencies: acc.deps,
