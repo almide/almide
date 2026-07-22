@@ -1200,6 +1200,90 @@ impl LowerCtx {
     /// unlowered shape walls, never wrong output). `depth` caps type-level recursion (a variant
     /// containing itself — `Cons(Int, MyList)` — would otherwise recurse forever at COMPILE
     /// time); a capped shape walls, honest (runtime-recursive eq needs a synthesized fn brick).
+    /// The `String`/`Value`/`List[T]` borrowed-handle module-eq call name for
+    /// [`Self::typed_slot_eq`]'s slot classification — a pure, `self`-free lookup keyed on
+    /// `ty` alone (no ownership events, matching the doc above). Verbatim extraction
+    /// (guard-clause flattening) of the former inline if-else-if chain, no behavior change —
+    /// see docs/roadmap/active/code-health-codopsy.md.
+    fn module_eq_call_name(ty: &Ty) -> Option<&'static str> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        if matches!(ty, Ty::String) {
+            return Some("string.eq");
+        }
+        if crate::lower::is_value_ty(ty) {
+            return Some("value.eq");
+        }
+        let Ty::Applied(TC::List, es) = ty else {
+            return None;
+        };
+        if es.len() != 1 {
+            return None;
+        }
+        Self::list_elem_eq_call_name(&es[0])
+    }
+
+    /// The `List[T]` ELEMENT classification half of [`Self::module_eq_call_name`] — split out
+    /// (rather than left nested) so neither function's guard-clause chain re-exceeds the
+    /// depth this extraction exists to fix. Verbatim extraction, no behavior change.
+    fn list_elem_eq_call_name(elem_ty: &Ty) -> Option<&'static str> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        if matches!(elem_ty, Ty::Int) {
+            return Some("list.eq_int");
+        }
+        if matches!(elem_ty, Ty::String) {
+            return Some("list.eq_str");
+        }
+        if matches!(elem_ty, Ty::Float) {
+            return Some("list.eq_float");
+        }
+        if matches!(elem_ty, Ty::Bool) {
+            return Some("list.eq_bool");
+        }
+        if crate::lower::is_value_ty(elem_ty) {
+            return Some("list.eq_value");
+        }
+        if let Ty::Applied(TC::List, inner) = elem_ty {
+            // Nested lists — the element-wise recursion into the flat list eq
+            // (value_core `list_eq_list_*`).
+            if inner.len() == 1 && matches!(inner[0], Ty::Int) {
+                return Some("list.eq_list_int");
+            }
+            if inner.len() == 1 && matches!(inner[0], Ty::Float) {
+                return Some("list.eq_list_float");
+            }
+            if inner.len() == 1 && matches!(inner[0], Ty::String) {
+                return Some("list.eq_list_str");
+            }
+            return None;
+        }
+        if let Ty::Applied(TC::Option, inner) = elem_ty {
+            // List[Option[Int/Bool]] — element-wise len-as-tag + i64 payload
+            // compare (value_core `list_eq_opt_int`). Scalar payloads only: a
+            // Float payload's slot is f64 BITS (bit-eq ≠ `==` on -0.0/NaN).
+            if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
+                return Some("list.eq_opt_int");
+            }
+            return None;
+        }
+        if let Ty::Tuple(ts) = elem_ty {
+            // List[Tuple[scalar…]] — a scalar tuple block is LAYOUT-IDENTICAL to a
+            // same-arity List of its slot class (len@4 = arity, 8-byte slots @12),
+            // so the nested-list eq of the matching class compares it exactly:
+            // Int/Bool slots bit-compare (list.eq_list_int), all-Float slots
+            // float-compare per slot (list.eq_list_float). A MIXED Int/Float
+            // tuple has no matching flat class (a bit-compare on the Float slot
+            // is wrong on -0.0/NaN) — decline, the eq site walls honestly.
+            if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Int | Ty::Bool)) {
+                return Some("list.eq_list_int");
+            }
+            if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Float)) {
+                return Some("list.eq_list_float");
+            }
+            return None;
+        }
+        None
+    }
+
     pub(crate) fn typed_slot_eq(
         &mut self,
         lv: ValueId,
@@ -1228,67 +1312,7 @@ impl LowerCtx {
             return Some(dst);
         }
         // String / Value / List[T] — the borrowed-handle module eq call.
-        let module_eq: Option<&str> = if matches!(ty, Ty::String) {
-            Some("string.eq")
-        } else if crate::lower::is_value_ty(ty) {
-            Some("value.eq")
-        } else if let Ty::Applied(TC::List, es) = ty {
-            if es.len() == 1 {
-                if matches!(es[0], Ty::Int) {
-                    Some("list.eq_int")
-                } else if matches!(es[0], Ty::String) {
-                    Some("list.eq_str")
-                } else if matches!(es[0], Ty::Float) {
-                    Some("list.eq_float")
-                } else if matches!(es[0], Ty::Bool) {
-                    Some("list.eq_bool")
-                } else if crate::lower::is_value_ty(&es[0]) {
-                    Some("list.eq_value")
-                } else if let Ty::Applied(TC::List, inner) = &es[0] {
-                    // Nested lists — the element-wise recursion into the flat list eq
-                    // (value_core `list_eq_list_*`).
-                    if inner.len() == 1 && matches!(inner[0], Ty::Int) {
-                        Some("list.eq_list_int")
-                    } else if inner.len() == 1 && matches!(inner[0], Ty::Float) {
-                        Some("list.eq_list_float")
-                    } else if inner.len() == 1 && matches!(inner[0], Ty::String) {
-                        Some("list.eq_list_str")
-                    } else {
-                        None
-                    }
-                } else if let Ty::Applied(TC::Option, inner) = &es[0] {
-                    // List[Option[Int/Bool]] — element-wise len-as-tag + i64 payload
-                    // compare (value_core `list_eq_opt_int`). Scalar payloads only: a
-                    // Float payload's slot is f64 BITS (bit-eq ≠ `==` on -0.0/NaN).
-                    if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
-                        Some("list.eq_opt_int")
-                    } else {
-                        None
-                    }
-                } else if let Ty::Tuple(ts) = &es[0] {
-                    // List[Tuple[scalar…]] — a scalar tuple block is LAYOUT-IDENTICAL to a
-                    // same-arity List of its slot class (len@4 = arity, 8-byte slots @12),
-                    // so the nested-list eq of the matching class compares it exactly:
-                    // Int/Bool slots bit-compare (list.eq_list_int), all-Float slots
-                    // float-compare per slot (list.eq_list_float). A MIXED Int/Float
-                    // tuple has no matching flat class (a bit-compare on the Float slot
-                    // is wrong on -0.0/NaN) — decline, the eq site walls honestly.
-                    if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Int | Ty::Bool)) {
-                        Some("list.eq_list_int")
-                    } else if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Float)) {
-                        Some("list.eq_list_float")
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let module_eq: Option<&str> = Self::module_eq_call_name(ty);
         if let Some(name) = module_eq {
             let dst = self.fresh_value();
             self.ops.push(Op::CallFn {
