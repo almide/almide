@@ -366,52 +366,10 @@ impl Ty {
         if matches!(self, Ty::TypeVar(_)) || matches!(other, Ty::TypeVar(_)) {
             return true;
         }
+        if let Some(r) = Self::compatible_numeric(self, other) {
+            return r;
+        }
         match (self, other) {
-            (Ty::Int, Ty::Int) => true,
-            (Ty::Float, Ty::Float) => true,
-            // Sized numeric types: exact-width match. Cross-width ops
-            // require explicit conversion (Stage 1c will enforce in the
-            // arithmetic dispatch).
-            (Ty::Int8, Ty::Int8) => true,
-            (Ty::Int16, Ty::Int16) => true,
-            (Ty::Int32, Ty::Int32) => true,
-            (Ty::Int64, Ty::Int64) => true,
-            (Ty::UInt8, Ty::UInt8) => true,
-            (Ty::UInt16, Ty::UInt16) => true,
-            (Ty::UInt32, Ty::UInt32) => true,
-            (Ty::UInt64, Ty::UInt64) => true,
-            (Ty::Float32, Ty::Float32) => true,
-            (Ty::Float64, Ty::Float64) => true,
-            // `Int` (canonical, literal slot) ↔ `Int64` (explicit
-            // width). Same 64-bit runtime repr so they freely interop.
-            // The binop `is_sized_scalar` rule still catches
-            // `Int32 + Int64` because `Int64` is *sized*; `Int` is not.
-            (Ty::Int, Ty::Int64) | (Ty::Int64, Ty::Int) => true,
-            (Ty::Float, Ty::Float64) | (Ty::Float64, Ty::Float) => true,
-            // Int64 / Float64 literal-coerce to narrower sized widths,
-            // same as `Int` / `Float`.
-            (Ty::Int64, Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
-            | (Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int64) => true,
-            (Ty::Float64, Ty::Float32) | (Ty::Float32, Ty::Float64) => true,
-            // Literal coercion (Sized Numeric Types Stage 1b): an
-            // integer literal inferred as `Ty::Int` is accepted in a
-            // context that expects any sized integer type. Same for
-            // `Ty::Float` ↔ `Ty::Float32`. The coercion is symmetric
-            // in `compatible` because this pass runs before range
-            // checking; the subsequent arithmetic-dispatch sub-phase
-            // will enforce same-type binary ops, and an explicit
-            // range-check pass (Stage 1b polish) catches `UInt8 = 300`.
-            // Keeping it here (rather than threading an "expected
-            // type" through infer) is a deliberate minimum-viable
-            // choice: it gets `let x: Int32 = 42` working today with
-            // a tight, auditable one-line rule per pairing.
-            (Ty::Int, Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
-            | (Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int) => true,
-            (Ty::Float, Ty::Float32) | (Ty::Float32, Ty::Float) => true,
             (Ty::String, Ty::String) => true,
             (Ty::Bool, Ty::Bool) => true,
             (Ty::Unit, Ty::Unit) => true,
@@ -440,6 +398,16 @@ impl Ty {
             (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
                 args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))
             }
+            _ => Self::compatible_structural(self, other),
+        }
+    }
+
+    /// `compatible()` case for the structural/nominal types: Named/Variant
+    /// cross-matching, Fn, Record/OpenRecord/Tuple, and Union. Split out
+    /// because it's the largest remaining semantic group once the scalar
+    /// and numeric arms are handled by the router and `compatible_numeric`.
+    fn compatible_structural(a: &Ty, b: &Ty) -> bool {
+        match (a, b) {
             (Ty::Named(a, _), Ty::Named(b, _)) => names_match(*a, *b),
             (Ty::Variant { name: a, .. }, Ty::Variant { name: b, .. }) => names_match(*a, *b),
             (Ty::Named(a, _), Ty::Variant { name: b, .. }) => names_match(*a, *b),
@@ -479,6 +447,75 @@ impl Ty {
             (other, Ty::Union(members)) => members.iter().any(|m| other.compatible(m)),
             _ => false,
         }
+    }
+
+    /// `compatible()` case for numeric-type pairs: canonical Int/Float
+    /// against each other and against the sized ints/floats (exact-width
+    /// match, Int64/Float64 bridging, and literal coercion). Returns `None`
+    /// for any pair not covered here so `compatible` falls through to the
+    /// rest of its match.
+    fn compatible_numeric(a: &Ty, b: &Ty) -> Option<bool> {
+        Self::compatible_numeric_exact(a, b).or_else(|| Self::compatible_numeric_coerce(a, b))
+    }
+
+    /// `compatible_numeric` sub-case: exact same-width match (Int/Int,
+    /// Int8/Int8, ... Float64/Float64). Cross-width ops require explicit
+    /// conversion (Stage 1c will enforce in the arithmetic dispatch).
+    fn compatible_numeric_exact(a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
+            (Ty::Int, Ty::Int) => true,
+            (Ty::Float, Ty::Float) => true,
+            (Ty::Int8, Ty::Int8) => true,
+            (Ty::Int16, Ty::Int16) => true,
+            (Ty::Int32, Ty::Int32) => true,
+            (Ty::Int64, Ty::Int64) => true,
+            (Ty::UInt8, Ty::UInt8) => true,
+            (Ty::UInt16, Ty::UInt16) => true,
+            (Ty::UInt32, Ty::UInt32) => true,
+            (Ty::UInt64, Ty::UInt64) => true,
+            (Ty::Float32, Ty::Float32) => true,
+            (Ty::Float64, Ty::Float64) => true,
+            _ => return None,
+        })
+    }
+
+    /// `compatible_numeric` sub-case: Int64/Float64 bridging to the
+    /// canonical `Int`/`Float` slots, and literal coercion of `Int`/`Int64`
+    /// (resp. `Float`/`Float64`) into any narrower sized width.
+    fn compatible_numeric_coerce(a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
+            // `Int` (canonical, literal slot) ↔ `Int64` (explicit
+            // width). Same 64-bit runtime repr so they freely interop.
+            // The binop `is_sized_scalar` rule still catches
+            // `Int32 + Int64` because `Int64` is *sized*; `Int` is not.
+            (Ty::Int, Ty::Int64) | (Ty::Int64, Ty::Int) => true,
+            (Ty::Float, Ty::Float64) | (Ty::Float64, Ty::Float) => true,
+            // Int64 / Float64 literal-coerce to narrower sized widths,
+            // same as `Int` / `Float`.
+            (Ty::Int64, Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
+            | (Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int64) => true,
+            (Ty::Float64, Ty::Float32) | (Ty::Float32, Ty::Float64) => true,
+            // Literal coercion (Sized Numeric Types Stage 1b): an
+            // integer literal inferred as `Ty::Int` is accepted in a
+            // context that expects any sized integer type. Same for
+            // `Ty::Float` ↔ `Ty::Float32`. The coercion is symmetric
+            // in `compatible` because this pass runs before range
+            // checking; the subsequent arithmetic-dispatch sub-phase
+            // will enforce same-type binary ops, and an explicit
+            // range-check pass (Stage 1b polish) catches `UInt8 = 300`.
+            // Keeping it here (rather than threading an "expected
+            // type" through infer) is a deliberate minimum-viable
+            // choice: it gets `let x: Int32 = 42` working today with
+            // a tight, auditable one-line rule per pairing.
+            (Ty::Int, Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
+            | (Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int) => true,
+            (Ty::Float, Ty::Float32) | (Ty::Float32, Ty::Float) => true,
+            _ => return None,
+        })
     }
 
     // --- HKT Foundation: Type Constructor Helpers ---
