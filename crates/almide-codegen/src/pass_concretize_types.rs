@@ -239,174 +239,202 @@ impl SymbolTable {
 /// - `Constructor { name: "Alias", args: [Bind(v)] }` → `Bind(v)` (identity unwrap)
 /// This is the Rust `#[repr(transparent)]` / Haskell `newtype` approach.
 fn erase_type_aliases(program: &mut IrProgram, aliases: &HashMap<String, Ty>) {
-    use almide_ir::{IrExprKind, IrStmtKind, IrPattern};
-    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
-
-    fn erase_ty(ty: &mut Ty, aliases: &HashMap<String, Ty>) {
-        if let Ty::Named(name, _) = ty {
-            if let Some(target) = aliases.get(name.as_str()) {
-                *ty = target.clone();
-            }
-        }
-    }
-
-    fn erase_expr(expr: &mut almide_ir::IrExpr, aliases: &HashMap<String, Ty>) {
-        erase_ty(&mut expr.ty, aliases);
-        match &mut expr.kind {
-            // Constructor call: Alias(arg) → arg
-            IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, args, .. } => {
-                if aliases.contains_key(name.as_str()) && args.len() == 1 {
-                    let arg = args.remove(0);
-                    *expr = arg;
-                    erase_expr(expr, aliases);
-                    return;
-                }
-                for a in args.iter_mut() { erase_expr(a, aliases); }
-            }
-            IrExprKind::Block { stmts, expr: tail } => {
-                for s in stmts.iter_mut() { erase_stmt(s, aliases); }
-                if let Some(t) = tail { erase_expr(t, aliases); }
-            }
-            IrExprKind::If { cond, then, else_ } => {
-                erase_expr(cond, aliases);
-                erase_expr(then, aliases);
-                erase_expr(else_, aliases);
-            }
-            IrExprKind::Match { subject, arms } => {
-                erase_expr(subject, aliases);
-                for arm in arms.iter_mut() {
-                    erase_pattern(&mut arm.pattern, aliases);
-                    if let Some(g) = &mut arm.guard { erase_expr(g, aliases); }
-                    erase_expr(&mut arm.body, aliases);
-                }
-            }
-            IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => {
-                for a in args.iter_mut() { erase_expr(a, aliases); }
-            }
-            IrExprKind::RuntimeCall { args, .. } => {
-                for a in args.iter_mut() { erase_expr(a, aliases); }
-            }
-            IrExprKind::Lambda { body, params, .. } => {
-                for (_, t) in params.iter_mut() { erase_ty(t, aliases); }
-                erase_expr(body, aliases);
-            }
-            IrExprKind::BinOp { left, right, .. } => {
-                erase_expr(left, aliases);
-                erase_expr(right, aliases);
-            }
-            IrExprKind::UnOp { operand, .. } => erase_expr(operand, aliases),
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-                for e in elements.iter_mut() { erase_expr(e, aliases); }
-            }
-            IrExprKind::Record { fields, .. } => {
-                for (_, e) in fields.iter_mut() { erase_expr(e, aliases); }
-            }
-            IrExprKind::Member { object, .. } => erase_expr(object, aliases),
-            IrExprKind::IndexAccess { object, index } => {
-                erase_expr(object, aliases);
-                erase_expr(index, aliases);
-            }
-            IrExprKind::ForIn { iterable, body, .. } => {
-                erase_expr(iterable, aliases);
-                for s in body.iter_mut() { erase_stmt(s, aliases); }
-            }
-            IrExprKind::While { cond, body } => {
-                erase_expr(cond, aliases);
-                for s in body.iter_mut() { erase_stmt(s, aliases); }
-            }
-            IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-            | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-            | IrExprKind::Unwrap { expr: e } | IrExprKind::Clone { expr: e } => erase_expr(e, aliases),
-            // Explicit-preserve (total-by-construction). The head of this
-            // fn already ran `erase_ty(&mut expr.ty, ..)` for this node;
-            // these variants intentionally do not descend further (exactly
-            // the old `_ => {}` behaviour). Listing every remaining kind
-            // makes a future IrExprKind variant a compile error here so a
-            // new node carrying an aliasable subtree cannot be silently
-            // skipped.
-            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
-            | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
-            | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
-            | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. }
-            | IrExprKind::TupleIndex { .. } | IrExprKind::MapAccess { .. }
-            | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
-            | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-            | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
-            | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
-            | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
-            | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
-            | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
-            | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-            | IrExprKind::IterChain { .. } | IrExprKind::Hole
-            | IrExprKind::Todo { .. } => {}
-        }
-    }
-
-    fn erase_stmt(stmt: &mut almide_ir::IrStmt, aliases: &HashMap<String, Ty>) {
-        match &mut stmt.kind {
-            IrStmtKind::Bind { value, ty, .. } => {
-                erase_ty(ty, aliases);
-                erase_expr(value, aliases);
-            }
-            IrStmtKind::Assign { value, .. } => erase_expr(value, aliases),
-            IrStmtKind::Expr { expr } => erase_expr(expr, aliases),
-            IrStmtKind::BindDestructure { value, pattern, .. } => {
-                erase_expr(value, aliases);
-                erase_pattern(pattern, aliases);
-            }
-            // Explicit-preserve (total-by-construction). These statement
-            // kinds carry no `Ty::Named` slot or aliasable subtree that
-            // alias-erasure needs to touch (the assignable expressions
-            // inside IndexAssign/MapInsert/FieldAssign/Guard contain only
-            // values whose own types are erased when their enclosing
-            // expression is visited). Zero behaviour change vs the old
-            // `_ => {}`; listing every kind makes a new IrStmtKind a
-            // compile error here.
-            IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
-            | IrStmtKind::FieldAssign { .. } | IrStmtKind::Guard { .. }
-            | IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. }
-            | IrStmtKind::RcDec { .. } | IrStmtKind::ListSwap { .. }
-            | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
-            | IrStmtKind::ListCopySlice { .. } => {}
-        }
-    }
-
-    fn erase_pattern(pat: &mut IrPattern, aliases: &HashMap<String, Ty>) {
-        match pat {
-            // Constructor("Alias", [Bind(v)]) → Bind(v)
-            IrPattern::Constructor { name, args } => {
-                if aliases.contains_key(name.as_str()) && args.len() == 1 {
-                    *pat = args.remove(0);
-                    return;
-                }
-            }
-            IrPattern::Tuple { elements } => {
-                for e in elements.iter_mut() { erase_pattern(e, aliases); }
-            }
-            IrPattern::Some { inner } => erase_pattern(inner, aliases),
-            IrPattern::Ok { inner } | IrPattern::Err { inner } => erase_pattern(inner, aliases),
-            _ => {}
-        }
-    }
-
-    for func in &mut program.functions {
-        erase_ty(&mut func.ret_ty, aliases);
-        for p in &mut func.params { erase_ty(&mut p.ty, aliases); }
-        erase_expr(&mut func.body, aliases);
-    }
+    for func in &mut program.functions { erase_fn_types(func, aliases); }
     for tl in &mut program.top_lets { erase_expr(&mut tl.value, aliases); }
     for module in &mut program.modules {
-        for func in &mut module.functions {
-            erase_ty(&mut func.ret_ty, aliases);
-            for p in &mut func.params { erase_ty(&mut p.ty, aliases); }
-            erase_expr(&mut func.body, aliases);
-        }
+        for func in &mut module.functions { erase_fn_types(func, aliases); }
     }
     // Also erase in VarTable
     for entry in &mut program.var_table.entries {
         erase_ty(&mut entry.ty, aliases);
+    }
+}
+
+// ── `erase_type_aliases` helpers (Ty::Named alias substitution) ──────────
+
+/// Erase aliases in a function's return type, param types, and body — the
+/// identical per-function step `erase_type_aliases` runs both for top-level
+/// and module functions.
+fn erase_fn_types(func: &mut IrFunction, aliases: &HashMap<String, Ty>) {
+    erase_ty(&mut func.ret_ty, aliases);
+    for p in &mut func.params { erase_ty(&mut p.ty, aliases); }
+    erase_expr(&mut func.body, aliases);
+}
+
+fn erase_ty(ty: &mut Ty, aliases: &HashMap<String, Ty>) {
+    if let Ty::Named(name, _) = ty {
+        if let Some(target) = aliases.get(name.as_str()) {
+            *ty = target.clone();
+        }
+    }
+}
+
+// `Call { target: Named { name }, args, .. }` arm of `erase_expr`: a
+// constructor call for an alias, `Alias(arg)`, unwraps to `arg`
+// (recursively erased); otherwise erase each arg in place.
+fn erase_expr_alias_call(expr: &mut IrExpr, aliases: &HashMap<String, Ty>) {
+    let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut expr.kind else { unreachable!() };
+    if aliases.contains_key(name.as_str()) && args.len() == 1 {
+        let arg = args.remove(0);
+        *expr = arg;
+        erase_expr(expr, aliases);
+        return;
+    }
+    for a in args.iter_mut() { erase_expr(a, aliases); }
+}
+
+// `Block { stmts, expr: tail }` arm of `erase_expr`.
+fn erase_expr_block(stmts: &mut [IrStmt], tail: &mut Option<Box<IrExpr>>, aliases: &HashMap<String, Ty>) {
+    for s in stmts.iter_mut() { erase_stmt(s, aliases); }
+    if let Some(t) = tail { erase_expr(t, aliases); }
+}
+
+// `If { cond, then, else_ }` arm of `erase_expr`.
+fn erase_expr_if(cond: &mut IrExpr, then: &mut IrExpr, else_: &mut IrExpr, aliases: &HashMap<String, Ty>) {
+    erase_expr(cond, aliases);
+    erase_expr(then, aliases);
+    erase_expr(else_, aliases);
+}
+
+// `Match { subject, arms }` arm of `erase_expr`.
+fn erase_expr_match(subject: &mut IrExpr, arms: &mut [IrMatchArm], aliases: &HashMap<String, Ty>) {
+    erase_expr(subject, aliases);
+    for arm in arms.iter_mut() {
+        erase_pattern(&mut arm.pattern, aliases);
+        if let Some(g) = &mut arm.guard { erase_expr(g, aliases); }
+        erase_expr(&mut arm.body, aliases);
+    }
+}
+
+// `ForIn { iterable, body, .. }` arm of `erase_expr`.
+fn erase_expr_for_in(iterable: &mut IrExpr, body: &mut [IrStmt], aliases: &HashMap<String, Ty>) {
+    erase_expr(iterable, aliases);
+    for s in body.iter_mut() { erase_stmt(s, aliases); }
+}
+
+// `While { cond, body }` arm of `erase_expr`.
+fn erase_expr_while(cond: &mut IrExpr, body: &mut [IrStmt], aliases: &HashMap<String, Ty>) {
+    erase_expr(cond, aliases);
+    for s in body.iter_mut() { erase_stmt(s, aliases); }
+}
+
+// `Call { args, .. } | TailCall { args, .. }`, `RuntimeCall { args, .. }`,
+// and `List { elements } | Tuple { elements }` arms of `erase_expr` — all
+// erase a flat `Vec<IrExpr>` in place.
+fn erase_expr_args(args: &mut [IrExpr], aliases: &HashMap<String, Ty>) {
+    for a in args.iter_mut() { erase_expr(a, aliases); }
+}
+
+// `Lambda { body, params, .. }` arm of `erase_expr`.
+fn erase_expr_lambda(body: &mut IrExpr, params: &mut [(VarId, Ty)], aliases: &HashMap<String, Ty>) {
+    for (_, t) in params.iter_mut() { erase_ty(t, aliases); }
+    erase_expr(body, aliases);
+}
+
+// `Record { fields, .. }` arm of `erase_expr`.
+fn erase_expr_field_values(fields: &mut [(almide_base::intern::Sym, IrExpr)], aliases: &HashMap<String, Ty>) {
+    for (_, e) in fields.iter_mut() { erase_expr(e, aliases); }
+}
+
+fn erase_expr(expr: &mut IrExpr, aliases: &HashMap<String, Ty>) {
+    erase_ty(&mut expr.ty, aliases);
+    match &mut expr.kind {
+        // Constructor call: Alias(arg) → arg
+        IrExprKind::Call { target: CallTarget::Named { .. }, .. } => erase_expr_alias_call(expr, aliases),
+        IrExprKind::Block { stmts, expr: tail } => erase_expr_block(stmts, tail, aliases),
+        IrExprKind::If { cond, then, else_ } => erase_expr_if(cond, then, else_, aliases),
+        IrExprKind::Match { subject, arms } => erase_expr_match(subject, arms, aliases),
+        IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => erase_expr_args(args, aliases),
+        IrExprKind::RuntimeCall { args, .. } => erase_expr_args(args, aliases),
+        IrExprKind::Lambda { body, params, .. } => erase_expr_lambda(body, params, aliases),
+        IrExprKind::BinOp { left, right, .. } => {
+            erase_expr(left, aliases);
+            erase_expr(right, aliases);
+        }
+        IrExprKind::UnOp { operand, .. } => erase_expr(operand, aliases),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => erase_expr_args(elements, aliases),
+        IrExprKind::Record { fields, .. } => erase_expr_field_values(fields, aliases),
+        IrExprKind::Member { object, .. } => erase_expr(object, aliases),
+        IrExprKind::IndexAccess { object, index } => {
+            erase_expr(object, aliases);
+            erase_expr(index, aliases);
+        }
+        IrExprKind::ForIn { iterable, body, .. } => erase_expr_for_in(iterable, body, aliases),
+        IrExprKind::While { cond, body } => erase_expr_while(cond, body, aliases),
+        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::Clone { expr: e } => erase_expr(e, aliases),
+        // Explicit-preserve (total-by-construction). The head of this
+        // fn already ran `erase_ty(&mut expr.ty, ..)` for this node;
+        // these variants intentionally do not descend further (exactly
+        // the old `_ => {}` behaviour). Listing every remaining kind
+        // makes a future IrExprKind variant a compile error here so a
+        // new node carrying an aliasable subtree cannot be silently
+        // skipped.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. } | IrExprKind::Hole
+        | IrExprKind::Todo { .. } => {}
+    }
+}
+
+fn erase_stmt(stmt: &mut IrStmt, aliases: &HashMap<String, Ty>) {
+    match &mut stmt.kind {
+        IrStmtKind::Bind { value, ty, .. } => {
+            erase_ty(ty, aliases);
+            erase_expr(value, aliases);
+        }
+        IrStmtKind::Assign { value, .. } => erase_expr(value, aliases),
+        IrStmtKind::Expr { expr } => erase_expr(expr, aliases),
+        IrStmtKind::BindDestructure { value, pattern, .. } => {
+            erase_expr(value, aliases);
+            erase_pattern(pattern, aliases);
+        }
+        // Explicit-preserve (total-by-construction). These statement
+        // kinds carry no `Ty::Named` slot or aliasable subtree that
+        // alias-erasure needs to touch (the assignable expressions
+        // inside IndexAssign/MapInsert/FieldAssign/Guard contain only
+        // values whose own types are erased when their enclosing
+        // expression is visited). Zero behaviour change vs the old
+        // `_ => {}`; listing every kind makes a new IrStmtKind a
+        // compile error here.
+        IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::FieldAssign { .. } | IrStmtKind::Guard { .. }
+        | IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. }
+        | IrStmtKind::RcDec { .. } | IrStmtKind::ListSwap { .. }
+        | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+        | IrStmtKind::ListCopySlice { .. } => {}
+    }
+}
+
+fn erase_pattern(pat: &mut IrPattern, aliases: &HashMap<String, Ty>) {
+    match pat {
+        // Constructor("Alias", [Bind(v)]) → Bind(v)
+        IrPattern::Constructor { name, args } => {
+            if aliases.contains_key(name.as_str()) && args.len() == 1 {
+                *pat = args.remove(0);
+                return;
+            }
+        }
+        IrPattern::Tuple { elements } => {
+            for e in elements.iter_mut() { erase_pattern(e, aliases); }
+        }
+        IrPattern::Some { inner } => erase_pattern(inner, aliases),
+        IrPattern::Ok { inner } | IrPattern::Err { inner } => erase_pattern(inner, aliases),
+        _ => {}
     }
 }
 
