@@ -640,12 +640,20 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     } else {
         String::new()
     };
-    format!("{preamble}{data}{closure_table}{funcs}{mg_helpers}{start}{pub_exports})
+    // Dead-import/dead-function elimination over the fixed preamble (see
+    // render_wasm_dce.rs): drop every WASI import and runtime helper nothing
+    // in this program's own rendered code — or a kept helper's own body —
+    // transitively reaches. `println`-only programs no longer link
+    // `path_open`/`fd_readdir`/`clock_time_get`/etc.
+    let used_text = format!("{data}{closure_table}{funcs}{mg_helpers}{start}{pub_exports}");
+    let preamble = filter_unreachable_preamble(&preamble, &used_text);
+    format!("{preamble}{used_text})
 ")
 }
 
 include!("render_wasm_b.rs");
 include!("render_wasm_c.rs");
+include!("render_wasm_dce.rs");
 
 /// The self-hosted stdlib runtime registry: `(call name, impl fn name, Almide source)`.
 /// The v1 linker auto-includes an entry when its `call name` is invoked but undefined,
