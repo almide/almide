@@ -520,10 +520,17 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // emit NOTHING for the underflowing marker (see that arm).
     let param_counts: BTreeMap<String, usize> =
         prog.functions.iter().map(|f| (f.name.clone(), f.params.len())).collect();
+    // Constant-fold-through-wrap (render_wasm_peephole.rs): the i64-uniform
+    // scalar convention round-trips every literal address/offset a
+    // self-hosted `prim.*` caller uses through `i64.const → local.set →
+    // local.get → i32.wrap_i64`; when the local's ONE definition is a bare
+    // constant, that whole round-trip is itself a compile-time constant —
+    // fold it to `i32.const` directly at each use. Per-function (never
+    // crosses a call boundary), so it composes with pruning either order.
     let funcs = prog
         .functions
         .iter()
-        .map(|f| render_wasm_fn(f, &label_off, &func_slots, &param_counts))
+        .map(|f| fold_const_wrap_roundtrips(&render_wasm_fn(f, &label_off, &func_slots, &param_counts)))
         .collect::<String>();
     // Closure dispatch: when any function makes an indirect (closure) call, emit a module
     // function table whose slot i holds function i (the lambda-lifting convention — a
@@ -738,6 +745,7 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
 include!("render_wasm_b.rs");
 include!("render_wasm_c.rs");
 include!("render_wasm_dce.rs");
+include!("render_wasm_peephole.rs");
 
 /// The self-hosted stdlib runtime registry: `(call name, impl fn name, Almide source)`.
 /// The v1 linker auto-includes an entry when its `call name` is invoked but undefined,
