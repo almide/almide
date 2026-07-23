@@ -439,7 +439,7 @@ fn wasm_ty(repr: Repr) -> &'static str {
 /// Every [`ValueId`] an op touches (dst + all operands), exhaustively — the
 /// generic occurrence walk the render-level peepholes (#806 step 3b) use to
 /// prove a value is single-use before fusing its def into its use site.
-fn op_values(op: &Op, out: &mut Vec<ValueId>) {
+pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
     let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
         for a in args {
             match a {

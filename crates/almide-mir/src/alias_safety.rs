@@ -83,7 +83,16 @@ use std::collections::HashSet;
 /// escaping (see `step`'s `Op::CallFn` arm). Extending this list requires
 /// re-reading the callee's OWN source and re-confirming the same property —
 /// do not add a name here on the strength of its doc comment alone.
-const TRUSTED_FRESH_ALLOCATORS: &[&str] = &["__list_concat", "__list_concat_rc"];
+// `__list_append1` (render_wasm_p3.rs, the self-append runtime): its result is
+// either (a) a freshly allocated grown copy, or (b) its own first argument,
+// returned ONLY when `rc == 1` at entry — i.e. the caller's about-to-be-dropped
+// handle was the object's sole owner, so after the rewrite window's `Drop x` +
+// `SetLocal x ← d` no OTHER live handle can alias the result. Case (b) is the
+// reason this entry is safe even though the fn can return an argument: the
+// runtime rc check proves at execution time what the other entries prove
+// statically (see concat_to_append.rs for the window that emits the call).
+const TRUSTED_FRESH_ALLOCATORS: &[&str] =
+    &["__list_concat", "__list_concat_rc", "__list_append1"];
 
 /// One forward step of the "which values are possibly aliased right now"
 /// dataflow fact, applied in place to `escaped`. See the module doc for the

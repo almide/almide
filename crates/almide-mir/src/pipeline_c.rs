@@ -377,6 +377,13 @@ fn try_render_wasm_source_impl_rest(
     // native leg the map is empty (no self-host link), so it is wasm-only in effect.
     crate::scalar_call_inline::inline_scalar_prim_wrappers(&mut functions);
 
+    // Self-append windows (`x = x + [e]`, incl. the `list.push` desugar) →
+    // the amortized-O(1) `__list_append1` (wasm leg only — the runtime fn is a
+    // wasm preamble function; the native leg keeps the concat shape, which is
+    // observation-identical). See concat_to_append.rs for the certificate
+    // argument (the slot's `(id)` stream is preserved verbatim).
+    crate::concat_to_append::rewrite_self_append(&mut functions);
+
     // #824: drop MakeUnique guards that are provably dead (the value they'd guard
     // is never aliased anywhere in its own function) — see alias_safety.rs's doc
     // comment for the soundness argument. Target-agnostic (applies before either

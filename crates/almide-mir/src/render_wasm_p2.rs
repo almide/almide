@@ -26,7 +26,7 @@ fn render_op(
         | Op::IntBinOp { .. }
         | Op::CallIndirect { .. }
         | Op::CallFn { .. }
-        | Op::CallImport { .. } => render_op_call(op, label_off, param_counts, reprs, fuser),
+        | Op::CallImport { .. } => render_op_call(op, label_off, param_counts, reprs, floats, fuser),
         Op::Drop { .. }
         | Op::DropListStr { .. }
         | Op::DropListListStr { .. }
@@ -287,6 +287,7 @@ fn render_op_call(
     label_off: &BTreeMap<String, (u32, u32)>,
     param_counts: &BTreeMap<String, usize>,
     reprs: &BTreeMap<ValueId, Repr>,
+    floats: &BTreeSet<ValueId>,
     fuser: &mut Fuser,
 ) -> String {
     match op {
@@ -294,7 +295,7 @@ fn render_op_call(
         | Op::Call { .. }
         | Op::CallIndirect { .. }
         | Op::CallFn { .. }
-        | Op::CallImport { .. } => render_op_call_light(op, label_off, param_counts, reprs),
+        | Op::CallImport { .. } => render_op_call_light(op, label_off, param_counts, reprs, floats),
         Op::IntBinOp { .. } => render_op_call_intbinop(op, fuser),
         _ => unreachable!("render_op_call: {op:?} is not in this group"),
     }
@@ -305,6 +306,7 @@ fn render_op_call_light(
     label_off: &BTreeMap<String, (u32, u32)>,
     param_counts: &BTreeMap<String, usize>,
     reprs: &BTreeMap<ValueId, Repr>,
+    floats: &BTreeSet<ValueId>,
 ) -> String {
     match op {
         // An alias SHARES the object and bumps its refcount (A1.3-render): dst and
@@ -379,8 +381,20 @@ fn render_op_call_light(
             if is_elided_marker {
                 return String::new();
             }
-            let argstr =
-                args.iter().map(|a| render_arg_wasm(a, reprs)).collect::<Vec<_>>().join(" ");
+            let argstr = args
+                .iter()
+                .map(|a| match a {
+                    // `__list_append1`'s element arg is FLEXIBLE for the f64
+                    // classifier (see classify_f64_op): an f64-classified
+                    // appended value crosses the i64 ABI with ONE boundary
+                    // reinterpret here, exactly like a ListLit element slot.
+                    CallArg::Scalar(v) if name == "__list_append1" && floats.contains(v) => {
+                        format!("(i64.reinterpret_f64 (local.get {}))", local(*v))
+                    }
+                    _ => render_arg_wasm(a, reprs),
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
             match dst {
                 Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
                 None => format!("    (call ${name} {argstr})\n"),

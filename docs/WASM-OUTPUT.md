@@ -127,6 +127,13 @@ wasm-opt -Oz --all-features app.wasm -o app.min.wasm
 pairs, and the float printer uses post-MVP integer ops. Binaryen then squeezes
 further: Hello, world drops from 770 B to 548 B.)
 
+**`-Oz` trades speed for those bytes.** The verified renderer versions hot
+loops into a guarded fast path with the bounds checks discharged up front
+(`render_wasm_bce.rs`); `-Oz`'s code folding merges the near-identical fast
+and slow copies back into one checked loop, measured ~3× slower on
+spectralnorm. Use `-Oz` for size-critical cold code; benchmark before applying
+it to compute kernels.
+
 ## Determinism and the cross-target contract
 
 The emitted bytes are **deterministic across host architectures**: the compiler
