@@ -449,6 +449,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
     ) {
         Ok(wat) => match wat::parse_str(&wat) {
             Ok(bytes) => {
+                let bytes = strip_wasm_name_section(bytes);
                 if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
                     err(&format!(
                         "[almide] v1 trust-spine emitted the module ({} bytes)",
@@ -498,6 +499,68 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // exactly as without `--verified`.
     let _ = (&mut ir_program, allow_unverified, verified);
     render_wasm_module(&source_text, &v1_self_modules)
+}
+
+/// Drop every "name"-id custom section from a compiled wasm module.
+///
+/// `wat::parse_str` always emits a name section recording every symbolic
+/// `$name` the WAT source used (functions, locals, globals) — pure debug
+/// metadata a disassembler/debugger reads to show human labels instead of
+/// raw indices. The wasm spec defines custom sections as ignorable by any
+/// consumer that doesn't recognize them (§2.5.9), so removing one can never
+/// change what the module computes — this is exactly as safe as the
+/// preamble reachability DCE (`render_wasm_dce.rs`), just one level lower:
+/// a format-legal removal, not a black-box "optimization".
+fn strip_wasm_name_section(bytes: Vec<u8>) -> Vec<u8> {
+    const HEADER_LEN: usize = 8; // b"\0asm" + version u32
+    if bytes.len() < HEADER_LEN {
+        return bytes;
+    }
+    let mut out = bytes[..HEADER_LEN].to_vec();
+    let mut i = HEADER_LEN;
+    while i < bytes.len() {
+        let id = bytes[i];
+        let Some((payload_len, len_bytes)) = read_leb128_u32(&bytes[i + 1..]) else {
+            // Malformed length — bail out and keep everything from here on
+            // verbatim rather than risk corrupting the module.
+            out.extend_from_slice(&bytes[i..]);
+            return out;
+        };
+        let payload_start = i + 1 + len_bytes;
+        let payload_end = (payload_start + payload_len as usize).min(bytes.len());
+        let is_name_section = id == 0 && custom_section_name(&bytes[payload_start..payload_end]) == Some("name");
+        if !is_name_section {
+            out.extend_from_slice(&bytes[i..payload_end]);
+        }
+        i = payload_end;
+    }
+    out
+}
+
+/// A custom section's payload starts with its own length-prefixed name string.
+fn custom_section_name(payload: &[u8]) -> Option<&str> {
+    let (name_len, len_bytes) = read_leb128_u32(payload)?;
+    let name_bytes = payload.get(len_bytes..len_bytes + name_len as usize)?;
+    std::str::from_utf8(name_bytes).ok()
+}
+
+/// Decode an unsigned LEB128 `u32` at the start of `bytes`. Returns the
+/// decoded value and how many bytes it occupied, or `None` on overflow /
+/// truncated input.
+fn read_leb128_u32(bytes: &[u8]) -> Option<(u32, usize)> {
+    let mut result: u32 = 0;
+    let mut shift = 0u32;
+    for (i, &byte) in bytes.iter().enumerate() {
+        result |= ((byte & 0x7f) as u32).checked_shl(shift)?;
+        if byte & 0x80 == 0 {
+            return Some((result, i + 1));
+        }
+        shift += 7;
+        if shift >= 32 {
+            return None;
+        }
+    }
+    None
 }
 
 /// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.
