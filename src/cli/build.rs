@@ -501,14 +501,21 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     render_wasm_module(&source_text, &v1_self_modules)
 }
 
-/// Drop every "name"-id custom section from a compiled wasm module.
+/// Trim every "name"-id custom section down to its function-names
+/// subsection, dropping local-names and any other subsection.
 ///
 /// `wat::parse_str` always emits a name section recording every symbolic
-/// `$name` the WAT source used (functions, locals, globals) — pure debug
-/// metadata a disassembler/debugger reads to show human labels instead of
-/// raw indices. The wasm spec defines custom sections as ignorable by any
-/// consumer that doesn't recognize them (§2.5.9), so removing one can never
-/// change what the module computes — this is exactly as safe as the
+/// `$name` the WAT source used — functions AND every per-function local
+/// (`$v1`, `$v2`, ...). `docs/WASM-OUTPUT.md` commits to keeping function
+/// names because they're what a wasmtime trap backtrace prints
+/// (`<unknown>!funcname`) — the one piece of this metadata with real
+/// diagnostic value. Local names carry none (wasmtime backtraces never
+/// print them) and dominate the section's size: measured on
+/// `closure.almd`, 251 named locals cost 1.6KB versus keeping only the 20
+/// function names. The wasm spec defines custom sections — and every
+/// subsection within the "name" section — as ignorable by any consumer
+/// that doesn't recognize them (§2.5.9), so dropping subsections can never
+/// change what the module computes; this is exactly as safe as the
 /// preamble reachability DCE (`render_wasm_dce.rs`), just one level lower:
 /// a format-legal removal, not a black-box "optimization".
 fn strip_wasm_name_section(bytes: Vec<u8>) -> Vec<u8> {
@@ -529,7 +536,16 @@ fn strip_wasm_name_section(bytes: Vec<u8>) -> Vec<u8> {
         let payload_start = i + 1 + len_bytes;
         let payload_end = (payload_start + payload_len as usize).min(bytes.len());
         let is_name_section = id == 0 && custom_section_name(&bytes[payload_start..payload_end]) == Some("name");
-        if !is_name_section {
+        if is_name_section {
+            if let Some(trimmed) = trim_name_section_to_function_names(&bytes[payload_start..payload_end]) {
+                out.push(0);
+                out.extend_from_slice(&write_leb128_u32(trimmed.len() as u32));
+                out.extend_from_slice(&trimmed);
+            }
+            // Malformed name-section payload: drop it whole rather than risk
+            // shipping a corrupt custom section — still format-legal (the
+            // section is optional metadata, never load-bearing).
+        } else {
             out.extend_from_slice(&bytes[i..payload_end]);
         }
         i = payload_end;
@@ -542,6 +558,34 @@ fn custom_section_name(payload: &[u8]) -> Option<&str> {
     let (name_len, len_bytes) = read_leb128_u32(payload)?;
     let name_bytes = payload.get(len_bytes..len_bytes + name_len as usize)?;
     std::str::from_utf8(name_bytes).ok()
+}
+
+/// A "name" custom section's payload is its own length-prefixed "name"
+/// identifier string, followed by a sequence of subsections (id byte +
+/// LEB128 length + payload) — id 1 is function names, the only one kept.
+/// Returns `None` if the payload is too short to even contain the leading
+/// identifier string (malformed).
+fn trim_name_section_to_function_names(payload: &[u8]) -> Option<Vec<u8>> {
+    let (name_len, len_bytes) = read_leb128_u32(payload)?;
+    let prefix_end = len_bytes + name_len as usize;
+    if prefix_end > payload.len() {
+        return None;
+    }
+    let mut out = payload[..prefix_end].to_vec();
+    let mut i = prefix_end;
+    while i < payload.len() {
+        let id = payload[i];
+        let Some((sub_len, sub_len_bytes)) = read_leb128_u32(&payload[i + 1..]) else {
+            return None;
+        };
+        let sub_start = i + 1 + sub_len_bytes;
+        let sub_end = (sub_start + sub_len as usize).min(payload.len());
+        if id == 1 {
+            out.extend_from_slice(&payload[i..sub_end]);
+        }
+        i = sub_end;
+    }
+    Some(out)
 }
 
 /// Decode an unsigned LEB128 `u32` at the start of `bytes`. Returns the
@@ -561,6 +605,20 @@ fn read_leb128_u32(bytes: &[u8]) -> Option<(u32, usize)> {
         }
     }
     None
+}
+
+/// Encode a `u32` as unsigned LEB128.
+fn write_leb128_u32(mut v: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let byte = (v & 0x7f) as u8;
+        v >>= 7;
+        if v == 0 {
+            out.push(byte);
+            return out;
+        }
+        out.push(byte | 0x80);
+    }
 }
 
 /// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.
