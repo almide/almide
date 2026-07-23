@@ -2,17 +2,17 @@
 
 ## WASM Binary Size
 
-Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Since the verified (PCC) pipeline became the sole wasm path, **the shipped binary is the exact module the certificate was checked against**: it carries the full audited runtime preamble and the debug-name section, and no post-hoc optimizer touches it.
+Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Since the verified (PCC) pipeline became the sole wasm path, **the shipped binary is the exact module the certificate was checked against**: reachability DCE inside the renderer prunes unreached preamble helpers, imports, and data segments before assembly, and the debug-name section keeps only function names (for trap backtraces) — but no post-hoc optimizer touches the shipped bytes.
 
 | Program | Verified, as shipped | After `wasm-opt -Oz --all-features` |
 |---------|-----:|-----:|
-| Hello World | **8,713 B** | **874 B** |
-| FizzBuzz 1–100 | **10,515 B** | **1,580 B** |
-| Fibonacci (recursive) | **10,044 B** | **1,139 B** |
-| Closure + call_indirect | **11,414 B** | **1,898 B** |
-| Variant (match + float) | **34,407 B** | **6,460 B** |
+| Hello World | **770 B** | **548 B** |
+| FizzBuzz 1–100 | **1,793 B** | **1,092 B** |
+| Fibonacci (recursive) | **1,441 B** | **771 B** |
+| Closure + call_indirect | **2,744 B** | **1,672 B** |
+| Variant (match + float) | **11,965 B** | **6,868 B** |
 
-The "as shipped" column is raw `almide build --target wasm` output (measured 2026-07-20). Running `wasm-opt` is an explicit opt-in that leaves the verified envelope — its DCE strips the unused runtime helpers and the name section. The float row is dominated by the self-hosted Dragon4 shortest-round-trip printer that `float.to_string` demand-links; programs that never display a Float never pay for it. Full dissection: [WASM-OUTPUT.md](./WASM-OUTPUT.md).
+The "as shipped" column is raw `almide build --target wasm` output (measured 2026-07-23). Running `wasm-opt` is an explicit opt-in that leaves the verified envelope — it goes beyond the renderer's own reachability DCE with instruction-level rewrites (local coalescing, inlining, more aggressive dead-code removal). The float row is dominated by the self-hosted Dragon4 shortest-round-trip printer that `float.to_string` demand-links; programs that never display a Float never pay for it. Full dissection: [WASM-OUTPUT.md](./WASM-OUTPUT.md).
 
 ## Native Performance
 
