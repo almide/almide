@@ -454,6 +454,17 @@ fn render_op_call_intbinop(op: &Op, fuser: &mut Fuser) -> String {
                     Some(c) if c != 0 && c != -1 => {
                         if matches!(op, IntOp::Div) && c > 1 && (c as u64).is_power_of_two() {
                             let k = (c as u64).trailing_zeros();
+                            // A provably-EVEN dividend divided by 2 needs no
+                            // negative-rounding correction: the quotient is
+                            // exact, and truncation == floor == `shr_s` for
+                            // every sign (incl. i64::MIN). See Fuser::evens.
+                            if c == 2 && fuser.is_even(*a) {
+                                return format!(
+                                    "    (local.set {d} (i64.shr_s (local.get {a}) (i64.const 1)))\n",
+                                    a = local(*a),
+                                    d = local(*dst),
+                                );
+                            }
                             return format!(
                                 "    (local.set {d} (i64.shr_s (i64.add (local.get {a})\n\
                                  \x20       (i64.shr_u (i64.shr_s (local.get {a}) (i64.const 63)) (i64.const {nk})))\n\

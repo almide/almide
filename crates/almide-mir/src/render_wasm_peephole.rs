@@ -110,8 +110,50 @@ fn apply_const_wrap_folds(body: &str, folds: &std::collections::BTreeMap<String,
 /// rendered function.
 pub(crate) fn fold_const_wrap_roundtrips(body: &str) -> String {
     let folds = single_const_defs(body);
-    if folds.is_empty() {
-        return body.to_string();
+    let folded = if folds.is_empty() {
+        body.to_string()
+    } else {
+        apply_const_wrap_folds(body, &folds)
+    };
+    strip_dead_const_sets(&folded)
+}
+
+/// Remove `(local.set $vN (i64.const V))` / `(local.set $vN (f64.const V))`
+/// statements whose local is NEVER read (`(local.get $vN)` absent from the
+/// whole rendered function, tail included). These are constants whose every
+/// consumer was folded away statically — e.g. the divisor local of a
+/// `÷ 2^k` after the Div render strength-reduced it — which otherwise cost
+/// one dead store per hot-loop iteration. Removing a never-read write cannot
+/// change any observable: the local has no other reader by construction, and
+/// a bare-const RHS has no side effect.
+fn strip_dead_const_sets(body: &str) -> String {
+    let bytes = body.as_bytes();
+    let mut out = Vec::with_capacity(body.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i..].starts_with(b"(local.set $v") {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        let end = match_paren(body, i);
+        let stmt = &body[i..end];
+        let is_dead_const = local_set_target(stmt).is_some_and(|name| {
+            let bare_const = stmt
+                .strip_prefix(&format!("(local.set {name} "))
+                .and_then(|r| r.strip_suffix("))"))
+                .is_some_and(|rhs| {
+                    (rhs.starts_with("(i64.const ") || rhs.starts_with("(f64.const "))
+                        && !rhs[1..].contains('(')
+                });
+            // `(local.get $vN)` with its closing paren — exact-name match, so
+            // `$v1` never shadows `$v10`.
+            bare_const && !body.contains(&format!("(local.get {name})"))
+        });
+        if !is_dead_const {
+            out.extend_from_slice(stmt.as_bytes());
+        }
+        i = end;
     }
-    apply_const_wrap_folds(body, &folds)
+    String::from_utf8(out).expect("byte-for-byte copy of valid UTF-8 input stays valid UTF-8")
 }
