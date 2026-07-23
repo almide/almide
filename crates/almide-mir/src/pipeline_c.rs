@@ -370,6 +370,13 @@ fn try_render_wasm_source_impl_rest(
         }
     }
 
+    // #826 ②: rewrite `CallFn math.sqrt`-style single-prim wrapper calls to the
+    // prim itself — kills the per-call overhead AND stops the call boundary from
+    // poisoning the f64-local classification of the surrounding arithmetic. Runs
+    // after the runtime link (the wrappers must exist as MirFunctions); on the
+    // native leg the map is empty (no self-host link), so it is wasm-only in effect.
+    crate::scalar_call_inline::inline_scalar_prim_wrappers(&mut functions);
+
     // #824: drop MakeUnique guards that are provably dead (the value they'd guard
     // is never aliased anywhere in its own function) — see alias_safety.rs's doc
     // comment for the soundness argument. Target-agnostic (applies before either
