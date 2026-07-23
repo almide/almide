@@ -130,26 +130,45 @@ fn collect_type_names(ty: &Ty, out: &mut HashSet<String>) {
 /// self-recursion, so neither member is emitted as an infinitely-sized native
 /// enum (E0072) (#656).
 fn find_recursive_enums<'a>(type_decls: impl Iterator<Item = &'a IrTypeDecl>) -> HashSet<String> {
-    // Reference graph: type name → names it mentions in any variant field type.
+    let graph = build_type_ref_graph(type_decls);
+    find_cycle_reachable_types(&graph)
+}
+
+/// Phase 1 of `find_recursive_enums`, extracted verbatim (cog>30
+/// decomposition, sequential-phase pattern — phase 2 only reads this
+/// phase's output, never mutates it back). Reference graph: type name →
+/// names it mentions in any variant field type.
+fn build_type_ref_graph<'a>(type_decls: impl Iterator<Item = &'a IrTypeDecl>) -> HashMap<String, HashSet<String>> {
     let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
     for td in type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
             let mut refs = HashSet::new();
-            for case in cases {
-                match &case.kind {
-                    IrVariantKind::Tuple { fields } => {
-                        for f in fields { collect_type_names(f, &mut refs); }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields { collect_type_names(&f.ty, &mut refs); }
-                    }
-                    _ => {}
-                }
-            }
+            for case in cases { collect_variant_case_refs(case, &mut refs); }
             graph.insert(td.name.to_string(), refs);
         }
     }
-    // A type is recursive iff it can reach itself through ≥1 edge.
+    graph
+}
+
+/// Per-case body of `build_type_ref_graph`'s inner loop, extracted verbatim
+/// (further split of the same decomposition — `refs` is a write-only
+/// accumulator).
+fn collect_variant_case_refs(case: &IrVariantDecl, refs: &mut HashSet<String>) {
+    match &case.kind {
+        IrVariantKind::Tuple { fields } => {
+            for f in fields { collect_type_names(f, refs); }
+        }
+        IrVariantKind::Record { fields } => {
+            for f in fields { collect_type_names(&f.ty, refs); }
+        }
+        _ => {}
+    }
+}
+
+/// Phase 2 of `find_recursive_enums`, extracted verbatim (cog>30
+/// decomposition) — a type is recursive iff it can reach itself through
+/// ≥1 edge of the phase-1 reference graph (DFS per node).
+fn find_cycle_reachable_types(graph: &HashMap<String, HashSet<String>>) -> HashSet<String> {
     let mut recursive = HashSet::new();
     for start in graph.keys().cloned().collect::<Vec<_>>() {
         let mut stack: Vec<String> = graph[&start].iter().cloned().collect();

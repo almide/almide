@@ -66,74 +66,91 @@ struct BranchBalance<'a> {
     fn_name: &'a str,
 }
 
-impl IrVisitor for BranchBalance<'_> {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        match &expr.kind {
-            IrExprKind::Block { stmts, .. } => {
-                let saved = self.heap_vars.clone();
-                for stmt in stmts {
-                    if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
-                        if is_heap_type(ty) && !self.env_load_vars.contains(var) {
-                            self.heap_vars.insert(*var);
-                        }
-                    }
+impl BranchBalance<'_> {
+    /// `IrExprKind::Block` case of `visit_expr`, extracted verbatim
+    /// (cog>30 decomposition, pattern 2: uniform match arms, as an
+    /// inherent method since the arm bodies use `self.*` fields — mirrors
+    /// how `Concretizer`'s `visit_expr_mut` steps were extracted).
+    fn visit_expr_block(&mut self, expr: &IrExpr) {
+        let IrExprKind::Block { stmts, .. } = &expr.kind else { unreachable!() };
+        let saved = self.heap_vars.clone();
+        for stmt in stmts {
+            if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
+                if is_heap_type(ty) && !self.env_load_vars.contains(var) {
+                    self.heap_vars.insert(*var);
                 }
-                walk_expr(self, expr); // recurse stmts + tail with the extended heap_vars
-                self.heap_vars = saved;
             }
-            IrExprKind::If { cond, then, else_ } => {
-                self.visit_expr(cond);
-                // Both branches should Dec each outer heap var referenced in BOTH.
-                let then_decs = collect_decs_in_expr(then);
-                let else_decs = collect_decs_in_expr(else_);
-                let mut then_refs = HashSet::new();
-                let mut else_refs = HashSet::new();
-                collect_var_refs_expr(then, &mut then_refs);
-                collect_var_refs_expr(else_, &mut else_refs);
-                for var in &self.heap_vars {
-                    let in_both = then_refs.contains(var) && else_refs.contains(var);
-                    if !in_both { continue; }
-                    let in_then = then_decs.contains(var);
-                    let in_else = else_decs.contains(var);
-                    if in_then != in_else {
+        }
+        walk_expr(self, expr); // recurse stmts + tail with the extended heap_vars
+        self.heap_vars = saved;
+    }
+
+    /// `IrExprKind::If` case of `visit_expr`, extracted verbatim.
+    fn visit_expr_if(&mut self, expr: &IrExpr) {
+        let IrExprKind::If { cond, then, else_ } = &expr.kind else { unreachable!() };
+        self.visit_expr(cond);
+        // Both branches should Dec each outer heap var referenced in BOTH.
+        let then_decs = collect_decs_in_expr(then);
+        let else_decs = collect_decs_in_expr(else_);
+        let mut then_refs = HashSet::new();
+        let mut else_refs = HashSet::new();
+        collect_var_refs_expr(then, &mut then_refs);
+        collect_var_refs_expr(else_, &mut else_refs);
+        for var in &self.heap_vars {
+            let in_both = then_refs.contains(var) && else_refs.contains(var);
+            if !in_both { continue; }
+            let in_then = then_decs.contains(var);
+            let in_else = else_decs.contains(var);
+            if in_then != in_else {
+                let name = self.var_table.get(*var).name.as_str();
+                eprintln!(
+                    "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in {} but not {}",
+                    name, var.0, self.fn_name,
+                    if in_then { "then" } else { "else" },
+                    if in_then { "else" } else { "then" },
+                );
+            }
+        }
+        self.visit_expr(then);
+        self.visit_expr(else_);
+    }
+
+    /// `IrExprKind::Match` case of `visit_expr`, extracted verbatim.
+    fn visit_expr_match(&mut self, expr: &IrExpr) {
+        let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+        self.visit_expr(subject);
+        if arms.len() > 1 {
+            let arm_decs: Vec<HashSet<VarId>> = arms.iter()
+                .map(|arm| collect_decs_in_expr(&arm.body))
+                .collect();
+            let arm_refs: Vec<HashSet<VarId>> = arms.iter()
+                .map(|arm| { let mut r = HashSet::new(); collect_var_refs_expr(&arm.body, &mut r); r })
+                .collect();
+            for var in &self.heap_vars {
+                let ref_count = arm_refs.iter().filter(|r| r.contains(var)).count();
+                if ref_count < 2 { continue; }
+                let first_has = arm_decs[0].contains(var);
+                for (i, decs) in arm_decs.iter().enumerate().skip(1) {
+                    if decs.contains(var) != first_has {
                         let name = self.var_table.get(*var).name.as_str();
                         eprintln!(
-                            "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in {} but not {}",
-                            name, var.0, self.fn_name,
-                            if in_then { "then" } else { "else" },
-                            if in_then { "else" } else { "then" },
+                            "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in arm 0 but not arm {}",
+                            name, var.0, self.fn_name, i,
                         );
                     }
                 }
-                self.visit_expr(then);
-                self.visit_expr(else_);
             }
-            IrExprKind::Match { subject, arms } => {
-                self.visit_expr(subject);
-                if arms.len() > 1 {
-                    let arm_decs: Vec<HashSet<VarId>> = arms.iter()
-                        .map(|arm| collect_decs_in_expr(&arm.body))
-                        .collect();
-                    let arm_refs: Vec<HashSet<VarId>> = arms.iter()
-                        .map(|arm| { let mut r = HashSet::new(); collect_var_refs_expr(&arm.body, &mut r); r })
-                        .collect();
-                    for var in &self.heap_vars {
-                        let ref_count = arm_refs.iter().filter(|r| r.contains(var)).count();
-                        if ref_count < 2 { continue; }
-                        let first_has = arm_decs[0].contains(var);
-                        for (i, decs) in arm_decs.iter().enumerate().skip(1) {
-                            if decs.contains(var) != first_has {
-                                let name = self.var_table.get(*var).name.as_str();
-                                eprintln!(
-                                    "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in arm 0 but not arm {}",
-                                    name, var.0, self.fn_name, i,
-                                );
-                            }
-                        }
-                    }
-                }
-                for arm in arms { self.visit_expr(&arm.body); }
-            }
+        }
+        for arm in arms { self.visit_expr(&arm.body); }
+    }
+}
+
+impl IrVisitor for BranchBalance<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Block { .. } => self.visit_expr_block(expr),
+            IrExprKind::If { .. } => self.visit_expr_if(expr),
+            IrExprKind::Match { .. } => self.visit_expr_match(expr),
             _ => walk_expr(self, expr),
         }
     }
@@ -163,6 +180,50 @@ impl IrVisitor for DecCollector<'_> {
     }
 }
 
+/// `IrExprKind::Block { expr: Some(tail), .. }` case of
+/// `collect_all_tail_vars`, extracted verbatim (cog>30 decomposition,
+/// pattern 2). NOT merged with the `None`-tail arm below despite the
+/// surface similarity — they treat `IrStmtKind::Assign` differently
+/// (recurse here, no-op there), a deliberate tail-context distinction, not
+/// incidental duplication.
+fn collect_all_tail_vars_block_with_tail(stmts: &[IrStmt], tail: &IrExpr, vars: &mut HashSet<VarId>) {
+    // Variables in this block's tail
+    collect_var_refs_expr(tail, vars);
+    // Recurse into statements' values
+    for stmt in stmts {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
+            IrStmtKind::Assign { value, .. } => collect_all_tail_vars(value, vars),
+            IrStmtKind::Expr { expr } => collect_all_tail_vars(expr, vars),
+            IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
+            | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
+            | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
+            | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+            | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
+            | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
+        }
+    }
+    collect_all_tail_vars(tail, vars);
+}
+
+/// `IrExprKind::Block { expr: None, .. }` case of `collect_all_tail_vars`,
+/// extracted verbatim (cog>30 decomposition, pattern 2). See the
+/// `with_tail` sibling above for why this is NOT merged with it.
+fn collect_all_tail_vars_block_no_tail(stmts: &[IrStmt], vars: &mut HashSet<VarId>) {
+    for stmt in stmts {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
+            IrStmtKind::Assign { .. } | IrStmtKind::Expr { .. }
+            | IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
+            | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
+            | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
+            | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+            | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
+            | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
+        }
+    }
+}
+
 /// Recursively collect all variables used in tail expressions at any nesting level.
 fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
     // Tail-CONTEXT analysis: only positions that flow to a return are walked. A
@@ -171,39 +232,8 @@ fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
     // listed as explicit no-ops, not recursed — total by construction, semantics
     // unchanged.
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: Some(tail) } => {
-            // Variables in this block's tail
-            collect_var_refs_expr(tail, vars);
-            // Recurse into statements' values
-            for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
-                    IrStmtKind::Assign { value, .. } => collect_all_tail_vars(value, vars),
-                    IrStmtKind::Expr { expr } => collect_all_tail_vars(expr, vars),
-                    IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
-                    | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
-                    | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
-                    | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
-                }
-            }
-            collect_all_tail_vars(tail, vars);
-        }
-        IrExprKind::Block { stmts, expr: None } => {
-            for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
-                    IrStmtKind::Assign { .. } | IrStmtKind::Expr { .. }
-                    | IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
-                    | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
-                    | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
-                    | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
-                }
-            }
-        }
+        IrExprKind::Block { stmts, expr: Some(tail) } => collect_all_tail_vars_block_with_tail(stmts, tail, vars),
+        IrExprKind::Block { stmts, expr: None } => collect_all_tail_vars_block_no_tail(stmts, vars),
         IrExprKind::If { cond, then, else_ } => {
             collect_all_tail_vars(cond, vars);
             collect_all_tail_vars(then, vars);

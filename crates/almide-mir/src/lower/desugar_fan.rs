@@ -209,7 +209,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             // real Err path.
             if let Some(bodies) = fan_bodies(e, "race", &self.thunk_lets) {
                 let orig_ty = e.ty.clone();
-                let t0 = bodies.into_iter().next().unwrap();
+                let t0 = bodies.into_iter().next().expect("fan_bodies() never returns Some(bodies) with an empty bodies (elements.is_empty() is rejected internally)");
                 *e = if crate::lower::is_result_ty(&orig_ty) && !crate::lower::is_result_ty(&t0.ty) {
                     IrExpr {
                         kind: IrExprKind::ResultOk { expr: Box::new(t0) },

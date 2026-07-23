@@ -1,4 +1,5 @@
 use std::process::Command;
+use crate::{err, err_no_nl};
 
 const REPO: &str = "almide/almide";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -24,21 +25,21 @@ pub fn cmd_self_update(version: Option<&str>) {
         None => match fetch_latest_version() {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("error: failed to check latest version: {}", e);
+                err(&format!("error: failed to check latest version: {}", e));
                 std::process::exit(1);
             }
         },
     };
 
     if target_version == CURRENT_VERSION {
-        eprintln!("almide {} is already up to date.", CURRENT_VERSION);
+        err(&format!("almide {} is already up to date.", CURRENT_VERSION));
         return;
     }
 
-    eprintln!(
+    err(&format!(
         "Updating almide {} → {}",
         CURRENT_VERSION, target_version
-    );
+    ));
 
     let tag = format!("v{}", target_version);
     let archive = archive_name();
@@ -51,7 +52,7 @@ pub fn cmd_self_update(version: Option<&str>) {
 
     // Download archive
     let archive_path = format!("{}/{}", tmp, archive);
-    eprintln!("Downloading {}...", archive);
+    err(&format!("Downloading {}...", archive));
     curl_download(&format!("{}/{}", base_url, archive), &archive_path);
 
     // Download checksums
@@ -62,12 +63,15 @@ pub fn cmd_self_update(version: Option<&str>) {
     );
 
     // Verify checksum
-    eprintln!("Verifying checksum...");
+    err(&format!("Verifying checksum..."));
     verify_checksum(&archive_path, &checksum_path, &archive);
 
     // Extract
     let extract_dir = format!("{}/extracted", tmp);
-    std::fs::create_dir_all(&extract_dir).unwrap();
+    std::fs::create_dir_all(&extract_dir).unwrap_or_else(|e| {
+        err(&format!("error: failed to create extraction dir: {}", e));
+        std::process::exit(1);
+    });
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -75,11 +79,11 @@ pub fn cmd_self_update(version: Option<&str>) {
             .args(["xzf", &archive_path, "-C", &extract_dir])
             .status()
             .unwrap_or_else(|e| {
-                eprintln!("error: failed to extract archive: {}", e);
+                err(&format!("error: failed to extract archive: {}", e));
                 std::process::exit(1);
             });
         if !status.success() {
-            eprintln!("error: tar extraction failed");
+            err(&format!("error: tar extraction failed"));
             std::process::exit(1);
         }
     }
@@ -96,11 +100,11 @@ pub fn cmd_self_update(version: Option<&str>) {
             ])
             .status()
             .unwrap_or_else(|e| {
-                eprintln!("error: failed to extract archive: {}", e);
+                err(&format!("error: failed to extract archive: {}", e));
                 std::process::exit(1);
             });
         if !status.success() {
-            eprintln!("error: extraction failed");
+            err(&format!("error: extraction failed"));
             std::process::exit(1);
         }
     }
@@ -115,16 +119,16 @@ pub fn cmd_self_update(version: Option<&str>) {
     let extracted_binary = format!("{}/{}/{}", extract_dir, stem, binary_name);
 
     if !std::path::Path::new(&extracted_binary).exists() {
-        eprintln!(
+        err(&format!(
             "error: expected binary not found at {}",
             extracted_binary
-        );
+        ));
         std::process::exit(1);
     }
 
     // Replace current binary
     let current_exe = std::env::current_exe().unwrap_or_else(|e| {
-        eprintln!("error: cannot determine current executable path: {}", e);
+        err(&format!("error: cannot determine current executable path: {}", e));
         std::process::exit(1);
     });
 
@@ -133,12 +137,12 @@ pub fn cmd_self_update(version: Option<&str>) {
     // Cleanup
     let _ = std::fs::remove_dir_all(&tmp);
 
-    eprintln!("Updated to almide {}.", target_version);
+    err(&format!("Updated to almide {}.", target_version));
 
     // Verify
     let output = Command::new(current_exe).arg("--version").output();
     if let Ok(out) = output {
-        eprint!("{}", String::from_utf8_lossy(&out.stdout));
+        err_no_nl(&format!("{}", String::from_utf8_lossy(&out.stdout)));
     }
 }
 
@@ -193,20 +197,20 @@ fn curl_download(url: &str, dest: &str) {
         .args(["-fsSL", "-o", dest, url])
         .status()
         .unwrap_or_else(|e| {
-            eprintln!("error: curl not found: {}", e);
-            eprintln!("       curl is required for self-update");
+            err(&format!("error: curl not found: {}", e));
+            err(&format!("       curl is required for self-update"));
             std::process::exit(1);
         });
     if !status.success() {
-        eprintln!("error: download failed: {}", url);
-        eprintln!("       check that the version exists: https://github.com/{}/releases", REPO);
+        err(&format!("error: download failed: {}", url));
+        err(&format!("       check that the version exists: https://github.com/{}/releases", REPO));
         std::process::exit(1);
     }
 }
 
 fn verify_checksum(archive_path: &str, checksum_path: &str, archive_name: &str) {
     let checksums = std::fs::read_to_string(checksum_path).unwrap_or_else(|e| {
-        eprintln!("error: failed to read checksums: {}", e);
+        err(&format!("error: failed to read checksums: {}", e));
         std::process::exit(1);
     });
 
@@ -215,7 +219,7 @@ fn verify_checksum(archive_path: &str, checksum_path: &str, archive_name: &str) 
         .find(|line| line.contains(archive_name))
         .and_then(|line| line.split_whitespace().next())
         .unwrap_or_else(|| {
-            eprintln!("error: checksum not found for {}", archive_name);
+            err(&format!("error: checksum not found for {}", archive_name));
             std::process::exit(1);
         });
 
@@ -235,14 +239,14 @@ fn verify_checksum(archive_path: &str, checksum_path: &str, archive_name: &str) 
     };
 
     if actual.is_empty() {
-        eprintln!("warning: could not verify checksum (sha256sum/shasum not found)");
+        err(&format!("warning: could not verify checksum (sha256sum/shasum not found)"));
         return;
     }
 
     if expected != actual {
-        eprintln!("error: checksum mismatch");
-        eprintln!("       expected: {}", expected);
-        eprintln!("       got:      {}", actual);
+        err(&format!("error: checksum mismatch"));
+        err(&format!("       expected: {}", expected));
+        err(&format!("       got:      {}", actual));
         std::process::exit(1);
     }
 }
@@ -268,11 +272,14 @@ fn replace_binary(new_path: &str, current_exe: &std::path::Path) {
     {
         // Unix: copy new binary over the current one (inodes allow this)
         // Use a temp file + rename for atomicity
-        let dir = current_exe.parent().unwrap();
+        let dir = current_exe.parent().unwrap_or_else(|| {
+            err("error: could not determine directory of the running executable");
+            std::process::exit(1);
+        });
         let tmp_path = dir.join(".almide-update.tmp");
 
         std::fs::copy(new_path, &tmp_path).unwrap_or_else(|e| {
-            eprintln!("error: failed to copy new binary: {}", e);
+            err(&format!("error: failed to copy new binary: {}", e));
             std::process::exit(1);
         });
 
@@ -286,8 +293,8 @@ fn replace_binary(new_path: &str, current_exe: &std::path::Path) {
         std::fs::rename(&tmp_path, current_exe).unwrap_or_else(|e| {
             // rename fails across filesystems; fall back to copy
             if std::fs::copy(&tmp_path, current_exe).is_err() {
-                eprintln!("error: failed to replace binary: {}", e);
-                eprintln!("       try: sudo cp {} {}", new_path, current_exe.display());
+                err(&format!("error: failed to replace binary: {}", e));
+                err(&format!("       try: sudo cp {} {}", new_path, current_exe.display()));
                 let _ = std::fs::remove_file(&tmp_path);
                 std::process::exit(1);
             }
@@ -301,13 +308,13 @@ fn replace_binary(new_path: &str, current_exe: &std::path::Path) {
         let old_path = current_exe.with_extension("old.exe");
         let _ = std::fs::remove_file(&old_path);
         std::fs::rename(current_exe, &old_path).unwrap_or_else(|e| {
-            eprintln!("error: failed to rename current binary: {}", e);
+            err(&format!("error: failed to rename current binary: {}", e));
             std::process::exit(1);
         });
         std::fs::copy(new_path, current_exe).unwrap_or_else(|e| {
             // Rollback
             let _ = std::fs::rename(&old_path, current_exe);
-            eprintln!("error: failed to copy new binary: {}", e);
+            err(&format!("error: failed to copy new binary: {}", e));
             std::process::exit(1);
         });
         let _ = std::fs::remove_file(&old_path);

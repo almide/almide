@@ -2,6 +2,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use crate::project::{Dependency, FetchedDep, Project, LockedDep, PkgId, cache_dir, parse_lock_file, parse_toml, write_lock_file};
+use crate::err;
 
 /// Get the current HEAD commit hash in a git repo
 fn git_head_hash(repo_dir: &Path) -> Result<String, String> {
@@ -21,50 +22,43 @@ pub fn fetch_dep(dep: &Dependency) -> Result<PathBuf, String> {
     fetch_dep_with_lock(dep, None)
 }
 
-/// Fetch a dependency, optionally pinned to a locked commit hash.
-pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Result<PathBuf, String> {
-    // Path dependency: use local directory directly, no fetch needed.
-    if let Some(ref path) = dep.path {
-        let p = PathBuf::from(path);
-        if p.exists() { return Ok(p); }
-        return Err(format!("path dependency '{}' not found: {}", dep.name, path));
-    }
+/// `fetch_dep_with_lock`'s locked-commit path: clone into a commit-keyed
+/// cache dir and checkout the exact commit. Extracted verbatim.
+fn fetch_dep_at_commit(dep: &Dependency, commit: &str) -> Result<PathBuf, String> {
     let cache = cache_dir();
-    let ref_name = dep.tag.as_deref()
-        .or(dep.branch.as_deref())
-        .unwrap_or("main");
-
-    // If locked to a specific commit, use commit-based cache dir
-    let dep_dir = if let Some(commit) = locked_commit {
-        let dir = cache.join(&dep.name).join(&commit[..12.min(commit.len())]);
-        if dir.exists() {
-            return Ok(dir);
-        }
-        // Clone and checkout exact commit
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create cache dir: {}", e))?;
-        eprintln!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]);
-        let output = Command::new("git")
-            .arg("clone").arg(&dep.git).arg(&dir)
-            .output()
-            .map_err(|e| format!("Failed to run git: {}", e))?;
-        if !output.status.success() {
-            let _ = std::fs::remove_dir_all(&dir);
-            return Err(format!("Failed to fetch {}: {}", dep.name, String::from_utf8_lossy(&output.stderr)));
-        }
-        let checkout = Command::new("git")
-            .arg("-C").arg(&dir)
-            .arg("checkout").arg(commit)
-            .output()
-            .map_err(|e| format!("Failed to checkout commit: {}", e))?;
-        if !checkout.status.success() {
-            let _ = std::fs::remove_dir_all(&dir);
-            return Err(format!("Failed to checkout {} at {}: {}", dep.name, commit, String::from_utf8_lossy(&checkout.stderr)));
-        }
+    let dir = cache.join(&dep.name).join(&commit[..12.min(commit.len())]);
+    if dir.exists() {
         return Ok(dir);
-    } else {
-        cache.join(&dep.name).join(ref_name)
-    };
+    }
+    // Clone and checkout exact commit
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
+    err(&format!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]));
+    let output = Command::new("git")
+        .arg("clone").arg(&dep.git).arg(&dir)
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(format!("Failed to fetch {}: {}", dep.name, String::from_utf8_lossy(&output.stderr)));
+    }
+    let checkout = Command::new("git")
+        .arg("-C").arg(&dir)
+        .arg("checkout").arg(commit)
+        .output()
+        .map_err(|e| format!("Failed to checkout commit: {}", e))?;
+    if !checkout.status.success() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(format!("Failed to checkout {} at {}: {}", dep.name, commit, String::from_utf8_lossy(&checkout.stderr)));
+    }
+    Ok(dir)
+}
+
+/// `fetch_dep_with_lock`'s ref-based path (tag/branch, no lock pin): clone
+/// into a ref-keyed cache dir. Extracted verbatim.
+fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str) -> Result<PathBuf, String> {
+    let cache = cache_dir();
+    let dep_dir = cache.join(&dep.name).join(ref_name);
 
     if dep_dir.exists() {
         return Ok(dep_dir);
@@ -73,7 +67,7 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
     std::fs::create_dir_all(&dep_dir)
         .map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
-    eprintln!("Fetching {} from {} ({})", dep.name, dep.git, ref_name);
+    err(&format!("Fetching {} from {} ({})", dep.name, dep.git, ref_name));
 
     let mut cmd = Command::new("git");
     cmd.arg("clone")
@@ -97,6 +91,26 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
     }
 
     Ok(dep_dir)
+}
+
+/// Fetch a dependency, optionally pinned to a locked commit hash.
+pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Result<PathBuf, String> {
+    // Path dependency: use local directory directly, no fetch needed.
+    if let Some(ref path) = dep.path {
+        let p = PathBuf::from(path);
+        if p.exists() { return Ok(p); }
+        return Err(format!("path dependency '{}' not found: {}", dep.name, path));
+    }
+
+    // If locked to a specific commit, use commit-based cache dir
+    if let Some(commit) = locked_commit {
+        return fetch_dep_at_commit(dep, commit);
+    }
+
+    let ref_name = dep.tag.as_deref()
+        .or(dep.branch.as_deref())
+        .unwrap_or("main");
+    fetch_dep_at_ref(dep, ref_name)
 }
 
 /// Update almide.lock after fetching all dependencies.
@@ -171,6 +185,80 @@ pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
     Ok(fetched)
 }
 
+/// After fetching a dependency at `path`, read its own `almide.toml` (if
+/// any) for its declared package name, src dir, and transitive deps —
+/// falling back to the requesting `Dependency`'s own name when there's no
+/// manifest or it fails to parse. Extracted verbatim from
+/// `fetch_deps_recursive`'s per-dep body (the 3 branches computed the same
+/// `src_dir` expression independently; hoisted out here, same result).
+fn resolve_fetched_dep_manifest(path: &Path, fallback_name: &str) -> (String, PathBuf, Vec<Dependency>) {
+    let src_dir = if path.join("src").is_dir() { path.join("src") } else { path.to_path_buf() };
+    let dep_toml = path.join("almide.toml");
+    if !dep_toml.exists() {
+        return (fallback_name.to_string(), src_dir, vec![]);
+    }
+    match parse_toml(&dep_toml) {
+        Ok(dep_project) => (dep_project.package.name, src_dir, dep_project.dependencies),
+        Err(_) => (fallback_name.to_string(), src_dir, vec![]),
+    }
+}
+
+/// `fetch_deps_recursive`'s per-dependency body: version/pkg-id resolution,
+/// diamond-dependency major-version-clash warning, dedup via `visited`,
+/// fetch (with lock pin if any), resolve the dependency's own manifest,
+/// record it, then recurse into its own transitive deps. Extracted
+/// verbatim.
+fn fetch_one_dep_recursive(
+    dep: &Dependency,
+    locked: &[LockedDep],
+    fetched: &mut Vec<FetchedDep>,
+    visited: &mut std::collections::HashSet<String>,
+) -> Result<(), String> {
+    let version_str = resolve_dep_version(dep);
+    let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
+
+    if fetched.iter().any(|f| f.pkg_id == pkg_id) {
+        return Ok(());
+    }
+
+    // Detect different major versions of the same package (diamond with version split)
+    if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
+        err(&format!("warning: package '{}' required at two different major versions", pkg_id.name));
+        err(&format!("  → {} (already loaded)", existing.pkg_id));
+        err(&format!("  → {} (newly required)", pkg_id));
+        err(&format!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major));
+    }
+
+    let visit_key = if let Some(ref p) = dep.path {
+        format!("path:{}@{}", p, version_str)
+    } else {
+        format!("{}@{}", dep.git, version_str)
+    };
+    if visited.contains(&visit_key) {
+        return Ok(());
+    }
+    visited.insert(visit_key);
+
+    // Use locked commit if available
+    let locked_commit = locked.iter()
+        .find(|l| l.name == dep.name)
+        .map(|l| l.commit.as_str());
+    let path = fetch_dep_with_lock(dep, locked_commit)?;
+
+    let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name);
+
+    let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
+    fetched.push(FetchedDep {
+        pkg_id: actual_pkg_id,
+        source_dir,
+    });
+
+    if !transitive_deps.is_empty() {
+        fetch_deps_recursive(&transitive_deps, locked, fetched, visited)?;
+    }
+    Ok(())
+}
+
 fn fetch_deps_recursive(
     deps: &[Dependency],
     locked: &[LockedDep],
@@ -178,61 +266,7 @@ fn fetch_deps_recursive(
     visited: &mut std::collections::HashSet<String>,
 ) -> Result<(), String> {
     for dep in deps {
-        let version_str = resolve_dep_version(dep);
-        let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
-
-        if fetched.iter().any(|f| f.pkg_id == pkg_id) {
-            continue;
-        }
-
-        // Detect different major versions of the same package (diamond with version split)
-        if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
-            eprintln!("warning: package '{}' required at two different major versions", pkg_id.name);
-            eprintln!("  → {} (already loaded)", existing.pkg_id);
-            eprintln!("  → {} (newly required)", pkg_id);
-            eprintln!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major);
-        }
-
-        let visit_key = if let Some(ref p) = dep.path {
-            format!("path:{}@{}", p, version_str)
-        } else {
-            format!("{}@{}", dep.git, version_str)
-        };
-        if visited.contains(&visit_key) {
-            continue;
-        }
-        visited.insert(visit_key);
-
-        // Use locked commit if available
-        let locked_commit = locked.iter()
-            .find(|l| l.name == dep.name)
-            .map(|l| l.commit.as_str());
-        let path = fetch_dep_with_lock(dep, locked_commit)?;
-
-        let dep_toml = path.join("almide.toml");
-        let (module_name, source_dir, transitive_deps) = if dep_toml.exists() {
-            if let Ok(dep_project) = parse_toml(&dep_toml) {
-                let name = dep_project.package.name;
-                let src_dir = if path.join("src").is_dir() { path.join("src") } else { path.clone() };
-                (name, src_dir, dep_project.dependencies)
-            } else {
-                let src_dir = if path.join("src").is_dir() { path.join("src") } else { path.clone() };
-                (dep.name.clone(), src_dir, vec![])
-            }
-        } else {
-            let src_dir = if path.join("src").is_dir() { path.join("src") } else { path.clone() };
-            (dep.name.clone(), src_dir, vec![])
-        };
-
-        let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
-        fetched.push(FetchedDep {
-            pkg_id: actual_pkg_id,
-            source_dir,
-        });
-
-        if !transitive_deps.is_empty() {
-            fetch_deps_recursive(&transitive_deps, locked, fetched, visited)?;
-        }
+        fetch_one_dep_recursive(dep, locked, fetched, visited)?;
     }
     Ok(())
 }
@@ -301,6 +335,6 @@ pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>) -> Result<(), S
     std::fs::write(toml_path, content)
         .map_err(|e| format!("Failed to write almide.toml: {}", e))?;
 
-    eprintln!("Added {} to almide.toml", name);
+    err(&format!("Added {} to almide.toml", name));
     Ok(())
 }

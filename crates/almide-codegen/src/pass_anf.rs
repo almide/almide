@@ -106,114 +106,20 @@ fn wrap_with_lets(expr: IrExpr, lifted: Vec<IrStmt>) -> IrExpr {
 /// ANF-transform an expression tree. Lifts heap sub-expressions to let bindings.
 fn anf_expr(expr: &mut IrExpr, var_table: &mut VarTable, counter: &mut u32) {
     match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            for stmt in stmts.iter_mut() {
-                match &mut stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
-                        anf_expr(value, var_table, counter),
-                    IrStmtKind::Expr { expr } =>
-                        anf_expr(expr, var_table, counter),
-                    IrStmtKind::Guard { cond, else_ } => {
-                        anf_expr(cond, var_table, counter);
-                        anf_expr(else_, var_table, counter);
-                    }
-                    // Explicit-preserve: statement kinds carrying no heap
-                    // sub-expression to ANF-lift (or only simple var/key refs).
-                    // Listed so a new IrStmtKind is a compile error, not a drop.
-                    IrStmtKind::BindDestructure { .. }
-                    | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. }
-                    | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Comment { .. }
-                    | IrStmtKind::RcInc { .. }
-                    | IrStmtKind::RcDec { .. }
-                    | IrStmtKind::ListSwap { .. }
-                    | IrStmtKind::ListReverse { .. }
-                    | IrStmtKind::ListRotateLeft { .. }
-                    | IrStmtKind::ListCopySlice { .. } => {}
-                }
-            }
-            if let Some(t) = tail { anf_expr(t, var_table, counter); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            anf_expr(cond, var_table, counter);
-            anf_expr(then, var_table, counter);
-            anf_expr(else_, var_table, counter);
-        }
-        IrExprKind::Match { subject, arms } => {
-            anf_expr(subject, var_table, counter);
-            for arm in arms { anf_expr(&mut arm.body, var_table, counter); }
-        }
-        IrExprKind::While { cond, body } => {
-            anf_expr(cond, var_table, counter);
-            for stmt in body.iter_mut() {
-                match &mut stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
-                        anf_expr(value, var_table, counter),
-                    IrStmtKind::Expr { expr } => anf_expr(expr, var_table, counter),
-                    // Explicit-preserve: no heap sub-expression to ANF-lift.
-                    IrStmtKind::Guard { .. }
-                    | IrStmtKind::BindDestructure { .. }
-                    | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. }
-                    | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Comment { .. }
-                    | IrStmtKind::RcInc { .. }
-                    | IrStmtKind::RcDec { .. }
-                    | IrStmtKind::ListSwap { .. }
-                    | IrStmtKind::ListReverse { .. }
-                    | IrStmtKind::ListRotateLeft { .. }
-                    | IrStmtKind::ListCopySlice { .. } => {}
-                }
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            anf_expr(iterable, var_table, counter);
-            for stmt in body.iter_mut() {
-                match &mut stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
-                        anf_expr(value, var_table, counter),
-                    IrStmtKind::Expr { expr } => anf_expr(expr, var_table, counter),
-                    // Explicit-preserve: no heap sub-expression to ANF-lift.
-                    IrStmtKind::Guard { .. }
-                    | IrStmtKind::BindDestructure { .. }
-                    | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. }
-                    | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Comment { .. }
-                    | IrStmtKind::RcInc { .. }
-                    | IrStmtKind::RcDec { .. }
-                    | IrStmtKind::ListSwap { .. }
-                    | IrStmtKind::ListReverse { .. }
-                    | IrStmtKind::ListRotateLeft { .. }
-                    | IrStmtKind::ListCopySlice { .. } => {}
-                }
-            }
-        }
+        IrExprKind::Block { stmts, expr: tail } => anf_expr_block(stmts, tail, var_table, counter),
+        IrExprKind::If { cond, then, else_ } => anf_expr_if(cond, then, else_, var_table, counter),
+        IrExprKind::Match { subject, arms } => anf_expr_match(subject, arms, var_table, counter),
+        IrExprKind::While { cond, body } => anf_expr_while(cond, body, var_table, counter),
+        IrExprKind::ForIn { iterable, body, .. } => anf_expr_for_in(iterable, body, var_table, counter),
         IrExprKind::Lambda { body, .. } => { anf_expr(body, var_table, counter); }
 
         // Compound expressions with sub-expressions: recurse into children
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-            for elem in elements.iter_mut() { anf_expr(elem, var_table, counter); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, val) in fields.iter_mut() { anf_expr(val, var_table, counter); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            anf_expr(base, var_table, counter);
-            for (_, val) in fields.iter_mut() { anf_expr(val, var_table, counter); }
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries.iter_mut() {
-                anf_expr(k, var_table, counter);
-                anf_expr(v, var_table, counter);
-            }
-        }
-        IrExprKind::StringInterp { parts } => {
-            for part in parts.iter_mut() {
-                if let IrStringPart::Expr { expr: e } = part { anf_expr(e, var_table, counter); }
-            }
-        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } =>
+            anf_expr_elements(elements, var_table, counter),
+        IrExprKind::Record { fields, .. } => anf_expr_field_values(fields, var_table, counter),
+        IrExprKind::SpreadRecord { base, fields } => anf_expr_spread_record(base, fields, var_table, counter),
+        IrExprKind::MapLiteral { entries } => anf_expr_map_literal(entries, var_table, counter),
+        IrExprKind::StringInterp { parts } => anf_expr_string_interp(parts, var_table, counter),
         IrExprKind::OptionSome { expr: inner }
         | IrExprKind::ResultOk { expr: inner }
         | IrExprKind::ResultErr { expr: inner }
@@ -248,6 +154,122 @@ fn anf_expr(expr: &mut IrExpr, var_table: &mut VarTable, counter: &mut u32) {
             // For Call, RuntimeCall, BinOp: lift heap sub-args
             anf_lift_children(expr, var_table, counter);
         }
+    }
+}
+
+/// ANF-transform a statement's value/condition sub-expressions, for the
+/// `Block` arm of [`anf_expr`] (statements where `Guard` is meaningfully
+/// ANF'd, unlike loop bodies — see [`anf_loop_stmt`]).
+fn anf_block_stmt(stmt: &mut IrStmt, var_table: &mut VarTable, counter: &mut u32) {
+    match &mut stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
+            anf_expr(value, var_table, counter),
+        IrStmtKind::Expr { expr } =>
+            anf_expr(expr, var_table, counter),
+        IrStmtKind::Guard { cond, else_ } => {
+            anf_expr(cond, var_table, counter);
+            anf_expr(else_, var_table, counter);
+        }
+        // Explicit-preserve: statement kinds carrying no heap
+        // sub-expression to ANF-lift (or only simple var/key refs).
+        // Listed so a new IrStmtKind is a compile error, not a drop.
+        IrStmtKind::BindDestructure { .. }
+        | IrStmtKind::IndexAssign { .. }
+        | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::FieldAssign { .. }
+        | IrStmtKind::Comment { .. }
+        | IrStmtKind::RcInc { .. }
+        | IrStmtKind::RcDec { .. }
+        | IrStmtKind::ListSwap { .. }
+        | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. }
+        | IrStmtKind::ListCopySlice { .. } => {}
+    }
+}
+
+/// `Block { stmts, expr: tail }` arm of [`anf_expr`].
+fn anf_expr_block(stmts: &mut [IrStmt], tail: &mut Option<Box<IrExpr>>, var_table: &mut VarTable, counter: &mut u32) {
+    for stmt in stmts.iter_mut() { anf_block_stmt(stmt, var_table, counter); }
+    if let Some(t) = tail { anf_expr(t, var_table, counter); }
+}
+
+/// `If { cond, then, else_ }` arm of [`anf_expr`].
+fn anf_expr_if(cond: &mut IrExpr, then: &mut IrExpr, else_: &mut IrExpr, var_table: &mut VarTable, counter: &mut u32) {
+    anf_expr(cond, var_table, counter);
+    anf_expr(then, var_table, counter);
+    anf_expr(else_, var_table, counter);
+}
+
+/// `Match { subject, arms }` arm of [`anf_expr`].
+fn anf_expr_match(subject: &mut IrExpr, arms: &mut [IrMatchArm], var_table: &mut VarTable, counter: &mut u32) {
+    anf_expr(subject, var_table, counter);
+    for arm in arms { anf_expr(&mut arm.body, var_table, counter); }
+}
+
+/// ANF-transform a statement's value sub-expression, for a loop body
+/// (`While` / `ForIn` arms of [`anf_expr`]). Unlike [`anf_block_stmt`],
+/// `Guard` inside a loop body carries no heap sub-expression to ANF-lift.
+fn anf_loop_stmt(stmt: &mut IrStmt, var_table: &mut VarTable, counter: &mut u32) {
+    match &mut stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
+            anf_expr(value, var_table, counter),
+        IrStmtKind::Expr { expr } => anf_expr(expr, var_table, counter),
+        // Explicit-preserve: no heap sub-expression to ANF-lift.
+        IrStmtKind::Guard { .. }
+        | IrStmtKind::BindDestructure { .. }
+        | IrStmtKind::IndexAssign { .. }
+        | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::FieldAssign { .. }
+        | IrStmtKind::Comment { .. }
+        | IrStmtKind::RcInc { .. }
+        | IrStmtKind::RcDec { .. }
+        | IrStmtKind::ListSwap { .. }
+        | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. }
+        | IrStmtKind::ListCopySlice { .. } => {}
+    }
+}
+
+/// `While { cond, body }` arm of [`anf_expr`].
+fn anf_expr_while(cond: &mut IrExpr, body: &mut [IrStmt], var_table: &mut VarTable, counter: &mut u32) {
+    anf_expr(cond, var_table, counter);
+    for stmt in body.iter_mut() { anf_loop_stmt(stmt, var_table, counter); }
+}
+
+/// `ForIn { iterable, body, .. }` arm of [`anf_expr`].
+fn anf_expr_for_in(iterable: &mut IrExpr, body: &mut [IrStmt], var_table: &mut VarTable, counter: &mut u32) {
+    anf_expr(iterable, var_table, counter);
+    for stmt in body.iter_mut() { anf_loop_stmt(stmt, var_table, counter); }
+}
+
+/// `List { elements } | Tuple { elements } | Fan { exprs: elements }` arm of [`anf_expr`].
+fn anf_expr_elements(elements: &mut [IrExpr], var_table: &mut VarTable, counter: &mut u32) {
+    for elem in elements.iter_mut() { anf_expr(elem, var_table, counter); }
+}
+
+/// `Record { fields, .. }` arm of [`anf_expr`].
+fn anf_expr_field_values(fields: &mut [(almide_base::intern::Sym, IrExpr)], var_table: &mut VarTable, counter: &mut u32) {
+    for (_, val) in fields.iter_mut() { anf_expr(val, var_table, counter); }
+}
+
+/// `SpreadRecord { base, fields }` arm of [`anf_expr`].
+fn anf_expr_spread_record(base: &mut IrExpr, fields: &mut [(almide_base::intern::Sym, IrExpr)], var_table: &mut VarTable, counter: &mut u32) {
+    anf_expr(base, var_table, counter);
+    for (_, val) in fields.iter_mut() { anf_expr(val, var_table, counter); }
+}
+
+/// `MapLiteral { entries }` arm of [`anf_expr`].
+fn anf_expr_map_literal(entries: &mut [(IrExpr, IrExpr)], var_table: &mut VarTable, counter: &mut u32) {
+    for (k, v) in entries.iter_mut() {
+        anf_expr(k, var_table, counter);
+        anf_expr(v, var_table, counter);
+    }
+}
+
+/// `StringInterp { parts }` arm of [`anf_expr`].
+fn anf_expr_string_interp(parts: &mut [IrStringPart], var_table: &mut VarTable, counter: &mut u32) {
+    for part in parts.iter_mut() {
+        if let IrStringPart::Expr { expr: e } = part { anf_expr(e, var_table, counter); }
     }
 }
 
@@ -380,7 +402,16 @@ impl NanoPass for AnfPass {
 // ── Postcondition: verify all heap-typed args are Var after ANF ──────
 
 fn expr_kind_name(kind: &IrExprKind) -> &'static str {
-    match kind {
+    expr_kind_name_group_a(kind)
+        .or_else(|| expr_kind_name_group_b(kind))
+        .unwrap_or_else(|| expr_kind_name_group_c(kind))
+}
+
+/// First third of `expr_kind_name`'s arms, extracted (cog>30 decomposition,
+/// pattern 1 — independent name-router arms split into groups; mirrors the
+/// `list_call_name` recipe).
+fn expr_kind_name_group_a(kind: &IrExprKind) -> Option<&'static str> {
+    Some(match kind {
         IrExprKind::Var { .. } => "Var",
         IrExprKind::LitInt { .. } => "LitInt",
         IrExprKind::LitFloat { .. } => "LitFloat",
@@ -391,6 +422,13 @@ fn expr_kind_name(kind: &IrExprKind) -> &'static str {
         IrExprKind::RuntimeCall { .. } => "RuntimeCall",
         IrExprKind::BinOp { .. } => "BinOp",
         IrExprKind::UnOp { .. } => "UnOp",
+        _ => return None,
+    })
+}
+
+/// Second third of `expr_kind_name`'s arms, extracted (cog>30 decomposition).
+fn expr_kind_name_group_b(kind: &IrExprKind) -> Option<&'static str> {
+    Some(match kind {
         IrExprKind::If { .. } => "If",
         IrExprKind::Match { .. } => "Match",
         IrExprKind::Block { .. } => "Block",
@@ -401,6 +439,13 @@ fn expr_kind_name(kind: &IrExprKind) -> &'static str {
         IrExprKind::MapLiteral { .. } => "MapLiteral",
         IrExprKind::StringInterp { .. } => "StringInterp",
         IrExprKind::ClosureCreate { .. } => "ClosureCreate",
+        _ => return None,
+    })
+}
+
+/// Final third of `expr_kind_name`'s arms, extracted (cog>30 decomposition).
+fn expr_kind_name_group_c(kind: &IrExprKind) -> &'static str {
+    match kind {
         IrExprKind::EnvLoad { .. } => "EnvLoad",
         IrExprKind::Member { .. } => "Member",
         IrExprKind::IndexAccess { .. } => "IndexAccess",

@@ -1,16 +1,17 @@
 use std::io::{self, Write, BufRead};
 use std::path::PathBuf;
+use crate::{out, out_no_nl, err};
 
 pub fn run_repl() {
-    println!("Almide REPL v{} — type expressions to evaluate, :q to quit",
-             env!("CARGO_PKG_VERSION"));
-    println!();
+    out(&format!("Almide REPL v{} — type expressions to evaluate, :q to quit",
+             env!("CARGO_PKG_VERSION")));
+    out("");
 
     let mut session = Session::new();
     let stdin = io::stdin();
 
     loop {
-        print!(">>> ");
+        out_no_nl(&format!(">>> "));
         io::stdout().flush().ok();
 
         let mut line = String::new();
@@ -26,7 +27,7 @@ pub fn run_repl() {
                 ":h" | ":help" => print_help(),
                 ":history" => session.print_history(),
                 ":clear" => session.clear(),
-                _ => println!("Unknown command: {}. Type :h for help.", input),
+                _ => out(&format!("Unknown command: {}. Type :h for help.", input)),
             }
             continue;
         }
@@ -37,31 +38,46 @@ pub fn run_repl() {
 
 enum Kind { TopLevel, Body, Expr }
 
-fn classify(input: &str) -> Kind {
-    let t = input.trim_start();
-    if t.starts_with("fn ") || t.starts_with("effect fn ")
-        || t.starts_with("type ") || t.starts_with("mod type ")
-        || t.starts_with("import ")
-    {
-        return Kind::TopLevel;
-    }
-    if t.starts_with("let ") || t.starts_with("var ") || t.starts_with("for ") {
-        return Kind::Body;
-    }
-    // Assignment: `ident = expr` (not `==` or `=>`)
+/// `classify`'s top-level-declaration prefix check. Converted to a data
+/// table + linear scan (same technique as `lookup_keyword_info` in
+/// lsp_p2.rs) — cyclomatic complexity counts each `||` branch, so a flat
+/// table genuinely lowers it rather than just moving it around.
+fn is_top_level_prefix(t: &str) -> bool {
+    const PREFIXES: &[&str] = &["fn ", "effect fn ", "type ", "mod type ", "import "];
+    PREFIXES.iter().any(|p| t.starts_with(p))
+}
+
+/// `classify`'s statement-prefix check (`let`/`var`/`for`). Same table
+/// technique as `is_top_level_prefix`.
+fn is_body_prefix(t: &str) -> bool {
+    const PREFIXES: &[&str] = &["let ", "var ", "for "];
+    PREFIXES.iter().any(|p| t.starts_with(p))
+}
+
+/// `classify`'s assignment-detection scan: `ident = expr` (not `==` or
+/// `=>`). Extracted verbatim.
+fn looks_like_assignment(t: &str) -> bool {
     let bytes = t.as_bytes();
     let mut i = 0;
     while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'.') {
         i += 1;
     }
-    if i > 0 {
-        while i < bytes.len() && bytes[i] == b' ' { i += 1; }
-        if i < bytes.len() && bytes[i] == b'='
-            && bytes.get(i + 1) != Some(&b'=')
-            && bytes.get(i + 1) != Some(&b'>')
-        {
-            return Kind::Body;
-        }
+    if i == 0 {
+        return false;
+    }
+    while i < bytes.len() && bytes[i] == b' ' { i += 1; }
+    i < bytes.len() && bytes[i] == b'='
+        && bytes.get(i + 1) != Some(&b'=')
+        && bytes.get(i + 1) != Some(&b'>')
+}
+
+fn classify(input: &str) -> Kind {
+    let t = input.trim_start();
+    if is_top_level_prefix(t) {
+        return Kind::TopLevel;
+    }
+    if is_body_prefix(t) || looks_like_assignment(t) {
+        return Kind::Body;
     }
     Kind::Expr
 }
@@ -113,10 +129,10 @@ impl Session {
     fn eval_expr(&mut self, input: &str) {
         let source = build_program(&self.top, &self.body, Some(input));
         match self.compile_and_run(&source) {
-            Ok(out) => {
-                let out = out.trim();
-                if !out.is_empty() {
-                    println!("{}", out);
+            Ok(result) => {
+                let result = result.trim();
+                if !result.is_empty() {
+                    out(&format!("{}", result));
                 }
             }
             Err(_) => {} // errors already printed by compiler / cargo
@@ -126,7 +142,8 @@ impl Session {
     fn compile(&self, source: &str) -> Result<String, String> {
         let path = self.source_path();
         std::fs::write(&path, source).map_err(|e| e.to_string())?;
-        crate::try_compile(path.to_str().unwrap(), false)
+        let path_str = path.to_str().ok_or_else(|| format!("REPL source path is not valid UTF-8: {}", path.display()))?;
+        crate::try_compile(path_str, false)
     }
 
     fn compile_quiet(&self, source: &str) -> Result<String, String> {
@@ -150,7 +167,7 @@ impl Session {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if !stderr.is_empty() {
-                eprintln!("{}", stderr.trim());
+                err(&format!("{}", stderr.trim()));
             }
             return Err("runtime error".into());
         }
@@ -163,14 +180,14 @@ impl Session {
 
     fn print_history(&self) {
         for (i, h) in self.history.iter().enumerate() {
-            println!("{:>3}  {}", i + 1, h);
+            out(&format!("{:>3}  {}", i + 1, h));
         }
     }
 
     fn clear(&mut self) {
         self.top.clear();
         self.body.clear();
-        println!("Session cleared.");
+        out(&format!("Session cleared."));
     }
 }
 
@@ -199,16 +216,16 @@ fn build_program(top: &[String], body: &[String], expr: Option<&str>) -> String 
 }
 
 fn print_help() {
-    println!("Commands:");
-    println!("  :q, :quit    Exit");
-    println!("  :h, :help    Show this help");
-    println!("  :history     Show evaluation history");
-    println!("  :clear       Clear session state");
-    println!();
-    println!("Examples:");
-    println!("  >>> 1 + 2");
-    println!("  3");
-    println!("  >>> let name = \"world\"");
-    println!("  >>> \"Hello, \" + name");
-    println!("  Hello, world");
+    out(&format!("Commands:"));
+    out(&format!("  :q, :quit    Exit"));
+    out(&format!("  :h, :help    Show this help"));
+    out(&format!("  :history     Show evaluation history"));
+    out(&format!("  :clear       Clear session state"));
+    out("");
+    out(&format!("Examples:"));
+    out(&format!("  >>> 1 + 2"));
+    out(&format!("  3"));
+    out(&format!("  >>> let name = \"world\""));
+    out(&format!("  >>> \"Hello, \" + name"));
+    out(&format!("  Hello, world"));
 }

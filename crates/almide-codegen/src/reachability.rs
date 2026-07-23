@@ -107,8 +107,16 @@ pub(super) fn compute_reachable_fn_names(
     program: &IrProgram,
     roots: impl IntoIterator<Item = String>,
 ) -> HashSet<String> {
-    // Index every defined function body by all of its registered key spellings.
-    // A single body can be enqueued via any of its names.
+    let by_name = index_fn_bodies_by_name(program);
+    bfs_reachable(&by_name, roots)
+}
+
+/// Function-body indexing phase of `compute_reachable_fn_names`, extracted
+/// verbatim (cog>30 decomposition, sequential-phase pattern — the BFS
+/// phase below only reads this index, never mutates it back). Indexes
+/// every defined function body by all of its registered key spellings —
+/// a single body can be enqueued via any of its names.
+fn index_fn_bodies_by_name(program: &IrProgram) -> std::collections::HashMap<String, &IrExpr> {
     let mut by_name: std::collections::HashMap<String, &IrExpr> = std::collections::HashMap::new();
     for f in &program.functions {
         for k in registered_keys(None, f.name.as_str()) {
@@ -123,7 +131,15 @@ pub(super) fn compute_reachable_fn_names(
             }
         }
     }
+    by_name
+}
 
+/// BFS-worklist phase of `compute_reachable_fn_names`, extracted verbatim
+/// (cog>30 decomposition) — reads `by_name` read-only.
+fn bfs_reachable(
+    by_name: &std::collections::HashMap<String, &IrExpr>,
+    roots: impl IntoIterator<Item = String>,
+) -> HashSet<String> {
     let mut reachable: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<String> = VecDeque::new();
     for r in roots {

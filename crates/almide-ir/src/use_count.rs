@@ -10,20 +10,8 @@ use super::*;
 /// (e.g. the optimizer's `optimize_program`) each module still owns
 /// its own table and we walk it into the module-local table.
 pub fn compute_use_counts(program: &mut IrProgram) {
-    // Reset all counts
-    for i in 0..program.var_table.len() {
-        program.var_table.entries[i].use_count = 0;
-    }
-
-    // Count uses in all function bodies
-    for func in &program.functions {
-        count_uses_in_expr(&func.body, &mut program.var_table);
-    }
-
-    // Count uses in top-level let values
-    for tl in &program.top_lets {
-        count_uses_in_expr(&tl.value, &mut program.var_table);
-    }
+    reset_use_counts(&mut program.var_table);
+    count_uses_in_decls(&program.functions, &program.top_lets, &mut program.var_table);
 
     // Modules: if the module still owns a populated VarTable (i.e.
     // unify hasn't run yet or the module happens to be empty), count
@@ -33,23 +21,28 @@ pub fn compute_use_counts(program: &mut IrProgram) {
     // `program.var_table`, so we walk there instead.
     for module in program.modules.iter_mut() {
         if module.var_table.entries.is_empty() {
-            for func in &module.functions {
-                count_uses_in_expr(&func.body, &mut program.var_table);
-            }
-            for tl in &module.top_lets {
-                count_uses_in_expr(&tl.value, &mut program.var_table);
-            }
+            count_uses_in_decls(&module.functions, &module.top_lets, &mut program.var_table);
         } else {
-            for i in 0..module.var_table.len() {
-                module.var_table.entries[i].use_count = 0;
-            }
-            for func in &module.functions {
-                count_uses_in_expr(&func.body, &mut module.var_table);
-            }
-            for tl in &module.top_lets {
-                count_uses_in_expr(&tl.value, &mut module.var_table);
-            }
+            reset_use_counts(&mut module.var_table);
+            count_uses_in_decls(&module.functions, &module.top_lets, &mut module.var_table);
         }
+    }
+}
+
+/// Zero out every use-count slot in `table`, in place.
+fn reset_use_counts(table: &mut VarTable) {
+    for i in 0..table.len() {
+        table.entries[i].use_count = 0;
+    }
+}
+
+/// Count uses in every function body and top-level let value, into `table`.
+fn count_uses_in_decls(functions: &[IrFunction], top_lets: &[IrTopLet], table: &mut VarTable) {
+    for func in functions {
+        count_uses_in_expr(&func.body, table);
+    }
+    for tl in top_lets {
+        count_uses_in_expr(&tl.value, table);
     }
 }
 
@@ -78,24 +71,13 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             count_uses_in_expr(then, table);
             count_uses_in_expr(else_, table);
         }
-        IrExprKind::Match { subject, arms } => {
-            count_uses_in_expr(subject, table);
-            for arm in arms {
-                if let Some(g) = &arm.guard { count_uses_in_expr(g, table); }
-                count_uses_in_expr(&arm.body, table);
-            }
-        }
+        IrExprKind::Match { subject, arms } => count_uses_in_match(subject, arms, table),
         IrExprKind::Block { stmts, expr } => {
             for s in stmts { count_uses_in_stmt(s, table); }
             if let Some(e) = expr { count_uses_in_expr(e, table); }
         }
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            match target {
-                CallTarget::Method { object, .. } => count_uses_in_expr(object, table),
-                CallTarget::Computed { callee } => count_uses_in_expr(callee, table),
-                _ => {}
-            }
-            for a in args { count_uses_in_expr(a, table); }
+            count_uses_in_call(target, args, table)
         }
         IrExprKind::RuntimeCall { args, .. } => {
             for a in args { count_uses_in_expr(a, table); }
@@ -104,12 +86,10 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         | IrExprKind::Fan { exprs: elements } => {
             for e in elements { count_uses_in_expr(e, table); }
         }
-        IrExprKind::Record { fields, .. } => {
-            for (_, e) in fields { count_uses_in_expr(e, table); }
-        }
+        IrExprKind::Record { fields, .. } => count_uses_in_fields(fields, table),
         IrExprKind::SpreadRecord { base, fields } => {
             count_uses_in_expr(base, table);
-            for (_, e) in fields { count_uses_in_expr(e, table); }
+            count_uses_in_fields(fields, table);
         }
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries {
@@ -133,38 +113,13 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             count_uses_in_expr(object, table);
             count_uses_in_expr(key, table);
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            count_uses_in_expr(iterable, table);
-            // Collect vars defined inside the loop body
-            let body_locals = collect_bound_vars(body);
-            // Count body uses normally
-            for s in body { count_uses_in_stmt(s, table); }
-            // Extra count for outer vars used in loop body (they're used N times at runtime)
-            bump_outer_vars_in_loop(body, &body_locals, table);
-        }
-        IrExprKind::While { cond, body } => {
-            count_uses_in_expr(cond, table);
-            let body_locals = collect_bound_vars(body);
-            for s in body { count_uses_in_stmt(s, table); }
-            bump_outer_vars_in_loop(body, &body_locals, table);
-        }
-        IrExprKind::Lambda { params, body, .. } => {
-            count_uses_in_expr(body, table);
-            // Bump outer vars captured by lambda (closure captures move by default)
-            let mut lambda_locals: HashSet<u32> = params.iter().map(|(v, _)| v.0).collect();
-            // Also collect any bindings inside the lambda body
-            if let IrExprKind::Block { stmts, .. } = &body.kind {
-                lambda_locals.extend(collect_bound_vars(stmts));
-            }
-            bump_vars_in_expr(body, &lambda_locals, table);
-        }
-        IrExprKind::StringInterp { parts } => {
-            for part in parts {
-                if let IrStringPart::Expr { expr } = part {
-                    count_uses_in_expr(expr, table);
-                }
-            }
-        }
+        // ForIn/While: count the loop body once, then extra-count every
+        // outer-scope var referenced in it (both need the same treatment —
+        // a loop body runs N times, so outer captures are used N times too).
+        IrExprKind::ForIn { iterable, body, .. } => count_uses_in_loop_body(iterable, body, table),
+        IrExprKind::While { cond, body } => count_uses_in_loop_body(cond, body, table),
+        IrExprKind::Lambda { params, body, .. } => count_uses_in_lambda(params, body, table),
+        IrExprKind::StringInterp { parts } => count_uses_in_string_interp(parts, table),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
@@ -187,26 +142,93 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         }
         IrExprKind::RenderedCall { .. } => {}
         IrExprKind::IterChain { source, steps, collector, .. } => {
-            count_uses_in_expr(source, table);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                        count_uses_in_expr(lambda, table);
-                    }
-                }
+            count_uses_in_iter_chain(source, steps, collector, table)
+        }
+    }
+}
+
+/// `Match` arm of [`count_uses_in_expr`]: subject + each arm's guard/body.
+fn count_uses_in_match(subject: &IrExpr, arms: &[IrMatchArm], table: &mut VarTable) {
+    count_uses_in_expr(subject, table);
+    for arm in arms {
+        if let Some(g) = &arm.guard { count_uses_in_expr(g, table); }
+        count_uses_in_expr(&arm.body, table);
+    }
+}
+
+/// `Call`/`TailCall` arm of [`count_uses_in_expr`]: resolve the call target, then args.
+fn count_uses_in_call(target: &CallTarget, args: &[IrExpr], table: &mut VarTable) {
+    match target {
+        CallTarget::Method { object, .. } => count_uses_in_expr(object, table),
+        CallTarget::Computed { callee } => count_uses_in_expr(callee, table),
+        _ => {}
+    }
+    for a in args { count_uses_in_expr(a, table); }
+}
+
+/// `ForIn`/`While` arms of [`count_uses_in_expr`]: count the loop-controlling
+/// expression, then the body normally, then extra-count outer-scope vars
+/// referenced in the body (a loop body runs N times, so outer captures used
+/// inside it are used N times too — this is what triggers clone insertion).
+fn count_uses_in_loop_body(lead: &IrExpr, body: &[IrStmt], table: &mut VarTable) {
+    count_uses_in_expr(lead, table);
+    let body_locals = collect_bound_vars(body);
+    for s in body { count_uses_in_stmt(s, table); }
+    bump_outer_vars_in_loop(body, &body_locals, table);
+}
+
+/// `Record`/`SpreadRecord` field-value loop shared by [`count_uses_in_expr`].
+fn count_uses_in_fields(fields: &[(Sym, IrExpr)], table: &mut VarTable) {
+    for (_, e) in fields { count_uses_in_expr(e, table); }
+}
+
+/// `StringInterp` arm of [`count_uses_in_expr`]: count each interpolated sub-expression.
+fn count_uses_in_string_interp(parts: &[IrStringPart], table: &mut VarTable) {
+    for part in parts {
+        if let IrStringPart::Expr { expr } = part {
+            count_uses_in_expr(expr, table);
+        }
+    }
+}
+
+/// `Lambda` arm of [`count_uses_in_expr`]: count the body normally, then
+/// extra-count outer-scope vars captured by the closure (captures move by
+/// default, so a var used inside the lambda body is used once per call).
+fn count_uses_in_lambda(params: &[(VarId, Ty)], body: &IrExpr, table: &mut VarTable) {
+    count_uses_in_expr(body, table);
+    let mut lambda_locals: HashSet<u32> = params.iter().map(|(v, _)| v.0).collect();
+    if let IrExprKind::Block { stmts, .. } = &body.kind {
+        lambda_locals.extend(collect_bound_vars(stmts));
+    }
+    bump_vars_in_expr(body, &lambda_locals, table);
+}
+
+/// `IterChain` arm of [`count_uses_in_expr`]: source, then each step's lambda,
+/// then the collector.
+fn count_uses_in_iter_chain(
+    source: &IrExpr,
+    steps: &[IterStep],
+    collector: &IterCollector,
+    table: &mut VarTable,
+) {
+    count_uses_in_expr(source, table);
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                count_uses_in_expr(lambda, table);
             }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => {
-                    count_uses_in_expr(init, table);
-                    count_uses_in_expr(lambda, table);
-                }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-                    count_uses_in_expr(lambda, table);
-                }
-            }
+        }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => {
+            count_uses_in_expr(init, table);
+            count_uses_in_expr(lambda, table);
+        }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+            count_uses_in_expr(lambda, table);
         }
     }
 }
@@ -338,19 +360,13 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         }
         // Recurse into sub-expressions but don't double-count nested loops
         // (they'll handle their own bumping)
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { bump_vars_in_stmt(s, locals, table); }
-            if let Some(e) = expr { bump_vars_in_expr(e, locals, table); }
-        }
+        IrExprKind::Block { stmts, expr } => bump_vars_in_block(stmts, expr.as_deref(), locals, table),
         IrExprKind::If { cond, then, else_ } => {
             bump_vars_in_expr(cond, locals, table);
             bump_vars_in_expr(then, locals, table);
             bump_vars_in_expr(else_, locals, table);
         }
-        IrExprKind::Match { subject, arms } => {
-            bump_vars_in_expr(subject, locals, table);
-            for a in arms { bump_vars_in_expr(&a.body, locals, table); }
-        }
+        IrExprKind::Match { subject, arms } => bump_vars_in_match(subject, arms, locals, table),
         IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. }
         | IrExprKind::RuntimeCall { args, .. } => { for a in args { bump_vars_in_expr(a, locals, table); } }
         IrExprKind::BinOp { left, right, .. } => {
@@ -358,9 +374,7 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(right, locals, table);
         }
         IrExprKind::UnOp { operand, .. } => bump_vars_in_expr(operand, locals, table),
-        IrExprKind::StringInterp { parts } => {
-            for p in parts { if let IrStringPart::Expr { expr } = p { bump_vars_in_expr(expr, locals, table); } }
-        }
+        IrExprKind::StringInterp { parts } => bump_vars_in_string_interp(parts, locals, table),
         IrExprKind::Lambda { body, .. } => bump_vars_in_expr(body, locals, table),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
@@ -383,23 +397,15 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         | IrExprKind::Fan { exprs: elements } => {
             for e in elements { bump_vars_in_expr(e, locals, table); }
         }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
-        }
+        IrExprKind::Record { fields, .. } => bump_vars_in_fields(fields, locals, table),
         IrExprKind::SpreadRecord { base, fields } => {
             bump_vars_in_expr(base, locals, table);
-            for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+            bump_vars_in_fields(fields, locals, table);
         }
-        // Nested loops: bump outer vars in iterable AND body.
-        // The iterable is re-evaluated each iteration of the enclosing loop.
-        IrExprKind::ForIn { iterable, body, .. } => {
-            bump_vars_in_expr(iterable, locals, table);
-            for s in body { bump_vars_in_stmt(s, locals, table); }
-        }
-        IrExprKind::While { cond, body } => {
-            bump_vars_in_expr(cond, locals, table);
-            for s in body { bump_vars_in_stmt(s, locals, table); }
-        }
+        // Nested loops: bump outer vars in iterable/cond AND body. The lead
+        // expression is re-evaluated each iteration of the enclosing loop.
+        IrExprKind::ForIn { iterable, body, .. } => bump_vars_in_loop_body(iterable, body, locals, table),
+        IrExprKind::While { cond, body } => bump_vars_in_loop_body(cond, body, locals, table),
         IrExprKind::Range { start, end, .. } => {
             bump_vars_in_expr(start, locals, table);
             bump_vars_in_expr(end, locals, table);
@@ -415,6 +421,41 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         }
         _ => {}
     }
+}
+
+/// `Block` arm of [`bump_vars_in_expr`]: statements, then the optional tail expr.
+fn bump_vars_in_block(
+    stmts: &[IrStmt],
+    tail: Option<&IrExpr>,
+    locals: &HashSet<u32>,
+    table: &mut VarTable,
+) {
+    for s in stmts { bump_vars_in_stmt(s, locals, table); }
+    if let Some(e) = tail { bump_vars_in_expr(e, locals, table); }
+}
+
+/// `Match` arm of [`bump_vars_in_expr`]: subject, then each arm's body.
+fn bump_vars_in_match(subject: &IrExpr, arms: &[IrMatchArm], locals: &HashSet<u32>, table: &mut VarTable) {
+    bump_vars_in_expr(subject, locals, table);
+    for a in arms { bump_vars_in_expr(&a.body, locals, table); }
+}
+
+/// `StringInterp` arm of [`bump_vars_in_expr`]: each interpolated sub-expression.
+fn bump_vars_in_string_interp(parts: &[IrStringPart], locals: &HashSet<u32>, table: &mut VarTable) {
+    for p in parts { if let IrStringPart::Expr { expr } = p { bump_vars_in_expr(expr, locals, table); } }
+}
+
+/// `Record`/`SpreadRecord` field-value loop shared by [`bump_vars_in_expr`].
+fn bump_vars_in_fields(fields: &[(Sym, IrExpr)], locals: &HashSet<u32>, table: &mut VarTable) {
+    for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+}
+
+/// `ForIn`/`While` arms of [`bump_vars_in_expr`]: bump the lead expression
+/// (iterable / cond, re-evaluated every enclosing-loop iteration), then the
+/// body statements — identical shape for both, so they share one helper.
+fn bump_vars_in_loop_body(lead: &IrExpr, body: &[IrStmt], locals: &HashSet<u32>, table: &mut VarTable) {
+    bump_vars_in_expr(lead, locals, table);
+    for s in body { bump_vars_in_stmt(s, locals, table); }
 }
 
 fn bump_vars_in_stmt(stmt: &IrStmt, locals: &HashSet<u32>, table: &mut VarTable) {

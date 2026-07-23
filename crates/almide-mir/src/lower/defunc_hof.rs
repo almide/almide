@@ -93,7 +93,7 @@ impl LowerCtx {
                 xs,
                 params,
                 body,
-                &args[init_idx.unwrap()],
+                &args[init_idx.expect("init_idx is Some when func == \"fold\" && args.len() == 3, checked at this match's guard")],
                 result_ty,
             ) {
                 // The closure was FAITHFULLY inlined — clear the unlifted-closure flag (see the tail
@@ -114,7 +114,7 @@ impl LowerCtx {
                 xs,
                 params,
                 body,
-                &args[init_idx.unwrap()],
+                &args[init_idx.expect("init_idx is Some when func == \"fold\" && args.len() == 3, checked at this match's guard")],
                 result_ty,
             ) {
                 self.last_call_had_unlifted_closure = false;
@@ -138,14 +138,14 @@ impl LowerCtx {
                 Some((real, i_var, key_var, key_ty, tail)) => {
                     fuse_index = Some(i_var);
                     fuse_holder = Some((vec![(key_var, key_ty)], tail));
-                    let (p, b) = fuse_holder.as_ref().unwrap();
+                    let (p, b) = fuse_holder.as_ref().expect("fuse_holder was just set to Some on the previous line");
                     (real, p.as_slice(), b)
                 }
                 None => match detect_zip_map_fusion(xs, params, body) {
                     Some((a, b, p0, t0, p1, t1, new_body)) => {
                         fuse_second = Some((b.clone(), p1, t1));
                         fuse_holder = Some((vec![(p0, t0)], new_body));
-                        let (p, bd) = fuse_holder.as_ref().unwrap();
+                        let (p, bd) = fuse_holder.as_ref().expect("fuse_holder was just set to Some on the previous line");
                         (a, p.as_slice(), bd)
                     }
                     None => {
@@ -163,7 +163,7 @@ impl LowerCtx {
                 Some((real, i_var, acc_param, key_var, key_ty, tail)) => {
                     fuse_index = Some(i_var);
                     fuse_holder = Some((vec![acc_param, (key_var, key_ty)], tail));
-                    let (p, b) = fuse_holder.as_ref().unwrap();
+                    let (p, b) = fuse_holder.as_ref().expect("fuse_holder was just set to Some on the previous line");
                     (real, p.as_slice(), b)
                 }
                 None => {
@@ -594,7 +594,7 @@ impl LowerCtx {
             }
         }
         if func == "fold" {
-            self.value_of.insert(params[0].0, acc_local.unwrap());
+            self.value_of.insert(params[0].0, acc_local.expect("acc_local is Some here: func == \"fold\" is the only path that reaches this branch"));
         }
         // enumerate+map FUSION: bind the destructured INDEX var to the loop index `i_v` (a scalar),
         // so the fused body's `list.get_or(row, i, …)` reads the right index. (key was bound above as
@@ -630,7 +630,7 @@ impl LowerCtx {
                 // paths (which, for a non-conditional body, lower it; for a failed conditional body,
                 // also fail → the whole HOF rolls back at the call site). On a non-conditional body
                 // it returns false with no ops emitted.
-                let ok = self.try_lower_cond_heap_acc_fold(body, params[0].0, acc_local.unwrap());
+                let ok = self.try_lower_cond_heap_acc_fold(body, params[0].0, acc_local.expect("acc_local is Some here: func == \"fold\" is the only path that reaches this branch"));
                 self.scalar_loop_depth -= 1;
                 ok
             };
@@ -639,7 +639,7 @@ impl LowerCtx {
         // result element. So route filter to the scalar (Bool) path even when result_elem is Some.
         let body_v = if cond_acc_handled {
             // The slot was already updated in place; no merged body value flows out.
-            Some(acc_local.unwrap())
+            Some(acc_local.expect("acc_local is Some here: func == \"fold\" is the only path that reaches this branch"))
         } else if let Some(elem_ty) = result_elem.as_ref().filter(|_| func != "filter") {
             self.lower_heap_result_arm(body, elem_ty)
         } else if fold_acc_ty.is_some() {
@@ -684,7 +684,7 @@ impl LowerCtx {
         match func {
             "map" => {
                 // result[i] = body_v.
-                let rh = result_h.unwrap();
+                let rh = result_h.expect("result_h is Some here: the \"map\" arm is only reached when func == \"map\", which seeds result_h above");
                 let rbase = self.load_addr(rh, 12);
                 let raddr = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst: raddr, op: IntOp::Add, a: rbase, b: i8_v });
@@ -702,8 +702,8 @@ impl LowerCtx {
             }
             "filter" => {
                 // if body_v (Bool) then { result[cursor] = elem; cursor += 1 }.
-                let rh = result_h.unwrap();
-                let cur = cursor.unwrap();
+                let rh = result_h.expect("result_h is Some here: the \"filter\" arm is only reached when func == \"filter\", which seeds result_h above");
+                let cur = cursor.expect("cursor is Some here: the \"filter\" arm is only reached when func == \"filter\", which seeds cursor above");
                 self.ops.push(Op::IfThen { cond: body_v, dst: None });
                 // then-arm: store elem at result[cursor*8], bump cursor.
                 let c8 = self.fresh_value();
@@ -742,10 +742,10 @@ impl LowerCtx {
                 // append-accumulator pattern: each transient String reclaimed), then moves the new one
                 // in. A scalar acc just rebinds (no handle to free).
                 if fold_acc_ty.is_some() {
-                    let drop_op = self.drop_op_for(acc_local.unwrap());
+                    let drop_op = self.drop_op_for(acc_local.expect("acc_local is Some here: func == \"fold\" is the only path that reaches this branch"));
                     self.ops.push(drop_op);
                 }
-                self.ops.push(Op::SetLocal { local: acc_local.unwrap(), src: body_v });
+                self.ops.push(Op::SetLocal { local: acc_local.expect("acc_local is Some here: func == \"fold\" is the only path that reaches this branch"), src: body_v });
             }
             _ => return None,
         }
@@ -761,21 +761,21 @@ impl LowerCtx {
             // A HEAP acc's final value is an OWNED String returned to the caller, which registers it
             // for the outer scope-end drop (the same as the map/filter result list — C1 does NOT push
             // it itself, or it would be double-dropped).
-            "fold" => Some(acc_local.unwrap()),
-            "map" => Some(result_list.unwrap()),
+            "fold" => Some(acc_local.expect("acc_local is Some here: this arm only runs when func == \"fold\"")),
+            "map" => Some(result_list.expect("result_list is Some here: this arm only runs when func == \"map\"")),
             "filter" => {
                 // Patch the result list's `len` field (offset 4) to the write-cursor: the
                 // visible length is the count of kept elements (cap stays len(xs), unused
                 // tail slots are harmless — a `${list}` Display reads `len`, an `xs[i]`
                 // bounds-checks against `len`). `store32` at result_h + 4.
-                let rh = result_h.unwrap();
-                let cur = cursor.unwrap();
+                let rh = result_h.expect("result_h is Some here: the \"filter\" arm is only reached when func == \"filter\", which seeds result_h above");
+                let cur = cursor.expect("cursor is Some here: the \"filter\" arm is only reached when func == \"filter\", which seeds cursor above");
                 let four = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst: four, value: 4 });
                 let lenaddr = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst: lenaddr, op: IntOp::Add, a: rh, b: four });
                 self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![lenaddr, cur] });
-                Some(result_list.unwrap())
+                Some(result_list.expect("result_list is Some here: this arm only runs when func == \"filter\", which shares result_list with map"))
             }
             _ => None,
         }

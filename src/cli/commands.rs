@@ -1,9 +1,9 @@
-use crate::{parse_file, fmt, project};
+use crate::{parse_file, fmt, project, project_fetch, resolve, canonicalize, check, diagnostic, out, out_no_nl, err, err_no_nl};
 use super::{collect_test_files, incremental_cache_dir};
 
 pub fn cmd_init() {
     if std::path::Path::new("almide.toml").exists() {
-        eprintln!("almide.toml already exists");
+        err(&format!("almide.toml already exists"));
         std::process::exit(1);
     }
     let dir_name = std::env::current_dir()
@@ -14,21 +14,21 @@ pub fn cmd_init() {
     let toml = format!("[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2026\"\n", dir_name);
 
     if let Err(e) = std::fs::write("almide.toml", toml) {
-        eprintln!("Failed to write almide.toml: {}", e);
+        err(&format!("Failed to write almide.toml: {}", e));
         std::process::exit(1);
     }
     if let Err(e) = std::fs::create_dir_all("src") {
-        eprintln!("Failed to create src/: {}", e);
+        err(&format!("Failed to create src/: {}", e));
         std::process::exit(1);
     }
     if let Err(e) = std::fs::create_dir_all("tests") {
-        eprintln!("Failed to create tests/: {}", e);
+        err(&format!("Failed to create tests/: {}", e));
         std::process::exit(1);
     }
 
     if !std::path::Path::new("src/main.almd").exists() {
         if let Err(e) = std::fs::write("src/main.almd", "effect fn main() -> Unit = {\n  println(\"Hello, Almide!\")\n}\n") {
-            eprintln!("Failed to write src/main.almd: {}", e);
+            err(&format!("Failed to write src/main.almd: {}", e));
             std::process::exit(1);
         }
     }
@@ -37,26 +37,32 @@ pub fn cmd_init() {
     if !std::path::Path::new("CLAUDE.md").exists() {
         let claude_md = include_str!("../../docs/CLAUDE_TEMPLATE.md");
         if let Err(e) = std::fs::write("CLAUDE.md", claude_md) {
-            eprintln!("Failed to write CLAUDE.md: {}", e);
+            err(&format!("Failed to write CLAUDE.md: {}", e));
             std::process::exit(1);
         }
     }
 
-    eprintln!("Initialized project in ./");
-    eprintln!("  almide.toml");
-    eprintln!("  src/main.almd");
-    eprintln!("  tests/");
-    eprintln!("  CLAUDE.md");
+    err(&format!("Initialized project in ./"));
+    err(&format!("  almide.toml"));
+    err(&format!("  src/main.almd"));
+    err(&format!("  tests/"));
+    err(&format!("  CLAUDE.md"));
 }
 
-pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
-    let test_files: Vec<String> = if !file.is_empty() {
+/// Shared "resolve `almide test [file]`'s target file list" logic — used by
+/// `cmd_test`/`cmd_test_fast` (search `spec/` and `exercises/`, `.`
+/// fallback) and `cmd_test_wasm` (search `.` directly, i.e. an empty
+/// `fallback_dirs`). Extracted verbatim from `cmd_test`'s identical block —
+/// exits the process on an empty result, exactly as all three call sites
+/// already did.
+fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
+    if !file.is_empty() {
         let path = std::path::Path::new(file);
         if path.is_dir() {
             let mut files = collect_test_files(path);
             files.sort();
             if files.is_empty() {
-                eprintln!("No .almd files with test blocks found in {}", file);
+                err(&format!("No .almd files with test blocks found in {}", file));
                 std::process::exit(1);
             }
             files
@@ -64,9 +70,10 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
             vec![file.to_string()]
         }
     } else {
-        // Default: recursively find test files in spec/ and exercises/ (standard test directories)
+        // Default: recursively find test files in the given standard
+        // directories (e.g. spec/, exercises/); "." otherwise.
         let mut files = Vec::new();
-        for dir in &["spec", "exercises"] {
+        for dir in fallback_dirs {
             let path = std::path::Path::new(dir);
             if path.exists() {
                 files.extend(collect_test_files(path));
@@ -78,96 +85,110 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
         }
         files.sort();
         if files.is_empty() {
-            eprintln!("No .almd files with test blocks found.");
+            err(&format!("No .almd files with test blocks found."));
             std::process::exit(1);
         }
         files
-    };
+    }
+}
+
+/// `cmd_test`'s Phase 1: compile every test file in parallel (bounded by
+/// CPU count), each in its own scratch dir so cold rustc builds parallelize
+/// instead of serializing on the shared dir's BUILD_LOCK. Extracted
+/// verbatim.
+fn compile_test_files_parallel(test_files: &[String], no_check: bool) -> Vec<(String, Result<std::path::PathBuf, String>)> {
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+    for _ in 0..cpus { let _ = sem_tx.send(()); }
+    let sem_tx = std::sync::Arc::new(sem_tx);
+    let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+    let mut handles = Vec::new();
+    for test_file in test_files.to_vec() {
+        let tx = tx.clone();
+        let sem_rx = sem_rx.clone();
+        let sem_tx = sem_tx.clone();
+        handles.push(std::thread::spawn(move || {
+            let _ = sem_rx.lock().unwrap().recv();
+            // Per-file scratch dir so cold rustc builds parallelize instead
+            // of serializing on the shared dir's BUILD_LOCK.
+            let worker_dir = std::env::temp_dir()
+                .join("almide-test")
+                .join(test_file.replace('/', "_").replace('.', "_"));
+            let result = super::run::compile_to_binary(&test_file, no_check, true, false, Some(&worker_dir));
+            let _ = sem_tx.send(());
+            let _ = tx.send((test_file, result));
+        }));
+    }
+    drop(tx);
+    let mut results: Vec<_> = rx.iter().collect();
+    for h in handles { let _ = h.join(); }
+    results.sort_by(|a, b| a.0.cmp(&b.0));
+    results
+}
+
+/// `cmd_test`'s Phase 2: execute every compiled test binary in parallel
+/// (bounded by CPU count). Extracted verbatim.
+fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, String>)>, program_args: &std::sync::Arc<Vec<String>>) -> Vec<(String, i32)> {
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+    for _ in 0..cpus { let _ = sem_tx.send(()); }
+    let sem_tx = std::sync::Arc::new(sem_tx);
+    let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut handles = Vec::new();
+    for (file, compile_result) in compiled {
+        let tx = tx.clone();
+        let args = program_args.clone();
+        let sem_rx = sem_rx.clone();
+        let sem_tx = sem_tx.clone();
+        handles.push(std::thread::spawn(move || {
+            let _ = sem_rx.lock().unwrap().recv();
+            let code = match compile_result {
+                Ok(bin) => super::run::run_binary(&bin, &args),
+                Err(e) => {
+                    err(&format!("Compile error for {}:\n{}", file, e));
+                    1
+                }
+            };
+            let _ = sem_tx.send(());
+            let _ = tx.send((file, code));
+        }));
+    }
+    drop(tx);
+    let mut results: Vec<(String, i32)> = rx.iter().collect();
+    for h in handles { let _ = h.join(); }
+    results.sort_by(|a, b| a.0.cmp(&b.0));
+    results
+}
+
+pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
+    let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let mut program_args: Vec<String> = Vec::new();
     if let Some(filter) = run_filter {
         program_args.push(filter.to_string());
     }
+    let program_args = std::sync::Arc::new(program_args);
 
     // Phase 1: Compile all test files in parallel (bounded by CPU count)
-    let compiled: Vec<(String, Result<std::path::PathBuf, String>)> = {
-        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
-        for _ in 0..cpus { let _ = sem_tx.send(()); }
-        let sem_tx = std::sync::Arc::new(sem_tx);
-        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
-        let mut handles = Vec::new();
-        for test_file in test_files.clone() {
-            let tx = tx.clone();
-            let sem_rx = sem_rx.clone();
-            let sem_tx = sem_tx.clone();
-            handles.push(std::thread::spawn(move || {
-                let _ = sem_rx.lock().unwrap().recv();
-                // Per-file scratch dir so cold rustc builds parallelize instead
-                // of serializing on the shared dir's BUILD_LOCK.
-                let worker_dir = std::env::temp_dir()
-                    .join("almide-test")
-                    .join(test_file.replace('/', "_").replace('.', "_"));
-                let result = super::run::compile_to_binary(&test_file, no_check, true, false, Some(&worker_dir));
-                let _ = sem_tx.send(());
-                let _ = tx.send((test_file, result));
-            }));
-        }
-        drop(tx);
-        let mut results: Vec<_> = rx.iter().collect();
-        for h in handles { let _ = h.join(); }
-        results.sort_by(|a, b| a.0.cmp(&b.0));
-        results
-    };
+    let compiled = compile_test_files_parallel(&test_files, no_check);
 
     // Phase 2: Execute test binaries in parallel (bounded by CPU count)
-    let program_args = std::sync::Arc::new(program_args);
-    let results: Vec<(String, i32)> = {
-        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
-        for _ in 0..cpus { let _ = sem_tx.send(()); }
-        let sem_tx = std::sync::Arc::new(sem_tx);
-        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut handles = Vec::new();
-        for (file, compile_result) in compiled {
-            let tx = tx.clone();
-            let args = program_args.clone();
-            let sem_rx = sem_rx.clone();
-            let sem_tx = sem_tx.clone();
-            handles.push(std::thread::spawn(move || {
-                let _ = sem_rx.lock().unwrap().recv();
-                let code = match compile_result {
-                    Ok(bin) => super::run::run_binary(&bin, &args),
-                    Err(e) => {
-                        eprintln!("Compile error for {}:\n{}", file, e);
-                        1
-                    }
-                };
-                let _ = sem_tx.send(());
-                let _ = tx.send((file, code));
-            }));
-        }
-        drop(tx);
-        let mut results: Vec<(String, i32)> = rx.iter().collect();
-        for h in handles { let _ = h.join(); }
-        results.sort_by(|a, b| a.0.cmp(&b.0));
-        results
-    };
+    let results = run_test_binaries_parallel(compiled, &program_args);
 
     let mut failed = 0;
     for (file, code) in &results {
         if *code != 0 {
-            eprintln!("FAILED: {}", file);
+            err(&format!("FAILED: {}", file));
             failed += 1;
         }
     }
     if failed > 0 {
-        eprintln!("\n{}/{} test file(s) failed", failed, test_files.len());
+        err(&format!("\n{}/{} test file(s) failed", failed, test_files.len()));
         std::process::exit(1);
     }
-    eprintln!("\nAll {} test file(s) passed", test_files.len());
+    err(&format!("\nAll {} test file(s) passed", test_files.len()));
 }
 
 enum WasmTestOutcome {
@@ -179,52 +200,63 @@ enum WasmTestOutcome {
 /// Compile one `.almd` file to WASM and run it under wasmtime. Pure per-file
 /// work (no shared mutable state) so it runs in parallel — the WASM path takes
 /// no rustc/cargo, so there's no global build lock to serialize on.
-fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> WasmTestOutcome {
-    use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
-    let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
-    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
-    let mut marks: Vec<(&str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
-
-    let wasm_name = test_file.replace('/', "_").replace('.', "_") + ".wasm";
-    let wasm_path = tmp_dir.join(&wasm_name);
-
-    let (mut program, source_text, parse_errors) = parse_file(test_file);
-    if prof { marks.push(("parse", std::time::Instant::now())); }
+/// `compile_and_run_wasm_test`'s independent pre-flight gates: `// wasm:skip`
+/// marker, parse errors (a real failure, not a skip — see the comment at the
+/// call site), and the main+test co-presence gap in the v1 test-mode runner.
+/// Extracted verbatim — each check only reads its parameters; whichever
+/// fires first determines the outcome, matching the original code's
+/// early-return order exactly.
+fn wasm_test_preflight_outcome(
+    test_file: &str,
+    program: &almide_lang::ast::Program,
+    source_text: &str,
+    parse_errors: &[crate::diagnostic::Diagnostic],
+) -> Option<WasmTestOutcome> {
     if source_text.lines().take(3).any(|line| line.contains("// wasm:skip")) {
-        return skip("wasm:skip".to_string());
+        return Some(WasmTestOutcome::Skip { file: test_file.to_string(), reason: "wasm:skip".to_string() });
     }
-    // A parse error leaves an error-recovered (partial) AST. Compiling and
-    // running that mangled module would report a PASS, so a broken file looked
-    // green on the WASM path (only the rust path surfaced it). It is a real
-    // failure — NOT a benign skip like `// wasm:skip` — so report it as Fail:
-    // `cmd_test_wasm` then counts it failed, and `cmd_test_fast` routes it to the
-    // authoritative native fallback, which prints the full diagnostics.
-    if parse_errors.iter().any(|d| d.level == diagnostic::Level::Error) {
+    if parse_errors.iter().any(|d| d.level == crate::diagnostic::Level::Error) {
         let mut detail = String::new();
-        for d in parse_errors.iter().filter(|d| d.level == diagnostic::Level::Error).take(3) {
+        for d in parse_errors.iter().filter(|d| d.level == crate::diagnostic::Level::Error).take(3) {
             detail.push_str(&format!("  parse error: {}\n", d.message));
         }
-        return WasmTestOutcome::Fail { file: test_file.to_string(), detail };
+        return Some(WasmTestOutcome::Fail { file: test_file.to_string(), detail });
     }
-    // A file with BOTH `main` and `test` blocks: the v1 wasm test-mode renderer
-    // (almide_mir::pipeline::synthesize_test_runner_main) intentionally leaves
-    // `main`-bearing files on the ordinary `__main_runner` protocol and never
-    // synthesizes the `__test_runner` — so the wasm leg compiles and runs ONLY
-    // `main`, never the `test` blocks, and reports the whole file Pass as long
-    // as `main` exits cleanly. A file's tests can be silently unexecuted (not
-    // merely mis-scored) on this leg — the false-green class in
-    // feedback_wasm_test_parse_error_false_pass, a fresh trigger (runtime
-    // assertions, not parse errors). Skip straight to the authoritative native
-    // fallback rather than trust a Pass that never checked the tests at all.
     let has_main = program
         .decls
         .iter()
         .any(|d| matches!(d, almide_lang::ast::Decl::Fn { name, .. } if name.as_str() == "main"));
     let has_test = program.decls.iter().any(|d| matches!(d, almide_lang::ast::Decl::Test { .. }));
     if has_main && has_test {
-        return skip("main + test blocks: wasm test-mode runs main only, not the tests".to_string());
+        return Some(WasmTestOutcome::Skip { file: test_file.to_string(), reason: "main + test blocks: wasm test-mode runs main only, not the tests".to_string() });
     }
+    None
+}
 
+/// Push an `ALMIDE_PROFILE` timing mark when profiling is enabled — guards
+/// `compile_and_run_wasm_test`'s repeated `if prof { marks.push(...) }`
+/// call sites behind one named function instead of six inline branches.
+fn mark(prof: bool, marks: &mut Vec<(&'static str, std::time::Instant)>, label: &'static str) {
+    if prof {
+        marks.push((label, std::time::Instant::now()));
+    }
+}
+
+/// Print the `ALMIDE_PROFILE` per-phase timing breakdown for one test file.
+/// Extracted verbatim from `compile_and_run_wasm_test`'s trailing profiling
+/// block.
+fn print_wasm_test_profile(test_file: &str, marks: &[(&'static str, std::time::Instant)]) {
+    let total = marks.last().unwrap().1.duration_since(marks[0].1).as_secs_f64();
+    let mut line = format!("[prof] {} total={:.3}s", test_file, total);
+    for w in marks.windows(2) {
+        line.push_str(&format!(" | {}={:.3}", w[1].0, w[1].1.duration_since(w[0].1).as_secs_f64()));
+    }
+    err(&format!("{}", line));
+}
+
+/// `compile_and_run_wasm_test`'s dependency-fetch + import-resolution
+/// phase. Extracted verbatim.
+fn resolve_wasm_test_deps(test_file: &str, program: &almide_lang::ast::Program) -> Result<resolve::ResolvedModules, String> {
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
         if std::path::Path::new("almide.toml").exists() {
             if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
@@ -236,11 +268,76 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
             } else { vec![] }
         } else { vec![] };
 
-    let mut resolved = match resolve::resolve_imports_with_deps(test_file, &program, &dep_paths) {
+    resolve::resolve_imports_with_deps(test_file, program, &dep_paths)
+}
+
+/// `compile_and_run_wasm_test`'s type-check phase. Unlike `almide
+/// build`/`run --target wasm` (which print full diagnostics on a type
+/// error), a test-mode type error is a silent skip — the native fallback
+/// re-runs (and reports) it authoritatively. Extracted verbatim.
+fn typecheck_wasm_test_program(test_file: &str, source_text: &str, program: &mut almide_lang::ast::Program, resolved: &resolve::ResolvedModules) -> Result<check::Checker, ()> {
+    let canon = canonicalize::canonicalize_program(
+        program,
+        resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+    );
+    let mut checker = check::Checker::from_env(canon.env);
+    checker.set_source(test_file, source_text);
+    checker.diagnostics = canon.diagnostics;
+    // #785: module top-let types must be fully inferred before the entry
+    // program reads them (drivers infer the entry FIRST; without this the
+    // readers see the registration seed — Unknown for non-literal inits).
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
+    let diagnostics = checker.infer_program(program);
+    if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
+        return Err(());
+    }
+    Ok(checker)
+}
+
+/// `compile_and_run_wasm_test`'s pre-register + lower phase: pre-register
+/// versioned module names, lower the entry program, then lower each
+/// resolved user module via the shared `build::lower_one_wasm_module` (the
+/// same per-module lowering `compile_to_wasm_bytes` uses — this loop body
+/// used to be a byte-for-byte duplicate of it). link/optimize/monomorphize
+/// stay in the caller so the ALMIDE_PROFILE "lower_modules" mark lands at
+/// the same point as before. Extracted verbatim.
+fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> almide::ir::IrProgram {
+    for (name, _, pkg_id, _) in &resolved.modules {
+        if let Some(pid) = pkg_id.as_ref() {
+            let base = pid.mod_name();
+            let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
+            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
+        }
+    }
+    let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
+    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+        super::build::lower_one_wasm_module(checker, name, mod_prog, pkg_id, &mut ir_program);
+    }
+    ir_program
+}
+
+fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> WasmTestOutcome {
+    let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
+    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
+    let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
+
+    let wasm_name = test_file.replace('/', "_").replace('.', "_") + ".wasm";
+    let wasm_path = tmp_dir.join(&wasm_name);
+
+    let (mut program, source_text, parse_errors) = parse_file(test_file);
+    mark(prof, &mut marks, "parse");
+    // `// wasm:skip` marker / parse errors (a real Fail, not a benign skip —
+    // see `wasm_test_preflight_outcome`'s doc comment) / the main+test
+    // co-presence gap in the v1 test-mode runner.
+    if let Some(outcome) = wasm_test_preflight_outcome(test_file, &program, &source_text, &parse_errors) {
+        return outcome;
+    }
+
+    let mut resolved = match resolve_wasm_test_deps(test_file, &program) {
         Ok(r) => r,
         Err(e) => return skip(format!("resolve: {}", e)),
     };
-    if prof { marks.push(("resolve", std::time::Instant::now())); }
+    mark(prof, &mut marks, "resolve");
 
     // v1 verified leg (the DEFAULT build/run wasm path since 0.29.0): capture the FRESH
     // (un-inferred) cross-module siblings now — the infer loop below mutates them in
@@ -250,59 +347,18 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     let v1_self_modules: Vec<(String, almide_lang::ast::Program, bool)> =
         resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
 
-    let canon = canonicalize::canonicalize_program(
-        &program,
-        resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
-    );
-    let mut checker = check::Checker::from_env(canon.env);
-    checker.set_source(test_file, &source_text);
-    checker.diagnostics = canon.diagnostics;
-    // #785: module top-let types must be fully inferred before the entry
-    // program reads them (drivers infer the entry FIRST; without this the
-    // readers see the registration seed — Unknown for non-literal inits).
-    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
-    let diagnostics = checker.infer_program(&mut program);
-    if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
-        return skip("type errors".to_string());
-    }
-    if prof { marks.push(("check_user", std::time::Instant::now())); }
+    let mut checker = match typecheck_wasm_test_program(test_file, &source_text, &mut program, &resolved) {
+        Ok(c) => c,
+        Err(()) => return skip("type errors".to_string()),
+    };
+    mark(prof, &mut marks, "check_user");
 
-    for (name, _, pkg_id, _) in &resolved.modules {
-        if let Some(pid) = pkg_id.as_ref() {
-            let base = pid.mod_name();
-            let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
-        }
-    }
-    let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
-        let saved_self = checker.env.self_module_name;
-        if let Some(pid) = pkg_id.as_ref() {
-            checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
-        }
-        checker.infer_module(mod_prog, name);
-        let versioned = pkg_id.as_ref().map(|pid| {
-            let base = pid.mod_name();
-            if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base }
-        });
-        if let Some(ref v) = versioned {
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
-        }
-        let self_name = checker.env.self_module_name.map(|s| s.to_string());
-        let import_table_name = self_name.as_deref().unwrap_or(name);
-        let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
-        let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-        checker.env.import_table = saved_table;
-        checker.env.self_module_name = saved_self;
-        ir_program.modules.push(mod_ir_module);
-    }
-    if prof { marks.push(("lower_modules", std::time::Instant::now())); }
+    let mut ir_program = lower_wasm_test_modules(&program, &mut checker, &mut resolved);
+    mark(prof, &mut marks, "lower_modules");
     almide::ir_link::ir_link(&mut ir_program);
     almide::optimize::optimize_program(&mut ir_program);
     almide::mono::monomorphize(&mut ir_program);
-    if prof { marks.push(("opt_mono", std::time::Instant::now())); }
+    mark(prof, &mut marks, "opt_mono");
     // Native-only matrix ops (e.g. qwen3_block_q1_0_kv) have no WASM lowering;
     // skip with a clear reason instead of reaching the emitter (whose panic would
     // surface as a generic "WASM codegen panic" skip).
@@ -376,13 +432,8 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         }
     };
     if prof {
-        marks.push(("codegen", std::time::Instant::now()));
-        let total = marks.last().unwrap().1.duration_since(marks[0].1).as_secs_f64();
-        let mut line = format!("[prof] {} total={:.3}s", test_file, total);
-        for w in marks.windows(2) {
-            line.push_str(&format!(" | {}={:.3}", w[1].0, w[1].1.duration_since(w[0].1).as_secs_f64()));
-        }
-        eprintln!("{}", line);
+        mark(prof, &mut marks, "codegen");
+        print_wasm_test_profile(test_file, &marks);
     }
     // v1 first, and where v1 RENDERS its verdict is FINAL: a v1 run failure routes
     // to the authoritative NATIVE fallback, never to a v0 retry. The old v0 retry
@@ -401,28 +452,7 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
 }
 
 pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
-    let test_files: Vec<String> = if !file.is_empty() {
-        let path = std::path::Path::new(file);
-        if path.is_dir() {
-            let mut files = collect_test_files(path);
-            files.sort();
-            if files.is_empty() {
-                eprintln!("No .almd files with test blocks found in {}", file);
-                std::process::exit(1);
-            }
-            files
-        } else {
-            vec![file.to_string()]
-        }
-    } else {
-        let mut files = collect_test_files(std::path::Path::new("."));
-        files.sort();
-        if files.is_empty() {
-            eprintln!("No .almd files with test blocks found.");
-            std::process::exit(1);
-        }
-        files
-    };
+    let test_files: Vec<String> = discover_test_files(file, &[]);
 
     let tmp_dir = std::env::temp_dir().join("almide-wasm-test");
     std::fs::create_dir_all(&tmp_dir).ok();
@@ -465,32 +495,94 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
     for o in &outcomes {
         match o {
             WasmTestOutcome::Pass { file, count, bytes } => {
-                eprintln!("{}: {} tests passed ({} bytes)", file, count, bytes);
+                err(&format!("{}: {} tests passed ({} bytes)", file, count, bytes));
                 passed += 1;
             }
             WasmTestOutcome::Fail { file, detail } => {
-                eprintln!("FAIL {}", file);
-                eprint!("{}", detail);
+                err(&format!("FAIL {}", file));
+                err_no_nl(&format!("{}", detail));
                 failed += 1;
             }
             WasmTestOutcome::Skip { file, reason } => {
-                eprintln!("SKIP {} ({})", file, reason);
+                err(&format!("SKIP {} ({})", file, reason));
                 skipped += 1;
             }
         }
     }
 
-    eprintln!();
+    err("");
     if skipped > 0 {
-        eprintln!("{} passed, {} failed, {} skipped (of {} files)",
-            passed, failed, skipped, test_files.len());
+        err(&format!("{} passed, {} failed, {} skipped (of {} files)",
+            passed, failed, skipped, test_files.len()));
     } else {
-        eprintln!("{} passed, {} failed (of {} files)",
-            passed, failed, test_files.len());
+        err(&format!("{} passed, {} failed (of {} files)",
+            passed, failed, test_files.len()));
     }
     if failed > 0 {
         std::process::exit(1);
     }
+}
+
+/// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
+/// path, in parallel (bounded by `cpus`). Extracted verbatim.
+fn run_wasm_test_phase(test_files: &[String], tmp_dir: &std::sync::Arc<std::path::PathBuf>, cpus: usize) -> Vec<WasmTestOutcome> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+    for _ in 0..cpus { let _ = sem_tx.send(()); }
+    let sem_tx = std::sync::Arc::new(sem_tx);
+    let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+    let mut handles = Vec::new();
+    for tf in test_files.to_vec() {
+        let tx = tx.clone();
+        let td = tmp_dir.clone();
+        let sr = sem_rx.clone();
+        let st = sem_tx.clone();
+        handles.push(std::thread::spawn(move || {
+            let _ = sr.lock().unwrap().recv();
+            let o = compile_and_run_wasm_test(&tf, &td);
+            let _ = st.send(());
+            let _ = tx.send(o);
+        }));
+    }
+    drop(tx);
+    let v: Vec<_> = rx.iter().collect();
+    for h in handles { let _ = h.join(); }
+    v
+}
+
+/// `cmd_test_fast`'s Phase 2: native rustc fallback (authoritative) for
+/// everything the WASM path didn't pass, parallel with per-file scratch
+/// dirs. Extracted verbatim.
+fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize) -> Vec<(String, i32)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+    for _ in 0..cpus { let _ = sem_tx.send(()); }
+    let sem_tx = std::sync::Arc::new(sem_tx);
+    let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+    let mut handles = Vec::new();
+    for tf in fallback.to_vec() {
+        let tx = tx.clone();
+        let args = program_args.clone();
+        let sr = sem_rx.clone();
+        let st = sem_tx.clone();
+        handles.push(std::thread::spawn(move || {
+            let _ = sr.lock().unwrap().recv();
+            let worker_dir = std::env::temp_dir()
+                .join("almide-test")
+                .join(tf.replace('/', "_").replace('.', "_"));
+            let code = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
+                Ok(bin) => super::run::run_binary(&bin, &args),
+                Err(e) => { err(&format!("Compile error for {}:\n{}", tf, e)); 1 }
+            };
+            let _ = st.send(());
+            let _ = tx.send((tf, code));
+        }));
+    }
+    drop(tx);
+    let mut v: Vec<(String, i32)> = rx.iter().collect();
+    for h in handles { let _ = h.join(); }
+    v.sort_by(|a, b| a.0.cmp(&b.0));
+    v
 }
 
 /// Default `almide test`: run each file on the fast rustc-free WASM path; for
@@ -498,63 +590,14 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
 /// back to the native rustc path, which is authoritative. The common case (most
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
 pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
-    let test_files: Vec<String> = if !file.is_empty() {
-        let path = std::path::Path::new(file);
-        if path.is_dir() {
-            let mut files = collect_test_files(path);
-            files.sort();
-            if files.is_empty() {
-                eprintln!("No .almd files with test blocks found in {}", file);
-                std::process::exit(1);
-            }
-            files
-        } else {
-            vec![file.to_string()]
-        }
-    } else {
-        let mut files = Vec::new();
-        for dir in &["spec", "exercises"] {
-            let path = std::path::Path::new(dir);
-            if path.exists() { files.extend(collect_test_files(path)); }
-        }
-        if files.is_empty() { files = collect_test_files(std::path::Path::new(".")); }
-        files.sort();
-        if files.is_empty() {
-            eprintln!("No .almd files with test blocks found.");
-            std::process::exit(1);
-        }
-        files
-    };
+    let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let tmp_dir = std::sync::Arc::new(std::env::temp_dir().join("almide-wasm-test"));
     std::fs::create_dir_all(&*tmp_dir).ok();
 
     // Phase 1: WASM (fast, rustc-free), parallel.
-    let wasm_outcomes: Vec<WasmTestOutcome> = {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
-        for _ in 0..cpus { let _ = sem_tx.send(()); }
-        let sem_tx = std::sync::Arc::new(sem_tx);
-        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
-        let mut handles = Vec::new();
-        for tf in test_files.clone() {
-            let tx = tx.clone();
-            let td = tmp_dir.clone();
-            let sr = sem_rx.clone();
-            let st = sem_tx.clone();
-            handles.push(std::thread::spawn(move || {
-                let _ = sr.lock().unwrap().recv();
-                let o = compile_and_run_wasm_test(&tf, &td);
-                let _ = st.send(());
-                let _ = tx.send(o);
-            }));
-        }
-        drop(tx);
-        let v: Vec<_> = rx.iter().collect();
-        for h in handles { let _ = h.join(); }
-        v
-    };
+    let wasm_outcomes = run_wasm_test_phase(&test_files, &tmp_dir, cpus);
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
@@ -571,48 +614,18 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     if let Some(f) = run_filter { program_args.push(f.to_string()); }
     let program_args = std::sync::Arc::new(program_args);
 
-    let native_results: Vec<(String, i32)> = {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
-        for _ in 0..cpus { let _ = sem_tx.send(()); }
-        let sem_tx = std::sync::Arc::new(sem_tx);
-        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
-        let mut handles = Vec::new();
-        for tf in fallback.clone() {
-            let tx = tx.clone();
-            let args = program_args.clone();
-            let sr = sem_rx.clone();
-            let st = sem_tx.clone();
-            handles.push(std::thread::spawn(move || {
-                let _ = sr.lock().unwrap().recv();
-                let worker_dir = std::env::temp_dir()
-                    .join("almide-test")
-                    .join(tf.replace('/', "_").replace('.', "_"));
-                let code = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                    Ok(bin) => super::run::run_binary(&bin, &args),
-                    Err(e) => { eprintln!("Compile error for {}:\n{}", tf, e); 1 }
-                };
-                let _ = st.send(());
-                let _ = tx.send((tf, code));
-            }));
-        }
-        drop(tx);
-        let mut v: Vec<(String, i32)> = rx.iter().collect();
-        for h in handles { let _ = h.join(); }
-        v.sort_by(|a, b| a.0.cmp(&b.0));
-        v
-    };
+    let native_results = run_native_fallback_phase(&fallback, &program_args, no_check, cpus);
 
     let mut failed = 0;
     for (file, code) in &native_results {
-        if *code != 0 { eprintln!("FAILED: {}", file); failed += 1; }
+        if *code != 0 { err(&format!("FAILED: {}", file)); failed += 1; }
     }
-    eprintln!("\n{} via WASM, {} via native fallback, {} failed (of {} files)",
-        wasm_pass, fallback.len().saturating_sub(failed), failed, test_files.len());
+    err(&format!("\n{} via WASM, {} via native fallback, {} failed (of {} files)",
+        wasm_pass, fallback.len().saturating_sub(failed), failed, test_files.len()));
     if failed > 0 {
         std::process::exit(1);
     }
-    eprintln!("All {} test file(s) passed", test_files.len());
+    err(&format!("All {} test file(s) passed", test_files.len()));
 }
 
 pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
@@ -640,10 +653,10 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
         let code = super::cmd_run_inner(test_file, &program_args, false, true, false, false);
         // Emit JSON per file
         let status = if code == 0 { "pass" } else { "fail" };
-        println!(
+        out(&format!(
             r#"{{"file":"{}","status":"{}","exit_code":{}}}"#,
             test_file.replace('"', r#"\""#), status, code
-        );
+        ));
     }
 }
 
@@ -721,23 +734,23 @@ pub fn cmd_fmt(files: &[String], write_back: bool) {
             // items — formatting it and writing back would delete that code
             // from the file on disk. Report and skip instead.
             for e in &parse_errors {
-                eprintln!("{}", crate::diagnostic_render::display_with_source(e, &source_text));
+                err(&format!("{}", crate::diagnostic_render::display_with_source(e, &source_text)));
             }
-            eprintln!("{}: {} parse error(s), skipping", file, parse_errors.len());
+            err(&format!("{}: {} parse error(s), skipping", file, parse_errors.len()));
             continue;
         }
         // Auto-manage imports: add missing, remove unused
         let import_changes = fmt::auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
         for msg in &import_changes {
-            eprintln!("{}: {}", file, msg);
+            err(&format!("{}: {}", file, msg));
         }
         let formatted = fmt::format_program(&program);
         if write_back {
             std::fs::write(file, &formatted)
-                .unwrap_or_else(|e| { eprintln!("Failed to write {}: {}", file, e); std::process::exit(1); });
-            eprintln!("Formatted {}", file);
+                .unwrap_or_else(|e| { err(&format!("Failed to write {}: {}", file, e)); std::process::exit(1); });
+            err(&format!("Formatted {}", file));
         } else {
-            print!("{}", formatted);
+            out_no_nl(&format!("{}", formatted));
         }
     }
 }
@@ -747,26 +760,26 @@ pub fn cmd_clean() {
     let dep_cache = project::cache_dir();
     if dep_cache.exists() {
         std::fs::remove_dir_all(&dep_cache)
-            .unwrap_or_else(|e| { eprintln!("Failed to clean cache: {}", e); std::process::exit(1); });
-        eprintln!("Cleaned {}", dep_cache.display());
+            .unwrap_or_else(|e| { err(&format!("Failed to clean cache: {}", e)); std::process::exit(1); });
+        err(&format!("Cleaned {}", dep_cache.display()));
         cleaned = true;
     }
     let inc_cache = incremental_cache_dir();
     if inc_cache.exists() {
         std::fs::remove_dir_all(&inc_cache)
-            .unwrap_or_else(|e| { eprintln!("Failed to clean incremental cache: {}", e); std::process::exit(1); });
-        eprintln!("Cleaned {}", inc_cache.display());
+            .unwrap_or_else(|e| { err(&format!("Failed to clean incremental cache: {}", e)); std::process::exit(1); });
+        err(&format!("Cleaned {}", inc_cache.display()));
         cleaned = true;
     }
     let compile_cache = std::path::PathBuf::from("target/compile");
     if compile_cache.exists() {
         std::fs::remove_dir_all(&compile_cache)
-            .unwrap_or_else(|e| { eprintln!("Failed to clean compile cache: {}", e); std::process::exit(1); });
-        eprintln!("Cleaned {}", compile_cache.display());
+            .unwrap_or_else(|e| { err(&format!("Failed to clean compile cache: {}", e)); std::process::exit(1); });
+        err(&format!("Cleaned {}", compile_cache.display()));
         cleaned = true;
     }
     if !cleaned {
-        eprintln!("No cache to clean");
+        err(&format!("No cache to clean"));
     }
 }
 

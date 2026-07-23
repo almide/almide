@@ -84,6 +84,13 @@ pub fn is_any_stdlib(name: &str) -> bool {
 /// type checker queries and the templates codegen emits cannot drift
 /// out of step as bundled `.almd` modules evolve.
 pub fn bundled_source(name: &str) -> Option<&'static str> {
+    bundled_source_core(name)
+        .or_else(|| bundled_source_collections(name))
+        .or_else(|| bundled_source_io(name))
+        .or_else(|| bundled_source_sized_numeric(name))
+}
+
+fn bundled_source_core(name: &str) -> Option<&'static str> {
     match name {
         "args" => Some(include_str!("../../../stdlib/args.almd")),
         "path" => Some(include_str!("../../../stdlib/path.almd")),
@@ -95,6 +102,12 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "bytes" => Some(include_str!("../../../stdlib/bytes.almd")),
         "error" => Some(include_str!("../../../stdlib/error.almd")),
         "value" => Some(include_str!("../../../stdlib/value.almd")),
+        _ => None,
+    }
+}
+
+fn bundled_source_collections(name: &str) -> Option<&'static str> {
+    match name {
         "option" => Some(include_str!("../../../stdlib/option.almd")),
         "result" => Some(include_str!("../../../stdlib/result.almd")),
         "map" => Some(include_str!("../../../stdlib/map.almd")),
@@ -105,6 +118,12 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "random" => Some(include_str!("../../../stdlib/random.almd")),
         "regex" => Some(include_str!("../../../stdlib/regex.almd")),
         "testing" => Some(include_str!("../../../stdlib/testing.almd")),
+        _ => None,
+    }
+}
+
+fn bundled_source_io(name: &str) -> Option<&'static str> {
+    match name {
         "process" => Some(include_str!("../../../stdlib/process.almd")),
         "fs" => Some(include_str!("../../../stdlib/fs.almd")),
         "http" => Some(include_str!("../../../stdlib/http.almd")),
@@ -113,6 +132,12 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "mem" => Some(include_str!("../../../stdlib/mem.almd")),
         "math" => Some(include_str!("../../../stdlib/math.almd")),
         "datetime" => Some(include_str!("../../../stdlib/datetime.almd")),
+        _ => None,
+    }
+}
+
+fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
+    match name {
         "int8" => Some(include_str!("../../../stdlib/int8.almd")),
         "int16" => Some(include_str!("../../../stdlib/int16.almd")),
         "int32" => Some(include_str!("../../../stdlib/int32.almd")),
@@ -139,6 +164,20 @@ pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
 
 /// Return all stdlib modules that contain a given method name.
 pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
+    let r = resolve_ufcs_exclusive(method);
+    if !r.is_empty() {
+        return r;
+    }
+    let r = resolve_ufcs_ambiguous(method);
+    if !r.is_empty() {
+        return r;
+    }
+    resolve_ufcs_sized_numeric(method)
+}
+
+/// Methods owned by exactly one stdlib module (or a small closed set of
+/// module-native container methods: list/map/set, list/map).
+fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
     match method {
         // ── string-only ──
         "trim" | "split" | "pad_start"
@@ -205,6 +244,24 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         // ── datetime-only ──
         "is_before" | "is_after" => vec!["datetime"],
 
+        _ => vec![],
+    }
+}
+
+/// Methods shared by more than one stdlib module where the caller's type
+/// disambiguates (string/list overlap, numeric overlap, etc).
+fn resolve_ufcs_ambiguous(method: &str) -> Vec<&'static str> {
+    let r = resolve_ufcs_ambiguous_string_list(method);
+    if !r.is_empty() {
+        return r;
+    }
+    resolve_ufcs_ambiguous_container(method)
+}
+
+/// Ambiguous methods where the overlap is anchored on `string` and/or `list`
+/// (plus their map/set siblings for the container-shaped ones).
+fn resolve_ufcs_ambiguous_string_list(method: &str) -> Vec<&'static str> {
+    match method {
         // ── ambiguous: string + list ──
         "first" | "last" => vec!["string", "list"],
         "take" | "drop" | "take_end" | "drop_end" => vec!["string", "list"],
@@ -222,6 +279,14 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         // ── ambiguous: string + list + map ──
         "count" => vec!["string", "list", "map"],
 
+        _ => vec![],
+    }
+}
+
+/// Ambiguous methods anchored on container/numeric overlaps (list+result+
+/// option, list+map+set, int+float, ...) rather than on `string`.
+fn resolve_ufcs_ambiguous_container(method: &str) -> Vec<&'static str> {
+    match method {
         // ── ambiguous: list + result + option ──
         "flat_map" => vec!["list", "result", "option"],
         "unwrap_or" | "unwrap_or_else" => vec!["result", "option"],
@@ -248,10 +313,15 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         // ── ambiguous: math + float ──
         "sign" => vec!["math", "float"],
 
-        // ── sized numeric conversion methods (Stage 3) ──
-        // Every sized int / float provides these UFCS methods. The
-        // concrete module (int32, uint8, float32, ...) is picked by
-        // the receiver's type at codegen (`resolve_module_from_ty`).
+        _ => vec![],
+    }
+}
+
+/// Sized numeric conversion methods (Stage 3). Every sized int / float
+/// provides these UFCS methods. The concrete module (int32, uint8, float32,
+/// ...) is picked by the receiver's type at codegen (`resolve_module_from_ty`).
+fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
+    match method {
         "to_int8" | "to_int16" | "to_int32" | "to_int64"
         | "to_uint8" | "to_uint16" | "to_uint32" | "to_uint64"
         | "to_float32" | "to_float64" => vec![

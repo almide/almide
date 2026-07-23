@@ -83,9 +83,21 @@ impl Peephole {
     /// Apply the single-expression peephole rewrites to `expr` after its children
     /// have already been rewritten (post-order). Sets `self.changed` on a hit.
     fn local_rewrite(&mut self, expr: &mut IrExpr) {
-    // ── Fusion: unwrap_or(map.get(m, k), default) → map.get_or(m, k, default) ──
-    // Eliminates heap allocation for Option return in the common ?? pattern.
-    if let IrExprKind::UnwrapOr { expr: inner, fallback } = &expr.kind {
+        // ── Fusion: unwrap_or(map.get(m, k), default) → map.get_or(m, k, default) ──
+        if self.try_fuse_map_get_or(expr) { return; }
+        // Detect: for i in 0..n { xs[i] = ys[i] } → ListCopySlice
+        self.try_rewrite_copy_loop(expr);
+    }
+
+    /// `UnwrapOr` fusion check of `local_rewrite`, extracted verbatim
+    /// (cog>30 decomposition, pattern 1 — independent "try this rewrite,
+    /// return whether it fired" checks with no state shared between them
+    /// other than `self.changed`, which only the firing check writes).
+    /// Eliminates heap allocation for Option return in the common `??`
+    /// pattern. Returns `true` iff `expr` was rewritten (both the `Call`
+    /// and post-`IntrinsicLowering` `RuntimeCall` forms of `map.get`).
+    fn try_fuse_map_get_or(&mut self, expr: &mut IrExpr) -> bool {
+        let IrExprKind::UnwrapOr { expr: inner, fallback } = &expr.kind else { return false };
         if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &inner.kind {
             if module.as_str() == "map" && func.as_str() == "get" && args.len() == 2 {
                 let mut new_args = args.clone();
@@ -106,7 +118,7 @@ impl Peephole {
                     def_id: None,
                 };
                 self.changed = true;
-                return;
+                return true;
             }
         }
         // Also handle RuntimeCall form (post-IntrinsicLowering)
@@ -131,20 +143,22 @@ impl Peephole {
                     def_id: None,
                 };
                 self.changed = true;
-                return;
+                return true;
             }
         }
+        false
     }
 
-    // Detect: for i in 0..n { xs[i] = ys[i] } → ListCopySlice
-    if let IrExprKind::ForIn { var, var_tuple, iterable, body } = &expr.kind {
+    /// `ForIn` → `ListCopySlice` detection check of `local_rewrite`,
+    /// extracted verbatim (cog>30 decomposition).
+    fn try_rewrite_copy_loop(&mut self, expr: &mut IrExpr) {
+        let IrExprKind::ForIn { var, var_tuple, iterable, body } = &expr.kind else { return };
         if var_tuple.is_none() && body.len() == 1 {
             if let Some(copy) = try_detect_copy_loop(*var, iterable, &body[0]) {
                 *expr = copy;
                 self.changed = true;
             }
         }
-    }
     }
 
     /// Cross-statement sequence analysis. Recurses each statement's sub-exprs

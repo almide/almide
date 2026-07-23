@@ -1,11 +1,18 @@
 mod cli;
+mod compile_driver;
 
 // Bring library modules into binary crate scope so cli/ submodules can use `crate::*`.
 pub use almide::{
     ast, canonicalize, check, codegen, diagnostic, diagnostic_render, fmt,
     import_table, intern, ir, lexer, lower, mono, optimize,
     parser, project, project_fetch, resolve, stdlib, types,
+    out, out_no_nl, err, err_no_nl,
 };
+
+// `cli/*.rs` call these via `crate::<name>` — re-exported here (private,
+// visible to descendants of the crate root) so those call sites don't need
+// to change after the `compile_driver` split.
+use compile_driver::{parse_file, try_compile, register_versioned_module_names, lower_one_user_module, try_compile_with_ir};
 
 use std::process::Command;
 
@@ -328,210 +335,6 @@ fn find_rustc() -> String {
     "rustc".to_string()
 }
 
-fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>) {
-    let input = std::fs::read_to_string(file)
-        .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", file, e); std::process::exit(1); });
-
-    if file.ends_with(".json") {
-        let prog = serde_json::from_str(&input)
-            .unwrap_or_else(|e| { eprintln!("JSON parse error: {}", e); std::process::exit(1); });
-        (prog, input, Vec::new())
-    } else {
-        let tokens = lexer::Lexer::tokenize(&input);
-        let mut parser = parser::Parser::new(tokens).with_file(file);
-        let prog = parser.parse()
-            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-        let parse_errors = std::mem::take(&mut parser.errors);
-        (prog, input, parse_errors)
-    }
-}
-
-pub(crate) fn try_compile(file: &str, no_check: bool) -> Result<String, String> {
-    try_compile_with_ir(file, no_check, &codegen::CodegenOptions::default()).map(|(code, _)| code)
-}
-
-pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
-    let (mut program, source_text, parse_errors) = parse_file(file);
-    let has_parse_errors = !parse_errors.is_empty();
-
-    let parsed_project = if std::path::Path::new("almide.toml").exists() {
-        project::parse_toml(std::path::Path::new("almide.toml")).ok()
-    } else {
-        None
-    };
-
-    if let Some(ref proj) = parsed_project {
-        project::check_compiler_version(proj)
-            .map_err(|e| { eprintln!("{}", e); e })?;
-    }
-
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if let Some(ref proj) = parsed_project {
-        project_fetch::fetch_all_deps(proj)
-            .map_err(|e| { eprintln!("{}", e); e.to_string() })?
-            .into_iter()
-            .map(|fd| (fd.pkg_id, fd.source_dir))
-            .collect()
-    } else {
-        vec![]
-    };
-
-    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .map_err(|e| { eprintln!("{}", e); e.clone() })?;
-
-    let mut ir_program: Option<almide::ir::IrProgram> = None;
-    let mut module_irs = std::collections::HashMap::new();
-    if !no_check {
-        let canon = canonicalize::canonicalize_program(
-            &program,
-            resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
-        );
-        let mut checker = check::Checker::from_env(canon.env);
-        checker.set_source(file, &source_text);
-        checker.diagnostics = canon.diagnostics;
-        // #785: module top-let types must be fully inferred before the entry
-        // program reads them (drivers infer the entry FIRST; without this the
-        // readers see the registration seed — Unknown for non-literal inits).
-        almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
-        let diagnostics = checker.infer_program(&mut program);
-        // Combine parse errors + checker errors
-        let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
-        let checker_errors: Vec<_> = diagnostics.iter()
-            .filter(|d| d.level == diagnostic::Level::Error)
-            .collect();
-        all_errors.extend(checker_errors);
-        if !all_errors.is_empty() {
-            for d in &all_errors {
-                eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
-            }
-            eprintln!("\n{} error(s) found", all_errors.len());
-            return Err(format!("{} error(s) found", all_errors.len()));
-        }
-        if !warnings_suppressed() {
-            for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-                eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
-            }
-        }
-        // Pre-register versioned names BEFORE root lowering so cross-module
-        // top_let references (mc_bot.DEFAULT_CONFIG) get correct V0 prefix.
-        for (name, _, pkg_id, _) in &resolved.modules {
-            if let Some(pid) = pkg_id.as_ref() {
-                let base = pid.mod_name();
-                let versioned = if let Some(suffix) = name.strip_prefix(&pid.name) {
-                    format!("{}{}", base, suffix)
-                } else {
-                    base
-                };
-                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&versioned));
-            }
-        }
-
-        // Lower root program (versioned names now available)
-        if !has_parse_errors {
-            let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-            if !warnings_suppressed() {
-                let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
-                for d in &unused_warnings {
-                    eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
-                }
-            }
-            ir_program = Some(ir);
-        }
-
-        // Lower user modules
-        for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
-            // For dependency modules, temporarily set self_module_name to the package root
-            // so `import self` in sub-modules resolves to the dependency, not the main project
-            let saved_self = checker.env.self_module_name;
-            if let Some(pid) = pkg_id.as_ref() {
-                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
-            }
-            checker.infer_module(mod_prog, name);
-            let versioned = pkg_id.as_ref().map(|pid| {
-                let base = pid.mod_name();
-                if let Some(suffix) = name.strip_prefix(&pid.name) {
-                    format!("{}{}", base, suffix)
-                } else {
-                    base
-                }
-            });
-            if let Some(ref v) = versioned {
-                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
-            }
-            // Set module's import table for lowering, then restore
-            let self_name = checker.env.self_module_name.map(|s| s.to_string());
-            let import_table_name = self_name.as_deref().unwrap_or(name);
-            let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
-            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-            // Stdlib Declarative Unification arc complete: stdlib/defs/ is
-            // gone, every stdlib fn lives in `stdlib/<m>.almd`. Fns with
-            // `@inline_rust` / `@wasm_intrinsic` carry no real body (the
-            // Rust walker / WASM emitter skip them), but their attributes
-            // are consumed by `StdlibLoweringPass` to rewrite call sites
-            // into `IrExprKind::InlineRust`. Fns without those attrs
-            // (e.g. helpers like `split_at`) emit normally. No prune.
-            let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
-            checker.env.import_table = saved_table;
-            checker.env.self_module_name = saved_self;
-            module_irs.insert(name.clone(), mod_ir_program);
-            if let Some(ref mut ir) = ir_program {
-                ir.modules.push(mod_ir_module);
-            }
-        }
-    }
-
-    // Optimize IR: constant folding + dead code elimination
-    if let Some(ref mut ir) = ir_program {
-        almide::optimize::optimize_program(ir);
-        // Reclassify top-level lets after optimization (cross-reference const detection)
-        almide::ir::reclassify_top_lets(ir);
-    }
-
-    // Verify IR integrity
-    if let Some(ref ir) = ir_program {
-        let verify_errors = almide::ir::verify_program(ir);
-        if !verify_errors.is_empty() {
-            for e in &verify_errors {
-                eprintln!("internal compiler error: {}", e);
-            }
-            return Err(format!("{} IR verification error(s)", verify_errors.len()));
-        }
-    }
-
-    // Security Layer 2: check permissions if defined in almide.toml
-    if let Some(ref proj) = parsed_project {
-        if !proj.permissions.is_empty() {
-            if let Some(ref ir) = ir_program {
-                cli::check_permissions(ir, &proj.permissions)?;
-            }
-        }
-    }
-
-    // Monomorphize row-polymorphic functions (Rust target only)
-    if let Some(ref mut ir) = ir_program {
-        almide::mono::monomorphize(ir);
-    }
-
-    // IR link: merge dependency modules into root program
-    if let Some(ref mut ir) = ir_program {
-        almide::ir_link::ir_link(ir);
-    }
-
-    // Codegen v3: three-layer pipeline (Nanopass + Templates)
-    let ir = ir_program.as_mut().expect("IR required for codegen");
-    let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {
-        codegen::CodegenOutput::Source(s) => s,
-        codegen::CodegenOutput::Binary(_) => unreachable!(),
-    };
-    Ok((code, ir_program))
-}
-
-fn compile_with_ir(file: &str, no_check: bool) -> (String, Option<almide::ir::IrProgram>) {
-    try_compile_with_ir(file, no_check, &codegen::CodegenOptions::default())
-        .unwrap_or_else(|_| std::process::exit(1))
-}
-
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
@@ -555,12 +358,12 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
 /// differential tests), whose v0 invocations ARE the parity gate, not user escapes.
 fn warn_no_verified_deprecated(no_verified: bool) {
     if no_verified && std::env::var_os("ALMIDE_NO_VERIFIED_OK").is_none() {
-        eprintln!(
+        err(&format!(
             "error: --no-verified (the legacy v0 codegen path) has been removed; the \
              verified renderer is byte-identical where it lowers and falls back to v0 \
              automatically, so the flag should never be needed. If a program genuinely \
              needs it, file an issue: https://github.com/almide/almide/issues"
-        );
+        ));
         std::process::exit(1);
     }
 }
@@ -571,7 +374,7 @@ fn resolve_file(file: Option<String>) -> String {
             // Early-validate package name before looking for entry point
             match crate::project::parse_toml(std::path::Path::new("almide.toml")) {
                 Err(e) if e.contains("hyphens") => {
-                    eprintln!("error: {}", e);
+                    err(&format!("error: {}", e));
                     std::process::exit(1);
                 }
                 _ => {}
@@ -582,61 +385,79 @@ fn resolve_file(file: Option<String>) -> String {
                     return entry.to_string();
                 }
             }
-            eprintln!("almide.toml found but no entry point (src/mod.almd or src/main.almd).");
-            eprintln!("Create src/mod.almd (library) or src/main.almd (executable).");
+            err(&format!("almide.toml found but no entry point (src/mod.almd or src/main.almd)."));
+            err(&format!("Create src/mod.almd (library) or src/main.almd (executable)."));
             std::process::exit(1);
         } else {
-            eprintln!("No file specified and no almide.toml found.");
-            eprintln!("Run 'almide init' to create a project, or specify a file.");
+            err(&format!("No file specified and no almide.toml found."));
+            err(&format!("Run 'almide init' to create a project, or specify a file."));
             std::process::exit(1);
         }
     })
 }
 
+/// `print_error_explanation`'s candidate markdown paths: `ALMIDE_DIAGNOSTICS_DIR`
+/// (if set), each ancestor of the current exe joined with
+/// `docs/diagnostics/<CODE>.md` (handles `target/release/almide` and
+/// `~/.local/bin/almide` layouts), then a CWD-relative fallback. Extracted
+/// verbatim.
+fn diagnostics_md_candidates(code: &str) -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("ALMIDE_DIAGNOSTICS_DIR") {
+        paths.push(std::path::PathBuf::from(dir).join(format!("{}.md", code)));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        // Walk up parent dirs, looking for docs/diagnostics/CODE.md.
+        // Handles target/release/almide and ~/.local/bin/almide layouts.
+        let mut cur = exe.as_path();
+        for _ in 0..6 {
+            paths.push(cur.join("docs/diagnostics").join(format!("{}.md", code)));
+            if let Some(p) = cur.parent() { cur = p; } else { break; }
+        }
+    }
+    paths.push(std::path::PathBuf::from(format!("docs/diagnostics/{}.md", code)));
+    paths
+}
+
+/// `print_error_explanation`'s built-in fallback text (used when no
+/// `docs/diagnostics/<CODE>.md` is found on disk). Converted from a 10-arm
+/// `match` (cyclomatic complexity counts one branch per arm, regardless of
+/// how trivial) to a flat data table + linear scan — same code→text
+/// mapping, genuinely lower complexity since dispatch is now data, not
+/// branches (same technique as `lookup_keyword_info` in lsp_p2.rs).
+fn builtin_error_explanation(code: &str) -> Option<&'static str> {
+    const TABLE: &[(&str, &str)] = &[
+        ("E001", "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse()."),
+        ("E002", "E002: Undefined function\n\n  The function name was not found in the current scope, stdlib, or imports.\n\n  Example:\n    fn f() -> Int = nonexistent()  // error: undefined function\n\n  Fix: Check the function name for typos, or import the module that defines it."),
+        ("E003", "E003: Undefined variable\n\n  The variable name was not found in the current scope.\n\n  Example:\n    fn f() -> Int = x + 1  // error: undefined variable 'x'\n\n  Fix: Check the variable name for typos, or declare it with `let` or `var`\n  before use. If it's a function parameter, ensure it's in the parameter list."),
+        ("E004", "E004: Wrong argument count\n\n  The function was called with the wrong number of arguments.\n\n  Example:\n    fn add(a: Int, b: Int) -> Int = a + b\n    let x = add(1)  // error: expects 2 arguments but got 1\n\n  Fix: Provide the correct number of arguments."),
+        ("E005", "E005: Argument type mismatch\n\n  A function argument's type does not match the parameter type.\n\n  Example:\n    fn greet(name: String) -> String = name\n    greet(42)  // error: expects String but got Int\n\n  Fix: Pass the correct type, or use a conversion function."),
+        ("E006", "E006: Effect isolation violation\n\n  A pure function (fn) is calling an effect function (effect fn).\n  This violates Almide's security model — pure functions cannot perform I/O.\n\n  Example:\n    fn f() -> String = fs.read_text(\"file.txt\")  // error\n\n  Fix: Mark the calling function as `effect fn`."),
+        ("E007", "E007: Fan block in pure function\n\n  A `fan` block can only be used inside an `effect fn`.\n  Fan expressions perform concurrent I/O, which requires effect context.\n\n  Example:\n    fn f() -> (Int, Int) = fan { a(); b() }  // error\n\n  Fix: Mark the enclosing function as `effect fn`."),
+        ("E008", "E008: Mutable variable capture in fan\n\n  A `fan` block cannot capture mutable variables (var) from the outer scope.\n  This prevents data races in concurrent execution.\n\n  Example:\n    var x = 0\n    fan { use(x); ... }  // error: cannot capture var x\n\n  Fix: Use a `let` binding instead of `var`."),
+        ("E009", "E009: Assignment to immutable variable\n\n  Cannot assign to a variable declared with `let` or a function parameter.\n\n  Example:\n    let x = 1\n    x = 2  // error\n\n  Fix: Use `var` instead of `let` if the variable needs to be mutable."),
+        ("E010", "E010: Non-exhaustive match\n\n  The match expression does not cover all possible cases of the subject type.\n\n  Example:\n    type Color = | Red | Green | Blue\n    match c { Red => 1 }  // error: missing Green, Blue\n\n  Fix: Add the missing arms, or use `_` as a catch-all."),
+    ];
+    TABLE.iter().find(|(k, _)| *k == code).map(|(_, v)| *v)
+}
+
 fn print_error_explanation(code: &str) {
     // Prefer richer markdown reference under docs/diagnostics/<CODE>.md when
     // running from a checkout (or when ALMIDE_DIAGNOSTICS_DIR is set).
-    let candidates: Vec<std::path::PathBuf> = {
-        let mut paths = Vec::new();
-        if let Ok(dir) = std::env::var("ALMIDE_DIAGNOSTICS_DIR") {
-            paths.push(std::path::PathBuf::from(dir).join(format!("{}.md", code)));
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            // Walk up parent dirs, looking for docs/diagnostics/CODE.md.
-            // Handles target/release/almide and ~/.local/bin/almide layouts.
-            let mut cur = exe.as_path();
-            for _ in 0..6 {
-                paths.push(cur.join("docs/diagnostics").join(format!("{}.md", code)));
-                if let Some(p) = cur.parent() { cur = p; } else { break; }
-            }
-        }
-        paths.push(std::path::PathBuf::from(format!("docs/diagnostics/{}.md", code)));
-        paths
-    };
-    for path in &candidates {
+    for path in &diagnostics_md_candidates(code) {
         if let Ok(content) = std::fs::read_to_string(path) {
-            println!("{}", content);
+            out(&format!("{}", content));
             return;
         }
     }
 
-    let explanation = match code {
-        "E001" => "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse().",
-        "E002" => "E002: Undefined function\n\n  The function name was not found in the current scope, stdlib, or imports.\n\n  Example:\n    fn f() -> Int = nonexistent()  // error: undefined function\n\n  Fix: Check the function name for typos, or import the module that defines it.",
-        "E003" => "E003: Undefined variable\n\n  The variable name was not found in the current scope.\n\n  Example:\n    fn f() -> Int = x + 1  // error: undefined variable 'x'\n\n  Fix: Check the variable name for typos, or declare it with `let` or `var`\n  before use. If it's a function parameter, ensure it's in the parameter list.",
-        "E004" => "E004: Wrong argument count\n\n  The function was called with the wrong number of arguments.\n\n  Example:\n    fn add(a: Int, b: Int) -> Int = a + b\n    let x = add(1)  // error: expects 2 arguments but got 1\n\n  Fix: Provide the correct number of arguments.",
-        "E005" => "E005: Argument type mismatch\n\n  A function argument's type does not match the parameter type.\n\n  Example:\n    fn greet(name: String) -> String = name\n    greet(42)  // error: expects String but got Int\n\n  Fix: Pass the correct type, or use a conversion function.",
-        "E006" => "E006: Effect isolation violation\n\n  A pure function (fn) is calling an effect function (effect fn).\n  This violates Almide's security model — pure functions cannot perform I/O.\n\n  Example:\n    fn f() -> String = fs.read_text(\"file.txt\")  // error\n\n  Fix: Mark the calling function as `effect fn`.",
-        "E007" => "E007: Fan block in pure function\n\n  A `fan` block can only be used inside an `effect fn`.\n  Fan expressions perform concurrent I/O, which requires effect context.\n\n  Example:\n    fn f() -> (Int, Int) = fan { a(); b() }  // error\n\n  Fix: Mark the enclosing function as `effect fn`.",
-        "E008" => "E008: Mutable variable capture in fan\n\n  A `fan` block cannot capture mutable variables (var) from the outer scope.\n  This prevents data races in concurrent execution.\n\n  Example:\n    var x = 0\n    fan { use(x); ... }  // error: cannot capture var x\n\n  Fix: Use a `let` binding instead of `var`.",
-        "E009" => "E009: Assignment to immutable variable\n\n  Cannot assign to a variable declared with `let` or a function parameter.\n\n  Example:\n    let x = 1\n    x = 2  // error\n\n  Fix: Use `var` instead of `let` if the variable needs to be mutable.",
-        "E010" => "E010: Non-exhaustive match\n\n  The match expression does not cover all possible cases of the subject type.\n\n  Example:\n    type Color = | Red | Green | Blue\n    match c { Red => 1 }  // error: missing Green, Blue\n\n  Fix: Add the missing arms, or use `_` as a catch-all.",
-        _ => {
-            eprintln!("Unknown error code: {}", code);
+    match builtin_error_explanation(code) {
+        Some(explanation) => out(&format!("{}", explanation)),
+        None => {
+            err(&format!("Unknown error code: {}", code));
             std::process::exit(1);
         }
-    };
-    println!("{}", explanation);
+    }
 }
 
 /// The parse → check → lower → emit pipeline is deeply recursive: AST and IR
@@ -699,164 +520,183 @@ fn run_main() {
     dispatch(cli);
 }
 
-fn dispatch(cli: Cli) {
-    let command = match cli.command {
-        Some(cmd) => cmd,
-        None => {
-            cli::repl::run_repl();
-            return;
+/// `dispatch`'s `Commands::Run` arm. Extracted verbatim.
+fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Option<String>, no_verified: bool, program_args: Vec<String>) {
+    let file = resolve_file(file);
+    // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out.
+    // 0.30.0 (#764 rung-5 complete): the v1 NATIVE trust-spine renderer is
+    // likewise the DEFAULT (byte-identical to v0 where it lowers — the
+    // differential rows + the 18/18 wasm_cross native byte sweep — and an
+    // honest wall falls back to v0). `--no-verified` opts out of BOTH legs;
+    // `--verified` is kept as a no-op for compatibility.
+    warn_no_verified_deprecated(no_verified);
+    cli::cmd_run(cli::RunArgs {
+        file: &file,
+        program_args: &program_args,
+        no_check,
+        release,
+        target: target.as_deref(),
+        verified: !no_verified,
+        native_verified: !no_verified,
+    });
+}
+
+/// `dispatch`'s `Commands::Test` arm. Extracted verbatim.
+fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json: bool, target: Option<String>) {
+    let file_str = file.as_deref().unwrap_or("");
+    if target.as_deref() == Some("wasm") {
+        cli::cmd_test_wasm(file_str, run.as_deref());
+    } else if json {
+        cli::cmd_test_json(file_str, run.as_deref());
+    } else if matches!(target.as_deref(), Some("rust" | "native")) {
+        // Explicit pure-native run (e.g. CI's "Test Rust" job).
+        cli::cmd_test(file_str, no_check, run.as_deref());
+    } else {
+        // Default: fast rustc-free WASM path, native fallback for gaps.
+        cli::cmd_test_fast(file_str, no_check, run.as_deref());
+    }
+}
+
+/// `dispatch`'s `Commands::Check` arm. Extracted verbatim — `explain` still
+/// returns early into the caller via its own `bool` return (`true` = already
+/// handled, caller should return).
+fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool) {
+    if let Some(code) = explain {
+        print_error_explanation(&code);
+        return;
+    }
+    let file = resolve_file(file);
+    if effects {
+        cli::cmd_check_effects(&file);
+    } else if json {
+        cli::cmd_check_json(&file);
+    } else {
+        cli::cmd_check(&file, deny_warnings);
+    }
+}
+
+/// `dispatch`'s `Commands::Ide` arm (nested `IdeCommand` match). Extracted verbatim.
+fn dispatch_ide(cmd: IdeCommand) {
+    match cmd {
+        IdeCommand::Outline { target, filter, json } => {
+            let target = match target {
+                Some(t) if t.starts_with("@stdlib/") => t,
+                other => resolve_file(other),
+            };
+            cli::cmd_ide_outline(&target, filter.as_deref(), json);
         }
+        IdeCommand::Doc { symbol, file } => {
+            let file = resolve_file(file);
+            cli::cmd_ide_doc(&symbol, &file);
+        }
+        IdeCommand::StdlibSnapshot { modules, json } => {
+            cli::cmd_ide_stdlib_snapshot(modules.as_deref(), json);
+        }
+    }
+}
+
+/// `dispatch`'s `Commands::Fmt` arm. Extracted verbatim.
+fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool) {
+    let write_back = !check && !dry_run;
+    let fmt_files = if files.is_empty() {
+        let mut found = Vec::new();
+        if std::path::Path::new("src").is_dir() {
+            collect_almd_files(std::path::Path::new("src"), &mut found);
+        }
+        if found.is_empty() {
+            err(&format!("No .almd files found in src/"));
+            std::process::exit(1);
+        }
+        found
+    } else {
+        files
     };
+    cli::cmd_fmt(&fmt_files, write_back);
+}
+
+/// `dispatch`'s `Commands::Add` arm. Extracted verbatim.
+fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>) {
+    let (name, git_url, tag) = if let Some(git_url) = git {
+        (pkg, git_url, tag)
+    } else {
+        project_fetch::resolve_package_spec(&pkg)
+    };
+    project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    let dep = project::Dependency {
+        name: name.clone(),
+        git: git_url,
+        tag,
+        branch: None,
+        version: None,
+        path: None,
+    };
+    project_fetch::fetch_dep(&dep)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+}
+
+/// `dispatch`'s `Commands::Deps` arm. Extracted verbatim.
+fn dispatch_deps() {
+    if std::path::Path::new("almide.toml").exists() {
+        let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+            .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        if proj.dependencies.is_empty() {
+            out(&format!("No dependencies"));
+        } else {
+            for dep in &proj.dependencies {
+                let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+                out(&format!("{} = {} ({})", dep.name, dep.git, ref_name));
+            }
+        }
+    } else {
+        err(&format!("No almide.toml found"));
+    }
+}
+
+/// `dispatch`'s `Commands::DepPath` arm. Extracted verbatim.
+fn dispatch_dep_path(name: String) {
+    if !std::path::Path::new("almide.toml").exists() {
+        err(&format!("No almide.toml found"));
+        std::process::exit(1);
+    }
+    let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    let fetched = project_fetch::fetch_all_deps(&proj)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    match fetched.iter().find(|fd| fd.pkg_id.name == name) {
+        Some(fd) => out(&format!("{}", fd.source_dir.display())),
+        None => {
+            err(&format!("Dependency '{}' not found in almide.toml", name));
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `dispatch`'s second half: the "tooling" commands (LSP, diagnostics
+/// explain, IDE queries, fmt, compile, clean, package management, self
+/// update, emit). Split out of `dispatch`'s single flat match — cyclomatic
+/// complexity counts one branch per match arm regardless of how thin the
+/// arm body is, and `Commands` has ~19 variants, so the single match alone
+/// tripped the threshold. Extracted verbatim; the split point is arbitrary
+/// (arm count, not domain semantics) — `other` is exhaustive over exactly
+/// the variants `dispatch`'s own match doesn't handle.
+fn dispatch_rest(command: Commands) {
     match command {
-        Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, release, target, verified: _, no_verified, program_args } => {
-            let file = resolve_file(file);
-            // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out.
-            // 0.30.0 (#764 rung-5 complete): the v1 NATIVE trust-spine renderer is
-            // likewise the DEFAULT (byte-identical to v0 where it lowers — the
-            // differential rows + the 18/18 wasm_cross native byte sweep — and an
-            // honest wall falls back to v0). `--no-verified` opts out of BOTH legs;
-            // `--verified` is kept as a no-op for compatibility.
-            warn_no_verified_deprecated(no_verified);
-            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), !no_verified, !no_verified);
-        }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified } => {
-            let file = resolve_file(file);
-            warn_no_verified_deprecated(no_verified);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, !no_verified, !no_verified);
-        }
-        Commands::Test { file, run, no_check, json, target } => {
-            let file_str = file.as_deref().unwrap_or("");
-            if target.as_deref() == Some("wasm") {
-                cli::cmd_test_wasm(file_str, run.as_deref());
-            } else if json {
-                cli::cmd_test_json(file_str, run.as_deref());
-            } else if matches!(target.as_deref(), Some("rust" | "native")) {
-                // Explicit pure-native run (e.g. CI's "Test Rust" job).
-                cli::cmd_test(file_str, no_check, run.as_deref());
-            } else {
-                // Default: fast rustc-free WASM path, native fallback for gaps.
-                cli::cmd_test_fast(file_str, no_check, run.as_deref());
-            }
-        }
-        Commands::Check { file, deny_warnings, json, explain, effects } => {
-            if let Some(code) = explain {
-                print_error_explanation(&code);
-                return;
-            }
-            let file = resolve_file(file);
-            if effects {
-                cli::cmd_check_effects(&file);
-            } else if json {
-                cli::cmd_check_json(&file);
-            } else {
-                cli::cmd_check(&file, deny_warnings);
-            }
-        }
-        Commands::Fix { file, dry_run, json } => {
-            let file = resolve_file(file);
-            cli::cmd_fix(&file, dry_run, json);
-        }
-        Commands::DocsGen { check } => {
-            cli::cmd_docs_gen(check);
-        }
         Commands::Lsp => {
             cli::lsp::run_lsp();
         }
         Commands::Explain { code } => {
             print_error_explanation(&code);
         }
-        Commands::Ide { cmd } => {
-            match cmd {
-                IdeCommand::Outline { target, filter, json } => {
-                    let target = match target {
-                        Some(t) if t.starts_with("@stdlib/") => t,
-                        other => resolve_file(other),
-                    };
-                    cli::cmd_ide_outline(&target, filter.as_deref(), json);
-                }
-                IdeCommand::Doc { symbol, file } => {
-                    let file = resolve_file(file);
-                    cli::cmd_ide_doc(&symbol, &file);
-                }
-                IdeCommand::StdlibSnapshot { modules, json } => {
-                    cli::cmd_ide_stdlib_snapshot(modules.as_deref(), json);
-                }
-            }
-        }
-        Commands::Fmt { files, check, dry_run } => {
-            let write_back = !check && !dry_run;
-            let fmt_files = if files.is_empty() {
-                let mut found = Vec::new();
-                if std::path::Path::new("src").is_dir() {
-                    collect_almd_files(std::path::Path::new("src"), &mut found);
-                }
-                if found.is_empty() {
-                    eprintln!("No .almd files found in src/");
-                    std::process::exit(1);
-                }
-                found
-            } else {
-                files
-            };
-            cli::cmd_fmt(&fmt_files, write_back);
-        }
+        Commands::Ide { cmd } => dispatch_ide(cmd),
+        Commands::Fmt { files, check, dry_run } => dispatch_fmt(files, check, dry_run),
         Commands::Compile { module, json, dry_run, output } => {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
         Commands::Clean => cli::cmd_clean(),
-        Commands::Add { pkg, git, tag } => {
-            let (name, git_url, tag) = if let Some(git_url) = git {
-                (pkg, git_url, tag)
-            } else {
-                project_fetch::resolve_package_spec(&pkg)
-            };
-            project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-            let dep = project::Dependency {
-                name: name.clone(),
-                git: git_url,
-                tag,
-                branch: None,
-                version: None,
-                path: None,
-            };
-            project_fetch::fetch_dep(&dep)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-        }
-        Commands::Deps => {
-            if std::path::Path::new("almide.toml").exists() {
-                let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-                    .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-                if proj.dependencies.is_empty() {
-                    println!("No dependencies");
-                } else {
-                    for dep in &proj.dependencies {
-                        let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
-                        println!("{} = {} ({})", dep.name, dep.git, ref_name);
-                    }
-                }
-            } else {
-                eprintln!("No almide.toml found");
-            }
-        }
-        Commands::DepPath { name } => {
-            if !std::path::Path::new("almide.toml").exists() {
-                eprintln!("No almide.toml found");
-                std::process::exit(1);
-            }
-            let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-            let fetched = project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-            match fetched.iter().find(|fd| fd.pkg_id.name == name) {
-                Some(fd) => println!("{}", fd.source_dir.display()),
-                None => {
-                    eprintln!("Dependency '{}' not found in almide.toml", name);
-                    std::process::exit(1);
-                }
-            }
-        }
+        Commands::Add { pkg, git, tag } => dispatch_add(pkg, git, tag),
+        Commands::Deps => dispatch_deps(),
+        Commands::DepPath { name } => dispatch_dep_path(name),
         Commands::Install { spec, tag, branch, name, bin_dir, target } => {
             cli::cmd_install(
                 &spec,
@@ -871,7 +711,57 @@ fn dispatch(cli: Cli) {
             cli::cmd_self_update(version.as_deref());
         }
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c } => {
-            cli::cmd_emit(&file, &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c);
+            cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c });
         }
+        // `command`'s static type is the full `Commands` enum — Rust can't
+        // narrow it to "one of the 12 variants `dispatch` doesn't handle"
+        // across the function boundary, so this match must stay exhaustive.
+        // `dispatch`'s own match already handles the other 7 variants
+        // before ever calling this function, so this arm is genuinely
+        // unreachable at runtime.
+        _ => unreachable!("dispatch's match should have handled this Commands variant"),
+    }
+}
+
+fn dispatch(cli: Cli) {
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            cli::repl::run_repl();
+            return;
+        }
+    };
+    match command {
+        Commands::Init => cli::cmd_init(),
+        Commands::Run { file, no_check, release, target, verified: _, no_verified, program_args } =>
+            dispatch_run(file, no_check, release, target, no_verified, program_args),
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified } => {
+            let file = resolve_file(file);
+            warn_no_verified_deprecated(no_verified);
+            cli::cmd_build(cli::BuildArgs {
+                file: &file,
+                output: o.as_deref(),
+                target: target.as_deref(),
+                release: release || fast,
+                fast,
+                unchecked_index,
+                no_check,
+                repr_c,
+                cdylib,
+                emit_unverified,
+                verified: !no_verified,
+                native_verified: !no_verified,
+            });
+        }
+        Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),
+        Commands::Check { file, deny_warnings, json, explain, effects } => dispatch_check(file, deny_warnings, json, explain, effects),
+        Commands::Fix { file, dry_run, json } => {
+            let file = resolve_file(file);
+            cli::cmd_fix(&file, dry_run, json);
+        }
+        Commands::DocsGen { check } => {
+            cli::cmd_docs_gen(check);
+        }
+        other => dispatch_rest(other),
     }
 }

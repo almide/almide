@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::cell::RefCell;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
-use almide_base::intern::sym;
+use almide_base::intern::{sym, Sym};
 
 /// `true` if the bundled `module.func`'s `@inline_rust` template
 /// borrows the param at position `pos` (`&{name}`, `&*{name}`,
@@ -115,12 +115,10 @@ fn tco_owned_params(func: &IrFunction, mut borrows: Vec<ParamBorrow>) -> Vec<Par
     borrows
 }
 
-pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<ParamBorrow>> {
-    let mut sigs: HashMap<String, Vec<ParamBorrow>> = HashMap::new();
-
-    // Record the names of every user-declared RECORD type so a `t: Tok` param
-    // (`Ty::Named`) is borrow-inferred like a structural record instead of being
-    // deep-cloned at every read (#647).
+/// Record the names of every user-declared RECORD type so a `t: Tok` param
+/// (`Ty::Named`) is borrow-inferred like a structural record instead of being
+/// deep-cloned at every read (#647).
+fn seed_record_names(program: &IrProgram) {
     RECORD_NAMES.with(|r| {
         let mut set = r.borrow_mut();
         set.clear();
@@ -134,108 +132,143 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
         collect(&program.type_decls);
         for m in &program.modules { collect(&m.type_decls); }
     });
+}
 
-    // Seed `sigs` with `@intrinsic` fns from every bundled stdlib
-    // module — including ones that weren't lowered into
-    // `program.modules` (non auto-imported modules like `bytes`,
-    // `regex`, `fs`). The key is the mangled runtime symbol so
-    // `rewrite_calls` can look it up from `RuntimeCall.symbol` verbatim.
-    {
-        use almide_lang::ast::{AttrValue, Decl};
-        for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
-            let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
-            let Some(parsed) = almide_lang::parse_cached(source) else { continue };
-            for decl in &parsed.decls {
-                let Decl::Fn { params, attrs, return_type, .. } = decl else { continue };
-                let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
-                let Some(first) = attr.args.first() else { continue };
-                let AttrValue::String { value: symbol } = &first.value else { continue };
-                // Params in AST are `TypeExpr`, not resolved `Ty`. Convert
-                // the simple cases into a `Ty` so `intrinsic_borrow_mode`
-                // can reuse the same logic as the IR-side path.
-                let mut borrows: Vec<ParamBorrow> = params.iter()
-                    .map(|p| intrinsic_borrow_mode_from_type_expr(&p.ty))
-                    .collect();
-                // `@consume(p1, p2, ...)` overrides the inferred borrow for
-                // the named params to `Own`. Required when the runtime fn
-                // consumes a container (e.g. `xs: Vec<T>` on
-                // `almide_rt_list_map`) rather than borrowing it.
-                let consume_names: Vec<&str> = attrs.iter()
-                    .filter(|a| a.name.as_str() == "consume")
-                    .flat_map(|a| a.args.iter().filter_map(|arg| match &arg.value {
-                        AttrValue::Ident { name } => Some(name.as_str()),
-                        AttrValue::String { value } => Some(value.as_str()),
-                        _ => None,
-                    }))
-                    .collect();
-                for (idx, p) in params.iter().enumerate() {
-                    if consume_names.iter().any(|n| n == &p.name.as_str()) {
-                        borrows[idx] = ParamBorrow::Own;
-                    }
+/// Seed `sigs` with `@intrinsic` fns from every bundled stdlib module —
+/// including ones that weren't lowered into `program.modules` (non
+/// auto-imported modules like `bytes`, `regex`, `fs`). The key is the
+/// mangled runtime symbol so `rewrite_calls` can look it up from
+/// `RuntimeCall.symbol` verbatim. Extracted verbatim from
+/// `infer_borrow_signatures` (cog>100 decomposition): only ever writes to
+/// `sigs` (`.insert`), never reads it back, so it's a safe write-only
+/// accumulator to thread out.
+/// Apply the `@mutating` / implicit-mut / explicit `mut` param override:
+/// promote a heap container's inferred Ref-family borrow to `RefMut`.
+/// Extracted from `seed_intrinsic_sigs` (cog>100 decomposition, second
+/// round): only ever writes into `borrows` via index, never reads `sigs` —
+/// a safe write-only accumulator to thread out.
+fn apply_intrinsic_mut_overrides(
+    params: &[almide_lang::ast::Param],
+    attrs: &[almide_lang::ast::Attribute],
+    return_type: &almide_lang::ast::TypeExpr,
+    borrow_ref_names: &[&str],
+    borrows: &mut [ParamBorrow],
+) {
+    // Mutated parameters: explicit `mut` keyword, `@mutating`,
+    // or implicit (returns Unit with Ref-mode container first arg).
+    // `@borrow_ref(param)` always wins over mutation inference.
+    let has_mutating = attrs.iter().any(|a| a.name.as_str() == "mutating");
+    let implicit_mut = is_unit_type_expr(return_type);
+    // Collect all mut param indices
+    let mut mut_indices: Vec<usize> = params.iter().enumerate()
+        .filter(|(_, p)| p.is_mut)
+        .map(|(i, _)| i)
+        .collect();
+    if (has_mutating || implicit_mut) && !mut_indices.contains(&0) {
+        mut_indices.push(0);
+    }
+    for idx in mut_indices {
+        let param_name = params.get(idx).map(|p| p.name.as_str());
+        let is_borrow_ref = param_name
+            .map(|n| borrow_ref_names.iter().any(|r| r == &n))
+            .unwrap_or(false);
+        if !is_borrow_ref {
+            if let Some(b) = borrows.get_mut(idx) {
+                // A heap container an intrinsic mutates in place (Unit
+                // return) is taken by `&mut`. Every heap container
+                // reaches here already Ref-family:
+                // `intrinsic_borrow_mode_from_type_expr` seeds
+                // `List`→RefSlice, `String`→RefStr, and
+                // `Bytes`/`Map`/`Set`/records→Ref — so promoting the
+                // Ref family to RefMut covers them all. Primitives are
+                // seeded `Own` and stay `Own` (never mutated in place
+                // through a reference).
+                if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr) {
+                    *b = ParamBorrow::RefMut;
                 }
-                // `@borrow_ref(p1, p2, ...)` — opposite override: force
-                // `Ref` on params the default heuristic would pass by
-                // value (e.g. user-defined named types whose runtime fn
-                // takes `&T`, like `JsonPath`).
-                let borrow_ref_names: Vec<&str> = attrs.iter()
-                    .filter(|a| a.name.as_str() == "borrow_ref")
-                    .flat_map(|a| a.args.iter().filter_map(|arg| match &arg.value {
-                        AttrValue::Ident { name } => Some(name.as_str()),
-                        AttrValue::String { value } => Some(value.as_str()),
-                        _ => None,
-                    }))
-                    .collect();
-                for (idx, p) in params.iter().enumerate() {
-                    if borrow_ref_names.iter().any(|n| n == &p.name.as_str()) {
-                        borrows[idx] = ParamBorrow::Ref;
-                    }
-                }
-                // Mutated parameters: explicit `mut` keyword, `@mutating`,
-                // or implicit (returns Unit with Ref-mode container first arg).
-                // `@borrow_ref(param)` always wins over mutation inference.
-                let has_mutating = attrs.iter().any(|a| a.name.as_str() == "mutating");
-                let implicit_mut = is_unit_type_expr(return_type);
-                // Collect all mut param indices
-                let mut mut_indices: Vec<usize> = params.iter().enumerate()
-                    .filter(|(_, p)| p.is_mut)
-                    .map(|(i, _)| i)
-                    .collect();
-                if (has_mutating || implicit_mut) && !mut_indices.contains(&0) {
-                    mut_indices.push(0);
-                }
-                for idx in mut_indices {
-                    let param_name = params.get(idx).map(|p| p.name.as_str());
-                    let is_borrow_ref = param_name
-                        .map(|n| borrow_ref_names.iter().any(|r| r == &n))
-                        .unwrap_or(false);
-                    if !is_borrow_ref {
-                        if let Some(b) = borrows.get_mut(idx) {
-                            // A heap container an intrinsic mutates in place (Unit
-                            // return) is taken by `&mut`. Every heap container
-                            // reaches here already Ref-family:
-                            // `intrinsic_borrow_mode_from_type_expr` seeds
-                            // `List`→RefSlice, `String`→RefStr, and
-                            // `Bytes`/`Map`/`Set`/records→Ref — so promoting the
-                            // Ref family to RefMut covers them all. Primitives are
-                            // seeded `Own` and stay `Own` (never mutated in place
-                            // through a reference).
-                            if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr) {
-                                *b = ParamBorrow::RefMut;
-                            }
-                        }
-                    }
-                }
-                sigs.insert(symbol.clone(), borrows);
             }
         }
     }
+}
 
-    // Float ordering variants (IntrinsicLoweringPass swaps `..._sort` →
-    // `..._sort_float` etc. for `List[Float]`; C-055). They have the SAME
-    // borrow shape as their base symbol — `sort`/`min`/`max` borrow the slice,
-    // `sort_by` consumes the Vec — so alias the base signature rather than
-    // re-deriving it (the float variants are runtime-only and carry no
-    // `@intrinsic` attr to seed from).
+/// Seed `sigs` with one `@intrinsic` fn declaration's borrow signature.
+/// Extracted from `seed_intrinsic_sigs` (cog>100 decomposition, second
+/// round): a no-op for anything that isn't an `@intrinsic` fn — mirrors the
+/// original per-decl `let ... else { continue }` guard chain, just with
+/// `continue` becoming `return` from this standalone function.
+fn seed_intrinsic_sig_for_fn(
+    params: &[almide_lang::ast::Param],
+    attrs: &[almide_lang::ast::Attribute],
+    return_type: &almide_lang::ast::TypeExpr,
+    sigs: &mut HashMap<String, Vec<ParamBorrow>>,
+) {
+    use almide_lang::ast::AttrValue;
+    let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { return };
+    let Some(first) = attr.args.first() else { return };
+    let AttrValue::String { value: symbol } = &first.value else { return };
+    // Params in AST are `TypeExpr`, not resolved `Ty`. Convert
+    // the simple cases into a `Ty` so `intrinsic_borrow_mode`
+    // can reuse the same logic as the IR-side path.
+    let mut borrows: Vec<ParamBorrow> = params.iter()
+        .map(|p| intrinsic_borrow_mode_from_type_expr(&p.ty))
+        .collect();
+    // `@consume(p1, p2, ...)` overrides the inferred borrow for
+    // the named params to `Own`. Required when the runtime fn
+    // consumes a container (e.g. `xs: Vec<T>` on
+    // `almide_rt_list_map`) rather than borrowing it.
+    let consume_names: Vec<&str> = attrs.iter()
+        .filter(|a| a.name.as_str() == "consume")
+        .flat_map(|a| a.args.iter().filter_map(|arg| match &arg.value {
+            AttrValue::Ident { name } => Some(name.as_str()),
+            AttrValue::String { value } => Some(value.as_str()),
+            _ => None,
+        }))
+        .collect();
+    for (idx, p) in params.iter().enumerate() {
+        if consume_names.iter().any(|n| n == &p.name.as_str()) {
+            borrows[idx] = ParamBorrow::Own;
+        }
+    }
+    // `@borrow_ref(p1, p2, ...)` — opposite override: force
+    // `Ref` on params the default heuristic would pass by
+    // value (e.g. user-defined named types whose runtime fn
+    // takes `&T`, like `JsonPath`).
+    let borrow_ref_names: Vec<&str> = attrs.iter()
+        .filter(|a| a.name.as_str() == "borrow_ref")
+        .flat_map(|a| a.args.iter().filter_map(|arg| match &arg.value {
+            AttrValue::Ident { name } => Some(name.as_str()),
+            AttrValue::String { value } => Some(value.as_str()),
+            _ => None,
+        }))
+        .collect();
+    for (idx, p) in params.iter().enumerate() {
+        if borrow_ref_names.iter().any(|n| n == &p.name.as_str()) {
+            borrows[idx] = ParamBorrow::Ref;
+        }
+    }
+    apply_intrinsic_mut_overrides(params, attrs, return_type, &borrow_ref_names, &mut borrows);
+    sigs.insert(symbol.clone(), borrows);
+}
+
+fn seed_intrinsic_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
+    use almide_lang::ast::Decl;
+    for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+        let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
+        let Some(parsed) = almide_lang::parse_cached(source) else { continue };
+        for decl in &parsed.decls {
+            let Decl::Fn { params, attrs, return_type, .. } = decl else { continue };
+            seed_intrinsic_sig_for_fn(params, attrs, return_type, sigs);
+        }
+    }
+}
+
+/// Float ordering variants (IntrinsicLoweringPass swaps `..._sort` →
+/// `..._sort_float` etc. for `List[Float]`; C-055). They have the SAME
+/// borrow shape as their base symbol — `sort`/`min`/`max` borrow the slice,
+/// `sort_by` consumes the Vec — so alias the base signature rather than
+/// re-deriving it (the float variants are runtime-only and carry no
+/// `@intrinsic` attr to seed from).
+fn alias_float_variant_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
     for (base, float_var) in [
         ("almide_rt_list_sort", "almide_rt_list_sort_float"),
         ("almide_rt_list_min", "almide_rt_list_min_float"),
@@ -246,6 +279,70 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
             sigs.insert(float_var.to_string(), b);
         }
     }
+}
+
+/// One fixed-point iteration's pass over top-level functions. Extracted
+/// verbatim from `infer_borrow_signatures`: writes into `sigs` and into each
+/// function's own `param.borrow`, never reads `sigs` back within the same
+/// iteration (that read happens via the `SIGS_SNAPSHOT` thread-local frozen
+/// by the caller before this runs) — a safe write-only accumulator.
+fn infer_program_fn_borrows(program: &mut IrProgram, sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
+    for func in &mut program.functions {
+        if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+        let borrows = tco_owned_params(func, infer_function_borrows(func));
+        // Always record the signature (including all-Own) so that the
+        // fixed-point iteration can distinguish "known to be Own" from
+        // "not yet analysed". Without this, self-recursive functions
+        // whose first-pass inference produced all-Own would be looked
+        // up as None forever → conservative fallback → Own sticks.
+        sigs.insert(func.name.to_string(), borrows.clone());
+        for (param, borrow) in func.params.iter_mut().zip(borrows) {
+            param.borrow = borrow;
+        }
+    }
+}
+
+/// One fixed-point iteration's pass over module functions. Same shape and
+/// same safety rationale as `infer_program_fn_borrows`.
+fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
+    for module in &mut program.modules {
+        let mod_name = module.name.to_string();
+        MOD_SCOPE.with(|m| *m.borrow_mut() = Some(mod_name.clone()));
+        for func in &mut module.functions {
+            if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+            let borrows = tco_owned_params(func, infer_function_borrows(func));
+            sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
+            // `ResolveCallsPass` rewrites bundled-Almide calls to
+            // `CallTarget::Named { almide_rt_<m>_<f> }`. BorrowInsertion
+            // looks up that Named key directly, so also mirror the
+            // signature under the mangled symbol. Skip for
+            // @inline_rust / @intrinsic fns — those are already seeded
+            // under the mangled runtime symbol in the first loop and
+            // shouldn't be overwritten by bundled-body inference.
+            let is_dispatch_only = func.attrs.iter().any(|a|
+                matches!(a.name.as_str(),
+                    "inline_rust" | "wasm_intrinsic" | "intrinsic"));
+            if !is_dispatch_only {
+                let mangled = format!(
+                    "almide_rt_{}_{}",
+                    mod_name.replace('.', "_"),
+                    func.name.as_str().replace('.', "_"),
+                );
+                sigs.insert(mangled, borrows.clone());
+            }
+            for (param, borrow) in func.params.iter_mut().zip(borrows) {
+                param.borrow = borrow;
+            }
+        }
+    }
+}
+
+pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<ParamBorrow>> {
+    let mut sigs: HashMap<String, Vec<ParamBorrow>> = HashMap::new();
+
+    seed_record_names(program);
+    seed_intrinsic_sigs(&mut sigs);
+    alias_float_variant_sigs(&mut sigs);
 
     for _iter in 0..6 {
         // Snapshot current sigs into thread-local so check_needs_ownership can see them.
@@ -253,50 +350,8 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
         let prev_sigs = sigs.clone();
 
         MOD_SCOPE.with(|m| *m.borrow_mut() = None);
-        for func in &mut program.functions {
-            if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
-            let borrows = tco_owned_params(func, infer_function_borrows(func));
-            // Always record the signature (including all-Own) so that the
-            // fixed-point iteration can distinguish "known to be Own" from
-            // "not yet analysed". Without this, self-recursive functions
-            // whose first-pass inference produced all-Own would be looked
-            // up as None forever → conservative fallback → Own sticks.
-            sigs.insert(func.name.to_string(), borrows.clone());
-            for (param, borrow) in func.params.iter_mut().zip(borrows) {
-                param.borrow = borrow;
-            }
-        }
-
-        for module in &mut program.modules {
-            let mod_name = module.name.to_string();
-            MOD_SCOPE.with(|m| *m.borrow_mut() = Some(mod_name.clone()));
-            for func in &mut module.functions {
-                if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
-                let borrows = tco_owned_params(func, infer_function_borrows(func));
-                sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
-                // `ResolveCallsPass` rewrites bundled-Almide calls to
-                // `CallTarget::Named { almide_rt_<m>_<f> }`. BorrowInsertion
-                // looks up that Named key directly, so also mirror the
-                // signature under the mangled symbol. Skip for
-                // @inline_rust / @intrinsic fns — those are already seeded
-                // under the mangled runtime symbol in the first loop and
-                // shouldn't be overwritten by bundled-body inference.
-                let is_dispatch_only = func.attrs.iter().any(|a|
-                    matches!(a.name.as_str(),
-                        "inline_rust" | "wasm_intrinsic" | "intrinsic"));
-                if !is_dispatch_only {
-                    let mangled = format!(
-                        "almide_rt_{}_{}",
-                        mod_name.replace('.', "_"),
-                        func.name.as_str().replace('.', "_"),
-                    );
-                    sigs.insert(mangled, borrows.clone());
-                }
-                for (param, borrow) in func.params.iter_mut().zip(borrows) {
-                    param.borrow = borrow;
-                }
-            }
-        }
+        infer_program_fn_borrows(program, &mut sigs);
+        infer_program_module_borrows(program, &mut sigs);
 
         if sigs == prev_sigs {
             break;

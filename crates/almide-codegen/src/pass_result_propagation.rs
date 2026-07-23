@@ -25,170 +25,200 @@ impl NanoPass for ResultPropagationPass {
         // Result wrapping is Rust/WASM-only. (The TS target and its ResultErasurePass were removed.)
         let wrap_non_result = matches!(target, Target::Rust | Target::Wasm);
 
-        // `@inline_rust` / `@wasm_intrinsic` / `@intrinsic` fns dispatch
-        // through per-target templates whose runtime fn returns the unwrapped
-        // type. Lifting their IR signature would desync with the actual emit.
-        let is_template_dispatch = |attrs: &[almide_lang::ast::Attribute]| -> bool {
-            attrs.iter().any(|a| matches!(a.name.as_str(),
-                "inline_rust" | "wasm_intrinsic" | "intrinsic"))
-        };
+        let lifted_fns = lift_effect_fn_signatures(&mut program, wrap_non_result);
+        let intrinsic_effect_syms = collect_intrinsic_effect_result_syms(wrap_non_result);
 
-        // ── Phase 1: Lift effect fn signatures ──────────────────────
-        //
-        // For each non-test, non-extern, non-template effect fn: T → Result[T, String].
-        // Also register mangled names (almide_rt_<mod>_<fn>) so lookups succeed
-        // after StdlibLowering renames call targets.
+        transform_lifted_fn_bodies(&mut program, &lifted_fns, &intrinsic_effect_syms);
+        repair_already_result_effect_fn_bodies(&mut program, wrap_non_result, &lifted_fns, &intrinsic_effect_syms);
+        insert_try_in_test_fans(&mut program);
 
-        let mut lifted_fns: HashMap<String, Ty> = HashMap::new();
+        PassResult { program, changed: true }
+    }
+}
 
-        for func in &mut program.functions {
-            if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
-                && func.extern_attrs.is_empty()
-                && !is_template_dispatch(&func.attrs)
-            {
-                let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
-                func.ret_ty = Ty::result(orig, Ty::String);
-                lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
+// ── `run` phase extraction (cog>100 decomposition, pattern 2) ──
+//
+// Each of these is a 1:1 text-move of one of `run`'s four sequential,
+// independent phases (the original's own "Phase 1/2/2b/3" comment
+// headers). None reads a value a LATER phase produces.
+
+/// `@inline_rust` / `@wasm_intrinsic` / `@intrinsic` fns dispatch
+/// through per-target templates whose runtime fn returns the unwrapped
+/// type. Lifting their IR signature would desync with the actual emit.
+fn is_template_dispatch(attrs: &[almide_lang::ast::Attribute]) -> bool {
+    attrs.iter().any(|a| matches!(a.name.as_str(),
+        "inline_rust" | "wasm_intrinsic" | "intrinsic"))
+}
+
+/// Phase 1: Lift effect fn signatures.
+///
+/// For each non-test, non-extern, non-template effect fn: T → Result[T, String].
+/// Also register mangled names (almide_rt_<mod>_<fn>) so lookups succeed
+/// after StdlibLowering renames call targets.
+fn lift_effect_fn_signatures(program: &mut IrProgram, wrap_non_result: bool) -> HashMap<String, Ty> {
+    let mut lifted_fns: HashMap<String, Ty> = HashMap::new();
+
+    for func in &mut program.functions {
+        if should_lift_effect_fn_ret(func, wrap_non_result) {
+            let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
+            func.ret_ty = Ty::result(orig, Ty::String);
+            lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
+        }
+    }
+
+    for module in &mut program.modules {
+        lift_module_effect_fn_signatures(module, wrap_non_result, &mut lifted_fns);
+    }
+    lifted_fns
+}
+
+/// Shared predicate of `lift_effect_fn_signatures`'s two loops, extracted
+/// verbatim (cog>30 decomposition) — the two loops' `if` conditions were
+/// byte-identical.
+fn should_lift_effect_fn_ret(func: &IrFunction, wrap_non_result: bool) -> bool {
+    func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
+        && func.extern_attrs.is_empty()
+        && !is_template_dispatch(&func.attrs)
+}
+
+/// Module-scope loop body of `lift_effect_fn_signatures`, extracted
+/// verbatim (cog>30 decomposition, sequential-phase pattern — `lifted_fns`
+/// is a write-only accumulator shared with the root-scope loop above).
+fn lift_module_effect_fn_signatures(module: &mut IrModule, wrap_non_result: bool, lifted_fns: &mut HashMap<String, Ty>) {
+    let mod_name = module.versioned_name
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| module.name.to_string());
+    let mod_ident = mod_name.replace('.', "_");
+    for func in &mut module.functions {
+        if should_lift_effect_fn_ret(func, wrap_non_result) {
+            let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
+            func.ret_ty = Ty::result(orig, Ty::String);
+            let bare = func.name.to_string();
+            lifted_fns.insert(bare.clone(), func.ret_ty.clone());
+            let sanitized = bare
+                .replace(' ', "_")
+                .replace('-', "_")
+                .replace('.', "_");
+            let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
+            lifted_fns.insert(mangled, func.ret_ty.clone());
+        }
+    }
+}
+
+/// An `@intrinsic effect fn` (e.g. `http.serve`) compiles to a runtime
+/// fn that returns `Result<T, String>` at the boundary, even though its
+/// declared Almide ret is `T` and its IR call ty stays `T`. A bare tail
+/// call to one — `effect fn main() = { http.serve(...) }` — is already a
+/// `RuntimeCall` by this pass, so it is NOT in `lifted_fns` (those are the
+/// user fns whose signatures we lifted above) and `wrap_tail_in_ok` would
+/// wrongly `Ok(...)`-wrap it, double-wrapping the Result (#434, E0308).
+/// Collect their runtime symbols so the tail-wrap can recognize them.
+fn collect_intrinsic_effect_result_syms(wrap_non_result: bool) -> HashSet<String> {
+    if !wrap_non_result {
+        return HashSet::new();
+    }
+    use almide_lang::ast::{AttrValue, Decl, TypeExpr};
+    // Only intrinsic effect fns whose RUNTIME returns `Result<_, String>`
+    // belong in the tail exemption below: their tail `RuntimeCall` IS the
+    // Result this fn returns, so Ok-wrapping it double-wraps (#434). That
+    // is exactly the ones DECLARED `-> Result[...]`, plus the rare
+    // intrinsic whose runtime returns Result under a non-Result
+    // declaration — currently only `http.serve` (declared `-> Unit`, but
+    // `almide_rt_http_serve -> Result<(), String>`; its runtime wrapper
+    // composes the Result internally).
+    //
+    // A BARE-value intrinsic must NOT be exempted: `io.print -> Unit`,
+    // `io.read_line -> String`, `fs.exists -> Bool`, `env.get -> Option`
+    // all return a plain value from the runtime, so a tail call to one
+    // still needs `Ok(...)`. Exempting them left a bare `()`/value tail
+    // in a `-> Result<_, String>` fn (#758, E0308).
+    const RUNTIME_RESULT_NONRESULT_DECL: &[&str] = &["almide_rt_http_serve"];
+    let mut set = HashSet::new();
+    for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+        let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
+        let Some(parsed) = almide_lang::parse_cached(source) else { continue };
+        for decl in &parsed.decls {
+            let Decl::Fn { effect, attrs, return_type, .. } = decl else { continue };
+            if *effect != Some(true) { continue; }
+            let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
+            let Some(first) = attr.args.first() else { continue };
+            let AttrValue::String { value: symbol } = &first.value else { continue };
+            let declared_result = matches!(return_type,
+                TypeExpr::Generic { name, .. } if name.as_str() == "Result");
+            if declared_result || RUNTIME_RESULT_NONRESULT_DECL.contains(&symbol.as_str()) {
+                set.insert(symbol.to_string());
             }
         }
+    }
+    set
+}
 
-        for module in &mut program.modules {
-            let mod_name = module.versioned_name
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| module.name.to_string());
-            let mod_ident = mod_name.replace('.', "_");
-            for func in &mut module.functions {
-                if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
-                    && func.extern_attrs.is_empty()
-                    && !is_template_dispatch(&func.attrs)
-                {
-                    let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
-                    func.ret_ty = Ty::result(orig, Ty::String);
-                    let bare = func.name.to_string();
-                    lifted_fns.insert(bare.clone(), func.ret_ty.clone());
-                    let sanitized = bare
-                        .replace(' ', "_")
-                        .replace('-', "_")
-                        .replace('.', "_");
-                    let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
-                    lifted_fns.insert(mangled, func.ret_ty.clone());
-                }
-            }
+/// Phase 2: Transform lifted function bodies.
+///
+/// 1. resolve_err_types: fill Unknown in err() expressions using
+///    the function's Ok type. Must run BEFORE wrap_tail_in_ok.
+/// 2. wrap_tail_in_ok: wrap all exit paths in Ok(...).
+fn transform_lifted_fn_bodies(program: &mut IrProgram, lifted_fns: &HashMap<String, Ty>, intrinsic_effect_syms: &HashSet<String>) {
+    for func in &mut program.functions {
+        if lifted_fns.contains_key(func.name.as_str()) {
+            let ok_ty = extract_ok_type(&func.ret_ty);
+            resolve_err_types(&mut func.body, &ok_ty);
+            func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), lifted_fns, intrinsic_effect_syms);
         }
-
-        // An `@intrinsic effect fn` (e.g. `http.serve`) compiles to a runtime
-        // fn that returns `Result<T, String>` at the boundary, even though its
-        // declared Almide ret is `T` and its IR call ty stays `T`. A bare tail
-        // call to one — `effect fn main() = { http.serve(...) }` — is already a
-        // `RuntimeCall` by this pass, so it is NOT in `lifted_fns` (those are the
-        // user fns whose signatures we lifted above) and `wrap_tail_in_ok` would
-        // wrongly `Ok(...)`-wrap it, double-wrapping the Result (#434, E0308).
-        // Collect their runtime symbols so the tail-wrap can recognize them.
-        let intrinsic_effect_syms: HashSet<String> = if wrap_non_result {
-            use almide_lang::ast::{AttrValue, Decl, TypeExpr};
-            // Only intrinsic effect fns whose RUNTIME returns `Result<_, String>`
-            // belong in the tail exemption below: their tail `RuntimeCall` IS the
-            // Result this fn returns, so Ok-wrapping it double-wraps (#434). That
-            // is exactly the ones DECLARED `-> Result[...]`, plus the rare
-            // intrinsic whose runtime returns Result under a non-Result
-            // declaration — currently only `http.serve` (declared `-> Unit`, but
-            // `almide_rt_http_serve -> Result<(), String>`; its runtime wrapper
-            // composes the Result internally).
-            //
-            // A BARE-value intrinsic must NOT be exempted: `io.print -> Unit`,
-            // `io.read_line -> String`, `fs.exists -> Bool`, `env.get -> Option`
-            // all return a plain value from the runtime, so a tail call to one
-            // still needs `Ok(...)`. Exempting them left a bare `()`/value tail
-            // in a `-> Result<_, String>` fn (#758, E0308).
-            const RUNTIME_RESULT_NONRESULT_DECL: &[&str] = &["almide_rt_http_serve"];
-            let mut set = HashSet::new();
-            for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
-                let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
-                let Some(parsed) = almide_lang::parse_cached(source) else { continue };
-                for decl in &parsed.decls {
-                    let Decl::Fn { effect, attrs, return_type, .. } = decl else { continue };
-                    if *effect != Some(true) { continue; }
-                    let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
-                    let Some(first) = attr.args.first() else { continue };
-                    let AttrValue::String { value: symbol } = &first.value else { continue };
-                    let declared_result = matches!(return_type,
-                        TypeExpr::Generic { name, .. } if name.as_str() == "Result");
-                    if declared_result || RUNTIME_RESULT_NONRESULT_DECL.contains(&symbol.as_str()) {
-                        set.insert(symbol.to_string());
-                    }
-                }
-            }
-            set
-        } else {
-            HashSet::new()
-        };
-
-        // ── Phase 2: Transform lifted function bodies ───────────────
-        //
-        // 1. resolve_err_types: fill Unknown in err() expressions using
-        //    the function's Ok type. Must run BEFORE wrap_tail_in_ok.
-        // 2. wrap_tail_in_ok: wrap all exit paths in Ok(...).
-
-        for func in &mut program.functions {
+    }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
             if lifted_fns.contains_key(func.name.as_str()) {
                 let ok_ty = extract_ok_type(&func.ret_ty);
                 resolve_err_types(&mut func.body, &ok_ty);
-                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns, &intrinsic_effect_syms);
+                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), lifted_fns, intrinsic_effect_syms);
             }
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                if lifted_fns.contains_key(func.name.as_str()) {
-                    let ok_ty = extract_ok_type(&func.ret_ty);
-                    resolve_err_types(&mut func.body, &ok_ty);
-                    func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns, &intrinsic_effect_syms);
-                }
-            }
-        }
+    }
+}
 
-        // ── Phase 2b: Repair effect fns whose ret is ALREADY Result ──
-        //
-        // An effect fn declared `-> Result[T, String]` (e.g. `effect fn main()`) was NOT
-        // sig-lifted, so Phase 2 skipped it. But a `match`/`if`-tail body can still arrive
-        // mis-typed as the inner `T`/`Unit` (the frontend types a control-flow tail by its arm
-        // payloads, not the wrapped Result). Left alone, body.ty ≠ ret_ty and emit_wasm emits a
-        // trailing `unreachable` the fall-through reaches (porta read_message cross-module trap).
-        // Re-run the tail-ty fix ONLY on such a mismatch; a body already Result (a bare `ok()`
-        // tail) has body.ty == ret_ty and is untouched.
-        for func in &mut program.functions {
+/// Phase 2b: Repair effect fns whose ret is ALREADY Result.
+///
+/// An effect fn declared `-> Result[T, String]` (e.g. `effect fn main()`) was NOT
+/// sig-lifted, so Phase 2 skipped it. But a `match`/`if`-tail body can still arrive
+/// mis-typed as the inner `T`/`Unit` (the frontend types a control-flow tail by its arm
+/// payloads, not the wrapped Result). Left alone, body.ty ≠ ret_ty and emit_wasm emits a
+/// trailing `unreachable` the fall-through reaches (porta read_message cross-module trap).
+/// Re-run the tail-ty fix ONLY on such a mismatch; a body already Result (a bare `ok()`
+/// tail) has body.ty == ret_ty and is untouched.
+fn repair_already_result_effect_fn_bodies(program: &mut IrProgram, wrap_non_result: bool, lifted_fns: &HashMap<String, Ty>, intrinsic_effect_syms: &HashSet<String>) {
+    for func in &mut program.functions {
+        if func.is_effect && !func.is_test && wrap_non_result
+            && func.ret_ty.is_result() && !func.body.ty.is_result()
+        {
+            let ok_ty = extract_ok_type(&func.ret_ty);
+            resolve_err_types(&mut func.body, &ok_ty);
+            func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), lifted_fns, intrinsic_effect_syms);
+        }
+    }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
             if func.is_effect && !func.is_test && wrap_non_result
                 && func.ret_ty.is_result() && !func.body.ty.is_result()
             {
                 let ok_ty = extract_ok_type(&func.ret_ty);
                 resolve_err_types(&mut func.body, &ok_ty);
-                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns, &intrinsic_effect_syms);
+                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), lifted_fns, intrinsic_effect_syms);
             }
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                if func.is_effect && !func.is_test && wrap_non_result
-                    && func.ret_ty.is_result() && !func.body.ty.is_result()
-                {
-                    let ok_ty = extract_ok_type(&func.ret_ty);
-                    resolve_err_types(&mut func.body, &ok_ty);
-                    func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns, &intrinsic_effect_syms);
-                }
-            }
+    }
+}
+
+/// Phase 3: Test-block fan Try insertion.
+///
+/// Auto-? insertion for effect fn bodies moved to lowering
+/// (almide-frontend/src/lower/auto_try.rs). Only fan-block
+/// Try insertion for test functions remains here.
+fn insert_try_in_test_fans(program: &mut IrProgram) {
+    for func in &mut program.functions {
+        if func.is_test {
+            func.body = insert_try_in_fan(std::mem::take(&mut func.body));
         }
-
-        // ── Phase 3: Test-block fan Try insertion ──────────────────
-        //
-        // Auto-? insertion for effect fn bodies moved to lowering
-        // (almide-frontend/src/lower/auto_try.rs). Only fan-block
-        // Try insertion for test functions remains here.
-
-        for func in &mut program.functions {
-            if func.is_test {
-                func.body = insert_try_in_fan(std::mem::take(&mut func.body));
-            }
-        }
-
-        PassResult { program, changed: true }
     }
 }
 
@@ -215,42 +245,54 @@ fn resolve_err_types(body: &mut IrExpr, ok_ty: &Ty) {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             // Bottom-up: resolve children first
             walk_expr_mut(self, expr);
-
-            // ResultErr with unresolved Ok slot → fill from function ret_ty
-            if matches!(&expr.kind, IrExprKind::ResultErr { .. }) {
-                if expr.ty.has_unresolved_deep() {
-                    expr.ty = Ty::result(self.ok_ty.clone(), Ty::String);
-                }
-            }
-
-            // Try/Unwrap wrapping ResultErr: Ok type is unresolved → fill
-            match &expr.kind {
-                IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } => {
-                    if matches!(&inner.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
-                        expr.ty = self.ok_ty.clone();
-                    }
-                }
-                _ => {}
-            }
-
-            // Block wrapping a single Try/Unwrap { ResultErr } or bare ResultErr
-            if let IrExprKind::Block { stmts, expr: Some(tail) } = &expr.kind {
-                if stmts.is_empty() && expr.ty.has_unresolved_deep() {
-                    let is_err_wrapper = match &tail.kind {
-                        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
-                            => matches!(&inner.kind, IrExprKind::ResultErr { .. }),
-                        IrExprKind::ResultErr { .. } => true,
-                        _ => false,
-                    };
-                    if is_err_wrapper {
-                        expr.ty = tail.ty.clone();
-                    }
-                }
-            }
+            resolve_err_ty_direct(expr, self.ok_ty);
+            resolve_err_ty_try_unwrap(expr, self.ok_ty);
+            resolve_err_ty_block_wrapper(expr);
         }
     }
 
     ErrResolver { ok_ty }.visit_expr_mut(body);
+}
+
+/// `ResultErr`-with-unresolved-Ok-slot check of `resolve_err_types`'s
+/// visitor, extracted verbatim (cog>30 decomposition, pattern 1 — three
+/// independent checks in sequence, each only ever writes `expr.ty`, no
+/// state shared between them).
+fn resolve_err_ty_direct(expr: &mut IrExpr, ok_ty: &Ty) {
+    if matches!(&expr.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
+        expr.ty = Ty::result(ok_ty.clone(), Ty::String);
+    }
+}
+
+/// `Try`/`Unwrap`-wrapping-`ResultErr` check of `resolve_err_types`'s
+/// visitor, extracted verbatim (cog>30 decomposition).
+fn resolve_err_ty_try_unwrap(expr: &mut IrExpr, ok_ty: &Ty) {
+    match &expr.kind {
+        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } => {
+            if matches!(&inner.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
+                expr.ty = ok_ty.clone();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Block-wrapping-a-single-`Try`/`Unwrap`{`ResultErr`}-or-bare-`ResultErr`
+/// check of `resolve_err_types`'s visitor, extracted verbatim (cog>30
+/// decomposition).
+fn resolve_err_ty_block_wrapper(expr: &mut IrExpr) {
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &expr.kind else { return };
+    if stmts.is_empty() && expr.ty.has_unresolved_deep() {
+        let is_err_wrapper = match &tail.kind {
+            IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
+                => matches!(&inner.kind, IrExprKind::ResultErr { .. }),
+            IrExprKind::ResultErr { .. } => true,
+            _ => false,
+        };
+        if is_err_wrapper {
+            expr.ty = tail.ty.clone();
+        }
+    }
 }
 
 /// Wrap the tail expression of an effect fn body in Ok(...).

@@ -147,10 +147,229 @@ impl<'a> RenderContext<'a> {
 
 // ── Function rendering ──
 
-pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
-    // Collect VarIds of fn params that will be emitted as references
-    // (`&T` / `&[T]` / `&str`). The Borrow walker uses this to skip
-    // outer `&` wrap on already-borrowed bindings.
+// ── `render_function` step extraction (cog>100 decomposition, pattern 2) ──
+//
+// Each of these is a 1:1 text-move of one independent step from the
+// original `render_function` body, in the same order they used to run.
+// The two `try_render_*` helpers replace an inline `return` with an
+// `Option<String>` — `Some` means "an attr matched, this is the final
+// rendering" (the caller still returns it immediately), `None` means "no
+// attr matched, fall through" (the original's implicit no-op when the loop
+// found nothing) — same control flow, just delegated construction.
+
+/// `@extern` dispatch: native module call / template-based / C FFI.
+fn try_render_extern_fn(ctx: &RenderContext, func: &IrFunction) -> Option<String> {
+    let target_str = match ctx.target {
+        Target::Rust => "rs",
+        _ => "",
+    };
+    let native_target = match ctx.target {
+        Target::Rust => "rust",
+        _ => "wasm",
+    };
+    // A module fn's call sites all render the flatten prefix
+    // (`almide_rt_<origin>_<name>`), so an extern binding must be emitted
+    // under that same prefixed name — a bare `use bridge::f as f;` defines
+    // a symbol nobody calls (porta wasm_rt: E0425 on almide_rt_wasm_rt_*).
+    let emit_name = match &func.module_origin {
+        Some(origin) => format!("almide_rt_{}_{}", origin,
+            func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
+        None => func.name.to_string(),
+    };
+    for attr in &func.extern_attrs {
+        // @extern(rust, ...) / @extern(wasm, ...) — native module binding
+        if attr.target == native_target {
+            return Some(render_native_call(ctx, func, attr, &emit_name));
+        }
+        if attr.target == target_str {
+            return Some(ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", emit_name.as_str())])
+                .unwrap_or_else(|| format!("// extern: {}.{}", attr.module, attr.function)));
+        }
+        // @extern(c, "lib", "func") — generate extern "C" block + safe wrapper
+        if attr.target == "c" && matches!(ctx.target, Target::Rust) {
+            return Some(render_extern_c(ctx, func, attr, &emit_name));
+        }
+    }
+    None
+}
+
+/// Export fn: render body normally, then wrap with #[no_mangle] pub extern "C".
+fn try_render_export_fn(ctx: &RenderContext, func: &IrFunction) -> Option<String> {
+    for attr in &func.export_attrs {
+        if attr.target == "c" && matches!(ctx.target, Target::Rust) {
+            return Some(render_export_c(ctx, func, attr));
+        }
+    }
+    None
+}
+
+fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
+    func.params.iter()
+        .map(|p| {
+            // Escape Rust keywords in param names — same helper as every
+            // other emission site (var_name, fn call, fn definition), so a
+            // param named e.g. `self`/`box`/`move` matches at its binding and
+            // every use within the body (#659's rule, applied here too).
+            let mut param_name = escape_rust_ident(p.name.as_str(), fn_ctx.templates);
+            // Mutable params (e.g. from TCO pass) — let the template decide
+            // whether to emit a `mut` prefix via the {mut_prefix} variable.
+            let mut_prefix = if fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
+                fn_ctx.templates.render_with("mut_param_prefix", None, &[], &[])
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            if !mut_prefix.is_empty() {
+                param_name = format!("{}{}", mut_prefix, param_name);
+            }
+            let type_s = match p.borrow {
+                ParamBorrow::Own => render_type_fn(fn_ctx, &p.ty),
+                ParamBorrow::Ref => format!("&{}", render_type_fn(fn_ctx, &p.ty)),
+                ParamBorrow::RefMut => format!("&mut {}", render_type_fn(fn_ctx, &p.ty)),
+                ParamBorrow::RefStr => "&str".to_string(),
+                ParamBorrow::RefSlice => {
+                    if let almide_lang::types::Ty::Applied(_, args) = &p.ty {
+                        if let Some(inner) = args.first() {
+                            format!("&[{}]", render_type_fn(fn_ctx, inner))
+                        } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
+                    } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
+                }
+            };
+            fn_ctx.templates.render_with("fn_param", None, &[], &[("name", param_name.as_str()), ("type", type_s.as_str())])
+                .unwrap_or_else(|| format!("{}: {}", p.name, type_s))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Function body: render Block contents directly (no IIFE wrapper).
+/// Unwrap a Val-wrapped Var at a Block's tail expression: `.into_inner()`,
+/// including through a `ResultOk { Var }` wrapper (`Ok(var.into_inner())`).
+/// Only the Block-tail path gets the `ResultOk` case — the non-Block body
+/// path in `render_fn_body_str` does not check for it (pre-existing
+/// asymmetry in the original code, preserved verbatim here rather than
+/// "fixed" by sharing).
+fn unwrap_block_tail_var(fn_ctx: &RenderContext, e: &IrExpr, expr_str: &mut String) {
+    if let IrExprKind::Var { id } = &e.kind {
+        if fn_ctx.ann.is_rc_cow(id) {
+            *expr_str = format!("{}.into_inner()", expr_str);
+        }
+    } else if let IrExprKind::ResultOk { expr: inner } = &e.kind {
+        if let IrExprKind::Var { id } = &inner.kind {
+            if fn_ctx.ann.is_rc_cow(id) {
+                // Re-render with unwrap: Ok(var.into_inner())
+                let var_name = fn_ctx.var_table.get(*id).name.to_string();
+                *expr_str = format!("Ok({}.into_inner())", var_name);
+            }
+        }
+    }
+}
+
+/// A `break`/`continue` control-flow expr renders bare; anything else goes
+/// through the `block_result_expr` template. Shared verbatim by both
+/// `render_fn_body_str` branches — this part WAS identical between them.
+fn render_control_or_wrapped(fn_ctx: &RenderContext, kind: &IrExprKind, rendered: String) -> String {
+    let is_control = matches!(kind, IrExprKind::Break | IrExprKind::Continue);
+    if is_control {
+        rendered
+    } else {
+        fn_ctx.templates.render_with("block_result_expr", None, &[], &[("expr", rendered.as_str())])
+            .unwrap_or_else(|| rendered.clone())
+    }
+}
+
+fn render_fn_body_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
+    let body_raw = match &func.body.kind {
+        IrExprKind::Block { stmts, expr } => {
+            let mut parts: Vec<String> = stmts.iter()
+                .map(|s| terminate_stmt(fn_ctx, render_stmt_fn(fn_ctx, s)))
+                .collect();
+            if let Some(e) = expr {
+                let mut expr_str = render_expr_fn(fn_ctx, e);
+                unwrap_block_tail_var(fn_ctx, e, &mut expr_str);
+                parts.push(render_control_or_wrapped(fn_ctx, &e.kind, expr_str));
+            }
+            parts.join("\n")
+        }
+        _ => {
+            let mut raw = render_expr_fn(fn_ctx, &func.body);
+            if let IrExprKind::Var { id } = &func.body.kind {
+                if fn_ctx.ann.is_rc_cow(id) {
+                    raw = format!("{}.into_inner()", raw);
+                }
+            }
+            render_control_or_wrapped(fn_ctx, &func.body.kind, raw)
+        }
+    };
+    indent_lines(&body_raw, 4)
+}
+
+/// Build the `<T, U, ...>` generics string for the fn signature.
+fn render_fn_generics_str(ctx: &RenderContext, fn_ctx: &RenderContext, func: &IrFunction) -> String {
+    let Some(generics) = &func.generics else { return String::new(); };
+    if generics.is_empty() {
+        return String::new();
+    }
+    let bound_template = if fn_ctx.minimal_generic_bounds { "generic_bound_minimal" } else { "generic_bound_full" };
+    let params = generics.iter().map(|g| {
+        ctx.templates.render_with(bound_template, None, &[], &[("name", g.name.as_str())])
+            .unwrap_or_else(|| g.name.to_string())
+    }).collect::<Vec<_>>().join(", ");
+    format!("<{}>", params)
+}
+
+/// Sanitize the function name: spaces/dots/hyphens → underscores, mangle
+/// Rust-illegal characters, escape Rust keywords, add the module-origin
+/// runtime prefix, and append the generics suffix.
+fn render_fn_safe_name(
+    ctx: &RenderContext,
+    func: &IrFunction,
+    fn_generics: &str,
+    is_rust_effect_main: bool,
+    is_rust_plain_main_with_forces: bool,
+) -> String {
+    // Sanitize function name: spaces/dots/hyphens → underscores.
+    // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
+    // cannot collide with user fns here — no conditional prefixing needed.
+    let raw_name = if is_rust_effect_main || is_rust_plain_main_with_forces {
+        "__almide_main".to_string()
+    } else {
+        func.name.to_string()
+    };
+    let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
+        .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
+        .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
+        .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
+        .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
+        .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
+    // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
+    safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+    // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
+    // matches the CALL site exactly (#659).
+    safe_name = escape_rust_ident(&safe_name, ctx.templates);
+    // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
+    // IR name stays clean; prefix is a rendering concern.
+    if let Some(ref origin) = func.module_origin {
+        // A qualified-method fn (e.g. a Codec `Type.encode` whose type is now the
+        // namespaced `mod.Type`) flattens to `mod_Type_method`; the emit prefix
+        // already adds `almide_rt_<origin>_`, so strip a leading `<origin>_` to
+        // avoid doubling the module (#433 × #411-B). Mirrors the call-site strip;
+        // gated on a dotted IR name so plain module fns are unaffected.
+        let base: String = if func.name.as_str().contains('.') {
+            safe_name.strip_prefix(&format!("{}_", origin)).unwrap_or(&safe_name).to_string()
+        } else {
+            safe_name.clone()
+        };
+        safe_name = format!("almide_rt_{}_{}", origin, base);
+    }
+    format!("{}{}", safe_name, fn_generics)
+}
+
+/// Collect VarIds of fn params that will be emitted as references (`&T` /
+/// `&[T]` / `&str`, and separately `&mut T`). The Borrow walker uses this
+/// to skip an outer `&` wrap on already-borrowed bindings. Extracted from
+/// `render_function` (cog>25 decomposition).
+fn collect_ref_params(func: &IrFunction) -> (std::collections::HashSet<VarId>, std::collections::HashSet<VarId>) {
     let mut ref_params: std::collections::HashSet<VarId> =
         std::collections::HashSet::new();
     let mut ref_mut_params: std::collections::HashSet<VarId> =
@@ -167,6 +386,34 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             _ => {}
         }
     }
+    (ref_params, ref_mut_params)
+}
+
+/// Wrap `effect fn main`: report an unhandled error via Display + exit 1.
+/// Both wrapper shapes first FORCE the abortable lazy top-lets in
+/// declaration order, so an aborting initializer (integer `/`/`%`) fires at
+/// startup — byte-identical to wasm's eager top-let evaluation in
+/// `_start`. Extracted from `render_function` (cog>25 decomposition).
+fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
+    let force_lines: String = ctx.ann.global_init_order.iter()
+        .filter_map(|v| ctx.ann.globals.get(v))
+        .filter(|i| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
+        .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
+        .collect();
+    if is_rust_effect_main {
+        format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
+    } else if is_rust_plain_main_with_forces {
+        format!("{}\n\nfn main() {{\n{}    __almide_main();\n}}", fn_code, force_lines)
+    } else {
+        fn_code
+    }
+}
+
+pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
+    // Collect VarIds of fn params that will be emitted as references
+    // (`&T` / `&[T]` / `&str`). The Borrow walker uses this to skip
+    // outer `&` wrap on already-borrowed bindings.
+    let (ref_params, ref_mut_params) = collect_ref_params(func);
 
     // Error type that the enclosing fn's `?`/auto-? propagates into. A fn
     // declared `Result[_, E]` propagates into `E`; an effect fn declared with
@@ -219,153 +466,24 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     //   @extern(rs, "mod", "fn")   → template-based rendering (legacy)
     //   @extern(c, "lib", "fn")    → C FFI with extern "C" block
     if !func.extern_attrs.is_empty() {
-        let target_str = match ctx.target {
-            Target::Rust => "rs",
-            _ => "",
-        };
-        let native_target = match ctx.target {
-            Target::Rust => "rust",
-            _ => "wasm",
-        };
-        // A module fn's call sites all render the flatten prefix
-        // (`almide_rt_<origin>_<name>`), so an extern binding must be emitted
-        // under that same prefixed name — a bare `use bridge::f as f;` defines
-        // a symbol nobody calls (porta wasm_rt: E0425 on almide_rt_wasm_rt_*).
-        let emit_name = match &func.module_origin {
-            Some(origin) => format!("almide_rt_{}_{}", origin,
-                func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
-            None => func.name.to_string(),
-        };
-        for attr in &func.extern_attrs {
-            // @extern(rust, ...) / @extern(wasm, ...) — native module binding
-            if attr.target == native_target {
-                return render_native_call(ctx, func, attr, &emit_name);
-            }
-            if attr.target == target_str {
-                return ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", emit_name.as_str())])
-                    .unwrap_or_else(|| format!("// extern: {}.{}", attr.module, attr.function));
-            }
-            // @extern(c, "lib", "func") — generate extern "C" block + safe wrapper
-            if attr.target == "c" && matches!(ctx.target, Target::Rust) {
-                return render_extern_c(ctx, func, attr, &emit_name);
-            }
+        if let Some(rendered) = try_render_extern_fn(ctx, func) {
+            return rendered;
         }
     }
 
     // Export fn: render body normally, then wrap with #[no_mangle] pub extern "C"
     if !func.export_attrs.is_empty() {
-        for attr in &func.export_attrs {
-            if attr.target == "c" && matches!(ctx.target, Target::Rust) {
-                return render_export_c(ctx, func, attr);
-            }
+        if let Some(rendered) = try_render_export_fn(ctx, func) {
+            return rendered;
         }
     }
 
-    let params_str = func.params.iter()
-        .map(|p| {
-            // Escape Rust keywords in param names — same helper as every
-            // other emission site (var_name, fn call, fn definition), so a
-            // param named e.g. `self`/`box`/`move` matches at its binding and
-            // every use within the body (#659's rule, applied here too).
-            let mut param_name = escape_rust_ident(p.name.as_str(), fn_ctx.templates);
-            // Mutable params (e.g. from TCO pass) — let the template decide
-            // whether to emit a `mut` prefix via the {mut_prefix} variable.
-            let mut_prefix = if fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
-                fn_ctx.templates.render_with("mut_param_prefix", None, &[], &[])
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-            if !mut_prefix.is_empty() {
-                param_name = format!("{}{}", mut_prefix, param_name);
-            }
-            let type_s = match p.borrow {
-                ParamBorrow::Own => render_type_fn(&fn_ctx, &p.ty),
-                ParamBorrow::Ref => format!("&{}", render_type_fn(&fn_ctx, &p.ty)),
-                ParamBorrow::RefMut => format!("&mut {}", render_type_fn(&fn_ctx, &p.ty)),
-                ParamBorrow::RefStr => "&str".to_string(),
-                ParamBorrow::RefSlice => {
-                    if let almide_lang::types::Ty::Applied(_, args) = &p.ty {
-                        if let Some(inner) = args.first() {
-                            format!("&[{}]", render_type_fn(&fn_ctx, inner))
-                        } else { format!("&{}", render_type_fn(&fn_ctx, &p.ty)) }
-                    } else { format!("&{}", render_type_fn(&fn_ctx, &p.ty)) }
-                }
-            };
-            fn_ctx.templates.render_with("fn_param", None, &[], &[("name", param_name.as_str()), ("type", type_s.as_str())])
-                .unwrap_or_else(|| format!("{}: {}", p.name, type_s))
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    // Function body: render Block contents directly (no IIFE wrapper)
-    let body_raw = match &func.body.kind {
-        IrExprKind::Block { stmts, expr } => {
-            let mut parts: Vec<String> = stmts.iter()
-                .map(|s| terminate_stmt(&fn_ctx, render_stmt_fn(&fn_ctx, s)))
-                .collect();
-            if let Some(e) = expr {
-                let mut expr_str = render_expr_fn(&fn_ctx, e);
-                // Val-wrapped var at function return: unwrap to plain T.
-                // For simple Var: append .into_inner().
-                // For ResultOk { Var }: the Var inside Ok needs unwrapping.
-                if let IrExprKind::Var { id } = &e.kind {
-                    if fn_ctx.ann.is_rc_cow(id) {
-                        expr_str = format!("{}.into_inner()", expr_str);
-                    }
-                } else if let IrExprKind::ResultOk { expr: inner } = &e.kind {
-                    if let IrExprKind::Var { id } = &inner.kind {
-                        if fn_ctx.ann.is_rc_cow(id) {
-                            // Re-render with unwrap: Ok(var.into_inner())
-                            let var_name = fn_ctx.var_table.get(*id).name.to_string();
-                            expr_str = format!("Ok({}.into_inner())", var_name);
-                        }
-                    }
-                }
-                let is_control = matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue);
-                if is_control {
-                    parts.push(expr_str);
-                } else {
-                    parts.push(fn_ctx.templates.render_with("block_result_expr", None, &[], &[("expr", expr_str.as_str())])
-                        .unwrap_or_else(|| expr_str.clone()));
-                }
-            }
-            parts.join("\n")
-        }
-        _ => {
-            let mut raw = render_expr_fn(&fn_ctx, &func.body);
-            if let IrExprKind::Var { id } = &func.body.kind {
-                if fn_ctx.ann.is_rc_cow(id) {
-                    raw = format!("{}.into_inner()", raw);
-                }
-            }
-            let is_control = matches!(&func.body.kind, IrExprKind::Break | IrExprKind::Continue);
-            if is_control {
-                raw
-            } else {
-                fn_ctx.templates.render_with("block_result_expr", None, &[], &[("expr", raw.as_str())])
-                    .unwrap_or_else(|| raw.clone())
-            }
-        }
-    };
-    let body_str = indent_lines(&body_raw, 4);
+    let params_str = render_fn_params_str(&fn_ctx, func);
+    let body_str = render_fn_body_str(&fn_ctx, func);
     let ret_str = render_type_fn(ctx, &func.ret_ty);
 
     // Build generics string for functions
-    let fn_generics = if let Some(generics) = &func.generics {
-        if generics.is_empty() {
-            String::new()
-        } else {
-            let bound_template = if fn_ctx.minimal_generic_bounds { "generic_bound_minimal" } else { "generic_bound_full" };
-            let params = generics.iter().map(|g| {
-                ctx.templates.render_with(bound_template, None, &[], &[("name", g.name.as_str())])
-                    .unwrap_or_else(|| g.name.to_string())
-            }).collect::<Vec<_>>().join(", ");
-            format!("<{}>", params)
-        }
-    } else {
-        String::new()
-    };
+    let fn_generics = render_fn_generics_str(ctx, &fn_ctx, func);
 
     // `effect fn main` is renamed to `__almide_main` and given a thin `fn main`
     // wrapper (below) that reports an unhandled `Err` via Display (`Error: <msg>`)
@@ -383,41 +501,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             Some(almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true })
         ));
 
-    // Sanitize function name: spaces/dots/hyphens → underscores.
-    // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
-    // cannot collide with user fns here — no conditional prefixing needed.
-    let raw_name = if is_rust_effect_main || is_rust_plain_main_with_forces {
-        "__almide_main".to_string()
-    } else {
-        func.name.to_string()
-    };
-    let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
-        .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
-        .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
-        .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
-        .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
-        .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
-    // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
-    safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
-    // matches the CALL site exactly (#659).
-    safe_name = escape_rust_ident(&safe_name, ctx.templates);
-    // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
-    // IR name stays clean; prefix is a rendering concern.
-    if let Some(ref origin) = func.module_origin {
-        // A qualified-method fn (e.g. a Codec `Type.encode` whose type is now the
-        // namespaced `mod.Type`) flattens to `mod_Type_method`; the emit prefix
-        // already adds `almide_rt_<origin>_`, so strip a leading `<origin>_` to
-        // avoid doubling the module (#433 × #411-B). Mirrors the call-site strip;
-        // gated on a dotted IR name so plain module fns are unaffected.
-        let base: String = if func.name.as_str().contains('.') {
-            safe_name.strip_prefix(&format!("{}_", origin)).unwrap_or(&safe_name).to_string()
-        } else {
-            safe_name.clone()
-        };
-        safe_name = format!("almide_rt_{}_{}", origin, base);
-    }
-    let safe_name = format!("{}{}", safe_name, fn_generics);
+    let safe_name = render_fn_safe_name(ctx, func, &fn_generics, is_rust_effect_main, is_rust_plain_main_with_forces);
 
     let construct = if func.is_test {
         "test_block"
@@ -429,22 +513,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let fn_code = fn_ctx.templates.render_with(construct, None, &[], &[("name", safe_name.as_str()), ("params", params_str.as_str()), ("return_type", ret_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name));
 
-    // Wrap `effect fn main`: report an unhandled error via Display + exit 1.
-    // Both wrapper shapes first FORCE the abortable lazy top-lets in declaration
-    // order, so an aborting initializer (integer `/`/`%`) fires at startup —
-    // byte-identical to wasm's eager top-let evaluation in `_start`.
-    let force_lines: String = ctx.ann.global_init_order.iter()
-        .filter_map(|v| ctx.ann.globals.get(v))
-        .filter(|i| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
-        .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
-        .collect();
-    let fn_code = if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
-    } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}    __almide_main();\n}}", fn_code, force_lines)
-    } else {
-        fn_code
-    };
+    let fn_code = wrap_main_fn_code(fn_code, ctx, is_rust_effect_main, is_rust_plain_main_with_forces);
 
     // Prepend doc comment if present
     if let Some(ref doc) = func.doc {

@@ -465,24 +465,19 @@ fn strip_heredoc_indent(raw: &str) -> String {
 // ── Number lexing ───────────────────────────────────────────────
 
 fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
-    let mut pos = start;
-    let mut is_float = false;
-
     // Hex: 0x...
-    if chars[pos] == '0' && pos + 1 < chars.len() && (chars[pos + 1] == 'x' || chars[pos + 1] == 'X') {
-        pos += 2;
-        while pos < chars.len() && (chars[pos].is_ascii_hexdigit() || chars[pos] == '_') { pos += 1; }
-        let raw: String = chars[start..pos].iter().collect();
-        let end_col = col + (pos - start);
-        return (Token { token_type: TokenType::Int, value: raw, line, col, end_col }, pos);
+    if chars[start] == '0' && start + 1 < chars.len() && (chars[start + 1] == 'x' || chars[start + 1] == 'X') {
+        return lex_hex_number(chars, start, line, col);
     }
 
-    while pos < chars.len() && (chars[pos].is_ascii_digit() || chars[pos] == '_') { pos += 1; }
+    let mut pos = start;
+    let mut is_float = false;
+    pos = scan_digit_run(chars, pos);
 
     if pos < chars.len() && chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit() {
         is_float = true;
         pos += 1;
-        while pos < chars.len() && (chars[pos].is_ascii_digit() || chars[pos] == '_') { pos += 1; }
+        pos = scan_digit_run(chars, pos);
     }
 
     // Scientific notation
@@ -497,6 +492,24 @@ fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
     let tt = if is_float { TokenType::Float } else { TokenType::Int };
     let end_col = col + (pos - start);
     (Token { token_type: tt, value: raw, line, col, end_col }, pos)
+}
+
+/// Lexes a `0x`/`0X`-prefixed hex integer literal, starting at `chars[start]
+/// == '0'`. Reached from `lex_number` once the hex prefix is confirmed.
+fn lex_hex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    let mut pos = start + 2;
+    while pos < chars.len() && (chars[pos].is_ascii_hexdigit() || chars[pos] == '_') { pos += 1; }
+    let raw: String = chars[start..pos].iter().collect();
+    let end_col = col + (pos - start);
+    (Token { token_type: TokenType::Int, value: raw, line, col, end_col }, pos)
+}
+
+/// Scans a run of ASCII digits/underscores starting at `pos`, returning the
+/// position just past the run. Shared by `lex_number`'s integer and
+/// fractional-part scans (both allow `_` digit separators).
+fn scan_digit_run(chars: &[char], mut pos: usize) -> usize {
+    while pos < chars.len() && (chars[pos].is_ascii_digit() || chars[pos] == '_') { pos += 1; }
+    pos
 }
 
 // ── Identifier / keyword lexing ─────────────────────────────────

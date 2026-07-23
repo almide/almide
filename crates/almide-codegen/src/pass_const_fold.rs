@@ -76,59 +76,86 @@ impl IrMutVisitor for ConstFolder {
 }
 
 fn try_fold(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
-    // Float arithmetic
-    if let (IrExprKind::LitFloat { value: a }, IrExprKind::LitFloat { value: b })
-        = (&left.kind, &right.kind) {
-        let v = match op {
-            BinOp::AddFloat => Some(a + b),
-            BinOp::SubFloat => Some(a - b),
-            BinOp::MulFloat => Some(a * b),
-            // Avoid 0/0; let it stay as IR so runtime gets NaN.
-            BinOp::DivFloat if *b != 0.0 => Some(a / b),
-            _ => None,
-        };
-        if let Some(v) = v {
-            return Some(IrExprKind::LitFloat { value: v });
-        }
-    }
-    // Int arithmetic — checked to avoid silent wrap.
-    if let (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b })
-        = (&left.kind, &right.kind) {
-        let v = match op {
-            BinOp::AddInt => a.checked_add(*b),
-            BinOp::SubInt => a.checked_sub(*b),
-            BinOp::MulInt => a.checked_mul(*b),
-            BinOp::DivInt if *b != 0 => a.checked_div(*b),
-            BinOp::ModInt if *b != 0 => a.checked_rem(*b),
-            _ => None,
-        };
-        if let Some(v) = v {
-            return Some(IrExprKind::LitInt { value: v });
-        }
-    }
-    // Identity / annihilator simplifications (keeps types intact via left.ty)
-    let is_zero_f = |e: &IrExpr| matches!(&e.kind, IrExprKind::LitFloat { value } if *value == 0.0);
-    let is_one_f  = |e: &IrExpr| matches!(&e.kind, IrExprKind::LitFloat { value } if *value == 1.0);
-    let is_zero_i = |e: &IrExpr| matches!(&e.kind, IrExprKind::LitInt { value } if *value == 0);
-    let is_one_i  = |e: &IrExpr| matches!(&e.kind, IrExprKind::LitInt { value } if *value == 1);
+    try_fold_float(op, left, right)
+        .or_else(|| try_fold_int(op, left, right))
+        .or_else(|| try_fold_identity(op, left, right))
+}
+
+/// Float-arithmetic phase of `try_fold`, extracted verbatim (cog>30
+/// decomposition, pattern 1 — the three phases share no state and each
+/// independently returns `Some`/`None`).
+fn try_fold_float(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
+    let (IrExprKind::LitFloat { value: a }, IrExprKind::LitFloat { value: b })
+        = (&left.kind, &right.kind) else { return None };
+    let v = match op {
+        BinOp::AddFloat => Some(a + b),
+        BinOp::SubFloat => Some(a - b),
+        BinOp::MulFloat => Some(a * b),
+        // Avoid 0/0; let it stay as IR so runtime gets NaN.
+        BinOp::DivFloat if *b != 0.0 => Some(a / b),
+        _ => None,
+    };
+    v.map(|v| IrExprKind::LitFloat { value: v })
+}
+
+/// Int-arithmetic phase of `try_fold`, extracted verbatim (cog>30
+/// decomposition) — checked to avoid silent wrap.
+fn try_fold_int(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
+    let (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b })
+        = (&left.kind, &right.kind) else { return None };
+    let v = match op {
+        BinOp::AddInt => a.checked_add(*b),
+        BinOp::SubInt => a.checked_sub(*b),
+        BinOp::MulInt => a.checked_mul(*b),
+        BinOp::DivInt if *b != 0 => a.checked_div(*b),
+        BinOp::ModInt if *b != 0 => a.checked_rem(*b),
+        _ => None,
+    };
+    v.map(|v| IrExprKind::LitInt { value: v })
+}
+
+fn is_zero_f(e: &IrExpr) -> bool { matches!(&e.kind, IrExprKind::LitFloat { value } if *value == 0.0) }
+fn is_one_f(e: &IrExpr) -> bool { matches!(&e.kind, IrExprKind::LitFloat { value } if *value == 1.0) }
+fn is_zero_i(e: &IrExpr) -> bool { matches!(&e.kind, IrExprKind::LitInt { value } if *value == 0) }
+fn is_one_i(e: &IrExpr) -> bool { matches!(&e.kind, IrExprKind::LitInt { value } if *value == 1) }
+
+/// Identity / annihilator simplification phase of `try_fold`, extracted
+/// verbatim (cog>30 decomposition) — keeps types intact via `left.ty`. The
+/// three groups (add/sub, mul/div — split by operator family) share no
+/// state, so `.or_else()`-chained same as `try_fold` itself.
+fn try_fold_identity(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
+    try_fold_identity_add_sub(op, left, right)
+        .or_else(|| try_fold_identity_mul_div(op, left, right))
+}
+
+/// `+`/`-` identities of `try_fold_identity`, extracted verbatim (further
+/// split of the same decomposition).
+fn try_fold_identity_add_sub(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
     match op {
         // x + 0 / 0 + x → x
-        BinOp::AddFloat if is_zero_f(right) => return Some(left.kind.clone()),
-        BinOp::AddFloat if is_zero_f(left) => return Some(right.kind.clone()),
-        BinOp::AddInt if is_zero_i(right) => return Some(left.kind.clone()),
-        BinOp::AddInt if is_zero_i(left) => return Some(right.kind.clone()),
+        BinOp::AddFloat if is_zero_f(right) => Some(left.kind.clone()),
+        BinOp::AddFloat if is_zero_f(left) => Some(right.kind.clone()),
+        BinOp::AddInt if is_zero_i(right) => Some(left.kind.clone()),
+        BinOp::AddInt if is_zero_i(left) => Some(right.kind.clone()),
         // x - 0 → x  (not 0 - x; that's negation, leave alone)
-        BinOp::SubFloat if is_zero_f(right) => return Some(left.kind.clone()),
-        BinOp::SubInt if is_zero_i(right) => return Some(left.kind.clone()),
-        // x * 1 / 1 * x → x
-        BinOp::MulFloat if is_one_f(right) => return Some(left.kind.clone()),
-        BinOp::MulFloat if is_one_f(left) => return Some(right.kind.clone()),
-        BinOp::MulInt if is_one_i(right) => return Some(left.kind.clone()),
-        BinOp::MulInt if is_one_i(left) => return Some(right.kind.clone()),
-        // x / 1 → x
-        BinOp::DivFloat if is_one_f(right) => return Some(left.kind.clone()),
-        BinOp::DivInt if is_one_i(right) => return Some(left.kind.clone()),
-        _ => {}
+        BinOp::SubFloat if is_zero_f(right) => Some(left.kind.clone()),
+        BinOp::SubInt if is_zero_i(right) => Some(left.kind.clone()),
+        _ => None,
     }
-    None
+}
+
+/// `*`/`/` identities of `try_fold_identity`, extracted verbatim (further
+/// split of the same decomposition).
+fn try_fold_identity_mul_div(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
+    match op {
+        // x * 1 / 1 * x → x
+        BinOp::MulFloat if is_one_f(right) => Some(left.kind.clone()),
+        BinOp::MulFloat if is_one_f(left) => Some(right.kind.clone()),
+        BinOp::MulInt if is_one_i(right) => Some(left.kind.clone()),
+        BinOp::MulInt if is_one_i(left) => Some(right.kind.clone()),
+        // x / 1 → x
+        BinOp::DivFloat if is_one_f(right) => Some(left.kind.clone()),
+        BinOp::DivInt if is_one_i(right) => Some(left.kind.clone()),
+        _ => None,
+    }
 }

@@ -129,72 +129,101 @@ pub fn verify_expr(
     issues
 }
 
+/// `IrExprKind::Block` case of `verify_expr_inner`, extracted verbatim
+/// (cog>30 decomposition, pattern 1 — `issues` is push-only w.r.t. this
+/// function's own control flow, no cross-arm state).
+fn verify_block(
+    expr: &IrExpr,
+    ctx: &VerifyCtx,
+    issues: &mut Vec<(VarId, &'static str)>,
+) {
+    let IrExprKind::Block { stmts, expr: tail } = &expr.kind else { unreachable!() };
+    verify_block_leak_check(stmts, ctx, issues);
+    // Recurse into nested expressions
+    for stmt in stmts {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
+                verify_expr_inner(value, ctx, issues),
+            IrStmtKind::Expr { expr } =>
+                verify_expr_inner(expr, ctx, issues),
+            IrStmtKind::Guard { cond, else_ } => {
+                verify_expr_inner(cond, ctx, issues);
+                verify_expr_inner(else_, ctx, issues);
+            }
+            _ => {}
+        }
+    }
+    if let Some(t) = tail {
+        verify_expr_inner(t, ctx, issues);
+    }
+}
+
+/// The `continue`-guard chain of `verify_block_leak_check`'s per-`Bind` loop,
+/// extracted to a named predicate (further split of the same decomposition):
+/// true when this heap `Bind` is exempt from the Dec-balance check below —
+/// borrowed from the closure environment, or its ownership escapes the
+/// function/block so the Dec is legitimately carried elsewhere.
+fn bind_dec_check_exempt(var: VarId, value: &IrExpr, ctx: &VerifyCtx) -> bool {
+    if matches!(&value.kind, IrExprKind::EnvLoad { .. }) { return true; }
+    if ctx.env_load_vars.contains(&var) { return true; }
+    if ctx.returned_vars.contains(&var) { return true; }
+    // TCO trampoline temporaries (`__tco_*`) and branch-lift
+    // temporaries (`__br_*`) DO get an RcDec, but in a sibling/outer
+    // block from their Bind: the value is threaded through a loop or
+    // branch reassignment (`Assign loopvar = Var __tco_tmp`), so the
+    // matching Dec lands one scope away. This flat, per-block rule
+    // counts `count_decs` only within the Bind's own block and so
+    // reads decs==0 — a false positive, not a leak (verified by
+    // probing `sum_acc`: the RcDec exists; the cross-target gate
+    // would trap on a double-free and does not). This is a distinct
+    // class from the ANF move-out tails handled by `moved_out_vars`.
+    // Replacing this name-prefix exclusion with scope-aware Dec
+    // accounting is a tracked perceus-belt follow-up.
+    let vname = ctx.var_table.get(var).name.as_str();
+    vname.starts_with("__tco_") || vname.starts_with("__br_")
+}
+
+/// First phase of `verify_block`: each heap `Bind` in `stmts` should have a
+/// matching `RcDec` in this same scope — extracted verbatim (cog>30
+/// decomposition, further split of the `verify_block` extraction above).
+fn verify_block_leak_check(
+    stmts: &[IrStmt],
+    ctx: &VerifyCtx,
+    issues: &mut Vec<(VarId, &'static str)>,
+) {
+    for stmt in stmts {
+        if let IrStmtKind::Bind { var, ty, value, .. } = &stmt.kind {
+            if !is_heap_type(ty) { continue; }
+            if bind_dec_check_exempt(*var, value, ctx) { continue; }
+
+            let decs = count_decs(stmts, *var);
+            let incs = count_incs(stmts, *var);
+            let info = ctx.var_table.get(*var);
+            let is_mutable = matches!(info.mutability, almide_ir::Mutability::Var);
+
+            // Lean theorem: single_dec_frees. A var moved out of this
+            // block (bare-`Var` tail) has its Dec carried by the block's
+            // consumer, so decs==0 here is correct, not a leak.
+            if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {
+                issues.push((*var, "LEAK: no RcDec"));
+            }
+            // Lean theorem: inc_dec_is_id (balance check). Still enforced
+            // for moved-out vars: a Dec on an already-moved value is a
+            // double-free, so this check is NOT exempted.
+            if !is_mutable && decs > incs + 1 {
+                issues.push((*var, "DOUBLE-FREE: too many RcDec"));
+            }
+        }
+    }
+}
+
 fn verify_expr_inner(
     expr: &IrExpr,
     ctx: &VerifyCtx,
     issues: &mut Vec<(VarId, &'static str)>,
 ) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            // Verify this block: each heap Bind should have Dec in this scope
-            for stmt in stmts {
-                if let IrStmtKind::Bind { var, ty, value, .. } = &stmt.kind {
-                    if !is_heap_type(ty) { continue; }
-                    if matches!(&value.kind, IrExprKind::EnvLoad { .. }) { continue; }
-                    if ctx.env_load_vars.contains(var) { continue; }
-                    if ctx.returned_vars.contains(var) { continue; }
-                    // TCO trampoline temporaries (`__tco_*`) and branch-lift
-                    // temporaries (`__br_*`) DO get an RcDec, but in a sibling/outer
-                    // block from their Bind: the value is threaded through a loop or
-                    // branch reassignment (`Assign loopvar = Var __tco_tmp`), so the
-                    // matching Dec lands one scope away. This flat, per-block rule
-                    // counts `count_decs` only within the Bind's own block and so
-                    // reads decs==0 — a false positive, not a leak (verified by
-                    // probing `sum_acc`: the RcDec exists; the cross-target gate
-                    // would trap on a double-free and does not). This is a distinct
-                    // class from the ANF move-out tails handled by `moved_out_vars`.
-                    // Replacing this name-prefix exclusion with scope-aware Dec
-                    // accounting is a tracked perceus-belt follow-up.
-                    let vname = ctx.var_table.get(*var).name.as_str();
-                    if vname.starts_with("__tco_") || vname.starts_with("__br_") { continue; }
-
-                    let decs = count_decs(stmts, *var);
-                    let incs = count_incs(stmts, *var);
-                    let info = ctx.var_table.get(*var);
-                    let is_mutable = matches!(info.mutability, almide_ir::Mutability::Var);
-
-                    // Lean theorem: single_dec_frees. A var moved out of this
-                    // block (bare-`Var` tail) has its Dec carried by the block's
-                    // consumer, so decs==0 here is correct, not a leak.
-                    if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {
-                        issues.push((*var, "LEAK: no RcDec"));
-                    }
-                    // Lean theorem: inc_dec_is_id (balance check). Still enforced
-                    // for moved-out vars: a Dec on an already-moved value is a
-                    // double-free, so this check is NOT exempted.
-                    if !is_mutable && decs > incs + 1 {
-                        issues.push((*var, "DOUBLE-FREE: too many RcDec"));
-                    }
-                }
-            }
-            // Recurse into nested expressions
-            for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
-                        verify_expr_inner(value, ctx, issues),
-                    IrStmtKind::Expr { expr } =>
-                        verify_expr_inner(expr, ctx, issues),
-                    IrStmtKind::Guard { cond, else_ } => {
-                        verify_expr_inner(cond, ctx, issues);
-                        verify_expr_inner(else_, ctx, issues);
-                    }
-                    _ => {}
-                }
-            }
-            if let Some(t) = tail {
-                verify_expr_inner(t, ctx, issues);
-            }
-        }
+        IrExprKind::Block { .. } => verify_block(expr, ctx, issues),
         IrExprKind::If { cond, then, else_ } => {
             verify_expr_inner(cond, ctx, issues);
             verify_expr_inner(then, ctx, issues);

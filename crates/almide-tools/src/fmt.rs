@@ -210,19 +210,10 @@ fn collect_module_refs_decl(decl: &Decl, used: &mut std::collections::HashSet<St
 /// without this walk, an import used ONLY in type position was deleted as
 /// "unused", silently breaking the file.
 fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<String>) {
-    let insert_prefix = |name: &str, used: &mut std::collections::HashSet<String>| {
-        if let Some((prefix, _)) = name.rsplit_once('.') {
-            used.insert(prefix.to_string());
-            // Submodule path (`a.b.Type`): the import binds the LAST segment.
-            if let Some((_, last)) = prefix.rsplit_once('.') {
-                used.insert(last.to_string());
-            }
-        }
-    };
     match te {
-        TypeExpr::Simple { name } => insert_prefix(name.as_str(), used),
+        TypeExpr::Simple { name } => insert_type_name_prefix(name.as_str(), used),
         TypeExpr::Generic { name, args } => {
-            insert_prefix(name.as_str(), used);
+            insert_type_name_prefix(name.as_str(), used);
             for a in args { collect_module_refs_type(a, used); }
         }
         TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
@@ -236,30 +227,37 @@ fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<
             for e in elements { collect_module_refs_type(e, used); }
         }
         TypeExpr::Variant { cases } => {
-            for c in cases {
-                match c {
-                    VariantCase::Unit { .. } => {}
-                    VariantCase::Tuple { fields, .. } => {
-                        for f in fields { collect_module_refs_type(f, used); }
-                    }
-                    VariantCase::Record { fields, .. } => {
-                        for f in fields { collect_module_refs_type(&f.ty, used); }
-                    }
-                }
-            }
+            for c in cases { collect_module_refs_variant_case(c, used); }
         }
         TypeExpr::ConstLit { .. } => {}
     }
 }
 
+fn insert_type_name_prefix(name: &str, used: &mut std::collections::HashSet<String>) {
+    if let Some((prefix, _)) = name.rsplit_once('.') {
+        used.insert(prefix.to_string());
+        // Submodule path (`a.b.Type`): the import binds the LAST segment.
+        if let Some((_, last)) = prefix.rsplit_once('.') {
+            used.insert(last.to_string());
+        }
+    }
+}
+
+fn collect_module_refs_variant_case(c: &VariantCase, used: &mut std::collections::HashSet<String>) {
+    match c {
+        VariantCase::Unit { .. } => {}
+        VariantCase::Tuple { fields, .. } => {
+            for f in fields { collect_module_refs_type(f, used); }
+        }
+        VariantCase::Record { fields, .. } => {
+            for f in fields { collect_module_refs_type(&f.ty, used); }
+        }
+    }
+}
+
 fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<String>) {
     match &expr.kind {
-        ExprKind::Member { object, .. } => {
-            if let ExprKind::Ident { name, .. } = &object.kind {
-                used.insert(name.to_string());
-            }
-            collect_module_refs_expr(object, used);
-        }
+        ExprKind::Member { .. } => collect_module_refs_member(expr, used),
         ExprKind::Call { callee, args, .. } => {
             collect_module_refs_expr(callee, used);
             for a in args { collect_module_refs_expr(a, used); }
@@ -276,13 +274,7 @@ fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<St
         ExprKind::Block { stmts, .. } => {
             for s in stmts { collect_module_refs_stmt(s, used); }
         }
-        ExprKind::Match { subject, arms, .. } => {
-            collect_module_refs_expr(subject, used);
-            for arm in arms {
-                collect_module_refs_expr(&arm.body, used);
-                if let Some(g) = &arm.guard { collect_module_refs_expr(g, used); }
-            }
-        }
+        ExprKind::Match { .. } => collect_module_refs_match(expr, used),
         ExprKind::Lambda { body, .. } => collect_module_refs_expr(body, used),
         ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
             for e in elements { collect_module_refs_expr(e, used); }
@@ -291,11 +283,7 @@ fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<St
             collect_module_refs_expr(left, used);
             collect_module_refs_expr(right, used);
         }
-        ExprKind::InterpolatedString { parts, .. } => {
-            for p in parts {
-                if let StringPart::Expr { expr } = p { collect_module_refs_expr(expr, used); }
-            }
-        }
+        ExprKind::InterpolatedString { .. } => collect_module_refs_istring(expr, used),
         ExprKind::Record { fields, .. } => {
             for f in fields { collect_module_refs_expr(&f.value, used); }
         }
@@ -321,6 +309,30 @@ fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<St
             for s in body { collect_module_refs_stmt(s, used); }
         }
         _ => {}
+    }
+}
+
+fn collect_module_refs_member(expr: &Expr, used: &mut std::collections::HashSet<String>) {
+    let ExprKind::Member { object, .. } = &expr.kind else { unreachable!() };
+    if let ExprKind::Ident { name, .. } = &object.kind {
+        used.insert(name.to_string());
+    }
+    collect_module_refs_expr(object, used);
+}
+
+fn collect_module_refs_match(expr: &Expr, used: &mut std::collections::HashSet<String>) {
+    let ExprKind::Match { subject, arms, .. } = &expr.kind else { unreachable!() };
+    collect_module_refs_expr(subject, used);
+    for arm in arms {
+        collect_module_refs_expr(&arm.body, used);
+        if let Some(g) = &arm.guard { collect_module_refs_expr(g, used); }
+    }
+}
+
+fn collect_module_refs_istring(expr: &Expr, used: &mut std::collections::HashSet<String>) {
+    let ExprKind::InterpolatedString { parts, .. } = &expr.kind else { unreachable!() };
+    for p in parts {
+        if let StringPart::Expr { expr } = p { collect_module_refs_expr(expr, used); }
     }
 }
 
@@ -474,79 +486,91 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             if let Some(te) = ty { out.push_str(": "); fmt_type(out, te, depth); }
             out.push_str(" = "); fmt_expr(out, value, depth);
         }
-        Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, export_attrs, attrs, generics, .. } => {
-            for a in extern_attrs { wln!(out, "{i}@extern({}, \"{}\", \"{}\")", a.target, escape_dquoted(a.module.as_str()), escape_dquoted(a.function.as_str())); }
-            for a in export_attrs { wln!(out, "{i}@export({}, \"{}\")", a.target, escape_dquoted(a.symbol.as_str())); }
-            for a in attrs { wln!(out, "{i}{}", format_attribute(a)); }
-            out.push_str(&i); fmt_vis(out, visibility);
-            if matches!(effect, Some(true)) { out.push_str("effect "); }
-            if matches!(r#async, Some(true)) { out.push_str("async "); }
-            w!(out, "fn {name}");
-            maybe_generics(out, generics);
-            out.push('(');
-            comma_sep(out, params, |out, p| {
-                // `mut` is semantic (mutable-borrow param) — dropping it
-                // turned every in-place mutator call into E007.
-                if p.is_mut { out.push_str("mut "); }
-                if is_bare_self_param(p) {
-                    out.push_str("self");
-                } else {
-                    w!(out, "{}: ", p.name); fmt_type(out, &p.ty, depth);
-                }
-                if let Some(ref d) = p.default { out.push_str(" = "); fmt_expr(out, d, depth); }
-            });
-            out.push_str(") -> "); fmt_type(out, return_type, depth);
-            if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
-        }
-        Decl::Test { name, body, where_clauses, .. } => {
-            // `where` clauses are the test's data — dropping them deleted
-            // the bindings the body reads (E003 after formatting).
-            w!(out, "{i}test \"{}\"", escape_dquoted(name));
-            let cases: Vec<&TestWhere> = where_clauses.iter()
-                .filter(|wc| matches!(wc, TestWhere::Case { .. })).collect();
-            let binds: Vec<&TestWhere> = where_clauses.iter()
-                .filter(|wc| !matches!(wc, TestWhere::Case { .. })).collect();
-            for wc in &binds {
-                out.push('\n');
-                w!(out, "{i}  ");
-                fmt_test_where(out, wc, depth);
-            }
-            if !cases.is_empty() {
-                out.push_str(" where [\n");
-                for c in &cases {
-                    w!(out, "{i}  ");
-                    fmt_test_where(out, c, depth);
-                    out.push_str(",\n");
-                }
-                w!(out, "{i}]");
-            }
-            if !binds.is_empty() { out.push('\n'); w!(out, "{i}"); } else { out.push(' '); }
-            fmt_expr(out, body, depth);
-        }
+        Decl::Fn { .. } => fmt_decl_fn(out, decl, depth),
+        Decl::Test { .. } => fmt_decl_test(out, decl, depth),
         Decl::TestWhereDef { .. } => {} // test where defs don't need formatting (internal)
-        Decl::Protocol { name, methods, .. } => {
-            wln!(out, "{i}protocol {name} {{");
-            let inner = "  ".repeat(depth + 1);
-            for m in methods {
-                let effect = if m.effect { "effect " } else { "" };
-                let mut params_str = String::new();
-                for (j, p) in m.params.iter().enumerate() {
-                    if j > 0 { params_str.push_str(", "); }
-                    if is_bare_self_param(p) {
-                        params_str.push_str("self");
-                    } else {
-                        params_str.push_str(&p.name);
-                        params_str.push_str(": ");
-                        fmt_type(&mut params_str, &p.ty, 0);
-                    }
-                }
-                let mut ret_str = String::new();
-                fmt_type(&mut ret_str, &m.return_type, 0);
-                wln!(out, "{inner}{effect}fn {name}({params_str}) -> {ret_str}", name = m.name);
-            }
-            w!(out, "{i}}}");
-        }
+        Decl::Protocol { .. } => fmt_decl_protocol(out, decl, depth),
     }
+}
+
+fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
+    let Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, export_attrs, attrs, generics, .. } = decl else { unreachable!() };
+    let i = ind(depth);
+    for a in extern_attrs { wln!(out, "{i}@extern({}, \"{}\", \"{}\")", a.target, escape_dquoted(a.module.as_str()), escape_dquoted(a.function.as_str())); }
+    for a in export_attrs { wln!(out, "{i}@export({}, \"{}\")", a.target, escape_dquoted(a.symbol.as_str())); }
+    for a in attrs { wln!(out, "{i}{}", format_attribute(a)); }
+    out.push_str(&i); fmt_vis(out, visibility);
+    if matches!(effect, Some(true)) { out.push_str("effect "); }
+    if matches!(r#async, Some(true)) { out.push_str("async "); }
+    w!(out, "fn {name}");
+    maybe_generics(out, generics);
+    out.push('(');
+    comma_sep(out, params, |out, p| {
+        // `mut` is semantic (mutable-borrow param) — dropping it
+        // turned every in-place mutator call into E007.
+        if p.is_mut { out.push_str("mut "); }
+        if is_bare_self_param(p) {
+            out.push_str("self");
+        } else {
+            w!(out, "{}: ", p.name); fmt_type(out, &p.ty, depth);
+        }
+        if let Some(ref d) = p.default { out.push_str(" = "); fmt_expr(out, d, depth); }
+    });
+    out.push_str(") -> "); fmt_type(out, return_type, depth);
+    if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
+}
+
+fn fmt_decl_test(out: &mut String, decl: &Decl, depth: usize) {
+    let Decl::Test { name, body, where_clauses, .. } = decl else { unreachable!() };
+    let i = ind(depth);
+    // `where` clauses are the test's data — dropping them deleted
+    // the bindings the body reads (E003 after formatting).
+    w!(out, "{i}test \"{}\"", escape_dquoted(name));
+    let cases: Vec<&TestWhere> = where_clauses.iter()
+        .filter(|wc| matches!(wc, TestWhere::Case { .. })).collect();
+    let binds: Vec<&TestWhere> = where_clauses.iter()
+        .filter(|wc| !matches!(wc, TestWhere::Case { .. })).collect();
+    for wc in &binds {
+        out.push('\n');
+        w!(out, "{i}  ");
+        fmt_test_where(out, wc, depth);
+    }
+    if !cases.is_empty() {
+        out.push_str(" where [\n");
+        for c in &cases {
+            w!(out, "{i}  ");
+            fmt_test_where(out, c, depth);
+            out.push_str(",\n");
+        }
+        w!(out, "{i}]");
+    }
+    if !binds.is_empty() { out.push('\n'); w!(out, "{i}"); } else { out.push(' '); }
+    fmt_expr(out, body, depth);
+}
+
+fn fmt_decl_protocol(out: &mut String, decl: &Decl, depth: usize) {
+    let Decl::Protocol { name, methods, .. } = decl else { unreachable!() };
+    let i = ind(depth);
+    wln!(out, "{i}protocol {name} {{");
+    let inner = "  ".repeat(depth + 1);
+    for m in methods {
+        let effect = if m.effect { "effect " } else { "" };
+        let mut params_str = String::new();
+        for (j, p) in m.params.iter().enumerate() {
+            if j > 0 { params_str.push_str(", "); }
+            if is_bare_self_param(p) {
+                params_str.push_str("self");
+            } else {
+                params_str.push_str(&p.name);
+                params_str.push_str(": ");
+                fmt_type(&mut params_str, &p.ty, 0);
+            }
+        }
+        let mut ret_str = String::new();
+        fmt_type(&mut ret_str, &m.return_type, 0);
+        wln!(out, "{inner}{effect}fn {name}({params_str}) -> {ret_str}", name = m.name);
+    }
+    w!(out, "{i}}}");
 }
 
 fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {

@@ -1,5 +1,6 @@
 use std::process::Command;
 use crate::try_compile;
+use crate::err;
 use super::{hash64, cargo_build_generated_with_native, cargo_build_test_with_native};
 
 /// Cross-process advisory lock on a shared build scratch dir.
@@ -67,53 +68,17 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
     let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
     let rs_code = if native_verified && !test_mode {
-        let source_text = std::fs::read_to_string(file).unwrap_or_default();
-        match almide_mir::pipeline::try_render_rust_source(&source_text) {
-            Ok(v1_code) => {
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    eprintln!("native: v1 trust-spine render");
-                }
-                v1_code
-            }
-            Err(e) => {
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
-                }
-                rs_code
-            }
-        }
+        super::render_v1_native_or_fallback(file, rs_code)
     } else {
         rs_code
     };
 
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).
-    let file_dir = std::path::Path::new(file).parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let toml_path = {
-        let candidate = file_dir.join("almide.toml");
-        if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
-    };
-    let parsed = toml_path.exists().then(|| {
-        // A broken almide.toml must not be SILENT: dropping it here also drops
-        // [native-deps]/native/ injection, and the build then fails later as an
-        // opaque E0433 on the native module (almide-sqlite: a hyphenated
-        // package name errored in parse_toml and rusqlite never reached the
-        // generated Cargo.toml).
-        crate::project::parse_toml(&toml_path)
-            .map_err(|e| eprintln!("warning: {} ignored: {}", toml_path.display(), e))
-            .ok()
-    }).flatten();
-    let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
-    let toml_dir = toml_path.parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
-    let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
+    let (native_deps, source_root) = super::load_native_build_config(file);
 
     let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
-    build_native_cached(&rs_code, use_test_harness, release, project_dir_override, native_deps, source_root)
+    build_native_cached(&rs_code, use_test_harness, release, project_dir_override, &native_deps, source_root.as_deref())
 }
 
 /// Build a native binary from GENERATED Rust source through a content-addressed
@@ -239,12 +204,12 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
                 delay *= 2;
             }
             Err(e) => {
-                eprintln!("Failed to execute: {}", e);
+                err(&format!("Failed to execute: {}", e));
                 std::process::exit(1);
             }
         }
     }
-    eprintln!("Failed to execute: Text file busy (persisted after retries)");
+    err(&format!("Failed to execute: Text file busy (persisted after retries)"));
     1
 }
 
@@ -252,13 +217,27 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
     match compile_to_binary_with(file, no_check, test_mode, release, None, native_verified) {
         Ok(bin) => run_binary(&bin, program_args),
         Err(e) => {
-            eprintln!("Compile error:\n{}", e);
+            err(&format!("Compile error:\n{}", e));
             1
         }
     }
 }
 
-pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>, verified: bool, native_verified: bool) {
+/// Flags for [`cmd_run`] — bundled into one struct (was 7 positional
+/// params, a max-params violation) so the function signature stays under
+/// the params threshold. Field names match `dispatch_run`'s locals 1:1.
+pub struct RunArgs<'a> {
+    pub file: &'a str,
+    pub program_args: &'a [String],
+    pub no_check: bool,
+    pub release: bool,
+    pub target: Option<&'a str>,
+    pub verified: bool,
+    pub native_verified: bool,
+}
+
+pub fn cmd_run(args: RunArgs) {
+    let RunArgs { file, program_args, no_check, release, target, verified, native_verified } = args;
     let code = match target {
         // Default and explicit native target: the cargo/rustc path.
         None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release, native_verified),
@@ -267,13 +246,13 @@ pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: boo
         // produce byte-identical stdout/stderr/exit — the cross-target gate.
         Some("wasm") | Some("wasm32") | Some("wasi") => cmd_run_wasm(file, program_args, verified),
         Some(other) => {
-            eprintln!(
+            err(&format!(
                 "error: unknown run target '{}'\n  \
                  in `almide run --target {}`\n  \
                  supported targets: rust (default, native binary), wasm (wasmtime)\n  \
                  hint: drop --target to run natively, or use `--target wasm`",
                 other, other
-            );
+            ));
             1
         }
     };
@@ -302,7 +281,7 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     let wasm_name = format!("almide-run-{:016x}.wasm", hash64(&bytes));
     let wasm_path = std::env::temp_dir().join(wasm_name);
     if let Err(e) = std::fs::write(&wasm_path, &bytes) {
-        eprintln!("error: failed to stage wasm module {}: {}", wasm_path.display(), e);
+        err(&format!("error: failed to stage wasm module {}: {}", wasm_path.display(), e));
         return 1;
     }
 
@@ -323,13 +302,13 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     match status {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
-            eprintln!(
+            err(&format!(
                 "error: failed to run wasm module on wasmtime: {}\n  \
                  in `almide run --target wasm {}`\n  \
                  hint: the `wasmtime` CLI must be on PATH to execute wasm \
                  (install: https://wasmtime.dev) — or run natively without --target",
                 e, file
-            );
+            ));
             1
         }
     }

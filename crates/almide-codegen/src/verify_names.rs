@@ -68,24 +68,46 @@ struct TyChecker<'a> {
 }
 
 impl TyChecker<'_> {
+    /// `Ty::Named` case of `check_ty`, extracted verbatim (cog>30
+    /// decomposition, pattern 2: uniform match arms as inherent methods —
+    /// mirrors the `Concretizer`/`BranchBalance` extraction shape since
+    /// the arm body uses `self.*` fields).
+    fn check_ty_named(&mut self, n: &Sym, args: &[Ty]) {
+        let s = n.as_str();
+        if !s.contains('.') && !self.decls.bare.contains(n) {
+            if let Some(cands) = self.decls.qualified.get(s) {
+                // Cap per-site duplicates: one report per (name, where) is enough.
+                if !self.offenders.iter().any(|o| o.bare == s && o.where_ == self.where_) {
+                    self.offenders.push(UnresolvableName {
+                        bare: s.to_string(),
+                        qualified_candidates: cands.clone(),
+                        where_: self.where_.clone(),
+                    });
+                }
+            }
+        }
+        for a in args { self.check_ty(a); }
+    }
+
+    /// `Ty::Variant` case of `check_ty`, extracted verbatim. Variant cases
+    /// inside a Ty value carry payload tys.
+    fn check_ty_variant(&mut self, cases: &[almide_lang::types::VariantCase]) {
+        for c in cases {
+            match &c.payload {
+                almide_lang::types::VariantPayload::Tuple(ts) => {
+                    for t in ts { self.check_ty(t); }
+                }
+                almide_lang::types::VariantPayload::Record(fs) => {
+                    for (_, t) in fs { self.check_ty(t); }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn check_ty(&mut self, ty: &Ty) {
         match ty {
-            Ty::Named(n, args) => {
-                let s = n.as_str();
-                if !s.contains('.') && !self.decls.bare.contains(n) {
-                    if let Some(cands) = self.decls.qualified.get(s) {
-                        // Cap per-site duplicates: one report per (name, where) is enough.
-                        if !self.offenders.iter().any(|o| o.bare == s && o.where_ == self.where_) {
-                            self.offenders.push(UnresolvableName {
-                                bare: s.to_string(),
-                                qualified_candidates: cands.clone(),
-                                where_: self.where_.clone(),
-                            });
-                        }
-                    }
-                }
-                for a in args { self.check_ty(a); }
-            }
+            Ty::Named(n, args) => self.check_ty_named(n, args),
             Ty::Applied(_, args) | Ty::Tuple(args) => {
                 for a in args { self.check_ty(a); }
             }
@@ -96,20 +118,7 @@ impl TyChecker<'_> {
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
                 for (_, t) in fields { self.check_ty(t); }
             }
-            // Variant cases inside a Ty value carry payload tys
-            Ty::Variant { cases, .. } => {
-                for c in cases {
-                    match &c.payload {
-                        almide_lang::types::VariantPayload::Tuple(ts) => {
-                            for t in ts { self.check_ty(t); }
-                        }
-                        almide_lang::types::VariantPayload::Record(fs) => {
-                            for (_, t) in fs { self.check_ty(t); }
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            Ty::Variant { cases, .. } => self.check_ty_variant(cases),
             // Scalars / TypeVar / Unknown / Never etc. carry no Named children.
             _ => {}
         }
@@ -157,7 +166,14 @@ impl IrVisitor for TyChecker<'_> {
 }
 
 fn expr_kind_tag(k: &IrExprKind) -> &'static str {
-    match k {
+    expr_kind_tag_group_a(k).unwrap_or_else(|| expr_kind_tag_group_b(k))
+}
+
+/// First half of `expr_kind_tag`'s arms, extracted (cog>30 decomposition,
+/// pattern 1 — independent name-router arms split into two groups; mirrors
+/// the `list_call_name` recipe).
+fn expr_kind_tag_group_a(k: &IrExprKind) -> Option<&'static str> {
+    Some(match k {
         IrExprKind::Var { .. } => "Var",
         IrExprKind::Call { .. } => "Call",
         IrExprKind::RuntimeCall { .. } => "RuntimeCall",
@@ -167,6 +183,13 @@ fn expr_kind_tag(k: &IrExprKind) -> &'static str {
         IrExprKind::Block { .. } => "Block",
         IrExprKind::Member { .. } => "Member",
         IrExprKind::IndexAccess { .. } => "IndexAccess",
+        _ => return None,
+    })
+}
+
+/// Second half of `expr_kind_tag`'s arms, extracted (cog>30 decomposition).
+fn expr_kind_tag_group_b(k: &IrExprKind) -> &'static str {
+    match k {
         IrExprKind::List { .. } => "List",
         IrExprKind::Record { .. } => "Record",
         IrExprKind::Lambda { .. } => "Lambda",
@@ -181,6 +204,81 @@ fn expr_kind_tag(k: &IrExprKind) -> &'static str {
     }
 }
 
+/// `IrVariantKind` case of `collect_unresolvable_names`'s `check_decl_tys`
+/// closure, extracted to a real top-level fn (cog>30 decomposition) — NOT
+/// an anonymous-closure measurement dodge, since `check_decl_tys` itself
+/// stays a named, identifier-bound closure that codopsy already measures
+/// as its own unit.
+fn check_variant_case_tys(chk: &mut TyChecker, kind: &IrVariantKind) {
+    match kind {
+        IrVariantKind::Tuple { fields } => for t in fields { chk.check_ty(t); },
+        IrVariantKind::Record { fields } => for f in fields { chk.check_ty(&f.ty); },
+        IrVariantKind::Unit => {}
+    }
+}
+
+/// `IrTypeDeclKind` check of `collect_unresolvable_names`, extracted to a
+/// real top-level fn (cog>30 decomposition) — was a local closure that
+/// captured nothing (took `chk` as an explicit param already), so hoisting
+/// it changes nothing observable, just lets `collect_unresolvable_in_scope`
+/// below call it from outside the old closure's scope.
+fn check_decl_tys(chk: &mut TyChecker, td: &IrTypeDecl) {
+    chk.where_ = format!("type decl `{}`", td.name);
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => {
+            for f in fields { chk.check_ty(&f.ty); }
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            for c in cases { check_variant_case_tys(chk, &c.kind); }
+        }
+        IrTypeDeclKind::Alias { target } => chk.check_ty(target),
+    }
+}
+
+/// `IrFunction` check of `collect_unresolvable_names`, extracted to a real
+/// top-level fn (cog>30 decomposition) — same non-capturing-closure hoist
+/// as `check_decl_tys` above.
+fn check_fn_tys(chk: &mut TyChecker, func: &IrFunction) {
+    for p in &func.params {
+        chk.where_ = format!("fn `{}` / param `{}`", func.name, p.name);
+        chk.check_ty(&p.ty);
+    }
+    chk.where_ = format!("fn `{}` / return ty", func.name);
+    chk.check_ty(&func.ret_ty);
+    chk.where_ = format!("fn `{}`", func.name);
+    chk.visit_expr(&func.body);
+}
+
+/// One traversal scope (root program or a module) of
+/// `collect_unresolvable_names`, extracted (cog>30 decomposition,
+/// sequential-phase pattern — the same four loops were duplicated verbatim
+/// for `program` and for every entry of `program.modules`; factored into
+/// one fn reused by both call sites). `scope_label` distinguishes the
+/// `where_` diagnostic text ("top-level let" vs. "module `X` top-level
+/// let", etc.) between the two call sites.
+fn collect_unresolvable_in_scope(
+    chk: &mut TyChecker,
+    type_decls: &[IrTypeDecl],
+    functions: &[IrFunction],
+    top_lets: &[IrTopLet],
+    var_table: &VarTable,
+    // Empty at the root scope (matching the original's bare "top-level let"
+    // / "var #{i}" text there); "module `{name}` " at a module scope.
+    scope_prefix: &str,
+) {
+    for td in type_decls { check_decl_tys(chk, td); }
+    for f in functions { check_fn_tys(chk, f); }
+    for tl in top_lets {
+        chk.where_ = format!("{}top-level let", scope_prefix);
+        chk.check_ty(&tl.ty);
+        chk.visit_expr(&tl.value);
+    }
+    for (i, vi) in var_table.entries.iter().enumerate() {
+        chk.where_ = format!("{}var #{} `{}`", scope_prefix, i, vi.name);
+        chk.check_ty(&vi.ty);
+    }
+}
+
 /// Pure detector: every Ty position in the program (type decls, signatures,
 /// var tables, top-lets, expression types) is scanned for bare names whose
 /// only declaration is qualified.
@@ -188,59 +286,9 @@ pub fn collect_unresolvable_names(program: &IrProgram) -> Vec<UnresolvableName> 
     let decls = index_decls(program);
     let mut chk = TyChecker { decls: &decls, offenders: Vec::new(), where_: String::new() };
 
-    let check_decl_tys = |chk: &mut TyChecker, td: &IrTypeDecl| {
-        chk.where_ = format!("type decl `{}`", td.name);
-        match &td.kind {
-            IrTypeDeclKind::Record { fields } => {
-                for f in fields { chk.check_ty(&f.ty); }
-            }
-            IrTypeDeclKind::Variant { cases, .. } => {
-                for c in cases {
-                    match &c.kind {
-                        IrVariantKind::Tuple { fields } => for t in fields { chk.check_ty(t); },
-                        IrVariantKind::Record { fields } => for f in fields { chk.check_ty(&f.ty); },
-                        IrVariantKind::Unit => {}
-                    }
-                }
-            }
-            IrTypeDeclKind::Alias { target } => chk.check_ty(target),
-        }
-    };
-
-    let check_fn = |chk: &mut TyChecker, func: &IrFunction| {
-        for p in &func.params {
-            chk.where_ = format!("fn `{}` / param `{}`", func.name, p.name);
-            chk.check_ty(&p.ty);
-        }
-        chk.where_ = format!("fn `{}` / return ty", func.name);
-        chk.check_ty(&func.ret_ty);
-        chk.where_ = format!("fn `{}`", func.name);
-        chk.visit_expr(&func.body);
-    };
-
-    for td in &program.type_decls { check_decl_tys(&mut chk, td); }
-    for f in &program.functions { check_fn(&mut chk, f); }
-    for tl in &program.top_lets {
-        chk.where_ = "top-level let".to_string();
-        chk.check_ty(&tl.ty);
-        chk.visit_expr(&tl.value);
-    }
-    for (i, vi) in program.var_table.entries.iter().enumerate() {
-        chk.where_ = format!("var #{} `{}`", i, vi.name);
-        chk.check_ty(&vi.ty);
-    }
+    collect_unresolvable_in_scope(&mut chk, &program.type_decls, &program.functions, &program.top_lets, &program.var_table, "");
     for m in &program.modules {
-        for td in &m.type_decls { check_decl_tys(&mut chk, td); }
-        for f in &m.functions { check_fn(&mut chk, f); }
-        for tl in &m.top_lets {
-            chk.where_ = format!("module `{}` top-level let", m.name);
-            chk.check_ty(&tl.ty);
-            chk.visit_expr(&tl.value);
-        }
-        for (i, vi) in m.var_table.entries.iter().enumerate() {
-            chk.where_ = format!("module `{}` var #{} `{}`", m.name, i, vi.name);
-            chk.check_ty(&vi.ty);
-        }
+        collect_unresolvable_in_scope(&mut chk, &m.type_decls, &m.functions, &m.top_lets, &m.var_table, &format!("module `{}` ", m.name));
     }
     chk.offenders
 }
@@ -392,21 +440,55 @@ fn repair_decl_kind(kind: &mut IrTypeDeclKind, map: &std::collections::HashMap<S
         IrTypeDeclKind::Alias { target } => *target = repair_ty(target, map),
         IrTypeDeclKind::Variant { cases, .. } => {
             for c in cases {
-                match &mut c.kind {
-                    IrVariantKind::Unit => {}
-                    IrVariantKind::Tuple { fields } => {
-                        for t in fields {
-                            *t = repair_ty(t, map);
-                        }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields {
-                            f.ty = repair_ty(&f.ty, map);
-                        }
-                    }
-                }
+                repair_variant_case_kind(&mut c.kind, map);
             }
         }
+    }
+}
+
+/// `IrVariantKind` case of `repair_decl_kind`'s `Variant` arm, extracted
+/// verbatim (cog>30 decomposition).
+fn repair_variant_case_kind(kind: &mut IrVariantKind, map: &std::collections::HashMap<Sym, Sym>) {
+    match kind {
+        IrVariantKind::Unit => {}
+        IrVariantKind::Tuple { fields } => {
+            for t in fields {
+                *t = repair_ty(t, map);
+            }
+        }
+        IrVariantKind::Record { fields } => {
+            for f in fields {
+                f.ty = repair_ty(&f.ty, map);
+            }
+        }
+    }
+}
+
+/// One traversal scope (root program or a module) of `repair_bare_type_names`,
+/// extracted (cog>30 decomposition, sequential-phase pattern — the same
+/// four loops were duplicated verbatim for `program` and for every entry of
+/// `program.modules`; factored into one fn reused by both call sites). The
+/// root-only `def_table` pass stays at the call site since modules have no
+/// `def_table`.
+fn repair_scope(
+    type_decls: &mut [IrTypeDecl],
+    functions: &mut [IrFunction],
+    top_lets: &mut [IrTopLet],
+    var_table: &mut VarTable,
+    map: &std::collections::HashMap<Sym, Sym>,
+) {
+    for td in type_decls {
+        repair_decl_kind(&mut td.kind, map);
+    }
+    for f in functions {
+        repair_fn(f, map);
+    }
+    for tl in top_lets {
+        tl.ty = repair_ty(&tl.ty, map);
+        repair_expr_in_place(&mut tl.value, map);
+    }
+    for v in &mut var_table.entries {
+        v.ty = repair_ty(&v.ty, map);
     }
 }
 
@@ -423,36 +505,12 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
     if map.is_empty() {
         return;
     }
-    for td in &mut program.type_decls {
-        repair_decl_kind(&mut td.kind, &map);
-    }
-    for f in &mut program.functions {
-        repair_fn(f, &map);
-    }
-    for tl in &mut program.top_lets {
-        tl.ty = repair_ty(&tl.ty, &map);
-        repair_expr_in_place(&mut tl.value, &map);
-    }
-    for v in &mut program.var_table.entries {
-        v.ty = repair_ty(&v.ty, &map);
-    }
+    repair_scope(&mut program.type_decls, &mut program.functions, &mut program.top_lets, &mut program.var_table, &map);
     for d in &mut program.def_table.entries {
         d.ty = repair_ty(&d.ty, &map);
     }
     for m in &mut program.modules {
-        for td in &mut m.type_decls {
-            repair_decl_kind(&mut td.kind, &map);
-        }
-        for f in &mut m.functions {
-            repair_fn(f, &map);
-        }
-        for tl in &mut m.top_lets {
-            tl.ty = repair_ty(&tl.ty, &map);
-            repair_expr_in_place(&mut tl.value, &map);
-        }
-        for v in &mut m.var_table.entries {
-            v.ty = repair_ty(&v.ty, &map);
-        }
+        repair_scope(&mut m.type_decls, &mut m.functions, &mut m.top_lets, &mut m.var_table, &map);
     }
 }
 

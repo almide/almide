@@ -71,13 +71,13 @@
             cmp(false)\n  cmp(true)\n  differ(true, false)\n  differ(true, true) }\n";
         let prog = lower_source(src);
         // The condition must lower to a real `IntBinOp{Eq/Ne}`, not a deferred Const.
-        let cmp = prog.functions.iter().find(|f| f.name == "cmp").unwrap();
+        let cmp = prog.functions.iter().find(|f| f.name == "cmp").expect("lowered fn \"cmp\" not found");
         assert!(
             cmp.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Eq, .. })),
             "Bool `==` must lower to IntBinOp Eq, got {:?}",
             cmp.ops
         );
-        let differ = prog.functions.iter().find(|f| f.name == "differ").unwrap();
+        let differ = prog.functions.iter().find(|f| f.name == "differ").expect("lowered fn \"differ\" not found");
         assert!(
             differ.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Ne, .. })),
             "Bool `!=` must lower to IntBinOp Ne, got {:?}",
@@ -116,7 +116,7 @@
         let prog = lower_source(src);
         // `not (n < 0)` (a param-driven Not) must lower to a real `IntBinOp{Sub}` (1 - b),
         // not a deferred Const — proving the new UnOp arm is wired and reached.
-        let bnot = prog.functions.iter().find(|f| f.name == "bnot").unwrap();
+        let bnot = prog.functions.iter().find(|f| f.name == "bnot").expect("lowered fn \"bnot\" not found");
         assert!(
             bnot.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Sub, .. })),
             "`not` must lower to IntBinOp Sub (1 - b), got {:?}",
@@ -128,8 +128,8 @@
         // taken branch), NOT the prior EAGER `IntOp::And`/`Or` over both operands (which traps on a
         // side-effecting/trapping RHS). Assert the short-circuit markers are present and NO eager
         // And/Or IntBinOp remains.
-        let band = prog.functions.iter().find(|f| f.name == "band").unwrap();
-        let bor = prog.functions.iter().find(|f| f.name == "bor").unwrap();
+        let band = prog.functions.iter().find(|f| f.name == "band").expect("lowered fn \"band\" not found");
+        let bor = prog.functions.iter().find(|f| f.name == "bor").expect("lowered fn \"bor\" not found");
         assert!(
             band.ops.iter().any(|op| matches!(op, Op::IfThen { .. }))
                 && !band.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::And, .. })),
@@ -160,7 +160,7 @@
             fn main() -> Unit = println(float.to_string(fneg(2.5)))\n";
         let prog = lower_source(src);
         // `-x` over a param must reach the f64.neg prim (FloatUn Neg), not a deferred Const.
-        let fneg = prog.functions.iter().find(|f| f.name == "fneg").unwrap();
+        let fneg = prog.functions.iter().find(|f| f.name == "fneg").expect("lowered fn \"fneg\" not found");
         assert!(
             fneg.ops.iter().any(
                 |op| matches!(op, Op::Prim { kind: PrimKind::FloatUn(FUnOp::Neg), .. })
@@ -182,7 +182,7 @@
             fn main() -> Unit = {\n  \
             println(label(true))\n  println(label(false)) }\n";
         let prog = lower_source(src);
-        let f = prog.functions.iter().find(|f| f.name == "label").unwrap();
+        let f = prog.functions.iter().find(|f| f.name == "label").expect("lowered fn \"label\" not found");
         // It must EXECUTE (IfThen marker), not defer to a single Opaque Alloc.
         assert!(
             f.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
@@ -221,7 +221,7 @@
             fn main() -> Unit = {\n  \
             println(name(0))\n  println(name(1))\n  println(name(7)) }\n";
         let prog = lower_source(src);
-        let f = prog.functions.iter().find(|f| f.name == "name").unwrap();
+        let f = prog.functions.iter().find(|f| f.name == "name").expect("lowered fn \"name\" not found");
         assert!(
             f.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
             "heap-result match must lower to nested IfThen (executable), got {:?}",
@@ -242,7 +242,7 @@
             fn main() -> Unit = {\n  \
             println(pick(true))\n  println(pick(false)) }\n";
         let prog = lower_source(src);
-        let f = prog.functions.iter().find(|f| f.name == "pick").unwrap();
+        let f = prog.functions.iter().find(|f| f.name == "pick").expect("lowered fn \"pick\" not found");
         assert!(
             f.ops.iter().any(|op| matches!(op, Op::IfThen { .. }))
                 && f.ops.iter().any(|op| matches!(op, Op::CallFn { .. })),
@@ -265,7 +265,7 @@
             fn main() -> Unit = {\n  \
             println(pick(true, \"yes\", \"no\"))\n  println(pick(false, \"yes\", \"no\")) }\n";
         let prog = lower_source(src);
-        let f = prog.functions.iter().find(|f| f.name == "pick").unwrap();
+        let f = prog.functions.iter().find(|f| f.name == "pick").expect("lowered fn \"pick\" not found");
         assert!(
             f.ops.iter().any(|op| matches!(op, Op::IfThen { .. }))
                 && f.ops.iter().any(|op| matches!(op, Op::Dup { .. })),
@@ -286,7 +286,7 @@
         let src = "fn tag(s: String) -> String = if string.contains(s, \"x\") then \"y\" else \"n\"\n\
             fn main() -> Unit = { println(tag(\"box\")) }\n";
         let prog = lower_source(src);
-        let f = prog.functions.iter().find(|f| f.name == "tag").unwrap();
+        let f = prog.functions.iter().find(|f| f.name == "tag").expect("lowered fn \"tag\" not found");
         assert!(
             f.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
             "bool-call-cond heap-result if must lower to IfThen, got {:?}",
@@ -347,7 +347,7 @@
             Some(x) => println(int.to_string(x)),\n    \
             None => println(\"none\"),\n  } }\n";
         let prog = lower_source(src);
-        let main = prog.functions.iter().find(|f| f.name == "main").unwrap();
+        let main = prog.functions.iter().find(|f| f.name == "main").expect("lowered fn \"main\" not found");
         // The match EXECUTES (IfThen marker over the tag read), not linearized-both-arms.
         assert!(
             main.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),

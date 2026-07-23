@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use almide_base::intern::Sym;
 use almide_ir::{
-    BinOp, IrExpr, IrExprKind, IrMatchArm, IrPattern, IrStmt, IrStmtKind, IrStringPart, UnOp,
-    VarId,
+    BinOp, IrExpr, IrExprKind, IrFieldPattern, IrMatchArm, IrPattern, IrStmt, IrStmtKind,
+    IrStringPart, UnOp, VarId,
 };
 use almide_lang::types::Ty;
 
@@ -146,94 +146,10 @@ impl<'a> Interpreter<'a> {
             }
             IrExprKind::EmptyMap => Flow::val(Value::Map(Rc::new(Vec::new()))),
             IrExprKind::Record { name, fields } => {
-                let mut out = Vec::with_capacity(fields.len());
-                for (k, v) in fields {
-                    out.push((*k, val!(self.eval_expr(v, scope))));
-                }
-                // A record-shaped node whose `name` is a registered
-                // record-variant constructor builds a `Variant` (so it
-                // equality- / pattern-matches as a variant). A plain record
-                // type stays a `Record`. Empirically (probe /tmp/repr_probe),
-                // both display identically as `Name { f: v }`.
-                if let Some(n) = name {
-                    if let Some((ty_name, crate::dispatch::CtorKind::Record)) =
-                        self.variant_ctor(*n)
-                    {
-                        return Flow::val(Value::Variant {
-                            ty: Some(ty_name),
-                            ctor: *n,
-                            payload: VariantPayload::Record(out),
-                        });
-                    }
-                }
-                // Recover the displayed shape exactly as the codegen walker does
-                // (walker/expressions.rs:511-530, walker/types.rs:111). A record
-                // LITERAL carries no inline `name` when its nominal type comes
-                // from an annotation/inference — the name must be recovered from
-                // the expression's type. Three cases, in the walker's order:
-                //   1. `expr.ty == Ty::Named(n, _)`  → the nominal name `n`,
-                //      fields in literal (declaration) order.
-                //   2. `expr.ty == Ty::Record/OpenRecord` whose field-name set
-                //      matches a registered NAMED record type (e.g. a nested
-                //      list element `[{ val: 2, kids: [] }]` whose element type
-                //      was inferred structurally) → that type's name, fields
-                //      reordered to the type's DECLARATION order.
-                //   3. A genuinely ANONYMOUS record → no name; the native
-                //      synthesized struct stores fields in SORTED name order, so
-                //      sort here to match the backends' repr.
-                let resolved_name;
-                if let Some(n) = name {
-                    resolved_name = Some(*n);
-                } else {
-                    match &expr.ty {
-                        Ty::Named(n, _) => resolved_name = Some(*n),
-                        Ty::Record { .. } | Ty::OpenRecord { .. } => {
-                            let mut key: Vec<Sym> = out.iter().map(|(k, _)| *k).collect();
-                            key.sort();
-                            if let Some((ty_name, decl_order)) =
-                                self.named_records.get(&key).cloned()
-                            {
-                                // Case 2: reorder fields to declaration order.
-                                let mut reordered = Vec::with_capacity(out.len());
-                                for field in &decl_order {
-                                    if let Some(pos) = out.iter().position(|(k, _)| k == field) {
-                                        reordered.push(out.swap_remove(pos));
-                                    }
-                                }
-                                reordered.extend(out.drain(..));
-                                out = reordered;
-                                resolved_name = Some(ty_name);
-                            } else {
-                                // Case 3: true anonymous record → sorted fields.
-                                out.sort_by(|a, b| a.0.cmp(&b.0));
-                                resolved_name = None;
-                            }
-                        }
-                        _ => resolved_name = None,
-                    }
-                }
-                Flow::val(Value::Record { name: resolved_name, fields: Rc::new(out) })
+                self.eval_record_literal(name, fields, &expr.ty, scope)
             }
             IrExprKind::SpreadRecord { base, fields } => {
-                let base_v = val!(self.eval_expr(base, scope));
-                let (name, mut merged) = match base_v {
-                    Value::Record { name, fields } => (name, (*fields).clone()),
-                    other => {
-                        return Flow::Abort(format!(
-                            "internal: spread base is {} not Record",
-                            other.type_name()
-                        ))
-                    }
-                };
-                for (k, v) in fields {
-                    let vv = val!(self.eval_expr(v, scope));
-                    if let Some(slot) = merged.iter_mut().find(|(fk, _)| fk == k) {
-                        slot.1 = vv;
-                    } else {
-                        merged.push((*k, vv));
-                    }
-                }
-                Flow::val(Value::Record { name, fields: Rc::new(merged) })
+                self.eval_spread_record(base, fields, scope)
             }
             IrExprKind::Range { start, end, inclusive } => {
                 let s = val!(self.eval_expr(start, scope));
@@ -313,20 +229,7 @@ impl<'a> Interpreter<'a> {
             IrExprKind::OptionNone => Flow::val(Value::Option(None)),
             // `?` / `!` — short-circuit the enclosing fn on Err/None.
             IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
-                let v = val!(self.eval_expr(expr, scope));
-                match v {
-                    Value::Result(Ok(inner)) => Flow::val(*inner),
-                    Value::Result(Err(e)) => Flow::Return(Value::Result(Err(e))),
-                    Value::Option(Some(inner)) => Flow::val(*inner),
-                    // #556: `expr!` on a None propagates an Err whose message is
-                    // "none" on BOTH backends (the codegen lowers Option `!` to
-                    // `ok_or("none")?`). Returning a bare Option(None) made the
-                    // main-error path print the Rust-internal "called
-                    // Option::unwrap() on a None value" — a wrong third vote
-                    // against the native==wasm "Error: none".
-                    Value::Option(None) => Flow::Return(Value::Result(Err(Box::new(Value::str("none".to_string()))))),
-                    other => Flow::val(other),
-                }
+                self.eval_try_unwrap(expr, scope)
             }
             // `??` — unwrap with a fallback value.
             IrExprKind::UnwrapOr { expr, fallback } => {
@@ -351,18 +254,7 @@ impl<'a> Interpreter<'a> {
             }
             // `?.field` — optional chaining.
             IrExprKind::OptionalChain { expr, field } => {
-                let v = val!(self.eval_expr(expr, scope));
-                match v {
-                    Value::Option(None) => Flow::val(Value::Option(None)),
-                    Value::Option(Some(inner)) => match self.eval_member(*inner, *field) {
-                        Flow::Value(m) => Flow::val(Value::Option(Some(Box::new(m)))),
-                        other => other,
-                    },
-                    other => match self.eval_member(other, *field) {
-                        Flow::Value(m) => Flow::val(Value::Option(Some(Box::new(m)))),
-                        other => other,
-                    },
-                }
+                self.eval_optional_chain(expr, *field, scope)
             }
             // The interp is synchronous: await is identity over the value.
             IrExprKind::Await { expr } => self.eval_expr(expr, scope),
@@ -414,6 +306,139 @@ impl<'a> Interpreter<'a> {
                 "IterChain is codegen-inserted (StdlibLowering); interp runs pre-codegen"
             ),
         }
+    }
+
+    // ── `?` / `!` / `?.field` ───────────────────────────────────
+
+    /// `Try`/`Unwrap` — short-circuit the enclosing fn on Err/None.
+    fn eval_try_unwrap(&mut self, expr: &IrExpr, scope: &Scope) -> Flow {
+        let v = val!(self.eval_expr(expr, scope));
+        match v {
+            Value::Result(Ok(inner)) => Flow::val(*inner),
+            Value::Result(Err(e)) => Flow::Return(Value::Result(Err(e))),
+            Value::Option(Some(inner)) => Flow::val(*inner),
+            // #556: `expr!` on a None propagates an Err whose message is
+            // "none" on BOTH backends (the codegen lowers Option `!` to
+            // `ok_or("none")?`). Returning a bare Option(None) made the
+            // main-error path print the Rust-internal "called
+            // Option::unwrap() on a None value" — a wrong third vote
+            // against the native==wasm "Error: none".
+            Value::Option(None) => {
+                Flow::Return(Value::Result(Err(Box::new(Value::str("none".to_string())))))
+            }
+            other => Flow::val(other),
+        }
+    }
+
+    fn eval_optional_chain(&mut self, expr: &IrExpr, field: Sym, scope: &Scope) -> Flow {
+        let v = val!(self.eval_expr(expr, scope));
+        match v {
+            Value::Option(None) => Flow::val(Value::Option(None)),
+            Value::Option(Some(inner)) => match self.eval_member(*inner, field) {
+                Flow::Value(m) => Flow::val(Value::Option(Some(Box::new(m)))),
+                other => other,
+            },
+            other => match self.eval_member(other, field) {
+                Flow::Value(m) => Flow::val(Value::Option(Some(Box::new(m)))),
+                other => other,
+            },
+        }
+    }
+
+    // ── Record literal / spread ────────────────────────────────
+
+    fn eval_record_literal(
+        &mut self,
+        name: &Option<Sym>,
+        fields: &[(Sym, IrExpr)],
+        ty: &Ty,
+        scope: &Scope,
+    ) -> Flow {
+        let mut out = Vec::with_capacity(fields.len());
+        for (k, v) in fields {
+            out.push((*k, val!(self.eval_expr(v, scope))));
+        }
+        // A record-shaped node whose `name` is a registered
+        // record-variant constructor builds a `Variant` (so it
+        // equality- / pattern-matches as a variant). A plain record
+        // type stays a `Record`. Empirically (probe /tmp/repr_probe),
+        // both display identically as `Name { f: v }`.
+        if let Some(n) = name {
+            if let Some((ty_name, crate::dispatch::CtorKind::Record)) = self.variant_ctor(*n) {
+                return Flow::val(Value::Variant {
+                    ty: Some(ty_name),
+                    ctor: *n,
+                    payload: VariantPayload::Record(out),
+                });
+            }
+        }
+        // Recover the displayed shape exactly as the codegen walker does
+        // (walker/expressions.rs:511-530, walker/types.rs:111). A record
+        // LITERAL carries no inline `name` when its nominal type comes
+        // from an annotation/inference — the name must be recovered from
+        // the expression's type. Three cases, in the walker's order:
+        //   1. `expr.ty == Ty::Named(n, _)`  → the nominal name `n`,
+        //      fields in literal (declaration) order.
+        //   2. `expr.ty == Ty::Record/OpenRecord` whose field-name set
+        //      matches a registered NAMED record type (e.g. a nested
+        //      list element `[{ val: 2, kids: [] }]` whose element type
+        //      was inferred structurally) → that type's name, fields
+        //      reordered to the type's DECLARATION order.
+        //   3. A genuinely ANONYMOUS record → no name; the native
+        //      synthesized struct stores fields in SORTED name order, so
+        //      sort here to match the backends' repr.
+        let resolved_name;
+        if let Some(n) = name {
+            resolved_name = Some(*n);
+        } else {
+            match ty {
+                Ty::Named(n, _) => resolved_name = Some(*n),
+                Ty::Record { .. } | Ty::OpenRecord { .. } => {
+                    let mut key: Vec<Sym> = out.iter().map(|(k, _)| *k).collect();
+                    key.sort();
+                    if let Some((ty_name, decl_order)) = self.named_records.get(&key).cloned() {
+                        // Case 2: reorder fields to declaration order.
+                        let mut reordered = Vec::with_capacity(out.len());
+                        for field in &decl_order {
+                            if let Some(pos) = out.iter().position(|(k, _)| k == field) {
+                                reordered.push(out.swap_remove(pos));
+                            }
+                        }
+                        reordered.extend(out.drain(..));
+                        out = reordered;
+                        resolved_name = Some(ty_name);
+                    } else {
+                        // Case 3: true anonymous record → sorted fields.
+                        out.sort_by(|a, b| a.0.cmp(&b.0));
+                        resolved_name = None;
+                    }
+                }
+                _ => resolved_name = None,
+            }
+        }
+        Flow::val(Value::Record { name: resolved_name, fields: Rc::new(out) })
+    }
+
+    fn eval_spread_record(&mut self, base: &IrExpr, fields: &[(Sym, IrExpr)], scope: &Scope) -> Flow {
+        let base_v = val!(self.eval_expr(base, scope));
+        let (name, mut merged) = match base_v {
+            Value::Record { name, fields } => (name, (*fields).clone()),
+            other => {
+                return Flow::Abort(format!(
+                    "internal: spread base is {} not Record",
+                    other.type_name()
+                ))
+            }
+        };
+        for (k, v) in fields {
+            let vv = val!(self.eval_expr(v, scope));
+            if let Some(slot) = merged.iter_mut().find(|(fk, _)| fk == k) {
+                slot.1 = vv;
+            } else {
+                merged.push((*k, vv));
+            }
+        }
+        Flow::val(Value::Record { name, fields: Rc::new(merged) })
     }
 
     // ── Member / index access ──────────────────────────────────

@@ -7,162 +7,65 @@ use super::RenderContext;
 use super::types::render_type;
 use super::helpers::{template_or, render_type_field_fn};
 
+/// `render_type_decl`'s generics-string computation, extracted verbatim
+/// (cog>25 decomposition). Builds e.g. `"<T>"` or `"<T, U>"`, or `""` when
+/// there are none (or #621 phantom-param dropping applies).
+fn render_type_decl_generics(ctx: &RenderContext, td: &IrTypeDecl) -> String {
+    if ctx.ann.phantom_param_structs.contains(td.name.as_str()) {
+        // All params phantom (#621): drop them so Rust doesn't reject E0392.
+        return String::new();
+    }
+    let Some(generics) = &td.generics else { return String::new() };
+    if generics.is_empty() {
+        return String::new();
+    }
+    let params = generics.iter().map(|g| {
+        ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
+            .unwrap_or_else(|| g.name.to_string())
+    }).collect::<Vec<_>>().join(", ");
+    format!("<{}>", params)
+}
+
+/// `IrTypeDeclKind::Alias` arm of `render_type_decl`, extracted verbatim
+/// (cog>25 decomposition). Returns `None` for the two "no declaration
+/// emitted" cases (Fn alias erasure, transparent-primitive alias); the
+/// caller's `return String::new()` mirrors those.
+fn render_type_decl_alias(ctx: &RenderContext, td: &IrTypeDecl, target: &Ty) -> Option<String> {
+    // Fn type aliases are erased — the type checker expands them at use sites
+    if matches!(target, Ty::Fn { .. }) {
+        return None;
+    }
+    // Opaque (mod/local) aliases → newtype struct
+    if matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private) {
+        let type_s = render_type(ctx, target);
+        return Some(format!(
+            "#[derive(Clone, Debug, PartialEq)]\npub struct {}({});",
+            td.name, type_s
+        ));
+    }
+    // Transparent aliases to primitives are expanded at use sites
+    // by render_type via type_aliases. Don't emit a Rust `type`
+    // declaration — it would shadow runtime `use` imports
+    // (e.g. `type TcpStream = i64` shadows `std::net::TcpStream`).
+    if ctx.type_aliases.contains_key(&td.name) {
+        return None;
+    }
+    let type_s = render_type(ctx, target);
+    Some(ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
+        .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target))))
+}
+
 pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
-
-    // Build generics string e.g. "<T>" or "<T, U>"
-    let generics_str = if ctx.ann.phantom_param_structs.contains(td.name.as_str()) {
-        // All params phantom (#621): drop them so Rust doesn't reject E0392.
-        String::new()
-    } else if let Some(generics) = &td.generics {
-        if generics.is_empty() {
-            String::new()
-        } else {
-            let params = generics.iter().map(|g| {
-                ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
-                    .unwrap_or_else(|| g.name.to_string())
-            }).collect::<Vec<_>>().join(", ");
-            format!("<{}>", params)
-        }
-    } else {
-        String::new()
-    };
+    let generics_str = render_type_decl_generics(ctx, td);
 
     let decl = match &td.kind {
-        IrTypeDeclKind::Record { fields } => {
-            let has_fn_fields = fields.iter().any(|f| matches!(&f.ty, Ty::Fn { .. }));
-            // Matrix / Fn / transitively-blocking types prevent PartialEq derive.
-            // Uses the precomputed `eq_blocked_types` set so Named references
-            // to other blocked user types propagate correctly.
-            let has_non_eq_fields = fields.iter().any(|f| ty_blocks_eq_with(&f.ty, &ctx.ann.eq_blocked_types));
-            let fields_str = fields.iter()
-                .map(|f| {
-                    // Closure-bearing struct fields use Rc<dyn Fn> (impl Fn is
-                    // invalid in struct position, Box<dyn Fn> is not Clone) — also
-                    // when the closure is nested in a List/Map/Tuple field. Fn-free
-                    // field types fall through to the normal renderer.
-                    let type_s = render_type_field_fn(ctx, &f.ty);
-                    ctx.templates.render_with("struct_field", None, &[], &[("name", f.name.as_str()), ("type", type_s.as_str())])
-                        .unwrap_or_else(|| format!("    pub {}: {},", f.name, render_type(ctx, &f.ty)))
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            let full_name = format!("{}{}", td.name, generics_str);
-            let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
-            let mut attrs = decl_attrs.clone();
-            if has_fn_fields { attrs.push("has_fn_fields"); }
-            if has_non_eq_fields { attrs.push("has_non_eq_fields"); }
-            if has_hash && !has_fn_fields && !has_non_eq_fields { attrs.push("has_hash"); }
-            let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
-            let fallback = if has_fn_fields {
-                format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, &fields_str)
-            } else if has_non_eq_fields {
-                format!("{}#[derive(Clone, Debug)]\npub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
-            } else {
-                format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
-            };
-            ctx.templates.render_with("struct_decl", None, &attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
-                .unwrap_or(fallback)
-        }
-        IrTypeDeclKind::Variant { cases, .. } => {
-            let variants_parts: Vec<String> = cases.iter()
-                .map(|v| match &v.kind {
-                    IrVariantKind::Unit => {
-                        ctx.templates.render_with("enum_variant_unit", None, &[], &[("name", v.name.as_str())])
-                            .unwrap_or_else(|| v.name.to_string())
-                    }
-                    IrVariantKind::Tuple { fields } => {
-                        let is_recursive = ctx.ann.recursive_enums.contains(&*td.name);
-                        let types: Vec<String> = fields.iter().map(|t| {
-                            // Closure payloads (direct or nested in a container) use
-                            // Rc<dyn Fn> — same as a struct field.
-                            let rendered = render_type_field_fn(ctx, t);
-                            // Box a field referencing ANY cycle member (mutual recursion), not
-                            // just the enclosing type's own name (#656).
-                            if is_recursive && super::ty_contains_any_recursive(t, &ctx.ann.recursive_enums) { format!("std::boxed::Box<{}>", rendered) } else { rendered }
-                        }).collect();
-                        let fields_str = types.join(", ");
-                        // Named params via fn_param template (respects JS/TS)
-                        let params_str = types.iter().enumerate()
-                            .map(|(i, t)| {
-                                let name = format!("v{}", i);
-                                ctx.templates.render_with("fn_param", None, &[], &[("name", name.as_str()), ("type", t.as_str())])
-                                    .unwrap_or(name)
-                            })
-                            .collect::<Vec<_>>().join(", ");
-                        let param_names = (0..types.len()).map(|i| format!("v{}", i))
-                            .collect::<Vec<_>>().join(", ");
-                        let fallback = format!("{}({})", v.name, &fields_str);
-                        ctx.templates.render_with("enum_variant", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("params", params_str.as_str()), ("param_names", param_names.as_str())])
-                            .unwrap_or(fallback)
-                    }
-                    IrVariantKind::Record { fields } => {
-                        let fields_str = fields.iter()
-                            .map(|f| {
-                                let rendered = render_type_field_fn(ctx, &f.ty);
-                                let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && super::ty_contains_any_recursive(&f.ty, &ctx.ann.recursive_enums) {
-                                    format!("std::boxed::Box<{}>", rendered)
-                                } else {
-                                    rendered
-                                };
-                                ctx.templates.render_with("fn_param", None, &[], &[("name", f.name.as_str()), ("type", boxed.as_str())])
-                                    .unwrap_or_else(|| format!("{}: {}", f.name, boxed))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        let field_names = fields.iter().map(|f| f.name.to_string()).collect::<Vec<_>>().join(", ");
-                        ctx.templates.render_with("enum_variant_record", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("field_names", field_names.as_str())])
-                            .unwrap_or_else(|| format!("{} {{ {} }}", v.name, fields_str))
-                    }
-                })
-                .collect::<Vec<_>>();
-            let sep = template_or(ctx, "enum_variant_sep", &[], ",\n");
-            let variants_str = variants_parts.join(&sep);
-            let full_name = format!("{}{}", td.name, generics_str);
-            let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
-            // A closure payload (Fn directly, or nested in a container) lowers to
-            // `Rc<dyn Fn>`, which is neither Debug nor PartialEq → derive Clone only.
-            let has_fn_fields = cases.iter().any(|v| match &v.kind {
-                IrVariantKind::Unit => false,
-                IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
-                IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
-            });
-            let mut enum_attrs = decl_attrs.clone();
-            if has_fn_fields { enum_attrs.push("has_fn_fields"); }
-            else if has_hash { enum_attrs.push("has_hash"); }
-            let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
-            let fallback = if has_fn_fields {
-                format!("#[derive(Clone)]\npub enum {} {{\n{}\n}}", full_name, &variants_str)
-            } else {
-                format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str)
-            };
-            ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
-                .unwrap_or(fallback)
-        }
-        IrTypeDeclKind::Alias { target } => {
-            // Fn type aliases are erased — the type checker expands them at use sites
-            if matches!(target, Ty::Fn { .. }) {
-                return String::new();
-            }
-            // Opaque (mod/local) aliases → newtype struct
-            if matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private) {
-                let type_s = render_type(ctx, target);
-                return format!(
-                    "#[derive(Clone, Debug, PartialEq)]\npub struct {}({});",
-                    td.name, type_s
-                );
-            }
-            // Transparent aliases to primitives are expanded at use sites
-            // by render_type via type_aliases. Don't emit a Rust `type`
-            // declaration — it would shadow runtime `use` imports
-            // (e.g. `type TcpStream = i64` shadows `std::net::TcpStream`).
-            if ctx.type_aliases.contains_key(&td.name) {
-                return String::new();
-            }
-            let type_s = render_type(ctx, target);
-            ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
-                .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target)))
-        }
+        IrTypeDeclKind::Record { .. } => render_type_decl_record(ctx, td, &generics_str, &decl_attrs),
+        IrTypeDeclKind::Variant { .. } => render_type_decl_variant(ctx, td, &generics_str, &decl_attrs),
+        IrTypeDeclKind::Alias { target } => match render_type_decl_alias(ctx, td, target) {
+            Some(s) => s,
+            None => return String::new(),
+        },
     };
 
     // Emit the `AlmideRepr` impl for records/variants so a record/variant value
@@ -175,6 +78,125 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     } else {
         decl
     }
+}
+
+/// `IrTypeDeclKind::Record` case of `render_type_decl`, extracted verbatim
+/// (cog>30 decomposition, pattern 2 — mirrors the existing `render_type`'s
+/// Named/Record split and `TyChecker::check_ty`'s Named/Variant split).
+fn render_type_decl_record(ctx: &RenderContext, td: &IrTypeDecl, generics_str: &str, decl_attrs: &[&str]) -> String {
+    let IrTypeDeclKind::Record { fields } = &td.kind else { unreachable!() };
+    let has_fn_fields = fields.iter().any(|f| matches!(&f.ty, Ty::Fn { .. }));
+    // Matrix / Fn / transitively-blocking types prevent PartialEq derive.
+    // Uses the precomputed `eq_blocked_types` set so Named references
+    // to other blocked user types propagate correctly.
+    let has_non_eq_fields = fields.iter().any(|f| ty_blocks_eq_with(&f.ty, &ctx.ann.eq_blocked_types));
+    let fields_str = fields.iter()
+        .map(|f| {
+            // Closure-bearing struct fields use Rc<dyn Fn> (impl Fn is
+            // invalid in struct position, Box<dyn Fn> is not Clone) — also
+            // when the closure is nested in a List/Map/Tuple field. Fn-free
+            // field types fall through to the normal renderer.
+            let type_s = render_type_field_fn(ctx, &f.ty);
+            ctx.templates.render_with("struct_field", None, &[], &[("name", f.name.as_str()), ("type", type_s.as_str())])
+                .unwrap_or_else(|| format!("    pub {}: {},", f.name, render_type(ctx, &f.ty)))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let full_name = format!("{}{}", td.name, generics_str);
+    let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
+    let mut attrs = decl_attrs.to_vec();
+    if has_fn_fields { attrs.push("has_fn_fields"); }
+    if has_non_eq_fields { attrs.push("has_non_eq_fields"); }
+    if has_hash && !has_fn_fields && !has_non_eq_fields { attrs.push("has_hash"); }
+    let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
+    let fallback = if has_fn_fields {
+        format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, &fields_str)
+    } else if has_non_eq_fields {
+        format!("{}#[derive(Clone, Debug)]\npub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
+    } else {
+        format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
+    };
+    ctx.templates.render_with("struct_decl", None, &attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
+        .unwrap_or(fallback)
+}
+
+/// `IrTypeDeclKind::Variant` case of `render_type_decl`, extracted verbatim
+/// (cog>30 decomposition, pattern 2).
+fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: &str, decl_attrs: &[&str]) -> String {
+    let IrTypeDeclKind::Variant { cases, .. } = &td.kind else { unreachable!() };
+    let variants_parts: Vec<String> = cases.iter()
+        .map(|v| match &v.kind {
+            IrVariantKind::Unit => {
+                ctx.templates.render_with("enum_variant_unit", None, &[], &[("name", v.name.as_str())])
+                    .unwrap_or_else(|| v.name.to_string())
+            }
+            IrVariantKind::Tuple { fields } => {
+                let is_recursive = ctx.ann.recursive_enums.contains(&*td.name);
+                let types: Vec<String> = fields.iter().map(|t| {
+                    // Closure payloads (direct or nested in a container) use
+                    // Rc<dyn Fn> — same as a struct field.
+                    let rendered = render_type_field_fn(ctx, t);
+                    // Box a field referencing ANY cycle member (mutual recursion), not
+                    // just the enclosing type's own name (#656).
+                    if is_recursive && super::ty_contains_any_recursive(t, &ctx.ann.recursive_enums) { format!("std::boxed::Box<{}>", rendered) } else { rendered }
+                }).collect();
+                let fields_str = types.join(", ");
+                // Named params via fn_param template (respects JS/TS)
+                let params_str = types.iter().enumerate()
+                    .map(|(i, t)| {
+                        let name = format!("v{}", i);
+                        ctx.templates.render_with("fn_param", None, &[], &[("name", name.as_str()), ("type", t.as_str())])
+                            .unwrap_or(name)
+                    })
+                    .collect::<Vec<_>>().join(", ");
+                let param_names = (0..types.len()).map(|i| format!("v{}", i))
+                    .collect::<Vec<_>>().join(", ");
+                let fallback = format!("{}({})", v.name, &fields_str);
+                ctx.templates.render_with("enum_variant", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("params", params_str.as_str()), ("param_names", param_names.as_str())])
+                    .unwrap_or(fallback)
+            }
+            IrVariantKind::Record { fields } => {
+                let fields_str = fields.iter()
+                    .map(|f| {
+                        let rendered = render_type_field_fn(ctx, &f.ty);
+                        let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && super::ty_contains_any_recursive(&f.ty, &ctx.ann.recursive_enums) {
+                            format!("std::boxed::Box<{}>", rendered)
+                        } else {
+                            rendered
+                        };
+                        ctx.templates.render_with("fn_param", None, &[], &[("name", f.name.as_str()), ("type", boxed.as_str())])
+                            .unwrap_or_else(|| format!("{}: {}", f.name, boxed))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let field_names = fields.iter().map(|f| f.name.to_string()).collect::<Vec<_>>().join(", ");
+                ctx.templates.render_with("enum_variant_record", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("field_names", field_names.as_str())])
+                    .unwrap_or_else(|| format!("{} {{ {} }}", v.name, fields_str))
+            }
+        })
+        .collect::<Vec<_>>();
+    let sep = template_or(ctx, "enum_variant_sep", &[], ",\n");
+    let variants_str = variants_parts.join(&sep);
+    let full_name = format!("{}{}", td.name, generics_str);
+    let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
+    // A closure payload (Fn directly, or nested in a container) lowers to
+    // `Rc<dyn Fn>`, which is neither Debug nor PartialEq → derive Clone only.
+    let has_fn_fields = cases.iter().any(|v| match &v.kind {
+        IrVariantKind::Unit => false,
+        IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
+        IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
+    });
+    let mut enum_attrs = decl_attrs.to_vec();
+    if has_fn_fields { enum_attrs.push("has_fn_fields"); }
+    else if has_hash { enum_attrs.push("has_hash"); }
+    let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
+    let fallback = if has_fn_fields {
+        format!("#[derive(Clone)]\npub enum {} {{\n{}\n}}", full_name, &variants_str)
+    } else {
+        format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str)
+    };
+    ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
+        .unwrap_or(fallback)
 }
 
 /// Build `impl AlmideRepr for <Type>` for a record or variant type, mirroring
@@ -358,26 +380,10 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
     }
 
     // Collect from all types AND expressions in the program
-    for func in &program.functions {
-        for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
-        collect_anon_from_ty(&func.ret_ty, &named_set, &mut seen);
-        collect_anon_from_expr(&func.body, &named_set, &mut seen);
-    }
-    for tl in &program.top_lets {
-        collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
-        collect_anon_from_expr(&tl.value, &named_set, &mut seen);
-    }
+    collect_anon_from_fns_and_lets(&program.functions, &program.top_lets, &named_set, &mut seen);
     // Also collect from module functions and top_lets
     for module in &program.modules {
-        for func in &module.functions {
-            for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
-            collect_anon_from_ty(&func.ret_ty, &named_set, &mut seen);
-            collect_anon_from_expr(&func.body, &named_set, &mut seen);
-        }
-        for tl in &module.top_lets {
-            collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
-            collect_anon_from_expr(&tl.value, &named_set, &mut seen);
-        }
+        collect_anon_from_fns_and_lets(&module.functions, &module.top_lets, &named_set, &mut seen);
     }
 
     let mut map = HashMap::new();
@@ -390,6 +396,22 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
     map
 }
 
+/// Shared body of `collect_anon_records`'s program-level and per-module
+/// loops, extracted (cog>30 decomposition, sequential-phase pattern — was
+/// duplicated verbatim once for `program.functions`/`program.top_lets` and
+/// once for each `module.functions`/`module.top_lets`).
+fn collect_anon_from_fns_and_lets(functions: &[IrFunction], top_lets: &[IrTopLet], named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    for func in functions {
+        for p in &func.params { collect_anon_from_ty(&p.ty, named, seen); }
+        collect_anon_from_ty(&func.ret_ty, named, seen);
+        collect_anon_from_expr(&func.body, named, seen);
+    }
+    for tl in top_lets {
+        collect_anon_from_ty(&tl.ty, named, seen);
+        collect_anon_from_expr(&tl.value, named, seen);
+    }
+}
+
 /// Descend a type declaration's field / variant-payload types, registering any
 /// anonymous record reachable only from the declaration (never constructed).
 fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
@@ -398,66 +420,66 @@ fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &HashSet<Vec<String>>, se
             for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
         }
         IrTypeDeclKind::Variant { cases, .. } => {
-            for c in cases {
-                match &c.kind {
-                    IrVariantKind::Unit => {}
-                    IrVariantKind::Tuple { fields } => {
-                        for t in fields { collect_anon_from_ty(t, named, seen); }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
-                    }
-                }
-            }
+            for c in cases { collect_anon_from_variant_case(&c.kind, named, seen); }
         }
         _ => {}
     }
 }
 
-fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
-    collect_anon_from_ty(&expr.ty, named, seen);
-    match &expr.kind {
-        IrExprKind::Block { stmts, expr: e } => {
-            for s in stmts { collect_anon_from_stmt(s, named, seen); }
-            if let Some(e) = e { collect_anon_from_expr(e, named, seen); }
+/// `IrVariantKind` case of `collect_anon_from_type_decl`'s `Variant` arm,
+/// extracted verbatim (cog>30 decomposition).
+fn collect_anon_from_variant_case(kind: &IrVariantKind, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match kind {
+        IrVariantKind::Unit => {}
+        IrVariantKind::Tuple { fields } => {
+            for t in fields { collect_anon_from_ty(t, named, seen); }
         }
+        IrVariantKind::Record { fields } => {
+            for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
+        }
+    }
+}
+
+/// `collect_anon_from_expr` group: control-flow-shaped nodes (Block, If,
+/// Match, Call, ForIn, While, Lambda). Not exhaustive — the caller runs this
+/// alongside `collect_anon_from_expr_data`, so a `_ => {}` here just means
+/// "not this group's variant" (cog>25 decomposition).
+fn collect_anon_from_expr_control(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match &expr.kind {
+        IrExprKind::Block { .. } => collect_anon_from_block(expr, named, seen),
         IrExprKind::If { cond, then, else_ } => {
             collect_anon_from_expr(cond, named, seen);
             collect_anon_from_expr(then, named, seen);
             collect_anon_from_expr(else_, named, seen);
         }
-        IrExprKind::Match { subject, arms } => {
-            collect_anon_from_expr(subject, named, seen);
-            for arm in arms { collect_anon_from_expr(&arm.body, named, seen); }
-        }
-        IrExprKind::Call { args, target, .. } => {
-            if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
-                collect_anon_from_expr(object, named, seen);
-            }
-            for a in args { collect_anon_from_expr(a, named, seen); }
-        }
+        IrExprKind::Match { .. } => collect_anon_from_match(expr, named, seen),
+        IrExprKind::Call { .. } => collect_anon_from_call(expr, named, seen),
+        IrExprKind::ForIn { iterable, body, .. } => collect_anon_from_loop_body(iterable, body, named, seen),
+        IrExprKind::While { cond, body } => collect_anon_from_loop_body(cond, body, named, seen),
+        IrExprKind::Lambda { body, .. } => collect_anon_from_expr(body, named, seen),
+        _ => {}
+    }
+}
+
+/// `collect_anon_from_expr` group: operator/data/wrapper nodes (BinOp, UnOp,
+/// collection literals, access, Result/Option wrappers, StringInterp,
+/// codegen-specific wrappers). See `collect_anon_from_expr_control`.
+fn collect_anon_from_expr_data(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match &expr.kind {
         IrExprKind::BinOp { left, right, .. } => {
             collect_anon_from_expr(left, named, seen);
             collect_anon_from_expr(right, named, seen);
         }
         IrExprKind::UnOp { operand, .. } => collect_anon_from_expr(operand, named, seen),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::RustMacro { args: elements, .. } => {
             for e in elements { collect_anon_from_expr(e, named, seen); }
         }
-        IrExprKind::Lambda { body, .. } => collect_anon_from_expr(body, named, seen),
         IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
             for (_, v) in fields { collect_anon_from_expr(v, named, seen); }
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             collect_anon_from_expr(object, named, seen);
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            collect_anon_from_expr(iterable, named, seen);
-            for s in body { collect_anon_from_stmt(s, named, seen); }
-        }
-        IrExprKind::While { cond, body } => {
-            collect_anon_from_expr(cond, named, seen);
-            for s in body { collect_anon_from_stmt(s, named, seen); }
         }
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
@@ -480,11 +502,49 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
         | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
             collect_anon_from_expr(expr, named, seen);
         }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { collect_anon_from_expr(a, named, seen); }
-        }
         _ => {}
     }
+}
+
+fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    collect_anon_from_ty(&expr.ty, named, seen);
+    collect_anon_from_expr_control(expr, named, seen);
+    collect_anon_from_expr_data(expr, named, seen);
+}
+
+/// `IrExprKind::Block` case of `collect_anon_from_expr`, extracted verbatim
+/// (cog>30 decomposition).
+fn collect_anon_from_block(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    let IrExprKind::Block { stmts, expr: e } = &expr.kind else { unreachable!() };
+    for s in stmts { collect_anon_from_stmt(s, named, seen); }
+    if let Some(e) = e { collect_anon_from_expr(e, named, seen); }
+}
+
+/// `IrExprKind::Match` case of `collect_anon_from_expr`, extracted verbatim
+/// (cog>30 decomposition).
+fn collect_anon_from_match(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    collect_anon_from_expr(subject, named, seen);
+    for arm in arms { collect_anon_from_expr(&arm.body, named, seen); }
+}
+
+/// `IrExprKind::Call` case of `collect_anon_from_expr`, extracted verbatim
+/// (cog>30 decomposition).
+fn collect_anon_from_call(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    let IrExprKind::Call { args, target, .. } = &expr.kind else { unreachable!() };
+    if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
+        collect_anon_from_expr(object, named, seen);
+    }
+    for a in args { collect_anon_from_expr(a, named, seen); }
+}
+
+/// `IrExprKind::ForIn` / `IrExprKind::While` case of `collect_anon_from_expr`,
+/// extracted verbatim — both arms shared the identical "recurse the head
+/// expr, then walk body stmts" shape (`iterable`/`cond` as the head), so
+/// they now share one helper instead of two copies.
+fn collect_anon_from_loop_body(head: &IrExpr, body: &[IrStmt], named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    collect_anon_from_expr(head, named, seen);
+    for s in body { collect_anon_from_stmt(s, named, seen); }
 }
 
 fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {

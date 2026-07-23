@@ -8,12 +8,44 @@ use crate::parser;
 use crate::project;
 
 use crate::stdlib;
+use crate::err;
 
 pub struct ResolvedModules {
     /// Modules in dependency order (leaves first).
     /// Third element is the PkgId (None for local modules).
     /// Fourth element: true if this is a self-import (same project).
     pub modules: Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
+}
+
+/// Threaded through the recursive `load_*`/`resolve_*` helpers below.
+/// Bundles the 5 params nearly every helper in this file needs (base dir,
+/// dependency search path, and the 3 accumulators), so signatures carry a
+/// single `ctx: &mut ResolveCtx` instead of 5 individual params.
+struct ResolveCtx<'a> {
+    base_dir: &'a Path,
+    dep_paths: &'a [(project::PkgId, PathBuf)],
+    loaded: &'a mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
+    loaded_names: &'a mut HashSet<String>,
+    loading: &'a mut HashSet<String>,
+}
+
+/// Read + tokenize + parse a module's source file, producing the exact
+/// error text each of `load_module`/`load_self_module`/`load_submodule`
+/// used to assemble inline. `kind` is "module" or "sub-module" (matches
+/// each call site's original wording); `display_label` is the name/path
+/// already formatted the way that call site formatted it.
+fn parse_module_source(kind: &str, display_label: &str, file_path: &Path) -> Result<ast::Program, String> {
+    let source = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("error reading {} '{}': {}", kind, display_label, e))?;
+
+    let tokens = lexer::Lexer::tokenize(&source);
+    let mut parser = parser::Parser::new(tokens);
+    let program = parser.parse()
+        .map_err(|e| format!("parse error in {} '{}': {}", kind, display_label, e))?;
+    if !parser.errors.is_empty() {
+        return Err(format!("parse error in {} '{}': {}", kind, display_label, parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
+    }
+    Ok(program)
 }
 
 /// Find the project root (directory containing almide.toml), searching upward from base_dir.
@@ -50,6 +82,104 @@ pub fn refresh_module_toplets(
     }
 }
 
+/// `resolve_imports_with_deps`'s `import self` / `import self.xxx` branch.
+/// Extracted verbatim — mutates only `ctx`'s accumulators (same idempotent
+/// load-if-not-loaded-yet semantics as the sibling `load_*` helpers this
+/// delegates to), `?` propagation preserved.
+fn resolve_self_import(
+    path: &[crate::intern::Sym],
+    alias: Option<&str>,
+    project_root: Option<&PathBuf>,
+    ctx: &mut ResolveCtx,
+) -> Result<(), String> {
+    if path.len() == 1 {
+        // import self → load src/mod.almd (package entry point)
+        let root = project_root.ok_or_else(|| {
+            "cannot resolve 'import self': no almide.toml found in parent directories".to_string()
+        })?;
+        let mod_file = root.join("src").join("mod.almd");
+        if !mod_file.exists() {
+            return Err(format!(
+                "cannot resolve 'import self': no src/mod.almd in {}\n  hint: Create src/mod.almd as the package entry point",
+                root.display()
+            ));
+        }
+        // Determine module name: alias, or package name from almide.toml
+        let pkg_name = project::parse_toml(&root.join("almide.toml"))
+            .map(|p| p.package.name)
+            .unwrap_or_default();
+        let mod_name_owned: String;
+        let mod_name: &str = if let Some(a) = alias {
+            a
+        } else if !pkg_name.is_empty() {
+            mod_name_owned = pkg_name;
+            &mod_name_owned
+        } else {
+            "self"
+        };
+        if !ctx.loaded_names.contains(mod_name) {
+            let src_dir = root.join("src");
+            let mod_path = vec![crate::intern::sym("mod")];
+            load_self_module(mod_name, &mod_path, &src_dir, ctx, true)?;
+        }
+    } else {
+        // self.xxx → local module within the project
+        let mod_path = &path[1..]; // skip "self"
+        // Always use the canonical name (last path segment) — aliases are handled by import_aliases
+        let mod_name = mod_path.last().expect("guarded by path.len() >= 2").as_str();
+        let display_name = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+
+        if ctx.loaded_names.contains(mod_name) {
+            return Ok(());
+        }
+
+        let root = project_root.ok_or_else(|| {
+            format!("cannot resolve 'import self.{}': no almide.toml found in parent directories", display_name)
+        })?;
+        let src_dir = root.join("src");
+        load_self_module(mod_name, mod_path, &src_dir, ctx, false)?;
+    }
+    Ok(())
+}
+
+/// `resolve_imports_with_deps`'s non-`self` import branch (`import X` /
+/// `import pkg.submodule`). Extracted verbatim.
+fn resolve_named_import(path: &[crate::intern::Sym], ctx: &mut ResolveCtx) -> Result<(), String> {
+    if path.len() == 1 {
+        let name = &path[0];
+        // Bundled stdlib modules (written in Almide) need the source
+        // loaded so `pass_stdlib_lowering` can see their
+        // `@inline_rust` attributes. This check has to precede the
+        // legacy "stdlib → skip" fallback, otherwise explicitly
+        // imported bundled stdlib (e.g. `import base64`) gets
+        // short-circuited before their source reaches the checker.
+        if let Some(source) = stdlib::get_bundled_source(name) {
+            if !ctx.loaded_names.contains(name.as_str()) {
+                load_bundled_module(name, source, ctx)?;
+            }
+            return Ok(());
+        }
+        if stdlib::is_stdlib_module(name) {
+            return Ok(());
+        }
+        load_module(name, ctx)?;
+    } else {
+        // import pkg.submodule — load just the sub-module directly
+        let pkg_name = &path[0];
+        if stdlib::is_stdlib_module(pkg_name) {
+            return Ok(());
+        }
+        let sub_path = &path[1..];
+        // Internal name is always the dotted path (e.g. "nomod_lib.parser")
+        let dotted_name = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+        if ctx.loaded_names.contains(&dotted_name) {
+            return Ok(());
+        }
+        load_submodule(pkg_name, sub_path, &dotted_name, ctx)?;
+    }
+    Ok(())
+}
+
 pub fn resolve_imports_with_deps(
     source_file: &str,
     program: &ast::Program,
@@ -60,90 +190,15 @@ pub fn resolve_imports_with_deps(
     let mut loaded: Vec<(String, ast::Program, Option<project::PkgId>, bool)> = Vec::new();
     let mut loaded_names: HashSet<String> = HashSet::new();
     let mut loading: HashSet<String> = HashSet::new();
+    let mut ctx = ResolveCtx { base_dir, dep_paths, loaded: &mut loaded, loaded_names: &mut loaded_names, loading: &mut loading };
 
     for import in &program.imports {
         if let ast::Decl::Import { path, alias, .. } = import {
             let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
-
             if is_self_import {
-                if path.len() == 1 {
-                    // import self → load src/mod.almd (package entry point)
-                    let root = project_root.as_ref().ok_or_else(|| {
-                        "cannot resolve 'import self': no almide.toml found in parent directories".to_string()
-                    })?;
-                    let mod_file = root.join("src").join("mod.almd");
-                    if !mod_file.exists() {
-                        return Err(format!(
-                            "cannot resolve 'import self': no src/mod.almd in {}\n  hint: Create src/mod.almd as the package entry point",
-                            root.display()
-                        ));
-                    }
-                    // Determine module name: alias, or package name from almide.toml
-                    let pkg_name = project::parse_toml(&root.join("almide.toml"))
-                        .map(|p| p.package.name)
-                        .unwrap_or_default();
-                    let mod_name_owned: String;
-                    let mod_name: &str = if let Some(a) = alias.as_deref() {
-                        a
-                    } else if !pkg_name.is_empty() {
-                        mod_name_owned = pkg_name;
-                        &mod_name_owned
-                    } else {
-                        "self"
-                    };
-                    if !loaded_names.contains(mod_name) {
-                        let src_dir = root.join("src");
-                        let mod_path = vec![crate::intern::sym("mod")];
-                        load_self_module(mod_name, &mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading, true)?;
-                    }
-                } else {
-                    // self.xxx → local module within the project
-                    let mod_path = &path[1..]; // skip "self"
-                    // Always use the canonical name (last path segment) — aliases are handled by import_aliases
-                    let mod_name = mod_path.last().expect("guarded by path.len() >= 2").as_str();
-                    let display_name = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-
-                    if loaded_names.contains(mod_name) {
-                        continue;
-                    }
-
-                    let root = project_root.as_ref().ok_or_else(|| {
-                        format!("cannot resolve 'import self.{}': no almide.toml found in parent directories", display_name)
-                    })?;
-                    let src_dir = root.join("src");
-                    load_self_module(mod_name, mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading, false)?;
-                }
-            } else if path.len() == 1 {
-                let name = &path[0];
-                // Bundled stdlib modules (written in Almide) need the source
-                // loaded so `pass_stdlib_lowering` can see their
-                // `@inline_rust` attributes. This check has to precede the
-                // legacy "stdlib → skip" fallback, otherwise explicitly
-                // imported bundled stdlib (e.g. `import base64`) gets
-                // short-circuited before their source reaches the checker.
-                if let Some(source) = stdlib::get_bundled_source(name) {
-                    if !loaded_names.contains(name.as_str()) {
-                        load_bundled_module(name, source, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
-                    }
-                    continue;
-                }
-                if stdlib::is_stdlib_module(name) {
-                    continue;
-                }
-                load_module(name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                resolve_self_import(path, alias.as_deref(), project_root.as_ref(), &mut ctx)?;
             } else {
-                // import pkg.submodule — load just the sub-module directly
-                let pkg_name = &path[0];
-                if stdlib::is_stdlib_module(pkg_name) {
-                    continue;
-                }
-                let sub_path = &path[1..];
-                // Internal name is always the dotted path (e.g. "nomod_lib.parser")
-                let dotted_name = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                if loaded_names.contains(&dotted_name) {
-                    continue;
-                }
-                load_submodule(pkg_name, sub_path, &dotted_name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                resolve_named_import(path, &mut ctx)?;
             }
         }
     }
@@ -151,9 +206,9 @@ pub fn resolve_imports_with_deps(
     // Auto-load bundled stdlib modules that have Tier 1 (auto-import) behavior.
     // These are written in Almide but available without explicit `import`.
     for name in stdlib::AUTO_IMPORT_BUNDLED {
-        if !loaded_names.contains(*name) {
+        if !ctx.loaded_names.contains(*name) {
             if let Some(source) = stdlib::get_bundled_source(name) {
-                load_bundled_module(name, source, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                load_bundled_module(name, source, &mut ctx)?;
             }
         }
     }
@@ -162,16 +217,8 @@ pub fn resolve_imports_with_deps(
 }
 
 /// Load a bundled stdlib module from embedded source.
-fn load_bundled_module(
-    name: &str,
-    source: &'static str,
-    base_dir: &Path,
-    dep_paths: &[(project::PkgId, PathBuf)],
-    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
-    loaded_names: &mut HashSet<String>,
-    loading: &mut HashSet<String>,
-) -> Result<(), String> {
-    if loaded_names.contains(name) {
+fn load_bundled_module(name: &str, source: &'static str, ctx: &mut ResolveCtx) -> Result<(), String> {
+    if ctx.loaded_names.contains(name) {
         return Ok(());
     }
 
@@ -192,16 +239,48 @@ fn load_bundled_module(
             let dep_name = &path[0];
             if !stdlib::is_stdlib_module(dep_name) {
                 if let Some(dep_source) = stdlib::get_bundled_source(dep_name) {
-                    load_bundled_module(dep_name, dep_source, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                    load_bundled_module(dep_name, dep_source, ctx)?;
                 } else {
-                    load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                    load_module(dep_name, ctx)?;
                 }
             }
         }
     }
 
-    loaded_names.insert(name.to_string());
-    loaded.push((name.to_string(), program, None, false));
+    ctx.loaded_names.insert(name.to_string());
+    ctx.loaded.push((name.to_string(), program, None, false));
+    Ok(())
+}
+
+/// `load_self_module`'s per-import loop body: handles one `import` decl
+/// inside a self-loaded module (either a nested `self.xxx` or an external
+/// dependency / bundled stdlib module). Extracted verbatim.
+fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mut ResolveCtx) -> Result<(), String> {
+    let is_self = path.first().map(|s| s.as_str()) == Some("self");
+    if is_self {
+        if path.len() >= 2 {
+            let sub_mod_path = &path[1..];
+            // Always use canonical name (last path segment), not alias.
+            // Aliases are handled by import_table — module identity must be stable.
+            let sub_mod_name = sub_mod_path.last().expect("guarded by path.len() >= 2").as_str();
+            load_self_module(sub_mod_name, sub_mod_path, src_dir, ctx, false)?;
+        }
+    } else {
+        let dep_name = &path[0];
+        // Bundled .almd stdlib modules (fs, process, http, json, ...)
+        // must be loaded from embedded source so their type_decls and
+        // @inline_rust fns reach codegen. Without this, a submodule's
+        // `import fs` is silently skipped because is_stdlib_module is
+        // true — the top-level resolver has this branch; recursive
+        // self-module loading needs it too.
+        if let Some(source) = stdlib::get_bundled_source(dep_name) {
+            if !ctx.loaded_names.contains(dep_name.as_str()) {
+                load_bundled_module(dep_name, source, ctx)?;
+            }
+        } else if !stdlib::is_stdlib_module(dep_name) {
+            load_module(dep_name, ctx)?;
+        }
+    }
     Ok(())
 }
 
@@ -210,67 +289,31 @@ fn load_self_module(
     mod_name: &str,
     mod_path: &[crate::intern::Sym],
     src_dir: &Path,
-    base_dir: &Path,
-    dep_paths: &[(project::PkgId, PathBuf)],
-    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
-    loaded_names: &mut HashSet<String>,
-    loading: &mut HashSet<String>,
+    ctx: &mut ResolveCtx,
     is_package_root: bool,
 ) -> Result<(), String> {
-    if loaded_names.contains(mod_name) {
+    if ctx.loaded_names.contains(mod_name) {
         return Ok(());
     }
-    if loading.contains(mod_name) {
+    if ctx.loading.contains(mod_name) {
         return Err(format!("circular import detected: self.{}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")));
     }
-    loading.insert(mod_name.to_string());
+    ctx.loading.insert(mod_name.to_string());
 
     let file_path = find_self_module_file(mod_path, src_dir)?;
-    let source = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("error reading module 'self.{}': {}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
-
-    let tokens = lexer::Lexer::tokenize(&source);
-    let mut parser = parser::Parser::new(tokens);
-    let program = parser.parse()
-        .map_err(|e| format!("parse error in module 'self.{}': {}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
-    if !parser.errors.is_empty() {
-        return Err(format!("parse error in module 'self.{}': {}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
-    }
+    let display_label = format!("self.{}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."));
+    let program = parse_module_source("module", &display_label, &file_path)?;
 
     // Recursively resolve this module's imports
     for import in &program.imports {
-        if let ast::Decl::Import { path, alias, .. } = import {
-            let is_self = path.first().map(|s| s.as_str()) == Some("self");
-            if is_self {
-                if path.len() >= 2 {
-                    let sub_mod_path = &path[1..];
-                    // Always use canonical name (last path segment), not alias.
-                    // Aliases are handled by import_table — module identity must be stable.
-                    let sub_mod_name = sub_mod_path.last().expect("guarded by path.len() >= 2").as_str();
-                    load_self_module(sub_mod_name, sub_mod_path, src_dir, base_dir, dep_paths, loaded, loaded_names, loading, false)?;
-                }
-            } else {
-                let dep_name = &path[0];
-                // Bundled .almd stdlib modules (fs, process, http, json, ...)
-                // must be loaded from embedded source so their type_decls and
-                // @inline_rust fns reach codegen. Without this, a submodule's
-                // `import fs` is silently skipped because is_stdlib_module is
-                // true — the top-level resolver has this branch; recursive
-                // self-module loading needs it too.
-                if let Some(source) = stdlib::get_bundled_source(dep_name) {
-                    if !loaded_names.contains(dep_name.as_str()) {
-                        load_bundled_module(dep_name, source, base_dir, dep_paths, loaded, loaded_names, loading)?;
-                    }
-                } else if !stdlib::is_stdlib_module(dep_name) {
-                    load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
-                }
-            }
+        if let ast::Decl::Import { path, .. } = import {
+            load_self_module_import(path, src_dir, ctx)?;
         }
     }
 
-    loading.remove(mod_name);
-    loaded_names.insert(mod_name.to_string());
-    loaded.push((mod_name.to_string(), program, None, is_package_root));
+    ctx.loading.remove(mod_name);
+    ctx.loaded_names.insert(mod_name.to_string());
+    ctx.loaded.push((mod_name.to_string(), program, None, is_package_root));
     Ok(())
 }
 
@@ -302,33 +345,35 @@ fn find_self_module_file(mod_path: &[crate::intern::Sym], src_dir: &Path) -> Res
     ))
 }
 
-fn load_module(
-    name: &str,
-    base_dir: &Path,
-    dep_paths: &[(project::PkgId, PathBuf)],
-    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
-    loaded_names: &mut HashSet<String>,
-    loading: &mut HashSet<String>,
-) -> Result<(), String> {
-    if loaded_names.contains(name) {
+/// `load_module`'s tail: once the module itself is parsed and recorded,
+/// warn about deprecated `lib.almd` entry points and load sibling
+/// sub-namespace files if this was a package entry point (`mod.almd` /
+/// `lib.almd`). Extracted verbatim.
+fn load_module_sub_namespaces(name: &str, file_path: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
+    let file_name = file_path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+    if file_name == "lib.almd" {
+        err(&format!("warning: 'lib.almd' is deprecated as package entry point, rename to 'mod.almd'"));
+        err(&format!("  --> {}", file_path.display()));
+    }
+    if file_name == "mod.almd" || file_name == "lib.almd" {
+        if let Some(src_dir) = file_path.parent() {
+            load_sub_namespaces(name, src_dir, pkg_id, ctx)?;
+        }
+    }
+    Ok(())
+}
+
+fn load_module(name: &str, ctx: &mut ResolveCtx) -> Result<(), String> {
+    if ctx.loaded_names.contains(name) {
         return Ok(());
     }
-    if loading.contains(name) {
+    if ctx.loading.contains(name) {
         return Err(format!("circular import detected: {}", name));
     }
-    loading.insert(name.to_string());
+    ctx.loading.insert(name.to_string());
 
-    let (file_path, pkg_id) = find_module_file(name, base_dir, dep_paths)?;
-    let source = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("error reading module '{}': {}", name, e))?;
-
-    let tokens = lexer::Lexer::tokenize(&source);
-    let mut parser = parser::Parser::new(tokens);
-    let program = parser.parse()
-        .map_err(|e| format!("parse error in module '{}': {}", name, e))?;
-    if !parser.errors.is_empty() {
-        return Err(format!("parse error in module '{}': {}", name, parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
-    }
+    let (file_path, pkg_id) = find_module_file(name, ctx.base_dir, ctx.dep_paths)?;
+    let program = parse_module_source("module", name, &file_path)?;
 
     // Recursively resolve this module's imports (depth-first -> leaves first)
     for import in &program.imports {
@@ -337,83 +382,80 @@ fn load_module(
             // `import self` in a dependency root module is self-referential — skip
             if dep_name.as_str() == "self" { continue; }
             if !stdlib::is_stdlib_module(dep_name) {
-                load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                load_module(dep_name, ctx)?;
             }
         }
     }
 
-    loading.remove(name);
-    loaded_names.insert(name.to_string());
-    loaded.push((name.to_string(), program, pkg_id.clone(), false));
+    ctx.loading.remove(name);
+    ctx.loaded_names.insert(name.to_string());
+    ctx.loaded.push((name.to_string(), program, pkg_id.clone(), false));
 
     // Module System v2: load sub-namespace files for packages
     // If this module was loaded from mod.almd (or lib.almd), also load sibling .almd files as sub-namespaces
-    let file_name = file_path.file_name().and_then(|f| f.to_str()).unwrap_or("");
-    if file_name == "lib.almd" {
-        eprintln!("warning: 'lib.almd' is deprecated as package entry point, rename to 'mod.almd'");
-        eprintln!("  --> {}", file_path.display());
-    }
-    if file_name == "mod.almd" || file_name == "lib.almd" {
-        if let Some(src_dir) = file_path.parent() {
-            load_sub_namespaces(name, src_dir, &pkg_id, base_dir, dep_paths, loaded, loaded_names, loading)?;
-        }
-    }
+    load_module_sub_namespaces(name, &file_path, &pkg_id, ctx)?;
 
     Ok(())
 }
 
 /// Parse a single .almd file and return its Program.
 fn parse_almd_file(file_path: &Path, display_name: &str) -> Result<ast::Program, String> {
-    let source = std::fs::read_to_string(file_path)
-        .map_err(|e| format!("error reading sub-module '{}': {}", display_name, e))?;
-    let tokens = lexer::Lexer::tokenize(&source);
-    let mut parser = parser::Parser::new(tokens);
-    let program = parser.parse()
-        .map_err(|e| format!("parse error in sub-module '{}': {}", display_name, e))?;
-    if !parser.errors.is_empty() {
-        return Err(format!("parse error in sub-module '{}': {}", display_name, parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
-    }
-    Ok(program)
+    parse_module_source("sub-module", display_name, file_path)
 }
 
-/// Resolve imports within a sub-module's program.
-/// `pkg_name` is the owning package name (e.g. "bindgen") so that `import self`
-/// can be recognised as a reference to the already-loaded root module.
-fn resolve_submodule_imports(
-    program: &ast::Program,
-    pkg_name: &str,
-    base_dir: &Path,
-    dep_paths: &[(project::PkgId, PathBuf)],
-    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
-    loaded_names: &mut HashSet<String>,
-    loading: &mut HashSet<String>,
-) -> Result<(), String> {
+/// Resolve imports within a sub-module's program. `import self` / `import
+/// self as pkg` is skipped — the root module is already loaded.
+fn resolve_submodule_imports(program: &ast::Program, ctx: &mut ResolveCtx) -> Result<(), String> {
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let first = path[0].as_str();
-            // `import self` / `import self as pkg` — root module is already loaded
             if first == "self" {
                 continue;
             }
             if !stdlib::is_stdlib_module(first) {
-                load_module(first, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                load_module(first, ctx)?;
             }
         }
     }
     Ok(())
 }
 
+/// `load_sub_namespaces`'s per-entry body for a single sibling `.almd` file.
+/// Extracted verbatim.
+fn load_sub_namespace_file(pkg_name: &str, file_path: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
+    let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let sub_name = format!("{}.{}", pkg_name, stem);
+    if ctx.loaded_names.contains(&sub_name) {
+        return Ok(());
+    }
+    let program = parse_almd_file(file_path, &sub_name)?;
+    resolve_submodule_imports(&program, ctx)?;
+    ctx.loaded_names.insert(sub_name.clone());
+    ctx.loaded.push((sub_name, program, pkg_id.clone(), false));
+    Ok(())
+}
+
+/// `load_sub_namespaces`'s per-entry body for a single sibling subdirectory
+/// (its `mod.almd`, then a recursive scan). Extracted verbatim.
+fn load_sub_namespace_dir(pkg_name: &str, subdir: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
+    let dir_name = subdir.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let sub_name = format!("{}.{}", pkg_name, dir_name);
+    if !ctx.loaded_names.contains(&sub_name) {
+        // Check for mod.almd in subdirectory
+        let sub_mod = subdir.join("mod.almd");
+        if sub_mod.exists() {
+            let program = parse_almd_file(&sub_mod, &sub_name)?;
+            resolve_submodule_imports(&program, ctx)?;
+            ctx.loaded_names.insert(sub_name.clone());
+            ctx.loaded.push((sub_name.clone(), program, pkg_id.clone(), false));
+        }
+    }
+    // Recurse into subdirectory for deeper sub-namespaces
+    load_sub_namespaces(&sub_name, subdir, pkg_id, ctx)
+}
+
 /// Load all sibling .almd files as sub-namespaces, recursively scanning subdirectories.
-fn load_sub_namespaces(
-    pkg_name: &str,
-    src_dir: &Path,
-    pkg_id: &Option<project::PkgId>,
-    base_dir: &Path,
-    dep_paths: &[(project::PkgId, PathBuf)],
-    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
-    loaded_names: &mut HashSet<String>,
-    loading: &mut HashSet<String>,
-) -> Result<(), String> {
+fn load_sub_namespaces(pkg_name: &str, src_dir: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
     // Load .almd files in this directory (excluding mod.almd, lib.almd, main.almd)
     let mut files: Vec<PathBuf> = match std::fs::read_dir(src_dir) {
         Ok(entries) => entries
@@ -428,19 +470,8 @@ fn load_sub_namespaces(
     };
     files.sort();
 
-    for file_path in files {
-        let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        let sub_name = format!("{}.{}", pkg_name, stem);
-        if loaded_names.contains(&sub_name) {
-            continue;
-        }
-        let program = parse_almd_file(&file_path, &sub_name)?;
-        // Resolve this sub-module's imports
-        // Root package name: first segment of the dotted pkg_name (e.g. "bindgen" from "bindgen.bindings")
-        let root_pkg = pkg_name.split('.').next().unwrap_or(pkg_name);
-        resolve_submodule_imports(&program, root_pkg, base_dir, dep_paths, loaded, loaded_names, loading)?;
-        loaded_names.insert(sub_name.clone());
-        loaded.push((sub_name, program, pkg_id.clone(), false));
+    for file_path in &files {
+        load_sub_namespace_file(pkg_name, file_path, pkg_id, ctx)?;
     }
 
     // Scan subdirectories recursively
@@ -450,47 +481,21 @@ fn load_sub_namespaces(
     };
     subdirs.sort();
 
-    for subdir in subdirs {
-        let dir_name = subdir.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        let sub_name = format!("{}.{}", pkg_name, dir_name);
-        if loaded_names.contains(&sub_name) {
-            continue;
-        }
-
-        // Check for mod.almd in subdirectory
-        let sub_mod = subdir.join("mod.almd");
-        if sub_mod.exists() {
-            let program = parse_almd_file(&sub_mod, &sub_name)?;
-            let root_pkg = pkg_name.split('.').next().unwrap_or(pkg_name);
-            resolve_submodule_imports(&program, root_pkg, base_dir, dep_paths, loaded, loaded_names, loading)?;
-            loaded_names.insert(sub_name.clone());
-            loaded.push((sub_name.clone(), program, pkg_id.clone(), false));
-        }
-
-        // Recurse into subdirectory for deeper sub-namespaces
-        load_sub_namespaces(&sub_name, &subdir, pkg_id, base_dir, dep_paths, loaded, loaded_names, loading)?;
+    for subdir in &subdirs {
+        load_sub_namespace_dir(pkg_name, subdir, pkg_id, ctx)?;
     }
 
     Ok(())
 }
 
 /// Load a specific sub-module from a package (import pkg.submodule).
-fn load_submodule(
-    pkg_name: &str,
-    sub_path: &[crate::intern::Sym],
-    mod_name: &str,
-    base_dir: &Path,
-    dep_paths: &[(project::PkgId, PathBuf)],
-    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
-    loaded_names: &mut HashSet<String>,
-    loading: &mut HashSet<String>,
-) -> Result<(), String> {
-    if loaded_names.contains(mod_name) {
+fn load_submodule(pkg_name: &str, sub_path: &[crate::intern::Sym], mod_name: &str, ctx: &mut ResolveCtx) -> Result<(), String> {
+    if ctx.loaded_names.contains(mod_name) {
         return Ok(());
     }
 
     // Find the package's source directory
-    let (src_dir, pkg_id) = find_package_src_dir(pkg_name, base_dir, dep_paths)?;
+    let (src_dir, pkg_id) = find_package_src_dir(pkg_name, ctx.base_dir, ctx.dep_paths)?;
 
     // Build file path from sub_path segments
     let mut dir = src_dir.clone();
@@ -511,15 +516,8 @@ fn load_submodule(
             candidates[0].display(),
         ))?;
 
-    let source = std::fs::read_to_string(file_path)
-        .map_err(|e| format!("error reading sub-module '{}.{}': {}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
-    let tokens = lexer::Lexer::tokenize(&source);
-    let mut parser = parser::Parser::new(tokens);
-    let program = parser.parse()
-        .map_err(|e| format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
-    if !parser.errors.is_empty() {
-        return Err(format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
-    }
+    let display_label = format!("{}.{}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."));
+    let program = parse_module_source("sub-module", &display_label, file_path)?;
 
     // Recursively resolve this sub-module's imports. Without this, bundled
     // stdlib modules (fs, process, math, ...) that the sub-module imports
@@ -532,17 +530,17 @@ fn load_submodule(
             let dep_name = &path[0];
             if dep_name.as_str() == "self" { continue; }
             if let Some(source) = stdlib::get_bundled_source(dep_name) {
-                if !loaded_names.contains(dep_name.as_str()) {
-                    load_bundled_module(dep_name, source, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                if !ctx.loaded_names.contains(dep_name.as_str()) {
+                    load_bundled_module(dep_name, source, ctx)?;
                 }
             } else if !stdlib::is_stdlib_module(dep_name) {
-                load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                load_module(dep_name, ctx)?;
             }
         }
     }
 
-    loaded_names.insert(mod_name.to_string());
-    loaded.push((mod_name.to_string(), program, pkg_id, false));
+    ctx.loaded_names.insert(mod_name.to_string());
+    ctx.loaded.push((mod_name.to_string(), program, pkg_id, false));
     Ok(())
 }
 

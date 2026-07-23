@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::str::FromStr;
+use crate::err;
 use lsp_server::{Connection, Message, Request, Response, Notification};
 use lsp_types::*;
 
@@ -102,71 +103,63 @@ fn span_contains(span: &crate::ast::Span, line: u32, col: u32) -> bool {
     sl == line + 1 && col >= sc && col < ec
 }
 
-fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
-    let source = &doc.source;
-    let lines: Vec<&str> = source.lines().collect();
-    let line_text = lines.get(line as usize)?;
-    let col_usize = col as usize;
-    if col_usize >= line_text.len() { return None; }
+/// Step 1 of `find_node`: language keyword hover info. Extracted verbatim,
+/// then converted from a 22-arm `match` (which alone tripped
+/// max-complexity — cyclomatic complexity counts one branch per arm
+/// regardless of nesting) to a flat data table + linear scan: same
+/// word→description mapping, same `None` fallback, genuinely lower
+/// complexity (not just moved) since dispatch is now data, not branches.
+fn lookup_keyword_info(word: &str) -> Option<&'static str> {
+    const TABLE: &[(&str, &str)] = &[
+        ("fn", "Function declaration"),
+        ("let", "Immutable binding"),
+        ("var", "Mutable binding"),
+        ("mut", "Mutable parameter modifier — callers must pass a `var` binding"),
+        ("type", "Type declaration"),
+        ("match", "Pattern matching expression"),
+        ("effect", "Effect function — can perform I/O"),
+        ("test", "Test block"),
+        ("import", "Module import"),
+        ("if", "Conditional expression: `if cond then a else b`"),
+        ("then", "Then branch of an if expression"),
+        ("else", "Else branch of an if expression"),
+        ("for", "For-in loop: `for item in collection { ... }`"),
+        ("in", "Iterator binding in for loop"),
+        ("true", "`Bool` literal (true)"),
+        ("false", "`Bool` literal (false)"),
+        ("none", "`Option[T]` — no value"),
+        ("some", "`Option[T]` constructor — wraps a value"),
+        ("ok", "`Result[T, E]` — success value"),
+        ("err", "`Result[T, E]` — error value"),
+        ("assert", "Test assertion: `assert(condition)` — fails the test if false"),
+        ("assert_eq", "Test assertion: `assert_eq(actual, expected)` — fails if not equal"),
+    ];
+    TABLE.iter().find(|(k, _)| *k == word).map(|(_, v)| *v)
+}
 
-    // Extract word at cursor
-    let start = line_text[..col_usize].rfind(|c: char| !c.is_alphanumeric() && c != '_')
-        .map(|i| i + 1).unwrap_or(0);
-    let end = col_usize + line_text[col_usize..].find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(line_text.len() - col_usize);
-    let word = &line_text[start..end];
-    if word.is_empty() { return None; }
+/// Step 1b of `find_node`: primitive/built-in type hover info. Extracted
+/// verbatim, then converted to a data table for the same reason as
+/// `lookup_keyword_info` above.
+fn lookup_builtin_type_info(word: &str) -> Option<&'static str> {
+    const TABLE: &[(&str, &str)] = &[
+        ("Int", "64-bit signed integer"),
+        ("Float", "64-bit floating point (IEEE 754)"),
+        ("String", "UTF-8 string (immutable, reference-counted)"),
+        ("Bool", "Boolean (`true` or `false`)"),
+        ("Unit", "Unit type — no meaningful value (like void)"),
+        ("Bytes", "Byte array (`List[Int]` of 0–255 values)"),
+        ("List", "Ordered collection: `List[T]`"),
+        ("Map", "Key-value map: `Map[K, V]`"),
+        ("Set", "Unique value set: `Set[T]`"),
+        ("Option", "Optional value: `Option[T]` = `Some(T)` | `None`"),
+        ("Result", "Success or failure: `Result[T, E]` = `Ok(T)` | `Err(E)`"),
+    ];
+    TABLE.iter().find(|(k, _)| *k == word).map(|(_, v)| *v)
+}
 
-    // 1. Keywords
-    let kw = match word {
-        "fn" => Some("Function declaration"),
-        "let" => Some("Immutable binding"),
-        "var" => Some("Mutable binding"),
-        "mut" => Some("Mutable parameter modifier — callers must pass a `var` binding"),
-        "type" => Some("Type declaration"),
-        "match" => Some("Pattern matching expression"),
-        "effect" => Some("Effect function — can perform I/O"),
-        "test" => Some("Test block"),
-        "import" => Some("Module import"),
-        "if" => Some("Conditional expression: `if cond then a else b`"),
-        "then" => Some("Then branch of an if expression"),
-        "else" => Some("Else branch of an if expression"),
-        "for" => Some("For-in loop: `for item in collection { ... }`"),
-        "in" => Some("Iterator binding in for loop"),
-        "true" => Some("`Bool` literal (true)"),
-        "false" => Some("`Bool` literal (false)"),
-        "none" => Some("`Option[T]` — no value"),
-        "some" => Some("`Option[T]` constructor — wraps a value"),
-        "ok" => Some("`Result[T, E]` — success value"),
-        "err" => Some("`Result[T, E]` — error value"),
-        "assert" => Some("Test assertion: `assert(condition)` — fails the test if false"),
-        "assert_eq" => Some("Test assertion: `assert_eq(actual, expected)` — fails if not equal"),
-        _ => None,
-    };
-    if let Some(info) = kw {
-        return Some(Located::Keyword { info });
-    }
-
-    // 1b. Primitive / built-in types
-    let builtin = match word {
-        "Int" => Some("64-bit signed integer"),
-        "Float" => Some("64-bit floating point (IEEE 754)"),
-        "String" => Some("UTF-8 string (immutable, reference-counted)"),
-        "Bool" => Some("Boolean (`true` or `false`)"),
-        "Unit" => Some("Unit type — no meaningful value (like void)"),
-        "Bytes" => Some("Byte array (`List[Int]` of 0–255 values)"),
-        "List" => Some("Ordered collection: `List[T]`"),
-        "Map" => Some("Key-value map: `Map[K, V]`"),
-        "Set" => Some("Unique value set: `Set[T]`"),
-        "Option" => Some("Optional value: `Option[T]` = `Some(T)` | `None`"),
-        "Result" => Some("Success or failure: `Result[T, E]` = `Ok(T)` | `Err(E)`"),
-        _ => None,
-    };
-    if let Some(info) = builtin {
-        return Some(Located::Keyword { info });
-    }
-
-    // 2. module.func — cursor on module name
+/// Step 2 of `find_node`: cursor is on the module name of `module.func`.
+/// Extracted verbatim — reads only its parameters.
+fn find_stdlib_call_on_module(line_text: &str, word: &str, end: usize) -> Option<Located> {
     if end < line_text.len() && line_text.as_bytes()[end] == b'.' {
         let func_start = end + 1;
         let func_end = func_start + line_text[func_start..].find(|c: char| !c.is_alphanumeric() && c != '_' && c != '?').unwrap_or(line_text.len() - func_start);
@@ -176,8 +169,12 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             return Some(Located::StdlibCall { module: word.to_string(), func: func.to_string(), params, ret: sig.ret.display().to_string() });
         }
     }
+    None
+}
 
-    // 3. module.func — cursor on func name
+/// Step 3 of `find_node`: cursor is on the func name of `module.func`.
+/// Extracted verbatim — reads only its parameters.
+fn find_stdlib_call_on_func(line_text: &str, word: &str, start: usize) -> Option<Located> {
     if start > 0 && line_text.as_bytes()[start - 1] == b'.' {
         let mod_end = start - 1;
         let mod_start = line_text[..mod_end].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
@@ -189,11 +186,11 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4. AST-based lookup — walk declarations
-    let sym = crate::intern::sym(word);
-
-    // 4a. Variant constructors
+/// Step 4a of `find_node`: variant constructor lookup. Extracted verbatim.
+fn find_variant_constructor(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Type { name: type_name, ty: crate::ast::TypeExpr::Variant { cases }, .. } = decl {
             for case in cases {
@@ -212,8 +209,12 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4b. Type declarations — show variants/fields
+/// Step 4b of `find_node`: type declaration hover (shows variants/fields).
+/// Extracted verbatim.
+fn find_type_decl(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Type { name, ty, .. } = decl {
             if name.as_str() == word {
@@ -236,19 +237,26 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4c. Function declarations
-    if let Some(sig) = doc.checker.env.functions.get(&sym) {
-        let params = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
-        return Some(Located::FnDecl { name: word.to_string(), params, ret: sig.ret.display().to_string() });
-    }
+/// Step 4c (function half) of `find_node`. Extracted verbatim.
+fn find_fn_decl(doc: &AnalyzedDoc, word: &str, sym: &crate::intern::Sym) -> Option<Located> {
+    let sig = doc.checker.env.functions.get(sym)?;
+    let params = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+    Some(Located::FnDecl { name: word.to_string(), params, ret: sig.ret.display().to_string() })
+}
 
-    // 4c. Top-level lets
-    if let Some(ty) = doc.checker.env.top_lets.get(&sym) {
-        return Some(Located::TopLet { name: word.to_string(), ty: ty.display().to_string() });
-    }
+/// Step 4c (top-level-let half) of `find_node`. Extracted verbatim.
+fn find_top_let(doc: &AnalyzedDoc, word: &str, sym: &crate::intern::Sym) -> Option<Located> {
+    let ty = doc.checker.env.top_lets.get(sym)?;
+    Some(Located::TopLet { name: word.to_string(), ty: ty.display().to_string() })
+}
 
-    // 4d. Function parameters — check if cursor is inside a fn body
+/// Step 4d of `find_node`: function-parameter lookup (cursor inside a fn
+/// body, heuristically within ~100 lines of its declaration). Extracted
+/// verbatim.
+fn find_fn_param(doc: &AnalyzedDoc, word: &str, line: u32) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Fn { params, span, .. } = decl {
             let fn_line = span.as_ref().map(|s| s.line as u32).unwrap_or(0);
@@ -265,15 +273,78 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4e. ExprId-based type lookup — walk expressions to find matching Ident
+/// Step 4e of `find_node`: ExprId-based type lookup by walking expressions
+/// for a matching `Ident`. Extracted verbatim.
+fn find_user_ident(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let Some(ty) = find_expr_type_by_name(&doc.program, decl, word, &doc.checker.type_map) {
             return Some(Located::UserIdent { name: word.to_string(), ty: ty.display().to_string() });
         }
     }
-
     None
+}
+
+/// `find_node`'s AST-based declaration lookups (steps 4a-4c): variant
+/// constructor, type declaration, function declaration, top-level let.
+/// Extracted verbatim — same early-return-on-first-match order.
+fn find_node_decl_lookup(doc: &AnalyzedDoc, word: &str, sym: &crate::intern::Sym) -> Option<Located> {
+    if let Some(loc) = find_variant_constructor(doc, word) {
+        return Some(loc);
+    }
+    if let Some(loc) = find_type_decl(doc, word) {
+        return Some(loc);
+    }
+    if let Some(loc) = find_fn_decl(doc, word, sym) {
+        return Some(loc);
+    }
+    find_top_let(doc, word, sym)
+}
+
+/// `find_node`'s remaining lookups (steps 4d-4e): function parameters, then
+/// ExprId-based ident type lookup. Extracted verbatim.
+fn find_node_usage_lookup(doc: &AnalyzedDoc, word: &str, line: u32) -> Option<Located> {
+    if let Some(loc) = find_fn_param(doc, word, line) {
+        return Some(loc);
+    }
+    find_user_ident(doc, word)
+}
+
+fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
+    let source = &doc.source;
+    let lines: Vec<&str> = source.lines().collect();
+    let line_text = lines.get(line as usize)?;
+    let (word, start, end) = word_at(line_text, col as usize)?;
+
+    // 1. Keywords
+    if let Some(info) = lookup_keyword_info(word) {
+        return Some(Located::Keyword { info });
+    }
+
+    // 1b. Primitive / built-in types
+    if let Some(info) = lookup_builtin_type_info(word) {
+        return Some(Located::Keyword { info });
+    }
+
+    // 2. module.func — cursor on module name
+    if let Some(loc) = find_stdlib_call_on_module(line_text, word, end) {
+        return Some(loc);
+    }
+
+    // 3. module.func — cursor on func name
+    if let Some(loc) = find_stdlib_call_on_func(line_text, word, start) {
+        return Some(loc);
+    }
+
+    // 4. AST-based lookup — walk declarations
+    let sym = crate::intern::sym(word);
+    if let Some(loc) = find_node_decl_lookup(doc, word, &sym) {
+        return Some(loc);
+    }
+
+    find_node_usage_lookup(doc, word, line)
 }
 
 fn find_expr_type_by_name(
@@ -352,10 +423,9 @@ fn find_ident_in_stmt(stmt: &crate::ast::Stmt, name: &str, type_map: &crate::typ
 // LSP Server
 // ══════════════════════════════════════════════════════════════
 
-pub fn run_lsp() {
-    let (connection, io_threads) = Connection::stdio();
-
-    let server_capabilities = serde_json::to_value(ServerCapabilities {
+/// `run_lsp`'s server-capabilities declaration. Extracted verbatim.
+fn lsp_server_capabilities() -> ServerCapabilities {
+    ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         completion_provider: Some(CompletionOptions {
@@ -374,16 +444,66 @@ pub fn run_lsp() {
         rename_provider: Some(OneOf::Left(true)),
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
         ..Default::default()
-    }).unwrap();
+    }
+}
+
+/// `run_lsp`'s workspace-root derivation from `initialize`'s `root_uri`,
+/// falling back to CWD. Extracted verbatim.
+fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> {
+    init.root_uri.as_ref()
+        .and_then(|u| u.path().to_string().strip_prefix('/').or(Some(u.path().as_str())).map(|s| std::path::PathBuf::from(s.to_string())))
+        .or_else(|| std::env::current_dir().ok())
+}
+
+/// `run_lsp`'s notification dispatch (`didOpen`/`didChange`/`didClose`).
+/// Extracted verbatim.
+fn handle_notification(notif: Notification, connection: &Connection, documents: &mut HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>) {
+    match notif.method.as_str() {
+        "textDocument/didOpen" => {
+            if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params) {
+                let uri = params.text_document.uri.clone();
+                let source = params.text_document.text;
+                let file_path = uri_to_path(&uri);
+                let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
+                publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
+                documents.insert(uri.clone(), source);
+                analyzed.insert(uri, doc);
+            }
+        }
+        "textDocument/didChange" => {
+            if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
+                let uri = params.text_document.uri.clone();
+                if let Some(change) = params.content_changes.into_iter().last() {
+                    let source = change.text;
+                    let file_path = uri_to_path(&uri);
+                    let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
+                    publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
+                    documents.insert(uri.clone(), source);
+                    analyzed.insert(uri, doc);
+                }
+            }
+        }
+        "textDocument/didClose" => {
+            if let Ok(params) = serde_json::from_value::<DidCloseTextDocumentParams>(notif.params) {
+                documents.remove(&params.text_document.uri);
+                analyzed.remove(&params.text_document.uri);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn run_lsp() {
+    let (connection, io_threads) = Connection::stdio();
+
+    let server_capabilities = serde_json::to_value(lsp_server_capabilities()).unwrap();
 
     let init_params = match connection.initialize(server_capabilities) {
         Ok(it) => it,
-        Err(e) => { eprintln!("LSP init failed: {}", e); return; }
+        Err(e) => { err(&format!("LSP init failed: {}", e)); return; }
     };
     let init: InitializeParams = serde_json::from_value(init_params).unwrap();
-    let workspace_root = init.root_uri.as_ref()
-        .and_then(|u| u.path().to_string().strip_prefix('/').or(Some(u.path().as_str())).map(|s| std::path::PathBuf::from(s.to_string())))
-        .or_else(|| std::env::current_dir().ok());
+    let workspace_root = derive_workspace_root(&init);
 
     let mut documents: HashMap<Uri, String> = HashMap::new();
     let mut analyzed: HashMap<Uri, AnalyzedDoc> = HashMap::new();
@@ -397,41 +517,7 @@ pub fn run_lsp() {
                     connection.sender.send(Message::Response(r)).ok();
                 }
             }
-            Message::Notification(notif) => {
-                match notif.method.as_str() {
-                    "textDocument/didOpen" => {
-                        if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params) {
-                            let uri = params.text_document.uri.clone();
-                            let source = params.text_document.text;
-                            let file_path = uri_to_path(&uri);
-                            let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
-                            publish_diagnostics(&connection, &uri, &doc.lsp_diagnostics);
-                            documents.insert(uri.clone(), source);
-                            analyzed.insert(uri, doc);
-                        }
-                    }
-                    "textDocument/didChange" => {
-                        if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
-                            let uri = params.text_document.uri.clone();
-                            if let Some(change) = params.content_changes.into_iter().last() {
-                                let source = change.text;
-                                let file_path = uri_to_path(&uri);
-                                let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
-                                publish_diagnostics(&connection, &uri, &doc.lsp_diagnostics);
-                                documents.insert(uri.clone(), source);
-                                analyzed.insert(uri, doc);
-                            }
-                        }
-                    }
-                    "textDocument/didClose" => {
-                        if let Ok(params) = serde_json::from_value::<DidCloseTextDocumentParams>(notif.params) {
-                            documents.remove(&params.text_document.uri);
-                            analyzed.remove(&params.text_document.uri);
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            Message::Notification(notif) => handle_notification(notif, &connection, &mut documents, &mut analyzed),
             Message::Response(_) => {}
         }
     }
@@ -446,7 +532,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let pos = params.text_document_position_params.position;
             let doc = analyzed.get(uri)?;
             let hover = compute_hover(doc, pos);
-            let result = hover.map(|h| serde_json::to_value(h).unwrap()).unwrap_or(serde_json::Value::Null);
+            let result = hover.map(|h| serde_json::to_value(h).unwrap_or(serde_json::Value::Null)).unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/completion" => {
@@ -455,21 +541,21 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let pos = params.text_document_position.position;
             let source = documents.get(uri)?;
             let items = compute_completions(source, pos);
-            let result = serde_json::to_value(CompletionResponse::Array(items)).unwrap();
+            let result = serde_json::to_value(CompletionResponse::Array(items)).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/documentSymbol" => {
             let params: DocumentSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
             let doc = analyzed.get(&params.text_document.uri)?;
             let symbols = compute_document_symbols(doc);
-            let result = serde_json::to_value(DocumentSymbolResponse::Flat(symbols)).unwrap();
+            let result = serde_json::to_value(DocumentSymbolResponse::Flat(symbols)).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/formatting" => {
             let params: DocumentFormattingParams = serde_json::from_value(req.params.clone()).ok()?;
             let doc = analyzed.get(&params.text_document.uri)?;
             let edits = compute_formatting(doc);
-            let result = serde_json::to_value(edits).unwrap();
+            let result = serde_json::to_value(edits).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/definition" => {
@@ -478,7 +564,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let pos = params.text_document_position_params.position;
             let doc = analyzed.get(uri)?;
             let loc = compute_definition(doc, pos, uri);
-            let result = loc.map(|l| serde_json::to_value(GotoDefinitionResponse::Scalar(l)).unwrap())
+            let result = loc.map(|l| serde_json::to_value(GotoDefinitionResponse::Scalar(l)).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
@@ -489,13 +575,13 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let source = documents.get(uri)?;
             let doc = analyzed.get(uri);
             let help = compute_signature_help(source, pos, doc);
-            let result = help.map(|h| serde_json::to_value(h).unwrap()).unwrap_or(serde_json::Value::Null);
+            let result = help.map(|h| serde_json::to_value(h).unwrap_or(serde_json::Value::Null)).unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
         "workspace/symbol" => {
             let params: WorkspaceSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
             let symbols = compute_workspace_symbols(&params.query, workspace_root);
-            let result = serde_json::to_value(symbols).unwrap();
+            let result = serde_json::to_value(symbols).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/rename" => {
@@ -504,7 +590,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let pos = params.text_document_position.position;
             let source = documents.get(uri)?;
             let edit = compute_rename(source, pos, uri, &params.new_name);
-            let result = edit.map(|e| serde_json::to_value(e).unwrap()).unwrap_or(serde_json::Value::Null);
+            let result = edit.map(|e| serde_json::to_value(e).unwrap_or(serde_json::Value::Null)).unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/codeAction" => {
@@ -512,7 +598,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let uri = &params.text_document.uri;
             let source = documents.get(uri)?;
             let actions = compute_code_actions(source, &params.context.diagnostics, uri);
-            let result = serde_json::to_value(actions).unwrap();
+            let result = serde_json::to_value(actions).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         _ => None,

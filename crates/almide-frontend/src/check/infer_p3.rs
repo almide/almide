@@ -8,75 +8,9 @@
 impl Checker {
     pub(super) fn infer_expr_inner_g3(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
         Some(match &mut expr.kind {
-            ExprKind::Block { stmts, expr, .. } => {
-                self.env.push_scope();
-                // Pre-scan for vars used as match subjects with Ok/Err
-                // patterns — those bindings must keep their Result type.
-                let saved_skip = std::mem::take(&mut self.env.skip_auto_unwrap_for);
-                let result_match_vars = collect_block_result_match_vars(stmts, expr.as_deref());
-                for n in &result_match_vars {
-                    self.env.skip_auto_unwrap_for.insert(*n);
-                }
-                for stmt in stmts.iter_mut() { self.check_stmt(stmt); }
-                let ty = if let Some(e) = expr { self.infer_expr(e) } else { Ty::Unit };
-                self.env.pop_scope();
-                self.env.skip_auto_unwrap_for = saved_skip;
-                ty
-            }
-
-            ExprKind::Fan { exprs, .. } => {
-                if !self.env.can_call_effect {
-                    self.emit(super::err(
-                        "fan block can only be used inside an effect fn".to_string(),
-                        "Mark the enclosing function as `effect fn`",
-                        "fan block".to_string()).with_code("E007"));
-                }
-                // Check for mutable variable capture
-                let mutable_captures: Vec<String> = exprs.iter().flat_map(|e| {
-                    let mut idents = Vec::new();
-                    collect_idents(e, &mut idents);
-                    idents.into_iter().filter(|name| self.env.mutable_vars.contains(&sym(name))).collect::<Vec<_>>()
-                }).collect();
-                for name in &mutable_captures {
-                    self.emit(super::err(
-                        format!("cannot capture mutable variable '{}' inside fan block", name),
-                        "Use a `let` binding instead of `var` for values shared across fan expressions",
-                        "fan block".to_string()).with_code("E008"));
-                }
-                let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
-                    let ty = self.infer_expr(e);
-                    // Auto-unwrap Result: fan unwraps Result<T, E> to T
-                    let concrete = resolve_ty(&ty, &self.uf);
-                    match &concrete {
-                        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                        _ => ty,
-                    }
-                }).collect();
-                match tys.len() {
-                    1 => tys.into_iter().next().unwrap(),
-                    _ => Ty::Tuple(tys.iter().map(|t| resolve_ty(t, &self.uf)).collect()),
-                }
-            }
-
-            ExprKind::Call { callee, args, named_args, type_args, .. } => {
-                // Publish the outer Call's span so UFCS / whole-expr
-                // rewrites (E002 method-UFCS, E013 no-field) can emit
-                // a `try_replace` range covering `callee(args)` in
-                // full, not just the callee reference. Nested calls
-                // save/restore the previous value.
-                let prev_call = self.call_span_hint.take();
-                self.call_span_hint = expr.span;
-                let ty = self.infer_call(callee, args, named_args, type_args);
-                self.call_span_hint = prev_call;
-                // A generic collection constructor whose element type NO argument
-                // constrains — `set.new()` / `list.with_capacity(n)` — must have
-                // its element pinned by context (annotation / later use). Register
-                // it for the post-solve undecidable-empty-collection check (E018).
-                if let Some(kind) = empty_collection_ctor_kind(callee) {
-                    self.register_empty_collection(ty.clone(), kind);
-                }
-                ty
-            }
+            ExprKind::Block { .. } => self.infer_expr_g3_block(expr),
+            ExprKind::Fan { .. } => self.infer_expr_g3_fan(expr),
+            ExprKind::Call { .. } => self.infer_expr_g3_call(expr),
 
             ExprKind::Pipe { left, right, .. } => {
                 self.infer_pipe(left, right)
@@ -96,41 +30,7 @@ impl Checker {
                 }
             }
 
-            ExprKind::Lambda { params, body, .. } => {
-                self.env.push_scope();
-                // Lambda has its own return context — don't leak outer function's current_ret
-                let saved_ret = self.env.current_ret.take();
-                // A lambda is its own function: the enclosing effect fn's
-                // auto-`?` cannot propagate out of a closure body (the closure
-                // may escape), so an effect call inside a lambda yields the
-                // EXPLICIT Result — auto_unwrap is off, matching the lowering,
-                // which never inserts `?` inside Lambda bodies (#489).
-                let saved_auto_unwrap = self.env.auto_unwrap;
-                self.env.auto_unwrap = false;
-                self.env.lambda_depth += 1;
-                // Expected-type hint from the enclosing call (#653): when this
-                // lambda is an argument whose parameter slot is a `Fn`, the
-                // caller pins each UNANNOTATED param to the expected element
-                // type (e.g. `T` carrying a protocol bound) so the body resolves
-                // method calls on the param via the protocol path instead of
-                // collapsing it into a closure type. An explicit annotation on
-                // the param always wins; the hint only fills inferred slots.
-                let param_hint = self.lambda_arg_hint.take();
-                let param_tys: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
-                    let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te))
-                        .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned().flatten()))
-                        .unwrap_or_else(|| self.fresh_var());
-                    let concrete = resolve_ty(&ty, &self.uf);
-                    self.env.define_var(&p.name, concrete);
-                    ty
-                }).collect();
-                let ret_ty = self.infer_expr(body);
-                self.env.lambda_depth -= 1;
-                self.env.auto_unwrap = saved_auto_unwrap;
-                self.env.current_ret = saved_ret;
-                self.env.pop_scope();
-                Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
-            }
+            ExprKind::Lambda { .. } => self.infer_expr_g3_lambda(expr),
 
             ExprKind::ForIn { var, var_tuple, iterable, body, .. } => {
                 self.infer_for_in(var, var_tuple, iterable, body)
@@ -176,63 +76,9 @@ impl Checker {
             ExprKind::Hole | ExprKind::Todo { .. } => self.fresh_var(),
             ExprKind::Await { expr, .. } => self.infer_expr(expr),
 
-            // expr! — unwrap with propagation (Option[T] → T, Result[T,E] → T)
-            ExprKind::Unwrap { expr: inner, .. } => {
-                let t = self.infer_expr(inner);
-                let resolved = resolve_ty(&t, &self.uf);
-                self.check_unwrap_propagation_context();
-                if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
-                    inner_ty
-                } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
-                    self.fresh_var()
-                } else {
-                    self.emit(super::err(
-                        format!("operator '!' requires Option or Result type but got {}", resolved.display()),
-                        "Use '!' only on Option[T] or Result[T, E] values",
-                        "operator !",
-                    ));
-                    Ty::Unknown
-                }
-            }
-            // expr ?? fallback — unwrap with default (Option[T] → T, Result[T,E] → T)
-            ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
-                let t = self.infer_expr(inner);
-                let ft = self.infer_expr(fallback);
-                let resolved = resolve_ty(&t, &self.uf);
-                let inner_ty = if let Some(ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
-                    ty
-                } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
-                    ft.clone()
-                } else {
-                    self.emit(super::err(
-                        format!("operator '??' requires Option or Result type but got {}", resolved.display()),
-                        "Use '??' only on Option[T] or Result[T, E] values",
-                        "operator ??",
-                    ));
-                    ft.clone()
-                };
-                self.unify_infer(&inner_ty, &ft);
-                inner_ty
-            }
-            // expr? — to Option (Result[T,E] → Option[T], Option[T] → Option[T])
-            ExprKind::ToOption { expr: inner, .. } => {
-                let t = self.infer_expr(inner);
-                let resolved = resolve_ty(&t, &self.uf);
-                if let Some(ok_ty) = resolved.result_ok_ty() {
-                    Ty::option(ok_ty)
-                } else if resolved.is_option() {
-                    resolved.clone()
-                } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
-                    Ty::option(self.fresh_var())
-                } else {
-                    self.emit(super::err(
-                        format!("operator '?' requires Option or Result type but got {}", resolved.display()),
-                        "Use '?' only on Option[T] or Result[T, E] values",
-                        "operator ?",
-                    ));
-                    Ty::Unknown
-                }
-            }
+            ExprKind::Unwrap { .. } => self.infer_expr_g3_unwrap(expr),
+            ExprKind::UnwrapOr { .. } => self.infer_expr_g3_unwrap_or(expr),
+            ExprKind::ToOption { .. } => self.infer_expr_g3_to_option(expr),
             ExprKind::Error | ExprKind::Placeholder => Ty::Unknown,
 
             ExprKind::MapLiteral { entries, .. } => {
@@ -263,6 +109,191 @@ impl Checker {
             }
             _ => return None,
         })
+    }
+
+    /// `ExprKind::Block` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
+    fn infer_expr_g3_block(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::Block { stmts, expr, .. } = &mut expr.kind else { unreachable!() };
+        self.env.push_scope();
+        // Pre-scan for vars used as match subjects with Ok/Err
+        // patterns — those bindings must keep their Result type.
+        let saved_skip = std::mem::take(&mut self.env.skip_auto_unwrap_for);
+        let result_match_vars = collect_block_result_match_vars(stmts, expr.as_deref());
+        for n in &result_match_vars {
+            self.env.skip_auto_unwrap_for.insert(*n);
+        }
+        for stmt in stmts.iter_mut() { self.check_stmt(stmt); }
+        let ty = if let Some(e) = expr { self.infer_expr(e) } else { Ty::Unit };
+        self.env.pop_scope();
+        self.env.skip_auto_unwrap_for = saved_skip;
+        ty
+    }
+
+    /// `ExprKind::Fan` arm of [`Self::infer_expr_inner_g3`]: effect-fn
+    /// gate, mutable-capture diagnostic, and per-expr Result auto-unwrap.
+    /// Verbatim text move.
+    fn infer_expr_g3_fan(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::Fan { exprs, .. } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan block can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan block".to_string()).with_code("E007"));
+        }
+        // Check for mutable variable capture
+        let mutable_captures: Vec<String> = exprs.iter().flat_map(|e| {
+            let mut idents = Vec::new();
+            collect_idents(e, &mut idents);
+            idents.into_iter().filter(|name| self.env.mutable_vars.contains(&sym(name))).collect::<Vec<_>>()
+        }).collect();
+        for name in &mutable_captures {
+            self.emit(super::err(
+                format!("cannot capture mutable variable '{}' inside fan block", name),
+                "Use a `let` binding instead of `var` for values shared across fan expressions",
+                "fan block".to_string()).with_code("E008"));
+        }
+        let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
+            let ty = self.infer_expr(e);
+            // Auto-unwrap Result: fan unwraps Result<T, E> to T
+            let concrete = resolve_ty(&ty, &self.uf);
+            match &concrete {
+                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+                _ => ty,
+            }
+        }).collect();
+        match tys.len() {
+            1 => tys.into_iter().next().unwrap(),
+            _ => Ty::Tuple(tys.iter().map(|t| resolve_ty(t, &self.uf)).collect()),
+        }
+    }
+
+    /// `ExprKind::Call` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
+    fn infer_expr_g3_call(&mut self, expr: &mut ast::Expr) -> Ty {
+        let span = expr.span;
+        let ExprKind::Call { callee, args, named_args, type_args, .. } = &mut expr.kind else { unreachable!() };
+        // Publish the outer Call's span so UFCS / whole-expr
+        // rewrites (E002 method-UFCS, E013 no-field) can emit
+        // a `try_replace` range covering `callee(args)` in
+        // full, not just the callee reference. Nested calls
+        // save/restore the previous value.
+        let prev_call = self.call_span_hint.take();
+        self.call_span_hint = span;
+        let ty = self.infer_call(callee, args, named_args, type_args);
+        self.call_span_hint = prev_call;
+        // A generic collection constructor whose element type NO argument
+        // constrains — `set.new()` / `list.with_capacity(n)` — must have
+        // its element pinned by context (annotation / later use). Register
+        // it for the post-solve undecidable-empty-collection check (E018).
+        if let Some(kind) = empty_collection_ctor_kind(callee) {
+            self.register_empty_collection(ty.clone(), kind);
+        }
+        ty
+    }
+
+    /// `ExprKind::Lambda` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
+    fn infer_expr_g3_lambda(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::Lambda { params, body, .. } = &mut expr.kind else { unreachable!() };
+        self.env.push_scope();
+        // Lambda has its own return context — don't leak outer function's current_ret
+        let saved_ret = self.env.current_ret.take();
+        // A lambda is its own function: the enclosing effect fn's
+        // auto-`?` cannot propagate out of a closure body (the closure
+        // may escape), so an effect call inside a lambda yields the
+        // EXPLICIT Result — auto_unwrap is off, matching the lowering,
+        // which never inserts `?` inside Lambda bodies (#489).
+        let saved_auto_unwrap = self.env.auto_unwrap;
+        self.env.auto_unwrap = false;
+        self.env.lambda_depth += 1;
+        // Expected-type hint from the enclosing call (#653): when this
+        // lambda is an argument whose parameter slot is a `Fn`, the
+        // caller pins each UNANNOTATED param to the expected element
+        // type (e.g. `T` carrying a protocol bound) so the body resolves
+        // method calls on the param via the protocol path instead of
+        // collapsing it into a closure type. An explicit annotation on
+        // the param always wins; the hint only fills inferred slots.
+        let param_hint = self.lambda_arg_hint.take();
+        let param_tys: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
+            let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te))
+                .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned().flatten()))
+                .unwrap_or_else(|| self.fresh_var());
+            let concrete = resolve_ty(&ty, &self.uf);
+            self.env.define_var(&p.name, concrete);
+            ty
+        }).collect();
+        let ret_ty = self.infer_expr(body);
+        self.env.lambda_depth -= 1;
+        self.env.auto_unwrap = saved_auto_unwrap;
+        self.env.current_ret = saved_ret;
+        self.env.pop_scope();
+        Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
+    }
+
+    /// `expr!` — unwrap with propagation (Option[T] → T, Result[T,E] → T).
+    /// `ExprKind::Unwrap` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
+    fn infer_expr_g3_unwrap(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::Unwrap { expr: inner, .. } = &mut expr.kind else { unreachable!() };
+        let t = self.infer_expr(inner);
+        let resolved = resolve_ty(&t, &self.uf);
+        self.check_unwrap_propagation_context();
+        if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
+            inner_ty
+        } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+            self.fresh_var()
+        } else {
+            self.emit(super::err(
+                format!("operator '!' requires Option or Result type but got {}", resolved.display()),
+                "Use '!' only on Option[T] or Result[T, E] values",
+                "operator !",
+            ));
+            Ty::Unknown
+        }
+    }
+
+    /// `expr ?? fallback` — unwrap with default (Option[T] → T, Result[T,E]
+    /// → T). `ExprKind::UnwrapOr` arm of [`Self::infer_expr_inner_g3`].
+    /// Verbatim text move.
+    fn infer_expr_g3_unwrap_or(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::UnwrapOr { expr: inner, fallback, .. } = &mut expr.kind else { unreachable!() };
+        let t = self.infer_expr(inner);
+        let ft = self.infer_expr(fallback);
+        let resolved = resolve_ty(&t, &self.uf);
+        let inner_ty = if let Some(ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
+            ty
+        } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+            ft.clone()
+        } else {
+            self.emit(super::err(
+                format!("operator '??' requires Option or Result type but got {}", resolved.display()),
+                "Use '??' only on Option[T] or Result[T, E] values",
+                "operator ??",
+            ));
+            ft.clone()
+        };
+        self.unify_infer(&inner_ty, &ft);
+        inner_ty
+    }
+
+    /// `expr?` — to Option (Result[T,E] → Option[T], Option[T] →
+    /// Option[T]). `ExprKind::ToOption` arm of [`Self::infer_expr_inner_g3`].
+    /// Verbatim text move.
+    fn infer_expr_g3_to_option(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::ToOption { expr: inner, .. } = &mut expr.kind else { unreachable!() };
+        let t = self.infer_expr(inner);
+        let resolved = resolve_ty(&t, &self.uf);
+        if let Some(ok_ty) = resolved.result_ok_ty() {
+            Ty::option(ok_ty)
+        } else if resolved.is_option() {
+            resolved.clone()
+        } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+            Ty::option(self.fresh_var())
+        } else {
+            self.emit(super::err(
+                format!("operator '?' requires Option or Result type but got {}", resolved.display()),
+                "Use '?' only on Option[T] or Result[T, E] values",
+                "operator ?",
+            ));
+            Ty::Unknown
+        }
     }
 
     // ── Extracted inference helpers ──
@@ -324,17 +355,7 @@ impl Checker {
         // Unwrap postfix operators (??, !, ?) on the RHS so the pipe targets the inner Call.
         // e.g. `xs |> list.find(pred) ?? fallback` → pipe into list.find, then apply ??
         match &mut right.kind {
-            ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
-                let inner_ty = self.infer_pipe(left, inner);
-                let fb_ty = self.infer_expr(fallback);
-                self.unify_infer(&inner_ty, &fb_ty);
-                // UnwrapOr unwraps Option[T]/Result[T,E] → T
-                match &inner_ty {
-                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
-                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                    _ => inner_ty,
-                }
-            }
+            ExprKind::UnwrapOr { expr: inner, fallback, .. } => self.infer_pipe_unwrap_or(left, inner, fallback),
             ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
                 self.check_unwrap_propagation_context();
@@ -357,6 +378,19 @@ impl Checker {
                 }
             }
             _ => self.infer_pipe_direct(left, right),
+        }
+    }
+
+    /// `ExprKind::UnwrapOr` arm of [`Self::infer_pipe`]. Verbatim text move.
+    fn infer_pipe_unwrap_or(&mut self, left: &mut Box<ast::Expr>, inner: &mut Box<ast::Expr>, fallback: &mut Box<ast::Expr>) -> Ty {
+        let inner_ty = self.infer_pipe(left, inner);
+        let fb_ty = self.infer_expr(fallback);
+        self.unify_infer(&inner_ty, &fb_ty);
+        // UnwrapOr unwraps Option[T]/Result[T,E] → T
+        match &inner_ty {
+            Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+            _ => inner_ty,
         }
     }
 
@@ -445,6 +479,16 @@ impl Checker {
             Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
             _ => Ty::Unknown,
         };
+        self.bind_for_in_var(var, var_tuple, elem_ty);
+        for stmt in body.iter_mut() { self.check_stmt(stmt); }
+        self.env.pop_scope();
+        Ty::Unit
+    }
+
+    /// Bind the loop variable(s) of a `for` statement: a plain `var` name,
+    /// or `var_tuple` destructuring (`for (a, b) in xs`) against a Tuple
+    /// element type. Verbatim text move out of [`Self::infer_for_in`].
+    fn bind_for_in_var(&mut self, var: &str, var_tuple: &Option<Vec<almide_base::intern::Sym>>, elem_ty: Ty) {
         if let Some(names) = var_tuple {
             // Destructure tuple: for (a, b) in xs
             if let Ty::Tuple(tys) = &elem_ty {
@@ -457,9 +501,6 @@ impl Checker {
         } else {
             self.env.define_var(var, elem_ty);
         }
-        for stmt in body.iter_mut() { self.check_stmt(stmt); }
-        self.env.pop_scope();
-        Ty::Unit
     }
 
     // ── Statement checking ──
@@ -625,8 +666,12 @@ impl Checker {
         }
     }
 
-    pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
-        let (lit_id, raw, negated) = match &value.kind {
+    /// Identify the underlying `Int` literal site (id, raw text, negated) of
+    /// `value` — either a bare literal, a `-<literal>` unary, or a
+    /// parenthesized literal. Verbatim text move out of
+    /// [`Self::record_int_literal_context`].
+    fn int_literal_context_site(value: &ast::Expr) -> (Option<almide_lang::ast::ExprId>, Option<String>, bool) {
+        match &value.kind {
             ExprKind::Int { raw, .. } => (Some(value.id), Some(raw.clone()), false),
             ExprKind::Unary { op, operand, .. } if op.as_str() == "-"
                 && matches!(&operand.kind, ExprKind::Int { .. }) =>
@@ -639,7 +684,11 @@ impl Checker {
                 (Some(expr.id), raw, false)
             }
             _ => (None, None, false),
-        };
+        }
+    }
+
+    pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
+        let (lit_id, raw, negated) = Self::int_literal_context_site(value);
         if let Some(id) = lit_id {
             if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
                 site.context_ty = Some(declared.clone());

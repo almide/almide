@@ -137,19 +137,27 @@ fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
 
 /// Inline math/float/int intrinsics as native Rust expressions.
 /// Eliminates runtime function call overhead for hot-path numeric operations.
+// NOTE: `float` entries that used to live here (sqrt/abs/floor/
+// ceil/round/is_nan/is_infinite) have been deleted. The bundled
+// `stdlib/float.almd` now owns those dispatches via `@inline_rust`
+// templates that emit the same Method-call form — the intercept
+// fires earlier in `rewrite_expr`, so this code would be dead even
+// if left in place. Kept `math.*` entries because the `math`
+// module has not been migrated to bundled yet.
 fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
-    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span, def_id: None };
+    try_inline_intrinsic_rounding(module, func, args, ty, span)
+        .or_else(|| try_inline_intrinsic_trig(module, func, args, ty, span))
+        .or_else(|| try_inline_intrinsic_inverse_trig(module, func, args, ty, span))
+        .or_else(|| try_inline_intrinsic_exp_log(module, func, args, ty, span))
+}
 
-    // NOTE: `float` entries that used to live here (sqrt/abs/floor/
-    // ceil/round/is_nan/is_infinite) have been deleted. The bundled
-    // `stdlib/float.almd` now owns those dispatches via `@inline_rust`
-    // templates that emit the same Method-call form — the intercept
-    // fires earlier in `rewrite_expr`, so this code would be dead even
-    // if left in place. Kept `math.*` entries because the `math`
-    // module has not been migrated to bundled yet.
+/// `math.sqrt`/`abs`/`floor`/`ceil`/`round` group of `try_inline_intrinsic`,
+/// extracted (cog>30 decomposition, pattern 1 — independent `(module,
+/// func)` name-router arms, mirrors the `list_call_name` recipe). These
+/// are the highest-impact — called in tight loops (nbody, spectralnorm).
+fn try_inline_intrinsic_rounding(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span, def_id: None };
     match (module, func) {
-        // ── math.sqrt(x) → x.sqrt() via RenderedCall ──
-        // These are the highest-impact: called in tight loops (nbody, spectralnorm)
         ("math", "sqrt") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
@@ -200,6 +208,15 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
+        _ => None,
+    }
+}
+
+/// `math.sin`/`cos`/`tan`/`asin`/`acos` group of `try_inline_intrinsic`,
+/// extracted (cog>30 decomposition).
+fn try_inline_intrinsic_trig(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span, def_id: None };
+    match (module, func) {
         ("math", "sin") if args.len() >= 1 => Some(mk(IrExprKind::Call {
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("sin") },
             args: vec![], type_args: vec![],
@@ -220,6 +237,15 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("acos") },
             args: vec![], type_args: vec![],
         })),
+        _ => None,
+    }
+}
+
+/// `math.atan`/`atan2` group of `try_inline_intrinsic`, extracted (cog>30
+/// decomposition).
+fn try_inline_intrinsic_inverse_trig(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span, def_id: None };
+    match (module, func) {
         ("math", "atan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("atan") },
             args: vec![], type_args: vec![],
@@ -228,6 +254,15 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("atan2") },
             args: vec![args[1].clone()], type_args: vec![],
         })),
+        _ => None,
+    }
+}
+
+/// `math.exp`/`log`/`log2`/`log10`/`fpow` and constants group of
+/// `try_inline_intrinsic`, extracted (cog>30 decomposition).
+fn try_inline_intrinsic_exp_log(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span, def_id: None };
+    match (module, func) {
         ("math", "exp") if args.len() >= 1 => Some(mk(IrExprKind::Call {
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("exp") },
             args: vec![], type_args: vec![],
@@ -267,7 +302,23 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
 
 /// Try to lower a list.* call into an IterChain IR node.
 /// Returns None if the operation isn't iterator-eligible.
-fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+fn try_lower_to_iter_chain(func: &str, args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+    match func {
+        "map" | "filter" | "flat_map" | "filter_map" =>
+            try_lower_to_iter_chain_transform(func, args, ty, span),
+        "fold" | "find" | "any" | "all" | "count" =>
+            try_lower_to_iter_chain_collector(func, args, ty, span),
+        _ => None,
+    }
+}
+
+/// `map`/`filter`/`flat_map`/`filter_map` group of `try_lower_to_iter_chain`
+/// (all "consuming operations (into_iter) → produce Vec"), extracted
+/// (cog>30 decomposition, pattern 1 — independent name-router arms,
+/// mirrors the `list_call_name` recipe). `args` is taken by value and
+/// consumed entirely within whichever single arm matches — no state
+/// shared across arms/groups.
+fn try_lower_to_iter_chain_transform(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
     match func {
         // ── Consuming operations (into_iter) → produce Vec ──
         "map" if args.len() >= 2 => {
@@ -322,6 +373,15 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                 ty: ty.clone(), span, def_id: None,
             })
         }
+        _ => None,
+    }
+}
+
+/// `fold`/`find`/`any`/`all`/`count` group of `try_lower_to_iter_chain`
+/// (all producing a scalar, via `IterCollector` rather than `steps`),
+/// extracted (cog>30 decomposition).
+fn try_lower_to_iter_chain_collector(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
+    match func {
         "fold" if args.len() >= 3 => {
             let lambda = prepare_lambda(args.remove(2));
             let init = args.remove(1);

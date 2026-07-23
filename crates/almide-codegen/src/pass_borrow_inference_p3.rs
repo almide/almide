@@ -18,81 +18,116 @@ pub fn insert_borrows_at_call_sites(program: &mut IrProgram, sigs: &HashMap<Stri
     }
 }
 
+/// Wrap `arg` in a `Borrow` node per `borrows`'s `ParamBorrow` decision (or
+/// leave it untouched on `None`/`Move`). Shared by the `args` borrow-wrap
+/// loops in [`rewrite_calls_call`] and [`rewrite_calls_runtime_call`] — the
+/// three non-move `ParamBorrow` variants (`Ref`/`RefSlice`, `RefMut`,
+/// `RefStr`) each produce the same `Borrow` shape, just with different
+/// `as_str`/`mutable` flags.
+fn wrap_borrowed_arg(arg: IrExpr, borrow: Option<&ParamBorrow>) -> IrExpr {
+    match borrow {
+        Some(ParamBorrow::Ref | ParamBorrow::RefSlice) => {
+            let t = arg.ty.clone(); let s = arg.span;
+            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false }, ty: t, span: s, def_id: None }
+        }
+        Some(ParamBorrow::RefMut) => {
+            let t = arg.ty.clone(); let s = arg.span;
+            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: true }, ty: t, span: s, def_id: None }
+        }
+        Some(ParamBorrow::RefStr) => {
+            let t = arg.ty.clone(); let s = arg.span;
+            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false }, ty: t, span: s, def_id: None }
+        }
+        _ => arg,
+    }
+}
+
+/// `Call { target, args, type_args }` arm of [`rewrite_calls`].
+/// Borrow-wrap a `Call`'s already-rewritten `args` per the callee's
+/// signature, if any. `is_method_with_self` offsets the lookup by 1: the
+/// sig's param list starts at the receiver (spliced in by the walker ahead
+/// of `args`), so the IR `args` align to params 1..N, not 0..N.
+fn wrap_call_args_for_target(args: Vec<IrExpr>, target: &CallTarget, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> Vec<IrExpr> {
+    let (callee_name, is_method_with_self) = match target {
+        CallTarget::Named { name } => (Some(name.to_string()), false),
+        CallTarget::Module { module, func, .. } => (Some(format!("{}::{}", module, func)), false),
+        CallTarget::Method { method, .. } if method.contains('.') => (Some(method.to_string()), true),
+        _ => (None, false),
+    };
+    let Some(name) = callee_name else { return args; };
+    // For module-scoped calls, look up with "module::func" key first
+    let borrows = mod_scope
+        .and_then(|m| sigs.get(&format!("{}::{}", m, name)))
+        .or_else(|| sigs.get(&name));
+    let Some(borrows) = borrows else { return args; };
+    let arg_offset = if is_method_with_self { 1 } else { 0 };
+    args.into_iter().enumerate()
+        .map(|(i, arg)| wrap_borrowed_arg(arg, borrows.get(i + arg_offset)))
+        .collect()
+}
+
+/// `Method { object, method }` `CallTarget` case of [`rewrite_calls_call`]:
+/// a UFCS-dotted method (`"module.func"`) borrow-wraps its receiver per the
+/// method's first declared param, same as [`wrap_borrowed_arg`] minus the
+/// `RefMut` case (a receiver is never borrow-wrapped mutable here).
+fn rewrite_calls_method_target(object: IrExpr, method: Sym, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> CallTarget {
+    let mut obj = rewrite_calls(object, sigs, mod_scope);
+    if method.contains('.') {
+        if let Some(borrows) = sigs.get(method.as_str()) {
+            if let Some(b) = borrows.first() {
+                match b {
+                    ParamBorrow::Ref | ParamBorrow::RefSlice => {
+                        let t = obj.ty.clone(); let s = obj.span;
+                        obj = IrExpr { kind: IrExprKind::Borrow { expr: Box::new(obj), as_str: false, mutable: false }, ty: t, span: s, def_id: None };
+                    }
+                    ParamBorrow::RefStr => {
+                        let t = obj.ty.clone(); let s = obj.span;
+                        obj = IrExpr { kind: IrExprKind::Borrow { expr: Box::new(obj), as_str: true, mutable: false }, ty: t, span: s, def_id: None };
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    CallTarget::Method { object: Box::new(obj), method }
+}
+
+fn rewrite_calls_call(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> IrExprKind {
+    let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect();
+    let args = wrap_call_args_for_target(args, &target, sigs, mod_scope);
+    let target = match target {
+        CallTarget::Method { object, method } => rewrite_calls_method_target(*object, method, sigs, mod_scope),
+        CallTarget::Computed { callee } => CallTarget::Computed {
+            callee: Box::new(rewrite_calls(*callee, sigs, mod_scope)),
+        },
+        other => other,
+    };
+    IrExprKind::Call { target, args, type_args }
+}
+
+/// `RuntimeCall { symbol, args }` arm of [`rewrite_calls`]. Looks up the
+/// borrow signature by the mangled runtime symbol (populated from bundled
+/// `@intrinsic` attrs at the top of `infer_borrow_signatures`). On hit,
+/// wraps each arg with the corresponding Borrow IR node; on miss, leaves
+/// args untouched (walker still has its ty-based fallback).
+fn rewrite_calls_runtime_call(symbol: Sym, args: Vec<IrExpr>, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> IrExprKind {
+    let args: Vec<IrExpr> = args.into_iter()
+        .map(|a| rewrite_calls(a, sigs, mod_scope))
+        .collect();
+    let args = if let Some(borrows) = sigs.get(symbol.as_str()) {
+        args.into_iter().enumerate()
+            .map(|(i, arg)| wrap_borrowed_arg(arg, borrows.get(i)))
+            .collect()
+    } else { args };
+    IrExprKind::RuntimeCall { symbol, args }
+}
+
 fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
 
     let kind = match expr.kind {
-        IrExprKind::Call { target, args, type_args } => {
-            let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect();
-
-            // `is_method_with_self` marks that the call target carries a
-            // receiver object that walker will splice in ahead of `args`.
-            // In that case the sig's param list starts at the receiver,
-            // and the IR `args` align to params 1..N (not 0..N).
-            let (callee_name, is_method_with_self) = match &target {
-                CallTarget::Named { name } => (Some(name.to_string()), false),
-                CallTarget::Module { module, func, .. } => (Some(format!("{}::{}", module, func)), false),
-                CallTarget::Method { method, .. } if method.contains('.') => (Some(method.to_string()), true),
-                _ => (None, false),
-            };
-
-            let args = if let Some(ref name) = callee_name {
-                // For module-scoped calls, look up with "module::func" key first
-                let borrows = mod_scope
-                    .and_then(|m| sigs.get(&format!("{}::{}", m, name)))
-                    .or_else(|| sigs.get(name));
-                if let Some(borrows) = borrows {
-                    let arg_offset = if is_method_with_self { 1 } else { 0 };
-                    args.into_iter().enumerate().map(|(i, arg)| {
-                        match borrows.get(i + arg_offset) {
-                            Some(ParamBorrow::Ref | ParamBorrow::RefSlice) => {
-                                let t = arg.ty.clone(); let s = arg.span;
-                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false }, ty: t, span: s, def_id: None }
-                            }
-                            Some(ParamBorrow::RefMut) => {
-                                let t = arg.ty.clone(); let s = arg.span;
-                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: true }, ty: t, span: s, def_id: None }
-                            }
-                            Some(ParamBorrow::RefStr) => {
-                                let t = arg.ty.clone(); let s = arg.span;
-                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false }, ty: t, span: s, def_id: None }
-                            }
-                            _ => arg,
-                        }
-                    }).collect()
-                } else { args }
-            } else { args };
-
-            let target = match target {
-                CallTarget::Method { object, method } => {
-                    let mut obj = rewrite_calls(*object, sigs, mod_scope);
-                    if method.contains('.') {
-                        if let Some(borrows) = sigs.get(method.as_str()) {
-                            if let Some(b) = borrows.first() {
-                                match b {
-                                    ParamBorrow::Ref | ParamBorrow::RefSlice => {
-                                        let t = obj.ty.clone(); let s = obj.span;
-                                        obj = IrExpr { kind: IrExprKind::Borrow { expr: Box::new(obj), as_str: false, mutable: false }, ty: t, span: s, def_id: None };
-                                    }
-                                    ParamBorrow::RefStr => {
-                                        let t = obj.ty.clone(); let s = obj.span;
-                                        obj = IrExpr { kind: IrExprKind::Borrow { expr: Box::new(obj), as_str: true, mutable: false }, ty: t, span: s, def_id: None };
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                    CallTarget::Method { object: Box::new(obj), method }
-                },
-                CallTarget::Computed { callee } => CallTarget::Computed {
-                    callee: Box::new(rewrite_calls(*callee, sigs, mod_scope)),
-                },
-                other => other,
-            };
-            IrExprKind::Call { target, args, type_args }
-        }
+        IrExprKind::Call { target, args, type_args } => rewrite_calls_call(target, args, type_args, sigs, mod_scope),
 
         IrExprKind::Block { stmts, expr } => IrExprKind::Block {
             stmts: stmts.into_iter().map(|s| rewrite_calls_stmt(s, sigs, mod_scope)).collect(),
@@ -207,36 +242,7 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect(),
         },
-        IrExprKind::RuntimeCall { symbol, args } => {
-            let args: Vec<IrExpr> = args.into_iter()
-                .map(|a| rewrite_calls(a, sigs, mod_scope))
-                .collect();
-            // Look up the borrow signature by the mangled runtime symbol
-            // (populated from bundled `@intrinsic` attrs at the top of
-            // `infer_borrow_signatures`). On hit, wrap each arg with the
-            // corresponding Borrow IR node; on miss, leave args untouched
-            // (walker still has its ty-based fallback).
-            let args = if let Some(borrows) = sigs.get(symbol.as_str()) {
-                args.into_iter().enumerate().map(|(i, arg)| {
-                    match borrows.get(i) {
-                        Some(ParamBorrow::Ref | ParamBorrow::RefSlice) => {
-                            let t = arg.ty.clone(); let s = arg.span;
-                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false }, ty: t, span: s, def_id: None }
-                        }
-                        Some(ParamBorrow::RefMut) => {
-                            let t = arg.ty.clone(); let s = arg.span;
-                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: true }, ty: t, span: s, def_id: None }
-                        }
-                        Some(ParamBorrow::RefStr) => {
-                            let t = arg.ty.clone(); let s = arg.span;
-                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false }, ty: t, span: s, def_id: None }
-                        }
-                        _ => arg,
-                    }
-                }).collect()
-            } else { args };
-            IrExprKind::RuntimeCall { symbol, args }
-        }
+        IrExprKind::RuntimeCall { symbol, args } => rewrite_calls_runtime_call(symbol, args, sigs, mod_scope),
         // Explicit-preserve: leaves + nodes this call-rewriter intentionally
         // does NOT descend into (TailCall / RcWrap / InlineRust args are left
         // untouched, matching the original `other => other`). Listed explicitly

@@ -271,9 +271,9 @@
     /// VALIDATE only. Skips cleanly when no toolchain is present (CI may lack one).
     fn assert_wasm_valid(label: &str, wat: &str) {
         let dir = std::env::temp_dir().join(format!("almide_mir_validate_{label}"));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("failed to create the test scratch dir");
         let wat_path = dir.join("m.wat");
-        std::fs::write(&wat_path, wat).unwrap();
+        std::fs::write(&wat_path, wat).expect("failed to write the test scratch wat file");
         for (bin, args) in [("wasm-tools", vec!["validate"]), ("wat2wasm", vec!["--no-check"])] {
             match Command::new(bin).args(&args).arg(&wat_path).output() {
                 Ok(o) if o.status.code() != Some(127) => {

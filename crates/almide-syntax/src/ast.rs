@@ -476,24 +476,56 @@ fn visit_pattern_exprs_mut(pat: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
     }
 }
 
+/// Visits each element of an expression slice (List/Tuple/Fan payloads).
+fn visit_exprs_slice_mut(exprs: &mut [Expr], f: &mut impl FnMut(&mut Expr)) {
+    for e in exprs.iter_mut() { visit_expr_mut(e, f); }
+}
+
+/// Visits each key/value pair of a map literal.
+fn visit_map_entries_mut(entries: &mut [(Expr, Expr)], f: &mut impl FnMut(&mut Expr)) {
+    for (k, v) in entries.iter_mut() { visit_expr_mut(k, f); visit_expr_mut(v, f); }
+}
+
+/// Visits each field value of a record literal (Record/SpreadRecord payloads).
+fn visit_field_inits_mut(fields: &mut [FieldInit], f: &mut impl FnMut(&mut Expr)) {
+    for fi in fields.iter_mut() { visit_expr_mut(&mut fi.value, f); }
+}
+
+/// Visits pattern/guard/body of each match arm.
+fn visit_match_arms_mut(arms: &mut [MatchArm], f: &mut impl FnMut(&mut Expr)) {
+    for arm in arms.iter_mut() {
+        visit_pattern_exprs_mut(&mut arm.pattern, f);
+        if let Some(ref mut g) = arm.guard { visit_expr_mut(g, f); }
+        visit_expr_mut(&mut arm.body, f);
+    }
+}
+
+/// Visits a statement list (Block/ForIn/While bodies).
+fn visit_stmts_mut(stmts: &mut [Stmt], f: &mut impl FnMut(&mut Expr)) {
+    for s in stmts.iter_mut() { visit_stmt_exprs_mut(s, f); }
+}
+
+/// Visits the embedded expressions of an interpolated string.
+fn visit_string_parts_mut(parts: &mut [StringPart], f: &mut impl FnMut(&mut Expr)) {
+    for part in parts.iter_mut() {
+        if let StringPart::Expr { expr: e } = part { visit_expr_mut(e, f); }
+    }
+}
+
 pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
     f(expr);
     match &mut expr.kind {
-        ExprKind::List { elements } | ExprKind::Tuple { elements } => {
-            for e in elements.iter_mut() { visit_expr_mut(e, f); }
-        }
-        ExprKind::Fan { exprs } => { for e in exprs.iter_mut() { visit_expr_mut(e, f); } }
-        ExprKind::MapLiteral { entries } => {
-            for (k, v) in entries.iter_mut() { visit_expr_mut(k, f); visit_expr_mut(v, f); }
-        }
-        ExprKind::Record { fields, .. } => { for fi in fields.iter_mut() { visit_expr_mut(&mut fi.value, f); } }
+        ExprKind::List { elements } | ExprKind::Tuple { elements } => visit_exprs_slice_mut(elements, f),
+        ExprKind::Fan { exprs } => visit_exprs_slice_mut(exprs, f),
+        ExprKind::MapLiteral { entries } => visit_map_entries_mut(entries, f),
+        ExprKind::Record { fields, .. } => visit_field_inits_mut(fields, f),
         ExprKind::SpreadRecord { base, fields } => {
             visit_expr_mut(base, f);
-            for fi in fields.iter_mut() { visit_expr_mut(&mut fi.value, f); }
+            visit_field_inits_mut(fields, f);
         }
         ExprKind::Call { callee, args, named_args, .. } => {
             visit_expr_mut(callee, f);
-            for a in args.iter_mut() { visit_expr_mut(a, f); }
+            visit_exprs_slice_mut(args, f);
             for (_, a) in named_args.iter_mut() { visit_expr_mut(a, f); }
         }
         ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. } => visit_expr_mut(object, f),
@@ -511,23 +543,19 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         }
         ExprKind::Match { subject, arms } => {
             visit_expr_mut(subject, f);
-            for arm in arms.iter_mut() {
-                visit_pattern_exprs_mut(&mut arm.pattern, f);
-                if let Some(ref mut g) = arm.guard { visit_expr_mut(g, f); }
-                visit_expr_mut(&mut arm.body, f);
-            }
+            visit_match_arms_mut(arms, f);
         }
         ExprKind::Block { stmts, expr: tail } => {
-            for s in stmts.iter_mut() { visit_stmt_exprs_mut(s, f); }
+            visit_stmts_mut(stmts, f);
             if let Some(e) = tail { visit_expr_mut(e, f); }
         }
         ExprKind::ForIn { iterable, body, .. } => {
             visit_expr_mut(iterable, f);
-            for s in body.iter_mut() { visit_stmt_exprs_mut(s, f); }
+            visit_stmts_mut(body, f);
         }
         ExprKind::While { cond, body } => {
             visit_expr_mut(cond, f);
-            for s in body.iter_mut() { visit_stmt_exprs_mut(s, f); }
+            visit_stmts_mut(body, f);
         }
         ExprKind::Lambda { body, .. } => visit_expr_mut(body, f),
         ExprKind::Try { expr } | ExprKind::Unwrap { expr } | ExprKind::ToOption { expr } |
@@ -535,11 +563,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         ExprKind::Some { expr } | ExprKind::Ok { expr } | ExprKind::Err { expr } |
         ExprKind::OptionalChain { expr, .. } => visit_expr_mut(expr, f),
         ExprKind::Range { start, end, .. } => { visit_expr_mut(start, f); visit_expr_mut(end, f); }
-        ExprKind::InterpolatedString { parts } => {
-            for part in parts.iter_mut() {
-                if let StringPart::Expr { expr: e } = part { visit_expr_mut(e, f); }
-            }
-        }
+        ExprKind::InterpolatedString { parts } => visit_string_parts_mut(parts, f),
         ExprKind::TypeAscription { expr, .. } => visit_expr_mut(expr, f),
         ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
         ExprKind::Bool { .. } | ExprKind::Ident { .. } | ExprKind::TypeName { .. } |

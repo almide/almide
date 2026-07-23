@@ -11,19 +11,7 @@ impl Parser {
 
         if self.check(TokenType::Int) {
             self.advance();
-            let clean = tok.value.replace('_', "");
-            let parsed: i64 = if clean.starts_with("0x") || clean.starts_with("0X") {
-                i64::from_str_radix(&clean[2..], 16).unwrap_or(0)
-            } else {
-                clean.parse().unwrap_or(0)
-            };
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Int {
-                value: serde_json::Value::Number(
-                    serde_json::Number::from_f64(parsed as f64)
-                        .unwrap_or_else(|| serde_json::Number::from(0)),
-                ),
-                raw: tok.value.clone(),
-            }));
+            return Ok(self.parse_int_literal(&tok, span));
         }
         if self.check(TokenType::Float) {
             self.advance();
@@ -64,37 +52,16 @@ impl Parser {
             return Ok(Expr::new(self.next_id(), span, ExprKind::None));
         }
         if self.check(TokenType::Some) {
-            self.advance();
-            let open = self.current().clone();
-            self.expect(TokenType::LParen)?;
-            let expr = self.parse_expr()?;
-            self.expect_closing(TokenType::RParen, open.line, open.col, "some()")?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Some { expr: Box::new(expr) }));
+            return self.parse_some_expr(span);
         }
         if self.check(TokenType::Ok) {
-            self.advance();
-            let open = self.current().clone();
-            self.expect(TokenType::LParen)?;
-            let expr = self.parse_expr()?;
-            self.expect_closing(TokenType::RParen, open.line, open.col, "ok()")?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Ok { expr: Box::new(expr) }));
+            return self.parse_ok_expr(span);
         }
         if self.check(TokenType::Err) {
-            self.advance();
-            let open = self.current().clone();
-            self.expect(TokenType::LParen)?;
-            let expr = self.parse_expr()?;
-            self.expect_closing(TokenType::RParen, open.line, open.col, "err()")?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Err { expr: Box::new(expr) }));
+            return self.parse_err_expr(span);
         }
         if self.check(TokenType::Todo) {
-            self.advance();
-            let open = self.current().clone();
-            self.expect(TokenType::LParen)?;
-            let msg = self.current().value.clone();
-            self.expect(TokenType::String)?;
-            self.expect_closing(TokenType::RParen, open.line, open.col, "todo()")?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Todo { message: msg }));
+            return self.parse_todo_expr(span);
         }
         // try and await keywords removed (no implementation)
         if self.check(TokenType::If) {
@@ -116,15 +83,7 @@ impl Parser {
             return Err(format!("`do` blocks have been removed — use `while` for loops or remove `do` from effect fn bodies (line {})", span.line));
         }
         if self.check(TokenType::Fan) {
-            // fan { ... } = fan block; fan.map/fan.race = module-like call
-            if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
-                // Treat `fan` as an identifier for member access
-                let span = Some(self.current_span());
-                self.advance();
-                return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") }));
-            }
-            self.advance();
-            return self.parse_fan_block();
+            return self.parse_fan_primary();
         }
         // Backtick-escaped keywords are lexed as Ident, so they reach
         // the normal Ident path below. No special handling needed here.
@@ -151,6 +110,14 @@ impl Parser {
             return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name }));
         }
 
+        self.parse_primary_error(&tok)
+    }
+
+    /// Builds the "no primary matched" error, including targeted diagnostics
+    /// for two common LLM/other-language mistakes: ML-style `let .. in ..`
+    /// expressions, and a bare `=` in expression position (chained/misplaced
+    /// assignment). Falls back to a generic "Expected expression" error.
+    fn parse_primary_error(&mut self, tok: &crate::lexer::Token) -> Result<Expr, String> {
         // `let x = expr in body` — ML-style let-in expression
         if tok.token_type == TokenType::Let {
             let msg = "'let' is not an expression in Almide";
@@ -179,6 +146,71 @@ impl Parser {
             "Expected expression at line {}:{} (got {:?} '{}')",
             tok.line, tok.col, tok.token_type, tok.value
         ))
+    }
+
+    fn parse_int_literal(&mut self, tok: &crate::lexer::Token, span: Option<Span>) -> Expr {
+        let clean = tok.value.replace('_', "");
+        let parsed: i64 = if clean.starts_with("0x") || clean.starts_with("0X") {
+            i64::from_str_radix(&clean[2..], 16).unwrap_or(0)
+        } else {
+            clean.parse().unwrap_or(0)
+        };
+        Expr::new(self.next_id(), span, ExprKind::Int {
+            value: serde_json::Value::Number(
+                serde_json::Number::from_f64(parsed as f64)
+                    .unwrap_or_else(|| serde_json::Number::from(0)),
+            ),
+            raw: tok.value.clone(),
+        })
+    }
+
+    fn parse_some_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
+        self.advance();
+        let open = self.current().clone();
+        self.expect(TokenType::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect_closing(TokenType::RParen, open.line, open.col, "some()")?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::Some { expr: Box::new(expr) }))
+    }
+
+    fn parse_ok_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
+        self.advance();
+        let open = self.current().clone();
+        self.expect(TokenType::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect_closing(TokenType::RParen, open.line, open.col, "ok()")?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::Ok { expr: Box::new(expr) }))
+    }
+
+    fn parse_err_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
+        self.advance();
+        let open = self.current().clone();
+        self.expect(TokenType::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect_closing(TokenType::RParen, open.line, open.col, "err()")?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::Err { expr: Box::new(expr) }))
+    }
+
+    fn parse_todo_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
+        self.advance();
+        let open = self.current().clone();
+        self.expect(TokenType::LParen)?;
+        let msg = self.current().value.clone();
+        self.expect(TokenType::String)?;
+        self.expect_closing(TokenType::RParen, open.line, open.col, "todo()")?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::Todo { message: msg }))
+    }
+
+    fn parse_fan_primary(&mut self) -> Result<Expr, String> {
+        // fan { ... } = fan block; fan.map/fan.race = module-like call
+        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
+            // Treat `fan` as an identifier for member access
+            let span = Some(self.current_span());
+            self.advance();
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") }));
+        }
+        self.advance();
+        self.parse_fan_block()
     }
 
     fn parse_paren_expr(&mut self) -> Result<Expr, String> {
@@ -407,51 +439,8 @@ impl Parser {
                 if !lit.is_empty() {
                     parts.push(StringPart::Lit { value: std::mem::take(&mut lit) });
                 }
-                let expr_col_start = col_offset + 2; // past ${
-                i += 2; // skip ${
-                col_offset += 2;
-                let mut depth = 1;
-                let mut expr_str = String::new();
-                while i < chars.len() && depth > 0 {
-                    if chars[i] == '{' { depth += 1; }
-                    if chars[i] == '}' { depth -= 1; if depth == 0 { break; } }
-                    expr_str.push(chars[i]);
-                    i += 1;
-                    col_offset += 1;
-                }
-                i += 1; // skip }
-                col_offset += 1;
-                // Sub-parse the expression with current id counter
-                let mut tokens = crate::lexer::Lexer::tokenize(&expr_str);
-                // Adjust spans: sub-lexer produces line=1,col=1-based; remap to parent source
-                for t in &mut tokens {
-                    t.line = str_line;
-                    // col: sub-lexer 1-based → 0-based offset + parent string position
-                    // str_col is the opening quote col, +1 for quote char, + template offset
-                    t.col = str_col + 1 + expr_col_start + (t.col - 1);
-                }
-                let id_offset = self.expr_id_counter();
-                let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset);
-                match sub_parser.parse_single_expr() {
-                    Ok(parsed) => {
-                        // Advance our id counter past sub-parser's allocations
-                        self.next_expr_id = sub_parser.expr_id_counter();
-                        parts.push(StringPart::Expr { expr: Box::new(parsed) });
-                    }
-                    Err(e) => {
-                        // Error recovery: keep as literal, report diagnostic
-                        let mut diag = crate::diagnostic::Diagnostic::error(
-                            format!("invalid expression in interpolation: {}", e),
-                            "Check the expression syntax inside ${...}",
-                            format!("${{{}}}", expr_str),
-                        );
-                        diag.file = self.file.clone();
-                        diag.line = Some(str_line);
-                        diag.col = Some(str_col + 1 + expr_col_start);
-                        self.errors.push(diag);
-                        parts.push(StringPart::Lit { value: format!("${{{}}}", expr_str) });
-                    }
-                }
+                let part = self.parse_interpolation_expr_part(&chars, &mut i, &mut col_offset, str_line, str_col);
+                parts.push(part);
             } else {
                 col_offset += 1;
                 lit.push(chars[i]);
@@ -462,5 +451,65 @@ impl Parser {
             parts.push(StringPart::Lit { value: lit });
         }
         Ok(parts)
+    }
+
+    /// Parses one `${ .. }` interpolation hole, starting at `chars[*i] == '$'`.
+    /// Advances `*i`/`*col_offset` past the whole `${..}` span (brace-depth
+    /// scan, then sub-parse) and returns the resulting `StringPart` — either
+    /// the parsed sub-expression, or (on a parse error) the raw text kept as
+    /// a literal with a diagnostic recorded on `self.errors`.
+    fn parse_interpolation_expr_part(
+        &mut self,
+        chars: &[char],
+        i: &mut usize,
+        col_offset: &mut usize,
+        str_line: usize,
+        str_col: usize,
+    ) -> StringPart {
+        let expr_col_start = *col_offset + 2; // past ${
+        *i += 2; // skip ${
+        *col_offset += 2;
+        let mut depth = 1;
+        let mut expr_str = String::new();
+        while *i < chars.len() && depth > 0 {
+            if chars[*i] == '{' { depth += 1; }
+            if chars[*i] == '}' { depth -= 1; if depth == 0 { break; } }
+            expr_str.push(chars[*i]);
+            *i += 1;
+            *col_offset += 1;
+        }
+        *i += 1; // skip }
+        *col_offset += 1;
+        // Sub-parse the expression with current id counter
+        let mut tokens = crate::lexer::Lexer::tokenize(&expr_str);
+        // Adjust spans: sub-lexer produces line=1,col=1-based; remap to parent source
+        for t in &mut tokens {
+            t.line = str_line;
+            // col: sub-lexer 1-based → 0-based offset + parent string position
+            // str_col is the opening quote col, +1 for quote char, + template offset
+            t.col = str_col + 1 + expr_col_start + (t.col - 1);
+        }
+        let id_offset = self.expr_id_counter();
+        let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset);
+        match sub_parser.parse_single_expr() {
+            Ok(parsed) => {
+                // Advance our id counter past sub-parser's allocations
+                self.next_expr_id = sub_parser.expr_id_counter();
+                StringPart::Expr { expr: Box::new(parsed) }
+            }
+            Err(e) => {
+                // Error recovery: keep as literal, report diagnostic
+                let mut diag = crate::diagnostic::Diagnostic::error(
+                    format!("invalid expression in interpolation: {}", e),
+                    "Check the expression syntax inside ${...}",
+                    format!("${{{}}}", expr_str),
+                );
+                diag.file = self.file.clone();
+                diag.line = Some(str_line);
+                diag.col = Some(str_col + 1 + expr_col_start);
+                self.errors.push(diag);
+                StringPart::Lit { value: format!("${{{}}}", expr_str) }
+            }
+        }
     }
 }

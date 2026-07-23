@@ -18,7 +18,6 @@
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) |  |
-| [Code Health: Codopsy-Driven File Splits and Function Decomposition](active/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
 | [Codegen traversal totality](active/codegen-traversal-totality.md) |  |
 | [Completeness by Construction](active/completeness-by-construction.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
@@ -27,12 +26,13 @@
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) |  |
 | [Flight Evidence Gaps — 実地監査所見台帳](active/flight-evidence-gaps.md) | Hands-on internal audit findings (2026-07-03) — the measured distance between DAL-A philosophy and DAL-A evidence, as 7 findings with corrective work items and acceptance criteria |
-| [Flight Profile — 航空品質への接地分析と2つのキーストーン](active/flight-profile.md) | Flight-grade (DO-178C/DO-333/DO-330) gap analysis for the v1 trust spine — the 6 pillars, what the PCC spine already nails, and the two engineering-closeable keystones (lift loops into Coq for WCET-bounding; productionize MIR→Rust to bind the cert to a Ferrocene-qualified flight target) that converge on one flight stack |
+| [Flight Profile — 航空品質への接地分析と2つのキーストーン](active/flight-profile.md) | DO-178C flight-grade gap analysis: 6 pillars status + 2 engineering keystones |
 | [Flight Qualification — DO-178C/DO-330/DO-333 マッピング + 資格化キット(G-F5 + G-F6)](active/flight-qualification.md) | Flight gates G-F5 + G-F6 — how the PCC certificate/receipt maps to DO-178C Table A objectives, the DO-330 "prove-the-checker" tool-qualification argument (compiler→TQL-5 output-verified, checker→qualified-by-proof), the DO-333 formal-methods credit per proven property, and the G-F6 qualification kit as a product (AbsInt/SCADE-KCG model): what's in the kit, the boundary (kit provides vs customer's domain process), and the customer integration story. |
 | [Flight Reference App — PID 制御則カーネル + make verify + receipt(G-F4)](active/flight-reference-app.md) | Flight gate G-F4 — the reference application (a fixed-point Q16.16 PID control-law kernel over a counted sim loop) that passes `make verify` end-to-end, the 7-stage verify pipeline (exist vs gated on keystones), the receipt it emits (C-SAFE/C-PROVEN green, C-WCET/C-FAITHFUL pending), and the de-risking order (Slice 0 scalar-no-print green now → Slice 1 print=G-F0 frontier → Slice 2 keystone-あ unlocks C-WCET → Slice 3 keystone-い unlocks Ferrocene). |
 | [Flight Keystone (い) — v1 MIR → Rust → Ferrocene(忠実性束縛)](active/flight-rust-ferrocene.md) | Concrete implementation design for flight keystone (い) — G-F3: a production v1 MIR→Rust renderer + a rust_pattern faithfulness layer, making Rust→Ferrocene the flight target. The proof is cheap (~75% of the spine is target-agnostic; the faithfulness theorem is `exact eager_copy_refines_safety`); the real cost is the production renderer (~5x render_wasm). Ferrocene owns Rust→machine, so the flight path bypasses the hardest wasm byte-binding proof (Gap 1). |
 | [Almide Flight Profile — 規範仕様(Normative Subset)](active/flight-subset-spec.md) | The normative Almide Flight Profile — the SPARK/Ravenscar-class language subset for flight-grade code, machine-enforced by the per-build certificate (by proof, not review). Feature IN/OUT/RESTRICTED classification, the resolved keystone open questions (Dup-in-loop IN, break/continue OUT, recursion=acyclicity-reject, nested loops IN), the @flight enforcement architecture, the MISRA/Ravenscar mapping, and honest language residuals. |
 | [Flight Keystone (あ) — Counted Loops + Bounded Allocation(WCET-by-construction)](active/flight-wcet-loops.md) | Concrete implementation design for flight keystone (あ) — G-F1/G-F2: counted-loop flight subset + lifting loops into Coq to prove bounded allocation (WCET-by-construction). The counted loop is a SEPARATE structural witness (preserving the flat-fold RC invariant), two Subset.v-shaped properties prove it, and try_lower_scalar_for_range already knows the trip count. |
+| [Fuzz Findings Triage: Re-green the Nightly Differential Gate](active/fuzz-findings-triage.md) | Fuzz (nightly) is red — triage the differential findings to zero and re-green the workflow |
 | [StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`](active/interp-is-desugar-to-tostring.md) |  |
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) |  |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
@@ -115,13 +115,14 @@
 
 ## Done
 
-258 items
+259 items
 
 <details>
-<summary>Show all 258 completed items</summary>
+<summary>Show all 259 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-07-23 | [Code Health: Codopsy-Driven File Splits and Function Decomposition](done/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
 | 2026-07-15 | [Claim wording: Perceus phrasing and the byte-identity guarantee scope](done/claim-wording-perceus-byte-identity.md) | Two claim-wording fixes so the public pitch is 100% backed by measurement |
 | 2026-07-14 | [v1 walled-real → 0 (ENDGAME — COMPLETE 2026-07-14, 112 → 0)](done/v1-wall-histogram-goal.md) | ENDGAME COMPLETE - v1 walled-real 112 to 0 (2026-07-14); stage ledger B1-B129 |
 | 2026-07-10 | [GOAL PROMPT — closure env full mode: heap, Float and Fn captures](done/closure-env-heap-captures-goal.md) | GOAL PROMPT — closure env full mode: heap/Float/Fn captures with masked recursive drop |

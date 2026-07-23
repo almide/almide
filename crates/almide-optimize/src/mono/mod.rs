@@ -17,6 +17,7 @@
 mod utils;
 mod discovery;
 mod specialization;
+mod varid_remap;
 mod rewrite;
 mod propagation;
 
@@ -24,6 +25,7 @@ use std::collections::HashMap;
 use std::collections::BTreeMap;
 use almide_ir::*;
 use almide_lang::types::Ty;
+use almide_base::Sym;
 
 use utils::{MonoKey, BoundedParam, ty_contains_typevar};
 use discovery::{discover_instances, discover_instances_in_frontier};
@@ -212,76 +214,82 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         impl<'a> IrMutVisitor for Discover<'a> {
             fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
                 walk_expr_mut(self, expr);
-                // A CROSS-MODULE generic call the frontend already FLATTENED to its
-                // v0 name (`m.stash(41)` → `Named { almide_rt_m_stash }` — the
-                // #788/#782 crossmod cell): match the exact flatten spelling per
-                // generic (module list + fn name — no string parsing), so the call
-                // site instantiates exactly like a `Module { m, f }` one.
                 if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind {
-                    let n = name.as_str();
-                    for (gi, g) in self.generics.iter().enumerate() {
-                        let flat = format!("almide_rt_{}_{}", self.module_names[g.mi], g.name);
-                        if n != flat { continue; }
-                        let ptys = &self.param_types[gi];
-                        let bindings = collect_mono_bindings(&g.bounds, args, ptys);
-                        let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
-                            !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
-                            && !matches!(ty, Ty::TypeVar(_))
-                            && !ty.contains_typevar()
-                        );
-                        if !all_concrete { continue; }
-                        let generic_names: Vec<String> = self.generics[gi].bounds.iter()
-                            .map(|b| b.type_var.clone()).collect::<std::collections::HashSet<_>>()
-                            .into_iter().collect::<Vec<_>>();
-                        let mut sorted = generic_names;
-                        sorted.sort();
-                        let suffix = sorted.iter()
-                            .filter_map(|g| bindings.get(g))
-                            .filter_map(|t| ty_to_name(t))
-                            .collect::<Vec<_>>()
-                            .join("_");
-                        self.out.push((g.mi, g.fi, bindings, suffix));
-                        break;
-                    }
+                    self.record_flattened_call(name.as_str(), args);
                 }
                 if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind {
-                    let m = module.as_str();
-                    let f = func.as_str();
-                    for (gi, g) in self.generics.iter().enumerate() {
-                        if g.name != f { continue; }
-                        // Module guard: same fn name can live in multiple modules
-                        // (e.g. option.filter / list.filter / result.filter). Without
-                        // this, the first name-match wins and specialization is
-                        // registered under the wrong (mod, fn, suffix) key — the
-                        // rewriter (which DOES filter by module) then misses the
-                        // lookup and the call stays as unsuffixed `Module { m, f }`.
-                        if self.module_names[g.mi] != m { continue; }
-                        let ptys = &self.param_types[gi];
-                        let bindings = collect_mono_bindings(&g.bounds, args, ptys);
-                        let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
-                            !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
-                            && !matches!(ty, Ty::TypeVar(_))
-                            && !ty.contains_typevar()
-                        );
-                        if std::env::var_os("ALMIDE_MONO_DEBUG").is_some() {
-                            let atys: Vec<_> = args.iter().map(|a| &a.ty).collect();
-                            eprintln!("[mono-debug] {m}.{f} args={atys:?} ptys={ptys:?} bindings={bindings:?} concrete={all_concrete}");
-                        }
-                        if !all_concrete { continue; }
-                        // Deterministic suffix
-                        let generic_names: Vec<String> = self.generics[gi].bounds.iter()
-                            .map(|b| b.type_var.clone()).collect::<std::collections::HashSet<_>>()
-                            .into_iter().collect::<Vec<_>>();
-                        let mut sorted = generic_names;
-                        sorted.sort();
-                        let suffix = sorted.iter()
-                            .filter_map(|g| bindings.get(g))
-                            .filter_map(|t| ty_to_name(t))
-                            .collect::<Vec<_>>()
-                            .join("_");
-                        self.out.push((g.mi, g.fi, bindings, suffix));
-                        break;
+                    self.record_module_call(module.as_str(), func.as_str(), args);
+                }
+            }
+        }
+        impl<'a> Discover<'a> {
+            // A CROSS-MODULE generic call the frontend already FLATTENED to its
+            // v0 name (`m.stash(41)` → `Named { almide_rt_m_stash }` — the
+            // #788/#782 crossmod cell): match the exact flatten spelling per
+            // generic (module list + fn name — no string parsing), so the call
+            // site instantiates exactly like a `Module { m, f }` one.
+            fn record_flattened_call(&mut self, name: &str, args: &[almide_ir::IrExpr]) {
+                for (gi, g) in self.generics.iter().enumerate() {
+                    let flat = format!("almide_rt_{}_{}", self.module_names[g.mi], g.name);
+                    if name != flat { continue; }
+                    let ptys = &self.param_types[gi];
+                    let bindings = collect_mono_bindings(&g.bounds, args, ptys);
+                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                        && !matches!(ty, Ty::TypeVar(_))
+                        && !ty.contains_typevar()
+                    );
+                    if !all_concrete { continue; }
+                    let generic_names: Vec<String> = self.generics[gi].bounds.iter()
+                        .map(|b| b.type_var.clone()).collect::<std::collections::HashSet<_>>()
+                        .into_iter().collect::<Vec<_>>();
+                    let mut sorted = generic_names;
+                    sorted.sort();
+                    let suffix = sorted.iter()
+                        .filter_map(|g| bindings.get(g))
+                        .filter_map(|t| ty_to_name(t))
+                        .collect::<Vec<_>>()
+                        .join("_");
+                    self.out.push((g.mi, g.fi, bindings, suffix));
+                    break;
+                }
+            }
+
+            fn record_module_call(&mut self, m: &str, f: &str, args: &[almide_ir::IrExpr]) {
+                for (gi, g) in self.generics.iter().enumerate() {
+                    if g.name != f { continue; }
+                    // Module guard: same fn name can live in multiple modules
+                    // (e.g. option.filter / list.filter / result.filter). Without
+                    // this, the first name-match wins and specialization is
+                    // registered under the wrong (mod, fn, suffix) key — the
+                    // rewriter (which DOES filter by module) then misses the
+                    // lookup and the call stays as unsuffixed `Module { m, f }`.
+                    if self.module_names[g.mi] != m { continue; }
+                    let ptys = &self.param_types[gi];
+                    let bindings = collect_mono_bindings(&g.bounds, args, ptys);
+                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                        && !matches!(ty, Ty::TypeVar(_))
+                        && !ty.contains_typevar()
+                    );
+                    if std::env::var_os("ALMIDE_MONO_DEBUG").is_some() {
+                        let atys: Vec<_> = args.iter().map(|a| &a.ty).collect();
+                        eprintln!("[mono-debug] {m}.{f} args={atys:?} ptys={ptys:?} bindings={bindings:?} concrete={all_concrete}");
                     }
+                    if !all_concrete { continue; }
+                    // Deterministic suffix
+                    let generic_names: Vec<String> = self.generics[gi].bounds.iter()
+                        .map(|b| b.type_var.clone()).collect::<std::collections::HashSet<_>>()
+                        .into_iter().collect::<Vec<_>>();
+                    let mut sorted = generic_names;
+                    sorted.sort();
+                    let suffix = sorted.iter()
+                        .filter_map(|g| bindings.get(g))
+                        .filter_map(|t| ty_to_name(t))
+                        .collect::<Vec<_>>()
+                        .join("_");
+                    self.out.push((g.mi, g.fi, bindings, suffix));
+                    break;
                 }
             }
         }
@@ -372,65 +380,73 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     impl<'a> IrMutVisitor for Rewriter<'a> {
         fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
             walk_expr_mut(self, expr);
-            // The FLATTENED cross-module generic call (the Discover Named arm's
-            // twin): rewrite `Named { almide_rt_m_stash }` to the specialized
-            // instance's own flatten spelling (`almide_rt_m_stash__Int`) — the
-            // SAME name the module-fn flattening gives the pushed instance.
             if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut expr.kind {
-                let n = name.as_str().to_string();
-                for (gi, g) in self.generics.iter().enumerate() {
-                    let m = self.module_names[g.mi].clone();
-                    let flat = format!("almide_rt_{}_{}", m, g.name);
-                    if n != flat { continue; }
-                    let bindings = collect_mono_bindings(&g.bounds, args, &self.param_types[gi]);
-                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
-                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
-                        && !matches!(ty, Ty::TypeVar(_))
-                        && !ty.contains_typevar()
-                    );
-                    if !all_concrete { break; }
-                    let generic_names: std::collections::HashSet<String> = g.bounds.iter()
-                        .map(|b| b.type_var.clone()).collect();
-                    let mut sorted: Vec<String> = generic_names.into_iter().collect();
-                    sorted.sort();
-                    let suffix = sorted.iter()
-                        .filter_map(|gn| bindings.get(gn))
-                        .filter_map(|t| ty_to_name(t))
-                        .collect::<Vec<_>>()
-                        .join("_");
-                    if let Some(new_name) = self.rename.get(&(m.clone(), g.name.clone(), suffix)) {
-                        *name = sym(&format!("almide_rt_{}_{}", m, new_name));
-                    }
-                    break;
-                }
+                self.rewrite_flattened_call(name, args);
             }
             if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut expr.kind {
-                let m = module.as_str().to_string();
-                let f = func.as_str().to_string();
-                for (gi, g) in self.generics.iter().enumerate() {
-                    if g.name != f { continue; }
-                    if self.module_names[g.mi] != m { continue; }
-                    let bindings = collect_mono_bindings(&g.bounds, args, &self.param_types[gi]);
-                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
-                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
-                        && !matches!(ty, Ty::TypeVar(_))
-                        && !ty.contains_typevar()
-                    );
-                    if !all_concrete { break; }
-                    let generic_names: std::collections::HashSet<String> = g.bounds.iter()
-                        .map(|b| b.type_var.clone()).collect();
-                    let mut sorted: Vec<String> = generic_names.into_iter().collect();
-                    sorted.sort();
-                    let suffix = sorted.iter()
-                        .filter_map(|gn| bindings.get(gn))
-                        .filter_map(|t| ty_to_name(t))
-                        .collect::<Vec<_>>()
-                        .join("_");
-                    if let Some(new_name) = self.rename.get(&(m.clone(), f.clone(), suffix)) {
-                        *func = sym(new_name);
-                    }
-                    break;
+                self.rewrite_module_call(module.as_str(), func, args);
+            }
+        }
+    }
+    impl<'a> Rewriter<'a> {
+        // The FLATTENED cross-module generic call (the Discover Named arm's
+        // twin): rewrite `Named { almide_rt_m_stash }` to the specialized
+        // instance's own flatten spelling (`almide_rt_m_stash__Int`) — the
+        // SAME name the module-fn flattening gives the pushed instance.
+        fn rewrite_flattened_call(&self, name: &mut Sym, args: &[almide_ir::IrExpr]) {
+            let n = name.as_str().to_string();
+            for (gi, g) in self.generics.iter().enumerate() {
+                let m = self.module_names[g.mi].clone();
+                let flat = format!("almide_rt_{}_{}", m, g.name);
+                if n != flat { continue; }
+                let bindings = collect_mono_bindings(&g.bounds, args, &self.param_types[gi]);
+                let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                    !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                    && !matches!(ty, Ty::TypeVar(_))
+                    && !ty.contains_typevar()
+                );
+                if !all_concrete { break; }
+                let generic_names: std::collections::HashSet<String> = g.bounds.iter()
+                    .map(|b| b.type_var.clone()).collect();
+                let mut sorted: Vec<String> = generic_names.into_iter().collect();
+                sorted.sort();
+                let suffix = sorted.iter()
+                    .filter_map(|gn| bindings.get(gn))
+                    .filter_map(|t| ty_to_name(t))
+                    .collect::<Vec<_>>()
+                    .join("_");
+                if let Some(new_name) = self.rename.get(&(m.clone(), g.name.clone(), suffix)) {
+                    *name = sym(&format!("almide_rt_{}_{}", m, new_name));
                 }
+                break;
+            }
+        }
+
+        fn rewrite_module_call(&self, m: &str, func: &mut Sym, args: &[almide_ir::IrExpr]) {
+            let f = func.as_str().to_string();
+            for (gi, g) in self.generics.iter().enumerate() {
+                if g.name != f { continue; }
+                if self.module_names[g.mi] != m { continue; }
+                let bindings = collect_mono_bindings(&g.bounds, args, &self.param_types[gi]);
+                let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                    !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                    && !matches!(ty, Ty::TypeVar(_))
+                    && !ty.contains_typevar()
+                );
+                if !all_concrete { break; }
+                let generic_names: std::collections::HashSet<String> = g.bounds.iter()
+                    .map(|b| b.type_var.clone()).collect();
+                let mut sorted: Vec<String> = generic_names.into_iter().collect();
+                sorted.sort();
+                let suffix = sorted.iter()
+                    .filter_map(|gn| bindings.get(gn))
+                    .filter_map(|t| ty_to_name(t))
+                    .collect::<Vec<_>>()
+                    .join("_");
+                if let Some(new_name) = self.rename.get(&(m.to_string(), f.clone(), suffix)) {
+                    *func = sym(new_name);
+                }
+                break;
             }
         }
     }
@@ -528,19 +544,7 @@ fn erase_orphan_typevars(vt: &mut VarTable) {
 /// or top_lets. Orphaned entries from removed generic functions are ignored —
 /// they have TypeVar types but are not used by any live code.
 fn verify_no_typevars_post_mono(program: &almide_ir::IrProgram) {
-    use almide_lang::types::Ty;
     use std::collections::HashSet;
-    fn has_any_typevar(ty: &Ty) -> bool {
-        match ty {
-            Ty::TypeVar(_) => true,
-            Ty::Applied(_, args) => args.iter().any(has_any_typevar),
-            Ty::Tuple(elems) => elems.iter().any(has_any_typevar),
-            Ty::Fn { params, ret } => params.iter().any(has_any_typevar) || has_any_typevar(ret),
-            Ty::Named(_, args) => args.iter().any(has_any_typevar),
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_any_typevar(t)),
-            _ => false,
-        }
-    }
 
     // Collect all VarIds referenced by live code
     let mut live_vars: HashSet<u32> = HashSet::new();
@@ -552,21 +556,44 @@ fn verify_no_typevars_post_mono(program: &almide_ir::IrProgram) {
         collect_live_vars(&tl.value, &mut live_vars);
     }
 
+    let count = count_fn_sig_typevars(&program.functions) + count_live_var_typevars(program, &live_vars);
+    if count > 0 {
+        eprintln!("[ICE] {} TypeVar(s) remain after monomorphization. Generic params should be fully substituted.", count);
+    }
+}
+
+fn has_any_typevar(ty: &Ty) -> bool {
+    match ty {
+        Ty::TypeVar(_) => true,
+        Ty::Applied(_, args) => args.iter().any(has_any_typevar),
+        Ty::Tuple(elems) => elems.iter().any(has_any_typevar),
+        Ty::Fn { params, ret } => params.iter().any(has_any_typevar) || has_any_typevar(ret),
+        Ty::Named(_, args) => args.iter().any(has_any_typevar),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_any_typevar(t)),
+        _ => false,
+    }
+}
+
+/// Count TypeVars leaking into function signatures (return type + params).
+fn count_fn_sig_typevars(functions: &[almide_ir::IrFunction]) -> usize {
     let mut count = 0;
-    for func in &program.functions {
+    for func in functions {
         if has_any_typevar(&func.ret_ty) { count += 1; }
         for p in &func.params { if has_any_typevar(&p.ty) { count += 1; } }
     }
-    // Only check VarTable entries that are used by remaining functions
-    for &vid in &live_vars {
+    count
+}
+
+/// Count TypeVars leaking into VarTable entries that are actually referenced by live code.
+fn count_live_var_typevars(program: &almide_ir::IrProgram, live_vars: &std::collections::HashSet<u32>) -> usize {
+    let mut count = 0;
+    for &vid in live_vars {
         if (vid as usize) < program.var_table.len() {
             let info = program.var_table.get(almide_ir::VarId(vid));
             if has_any_typevar(&info.ty) { count += 1; }
         }
     }
-    if count > 0 {
-        eprintln!("[ICE] {} TypeVar(s) remain after monomorphization. Generic params should be fully substituted.", count);
-    }
+    count
 }
 
 /// Collect all VarIds referenced in an expression tree.
@@ -622,49 +649,7 @@ fn collect_pattern_vars(pattern: &IrPattern, vars: &mut std::collections::HashSe
 fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeDecl]) -> HashMap<String, Vec<BoundedParam>> {
     let mut result = HashMap::new();
     for func in functions {
-        let mut bounded = Vec::new();
-        let mut seen_tvars = std::collections::HashSet::new();
-        // パターン A: generic functions (with or without structural bounds)
-        if let Some(ref generics) = func.generics {
-            bounded.extend(
-                generics.iter()
-                    .flat_map(|g| {
-                        seen_tvars.insert(g.name.clone());
-                        func.params.iter().enumerate()
-                            .filter(|(_, param)| ty_contains_typevar(&param.ty, &g.name))
-                            .map(|(i, _)| BoundedParam { param_idx: i, type_var: g.name.to_string() })
-                    })
-            );
-        }
-        // パターン A2: generic + protocol bound (fn f[T: Showable](x: T))
-        if let Some(ref generics) = func.generics {
-            for g in generics.iter() {
-                if let Some(ref bounds) = g.bounds {
-                    if !bounds.is_empty() && !seen_tvars.contains(&g.name) {
-                        for (i, param) in func.params.iter().enumerate() {
-                            if ty_contains_typevar(&param.ty, &g.name) {
-                                bounded.push(BoundedParam { param_idx: i, type_var: g.name.to_string() });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // パターン B: 直接 OpenRecord パラメータ、または OpenRecord エイリアス
-        for (i, param) in func.params.iter().enumerate() {
-            let is_open = matches!(&param.ty, Ty::OpenRecord { .. })
-                || matches!(&param.ty, Ty::Named(name, args) if args.is_empty()
-                    && type_decls.iter().any(|td| td.name == *name
-                        && matches!(&td.kind, IrTypeDeclKind::Alias { target } if matches!(target, Ty::OpenRecord { .. }))));
-            if is_open {
-                // OpenRecord パラメータ用の仮の type_var 名を生成
-                let tv_name = format!("__open_{}", i);
-                bounded.push(BoundedParam {
-                    param_idx: i,
-                    type_var: tv_name,
-                });
-            }
-        }
+        let bounded = find_bounded_params_for_fn(func, type_decls);
         // Include all generic functions, even those with no param-based TypeVars
         // (e.g., stack_new[T]() — no params, but has generics and type_args at call site)
         if !bounded.is_empty() || func.generics.as_ref().map_or(false, |g| !g.is_empty()) {
@@ -672,4 +657,70 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
         }
     }
     result
+}
+
+/// Compute a single function's bounded params: structural-bound generics (パターン A),
+/// protocol-bound generics not already covered by A (パターン A2), and direct/aliased
+/// OpenRecord params (パターン B).
+fn find_bounded_params_for_fn(func: &IrFunction, type_decls: &[IrTypeDecl]) -> Vec<BoundedParam> {
+    let (mut bounded, seen_tvars) = bounded_from_structural_generics(func);
+    bounded.extend(bounded_from_protocol_generics(func, &seen_tvars));
+    bounded.extend(bounded_from_open_record_params(func, type_decls));
+    bounded
+}
+
+/// パターン A: generic functions (with or without structural bounds).
+/// Also returns the set of type-var names seen, so パターン A2 can skip duplicates.
+fn bounded_from_structural_generics(func: &IrFunction) -> (Vec<BoundedParam>, std::collections::HashSet<Sym>) {
+    let mut seen_tvars = std::collections::HashSet::new();
+    let mut bounded = Vec::new();
+    if let Some(ref generics) = func.generics {
+        bounded.extend(
+            generics.iter()
+                .flat_map(|g| {
+                    seen_tvars.insert(g.name.clone());
+                    func.params.iter().enumerate()
+                        .filter(|(_, param)| ty_contains_typevar(&param.ty, &g.name))
+                        .map(|(i, _)| BoundedParam { param_idx: i, type_var: g.name.to_string() })
+                })
+        );
+    }
+    (bounded, seen_tvars)
+}
+
+/// パターン A2: generic + protocol bound (fn f[T: Showable](x: T)), skipping type
+/// vars already covered by パターン A.
+fn bounded_from_protocol_generics(func: &IrFunction, seen_tvars: &std::collections::HashSet<Sym>) -> Vec<BoundedParam> {
+    let mut bounded = Vec::new();
+    let Some(ref generics) = func.generics else { return bounded };
+    for g in generics.iter() {
+        let Some(ref bounds) = g.bounds else { continue };
+        if bounds.is_empty() || seen_tvars.contains(&g.name) { continue; }
+        for (i, param) in func.params.iter().enumerate() {
+            if ty_contains_typevar(&param.ty, &g.name) {
+                bounded.push(BoundedParam { param_idx: i, type_var: g.name.to_string() });
+            }
+        }
+    }
+    bounded
+}
+
+/// パターン B: 直接 OpenRecord パラメータ、または OpenRecord エイリアス.
+fn bounded_from_open_record_params(func: &IrFunction, type_decls: &[IrTypeDecl]) -> Vec<BoundedParam> {
+    let mut bounded = Vec::new();
+    for (i, param) in func.params.iter().enumerate() {
+        let is_open = matches!(&param.ty, Ty::OpenRecord { .. })
+            || matches!(&param.ty, Ty::Named(name, args) if args.is_empty()
+                && type_decls.iter().any(|td| td.name == *name
+                    && matches!(&td.kind, IrTypeDeclKind::Alias { target } if matches!(target, Ty::OpenRecord { .. }))));
+        if is_open {
+            // OpenRecord パラメータ用の仮の type_var 名を生成
+            let tv_name = format!("__open_{}", i);
+            bounded.push(BoundedParam {
+                param_idx: i,
+                type_var: tv_name,
+            });
+        }
+    }
+    bounded
 }

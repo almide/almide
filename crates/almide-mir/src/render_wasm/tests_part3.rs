@@ -377,7 +377,7 @@
             fn main() -> Unit = count_to(4)\n";
         let prog = lower_source(src);
         // The loop must lower to REAL markers (executes), not the deferred one-iteration form.
-        let count_fn = prog.functions.iter().find(|f| f.name == "count_to").unwrap();
+        let count_fn = prog.functions.iter().find(|f| f.name == "count_to").expect("lowered fn \"count_to\" not found");
         assert!(
             count_fn.ops.iter().any(|op| matches!(op, Op::LoopStart)),
             "count_to's while must lower to LoopStart (executable), got {:?}",
@@ -448,7 +448,7 @@
             for i in 0..n {\n    write_int(i)\n  } }\n\
             fn main() -> Unit = print_range(4)\n";
         let prog = lower_source(src);
-        let f = prog.functions.iter().find(|f| f.name == "print_range").unwrap();
+        let f = prog.functions.iter().find(|f| f.name == "print_range").expect("lowered fn \"print_range\" not found");
         assert!(
             f.ops.iter().any(|op| matches!(op, Op::LoopStart)),
             "for-in must lower to LoopStart (executable), got {:?}",
@@ -631,9 +631,9 @@
 
     fn build_and_run(label: &str, wat: &str) -> Option<String> {
         let dir = std::env::temp_dir().join(format!("almide_mir_wasm_{label}"));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("failed to create the test scratch dir");
         let wat_path = dir.join("m.wat");
-        std::fs::write(&wat_path, wat).unwrap();
+        std::fs::write(&wat_path, wat).expect("failed to write the test scratch wat file");
         match Command::new("wasmtime").arg("run").arg(&wat_path).output() {
             Ok(o) if o.status.code() != Some(127) => {
                 assert!(
@@ -653,9 +653,9 @@
     /// for tests that EXPECT a trap (the double-free sentinel).
     fn run_status(label: &str, wat: &str) -> Option<bool> {
         let dir = std::env::temp_dir().join(format!("almide_mir_wasm_{label}"));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("failed to create the test scratch dir");
         let wat_path = dir.join("m.wat");
-        std::fs::write(&wat_path, wat).unwrap();
+        std::fs::write(&wat_path, wat).expect("failed to write the test scratch wat file");
         match Command::new("wasmtime").arg("run").arg(&wat_path).output() {
             Ok(o) if o.status.code() != Some(127) => Some(o.status.success()),
             _ => None, // wasmtime unavailable → skip

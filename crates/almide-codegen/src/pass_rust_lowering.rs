@@ -31,38 +31,53 @@ impl NanoPass for RustLoweringPass {
         // arg-0 and RE-TAG the matching bind's list elements to BoxSendSync —
         // the var-indirection twin of the inline-list boxing.
         if rebox_var_thunk_lists(&mut program) { changed = true; }
-        // Vars whose Assign must STAY an Assign — their lvalue is not a direct
-        // Rust place, so the `xs = xs + [v]` → `xs.push(v)` rewrite would push
-        // onto a DISCARDED CLONE and silently lose the write:
-        //   - shared cells (`SharedMut`): `xs.get().push(v)` (Closure v2 P6);
-        //   - mutable TOP-LETS (`ModuleRc`): the Method renderer falls through
-        //     to the module-var READ accessor `UPPER.with(|c| (**c.borrow())
-        //     .clone()).push(v)` (#501). Left as an Assign, the walker emits
-        //     the ModuleRc WRITE template, which is also alias-safe: the RHS
-        //     (including reads of the same var) evaluates BEFORE borrow_mut.
-        let mut shared: HashSet<VarId> = program.codegen_annotations.shared_mut_vars.clone();
-        for tl in &program.top_lets {
-            if tl.mutable { shared.insert(tl.var); }
-        }
-        for m in &program.modules {
-            for tl in &m.top_lets {
-                if tl.mutable { shared.insert(tl.var); }
-            }
-        }
-        let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
-        for func in functions.iter_mut() {
-            if rewrite_stmts_in_expr(&mut func.body, var_table, &shared) { changed = true; }
-        }
-        for tl in top_lets.iter_mut() {
-            if rewrite_stmts_in_expr(&mut tl.value, var_table, &shared) { changed = true; }
-        }
-        for module in modules.iter_mut() {
-            for func in module.functions.iter_mut() {
-                if rewrite_stmts_in_expr(&mut func.body, var_table, &shared) { changed = true; }
-            }
-        }
+        let shared = collect_assign_exempt_vars(&program);
+        if apply_rewrite_stmts_program(&mut program, &shared) { changed = true; }
         PassResult { program, changed }
     }
+}
+
+/// Vars whose `Assign` must STAY an `Assign` — their lvalue is not a direct
+/// Rust place, so the `xs = xs + [v]` → `xs.push(v)` rewrite would push onto
+/// a DISCARDED CLONE and silently lose the write:
+///   - shared cells (`SharedMut`): `xs.get().push(v)` (Closure v2 P6);
+///   - mutable TOP-LETS (`ModuleRc`): the Method renderer falls through
+///     to the module-var READ accessor `UPPER.with(|c| (**c.borrow())
+///     .clone()).push(v)` (#501). Left as an Assign, the walker emits
+///     the ModuleRc WRITE template, which is also alias-safe: the RHS
+///     (including reads of the same var) evaluates BEFORE borrow_mut.
+/// Extracted from `RustLoweringPass::run` (cog>25 decomposition).
+fn collect_assign_exempt_vars(program: &IrProgram) -> HashSet<VarId> {
+    let mut shared: HashSet<VarId> = program.codegen_annotations.shared_mut_vars.clone();
+    for tl in &program.top_lets {
+        if tl.mutable { shared.insert(tl.var); }
+    }
+    for m in &program.modules {
+        for tl in &m.top_lets {
+            if tl.mutable { shared.insert(tl.var); }
+        }
+    }
+    shared
+}
+
+/// Run [`rewrite_stmts_in_expr`] over every function body and top-let value,
+/// top-level and per-module. Extracted from `RustLoweringPass::run`
+/// (cog>25 decomposition).
+fn apply_rewrite_stmts_program(program: &mut IrProgram, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    let IrProgram { functions, top_lets, modules, var_table, .. } = program;
+    for func in functions.iter_mut() {
+        if rewrite_stmts_in_expr(&mut func.body, var_table, shared) { changed = true; }
+    }
+    for tl in top_lets.iter_mut() {
+        if rewrite_stmts_in_expr(&mut tl.value, var_table, shared) { changed = true; }
+    }
+    for module in modules.iter_mut() {
+        for func in module.functions.iter_mut() {
+            if rewrite_stmts_in_expr(&mut func.body, var_table, shared) { changed = true; }
+        }
+    }
+    changed
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -272,13 +287,25 @@ fn box_closures_expr(expr: IrExpr, box_here: bool, changed: &mut bool) -> IrExpr
 
 /// Box closures in THIS node's type-erased slots (non-recursive).
 fn box_node(expr: &mut IrExpr) -> bool {
+    if let Some(result) = try_box_closure_literal(expr) { return result; }
+    if let Some(result) = try_box_fan_thunks(expr) { return result; }
+    box_node_unbox_consumed(expr)
+}
+
+/// Closure-LITERAL boxing check of `box_node`, extracted (cog>30
+/// decomposition, pattern 1 — independent checks in sequence, each
+/// unconditionally decides the whole function's result once its own
+/// pattern matches, `None` otherwise so the caller falls through to the
+/// next check). UNIFORM-REPR: box every fresh closure LITERAL by
+/// default — a closure value is `Rc<dyn Fn>` everywhere it is
+/// stored/passed. Closures CONSUMED in place (combinators / IterChain /
+/// fan, which take `impl Fn`) are un-boxed at their consumer node instead
+/// (see `box_node_unbox_consumed`) — that is exact for nesting (a closure
+/// STORED inside a consumed lambda's body stays boxed), unlike
+/// subtree-wide `box_here` clearing.
+fn try_box_closure_literal(expr: &mut IrExpr) -> Option<bool> {
     use almide_lang::types::Ty;
     let node_ty = expr.ty.clone();
-    // UNIFORM-REPR: box every fresh closure LITERAL by default — a closure value
-    // is `Rc<dyn Fn>` everywhere it is stored/passed. Closures CONSUMED in place
-    // (combinators / IterChain / fan, which take `impl Fn`) are un-boxed below at
-    // their consumer node — that is exact for nesting (a closure STORED inside a
-    // consumed lambda's body stays boxed), unlike subtree-wide box_here clearing.
     if matches!(&expr.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. })
         && matches!(&node_ty, Ty::Fn { .. })
     {
@@ -286,43 +313,52 @@ fn box_node(expr: &mut IrExpr) -> bool {
         // — box it too so it unifies with closures in the same slot
         // (`[dbl, (x) => …]`, a user-HOF arg). As a CALLEE it lives in `CallTarget`,
         // not as an expr node, so a direct call `dbl(x)` is never boxed.
-        return box_closure_value(expr, &node_ty);
+        return Some(box_closure_value(expr, &node_ty));
     }
-    // fan.* thread-thunk boxing. The whole fan subtree was left RAW (box_here
-    // cleared in box_closures_expr), so each thunk here is a bare Lambda / FnRef /
-    // capture-clone `{ …; <lambda> }` block. Box per fan API (fan is still a
-    // `Module{fan}` / `RuntimeCall{fan}` call here — FanLowering runs later):
-    //   race/any/settle → `Box<dyn Fn + Send + Sync>`: distinct CAPTURING thunks
-    //     cannot share one `impl Fn` type (E0308), but `Box<dyn Fn + Send + Sync>`
-    //     is itself `Fn + Send + Sync`, so they unify as one element type AND
-    //     satisfy the runtime's `Vec<impl Fn() -> _ + Send + Sync>` thunk bound.
-    //   map → `Rc<dyn Fn>`: the runtime runs it SEQUENTIALLY over an `Rc<dyn Fn>`,
-    //     which also accepts a closure VALUE in a var — a `Send + Sync` box can't,
-    //     since the uniform repr of a stored closure is `Rc` (neither Send nor Sync).
-    if let Some(method) = fan_method(expr) {
-        let args = match &mut expr.kind {
-            IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
-            _ => return false,
-        };
-        return match method.as_str() {
-            "race" | "any" | "settle" => args.first_mut()
-                .map(|a| box_fan_thunk_list(a, FnBox::BoxSendSync))
-                .unwrap_or(false),
-            "map" => args.get_mut(1)
-                .map(|f| box_fan_thunk(f, FnBox::Rc))
-                .unwrap_or(false),
-            _ => false,
-        };
-    }
-    // Storage of a closure (in a list/map/tuple/record/field/`if`-`match` join/
-    // `??` fallback) needs NO rule — the default arm already boxed every closure
-    // literal where it sits, and a `Var` holding a closure is already
-    // `Rc<dyn Fn>`. Runtime HOFs take `Rc<dyn Fn>` too, so a boxed closure passed
-    // to `almide_rt_list_map`/`_fold`/`unwrap_or`/… needs NO un-box. The ONLY
-    // place a raw `impl Fn` is required is a FUSED `IterChain` step (below) and a
-    // `fan.*` arg (above). This REPLACES the former ~14 per-position boxing rules
-    // (and the consumed-vs-value allow-list) with: box by default, un-box only
-    // the two structural bare-closure sites.
+    None
+}
+
+/// `fan.*` thread-thunk boxing check of `box_node`, extracted (cog>30
+/// decomposition). The whole fan subtree was left RAW (box_here cleared in
+/// box_closures_expr), so each thunk here is a bare Lambda / FnRef /
+/// capture-clone `{ …; <lambda> }` block. Box per fan API (fan is still a
+/// `Module{fan}` / `RuntimeCall{fan}` call here — FanLowering runs later):
+///   race/any/settle → `Box<dyn Fn + Send + Sync>`: distinct CAPTURING thunks
+///     cannot share one `impl Fn` type (E0308), but `Box<dyn Fn + Send + Sync>`
+///     is itself `Fn + Send + Sync`, so they unify as one element type AND
+///     satisfy the runtime's `Vec<impl Fn() -> _ + Send + Sync>` thunk bound.
+///   map → `Rc<dyn Fn>`: the runtime runs it SEQUENTIALLY over an `Rc<dyn Fn>`,
+///     which also accepts a closure VALUE in a var — a `Send + Sync` box can't,
+///     since the uniform repr of a stored closure is `Rc` (neither Send nor Sync).
+fn try_box_fan_thunks(expr: &mut IrExpr) -> Option<bool> {
+    let method = fan_method(expr)?;
+    let args = match &mut expr.kind {
+        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
+        _ => return Some(false),
+    };
+    Some(match method.as_str() {
+        "race" | "any" | "settle" => args.first_mut()
+            .map(|a| box_fan_thunk_list(a, FnBox::BoxSendSync))
+            .unwrap_or(false),
+        "map" => args.get_mut(1)
+            .map(|f| box_fan_thunk(f, FnBox::Rc))
+            .unwrap_or(false),
+        _ => false,
+    })
+}
+
+/// Structural bare-closure un-box check of `box_node`, extracted (cog>30
+/// decomposition). Storage of a closure (in a list/map/tuple/record/field/
+/// `if`-`match` join/ `??` fallback) needs NO rule — the default arm
+/// already boxed every closure literal where it sits, and a `Var` holding
+/// a closure is already `Rc<dyn Fn>`. Runtime HOFs take `Rc<dyn Fn>` too,
+/// so a boxed closure passed to `almide_rt_list_map`/`_fold`/`unwrap_or`/…
+/// needs NO un-box. The ONLY place a raw `impl Fn` is required is a FUSED
+/// `IterChain` step and a `fan.*` arg (handled by `try_box_fan_thunks`
+/// above). This REPLACES the former ~14 per-position boxing rules (and the
+/// consumed-vs-value allow-list) with: box by default, un-box only the two
+/// structural bare-closure sites.
+fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
     match &mut expr.kind {
         // Fused combinator chain: un-box every consumed step lambda. Closures the
         // map PRODUCES (nested in the body) are already boxed by the default arm.
@@ -350,52 +386,6 @@ fn box_node(expr: &mut IrExpr) -> bool {
             if crate::generated::runtime_fn_modes::takes_raw_fn_last_arg(name.as_str()) =>
         {
             args.last_mut().map(unbox_consumed).unwrap_or(false)
-        }
-        _ => false,
-    }
-}
-
-/// Box every Fn-typed position reachable in `value` given its expected uniform
-/// element type `expected`. Descends through tuple/record element types so a
-/// closure nested in `[(k, closure)]` (map.from_list) is boxed.
-fn box_fn_in_value(value: &mut IrExpr, expected: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::Ty;
-    // A capture-clone-wrapped value (`{ let __cap = …; <tuple/record/closure> }`,
-    // produced for a HOF mapper body that captures) hides the structural value
-    // behind a Block — descend into the tail to reach the tuple/record beneath.
-    if let IrExprKind::Block { expr: Some(tail), .. } = &mut value.kind {
-        return box_fn_in_value(tail, expected);
-    }
-    match expected {
-        // UNIFORM-REPR SPIKE: a `Var` of `Ty::Fn` is ALREADY `Rc<dyn Fn>` (boxed
-        // at its binding / it is an `Rc<dyn Fn>` parameter), so storing it needs no
-        // re-box — wrapping it again would yield `Rc<Rc<dyn Fn>>` (the a6 over-box).
-        // Only fresh literals (Lambda, via control-flow joins) are boxed here.
-        Ty::Fn { .. } => box_closure_value(value, expected),
-        Ty::Tuple(comps) => {
-            if let IrExprKind::Tuple { elements } = &mut value.kind {
-                if elements.len() == comps.len() {
-                    let mut c = false;
-                    for (el, ct) in elements.iter_mut().zip(comps.iter()) {
-                        if ty_contains_fn(ct) { c |= box_fn_in_value(el, ct); }
-                    }
-                    return c;
-                }
-            }
-            false
-        }
-        Ty::Record { fields } => {
-            if let IrExprKind::Record { fields: vfields, .. } = &mut value.kind {
-                let mut c = false;
-                for (fname, fty) in fields.iter() {
-                    if !ty_contains_fn(fty) { continue; }
-                    if let Some((_, fv)) = vfields.iter_mut().find(|(n, _)| n == fname) {
-                        c |= box_fn_in_value(fv, fty);
-                    }
-                }
-                return c;
-            }
-            false
         }
         _ => false,
     }
@@ -433,18 +423,6 @@ fn box_closure_value(slot: &mut IrExpr, fn_ty: &almide_lang::types::Ty) -> bool 
     true
 }
 
-/// True if `ty` mentions a function type at a position a uniform container would
-/// need to unify (directly, or inside a tuple/record element). Nested List/Map
-/// are their own containers — not descended here.
-fn ty_contains_fn(ty: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::Ty;
-    match ty {
-        Ty::Fn { .. } => true,
-        Ty::Tuple(ts) => ts.iter().any(ty_contains_fn),
-        Ty::Record { fields } => fields.iter().any(|(_, t)| ty_contains_fn(t)),
-        _ => false,
-    }
-}
 
 /// Element type of `List[E]`.
 fn list_elem_ty(ty: &almide_lang::types::Ty) -> Option<&almide_lang::types::Ty> {
@@ -460,47 +438,14 @@ fn map_value_ty(ty: &almide_lang::types::Ty) -> Option<&almide_lang::types::Ty> 
 
 /// Walk all stmts in expressions recursively (Rust push/index peepholes).
 fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
-    let mut changed = false;
     match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-            if let Some(e) = tail { if rewrite_stmts_in_expr(e, vt, shared) { changed = true; } }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
-            if rewrite_stmts_in_expr(then, vt, shared) { changed = true; }
-            if rewrite_stmts_in_expr(else_, vt, shared) { changed = true; }
-        }
-        IrExprKind::Match { subject, arms } => {
-            if rewrite_stmts_in_expr(subject, vt, shared) { changed = true; }
-            for arm in arms {
-                if let Some(g) = &mut arm.guard { rewrite_stmts_in_expr(g, vt, shared); }
-                if rewrite_stmts_in_expr(&mut arm.body, vt, shared) { changed = true; }
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            if rewrite_stmts_in_expr(iterable, vt, shared) { changed = true; }
-            for s in body.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-        }
-        IrExprKind::While { cond, body } => {
-            if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
-            for s in body.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-        }
-        IrExprKind::Lambda { body, .. } => {
-            if rewrite_stmts_in_expr(body, vt, shared) { changed = true; }
-        }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
-        }
+        IrExprKind::Block { stmts, expr: tail } => rewrite_stmts_in_block(stmts, tail, vt, shared),
+        IrExprKind::If { cond, then, else_ } => rewrite_stmts_in_if(cond, then, else_, vt, shared),
+        IrExprKind::Match { subject, arms } => rewrite_stmts_in_match(subject, arms, vt, shared),
+        IrExprKind::ForIn { iterable, body, .. } => rewrite_stmts_in_for_in(iterable, body, vt, shared),
+        IrExprKind::While { cond, body } => rewrite_stmts_in_while(cond, body, vt, shared),
+        IrExprKind::Lambda { body, .. } => rewrite_stmts_in_expr(body, vt, shared),
+        IrExprKind::RuntimeCall { args, .. } => rewrite_stmts_in_runtime_call_args(args, vt, shared),
         // No nested statements to rewrite — listed explicitly so a new
         // statement-bearing IrExprKind is a compile error, not a silent miss.
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
@@ -519,9 +464,93 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
         | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => false,
+    }
+}
+
+/// `Block { stmts, expr: tail }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_block(stmts: &mut [IrStmt], tail: &mut Option<Box<IrExpr>>, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for s in stmts.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    if let Some(e) = tail { if rewrite_stmts_in_expr(e, vt, shared) { changed = true; } }
+    changed
+}
+
+/// `If { cond, then, else_ }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_if(cond: &mut IrExpr, then: &mut IrExpr, else_: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
+    if rewrite_stmts_in_expr(then, vt, shared) { changed = true; }
+    if rewrite_stmts_in_expr(else_, vt, shared) { changed = true; }
+    changed
+}
+
+/// `Match { subject, arms }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_match(subject: &mut IrExpr, arms: &mut [IrMatchArm], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(subject, vt, shared) { changed = true; }
+    for arm in arms {
+        if let Some(g) = &mut arm.guard { rewrite_stmts_in_expr(g, vt, shared); }
+        if rewrite_stmts_in_expr(&mut arm.body, vt, shared) { changed = true; }
     }
     changed
+}
+
+/// `ForIn { iterable, body, .. }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_for_in(iterable: &mut IrExpr, body: &mut [IrStmt], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(iterable, vt, shared) { changed = true; }
+    for s in body.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    changed
+}
+
+/// `While { cond, body }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_while(cond: &mut IrExpr, body: &mut [IrStmt], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
+    for s in body.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    changed
+}
+
+/// `RuntimeCall { args, .. }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_runtime_call_args(args: &mut [IrExpr], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
+    changed
+}
+
+/// `IndexAssign { index, value, target }` arm of [`rewrite_stmts_in_stmt`]:
+/// `xs[i] = closure` into a `List[Fn]` boxes the stored closure (the
+/// expr-level boxing pass can't reach a statement value).
+fn rewrite_stmts_in_index_assign(index: &mut IrExpr, value: &mut IrExpr, target: VarId, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
+    if rewrite_stmts_in_expr(index, vt, shared) { *changed = true; }
+    if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
+    let ety = list_elem_ty(&vt.get(target).ty).cloned();
+    if let Some(et) = ety {
+        if matches!(&et, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &et) { *changed = true; }
+    }
+}
+
+/// `MapInsert { key, value, target }` arm of [`rewrite_stmts_in_stmt`]:
+/// `m[k] = closure` / `m = map.set(m,k,closure)` (lowered to MapInsert)
+/// into a closure-valued map boxes the stored closure, same reasoning as
+/// [`rewrite_stmts_in_index_assign`].
+fn rewrite_stmts_in_map_insert(key: &mut IrExpr, value: &mut IrExpr, target: VarId, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
+    if rewrite_stmts_in_expr(key, vt, shared) { *changed = true; }
+    if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
+    let vty = map_value_ty(&vt.get(target).ty).cloned();
+    if let Some(vt_) = vty {
+        if matches!(&vt_, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &vt_) { *changed = true; }
+    }
 }
 
 fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
@@ -530,26 +559,8 @@ fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
             if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
         }
-        IrStmtKind::IndexAssign { index, value, target } => {
-            if rewrite_stmts_in_expr(index, vt, shared) { *changed = true; }
-            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
-            // `xs[i] = closure` into a `List[Fn]` — box the stored closure.
-            let ety = list_elem_ty(&vt.get(*target).ty).cloned();
-            if let Some(et) = ety {
-                if matches!(&et, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &et) { *changed = true; }
-            }
-        }
-        IrStmtKind::MapInsert { key, value, target } => {
-            if rewrite_stmts_in_expr(key, vt, shared) { *changed = true; }
-            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
-            // `m[k] = closure` / `m = map.set(m,k,closure)` (lowered to MapInsert)
-            // into a closure-valued map — box the stored closure. The expr-level
-            // boxing pass can't reach a statement value.
-            let vty = map_value_ty(&vt.get(*target).ty).cloned();
-            if let Some(vt_) = vty {
-                if matches!(&vt_, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &vt_) { *changed = true; }
-            }
-        }
+        IrStmtKind::IndexAssign { index, value, target } => rewrite_stmts_in_index_assign(index, value, *target, vt, shared, changed),
+        IrStmtKind::MapInsert { key, value, target } => rewrite_stmts_in_map_insert(key, value, *target, vt, shared, changed),
         IrStmtKind::Guard { cond, else_ } => {
             if rewrite_stmts_in_expr(cond, vt, shared) { *changed = true; }
             if rewrite_stmts_in_expr(else_, vt, shared) { *changed = true; }

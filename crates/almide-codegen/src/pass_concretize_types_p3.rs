@@ -5,107 +5,76 @@
 /// 3. Stdlib `list.*` polymorphic ops — compute from lambda return types
 ///
 /// Returning `None` is fine; the emit layer still has its fallbacks.
-fn resolve_call_ret_ty(
-    target: &CallTarget,
-    args: &[IrExpr],
-    _vt: &VarTable,
-    symbols: &SymbolTable,
-) -> Option<Ty> {
+/// Stdlib `list.*` polymorphic ops whose return type needs the lambda
+/// argument's `Fn::ret` (not expressible in the TOML template) — phase 3 of
+/// [`resolve_call_ret_ty`], extracted as its own name-router (cog>25
+/// decomposition): a pure per-`func`-name dispatch table with no state
+/// shared across arms.
+fn resolve_list_poly_ret_ty(func: &str, args: &[IrExpr]) -> Option<Ty> {
+    resolve_list_poly_ret_ty_lambda(func, args)
+        .or_else(|| resolve_list_poly_ret_ty_aggregate(func, args))
+        .or_else(|| resolve_list_poly_ret_ty_structural(func, args))
+}
+
+/// Helper: get the element type of a `List[T]` argument at the given index.
+/// Shared verbatim (same body) across the three `resolve_list_poly_ret_ty_*`
+/// group functions — each defines its own copy since it's a cheap closure
+/// over `args`, not shared state.
+fn list_poly_elem(args: &[IrExpr], idx: usize) -> Option<Ty> {
+    let arg = args.get(idx)?;
+    if let Ty::Applied(_, a) = &arg.ty {
+        a.first().cloned().filter(|t| !t.has_unresolved_deep())
+    } else { None }
+}
+
+/// Helper: get a lambda argument's return type (if it's a concrete Fn).
+fn list_poly_lambda_ret(args: &[IrExpr], idx: usize) -> Option<Ty> {
+    let arg = args.get(idx)?;
+    if let Ty::Fn { ret, .. } = &arg.ty {
+        if !ret.has_unresolved_deep() { Some((**ret).clone()) } else { None }
+    } else { None }
+}
+
+/// Helper: wrap a type in `List`.
+fn list_poly_list_of(t: Ty) -> Ty {
     use almide_lang::types::constructor::TypeConstructorId as TCI;
+    Ty::Applied(TCI::List, vec![t])
+}
 
-    // 1. User-defined function lookup
-    match target {
-        CallTarget::Module { module, func, .. } => {
-            if let Some(ret) = symbols.lookup_module(module.as_str(), func.as_str()) {
-                if !ret.has_unresolved_deep() {
-                    return Some(ret.clone());
-                }
-            }
-        }
-        CallTarget::Named { name } => {
-            if let Some(ret) = symbols.lookup_named(name.as_str()) {
-                if !ret.has_unresolved_deep() {
-                    return Some(ret.clone());
-                }
-            }
-        }
-        // Calling a closure VALUE (`f(x)` where `f` is a Fn-typed var/expr — e.g.
-        // a HOF lambda parameter): the call's type is the callee's RETURN type, not
-        // its whole Fn type. Without this the node keeps the `fn(..) -> T` type and
-        // a later `acc + f(x)` trips the IR verifier (AddInt on a function value).
-        CallTarget::Computed { callee } => {
-            if let Ty::Fn { ret, .. } = &callee.ty {
-                if !ret.has_unresolved_deep() {
-                    return Some((**ret).clone());
-                }
-            }
-        }
-        _ => {}
-    }
-
-    // Decode (module, func) from every stdlib call-target shape:
-    //   - `Module { list, map }`                 — pre-lowering
-    //   - `Named { "almide_rt_list_map" }`       — post-ResolveCalls or
-    //                                              frontend mangling
-    let (module_owned, func_owned): (String, String) = match target {
-        CallTarget::Module { module, func, .. } => (module.as_str().to_string(), func.as_str().to_string()),
-        CallTarget::Named { name } => {
-            let s = name.as_str();
-            if let Some(rest) = s.strip_prefix("almide_rt_") {
-                if let Some(under) = rest.find('_') {
-                    (rest[..under].to_string(), rest[under+1..].to_string())
-                } else { return None }
-            } else { return None }
-        }
-        _ => return None,
-    };
-    let module = module_owned.as_str();
-    let func = func_owned.as_str();
-
-    // 2. Stdlib polymorphic list operations with lambda return types.
-    //    These need the lambda argument's Fn::ret, which isn't expressible
-    //    in the TOML template.
-    if module != "list" { return None; }
-
-    // Helper: get the element type of List[T] argument at given index.
-    let list_elem = |idx: usize| -> Option<Ty> {
-        let arg = args.get(idx)?;
-        if let Ty::Applied(_, a) = &arg.ty {
-            a.first().cloned().filter(|t| !t.has_unresolved_deep())
-        } else { None }
-    };
-    // Helper: get a lambda argument's return type (if it's a concrete Fn).
-    let lambda_ret = |idx: usize| -> Option<Ty> {
-        let arg = args.get(idx)?;
-        if let Ty::Fn { ret, .. } = &arg.ty {
-            if !ret.has_unresolved_deep() { Some((**ret).clone()) } else { None }
-        } else { None }
-    };
-    // Helper: wrap in List
-    let list_of = |t: Ty| Ty::Applied(TCI::List, vec![t]);
-
+/// `resolve_list_poly_ret_ty` group 1 (cog>25 second-round decomposition):
+/// lambda-consuming ops whose return type needs the lambda argument's
+/// `Fn::ret`.
+fn resolve_list_poly_ret_ty_lambda(func: &str, args: &[IrExpr]) -> Option<Ty> {
     match func {
         "map" | "filter_map" => {
             // map(list, f) -> List[ret of f]
-            lambda_ret(1).map(list_of)
+            list_poly_lambda_ret(args, 1).map(list_poly_list_of)
         }
         "filter" | "take_while" | "drop_while" | "unique_by" | "dedup_by" => {
             // filter(list, pred) -> List[elem]
-            list_elem(0).map(list_of)
+            list_poly_elem(args, 0).map(list_poly_list_of)
         }
         "flat_map" => {
             // flat_map(list, f) -> List[inner_elem of f's return]
-            if let Some(inner) = lambda_ret(1) {
-                if let Ty::Applied(_, a) = &inner {
-                    a.first().cloned().filter(|t| !t.has_unresolved_deep()).map(list_of)
-                } else { None }
+            let inner = list_poly_lambda_ret(args, 1)?;
+            if let Ty::Applied(_, a) = &inner {
+                a.first().cloned().filter(|t| !t.has_unresolved_deep()).map(list_poly_list_of)
             } else { None }
         }
+        _ => None,
+    }
+}
+
+/// `resolve_list_poly_ret_ty` group 2: reductions and lookups that collapse
+/// the list to a scalar / `Option[elem]`.
+fn resolve_list_poly_ret_ty_aggregate(func: &str, args: &[IrExpr]) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    match func {
         "zip" => {
             // zip(xs, ys) -> List[(A, B)]
-            let a = list_elem(0)?;
-            let b = list_elem(1)?;
-            Some(list_of(Ty::Tuple(vec![a, b])))
+            let a = list_poly_elem(args, 0)?;
+            let b = list_poly_elem(args, 1)?;
+            Some(list_poly_list_of(Ty::Tuple(vec![a, b])))
         }
         "fold" => {
             // fold(list, init, f) -> type of init
@@ -114,7 +83,7 @@ fn resolve_call_ret_ty(
         }
         "reduce" | "min_by" | "max_by" => {
             // Option[elem]
-            let elem = list_elem(0)?;
+            let elem = list_poly_elem(args, 0)?;
             Some(Ty::Applied(TCI::Option, vec![elem]))
         }
         "any" | "all" => Some(Ty::Bool),
@@ -122,30 +91,104 @@ fn resolve_call_ret_ty(
         "len" => Some(Ty::Int),
         "first" | "last" | "find" => {
             // Option[elem]
-            let elem = list_elem(0)?;
+            let elem = list_poly_elem(args, 0)?;
             Some(Ty::Applied(TCI::Option, vec![elem]))
         }
-        "reverse" | "sort" | "sort_by" | "dedup" => list_elem(0).map(list_of),
-        "concat" | "append" | "prepend" => list_elem(0).map(list_of),
-        "slice" | "take" | "drop" | "chunks" => list_elem(0).map(list_of),
+        _ => None,
+    }
+}
+
+/// `resolve_list_poly_ret_ty` group 3: shape-preserving / structural ops
+/// that stay within `List[elem]` (or a tuple/pair of it).
+fn resolve_list_poly_ret_ty_structural(func: &str, args: &[IrExpr]) -> Option<Ty> {
+    match func {
+        "reverse" | "sort" | "sort_by" | "dedup" => list_poly_elem(args, 0).map(list_poly_list_of),
+        "concat" | "append" | "prepend" => list_poly_elem(args, 0).map(list_poly_list_of),
+        "slice" | "take" | "drop" | "chunks" => list_poly_elem(args, 0).map(list_poly_list_of),
         "flatten" => {
             // flatten(List[List[T]]) -> List[T]
-            list_elem(0).and_then(|inner| {
+            list_poly_elem(args, 0).and_then(|inner| {
                 if let Ty::Applied(_, a) = &inner {
-                    a.first().cloned().filter(|t| !t.has_unresolved_deep()).map(list_of)
+                    a.first().cloned().filter(|t| !t.has_unresolved_deep()).map(list_poly_list_of)
                 } else { None }
             })
         }
         "partition" => {
             // (List[elem], List[elem])
-            let elem = list_elem(0)?;
-            let l = list_of(elem);
+            let elem = list_poly_elem(args, 0)?;
+            let l = list_poly_list_of(elem);
             Some(Ty::Tuple(vec![l.clone(), l]))
         }
         "enumerate" => {
             // List[(Int, elem)]
-            let elem = list_elem(0)?;
-            Some(list_of(Ty::Tuple(vec![Ty::Int, elem])))
+            let elem = list_poly_elem(args, 0)?;
+            Some(list_poly_list_of(Ty::Tuple(vec![Ty::Int, elem])))
+        }
+        _ => None,
+    }
+}
+
+fn resolve_call_ret_ty(
+    target: &CallTarget,
+    args: &[IrExpr],
+    _vt: &VarTable,
+    symbols: &SymbolTable,
+) -> Option<Ty> {
+    if let Some(ret) = try_resolve_user_defined_ret_ty(target, symbols) {
+        return Some(ret);
+    }
+
+    // Decode (module, func) from every stdlib call-target shape:
+    //   - `Module { list, map }`                 — pre-lowering
+    //   - `Named { "almide_rt_list_map" }`       — post-ResolveCalls or
+    //                                              frontend mangling
+    let (module_owned, func_owned) = decode_stdlib_call_target(target)?;
+
+    // 2. Stdlib polymorphic list operations with lambda return types.
+    //    These need the lambda argument's Fn::ret, which isn't expressible
+    //    in the TOML template.
+    if module_owned != "list" { return None; }
+    resolve_list_poly_ret_ty(&func_owned, args)
+}
+
+/// `resolve_call_ret_ty` phase 1: user-defined function / closure-value
+/// lookup (cog>25 decomposition, extracted verbatim). `None` means "not
+/// resolvable this way" — the caller falls through to stdlib decoding.
+fn try_resolve_user_defined_ret_ty(target: &CallTarget, symbols: &SymbolTable) -> Option<Ty> {
+    match target {
+        CallTarget::Module { module, func, .. } => {
+            let ret = symbols.lookup_module(module.as_str(), func.as_str())?;
+            if !ret.has_unresolved_deep() { Some(ret.clone()) } else { None }
+        }
+        CallTarget::Named { name } => {
+            let ret = symbols.lookup_named(name.as_str())?;
+            if !ret.has_unresolved_deep() { Some(ret.clone()) } else { None }
+        }
+        // Calling a closure VALUE (`f(x)` where `f` is a Fn-typed var/expr — e.g.
+        // a HOF lambda parameter): the call's type is the callee's RETURN type, not
+        // its whole Fn type. Without this the node keeps the `fn(..) -> T` type and
+        // a later `acc + f(x)` trips the IR verifier (AddInt on a function value).
+        CallTarget::Computed { callee } => {
+            if let Ty::Fn { ret, .. } = &callee.ty {
+                if !ret.has_unresolved_deep() { Some((**ret).clone()) } else { None }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// `resolve_call_ret_ty` phase 2: decode `(module, func)` from every stdlib
+/// call-target shape (cog>25 decomposition, extracted verbatim).
+fn decode_stdlib_call_target(target: &CallTarget) -> Option<(String, String)> {
+    match target {
+        CallTarget::Module { module, func, .. } => Some((module.as_str().to_string(), func.as_str().to_string())),
+        CallTarget::Named { name } => {
+            let s = name.as_str();
+            let rest = s.strip_prefix("almide_rt_")?;
+            let under = rest.find('_')?;
+            Some((rest[..under].to_string(), rest[under+1..].to_string()))
         }
         _ => None,
     }
@@ -180,26 +223,48 @@ fn effective_ty(expr: &IrExpr, vt: &VarTable) -> Ty {
 
 /// Reconcile a BinOp's variant with its operand types.
 /// Returns Some(new_op) when we should rewrite. Only fixes Int↔Float
-/// confusion; leaves other ops alone.
+/// confusion; leaves other ops alone. Routes to a float-target or
+/// int-target lookup table (cog>25 decomposition: hoisting the
+/// `operand_is_float`/`operand_is_int` checks out of per-arm guards into a
+/// single router `if` removes 12 guard-branches from this function's own
+/// complexity — each table below is an unguarded flat match).
 fn reconcile_binop(op: BinOp, lt: &Ty, rt: &Ty) -> Option<BinOp> {
     let operand_is_float = matches!(lt, Ty::Float) || matches!(rt, Ty::Float);
     let operand_is_int = matches!(lt, Ty::Int) && matches!(rt, Ty::Int);
 
+    if operand_is_float {
+        reconcile_binop_to_float(op)
+    } else if operand_is_int {
+        reconcile_binop_to_int(op)
+    } else {
+        None
+    }
+}
+
+/// `reconcile_binop` sub-table: Int op → Float op, used when an operand is
+/// `Float`.
+fn reconcile_binop_to_float(op: BinOp) -> Option<BinOp> {
     match op {
-        BinOp::AddInt if operand_is_float => Some(BinOp::AddFloat),
-        BinOp::SubInt if operand_is_float => Some(BinOp::SubFloat),
-        BinOp::MulInt if operand_is_float => Some(BinOp::MulFloat),
-        BinOp::DivInt if operand_is_float => Some(BinOp::DivFloat),
-        BinOp::ModInt if operand_is_float => Some(BinOp::ModFloat),
-        BinOp::PowInt if operand_is_float => Some(BinOp::PowFloat),
+        BinOp::AddInt => Some(BinOp::AddFloat),
+        BinOp::SubInt => Some(BinOp::SubFloat),
+        BinOp::MulInt => Some(BinOp::MulFloat),
+        BinOp::DivInt => Some(BinOp::DivFloat),
+        BinOp::ModInt => Some(BinOp::ModFloat),
+        BinOp::PowInt => Some(BinOp::PowFloat),
+        _ => None,
+    }
+}
 
-        BinOp::AddFloat if operand_is_int => Some(BinOp::AddInt),
-        BinOp::SubFloat if operand_is_int => Some(BinOp::SubInt),
-        BinOp::MulFloat if operand_is_int => Some(BinOp::MulInt),
-        BinOp::DivFloat if operand_is_int => Some(BinOp::DivInt),
-        BinOp::ModFloat if operand_is_int => Some(BinOp::ModInt),
-        BinOp::PowFloat if operand_is_int => Some(BinOp::PowInt),
-
+/// `reconcile_binop` sub-table: Float op → Int op, used when both operands
+/// are `Int`.
+fn reconcile_binop_to_int(op: BinOp) -> Option<BinOp> {
+    match op {
+        BinOp::AddFloat => Some(BinOp::AddInt),
+        BinOp::SubFloat => Some(BinOp::SubInt),
+        BinOp::MulFloat => Some(BinOp::MulInt),
+        BinOp::DivFloat => Some(BinOp::DivInt),
+        BinOp::ModFloat => Some(BinOp::ModInt),
+        BinOp::PowFloat => Some(BinOp::PowInt),
         _ => None,
     }
 }

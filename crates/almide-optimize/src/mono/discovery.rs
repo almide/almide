@@ -90,46 +90,44 @@ impl<'a> IrVisitor for DiscoverVisitor<'a> {
 
 impl<'a> DiscoverVisitor<'a> {
     fn check_call(&mut self, expr: &IrExpr, target: &CallTarget, args: &[IrExpr], type_args: &[Ty]) {
-        // UFCS Method calls: check if method name matches a generic function.
-        if let CallTarget::Method { object, method } = target {
-            if let Some(bounded_params) = self.bound_fns.get::<str>(method) {
-                let orig_fn = self.program_functions.iter().find(|f| !f.is_test && f.name == *method);
-                let param_types: Vec<Ty> = orig_fn
-                    .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
-                    .unwrap_or_default();
-                // Synthetic args: [object, ...args]
-                let mut ufcs_args: Vec<IrExpr> = vec![(**object).clone()];
-                ufcs_args.extend(args.iter().cloned());
-                let mut bindings = collect_mono_bindings(bounded_params, &ufcs_args, &param_types);
-                // Infer from return type
-                self.infer_from_return_type(orig_fn, expr, &mut bindings);
-                self.try_insert(method.to_string(), bindings);
-            }
+        match target {
+            CallTarget::Method { object, method } => self.check_method_call(expr, object, method, args),
+            CallTarget::Named { name } => self.check_named_call(expr, name, args, type_args),
+            _ => {}
         }
-        if let CallTarget::Named { name } = target {
-            if let Some(bounded_params) = self.bound_fns.get::<str>(name) {
-                let orig_fn = self.program_functions.iter().find(|f| !f.is_test && f.name == *name);
-                let param_types: Vec<Ty> = orig_fn
-                    .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
-                    .unwrap_or_default();
-                let mut bindings = collect_mono_bindings(bounded_params, args, &param_types);
-                // Explicit type_args
-                if !type_args.is_empty() {
-                    if let Some(func) = orig_fn {
-                        if let Some(ref generics) = func.generics {
-                            for (g, ta) in generics.iter().zip(type_args.iter()) {
-                                if !bindings.contains_key(&*g.name) {
-                                    bindings.insert(g.name.to_string(), ta.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-                // Infer from return type
-                self.infer_from_return_type(orig_fn, expr, &mut bindings);
-                self.try_insert(name.to_string(), bindings);
-            }
+    }
+
+    /// UFCS method call: check if the method name matches a generic function.
+    fn check_method_call(&mut self, expr: &IrExpr, object: &IrExpr, method: &str, args: &[IrExpr]) {
+        let Some(bounded_params) = self.bound_fns.get::<str>(method) else { return };
+        let orig_fn = self.program_functions.iter().find(|f| !f.is_test && f.name == *method);
+        let param_types: Vec<Ty> = orig_fn
+            .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
+            .unwrap_or_default();
+        // Synthetic args: [object, ...args]
+        let mut ufcs_args: Vec<IrExpr> = vec![object.clone()];
+        ufcs_args.extend(args.iter().cloned());
+        let mut bindings = collect_mono_bindings(bounded_params, &ufcs_args, &param_types);
+        // Infer from return type
+        self.infer_from_return_type(orig_fn, expr, &mut bindings);
+        self.try_insert(method.to_string(), bindings);
+    }
+
+    /// Direct named call: check if the callee name matches a generic function.
+    fn check_named_call(&mut self, expr: &IrExpr, name: &str, args: &[IrExpr], type_args: &[Ty]) {
+        let Some(bounded_params) = self.bound_fns.get::<str>(name) else { return };
+        let orig_fn = self.program_functions.iter().find(|f| !f.is_test && f.name == *name);
+        let param_types: Vec<Ty> = orig_fn
+            .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
+            .unwrap_or_default();
+        let mut bindings = collect_mono_bindings(bounded_params, args, &param_types);
+        // Explicit type_args
+        if !type_args.is_empty() {
+            bind_explicit_type_args(orig_fn, type_args, &mut bindings);
         }
+        // Infer from return type
+        self.infer_from_return_type(orig_fn, expr, &mut bindings);
+        self.try_insert(name.to_string(), bindings);
     }
 
     fn infer_from_return_type(
@@ -138,19 +136,15 @@ impl<'a> DiscoverVisitor<'a> {
         expr: &IrExpr,
         bindings: &mut HashMap<String, Ty>,
     ) {
-        if bindings.values().any(|ty| matches!(ty, Ty::Unknown)) || bindings.is_empty() {
-            if let Some(func) = orig_fn {
-                if let Some(ref generics) = func.generics {
-                    let ret_ty = &func.ret_ty;
-                    for g in generics {
-                        if !bindings.contains_key(&*g.name) || matches!(bindings.get(&*g.name), Some(Ty::Unknown)) {
-                            let extracted = extract_typevar_binding(ret_ty, &expr.ty, &g.name);
-                            if !matches!(extracted, Ty::Unknown) {
-                                bindings.insert(g.name.to_string(), extracted);
-                            }
-                        }
-                    }
-                }
+        if !bindings.is_empty() && !bindings.values().any(|ty| matches!(ty, Ty::Unknown)) { return; }
+        let Some(func) = orig_fn else { return };
+        let Some(ref generics) = func.generics else { return };
+        let ret_ty = &func.ret_ty;
+        for g in generics {
+            if bindings.contains_key(&*g.name) && !matches!(bindings.get(&*g.name), Some(Ty::Unknown)) { continue; }
+            let extracted = extract_typevar_binding(ret_ty, &expr.ty, &g.name);
+            if !matches!(extracted, Ty::Unknown) {
+                bindings.insert(g.name.to_string(), extracted);
             }
         }
     }
@@ -164,6 +158,18 @@ impl<'a> DiscoverVisitor<'a> {
         if all_concrete {
             let suffix = mangle_suffix(&bindings);
             self.instances.insert((name, suffix), bindings);
+        }
+    }
+}
+
+/// Supplement `bindings` from explicit call-site `type_args`, matched positionally
+/// against `orig_fn`'s generics. Only fills type vars not already bound.
+fn bind_explicit_type_args(orig_fn: Option<&IrFunction>, type_args: &[Ty], bindings: &mut HashMap<String, Ty>) {
+    let Some(func) = orig_fn else { return };
+    let Some(ref generics) = func.generics else { return };
+    for (g, ta) in generics.iter().zip(type_args.iter()) {
+        if !bindings.contains_key(&*g.name) {
+            bindings.insert(g.name.to_string(), ta.clone());
         }
     }
 }
@@ -189,13 +195,8 @@ pub(super) fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str
         (Ty::Named(n, _), _) if n == var_name => arg_ty.clone(),
         (Ty::OpenRecord { .. }, _) if var_name.starts_with("__open_") => arg_ty.clone(),
         (Ty::Named(_, _), _) if var_name.starts_with("__open_") => arg_ty.clone(),
-        (Ty::Fn { params: p_params, ret: p_ret }, Ty::Fn { params: a_params, ret: a_ret }) if p_params.len() == a_params.len() => {
-            for (p, a) in p_params.iter().zip(a_params.iter()) {
-                let r = extract_typevar_binding(p, a, var_name);
-                if !matches!(r, Ty::Unknown) { return r; }
-            }
-            extract_typevar_binding(p_ret, a_ret, var_name)
-        }
+        (Ty::Fn { params: p_params, ret: p_ret }, Ty::Fn { params: a_params, ret: a_ret }) if p_params.len() == a_params.len() =>
+            extract_typevar_binding_fn(p_params, p_ret, a_params, a_ret, var_name),
         // A QUALIFIED/bare Named pair (`cell.Cell[T]` param vs a bare `Cell[Int]`
         // arg, or vice versa) is the SAME nominal type under the checker's
         // names_match doctrine — descend into the type args instead of letting
@@ -206,35 +207,47 @@ pub(super) fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str
             if p_args.len() == a_args.len()
                 && !p_args.is_empty()
                 && pn.as_str().rsplit('.').next() == an.as_str().rsplit('.').next() =>
-        {
-            for (p, a) in p_args.iter().zip(a_args.iter()) {
-                let r = extract_typevar_binding(p, a, var_name);
-                if !matches!(r, Ty::Unknown) {
-                    return r;
-                }
-            }
-            Ty::Unknown
-        }
-        _ => {
-            if param_ty.constructor_id() == arg_ty.constructor_id() {
-                let p_args = param_ty.type_args();
-                let a_args = arg_ty.type_args();
-                if p_args.len() == a_args.len() {
-                    for (p, a) in p_args.iter().zip(a_args.iter()) {
-                        let r = extract_typevar_binding(p, a, var_name);
-                        if !matches!(r, Ty::Unknown) { return r; }
-                    }
-                }
-            }
-            if let (Ty::Tuple(pts), Ty::Tuple(ats)) = (param_ty, arg_ty) {
-                if pts.len() == ats.len() {
-                    for (p, a) in pts.iter().zip(ats.iter()) {
-                        let r = extract_typevar_binding(p, a, var_name);
-                        if !matches!(r, Ty::Unknown) { return r; }
-                    }
-                }
-            }
-            Ty::Unknown
+            extract_typevar_binding_named_pair(p_args, a_args, var_name),
+        _ => extract_typevar_binding_fallback(param_ty, arg_ty, var_name),
+    }
+}
+
+fn extract_typevar_binding_fn(p_params: &[Ty], p_ret: &Ty, a_params: &[Ty], a_ret: &Ty, var_name: &str) -> Ty {
+    for (p, a) in p_params.iter().zip(a_params.iter()) {
+        let r = extract_typevar_binding(p, a, var_name);
+        if !matches!(r, Ty::Unknown) { return r; }
+    }
+    extract_typevar_binding(p_ret, a_ret, var_name)
+}
+
+fn extract_typevar_binding_named_pair(p_args: &[Ty], a_args: &[Ty], var_name: &str) -> Ty {
+    for (p, a) in p_args.iter().zip(a_args.iter()) {
+        let r = extract_typevar_binding(p, a, var_name);
+        if !matches!(r, Ty::Unknown) {
+            return r;
         }
     }
+    Ty::Unknown
+}
+
+fn extract_typevar_binding_fallback(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
+    if param_ty.constructor_id() == arg_ty.constructor_id() {
+        let p_args = param_ty.type_args();
+        let a_args = arg_ty.type_args();
+        if p_args.len() == a_args.len() {
+            for (p, a) in p_args.iter().zip(a_args.iter()) {
+                let r = extract_typevar_binding(p, a, var_name);
+                if !matches!(r, Ty::Unknown) { return r; }
+            }
+        }
+    }
+    if let (Ty::Tuple(pts), Ty::Tuple(ats)) = (param_ty, arg_ty) {
+        if pts.len() == ats.len() {
+            for (p, a) in pts.iter().zip(ats.iter()) {
+                let r = extract_typevar_binding(p, a, var_name);
+                if !matches!(r, Ty::Unknown) { return r; }
+            }
+        }
+    }
+    Ty::Unknown
 }
