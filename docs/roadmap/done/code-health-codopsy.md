@@ -1,4 +1,5 @@
 <!-- description: Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns -->
+<!-- done: 2026-07-23 -->
 # Code Health: Codopsy-Driven File Splits and Function Decomposition
 
 計測: `codopsy analyze crates -o /tmp/codopsy.json`（AST 品質解析、Rust 対応）。

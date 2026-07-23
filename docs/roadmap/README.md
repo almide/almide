@@ -6,7 +6,7 @@
 
 ## Active
 
-66 items
+65 items
 
 | Item | Description |
 |------|-------------|
@@ -18,7 +18,6 @@
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) |  |
-| [Code Health: Codopsy-Driven File Splits and Function Decomposition](active/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
 | [Codegen traversal totality](active/codegen-traversal-totality.md) |  |
 | [Completeness by Construction](active/completeness-by-construction.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
@@ -116,13 +115,14 @@
 
 ## Done
 
-258 items
+259 items
 
 <details>
-<summary>Show all 258 completed items</summary>
+<summary>Show all 259 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-07-23 | [Code Health: Codopsy-Driven File Splits and Function Decomposition](done/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
 | 2026-07-15 | [Claim wording: Perceus phrasing and the byte-identity guarantee scope](done/claim-wording-perceus-byte-identity.md) | Two claim-wording fixes so the public pitch is 100% backed by measurement |
 | 2026-07-14 | [v1 walled-real → 0 (ENDGAME — COMPLETE 2026-07-14, 112 → 0)](done/v1-wall-histogram-goal.md) | ENDGAME COMPLETE - v1 walled-real 112 to 0 (2026-07-14); stage ledger B1-B129 |
 | 2026-07-10 | [GOAL PROMPT — closure env full mode: heap, Float and Fn captures](done/closure-env-heap-captures-goal.md) | GOAL PROMPT — closure env full mode: heap/Float/Fn captures with masked recursive drop |
