@@ -196,10 +196,26 @@ Pairs with escape analysis.
 
 Specialize higher-order functions at known call sites.
 
-### 2.4 wasm-opt integration (optional)
+### 2.4 wasm-opt integration (optional) — DONE (2026-07-23)
 
-Post-build `wasm-opt -Oz` as opt-in flag. Current built-in DCE
-makes this nearly redundant (saves <1% additional).
+Shipped as `almide build --target wasm --wasm-opt`. The "<1% additional"
+estimate above was measured against the old v0 emitter's own built-in DCE
+(pre-retirement, #782) and no longer holds: v1's in-renderer reachability DCE
+(landed this session — preamble/import/function/data-segment pruning, plus a
+function-names-only name-section trim) cuts the *default* verified module
+from 8,713 B to 770 B on Hello World, but `wasm-opt -Oz` still saves a further
+28–43% on TOP of that (measured 2026-07-23): 770→548 B (Hello), 11,965→6,868 B
+(Variant). Reachability DCE only removes whole unreached units; it can't do
+wasm-opt's instruction-level work (local coalescing, inlining, dead-store
+elimination) — the two are complementary, not redundant.
+
+Kept strictly opt-in and default-off: the trust-spine ships the exact bytes
+its own certified rendering process produced, and `wasm-opt` is an external,
+unverified transform on that output. `--wasm-opt`'s own safety claim (that it
+never changes observable behavior on Almide's generated wasm) is backed by a
+dedicated differential gate — `tests/wasm_opt_parity_test.rs`, run in CI
+(`.github/workflows/ci.yml`) — not just asserted. Full writeup:
+[docs/WASM-OUTPUT.md](../../WASM-OUTPUT.md).
 
 ### 2.5 Memory layout type safety
 
