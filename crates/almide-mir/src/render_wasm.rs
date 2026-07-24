@@ -101,8 +101,8 @@ const I32_SIZE: u32 = 4; // a wasm i32 field is 4 bytes
 const LIST_RC_OFFSET: u32 = 0; // the refcount cell — RuntimeModel.v's RC_OFFSET = 0
 const LIST_LEN_OFFSET: u32 = LIST_RC_OFFSET + I32_SIZE;
 const LIST_CAP_OFFSET: u32 = LIST_LEN_OFFSET + I32_SIZE;
-const LIST_HEADER: u32 = LIST_CAP_OFFSET + I32_SIZE; // rc + len + cap
-const ELEM_SIZE: u32 = 8; // i64 elements
+pub(crate) const LIST_HEADER: u32 = LIST_CAP_OFFSET + I32_SIZE; // rc + len + cap
+pub(crate) const ELEM_SIZE: u32 = 8; // i64 elements
 // A freshly allocated heap block has exactly one owner — the `Alloc`'s +1, the
 // initial value of the cell RuntimeModel.v's `exec` starts the fold from.
 const RC_INITIAL: i32 = 1;

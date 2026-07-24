@@ -286,6 +286,32 @@ pub enum PrimKind {
     /// region_alloc.rs qualification), and the free-list is exactly what it
     /// was at entry.
     RegionRestore,
+    /// REGION-ONLY compact allocation (region_compact.rs, issue #838 stage 2):
+    /// dst = a HEADERLESS `bytes`-byte block. Inside a region the free-list is
+    /// empty, so `$alloc` is a pure frontier bump (grow check included) and the
+    /// rc/len/cap header + tag slot are provably dead — nothing inside a
+    /// qualified family reads them, and the frontier reset is the only free.
+    /// `zero` = fill the block with zeroes: the per-region SINGLETON twin,
+    /// whose fields must read as the original all-const block's padding (0).
+    /// Exists ONLY inside region windows / `__rgn_` clones; a headerless block
+    /// must never reach generic runtime code.
+    RegionAllocC { bytes: u32, zero: bool },
+    /// Compact-block HANDLE field load: `dst = *(i32*)(args[0] + off)` — the
+    /// region twin of `LoadHandle` minus the Handle/Add address bridge and the
+    /// 8-byte element slot (handles pack as raw 4-byte pointers).
+    RegionLoadH { off: u32 },
+    /// Compact-block SCALAR field load: `dst = *(i64*)(args[0] + off)`.
+    RegionLoadS { off: u32 },
+    /// Compact-block HANDLE field store: `*(i32*)(args[0] + off) = args[1]`.
+    RegionStoreH { off: u32 },
+    /// Compact-block SCALAR field store: `*(i64*)(args[0] + off) = args[1]`.
+    RegionStoreS { off: u32 },
+    /// Compact-region tag read: `dst = if args[0] == args[1] then tag else
+    /// args[2]`. Inside a qualified family every variant value is either THE
+    /// per-region nullary-ctor singleton or a compact dynamic block, and every
+    /// block is a distinct bump address — pointer identity IS the tag. Chains
+    /// (via `args[2]`) when a family carries two singletons.
+    RegionTagSel { tag: i64 },
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).

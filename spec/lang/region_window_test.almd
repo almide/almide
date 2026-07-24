@@ -60,3 +60,50 @@ test "windows interleave with unrelated heap use" {
   assert_eq(list.len(xs), 3)
   assert_eq(xs[2], 20)
 }
+
+// --- Compact layout (region_compact.rs, #838 stage 2) ---------------------
+
+// A SCALAR field between the tag and the handle fields: the compact layout
+// packs it as a raw 8-byte slot ahead of the 4-byte child pointers, so this
+// exercises RegionStoreS/RegionLoadS and the mixed-offset computation.
+type Weighted = Tip | Nd(Int, Weighted, Weighted)
+
+fn make_w(depth: Int) -> Weighted =
+  if depth == 0 then Tip
+  else Nd(depth, make_w(depth - 1), make_w(depth - 1))
+
+fn sum_w(t: Weighted) -> Int = match t {
+  Tip => 0,
+  Nd(x, l, r) => x + sum_w(l) + sum_w(r),
+}
+
+test "region compact: scalar field packs next to handle fields" {
+  var total = 0
+  for _ in 0..3 {
+    total = total + sum_w(make_w(3))
+  }
+  assert_eq(total, 3 * 11)
+}
+
+// TWO nullary constructors: two per-region singletons, so the tag read
+// becomes a chained RegionTagSel — each singleton must keep its own tag.
+type Tri = Aa | Bb | Nn(Tri, Tri)
+
+fn make_t(d: Int) -> Tri =
+  if d == 0 then Aa
+  else if d == 1 then Bb
+  else Nn(make_t(d - 1), make_t(d - 2))
+
+fn count_t(t: Tri) -> Int = match t {
+  Aa => 1,
+  Bb => 2,
+  Nn(l, r) => count_t(l) + count_t(r),
+}
+
+test "region compact: two singletons chain the tag select" {
+  var total = 0
+  for _ in 0..3 {
+    total = total + count_t(make_t(6))
+  }
+  assert_eq(total, 3 * 21)
+}

@@ -186,6 +186,8 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             Op::Prim {
                 dst: Some(dst),
                 kind: PrimKind::LoadHandle
+                    | PrimKind::RegionAllocC { .. }
+                    | PrimKind::RegionLoadH { .. }
                     | PrimKind::ArgsGetList
                     | PrimKind::ArgsGetListFull
                     | PrimKind::EnvGet

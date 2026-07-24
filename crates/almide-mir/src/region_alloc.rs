@@ -135,7 +135,7 @@ fn callee_closure(
     Some(seen)
 }
 
-fn rgn_name(n: &str) -> String {
+pub(crate) fn rgn_name(n: &str) -> String {
     format!("__rgn_{n}")
 }
 
@@ -200,7 +200,7 @@ fn match_region_window(
 
 /// Per-function single-def map (dst → op index) and SSA-const map (ConstInt
 /// dsts never reassigned) — the SAME discipline as Fuser::scan_consts.
-fn fn_tables(f: &MirFunction) -> (BTreeMap<ValueId, usize>, BTreeMap<ValueId, i64>) {
+pub(crate) fn fn_tables(f: &MirFunction) -> (BTreeMap<ValueId, usize>, BTreeMap<ValueId, i64>) {
     let mut def: BTreeMap<ValueId, usize> = BTreeMap::new();
     let mut multi: BTreeSet<ValueId> = BTreeSet::new();
     let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
@@ -517,4 +517,27 @@ pub fn apply_region_specialization(prog: &mut MirProgram) {
             .collect();
         prog.functions.push(clone);
     }
+
+    // Pass B3 (issue #838 stage 2): compact headerless block layout inside
+    // qualified clone FAMILIES (connected components of the window closures —
+    // a shared clone body forces one joint decision). Consolidation above
+    // already guarantees every member of a component carries the same
+    // singleton shape vector.
+    let mut comps: Vec<(BTreeSet<String>, Vec<Vec<i64>>, BTreeSet<usize>)> = Vec::new();
+    for w in &windows {
+        let mut names = w.closure.clone();
+        let shapes = w.shapes.clone();
+        let mut hosts = BTreeSet::from([w.fi]);
+        comps.retain(|(c, _, h)| {
+            if c.is_disjoint(&names) {
+                true
+            } else {
+                names.extend(c.iter().cloned());
+                hosts.extend(h.iter().copied());
+                false
+            }
+        });
+        comps.push((names, shapes, hosts));
+    }
+    crate::region_compact::compact_clone_families(prog, &comps);
 }
