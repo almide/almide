@@ -662,11 +662,13 @@ fn build_ir_with_drops(
     } else {
         ""
     };
-    // `map.find`'s `Option[(String, <scalar>)]` result routes its drop to the TAG-AWARE
-    // `$__drop_opt_str_int` (Some → recursive String-slot free; None → nothing) — a blind
-    // flat `rc_dec` of the Option's payload slot would only free the TUPLE's own refcount,
-    // leaking its String.
-    let opt_str_int_drop = if crate::lower::program_calls_map_find(&ir) {
+    // An `Option[(String, <scalar>)]` (map.find's result, or a plain `some((s, n))` ctor)
+    // routes its drop to the TAG-AWARE `$__drop_opt_str_int` (Some → recursive String-slot
+    // free; None → nothing) — a blind flat `rc_dec` of the Option's payload slot would only
+    // free the TUPLE's own refcount, leaking its String. Type-driven gate (#840): the old
+    // `map.find` name-heuristic missed the literal-ctor producer and left the routed call
+    // dangling in the WAT.
+    let opt_str_int_drop = if crate::lower::program_uses_opt_str_scalar(&ir) {
         crate::lower::OPT_STR_INT_DROP_SRC
     } else {
         ""

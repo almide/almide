@@ -1,0 +1,35 @@
+// Regression #840: an `Option[(String, <scalar>)]` built by a PLAIN `some((s, x))`
+// literal (no `map.find` anywhere) routes its drop to `$__drop_opt_str_int` — the
+// routine's injection gate must be TYPE-driven, not keyed on the `map.find` name,
+// or the routed call dangles and the WAT fails to parse.
+
+fn pick(flag: Bool) -> Option[(String, Float)] =
+  if flag then some(("café", 1.5)) else none
+
+fn take(o: Option[(String, Float)]) -> Float = match o {
+  some(p) => {
+    let (s, x) = p
+    if s == "café" then x else 0.0
+  },
+  none => 2.5,
+}
+
+test "option of (string, scalar) tuple from a literal ctor" {
+  assert_eq(take(pick(true)) + take(pick(false)), 4.0)
+}
+
+fn pick_i(flag: Bool) -> Option[(String, Int)] =
+  if flag then some(("key", 41)) else none
+
+test "option of (string, int) tuple survives rebinding and drop" {
+  var acc: Option[(String, Int)] = none
+  acc = pick_i(true)
+  let v = match acc {
+    some(p) => {
+      let (k, n) = p
+      if k == "key" then n else 0
+    },
+    none => 0,
+  }
+  assert_eq(v + 1, 42)
+}

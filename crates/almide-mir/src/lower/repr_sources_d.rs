@@ -240,38 +240,45 @@ pub fn program_uses_map_closure(program: &almide_ir::IrProgram) -> bool {
     false
 }
 
-/// Does the program call `map.find` anywhere (a `Some((key,value))` predicate-search result
-/// — the Option-tuple payload `$__drop_opt_str_int` frees) — gates `OPT_STR_INT_DROP_SRC`'s
-/// injection. Conservative on the call NAME alone (not the key/value TYPE, which would need
-/// re-deriving `map.find`'s exact concrete instantiation here) — a program calling
-/// `map.find` over a non-`(String,scalar)`-keyed map would pay one unused generated
-/// routine, never a missing one.
-pub fn program_calls_map_find(program: &almide_ir::IrProgram) -> bool {
-    struct Finder {
+/// Does the program carry an `Option[(String, <scalar>)]` anywhere (a bind/return/call-arg
+/// or expression type) — gates `OPT_STR_INT_DROP_SRC`'s injection. This is the EXACT type
+/// predicate every `variant_drop_handles = "opt_str_int"` router uses (`(String, !is_heap)`
+/// tuple payload: control.rs's match subject, binds_p4_b's `some((s, n))` ctor,
+/// heap_result_arm's arm-position mirror), so the routine is emitted exactly when a drop
+/// can route to it. The retired `program_calls_map_find` name-heuristic only covered the
+/// `map.find` PRODUCER and missed the same type built by a plain `some((s, n))` literal —
+/// the fuzzer-found #840 escape, where the routed call dangled and the WAT failed to parse.
+pub fn program_uses_opt_str_scalar(program: &almide_ir::IrProgram) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let is_osi = |ty: &Ty| {
+        matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                    && matches!(ts[0], Ty::String) && !crate::lower::is_heap_ty(&ts[1])))
+    };
+    struct Finder<'a> {
         found: bool,
+        pred: &'a dyn Fn(&Ty) -> bool,
     }
-    impl almide_ir::visit::IrVisitor for Finder {
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
         fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
-            if let almide_ir::IrExprKind::Call {
-                target: almide_ir::CallTarget::Module { module, func, .. },
-                ..
-            } = &expr.kind
-            {
-                if module.as_str() == "map" && func.as_str() == "find" {
-                    self.found = true;
-                }
+            if (self.pred)(&expr.ty) {
+                self.found = true;
             }
             if !self.found {
                 almide_ir::visit::walk_expr(self, expr);
             }
         }
     }
-    let mut finder = Finder { found: false };
+    let mut finder = Finder { found: false, pred: &is_osi };
     let funcs = program
         .functions
         .iter()
         .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
     for f in funcs {
+        if is_osi(&f.ret_ty) || f.params.iter().any(|p| is_osi(&p.ty)) {
+            return true;
+        }
         almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
         if finder.found {
             return true;

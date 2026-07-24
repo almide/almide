@@ -107,3 +107,49 @@ test "region compact: two singletons chain the tag select" {
   }
   assert_eq(total, 3 * 21)
 }
+
+// A FLOAT payload rides the compact scalar slot as raw bits (poisoned to the
+// i64-uniform repr, stored/loaded via RegionStoreS/RegionLoadS) — the sums
+// below are dyadic rationals, so equality is exact on both targets.
+type FTree = FLeaf | FNode(Float, FTree, FTree)
+
+fn make_f(depth: Int, x: Float) -> FTree =
+  if depth == 0 then FLeaf
+  else FNode(x, make_f(depth - 1, x + 0.25), make_f(depth - 1, x + 0.25))
+
+fn sum_f(t: FTree) -> Float = match t {
+  FLeaf => 0.0,
+  FNode(x, l, r) => x + sum_f(l) + sum_f(r),
+}
+
+test "region compact: float payload is bit-exact through the packed slot" {
+  var total = 0.0
+  for _ in 0..2 {
+    total = total + sum_f(make_f(3, 1.5))
+  }
+  // S(d,x) = x + 2*S(d-1, x+0.25); S(3, 1.5) = 13.0
+  assert_eq(total, 26.0)
+}
+
+// The region must SURVIVE a memory.grow at the frontier: one window big
+// enough that the (inlined) bump+grow tail actually grows linear memory
+// mid-region, then keeps allocating past the old boundary.
+test "region window: frontier grow inside one region" {
+  assert_eq(check(make(19)), 1048575)
+}
+
+// Free-list integrity across windows: the churn list dies each iteration
+// (its block enters the free-list), the next window EMPTIES the free-list on
+// entry and RESTORES it on exit — the churn list must keep reusing its block
+// and every tree must still count the same.
+test "region windows interleave with free-list churn" {
+  var total = 0
+  for i in 0..50 {
+    var xs: List[Int] = []
+    for j in 0..20 {
+      list.push(xs, i + j)
+    }
+    total = total + check(make(6)) + xs[19]
+  }
+  assert_eq(total, 50 * 127 + 2175)
+}

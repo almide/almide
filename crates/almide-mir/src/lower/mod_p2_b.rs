@@ -181,6 +181,11 @@ pub fn inline_mutual_tail_recursion(
     populate_abi_registries(fns, record_layouts);
     let can_err = compute_can_err(fns);
     let lifted_effect_fns = lifted_effect_fn_names(fns);
+    // Declared param types per fn — the rewrap pass's call-argument targets.
+    let param_sigs: std::collections::HashMap<String, Vec<almide_lang::types::Ty>> = fns
+        .iter()
+        .map(|f| (f.name.as_str().to_string(), f.params.iter().map(|p| p.ty.clone()).collect()))
+        .collect();
     let stripped: Vec<IrFunction> = fns
         .iter()
         .map(|f| {
@@ -196,6 +201,7 @@ pub fn inline_mutual_tail_recursion(
                 &can_err,
                 &lifted_effect_fns,
                 record_layouts,
+                &param_sigs,
             );
             nf
         })
