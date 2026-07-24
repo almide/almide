@@ -1,10 +1,18 @@
-> Last updated: 2026-03-28
+> Last updated: 2026-07-25
 
 # Codegen Specification
 
-Almide's codegen is a three-layer architecture that transforms typed IR into target-specific output. All semantic decisions are made in the IR before any text is emitted.
+Almide's codegen (`crates/almide-codegen`) is a three-layer architecture that
+transforms typed IR into source output for the **Rust** target (and WGSL). All
+semantic decisions are made in the IR before any text is emitted.
 
-**Source**: `src/codegen/mod.rs`
+The **WASM** target does not flow through this crate: it is the v1 MIR
+trust-spine in `crates/almide-mir` (WAT text, assembled by the CLI). The v0
+direct wasm emitter that used to live here was retired in #782. See
+[../ARCHITECTURE.md](../ARCHITECTURE.md) and
+[../WASM-OUTPUT.md](../WASM-OUTPUT.md).
+
+**Source**: `crates/almide-codegen/src/lib.rs`
 
 ```
 IrProgram (typed IR)
@@ -13,19 +21,20 @@ Layer 1: Nanopass Pipeline (target-specific semantic rewrites)
     |
 Layer 2: Emit (target-specific output)
     Rust  -> Template Renderer (TOML-driven) -> source code
-    WASM  -> Direct binary emit              -> .wasm bytes
+    WGSL  -> emit_wgsl                       -> shader source
 ```
 
 ## 1. Entry Point
 
-**Source**: `src/codegen/mod.rs`
+**Source**: `crates/almide-codegen/src/lib.rs`
 
-The single entry point is `codegen(program, target) -> CodegenOutput`.
+The single entry point is `codegen(program, target) -> CodegenOutput`
+(`codegen_with` accepts `CodegenOptions`).
 
 ```rust
 pub enum CodegenOutput {
-    Source(String),   // Rust target
-    Binary(Vec<u8>),  // WASM target
+    Source(String),   // Rust / WGSL targets
+    Binary(Vec<u8>),  // legacy variant; no longer produced
 }
 ```
 
@@ -35,7 +44,8 @@ The flow:
 2. The pipeline runs all applicable passes, transforming the IR in place
 3. Target-specific emit:
    - **Rust**: Walker renders IR via templates, prepends runtime preamble
-   - **WASM**: `emit_wasm::emit()` produces binary directly
+   - **WGSL**: `emit_wgsl::emit()` renders shader source
+   - **Wasm**: `unreachable!` — routed to `almide-mir` before reaching this crate
 
 ```almd
 // Input: hello.almd
@@ -59,23 +69,22 @@ pub fn main() -> () {
 
 ## 2. Target Enum
 
-**Source**: `src/codegen/pass.rs`
+**Source**: `crates/almide-codegen/src/pass.rs`
 
 ```rust
 pub enum Target {
     Rust,
-    TypeScript,  // Removed (2026-03-28) -- use --target wasm
-    Go,          // Pipeline stub
-    Python,      // Pipeline stub
-    Wasm,
+    Wasm,   // tombstone: codegen arm is unreachable! (v0 emitter retired, #782)
+    Wgsl,
 }
 ```
 
-Active targets with full pipelines: **Rust** and **WASM**. TypeScript codegen was removed; Go and Python have skeleton pipelines only.
+Active targets in this crate: **Rust** and **WGSL**. TypeScript codegen was
+removed (2026-03-28); wasm codegen moved to `crates/almide-mir`.
 
 Each target is configured via `target::configure()` which returns a `TargetConfig`:
 
-**Source**: `src/codegen/target.rs`
+**Source**: `crates/almide-codegen/src/target.rs`
 
 ```rust
 pub struct TargetConfig {
@@ -87,7 +96,7 @@ pub struct TargetConfig {
 
 ## 3. Nanopass Pipeline
 
-**Source**: `src/codegen/pass.rs`, `src/codegen/target.rs`
+**Source**: `crates/almide-codegen/src/pass.rs`, `crates/almide-codegen/src/target.rs`
 
 Each pass implements the `NanoPass` trait:
 
@@ -110,48 +119,45 @@ Passes compose into a `Pipeline`. The pipeline runner:
 
 ### Rust Pipeline (in order)
 
-**Source**: `src/codegen/target.rs`, `build_pipeline(Target::Rust)`
+**Source**: `crates/almide-codegen/src/target.rs`, `build_pipeline(Target::Rust)`
 
 | # | Pass | Source | Description |
 |---|------|--------|-------------|
-| 1 | BoxDerefPass | `pass_box_deref.rs` | Insert Deref IR nodes for pattern variables bound from Box'd fields in recursive enums |
-| 2 | TailCallOptPass | `pass_tco.rs` | Convert self-recursive tail calls into `while true` loops with parameter reassignment |
-| 3 | LICMPass | `pass_licm.rs` | Hoist loop-invariant pure expressions to `let` bindings before the loop |
-| 4 | TypeConcretizationPass | `pass.rs` | Box recursive types, generate anonymous record structs (stub) |
-| 5 | StreamFusionPass | `pass_stream_fusion/mod.rs` | Fuse pipe chains (`map \|> filter \|> fold`) into single loops using algebraic laws |
-| 6 | BorrowInsertionPass | `pass.rs` | Analyze parameter usage, mark `&T` vs `T` (stub) |
-| 7 | CaptureClonePass | `pass_capture_clone.rs` | Pre-clone variables captured by multiple move closures to avoid E0382 |
-| 8 | CloneInsertionPass | `pass_clone.rs` | Insert `Clone` IR nodes for heap-type variables based on use-count analysis |
-| 9 | MatchSubjectPass | `pass_match_subject.rs` | Insert `.as_str()` on String match subjects, `.as_deref()` on `Option<String>` |
-| 10 | EffectInferencePass | `pass_effect_inference.rs` | Infer capability requirements (IO, Net, Env, etc.) from stdlib usage |
-| 11 | StdlibLoweringPass | `pass_stdlib_lowering.rs` | Rewrite `Module { "list", "map" }` calls to `Named { "almide_rt_list_map" }` with arg decoration |
-| 12 | AutoParallelPass | `pass_auto_parallel.rs` | Rewrite pure `list.{map,filter,any,all}` calls to parallel `par_*` variants |
-| 13 | ResultPropagationPass | `pass_result_propagation.rs` | Insert `Try` (Rust `?`) around Result-returning calls in `effect fn` |
-| 14 | BuiltinLoweringPass | `pass_builtin_lowering.rs` | Convert `assert_eq`, `println`, etc. to `RustMacro` IR nodes |
-| 15 | FanLoweringPass | `pass_fan_lowering.rs` | Strip auto-try from fan spawn closures (try applied at join point) |
+| 1 | UnifyVarTablesPass | `pass_unify_var_tables.rs` | Merge per-module VarTables into one namespace |
+| 2 | ListPatternLoweringPass | `pass_list_pattern.rs` | Lower list patterns to length checks + indexing |
+| 3 | LambdaTypeResolvePass | `pass_lambda_type_resolve.rs` | Resolve stale lambda param types |
+| 4 | ConcretizeTypesPass | `pass_concretize_types*.rs` | Box recursive types, generate anonymous record structs |
+| 5 | PatternLiteralGuardPass | `pass_pattern_literal_guard.rs` | Turn literal sub-patterns into guards |
+| 6 | ResolveCallsPass | `pass_resolve_calls.rs` | Resolve call targets as an independent pass |
+| 7 | BoxDerefPass | `pass_box_deref.rs` | Insert Deref IR nodes for pattern variables bound from Box'd fields in recursive enums |
+| 8 | LICMPass | `pass_licm.rs` | Hoist loop-invariant pure expressions to `let` bindings before the loop |
+| 9 | EggSaturationPass | `pass_egg_saturation.rs` | Equality-saturation simplification |
+| 10 | MatrixShapeSpecPass | `pass_matrix_shape_spec.rs` | Specialize matrix ops on known shapes |
+| 11 | ConstFoldPass | `pass_const_fold.rs` | Constant folding |
+| 12 | IntrinsicLoweringPass | `pass_intrinsic_lowering.rs` | Lower `@intrinsic` declarations to runtime calls |
+| 13 | BorrowInsertionPass | `pass_borrow_inference*.rs` | Analyze parameter usage, mark `&T` vs `T` |
+| 14 | TailCallOptPass | `pass_tco.rs` | Convert self-recursive tail calls into `while true` loops with parameter reassignment |
+| 15 | CaptureClonePass | `pass_capture_clone.rs` | Pre-clone variables captured by multiple move closures to avoid E0382 |
+| 16 | CloneInsertionPass | `pass_clone.rs` | Insert `Clone` IR nodes for heap-type variables based on use-count analysis |
+| 17 | MatchSubjectPass | `pass_match_subject.rs` | Insert `.as_str()` on String match subjects, `.as_deref()` on `Option<String>` |
+| 18 | EffectInferencePass | `pass_effect_inference.rs` | Infer capability requirements (IO, Net, Env, etc.) from stdlib usage |
+| 19 | StdlibLoweringPass | `pass_stdlib_lowering.rs` | Rewrite `Module { "list", "map" }` calls to `Named { "almide_rt_list_map" }` with arg decoration |
+| 20 | AutoParallelPass | `pass_auto_parallel.rs` | Rewrite pure `list.{map,filter,any,all}` calls to parallel `par_*` variants |
+| 21 | ResultPropagationPass | `pass_result_propagation.rs` | Insert `Try` (Rust `?`) around Result-returning calls in `effect fn` |
+| 22 | BuiltinLoweringPass | `pass_builtin_lowering.rs` | Convert `assert_eq`, `println`, etc. to `RustMacro` IR nodes |
+| 23 | PeepholePass | `pass_peephole.rs` | Local IR peephole cleanups |
+| 24 | RustLoweringPass | `pass_rust_lowering.rs` | Rust-specific final lowering |
+| 25 | FanLoweringPass | `pass_fan_lowering.rs` | Strip auto-try from fan spawn closures (try applied at join point) |
+| 26 | NormalizeRuntimeCallsPass | `pass_normalize_runtime_calls.rs` | Canonicalize runtime call shapes |
+| 27 | IrLinkFlattenPass | `pass_ir_link_flatten.rs` | Flatten linked modules for emission |
+| 28 | TopLetStoragePass | `pass_top_let_storage.rs` | Classify top-level lets (const vs LazyLock) |
 
-### WASM Pipeline (in order)
-
-| # | Pass | Description |
-|---|------|-------------|
-| 1 | TailCallOptPass | Convert self-recursive tail calls into loops |
-| 2 | LICMPass | Hoist loop-invariant expressions |
-| 3 | EffectInferencePass | Infer capability requirements |
-| 4 | ResultPropagationPass | Insert Try for effect fn calls |
-| 5 | FanLoweringPass | Strip auto-try from fan spawn closures |
-
-### Other Passes (not in active pipelines)
-
-| Pass | Target | Source | Description |
-|------|--------|--------|-------------|
-| ResultErasurePass | TS/Python | `pass_result_erasure.rs` | Erase Result/Option wrapping: `ok(x)` becomes `x`, `err(e)` becomes throw |
-| MatchLoweringPass | TS | `pass_match_lowering.rs` | Lower `match` to `if/else` chains (TS has no native match) |
-| ShadowResolvePass | TS | `pass_shadow_resolve.rs` | Convert let-shadowing to assignment (TS disallows redeclaration) |
-| OptionErasurePass | TS/Python | `pass.rs` | Erase Option wrapping: `some(x)` becomes `x`, `none` becomes null |
+The exact order and the per-pass gating live in `build_pipeline` — treat this
+table as an index, and `target.rs` as the truth.
 
 ## 4. Template System
 
-**Source**: `src/codegen/template.rs`, `codegen/templates/rust.toml`
+**Source**: `crates/almide-codegen/src/template.rs`, `codegen/templates/rust.toml`
 
 Templates define syntax only. All semantic decisions are made by nanopass passes.
 
@@ -251,7 +257,7 @@ The Rust template set (`codegen/templates/rust.toml`) defines constructs for:
 
 ## 5. Walker
 
-**Source**: `src/codegen/walker/mod.rs`
+**Source**: `crates/almide-codegen/src/walker/mod.rs`
 
 The walker traverses typed IR and renders using templates. It is fully target-agnostic -- zero `if target == Rust` checks. Target differences are handled entirely by passes and templates.
 
@@ -303,7 +309,7 @@ Test functions are prefixed with `__test_almd_` to avoid collision with real fun
 
 ## 6. Rust Target Specifics
 
-**Source**: `src/codegen/mod.rs`, `emit_source()`
+**Source**: `crates/almide-codegen/src/lib.rs`, `emit_source()`
 
 ### Preamble
 
@@ -360,61 +366,24 @@ Two levels of generic bounds:
 - **Full** (user functions): `T: Clone + std::fmt::Debug + PartialEq + PartialOrd`
 - **Minimal** (bundled .almd module functions): `T: Clone`
 
-## 7. WASM Target
+## 7. WASM Target (not in this crate)
 
-**Source**: `src/codegen/emit_wasm/mod.rs`
+**Source**: `crates/almide-mir/src/pipeline.rs`, `render_wasm*.rs`
 
-The WASM target emits a standalone binary directly from IR, with no intermediate source code and no rustc dependency. It targets WASI preview1.
+The wasm binary is produced by the v1 MIR trust-spine, not by almide-codegen:
+`almide-mir` lowers the linked IR through MIR (Perceus ownership, layout) to
+WAT text; the CLI assembles it with the `wat` crate and keeps only function
+names in the name section. Stdlib calls are satisfied by self-hosted pure-Almide
+implementations (`stdlib/*.almd` via `render_wasm/registry.rs`); an unlinked
+call is a wall — a hard, diagnosed error. The v0 direct emitter that this
+section used to describe was retired in #782.
 
-### Architecture
-
-```
-IrProgram -> WasmEmitter (register + compile) -> wasm_encoder::Module -> Vec<u8>
-```
-
-Uses the `wasm_encoder` crate to produce a valid WASM module with:
-- Type section, Function section, Export section
-- Memory section (linear memory, bump allocator)
-- Data section (string literals, scratch areas)
-- Code section (compiled functions)
-
-### Memory Layout
-
-```
-[0..16)      Scratch area (iov struct for WASI fd_write)
-[16..48)     int_to_string scratch buffer
-[48]         Newline byte (0x0A)
-[49..N)      String literal data ([len:i32][data:u8...] per string)
-[N..)        Heap (bump allocator, grows upward)
-```
-
-### Module Organization
-
-The WASM emitter is split across specialized submodules:
-
-| Module | Responsibility |
-|--------|---------------|
-| `values.rs` | Value representation and type mapping |
-| `expressions.rs` | Expression compilation |
-| `statements.rs` | Statement compilation |
-| `functions.rs` | Function compilation and registration |
-| `control.rs` | Control flow (if/else, loops, match) |
-| `strings.rs` | String literal encoding |
-| `collections.rs` | List, map, set operations |
-| `closures.rs` | Lambda/closure compilation |
-| `equality.rs` | Deep equality comparison |
-| `runtime.rs`, `runtime_eq.rs` | Built-in runtime functions |
-| `rt_string.rs`, `rt_string_extra.rs` | String runtime operations |
-| `rt_numeric.rs` | Numeric runtime operations |
-| `rt_value.rs`, `rt_regex.rs` | Value/regex runtime |
-| `calls_*.rs` | Stdlib call compilation (string, list, map, option, etc.) |
-| `scratch.rs` | Scratch allocator for temporary memory |
-| `dce.rs` | Dead code elimination |
-| `wasm_macro.rs` | Helper macros for WASM instruction emission |
+Details: [../WASM-OUTPUT.md](../WASM-OUTPUT.md),
+[../ARCHITECTURE.md](../ARCHITECTURE.md), `crates/almide-mir/CLAUDE.md`.
 
 ## 8. CodegenOptions
 
-**Source**: `src/codegen/mod.rs`
+**Source**: `crates/almide-codegen/src/lib.rs`
 
 ```rust
 pub struct CodegenOptions {
@@ -426,7 +395,7 @@ When `repr_c` is true, the `struct_decl` and `enum_decl` templates select the `w
 
 ## 9. Module Function Naming
 
-**Source**: `src/codegen/walker/mod.rs`, `render_program()`
+**Source**: `crates/almide-codegen/src/walker/mod.rs`, `render_program()`
 
 Imported module functions are emitted with a prefixed name:
 
@@ -447,7 +416,7 @@ template = "almide_rt_{module}_{func}({args})"
 
 ## 10. CodegenAnnotations
 
-**Source**: `src/codegen/annotations.rs`
+**Source**: `crates/almide-codegen/src/annotations.rs`
 
 Annotations are populated by nanopass passes and read by the walker. The walker never checks types or context directly.
 
@@ -465,7 +434,7 @@ pub struct CodegenAnnotations {
 
 ## 11. TargetAttrs
 
-**Source**: `src/codegen/pass.rs`
+**Source**: `crates/almide-codegen/src/pass.rs`
 
 Per-node attributes set by passes, consumed by the template renderer:
 
@@ -478,7 +447,5 @@ pub struct TargetAttrs {
     pub none_type_hint: Option<String>, // None::<T> with explicit type
     pub match_as_str: bool,          // .as_str() on match subject
     pub lazy_init: bool,             // Top-level let -> LazyLock
-    pub option_erased: bool,         // (TS) some(x) -> x
-    pub result_wrapped: bool,        // (TS) Result in { ok, value/error }
 }
 ```

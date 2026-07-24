@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-Target Output Check: Run tests on Rust, TS, WASM and compare stdout.
+# Cross-Target Output Check: Run tests on native and WASM and compare stdout.
 # Usage: ./tools/cross-target-check.sh [dir]
 # Exit code: 0 = all outputs match, 1 = mismatches found
 

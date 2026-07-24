@@ -1,254 +1,203 @@
 # Architecture
 
-Almide is a ~72,000-line pure-Rust compiler organized as a workspace of 9 crates + a CLI binary. Dependencies: `serde` + `serde_json` (AST serialization), `toml` (template loading), `clap` (CLI), `lasso` (string interning).
+Almide is a ~170,000-line pure-Rust compiler organized as a workspace of a CLI
+binary + 13 library crates (plus the cargo-excluded `almide-kernel` SIMD crate
+and the Lean 4 proof project `almide-perceus-belt`). Key dependencies: `serde` +
+`serde_json` (AST serialization), `toml` (template loading), `clap` (CLI),
+`lasso` (string interning), `wat` + `wasmparser` + `wasm-encoder` (WASM
+assembly/validation), `lsp-server` + `lsp-types` (language server).
 
 ## Pipeline
 
 ```
-                          Build time (cargo build)
-                    ┌──────────────────────────────────────────┐
-                    │  grammar/*.toml ──┐                      │
-                    │  runtime/rs/src/  ─┤                     │
-                    │  stdlib/          ─┼─→ build.rs ─→ generated/       │
-                    │                          │  arg_transforms.rs      │
-                    │                          │  stdlib_sigs.rs         │
-                    │                          │  rust_runtime.rs        │
-                    │                          │  token_table.rs         │
-                    └──────────────────────────────────────────┘
-
-                            Run time (almide run)
-    ┌─────────────────────────────────────────────────────────────────┐
-    │                                                                 │
-    │  .almd source                                                   │
-    │       │                                                         │
-    │       ▼                                                         │
-    │  ┌─────────┐   ┌──────────┐   ┌─────────┐   ┌──────────────┐  │
-    │  │  Lexer   │──▶│  Parser  │──▶│   AST   │──▶│ Type Checker │  │
-    │  └─────────┘   └──────────┘   └─────────┘   └──────┬───────┘  │
-    │                                                      │          │
-    │                                              expr_types + env   │
-    │                                                      │          │
-    │                                                      ▼          │
-    │                              ┌───────────────────────────────┐  │
-    │                              │   Lowering (AST → Typed IR)   │  │
-    │                              └──────────────┬────────────────┘  │
-    │                                             │                   │
-    │                                             ▼                   │
-    │                              ┌───────────────────────────────┐  │
-    │                              │   Nanopass Pipeline            │  │
-    │                              │   (target-specific rewrites)   │  │
-    │                              └──────────────┬────────────────┘  │
-    │                                             │                   │
-    │                                             ▼                   │
-    │                      ┌────────────────────────────────────────┐ │
-    │                      │   Rust target          WASM target     │ │
-    │                      │   Template Renderer    Direct Emit     │ │
-    │                      │   (TOML-driven)        (linear memory) │ │
-    │                      └──────────────┬─────────────────────────┘ │
-    │                                     │                           │
-    │                                     ▼                           │
-    │                              .rs / .wasm                        │
-    └─────────────────────────────────────────────────────────────────┘
+  .almd source
+       │
+       ▼
+  ┌─────────┐   ┌──────────┐   ┌─────────┐   ┌──────────────┐
+  │  Lexer   │──▶│  Parser  │──▶│   AST   │──▶│ Type Checker │   almide-syntax / almide-frontend
+  └─────────┘   └──────────┘   └─────────┘   └──────┬───────┘
+                                                     │  expr_types + env
+                                                     ▼
+                               ┌───────────────────────────────┐
+                               │   Lowering (AST → Typed IR)   │   almide-frontend
+                               └──────────────┬────────────────┘
+                                              ▼
+                               ┌───────────────────────────────┐
+                               │ optimize → verify → mono →    │   almide-optimize
+                               │ ir_link                       │
+                               └──────────────┬────────────────┘
+                          ┌───────────────────┼──────────────────────┐
+                          ▼                   ▼                      ▼
+                 Rust target          WASM target             WGSL target
+                 codegen v3           v1 MIR trust-spine      emit_wgsl
+                 (nanopass + TOML     (almide-mir → WAT →     (almide-codegen)
+                 templates + walker)  wat assemble)
+                          │                   │
+                          ▼                   ▼
+                 native trust-spine      .wasm (verified;
+                 (v1 Rust render,        optional --wasm-opt
+                 v0 fallback on wall)    with parity gate)
+                          │
+                          ▼
+                 rustc/cargo → binary
 ```
+
+`almide-interp` sits beside the backends as a third executor: a tree-walking
+interpreter over the linked IR (after `lower → optimize → mono → ir_link`,
+before any target-lowering pass). It shares no codegen pass with either backend
+and serves as the cross-target oracle / executable spec.
+
+### Targets
+
+- **native (default)** — codegen v3 emits Rust source; the v1 native
+  trust-spine renderer (`almide-mir`) replaces it where it can lower (v0
+  codegen source is the fallback on a wall); `rustc`/`cargo` produces the
+  binary.
+- **`--target wasm`** — the v1 MIR trust-spine is the *only* path: `almide-mir`
+  renders WAT, the CLI assembles it with `wat`, strips local names (function
+  names are kept for debugging). The unverified v0 wasm emitter was retired
+  (#782): a wall is a hard, diagnosed error — there is no silent fallback.
+  `--wasm-opt` is opt-in and guarded by a differential parity gate against the
+  verified module (`tests/wasm_opt_parity_test.rs`).
+- **`--target wasm32` / `wasi`** — the generated Rust source compiled by bare
+  `rustc --target wasm32-wasip1` (SIMD128 enabled). A different beast from
+  `--target wasm`.
+- **`--target wgsl`** — GPU compute shaders via `emit_wgsl` in almide-codegen.
+
+`--verified` is the default (`--no-verified` is deprecated and warns).
+`almide run --target wasm` and `almide build --target wasm` share
+`compile_to_wasm_bytes`, so run and build are byte-identical.
 
 ## Crate Structure
 
 ```
-almide/                   Workspace root
-├── Cargo.toml            Workspace manifest
-├── src/                  CLI binary (almide)
-│   ├── main.rs           CLI entry: subcommands, orchestration
-│   ├── lib.rs            Public API (used by playground WASM crate)
-│   ├── resolve.rs        Module resolution (filesystem + git deps)
-│   ├── project.rs        almide.toml parsing, PkgId
-│   ├── project_fetch.rs  Git dependency fetching
-│   ├── diagnostic_render.rs  Diagnostic pretty-printing
-│   └── cli/
-│       ├── mod.rs         CLI module exports
-│       ├── run.rs         almide run: compile → rustc → execute
-│       ├── build.rs       almide build: compile → binary / WASM
-│       ├── check.rs       almide check: type check only
-│       ├── emit.rs        almide emit: output generated source
-│       ├── commands.rs    almide test: find + run test blocks
-│       └── selfupdate.rs  almide self-update: binary update from GitHub
+almide/                    Workspace root
+├── src/                   CLI binary (almide)
+│   ├── main.rs            Subcommands: init, run, build, test, check, lsp,
+│   │                      explain, fmt, compile, clean, add, deps, dep-path,
+│   │                      install, self-update, ide, fix, docs-gen
+│   │                      (no subcommand → REPL)
+│   ├── compile_driver.rs  Shared front half: parse → check → lower → optimize
+│   ├── resolve.rs         Module resolution (filesystem + git deps)
+│   ├── project.rs         almide.toml parsing, PkgId
+│   ├── project_fetch.rs   Git dependency fetching
+│   └── cli/               Subcommand implementations; lsp.rs is the LSP server
+│                          (lsp-server over stdio); repl.rs; ide.rs = semantic
+│                          queries for agents (outline, doc, stdlib-snapshot)
 │
 ├── crates/
-│   ├── almide-base/       Shared primitives
-│   │   ├── diagnostic.rs  Error/warning types with file:line + hint
-│   │   ├── intern.rs      String interning (lasso)
-│   │   └── span.rs        Source span types
-│   │
-│   ├── almide-syntax/     Parsing
-│   │   ├── ast.rs         AST node types (serde-serializable)
-│   │   ├── lexer.rs       Tokenizer (42 keywords, string interpolation, heredocs)
-│   │   └── parser/        Recursive descent parser with error recovery
-│   │       ├── entry.rs         Top-level: program, imports, declarations
-│   │       ├── declarations.rs  fn, type, trait, impl, test, top-let
-│   │       ├── expressions.rs   Binary, unary, pipe, match, if/then/else
-│   │       ├── primary.rs       Literals, identifiers, lambdas, blocks
-│   │       ├── statements.rs    let, var, guard, assignment
-│   │       ├── patterns.rs      Match arm patterns (variant, record, tuple)
-│   │       ├── types.rs         Type expressions (generics, records, functions)
-│   │       ├── collections.rs   List, map, record, tuple literals
-│   │       ├── compounds.rs     for-in, while, fan blocks
-│   │       └── hints/           Smart error hints (typos, keywords, delimiters)
-│   │
-│   ├── almide-types/      Type system
-│   │   ├── types/         Ty enum (Int, String, List, Record, Fn, Variant, ...)
-│   │   └── stdlib_info.rs UFCS candidate tables, auto-import module lists
-│   │
-│   ├── almide-frontend/   Type checking & lowering
-│   │   ├── check/         Constraint-based type inference + UFCS resolution
-│   │   ├── lower/         AST + Types → IR lowering, VarId assignment
-│   │   ├── canonicalize/  Import canonicalization
-│   │   ├── type_env.rs    Scoped variables, functions, types, modules
-│   │   ├── import_table.rs  Import resolution table
-│   │   └── stdlib.rs      Stdlib signature registration
-│   │
-│   ├── almide-ir/         Intermediate representation
-│   │   ├── lib.rs         IrProgram, IrExpr, IrStmt, IrPattern, CallTarget, VarTable
-│   │   ├── fold.rs        IR tree walker/transformer
-│   │   ├── visit.rs       Read-only IR visitor
-│   │   ├── use_count.rs   Variable use-count analysis (move vs clone)
-│   │   ├── result.rs      Result expression detection
-│   │   ├── effect.rs      Effect inference helpers
-│   │   └── wasm_repr.rs   WASM type representation
-│   │
-│   ├── almide-optimize/   Optimization
-│   │   ├── mono/          Monomorphization (generic instantiation, VarId alpha-renaming)
-│   │   └── optimize/      DCE, constant propagation, LICM, peephole, stream fusion
-│   │
-│   ├── almide-codegen/    Code generation
-│   │   ├── pass.rs        NanoPass trait, Pipeline, Target enum
-│   │   ├── target.rs      Target config: pipeline + templates per target
-│   │   ├── template.rs    TOML template engine ({var} substitution)
-│   │   ├── walker/        IR → Rust source renderer (target-agnostic)
-│   │   ├── emit_wasm/     Direct WASM binary emitter (linear memory, WASI)
-│   │   ├── pass_*.rs      Nanopass implementations (20+ passes)
-│   │   └── generated/     Auto-generated by build.rs (DO NOT EDIT)
-│   │       ├── arg_transforms.rs    Per-function argument decoration rules
-│   │       └── rust_runtime.rs      Embedded Rust runtime (include_str)
-│   │
-│   ├── almide-tools/      Tooling
-│   │   ├── fmt.rs         Source code formatter (almide fmt)
-│   │   ├── interface.rs   Module interface extraction (almide compile)
-│   │   └── almdi.rs       ALMDI metadata format
-│   │
-│   └── almide-lang/       Language metadata (version, feature flags)
+│   ├── almide-base/       Foundation: Sym interning (lasso), Span, Diagnostic
+│   ├── almide-syntax/     Lexer, recursive-descent parser, untyped AST
+│   ├── almide-types/      Resolved Ty, unification, protocol defs,
+│   │                      stdlib_info.rs (module registry, auto-import lists,
+│   │                      bundled stdlib sources via include_str!)
+│   ├── almide-lang/       Facade crate: re-exports syntax + types (no logic)
+│   ├── almide-frontend/   Type checker (Infer → Solve → Resolve), AST→IR
+│   │                      lowering, canonicalize, ir_link
+│   ├── almide-ir/         Typed IR: IrProgram/IrExpr (every node carries ty),
+│   │                      VarId/VarTable, visitors
+│   ├── almide-mir/        v1 Middle IR — single source of truth for ownership
+│   │                      and layout (Perceus). #![forbid(unsafe_code)].
+│   │                      Renders the wasm (WAT) and native trust-spines.
+│   ├── almide-optimize/   Monomorphization, DCE, constant propagation,
+│   │                      stream fusion
+│   ├── almide-codegen/    Codegen v3 for Rust (+ WGSL): nanopass pipeline,
+│   │                      TOML template renderer, target-agnostic walker
+│   ├── almide-interp/     Pre-codegen IR interpreter — 3rd cross-target oracle
+│   ├── almide-tools/      Formatter, module interface (almide compile), ALMDI
+│   ├── almide-dialect/    Pure-Rust MLIR dialect schema (no FFI)
+│   ├── almide-egg-lab/    Equality-saturation (egg) PoC, isolated
+│   ├── almide-kernel/     [cargo-excluded] target-specific SIMD numeric kernels
+│   └── almide-perceus-belt/  [Lean 4, not a cargo crate] Perceus RC/ownership
+│                             proof belt
 │
-├── grammar/               Grammar definitions
-│   ├── tokens.toml        Keyword → TokenType mapping
-│   ├── almide.toml        Grammar rules
-│   └── precedence.toml    Operator precedence table
-│
-├── codegen/templates/
-│   └── rust.toml          Rust syntax templates (~330 rules)
-│
-├── stdlib/defs/           Stdlib TOML definitions (23 modules, 430+ functions)
-│
-└── runtime/rs/src/        Rust runtime: 22 modules (string, list, map, json, fs, ...)
+├── grammar/               Git submodule → almide/almide-grammar: descriptive
+│                          keyword/precedence data consumed by the tree-sitter
+│                          and TextMate generators (not by the compiler build)
+├── codegen/templates/rust.toml   Rust syntax templates (~330 rules)
+├── stdlib/                Self-hosted stdlib: ~280 .almd files (see below)
+└── runtime/rs/src/        Native Rust runtime for @intrinsic functions
 ```
 
-## Codegen v3: Three-Layer Architecture
+## Codegen v3 (Rust target): Three-Layer Architecture
 
-All semantic decisions are made in the IR before any text is emitted. The walker sees only typed IR nodes — it never checks what target it's rendering for.
+All semantic decisions are made in the IR before any text is emitted. The
+walker sees only typed IR nodes — it never checks what target it renders for.
 
-### Layer 1: Nanopass Pipeline
+1. **Nanopass pipeline** — each `pass_*.rs` receives `&mut IrProgram` and does
+   one semantic rewrite (StdlibLowering, ResultPropagation, CloneInsertion,
+   BuiltinLowering, FanLowering, ...).
+2. **Template renderer** — TOML files define syntax patterns; the walker calls
+   `templates.render_with("if_expr", ...)`. All string rendering happens here.
+3. **Walker** — target-agnostic IR tree renderer; zero `if target == Rust`
+   checks.
 
-Each pass receives `&mut IrProgram` and rewrites it structurally. Passes are composable and target-specific:
+## WASM Trust-Spine (almide-mir)
 
-**Rust pipeline:**
-```
-TypeConcretization → BorrowInsertion → CloneInsertion
-  → StdlibLowering → ResultPropagation → BuiltinLowering → FanLowering
-```
+The wasm backend is the v1 MIR pipeline in `almide-mir`:
 
-**WASM pipeline:**
-Direct binary emission — no template layer. The `emit_wasm/` module walks the IR and emits WASM bytecode directly, managing linear memory layout, stack frames, and WASI syscalls.
+- `pipeline::try_render_wasm_source` lowers linked IR through MIR to WAT text;
+  the CLI assembles it (`wat::parse_str`) and keeps only function names in the
+  name section.
+- Ownership/RC follows Perceus; the crate forbids `unsafe`.
+- Stdlib calls are *self-hosted*: pure-Almide implementations from
+  `stdlib/*.almd` are registered in `render_wasm/registry.rs` and compiled
+  along with user code. An unlinked stdlib call is a wall (hard error).
+- `wasmparser::validate` guards the test harness; `almide test --target wasm`
+  falls back to native execution on a wall.
 
-| Pass | Target | What it does |
-|------|--------|------|
-| StdlibLowering | Rust | `Module { "list", "map" }` → `Named { "almide_rt_list_map" }` + arg decoration |
-| ResultPropagation | Rust | Insert `Try { expr }` (Rust `?`) on fallible calls in `effect fn` |
-| CloneInsertion | Rust | Insert `Clone` nodes based on use-count analysis |
-| BoxDeref | Rust | Insert `Deref` for recursive type access through `Box` |
-| BuiltinLowering | Rust | `assert_eq` → `RustMacro`, `println` → `RustMacro` |
-| FanLowering | Rust | Strip auto-try from fan spawn closures |
-| TailCallMark | WASM | Mark tail-recursive calls for `return_call` emission |
-| ClosureConversion | WASM | Lambda capture → explicit env struct passing |
+## Stdlib
 
-### Layer 2: Template Renderer (Rust target only)
+The stdlib is self-hosted: every function lives in `stdlib/<module>[_part].almd`
+(the old `stdlib/defs/*.toml` pipeline is gone). Two consumption paths:
 
-TOML files define syntax patterns. The walker calls `templates.render_with("if_expr", ...)` and gets back Rust syntax:
+- **Native / type signatures** — module sources are embedded via `include_str!`
+  in `almide-types/src/stdlib_info.rs`; the frontend extracts signatures, the
+  codegen extracts `@inline_rust` templates. `@intrinsic("almide_rt_*")`
+  declarations dispatch to hand-written Rust in `runtime/rs/src/<module>.rs`.
+- **WASM** — pure-Almide implementations registered in
+  `almide-mir/src/render_wasm/registry.rs` are compiled to WAT with user code.
 
-```toml
-# rust.toml
-[if_expr]
-template = "if ({cond}) {{ {then} }} else {{ {else} }}"
-```
-
-~330 template rules. All string rendering is done here — passes never produce text.
-
-### Layer 3: Walker
-
-`walker/` walks the IR tree and renders each node by calling the template engine. It is **fully target-agnostic** — zero `if target == Rust` checks. Target differences are handled entirely by passes (Layer 1) and templates (Layer 2).
-
-Key rendering functions:
-- `render_expr()` — expressions (recursively renders sub-expressions)
-- `render_stmt()` — statements (let, var, guard, assign)
-- `render_type()` — type annotations (named records, generics, tuples)
-- `render_pattern()` — match patterns (variants, records, tuples)
-- `render_function()` — function declarations with params, return type, body
-
-## WASM Direct Emitter
-
-The WASM target (`emit_wasm/`) bypasses templates entirely and emits binary WASM directly:
-
-- **Linear memory**: Stack allocator on memory 0, scratch buffer on memory 1 (multi-memory)
-- **Tail calls**: Native `return_call` / `return_call_indirect` (WASM 3.0)
-- **Strings**: UTF-8 in linear memory, length-prefixed
-- **Closures**: Explicit environment structs, function table indirect calls
-- **WASI**: File I/O, args, env vars via WASI preview1 imports
+Auto-import is the union of the seed list in
+`almide-frontend/src/import_table.rs` and `AUTO_IMPORT_BUNDLED` in
+`stdlib_info.rs`. Modules like `json`, `fs`, `http`, `env`, `io`, `random`,
+`regex`, `testing` require an explicit `import`.
 
 ## Build System
 
-`build.rs` generates code at compile time:
+The root `build.rs` is empty; codegen lives in crate-specific build scripts:
 
-1. **Scans `runtime/rs/src/*.rs`** → extracts function signatures → generates `arg_transforms.rs` (per-function argument decoration: BorrowStr, BorrowRef, ToVec, LambdaClone, Direct)
-2. **Reads stdlib definitions** → generates `stdlib_sigs.rs` (function signatures for type checking)
-3. **Reads grammar files** → generates `token_table.rs` (keyword → TokenType mapping)
-
-The Rust runtime is embedded in the compiler binary via `include_str!` and prepended to generated `.rs` files.
+- `almide-codegen/build.rs` — scans `runtime/rs/src/*.rs` → generates
+  `arg_transforms.rs` (per-function argument decoration) and `rust_runtime.rs`
+  (embedded runtime via `include_str!`).
+- `almide-frontend` — generates `stdlib_sigs.rs` (signatures for checking).
 
 ## Type System
 
 Constraint-based inference with eager unification:
 
-1. **Infer** — Walk AST, assign fresh type variables to unknowns, collect constraints
-2. **Solve** — Unify constraints, propagate solutions
-3. **Resolve** — Replace inference variables with concrete types in `expr_types`
+1. **Infer** — walk AST, assign fresh type variables, collect constraints
+2. **Solve** — unify constraints, propagate solutions
+3. **Resolve** — replace inference variables with concrete types in `expr_types`
 
-Key types: `Ty::Int`, `Ty::String`, `Ty::List(Box<Ty>)`, `Ty::Record { fields }`, `Ty::Variant { cases }`, `Ty::Fn { params, ret }`, `Ty::Option(Box<Ty>)`, `Ty::Result(Box<Ty>, Box<Ty>)`.
-
-UFCS resolution: `xs.map(fn)` → checker finds `builtin_module_for_type(List) = "list"` → dispatches to `list.map(xs, fn)`.
+UFCS resolution: `xs.map(f)` → checker finds `builtin_module_for_type(List) =
+"list"` → dispatches to `list.map(xs, f)`. Pipes, UFCS, and string
+interpolation are desugared once, in lowering — codegen never sees them.
 
 ## Module System
 
-1. **Resolve** (`resolve.rs`) — Walks `import` declarations, finds `.almd` files (local, git deps, stdlib skip)
-2. **Register** (`check/mod.rs`) — `register_module(name, program)` adds prefixed function/type signatures to TypeEnv
-3. **Check** — Main program type-checked with all modules registered
-4. **Lower** — Each module lowered to `IrModule` (separate function/type namespace)
-5. **Codegen** — Module functions emitted with `almide_rt_{module}_{func}` prefix
-
-Stdlib modules (TOML-defined) are never loaded from disk — their signatures come from `build.rs`-generated code, and their runtime is embedded.
+1. **Resolve** (`src/resolve.rs`) — walk `import` declarations, find `.almd`
+   files (local, git deps; stdlib handled via bundled sources)
+2. **Register** — module signatures added to TypeEnv with prefixes
+3. **Check** → **Lower** → per-module IR with separate namespaces
+4. **Codegen** — module functions emitted with `almide_rt_{module}_{func}`
+   prefixes
 
 ## Diagnostics
 
-Every diagnostic includes:
-- **Error code** (E001–E010) for programmatic consumption
-- **File:line:col** location
-- **Source context** with underline
-- **Actionable hint** pointing to a specific fix
+Every diagnostic includes an error code (E001–E030, E420 — see
+[diagnostics/](./diagnostics/)), file:line:col, source context with underline,
+and an actionable hint. Output: human-readable or `--json`.
 
 ```
 error[E005]: argument 'xs' expects List[Int] but got String
@@ -260,4 +209,12 @@ error[E005]: argument 'xs' expects List[Int] but got String
   |                        ^^^^^^^
 ```
 
-Supported output: human-readable (default) or `--json` for tool integration.
+## Verification Spine
+
+- **Contracts** — every observable cross-target promise is a named
+  `[[contract]]` in [contracts/contracts.toml](./contracts/contracts.toml) with
+  executable evidence (fixture / fuzz / Σ-probe / theorem).
+- **3-way oracle** — native, wasm, and `almide-interp` must agree on
+  stdout/stderr/exit code.
+- **Lean belt** — `almide-perceus-belt` proves the Perceus RC discipline that
+  `almide-mir` implements.

@@ -866,20 +866,26 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 
 | Level | Operators | Associativity |
 |-------|-----------|---------------|
-| 1 | `\|>` (pipe) | left |
-| 2 | `or` | left |
-| 3 | `and` | left |
-| 4 | `==` `!=` `<` `<=` `>` `>=` | left |
+| 1 | `or` | left |
+| 2 | `and` | left |
+| 3 | `==` `!=` `<` `<=` `>` `>=` | non-assoc (chaining is an error) |
+| 4 | `\|>` (pipe) | left, asymmetric (see below) |
 | 5 | `..` `..=` (range) | none |
 | 6 | `+` `-` (additive) | left |
-| 7 | `*` `/` `%` `^` (multiplicative, XOR) | left |
-| 8 | `**` (power) | right |
-| 9 | `-` `not` (unary) | prefix |
-| 10 | `.` `()` `[]` (postfix) | left |
+| 7 | `*` `/` `%` (multiplicative) | left |
+| 8 | `^` (power; `**` is an alias) | right |
+| 9 | `>>` (compose) | left (tightest binary) |
+| 10 | `-` `not` (unary) | prefix |
+| 11 | `.` `()` `[]` `!` `?` `?.` `??` (postfix) | left |
 
+- **`\|>` is asymmetric**: its right-hand side is a single call/compose chain.
+  Any other operator after it applies to the piped result —
+  `xs \|> list.map(f) + ys` is `(xs \|> list.map(f)) + ys`, and
+  `xs \|> f >> g` pipes into the composition `f >> g`
 - Assignment (`=`) is a statement, not an operator
 - Operator overloading is prohibited -- built-in types only
-- `&&` and `||` are rejected with hints to use `and`/`or`
+- `&&` and `||` are rejected with hints to use `and`/`or`; `++` is rejected
+  with a hint to use `+`
 
 ### Operator Semantics
 
@@ -887,13 +893,14 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 |----------|---------|
 | `+` | Addition (Int, Float) or concatenation (String, List) |
 | `-` `*` `/` `%` | Arithmetic |
-| `**` | Exponentiation |
-| `^` | Bitwise XOR (Int) |
+| `^` (`**`) | Exponentiation (bitwise XOR is `int.bxor`) |
 | `==` `!=` | Deep equality (all types except Fn) |
 | `<` `<=` `>` `>=` | Comparison |
 | `and` `or` `not` | Boolean logic |
 | `\|>` | Pipe |
+| `>>` | Function composition |
 | `..` `..=` | Range (exclusive / inclusive) |
+| `!` `?` `?.` `??` (postfix) | Unwrap / to-Option / optional chain / fallback |
 
 In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equality. In WASM codegen, they emit byte-level comparison.
 
@@ -1110,6 +1117,15 @@ Type-agnostic value operations for dynamic data handling.
 **set** (auto-imported):
 Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, `difference`, `len`, `is_empty`, `to_list`, `from_list`.
 
+**datetime** (21 functions):
+Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `to_iso`, `from_parts`, etc.
+
+**error** (3 functions):
+`message`, `chain`, `context`
+
+Also auto-imported: `bytes`, `matrix`, and the sized numeric modules
+(`int8`/`int16`/`int32`, `uint8`/`uint16`/`uint32`/`uint64`, `float32`).
+
 ### 17.2 Import-Required Modules
 
 **fs** (24 functions, all effect):
@@ -1130,17 +1146,11 @@ Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, 
 **random** (4 functions, effect):
 `int`, `float`, `choice`, `shuffle`
 
-**datetime** (21 functions):
-Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `to_iso`, `from_parts`, etc.
-
 **log** (8 functions, effect):
 `debug`, `info`, `warn`, `error`, `trace`, `set_level`, `with_context`, `flush`
 
 **testing** (7 functions):
 `assert`, `assert_eq`, `assert_ne`, `assert_ok`, `assert_err`, `assert_some`, `assert_none`
-
-**error** (3 functions):
-`message`, `chain`, `context`
 
 **regex** (8 functions):
 `match`, `full_match`, `find`, `find_all`, `replace`, `replace_first`, `split`, `captures`
@@ -1148,17 +1158,10 @@ Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`,
 **http** (26 functions, effect):
 HTTP client operations.
 
-### 17.3 Bundled Modules (Pure Almide)
+### 17.3 Bundled Modules (Pure Almide, import required)
 
-| Module | Functions |
-|--------|-----------|
-| args | 6 |
-| path | 7 |
-| time | 20 |
-| encoding | 10 |
-| hash | 3 |
-| url | 21 |
-| csv | 9 |
+`args`, `path`, `html`, `mem` — plus opt-in codecs `base64`, `hex`, `zlib` and
+`net`. (The former `time`/`encoding`/`hash`/`url`/`csv` modules were removed.)
 
 ### 17.4 Built-in Functions
 

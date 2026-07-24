@@ -11,7 +11,7 @@
 #   - top wall : the most frequent wall reason (the lever — one brick clears a whole class)
 #
 # ⚠ A wall count of 0 means "every function is INSIDE the lowering subset", NOT "byte-verified".
-# The real ② gate is a v0==v1 byte-match (run the repo's own vectors/tests on native AND wasm).
+# The real ② gate is a native==wasm behavior match (run the repo's own vectors/tests on native AND wasm).
 # `lowers but not byte-verified` is exactly the trap that produced a fake sha1=0 before the
 # `var v=w` aliasing miscompile was found by byte-matching the RFC 3174 vectors. Keep that order:
 # wall=0 first, byte-match SECOND and AUTHORITATIVE.
@@ -36,7 +36,7 @@ RBIN="$work_root/target/debug/examples/render_program"
 echo "building classify_corpus + render_program…" >&2
 ( cd "$work_root" && cargo build -q -p almide-mir --example classify_corpus --example render_program )
 
-# The repos verified by a real v0==wasm byte-match (not just wall=0): the repo's OWN test suite
+# The repos verified by a real native==wasm byte-match (not just wall=0): the repo's OWN test suite
 # passes in full on BOTH `almide test --target native` and `almide test --target wasm`.
 # Verified 2026-07-02 after the wasm share/layout/value-semantics fixes (contracts C-121..C-125).
 # Update as new ones are checked. Not verifiable: almide-web / almide-sqlite / wasm-webgl / obsid / audio-poc (no tests),
@@ -55,7 +55,7 @@ res_clean=0; res_total_fail=0; res_total_ffail=0; res_counted=0
 
 for d in "$ORG_DIR"/*/; do
   repo="$(basename "$d")"
-  [ "$repo" = "almide" ] && continue                       # the compiler itself is the v0 corpus, not a target
+  [ "$repo" = "almide" ] && continue                       # the compiler itself is the reference corpus, not a target
   # Sweep EVERY src/ module (recursive), not just the entry — a barrel `mod.almd` re-exports
   # submodules that hold the real code (porta's variants etc.), so entry-only counting reported
   # a false 0/0. classify_corpus reads ONE file with no cross-module import resolution, so a
@@ -166,7 +166,7 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo "> imports already are. They are NOT lowering bugs. Only REAL walls drive the wall=0 goal."
   echo
   echo "⚠ **wall=0 ≠ correct.** It means every function is inside the v1 lowering subset, NOT that the"
-  echo "output is byte-identical to v0. The authoritative ② gate is a **v0==v1 byte-match** (run the repo's"
+  echo "output is behaviorally correct. The authoritative ② gate is a **native==wasm byte-match** (run the repo's"
   echo "own vectors/tests on native AND \`--target wasm\`). \`🟡 lowers, byte-match TODO\` flags repos that"
   echo "reached wall=0 but have not yet been byte-verified — exactly where a silent miscompile can hide"
   echo "(e.g. the \`var v=w\` scalar-aliasing bug that faked an early sha1=0 until the RFC vectors caught it)."
@@ -188,8 +188,8 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo "## Notes"
   echo
   echo "- **Every** \`src/*.almd\` module is swept (not just the entry). The **resolved column** renders each module through the real pipeline (sibling + dep resolution), so cross-module importers ARE measured there. classify_corpus reads one file with no cross-module import resolution, so its sweep skips sibling importers — surfaced per repo as \`+N xmod\`; keep it for per-function wall reasons only."
-  echo "- The \`almide\` repo itself is the v0 corpus (its own \`proofs/corpus-wall.sh\` gate), not a target here."
-  echo "- \`porta\` is a NATIVE HOST (\`almide.toml\`: wasmtime + reqwest/Net) — the full MCP server is native-only by design (WASI preview1 has no net and can't embed wasmtime), so the 25 native-FFI are its host calls and only its PORTABLE protocol layer (jsonrpc/config) is in the v1 subset. Its byte-verification = the full test suite on both targets (7/7 wasm-runnable files + 1 FFI file native-only by design), plus the native (v0) build of the full MCP server, both green."
+  echo "- The \`almide\` repo itself is the reference corpus (its own \`proofs/corpus-wall.sh\` gate), not a target here."
+  echo "- \`porta\` is a NATIVE HOST (\`almide.toml\`: wasmtime + reqwest/Net) — the full MCP server is native-only by design (WASI preview1 has no net and can't embed wasmtime), so the 25 native-FFI are its host calls and only its PORTABLE protocol layer (jsonrpc/config) is in the v1 subset. Its byte-verification = the full test suite on both targets (7/7 wasm-runnable files + 1 FFI file native-only by design), plus the native build of the full MCP server, both green."
   echo "- ✅ **byte-verified** = the repo's OWN test suite passes IN FULL on both \`almide test --target native\` and \`--target wasm\` (the assertions are the vectors). The 2026-07-02 sweep took this from 2 repos (yaml, sha1) to every repo WITH a test suite, after fixing six wasm bug classes the sweep itself flushed out (share/+1 on pass-through and copied-pair paths, list-layout under-allocation, missing Value deep-eq, value.merge oracle mismatch, bytes.set value semantics — contracts C-121..C-125; see docs/roadmap/active/v1-org-byte-verification.md)."
   echo "- Repos that CANNOT be byte-verified yet: \`almide-web\` / \`almide-sqlite\` (no test vectors — write suites first), \`almide-dojo\` (task-bank fixtures, not a compilable suite)."
   echo "- To byte-verify a repo: run its own tests on BOTH targets (\`almide test --target native\` and"

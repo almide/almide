@@ -381,17 +381,22 @@ Protocol methods can be `effect fn`.
 
 テスト: `spec/lang/protocol_test.almd`, `spec/lang/protocol_advanced_test.almd`
 
-### 4.5 Impl Blocks
+### 4.5 Convention Methods
+
+`impl` ブロックは存在しない（削除済み）。プロトコルの充足も型へのメソッド追加も、
+convention method（`fn Type.method`）で行う:
 
 ```
-impl Action for GreetAction {
-  fn name(a: GreetAction) -> String = "greet"
-  fn execute(a: GreetAction, ctx: Context) -> Result[String, String] =
-    ok(a.greeting)
-}
+type GreetAction = { greeting: String }
+
+fn GreetAction.name(a: GreetAction) -> String = "greet"
+fn GreetAction.execute(a: GreetAction, ctx: Context) -> Result[String, String] =
+  ok(a.greeting)
 ```
 
-テスト: `spec/lang/impl_block_test.almd`, `spec/lang/trait_impl_test.almd`
+呼び出しは `GreetAction.name(a)` でも UFCS の `a.name()` でも可。
+
+テスト: `spec/lang/trait_impl_test.almd`, `spec/lang/protocol_test.almd`
 
 ### 4.6 Top-level `let`
 
@@ -1184,7 +1189,7 @@ All test files are located under `spec/lang/`:
 | `guard_test.almd` | Guard statements |
 | `hash_protocol_test.almd` | Hash protocol |
 | `heredoc_test.almd` | Multi-line strings |
-| `impl_block_test.almd`, `impl_error_test.almd` | Impl blocks |
+| `trait_impl_test.almd` | Convention methods + protocols |
 | `import_test.almd` | Import declarations |
 | `interpolation_edge_test.almd` | String interpolation edge cases |
 | `lambda_test.almd` | Lambda expressions |

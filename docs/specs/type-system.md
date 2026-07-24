@@ -448,24 +448,14 @@ protocol Showable {
 
 Two ways to declare that a type implements a protocol:
 
-**Convention methods** (inline):
+**Convention methods** (the only mechanism — `impl` blocks were removed):
 
 ```
 type Dog: Showable = { name: String }
 fn Dog.show(d: Dog) -> String = "Dog: " + d.name
 ```
 
-**Impl blocks**:
-
-```
-type Cat = { name: String }
-
-impl Showable for Cat {
-  fn show(c: Cat) -> String = "Cat: " + c.name
-}
-```
-
-Both register methods as `Type.method` in the function environment.
+Convention methods register as `Type.method` in the function environment.
 
 ### Built-in Protocols
 
@@ -481,7 +471,7 @@ Both register methods as `Type.method` in the function environment.
 
 After all declarations are registered, the checker validates:
 
-1. All required methods are defined (convention or impl block).
+1. All required methods are defined (as convention methods).
 2. Method signatures match the protocol definition (parameter types, return type, arity).
 3. `Self` is correctly substituted with the concrete type.
 
@@ -509,7 +499,7 @@ protocol Serializable {}
 type Marker: Serializable = { tag: String }
 ```
 
-Tests: `spec/lang/protocol_test.almd`, `spec/lang/impl_block_test.almd`, `spec/lang/protocol_generics_test.almd`, `spec/lang/protocol_advanced_test.almd`, `spec/lang/derive_conventions_test.almd`
+Tests: `spec/lang/protocol_test.almd`, `spec/lang/trait_impl_test.almd`, `spec/lang/protocol_generics_test.almd`, `spec/lang/protocol_advanced_test.almd`, `spec/lang/derive_conventions_test.almd`
 
 ---
 

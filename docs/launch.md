@@ -36,20 +36,20 @@ mistakes; *when it does*, only the language decides whether you see them).
   re-verifies ownership / name-resolution / capability bounds and emits a certificate —
   Almide aims to ship a *proof*, not just an artifact.
 - **Runtime today:** the shipping Almide compiler runs your programs now.
-- **Maturing (in the open):** the **verified-wasm execution path** that renders your code
-  to wasm *byte-for-byte identical to the reference*, carrying the proof. It is real,
-  gated in CI, and **not yet at full coverage** — the last mile (byte-level binding) is
-  the hard, deliberate, soundness-critical work, and we will not rush it.
+- **Shipped (2026-07):** the **verified-wasm execution path** is the *only* wasm
+  path — the unverified v0 emitter was retired (#782) once v1 carried the full
+  byte-gate corpus. Every wasm build carries the proof; a gap in coverage is an
+  honest, diagnosed error, never a silent fallback.
 
-We say this plainly because the whole point is trust: we won't claim "v1 runs everything"
-before it does.
+We say this plainly because the whole point is trust: we didn't claim "v1 runs
+everything" before it did.
 
 ## The direction — the destination
 
-**Full parity: every program and every library that runs today runs on the verified path
-— with proof.** When that lands, *unverified* machine-written code becomes the exception,
-and the old unverified path becomes obsolete as a byproduct. That is the north-star, and
-the verified-execution work is the climb toward it.
+**Full parity landed for wasm: everything that compiles to wasm compiles on the
+verified path — with proof.** The old unverified wasm path is gone. The climb
+continues on the native side (the v1 native render still falls back to classic
+codegen on a wall) and toward qualification-grade hardening of the proof spine.
 
 ## Who it's for
 
