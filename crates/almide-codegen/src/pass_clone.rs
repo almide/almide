@@ -304,6 +304,52 @@ fn insert_clones_while(cond: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> I
 
 /// `Call { target, args, type_args }` arm of [`insert_clones_live`].
 fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>, ctx: &mut CloneCtx) -> IrExprKind {
+    // E0505 guard (#809): a var passed BY BORROW as one argument stays borrowed
+    // until the call itself executes, so a MOVE of the same var anywhere in a
+    // SIBLING argument — a `__cap` capture bind, a nested call's arg — conflicts
+    // (`map.fold(acc, acc, (…) => acc)` moved `acc` into the closure's capture
+    // bind while `&acc` from the first argument was still live). Rustc's borrow
+    // live-range, not the flat last-use count, is the authority INSIDE one call:
+    // force-clone every var borrowed at the top level of an argument (or the
+    // method receiver) for the duration of this call's transform. The Borrow arm
+    // strips any clone inserted directly under it, so the borrowed occurrence
+    // itself stays a plain `&x`.
+    let mut borrowed: HashSet<VarId> = HashSet::new();
+    for a in &args {
+        if let IrExprKind::Borrow { expr, .. } = &a.kind {
+            if let IrExprKind::Var { id } = &expr.kind {
+                borrowed.insert(*id);
+            }
+        }
+    }
+    if let CallTarget::Method { object, .. } = &target {
+        if let IrExprKind::Borrow { expr, .. } = &object.kind {
+            if let IrExprKind::Var { id } = &expr.kind {
+                borrowed.insert(*id);
+            }
+        }
+    }
+    if !borrowed.is_empty() {
+        let merged: HashSet<VarId> = ctx.always.union(&borrowed).copied().collect();
+        let mut call_ctx = CloneCtx {
+            always: &merged,
+            eligible: ctx.eligible,
+            remaining: ctx.remaining,
+            in_loop: ctx.in_loop,
+        };
+        let args = args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect();
+        let target = match target {
+            CallTarget::Method { object, method } => CallTarget::Method {
+                object: Box::new(insert_clones_live(*object, &mut call_ctx)),
+                method,
+            },
+            CallTarget::Computed { callee } => CallTarget::Computed {
+                callee: Box::new(insert_clones_live(*callee, &mut call_ctx)),
+            },
+            other => other,
+        };
+        return IrExprKind::Call { target, args, type_args };
+    }
     let args = args.into_iter().map(|a| insert_clones_live(a, ctx)).collect();
     let target = match target {
         CallTarget::Method { object, method } => CallTarget::Method {
