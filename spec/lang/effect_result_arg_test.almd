@@ -32,3 +32,25 @@ fn len_or_zero(r: Result[String, String]) -> Int = match r {
 test "never-err effect call with a String payload" {
   assert_eq(len_or_zero(mk_s()), 5)
 }
+
+// CAN-ERR half (#841): the callee always-wraps now (AUTO_WRAP widened to every
+// non-Unit can-err lifted fn + payload-typed CALL arms wrap in the heap-result
+// arm machinery), so both the ok path and the propagated-err path hand the
+// caller a real Result block — the old hybrid ABI returned raw `T` on ok paths
+// and OOB-crashed the scope-end drop.
+effect fn mk_v(flag: Bool) -> Value =
+  if flag then value.object([("name", value.str("Alice"))])
+  else {
+    let n = int.parse("zz")!
+    value.int(n)
+  }
+
+test "can-err effect call as a first-class Result argument" {
+  let got = value.as_string(value.get(unwrap_or_null(mk_v(true)), "name") ?? value.null()) ?? ""
+  assert_eq(got, "Alice")
+  let fell_back = match mk_v(false) {
+    ok(_) => "ok",
+    err(_) => "err",
+  }
+  assert_eq(fell_back, "err")
+}

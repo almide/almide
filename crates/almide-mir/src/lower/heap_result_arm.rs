@@ -10,8 +10,13 @@ impl LowerCtx {
         // caller reads a cap-as-tag wrapper (the validate_age latent miscompile).
         // Build the Ok wrapper (`lower_result_str_piece` + `materialize_result_str`),
         // the heap twin of the scalar-Var `materialize_result_ok` arm below. Gated to
-        // VALUE-shaped arms (LitStr/Var/concat) whose ty IS the Ok payload — a
-        // Result-typed arm (Unwrap/ctor/nested if/block/call) keeps its own path.
+        // PAYLOAD-shaped arms whose ty IS the Ok payload — LitStr/Var/concat, and
+        // (#841) CALL arms: a CAN-ERR lifted effect fn now always-wraps (its body ty
+        // is overridden to `Result[T, String]`), so its ok arms are payload-typed
+        // calls (`value.object(..)`, `value.int(n)`) that must wrap here — left bare
+        // they returned raw `T` against the wrapped-Err propagation paths, the
+        // undiscriminable hybrid ABI. A Result-typed arm (Unwrap/ctor/nested
+        // if/block, or a call whose OWN type is the Result) keeps its own path.
         if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) =
             result_ty
         {
@@ -23,12 +28,20 @@ impl LowerCtx {
                     IrExprKind::LitStr { .. }
                         | IrExprKind::Var { .. }
                         | IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }
+                        | IrExprKind::Call { .. }
                 )
             {
                 let arm_mark = self.live_heap_handles.len();
                 let piece = self.lower_result_str_piece(arm)?;
                 let repr = repr_of(result_ty).ok()?;
-                let obj = self.materialize_result_str(piece, repr, false, false);
+                // A `Result[Value, _]` wrapper drops via the recursive
+                // DropResultValue (value_ok), a String one via the flat DropListStr.
+                let obj = self.materialize_result_str(
+                    piece,
+                    repr,
+                    false,
+                    crate::lower::is_value_ty(&a[0]),
+                );
                 self.ops.push(Op::Consume { v: obj });
                 self.drop_arm_locals(arm_mark);
                 return Some(obj);
