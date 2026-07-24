@@ -348,6 +348,30 @@ fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
   buf
 }
 
+// list.take_end over a List[String] — the LAST n elements, each kept element CO-OWNED
+// (#808: the raw list_take_end copy aliased the String handles un-owned → source and
+// result both released them at scope end, the rc_dec double-free trap).
+fn list_take_end_str(xs: List[String], n: Int) -> List[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let cnt = len - start
+  let buf = prim.alloc_list_str(cnt)
+  let _c = __copy_slots_rc(h + 12 + start * 8, prim.handle(buf) + 12, cnt, 0)
+  buf
+}
+
+// list.tail over a List[String] — elements [1, n), each kept element CO-OWNED
+// (#808 sibling: the raw list_tail copy had the identical un-owned alias).
+fn list_tail_str(xs: List[String]) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let newlen = if n > 0 then n - 1 else 0
+  let buf = prim.alloc_list_str(newlen)
+  let _c = __copy_slots_rc(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
+  buf
+}
+
 // Apply f to slot i of the list at base `bh` iff 0 <= i < n (else no-op). The closure `f` is
 // invoked via CallIndirect (the list.map machinery), here CONDITIONALLY — v0's update only calls
 // `f(s.clone())` when the index is in bounds. Returns 0 (a scalar helper, so list_update keeps a
