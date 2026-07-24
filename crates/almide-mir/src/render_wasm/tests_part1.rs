@@ -352,9 +352,9 @@
         } else {
             ""
         };
-        // `map.find`'s `Option[(String, <scalar>)]` result — `$__drop_opt_str_int` (see
-        // pipeline.rs's mirror).
-        let opt_str_int_drop = if crate::lower::program_calls_map_find(&ir) {
+        // An `Option[(String, <scalar>)]` — `$__drop_opt_str_int` (see pipeline.rs's
+        // mirror; type-driven gate, #840).
+        let opt_str_int_drop = if crate::lower::program_uses_opt_str_scalar(&ir) {
             crate::lower::OPT_STR_INT_DROP_SRC
         } else {
             ""

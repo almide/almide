@@ -296,7 +296,7 @@ impl LowerCtx {
             // above would only `rc_dec` the TUPLE's own handle, leaking its String (the
             // exact class of bug this session's `_str`-dispatch fix already caught
             // elsewhere). Override with the type-specific recursive
-            // `$__drop_opt_str_int` (generated, gated on `program_calls_map_find`) —
+            // `$__drop_opt_str_int` (generated, gated on `program_uses_opt_str_scalar`) —
             // `variant_drop_handles` is checked BEFORE `heap_elem_lists` in the drop-op
             // cascade (`drop_op_for`), so this takes priority for the SAME value; the
             // `heap_elem_lists` entry above still stands and is harmlessly unused for
