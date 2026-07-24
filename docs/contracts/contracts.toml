@@ -1629,6 +1629,7 @@ evidence  = [
   { path = "spec/wasm_cross/list_chunk_windows.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_chunk_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_windows_zero.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_window_zero.almd", class = "fixture" },
 ]
 
 [[contract]]
