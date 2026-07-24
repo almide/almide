@@ -207,14 +207,15 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 
 | Headline | Value |
 |---|---|
-| WASM "Hello World" binary | **8.7 KB** verified as shipped (runtime + debug names included) — **874 B** after `wasm-opt -Oz`; Rust on the same target is 40 KB+ even fully size-tuned |
+| WASM "Hello World" binary | **770 B** verified as shipped (reachability-pruned runtime + function-name debug info) — **548 B** after `wasm-opt -Oz`; Rust on the same target is 40 KB+ even fully size-tuned |
 | Native minigit CLI binary | **444 KB** stripped, 0 dependencies |
 | MiniGit AI-coding benchmark | **100% pass** (Sonnet 5 × 20 trials) — most concise of 5 languages (233 LOC), faster than Gleam/MoonBit |
 
-The verified pipeline ships the exact bytes it certified — post-hoc optimizers are
-never run on the default path, so the "as shipped" number carries the full audited
-runtime and the name section for trap backtraces. What's inside the binary, why it's
-small, and how to reproduce every number: **[docs/WASM-OUTPUT.md](./docs/WASM-OUTPUT.md)**.
+The verified pipeline ships the exact bytes its own rendering process produced —
+reachability DCE prunes unreached runtime helpers inside the renderer itself, but
+post-hoc external optimizers are never run on the default path, so the "as shipped"
+number carries the name section for trap backtraces. What's inside the binary, why
+it's small, and how to reproduce every number: **[docs/WASM-OUTPUT.md](./docs/WASM-OUTPUT.md)**.
 
 Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.md)**.
 

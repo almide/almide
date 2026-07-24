@@ -117,6 +117,14 @@ enum Commands {
         /// the legacy v0 codegen path directly (its wasm gets wasm-opt).
         #[arg(long)]
         no_verified: bool,
+        /// Run `wasm-opt -Oz` on the wasm output after the verified renderer
+        /// produces it. This is an explicit opt-in that LEAVES the verified
+        /// envelope: wasm-opt is an external, unverified transform, so the
+        /// shipped bytes are no longer the exact bytes the trust-spine
+        /// rendered (see docs/WASM-OUTPUT.md). Default off — without this
+        /// flag the module ships verbatim. No-op on the native target.
+        #[arg(long = "wasm-opt")]
+        wasm_opt: bool,
     },
     /// Run tests
     Test {
@@ -735,7 +743,7 @@ fn dispatch(cli: Cli) {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, program_args } =>
             dispatch_run(file, no_check, release, target, no_verified, program_args),
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(cli::BuildArgs {
@@ -751,6 +759,7 @@ fn dispatch(cli: Cli) {
                 emit_unverified,
                 verified: !no_verified,
                 native_verified: !no_verified,
+                wasm_opt,
             });
         }
         Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),

@@ -387,6 +387,19 @@ fn classify_f64_op(
                 poison.insert(*u);
             }
         }
+        // `__list_append1`'s ELEMENT arg is FLEXIBLE (like a ListLit elem):
+        // the render crosses the i64 ABI with one boundary reinterpret, so an
+        // f64-classified appended value keeps its real-f64 local — the whole
+        // point of the self-append rewrite is not to poison the hot
+        // accumulator the way a generic call boundary would.
+        Op::CallFn { dst, name, args, .. } if name == "__list_append1" => {
+            if let Some(d) = dst {
+                poison.insert(*d);
+            }
+            if let Some(CallArg::Handle(l) | CallArg::Scalar(l)) = args.first() {
+                poison.insert(*l);
+            }
+        }
         Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
             if let Some(d) = dst {
                 poison.insert(*d);

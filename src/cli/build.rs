@@ -19,6 +19,7 @@ pub struct BuildArgs<'a> {
     pub emit_unverified: bool,
     pub verified: bool,
     pub native_verified: bool,
+    pub wasm_opt: bool,
 }
 
 /// The npm/JavaScript target was removed with the TS backend; reject it with
@@ -124,7 +125,7 @@ pub fn cmd_build(args: BuildArgs) {
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
         file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
@@ -132,7 +133,7 @@ pub fn cmd_build(args: BuildArgs) {
 
     // Direct WASM emit: .almd → IR → WASM binary (no rustc)
     if is_wasm_direct {
-        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified);
+        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt);
         return;
     }
 
@@ -211,7 +212,7 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
 }
 
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
-fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool) {
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
 
@@ -220,7 +221,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, produced_by_v1) = match compile_to_wasm_bytes(file, allow_unverified, verified) {
+    let (bytes, _produced_by_v1) = match compile_to_wasm_bytes(file, allow_unverified, verified) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
@@ -231,29 +232,38 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         std::process::exit(1);
     }
 
-    // A PCC-VERIFIED v1 module is shipped AS-IS: wasm-opt is an UNVERIFIED transform, so running it
-    // would replace the exact bytes the trust-spine verified. `--verified` therefore emits the
-    // verified module verbatim (a v0 fallback build still gets wasm-opt, exactly as without the flag).
-    if produced_by_v1 {
-        err(&format!("Built {} ({} bytes, v1-verified — wasm-opt skipped)", output, pre_size));
+    // The trust-spine ships the bytes ITS OWN rendering process produced —
+    // reachability DCE and the name-section trim already ran inside that
+    // pipeline (docs/WASM-OUTPUT.md). `wasm-opt` is a different kind of
+    // thing: an EXTERNAL, unverified transform applied to the renderer's
+    // finished output, so running it replaces bytes the trust-spine produced
+    // with bytes a separate, un-certified tool rewrote. That is why it stays
+    // an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
+    // see the wasm-opt parity leg (`tests/wasm_opt_parity_test.rs`) for the
+    // differential-testing evidence backing this tier's own guarantee.
+    if !wasm_opt {
+        err(&format!(
+            "Built {} ({} bytes, v1-verified — wasm-opt skipped; pass --wasm-opt for a smaller, non-verified build)",
+            output, pre_size
+        ));
         return;
     }
 
-    // Post-process: wasm-opt -O3 (binaryen) shrinks size + sometimes helps
-    // perf via constant prop / dead-store elim across stdlib calls. Default-on
-    // (round-trip verified across spec/ on WASM target — 197 pass identical
-    // with and without wasm-opt). Opt-out via ALMIDE_NO_WASM_OPT=1.
-    // Silent skip if wasm-opt is not installed.
-    let opt_out = std::env::var("ALMIDE_NO_WASM_OPT").map(|v| v == "1" || v == "true").unwrap_or(false);
-    if !opt_out {
-        if let Ok(post_size) = run_wasm_opt(output) {
+    match run_wasm_opt(output) {
+        Ok(post_size) => {
             let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
-            err(&format!("Built {} ({} bytes → {} bytes, -{:.1}%)", output, pre_size, post_size, pct));
-            return;
+            err(&format!(
+                "Built {} ({} bytes → {} bytes, -{:.1}%) — wasm-opt applied: this is NOT the trust-spine-verified module",
+                output, pre_size, post_size, pct
+            ));
         }
-        // wasm-opt not available → silent fallback to unoptimized output.
+        Err(_) => {
+            err(&format!(
+                "Built {} ({} bytes) — --wasm-opt requested but wasm-opt is not installed; shipped the verified module unoptimized",
+                output, pre_size
+            ));
+        }
     }
-    err(&format!("Built {} ({} bytes)", output, pre_size));
 }
 
 /// Compile an `.almd` file to a raw wasm32-wasi module (no wasm-opt, no file IO).
@@ -449,6 +459,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
     ) {
         Ok(wat) => match wat::parse_str(&wat) {
             Ok(bytes) => {
+                let bytes = strip_wasm_name_section(bytes);
                 if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
                     err(&format!(
                         "[almide] v1 trust-spine emitted the module ({} bytes)",
@@ -498,6 +509,126 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // exactly as without `--verified`.
     let _ = (&mut ir_program, allow_unverified, verified);
     render_wasm_module(&source_text, &v1_self_modules)
+}
+
+/// Trim every "name"-id custom section down to its function-names
+/// subsection, dropping local-names and any other subsection.
+///
+/// `wat::parse_str` always emits a name section recording every symbolic
+/// `$name` the WAT source used — functions AND every per-function local
+/// (`$v1`, `$v2`, ...). `docs/WASM-OUTPUT.md` commits to keeping function
+/// names because they're what a wasmtime trap backtrace prints
+/// (`<unknown>!funcname`) — the one piece of this metadata with real
+/// diagnostic value. Local names carry none (wasmtime backtraces never
+/// print them) and dominate the section's size: measured on
+/// `closure.almd`, 251 named locals cost 1.6KB versus keeping only the 20
+/// function names. The wasm spec defines custom sections — and every
+/// subsection within the "name" section — as ignorable by any consumer
+/// that doesn't recognize them (§2.5.9), so dropping subsections can never
+/// change what the module computes; this is exactly as safe as the
+/// preamble reachability DCE (`render_wasm_dce.rs`), just one level lower:
+/// a format-legal removal, not a black-box "optimization".
+fn strip_wasm_name_section(bytes: Vec<u8>) -> Vec<u8> {
+    const HEADER_LEN: usize = 8; // b"\0asm" + version u32
+    if bytes.len() < HEADER_LEN {
+        return bytes;
+    }
+    let mut out = bytes[..HEADER_LEN].to_vec();
+    let mut i = HEADER_LEN;
+    while i < bytes.len() {
+        let id = bytes[i];
+        let Some((payload_len, len_bytes)) = read_leb128_u32(&bytes[i + 1..]) else {
+            // Malformed length — bail out and keep everything from here on
+            // verbatim rather than risk corrupting the module.
+            out.extend_from_slice(&bytes[i..]);
+            return out;
+        };
+        let payload_start = i + 1 + len_bytes;
+        let payload_end = (payload_start + payload_len as usize).min(bytes.len());
+        let is_name_section = id == 0 && custom_section_name(&bytes[payload_start..payload_end]) == Some("name");
+        if is_name_section {
+            if let Some(trimmed) = trim_name_section_to_function_names(&bytes[payload_start..payload_end]) {
+                out.push(0);
+                out.extend_from_slice(&write_leb128_u32(trimmed.len() as u32));
+                out.extend_from_slice(&trimmed);
+            }
+            // Malformed name-section payload: drop it whole rather than risk
+            // shipping a corrupt custom section — still format-legal (the
+            // section is optional metadata, never load-bearing).
+        } else {
+            out.extend_from_slice(&bytes[i..payload_end]);
+        }
+        i = payload_end;
+    }
+    out
+}
+
+/// A custom section's payload starts with its own length-prefixed name string.
+fn custom_section_name(payload: &[u8]) -> Option<&str> {
+    let (name_len, len_bytes) = read_leb128_u32(payload)?;
+    let name_bytes = payload.get(len_bytes..len_bytes + name_len as usize)?;
+    std::str::from_utf8(name_bytes).ok()
+}
+
+/// A "name" custom section's payload is its own length-prefixed "name"
+/// identifier string, followed by a sequence of subsections (id byte +
+/// LEB128 length + payload) — id 1 is function names, the only one kept.
+/// Returns `None` if the payload is too short to even contain the leading
+/// identifier string (malformed).
+fn trim_name_section_to_function_names(payload: &[u8]) -> Option<Vec<u8>> {
+    let (name_len, len_bytes) = read_leb128_u32(payload)?;
+    let prefix_end = len_bytes + name_len as usize;
+    if prefix_end > payload.len() {
+        return None;
+    }
+    let mut out = payload[..prefix_end].to_vec();
+    let mut i = prefix_end;
+    while i < payload.len() {
+        let id = payload[i];
+        let Some((sub_len, sub_len_bytes)) = read_leb128_u32(&payload[i + 1..]) else {
+            return None;
+        };
+        let sub_start = i + 1 + sub_len_bytes;
+        let sub_end = (sub_start + sub_len as usize).min(payload.len());
+        if id == 1 {
+            out.extend_from_slice(&payload[i..sub_end]);
+        }
+        i = sub_end;
+    }
+    Some(out)
+}
+
+/// Decode an unsigned LEB128 `u32` at the start of `bytes`. Returns the
+/// decoded value and how many bytes it occupied, or `None` on overflow /
+/// truncated input.
+fn read_leb128_u32(bytes: &[u8]) -> Option<(u32, usize)> {
+    let mut result: u32 = 0;
+    let mut shift = 0u32;
+    for (i, &byte) in bytes.iter().enumerate() {
+        result |= ((byte & 0x7f) as u32).checked_shl(shift)?;
+        if byte & 0x80 == 0 {
+            return Some((result, i + 1));
+        }
+        shift += 7;
+        if shift >= 32 {
+            return None;
+        }
+    }
+    None
+}
+
+/// Encode a `u32` as unsigned LEB128.
+fn write_leb128_u32(mut v: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let byte = (v & 0x7f) as u8;
+        v >>= 7;
+        if v == 0 {
+            out.push(byte);
+            return out;
+        }
+        out.push(byte | 0x80);
+    }
 }
 
 /// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.

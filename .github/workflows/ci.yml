@@ -107,6 +107,12 @@ jobs:
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 
+      - name: Install wasm-opt (binaryen)
+        # Required by the wasm-opt parity gate (wasm_opt_parity_test) — without
+        # it the test silently early-returns as a pass, so `--wasm-opt`'s
+        # differential-equivalence claim would never actually be checked here.
+        run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
+
       - name: Cargo tests
         # Parallel-safe: the shared build scratch dir (/tmp/almide-run,
         # /tmp/almide-build) is serialized across processes by an advisory

@@ -70,3 +70,36 @@ fn __list_concat_rc(a: List[Int], b: List[Int]) -> List[Int] = {
   let _y = __lc_copy_rc(ho + 12 + la * 8, hb + 12, lb, 0)
   out
 }
+
+// SELF-APPEND (`x = x + [e]`, incl. the v1 `list.push` desugar — see
+// concat_to_append.rs for the window rewrite that calls this): value-semantics
+// append that BORROWS `a`; the caller's `Drop x` right after releases the old
+// reference either way, so the result must carry its OWN reference.
+// - rc == 1 && len < cap: the caller's dying handle is the object's sole
+//   owner, so appending in place is unobservable; the value-semantics return
+//   of `a` Dups it (rc → 2) and the caller's Drop rebalances to 1 on the
+//   rebound slot. This is what makes the accumulator loop amortized O(1):
+//   __lc_cap's geometric blocks leave cap > len headroom on every grow.
+// - else: a fresh geometric-capacity copy (the concat path's exact physics);
+//   the caller's Drop releases the old reference as before.
+fn __list_append1(a: List[Int], v: Int) -> List[Int] = {
+  let ha = prim.handle(a)
+  let la = prim.load32(ha + 4)
+  if prim.load32(ha) == 1 and la < prim.load32(ha + 8) then {
+    prim.store64(ha + 12 + la * 8, v)
+    prim.store32(ha + 4, la + 1)
+    a
+  } else {
+    // Growth uses 2·len + 8 (NOT __lc_cap's pow2): an append-built list then
+    // walks the SAME size sequence on every rebuild, so the freed previous
+    // block is an exact free-list match (the C-131 churn argument, applied to
+    // this fn's own size class) — and the resulting block placement measured
+    // ~15% faster than pow2 blocks on spectralnorm's read-streamed vectors.
+    let out = prim.alloc_list(la * 2 + 8)
+    let ho = prim.handle(out)
+    prim.store32(ho + 4, la + 1)
+    let _x = __lc_copy(ho + 12, ha + 12, la, 0)
+    prim.store64(ho + 12 + la * 8, v)
+    out
+  }
+}

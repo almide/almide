@@ -205,6 +205,13 @@ fn try_render_wasm_source_impl_rest(
         verbose,
     );
 
+    // Self-append windows (`x = x + [e]`, incl. the `list.push` desugar) →
+    // the amortized-O(1) `__list_append1` (self-hosted in list_concat.almd —
+    // §4.1: the hand-written WAT floor must not grow). MUST run BEFORE the
+    // runtime link: the linker's fixpoint scans CallFn names, and this rewrite
+    // is what introduces the `__list_append1` calls it needs to link.
+    crate::concat_to_append::rewrite_self_append(&mut functions);
+
     synthesize_and_link_runtime_fns(&mut functions, &mutable_tls, &layouts, verbose)?;
 
     // EAGER GLOBAL-INIT semantics (C-007): v0 evaluates every ABORTABLE top-let initializer at
@@ -369,6 +376,13 @@ fn try_render_wasm_source_impl_rest(
             }
         }
     }
+
+    // #826 ②: rewrite `CallFn math.sqrt`-style single-prim wrapper calls to the
+    // prim itself — kills the per-call overhead AND stops the call boundary from
+    // poisoning the f64-local classification of the surrounding arithmetic. Runs
+    // after the runtime link (the wrappers must exist as MirFunctions); on the
+    // native leg the map is empty (no self-host link), so it is wasm-only in effect.
+    crate::scalar_call_inline::inline_scalar_prim_wrappers(&mut functions);
 
     // #824: drop MakeUnique guards that are provably dead (the value they'd guard
     // is never aliased anywhere in its own function) — see alias_safety.rs's doc

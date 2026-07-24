@@ -27,7 +27,9 @@
 
 pub mod alias_safety;
 pub mod certificate;
+pub mod concat_to_append;
 pub mod coown_names;
+pub mod scalar_call_inline;
 pub mod lower;
 pub mod pipeline;
 pub mod purity;
