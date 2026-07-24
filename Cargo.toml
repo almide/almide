@@ -5,7 +5,7 @@ exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare"
 
 [package]
 name = "almide"
-version = "0.34.2"
+version = "0.34.3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -19,14 +19,16 @@ almide-optimize = { path = "crates/almide-optimize" }
 almide-interp = { path = "crates/almide-interp" }
 almide-frontend = { path = "crates/almide-frontend" }
 almide-dialect = { path = "crates/almide-dialect" }
-# v1 MIR trust-spine — the opt-in `--verified` wasm codegen path (pipeline::try_render_wasm_source),
-# tried before v0 codegen and byte-identical to it where it lowers; v0 fallback on wall. Acyclic:
+# v1 MIR trust-spine — the sole wasm codegen path (pipeline::try_render_wasm_source; the v0
+# emitter was retired in #782, a wall is a hard error) and the native Rust render (which still
+# falls back to v0 codegen source on a wall). Acyclic:
 # almide-mir keeps `almide` only as a DEV-dependency, so this edge does not cycle.
 almide-mir = { path = "crates/almide-mir" }
 # WAT (text) → wasm bytes: the v1 renderer emits WAT; the CLI assembles it to a module.
 wat = "1"
 # Structural validation of the assembled v1 module: `wat` assembles without full stack-shape
-# validation, so the test harness validates before accepting a v1 module (invalid → v0 fallback).
+# validation, so the test harness validates before accepting a v1 module (invalid → the test
+# harness falls back to native execution; there is no v0 wasm emitter anymore).
 wasmparser = "0.253"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
