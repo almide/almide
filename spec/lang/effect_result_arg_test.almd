@@ -1,0 +1,34 @@
+// Regression (yaml wasm-leg divergence, 2026-07-24): a NEVER-ERR lifted effect
+// call (`effect fn -> Value`, frontend-lifted to `Result[Value, String]`) passed
+// as a FIRST-CLASS Result argument. The never-err pre-pass rewrites the call's
+// type to raw `T` everywhere; `rewrap_never_err_into_result_targets` must then
+// re-wrap it as a real `ok(..)` in call-argument positions whose callee param
+// declares Result — without that, the callee read the raw block's payload slots
+// as a Result (yaml's `unwrap(parse("name: Alice"))` returned "" on wasm while
+// native said "Alice").
+
+effect fn mk() -> Value = value.object([("name", value.str("Alice"))])
+
+fn unwrap_or_null(r: Result[Value, String]) -> Value = match r {
+  ok(v) => v,
+  err(_) => value.null(),
+}
+
+fn gs(v: Value, key: String) -> String =
+  value.as_string(value.get(v, key) ?? value.null()) ?? ""
+
+test "never-err effect call as a first-class Result argument" {
+  let v = unwrap_or_null(mk())
+  assert_eq(gs(v, "name"), "Alice")
+}
+
+effect fn mk_s() -> String = "hello"
+
+fn len_or_zero(r: Result[String, String]) -> Int = match r {
+  ok(s) => string.len(s),
+  err(_) => 0,
+}
+
+test "never-err effect call with a String payload" {
+  assert_eq(len_or_zero(mk_s()), 5)
+}

@@ -266,6 +266,14 @@ fn inline_and_classify_cross_module_fns(
         prev_auto_wrap = Some(cur);
         let wide_can_err = crate::lower::compute_can_err(&all_rewritten);
         let wide_lifted = crate::lower::lifted_effect_fn_names(&all_rewritten);
+        // Declared param types per fn — the rewrap pass's call-argument targets.
+        let param_sigs: std::collections::HashMap<String, Vec<almide_lang::types::Ty>> =
+            all_rewritten
+                .iter()
+                .map(|f| {
+                    (f.name.as_str().to_string(), f.params.iter().map(|p| p.ty.clone()).collect())
+                })
+                .collect();
         for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
             let self_name = f.name.as_str().to_string();
             crate::lower::strip_never_err_unwraps(
@@ -281,6 +289,7 @@ fn inline_and_classify_cross_module_fns(
                 &wide_can_err,
                 &wide_lifted,
                 record_layouts,
+                &param_sigs,
             );
         }
     }

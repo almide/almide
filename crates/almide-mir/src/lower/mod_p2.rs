@@ -505,6 +505,7 @@ pub fn rewrap_never_err_into_result_targets(
     can_err: &std::collections::HashSet<String>,
     lifted_effect_fns: &std::collections::HashSet<String>,
     record_layouts: &RecordLayouts,
+    param_sigs: &std::collections::HashMap<String, Vec<Ty>>,
 ) {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::types::constructor::TypeConstructorId;
@@ -532,6 +533,7 @@ pub fn rewrap_never_err_into_result_targets(
         lifted: &'a std::collections::HashSet<String>,
         result_vars: std::collections::HashSet<u32>,
         record_layouts: &'a RecordLayouts,
+        param_sigs: &'a std::collections::HashMap<String, Vec<Ty>>,
     }
     impl S<'_> {
         fn is_raw_never_err_call(&self, e: &IrExpr) -> bool {
@@ -601,6 +603,28 @@ pub fn rewrap_never_err_into_result_targets(
                         }
                     }
                 }
+                // `unwrap(step())` — a CALL-ARGUMENT position whose CALLEE PARAM's declared
+                // type is Result (#840 follow-up class, the yaml `unwrap(parse(s))` shape):
+                // the callee reads a real Result block off its param, so a raw never-err
+                // call in that slot must re-wrap exactly like a bind/construction target.
+                // Positional zip against the callee's declared params; an arity mismatch
+                // (a shape this pre-pass doesn't understand) is left untouched — the
+                // lowering's own walls stay the safety net.
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                    let Some(ptys) = self.param_sigs.get(name.as_str()) else {
+                        return;
+                    };
+                    if ptys.len() != args.len() {
+                        return;
+                    }
+                    for (arg, pty) in args.iter_mut().zip(ptys.iter()) {
+                        if matches!(pty, Ty::Applied(TypeConstructorId::Result, _))
+                            && self.is_raw_never_err_call(arg)
+                        {
+                            self.wrap(arg, pty.clone());
+                        }
+                    }
+                }
                 // `(step(), 9): (Result[..], Int)` — each slot's type comes directly from the
                 // TUPLE expr's own `Ty::Tuple` positionally (no registry lookup needed).
                 IrExprKind::Tuple { elements } => {
@@ -650,5 +674,6 @@ pub fn rewrap_never_err_into_result_targets(
             }
         }
     }
-    S { can_err, lifted: lifted_effect_fns, result_vars, record_layouts }.visit_expr_mut(body);
+    S { can_err, lifted: lifted_effect_fns, result_vars, record_layouts, param_sigs }
+        .visit_expr_mut(body);
 }
