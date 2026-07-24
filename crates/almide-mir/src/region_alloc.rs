@@ -198,125 +198,318 @@ fn match_region_window(
     Some((*t, f.clone(), g.clone(), drop_at))
 }
 
+/// Per-function single-def map (dst → op index) and SSA-const map (ConstInt
+/// dsts never reassigned) — the SAME discipline as Fuser::scan_consts.
+fn fn_tables(f: &MirFunction) -> (BTreeMap<ValueId, usize>, BTreeMap<ValueId, i64>) {
+    let mut def: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut multi: BTreeSet<ValueId> = BTreeSet::new();
+    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
+    for (i, op) in f.ops.iter().enumerate() {
+        if let Some(d) = crate::render_wasm::defined_value(op) {
+            if def.insert(d, i).is_some() {
+                multi.insert(d);
+            }
+        }
+        if let Op::ConstInt { dst, value } = op {
+            consts.insert(*dst, *value);
+        }
+        if let Op::SetLocal { local, .. } = op {
+            multi.insert(*local);
+            consts.remove(local);
+        }
+    }
+    for m in &multi {
+        def.remove(m);
+        consts.remove(m);
+    }
+    (def, consts)
+}
+
+/// SINGLETON qualification for one function: every `Prim::Store` address
+/// chain must root at a fresh non-`ListLit` alloc (so no store can ever hit a
+/// `ListLit` block), and there must be no `ListSetScalar` (same reason). When
+/// this holds for the whole closure, an all-const `ListLit` block is
+/// immutable for its region lifetime and every instance can be ONE shared
+/// block built once at region entry (binarytrees' `Leaf`: half of all nodes).
+fn stores_root_at_fresh_allocs(f: &MirFunction) -> bool {
+    let (def, consts) = fn_tables(f);
+    for op in &f.ops {
+        if matches!(op, Op::ListSetScalar { .. }) {
+            return false;
+        }
+        let Op::Prim { kind: PrimKind::Store { .. }, args, .. } = op else { continue };
+        let mut v = args[0];
+        let mut ok = false;
+        for _ in 0..8 {
+            let Some(&d) = def.get(&v) else { break };
+            match &f.ops[d] {
+                Op::IntBinOp { op: crate::IntOp::Add, a, b, .. } => {
+                    if consts.contains_key(b) {
+                        v = *a;
+                    } else if consts.contains_key(a) {
+                        v = *b;
+                    } else {
+                        break;
+                    }
+                }
+                Op::Prim { kind: PrimKind::Handle, args: hargs, .. } => {
+                    let Some(&hd) = def.get(&hargs[0]) else { break };
+                    ok = matches!(&f.ops[hd], Op::Alloc { .. });
+                    break;
+                }
+                _ => break,
+            }
+        }
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+/// The distinct all-const `ListLit` element vectors of a function.
+fn const_listlit_shapes(f: &MirFunction) -> Vec<Vec<i64>> {
+    let (_, consts) = fn_tables(f);
+    let mut shapes: Vec<Vec<i64>> = Vec::new();
+    for op in &f.ops {
+        let Op::ListLit { elems, .. } = op else { continue };
+        let vals: Option<Vec<i64>> = elems.iter().map(|e| consts.get(e).copied()).collect();
+        if let Some(v) = vals {
+            if !shapes.contains(&v) {
+                shapes.push(v);
+            }
+        }
+    }
+    shapes
+}
+
+struct RegionWindow {
+    fi: usize,
+    start: usize,
+    drop_at: usize,
+    closure: BTreeSet<String>,
+    shapes: Vec<Vec<i64>>,
+}
+
 /// Rewrite every qualifying window and append the `__rgn_` clones. Applied to
 /// the wasm leg only, after pipeline verification, before the reachability
 /// prune (the prune scans rendered text, so the clone calls keep them live).
 pub fn apply_region_specialization(prog: &mut MirProgram) {
     let mg_lo = crate::MG_SLOT_BASE as i64;
     let mg_hi = mg_lo + 8 * prog.mutable_global_count as i64;
-    let mut clones_needed: BTreeSet<String> = BTreeSet::new();
-    let mut qualified_cache: BTreeMap<(String, String), Option<BTreeSet<String>>> =
-        BTreeMap::new();
 
-    // Pass 1: find windows per function, qualify their closures, rewrite ops.
-    let names: Vec<String> = prog.functions.iter().map(|f| f.name.clone()).collect();
-    for fi in 0..prog.functions.len() {
-        // Skip functions that are themselves clones (added in a prior call).
-        if names.get(fi).is_some_and(|n| n.starts_with("__rgn_")) {
+    // Pass A: collect qualifying windows (no mutation yet).
+    let mut windows: Vec<RegionWindow> = Vec::new();
+    let mut qualified_cache: BTreeMap<(String, String), Option<(BTreeSet<String>, Vec<Vec<i64>>)>> =
+        BTreeMap::new();
+    for (fi, func) in prog.functions.iter().enumerate() {
+        if func.name.starts_with("__rgn_") {
             continue;
         }
         let mut occ: BTreeMap<ValueId, usize> = BTreeMap::new();
-        {
-            let f = &prog.functions[fi];
-            let mut vals: Vec<ValueId> = Vec::new();
-            for op in &f.ops {
-                vals.clear();
-                crate::render_wasm::op_values(op, &mut vals);
-                for v in &vals {
-                    *occ.entry(*v).or_insert(0) += 1;
-                }
+        let mut vals: Vec<ValueId> = Vec::new();
+        for op in &func.ops {
+            vals.clear();
+            crate::render_wasm::op_values(op, &mut vals);
+            for v in &vals {
+                *occ.entry(*v).or_insert(0) += 1;
             }
-        }
-        let mut max_id: u32 = 0;
-        for v in occ.keys() {
-            max_id = max_id.max(v.0);
-        }
-        for p in &prog.functions[fi].params {
-            max_id = max_id.max(p.value.0);
         }
         let mut i = 0;
-        let mut out: Vec<Op> = Vec::new();
-        while i < prog.functions[fi].ops.len() {
-            let window = if i + 3 <= prog.functions[fi].ops.len() {
-                match_region_window(&prog.functions[fi].ops, i, &occ)
-            } else {
-                None
+        while i + 3 <= func.ops.len() {
+            let Some((_t, f, g, drop_at)) = match_region_window(&func.ops, i, &occ) else {
+                i += 1;
+                continue;
             };
-            if let Some((_t, f, g, drop_at)) = window {
-                let key = (f.clone(), g.clone());
-                let closure = qualified_cache.entry(key).or_insert_with(|| {
-                    let c = callee_closure(prog, [f.as_str(), g.as_str()])?;
-                    let ok = c.iter().all(|n| {
-                        prog.functions
-                            .iter()
-                            .find(|h| &h.name == n)
-                            .is_some_and(|h| {
-                                h.ops.iter().all(|op| region_safe_op(op, mg_lo, mg_hi, &c))
-                            })
-                    });
-                    ok.then_some(c)
-                });
-                if let Some(c) = closure.clone() {
-                    max_id += 1;
-                    let sp = ValueId(max_id);
-                    let (fc, gc) = {
-                        let ops = &prog.functions[fi].ops;
-                        let mut fc = ops[i].clone();
-                        let mut gc = ops[i + 1].clone();
-                        if let Op::CallFn { name, .. } = &mut fc {
-                            *name = rgn_name(name);
-                        }
-                        if let Op::CallFn { name, .. } = &mut gc {
-                            *name = rgn_name(name);
-                        }
-                        (fc, gc)
-                    };
-                    out.push(Op::Prim {
-                        kind: PrimKind::RegionSave,
-                        dst: Some(sp),
-                        args: vec![],
-                    });
-                    out.push(fc);
-                    out.push(gc);
-                    out.push(Op::Prim {
-                        kind: PrimKind::RegionRestore,
-                        dst: None,
-                        args: vec![sp],
-                    });
-                    // Keep the ops between the consumer and the (removed)
-                    // drop — they cannot reference `t` (occ == 3) and now run
-                    // after the restore, i.e. outside the region.
-                    for k in i + 2..drop_at {
-                        out.push(prog.functions[fi].ops[k].clone());
-                    }
-                    clones_needed.extend(c);
-                    i = drop_at + 1;
-                    continue;
+            let key = (f.clone(), g.clone());
+            let entry = qualified_cache.entry(key).or_insert_with(|| {
+                let c = callee_closure(prog, [f.as_str(), g.as_str()])?;
+                let members: Vec<&MirFunction> = c
+                    .iter()
+                    .filter_map(|n| prog.functions.iter().find(|h| &h.name == n))
+                    .collect();
+                if members.len() != c.len() {
+                    return None;
                 }
+                if !members
+                    .iter()
+                    .all(|h| h.ops.iter().all(|op| region_safe_op(op, mg_lo, mg_hi, &c)))
+                {
+                    return None;
+                }
+                // Singleton shapes: only when every member's stores provably
+                // avoid ListLit blocks; capped so the extra clone params stay
+                // register-friendly. Failing the bar disables the singleton
+                // (empty shapes), never the region itself.
+                let mut shapes: Vec<Vec<i64>> = Vec::new();
+                if members.iter().all(|h| stores_root_at_fresh_allocs(h)) {
+                    for h in &members {
+                        for s in const_listlit_shapes(h) {
+                            if !shapes.contains(&s) {
+                                shapes.push(s);
+                            }
+                        }
+                    }
+                    if shapes.len() > 2 {
+                        shapes.clear();
+                    }
+                }
+                Some((c, shapes))
+            });
+            if let Some((c, shapes)) = entry.clone() {
+                windows.push(RegionWindow { fi, start: i, drop_at, closure: c, shapes });
+                i = drop_at + 1;
+            } else {
+                i += 1;
             }
-            out.push(prog.functions[fi].ops[i].clone());
-            i += 1;
         }
-        prog.functions[fi].ops = out;
+    }
+    if windows.is_empty() {
+        return;
     }
 
-    // Pass 2: append the clones — drops removed (the frontier reset IS the
-    // teardown), callee names remapped into the clone set. `Dup` keeps its
-    // normal render (alias + rc_inc): the count is dead weight inside a
-    // region (nothing frees), but a stray increment on a region block is a
-    // harmless store — correctness never depends on stripping it.
-    for name in &clones_needed {
+    // Consolidate: a clone is generated ONCE per name, so every closure that
+    // shares a member must agree on the singleton shape vector (it changes
+    // the clone's arity). Disagreement disables singletons everywhere —
+    // conservative and rare.
+    {
+        let mut by_name: BTreeMap<&str, &Vec<Vec<i64>>> = BTreeMap::new();
+        let mut conflict = false;
+        for w in &windows {
+            for n in &w.closure {
+                match by_name.get(n.as_str()) {
+                    Some(existing) if *existing != &w.shapes => {
+                        conflict = true;
+                    }
+                    _ => {
+                        by_name.insert(n, &w.shapes);
+                    }
+                }
+            }
+        }
+        if conflict {
+            for w in &mut windows {
+                w.shapes.clear();
+            }
+        }
+    }
+
+    // Pass B1: rewrite the windows, per function (descending op index so the
+    // recorded positions stay valid).
+    let mut clones_needed: BTreeMap<String, Vec<Vec<i64>>> = BTreeMap::new();
+    for w in windows.iter().rev() {
+        for n in &w.closure {
+            clones_needed.entry(n.clone()).or_insert_with(|| w.shapes.clone());
+        }
+        let func = &mut prog.functions[w.fi];
+        let mut max_id: u32 = 0;
+        let mut vals: Vec<ValueId> = Vec::new();
+        for op in &func.ops {
+            vals.clear();
+            crate::render_wasm::op_values(op, &mut vals);
+            for v in &vals {
+                max_id = max_id.max(v.0);
+            }
+        }
+        for p in &func.params {
+            max_id = max_id.max(p.value.0);
+        }
+        let mut seq: Vec<Op> = Vec::new();
+        max_id += 1;
+        let sp = ValueId(max_id);
+        seq.push(Op::Prim { kind: PrimKind::RegionSave, dst: Some(sp), args: vec![] });
+        // Build each singleton ONCE inside the region; the clones receive its
+        // handle as a trailing param and alias it per instance.
+        let mut singleton_ids: Vec<ValueId> = Vec::new();
+        for shape in &w.shapes {
+            let mut elem_ids = Vec::with_capacity(shape.len());
+            for value in shape {
+                max_id += 1;
+                let c = ValueId(max_id);
+                seq.push(Op::ConstInt { dst: c, value: *value });
+                elem_ids.push(c);
+            }
+            max_id += 1;
+            let s = ValueId(max_id);
+            seq.push(Op::ListLit { dst: s, elems: elem_ids });
+            singleton_ids.push(s);
+        }
+        let mut fc = func.ops[w.start].clone();
+        let mut gc = func.ops[w.start + 1].clone();
+        for call in [&mut fc, &mut gc] {
+            if let Op::CallFn { name, args, .. } = call {
+                *name = rgn_name(name);
+                for s in &singleton_ids {
+                    args.push(CallArg::Handle(*s));
+                }
+            }
+        }
+        seq.push(fc);
+        seq.push(gc);
+        seq.push(Op::Prim { kind: PrimKind::RegionRestore, dst: None, args: vec![sp] });
+        // Keep the ops between the consumer and the (removed) drop — they
+        // cannot reference `t` (occ == 3) and now run after the restore.
+        for k in w.start + 2..w.drop_at {
+            seq.push(func.ops[k].clone());
+        }
+        func.ops.splice(w.start..=w.drop_at, seq);
+    }
+
+    // Pass B2: append the clones — drops removed (the frontier reset IS the
+    // teardown), callee names remapped into the clone set, singleton params
+    // appended and threaded through every internal closure call. `Dup` keeps
+    // its normal render (alias + rc_inc): the count is dead weight inside a
+    // region (nothing frees), and a stray increment is a harmless store.
+    for (name, shapes) in &clones_needed {
         let Some(orig) = prog.functions.iter().find(|f| &f.name == name) else { continue };
         let mut clone = orig.clone();
         clone.name = rgn_name(name);
+        let mut max_id: u32 = 0;
+        let mut vals: Vec<ValueId> = Vec::new();
+        for op in &clone.ops {
+            vals.clear();
+            crate::render_wasm::op_values(op, &mut vals);
+            for v in &vals {
+                max_id = max_id.max(v.0);
+            }
+        }
+        for p in &clone.params {
+            max_id = max_id.max(p.value.0);
+        }
+        let mut singleton_params: Vec<ValueId> = Vec::new();
+        for _ in shapes {
+            max_id += 1;
+            let p = ValueId(max_id);
+            clone.params.push(crate::MirParam {
+                value: p,
+                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            });
+            singleton_params.push(p);
+        }
+        let (_, consts) = fn_tables(orig);
         clone.ops = clone
             .ops
             .into_iter()
             .filter(|op| !matches!(op, Op::Drop { .. } | Op::DropVariant { .. }))
-            .map(|mut op| {
-                if let Op::CallFn { name, .. } = &mut op {
-                    if clones_needed.contains(name) {
+            .map(|op| {
+                if let Op::ListLit { dst, elems } = &op {
+                    let vals: Option<Vec<i64>> =
+                        elems.iter().map(|e| consts.get(e).copied()).collect();
+                    if let Some(v) = vals {
+                        if let Some(k) = shapes.iter().position(|s| s == &v) {
+                            // Every instance of this immutable all-const
+                            // block ALIASES the one built at region entry.
+                            return Op::Dup { dst: *dst, src: singleton_params[k] };
+                        }
+                    }
+                }
+                let mut op = op;
+                if let Op::CallFn { name, args, .. } = &mut op {
+                    if clones_needed.contains_key(name) {
                         *name = rgn_name(name);
+                        for p in &singleton_params {
+                            args.push(CallArg::Handle(*p));
+                        }
                     }
                 }
                 op

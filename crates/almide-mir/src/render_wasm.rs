@@ -538,7 +538,24 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     let funcs = prog
         .functions
         .iter()
-        .map(|f| fold_const_wrap_roundtrips(&render_wasm_fn(f, &label_off, &func_slots, &param_counts)))
+        .map(|f| {
+            let body =
+                fold_const_wrap_roundtrips(&render_wasm_fn(f, &label_off, &func_slots, &param_counts));
+            // Inside a region clone the refcount is dead weight (nothing
+            // frees before the frontier reset), and a `Dup` singleton alias
+            // per instance would otherwise serialize on ONE rc cell's
+            // read-modify-write chain. MakeUnique is rejected by the region
+            // qualifier, so every `rc_inc` line in a clone body stems from a
+            // Dup — drop them all (region_alloc.rs's documented contract).
+            if f.name.starts_with("__rgn_") {
+                body.lines()
+                    .filter(|l| !l.contains("call $rc_inc"))
+                    .map(|l| format!("{l}\n"))
+                    .collect::<String>()
+            } else {
+                body
+            }
+        })
         .collect::<String>();
     // Closure dispatch: when any function makes an indirect (closure) call, emit a module
     // function table whose slot i holds function i (the lambda-lifting convention — a

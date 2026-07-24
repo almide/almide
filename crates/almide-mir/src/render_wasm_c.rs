@@ -124,7 +124,7 @@ fn fusable_expr(
     }
 }
 
-fn defined_value(op: &Op) -> Option<ValueId> {
+pub(crate) fn defined_value(op: &Op) -> Option<ValueId> {
     match op {
         Op::Alloc { dst, .. }
         | Op::Dup { dst, .. }
