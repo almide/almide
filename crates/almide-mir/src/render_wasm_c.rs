@@ -249,16 +249,6 @@ fn classify_f64_op(
     poison: &mut BTreeSet<ValueId>,
     edges: &mut Vec<(ValueId, ValueId)>,
 ) {
-    let arg_vals = |args: &[CallArg], poison: &mut BTreeSet<ValueId>| {
-        for a in args {
-            match a {
-                CallArg::Handle(v) | CallArg::Scalar(v) => {
-                    poison.insert(*v);
-                }
-                CallArg::Imm(_) | CallArg::Label(_) => {}
-            }
-        }
-    };
     match op {
         Op::Prim { kind: PrimKind::FloatUn(_) | PrimKind::FloatBin(_), dst, args } => {
             for a in args {
@@ -387,31 +377,34 @@ fn classify_f64_op(
                 poison.insert(*u);
             }
         }
-        // `__list_append1`'s ELEMENT arg is FLEXIBLE (like a ListLit elem):
-        // the render crosses the i64 ABI with one boundary reinterpret, so an
-        // f64-classified appended value keeps its real-f64 local — the whole
-        // point of the self-append rewrite is not to poison the hot
-        // accumulator the way a generic call boundary would.
-        Op::CallFn { dst, name, args, .. } if name == "__list_append1" => {
-            if let Some(d) = dst {
-                poison.insert(*d);
-            }
-            if let Some(CallArg::Handle(l) | CallArg::Scalar(l)) = args.first() {
-                poison.insert(*l);
-            }
-        }
+        // A SCALAR call argument is FLEXIBLE (like a ListLit element): the
+        // render crosses the i64-uniform ABI with ONE boundary reinterpret at
+        // the call site, so an f64-classified value keeps its real-f64 local.
+        // Poisoning args froze every local a call ever touched into i64 for
+        // its WHOLE lifetime — nbody's two 34-arg `energy(...)` calls forced
+        // the entire advance loop onto reinterpret round-trips. Handle args
+        // (heap pointers) and the RESULT (the callee returns raw i64 bits)
+        // stay poisoned.
         Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
             if let Some(d) = dst {
                 poison.insert(*d);
             }
-            arg_vals(args, &mut *poison);
+            for a in args {
+                if let CallArg::Handle(v) = a {
+                    poison.insert(*v);
+                }
+            }
         }
         Op::CallIndirect { dst, table_idx, args, .. } => {
             if let Some(d) = dst {
                 poison.insert(*d);
             }
             poison.insert(*table_idx);
-            arg_vals(args, &mut *poison);
+            for a in args {
+                if let CallArg::Handle(v) = a {
+                    poison.insert(*v);
+                }
+            }
         }
         Op::FuncRef { dst, .. } => {
             poison.insert(*dst);
@@ -513,7 +506,11 @@ pub fn import_symbol(module: &str, name: &str) -> String {
 }
 
 
-fn render_arg_wasm(arg: &CallArg, reprs: &BTreeMap<ValueId, Repr>) -> String {
+fn render_arg_wasm(
+    arg: &CallArg,
+    reprs: &BTreeMap<ValueId, Repr>,
+    floats: &BTreeSet<ValueId>,
+) -> String {
     match arg {
         // A Handle arg names a heap BLOCK (i32 pointer param). The value may live
         // in an i64 local when it came through `PrimKind::Handle` (the eq engine's
@@ -528,7 +525,17 @@ fn render_arg_wasm(arg: &CallArg, reprs: &BTreeMap<ValueId, Repr>) -> String {
                 format!("(local.get {})", local(*v))
             }
         }
-        CallArg::Scalar(v) => format!("(local.get {})", local(*v)),
+        // A scalar arg is FLEXIBLE for the f64 classifier (classify_f64_op does
+        // NOT poison it): an f64-classified value crosses the i64-uniform ABI
+        // with this ONE boundary reinterpret instead of dragging its whole
+        // lifetime onto i64 round-trips (nbody's 34-arg energy() calls).
+        CallArg::Scalar(v) => {
+            if floats.contains(v) {
+                format!("(i64.reinterpret_f64 (local.get {}))", local(*v))
+            } else {
+                format!("(local.get {})", local(*v))
+            }
+        }
         CallArg::Imm(n) => format!("(i64.const {n})"),
         CallArg::Label(l) => panic!("label arg {l:?} not valid for a user call"),
     }
@@ -540,7 +547,11 @@ fn render_arg_wasm(arg: &CallArg, reprs: &BTreeMap<ValueId, Repr>) -> String {
 /// param narrows (`i32.wrap_i64`), an `I64` param passes through. A heap handle is
 /// already an i32 pointer for an `I32` param. An immediate matches the valtype's
 /// constant form.
-fn render_import_arg_wasm(arg: &CallArg, ty: crate::WasmAbi) -> String {
+fn render_import_arg_wasm(
+    arg: &CallArg,
+    ty: crate::WasmAbi,
+    floats: &BTreeSet<ValueId>,
+) -> String {
     use crate::WasmAbi;
     match arg {
         CallArg::Handle(v) => match ty {
@@ -548,6 +559,17 @@ fn render_import_arg_wasm(arg: &CallArg, ty: crate::WasmAbi) -> String {
             WasmAbi::I32 => format!("(local.get {})", local(*v)),
             // A heap handle to an i64/f64 param is a type error the lowering never emits.
             _ => format!("(local.get {})", local(*v)),
+        },
+        // An f64-classified scalar lives in a REAL f64 local (scalar call args
+        // are flexible, not poisoned): an F64 import param reads it directly,
+        // an I64 param takes its bits, an I32 (Bool) param cannot legally
+        // carry a float — the wrap goes through the bits for form's sake.
+        CallArg::Scalar(v) if floats.contains(v) => match ty {
+            WasmAbi::F64 => format!("(local.get {})", local(*v)),
+            WasmAbi::I64 => format!("(i64.reinterpret_f64 (local.get {}))", local(*v)),
+            WasmAbi::I32 => {
+                format!("(i32.wrap_i64 (i64.reinterpret_f64 (local.get {})))", local(*v))
+            }
         },
         CallArg::Scalar(v) => match ty {
             WasmAbi::I64 => format!("(local.get {})", local(*v)),
@@ -568,6 +590,7 @@ fn render_call(
     func: &RtFn,
     args: &[CallArg],
     label_off: &BTreeMap<String, (u32, u32)>,
+    floats: &BTreeSet<ValueId>,
 ) -> String {
     match (func, args) {
         (RtFn::ListSet, [CallArg::Handle(t), CallArg::Imm(idx), CallArg::Imm(val)]) => format!(
@@ -591,7 +614,16 @@ fn render_call(
             )
         }
         (RtFn::PrintInt, [CallArg::Scalar(v)]) => {
-            format!("    (call $print_int (local.get {}))\n", local(*v))
+            // An f64-classified value never legally reaches print_int, but the
+            // flexible-scalar-arg rule still owes the i64 BITS at the boundary.
+            if floats.contains(v) {
+                format!(
+                    "    (call $print_int (i64.reinterpret_f64 (local.get {})))\n",
+                    local(*v)
+                )
+            } else {
+                format!("    (call $print_int (local.get {}))\n", local(*v))
+            }
         }
         (RtFn::PrintStr, [CallArg::Handle(v)]) => {
             format!("    (call $print_str (local.get {}))\n", local(*v))
