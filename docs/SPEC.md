@@ -50,13 +50,8 @@ The essence of language design for LLMs is not maximizing expressiveness, but **
 Identifier ::= [a-z_][a-zA-Z0-9_]*
 ```
 
-A single trailing `?` is allowed for predicates:
-
-```
-Name ::= Identifier | Identifier "?"
-```
-
-- `name?` -- **Bool predicate only** (return type must be `Bool`; compiler enforced)
+Trailing `?` in identifiers was removed — predicates are plain identifiers
+that return `Bool` (`is_` prefix convention: `is_empty`, `is_digit`).
 
 ### 1.2 Type Names
 
@@ -108,7 +103,8 @@ local   mod     fan
 ### 1.6 Operators and Delimiters
 
 ```
-Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  ..  ..=
+Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  >>  ..  ..=
+Postfix:     !  ?  ?.  ??
 Unary:       -  not
 Logical:     and  or
 Assignment:  =
@@ -219,17 +215,19 @@ import mylib.{Parser, Lexer}    // selective import
 The following modules are available without `import`:
 
 ```
-string  list  int  float  math  map  result  option  value  set
+string  list  int  float  math  map  set  result  option  value  prim
+datetime  error  bytes  matrix  int8  int16  int32  uint8  uint16  uint32
+uint64  float32
 ```
 
 All other stdlib modules require explicit `import`:
 
 ```
-fs  env  io  process  json  random  regex  datetime  http
-log  testing  error
+fs  env  io  process  json  random  regex  http  log  testing
+net  zlib  base64  hex
 ```
 
-Bundled stdlib packages (pure Almide): `args`, `path`, `time`, `encoding`, `hash`, `url`, `csv`.
+Bundled stdlib packages (pure Almide, import required): `args`, `path`, `html`, `mem`.
 
 ### 4.3 Prelude Types
 
@@ -509,7 +507,7 @@ E021: "use a record pattern").
 
 ### 7.4 Predicate Functions
 
-Functions ending in `?` must return `Bool`:
+Predicates are plain identifiers returning `Bool` (no `?` suffix — it was removed):
 
 ```
 fn empty(xs: List[Int]) -> Bool = list.len(xs) == 0

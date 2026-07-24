@@ -62,7 +62,7 @@ fn extension(p: String) -> Option[String] = {
   else list.last(parts)
 }
 
-fn is_absolute?(p: String) -> Bool = string.starts_with(p, "/")
+fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")
 
 fn stem(p: String) -> String = {
   let name = basename(p)
