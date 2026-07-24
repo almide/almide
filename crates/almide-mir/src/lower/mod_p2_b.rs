@@ -116,9 +116,7 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
         *s.borrow_mut() =
             lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
     });
-    if std::env::var("ALMIDE_ABI_PROBE").is_ok() {
-        eprintln!("[abi] can_err={can_err:?} lifted={lifted_effect_fns:?}");
-    }
+    let abi_probe = std::env::var("ALMIDE_ABI_PROBE").is_ok();
     AUTO_WRAP_ABI_FNS.with(|s| {
         *s.borrow_mut() = fns
             .iter()
@@ -133,11 +131,30 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
                     )
                 ) && (body_has_stmt_position_propagating_unwrap(&f.body)
                     || body_has_tail_position_option_unwrap(&f.body)
-                    || body_has_tail_position_canerr_try(&f.body, &can_err))
+                    || body_has_tail_position_canerr_try(&f.body, &can_err)
+                    // #841: EVERY non-Unit CAN-ERR lifted effect fn always-wraps. Its
+                    // uncovered shapes (a `!` nested in a branch block, an
+                    // argument-position `!`) err via a wrapped block while the ok
+                    // paths returned raw `T` — a runtime HYBRID no consumer can
+                    // discriminate (a first-class Result use misread the raw payload
+                    // and OOB-crashed in the scope-end drop). Declared-Unit can-err
+                    // fns are excluded: the Unit classification arm already treats
+                    // `AUTO_WRAP ∪ can-err` uniformly (`wrap_unit_body_in_ok` — the
+                    // test-harness `__almd_test_N` precedent), so widening them here
+                    // would only churn the `ret_is_result_abi`-gated desugars.
+                    || (f.is_effect
+                        && !matches!(&f.ret_ty, Ty::Unit)
+                        && can_err.contains(f.name.as_str())))
             })
             .map(|f| f.name.as_str().to_string())
             .collect();
     });
+    if abi_probe {
+        eprintln!(
+            "[abi] can_err={can_err:?} lifted={lifted_effect_fns:?} auto_wrap={:?}",
+            auto_wrap_abi_snapshot()
+        );
+    }
     DECLARED_OPTION_FNS.with(|s| {
         *s.borrow_mut() = fns
             .iter()
