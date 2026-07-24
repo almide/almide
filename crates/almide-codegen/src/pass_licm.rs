@@ -60,9 +60,17 @@ impl NanoPass for LICMPass {
 fn collect_pure_stdlib_module_fns(program: &IrProgram, pure_fns: &mut HashSet<Sym>) {
     for module in &program.modules {
         for func in &module.functions {
+            // The attribute criteria alone are NOT sufficient: a non-effect
+            // module fn with no mut params can still mutate module globals
+            // (`var` state). `analyze_pure_functions` already ran the body
+            // fixpoint over every module fn under its bare name, so require
+            // that verdict too — otherwise a stateful cross-module call in a
+            // loop gets hoisted and N calls collapse into one (ceangal's
+            // scroll physics; almide#846).
             if !func.is_effect && !func.is_async
                 && func.mutated_params.is_empty()
                 && !has_mut_in_inline_rust(&func.attrs)
+                && pure_fns.contains(&func.name)
             {
                 pure_fns.insert(almide_base::intern::sym(
                     &format!("{}.{}", module.name, func.name),
