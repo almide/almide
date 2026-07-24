@@ -304,48 +304,6 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
                (i32.add (local.get $len) (i32.const 1)))
     (local.get $list))
 
-  ;; The self-append runtime (concat_to_append.rs): value-semantics append that
-  ;; BORROWS $list — the caller's `Drop x` right after releases the old
-  ;; reference either way.
-  ;; - rc == 1 && len < cap: the caller's dying handle is the SOLE owner, so
-  ;;   appending in place is unobservable; rc_inc + return $list itself (the
-  ;;   caller's Drop rebalances to rc 1 on the rebound slot).
-  ;; - else: fresh block at cap = 2*len + headroom (amortized doubling), the
-  ;;   len slots byte-copied, the new element stored — the caller's Drop
-  ;;   releases the old reference exactly as the concat shape did.
-  (func $__list_append1 (param $list i32) (param $val i64) (result i32)
-    (local $len i32) (local $new i32) (local $i i32)
-    (local.set $len (i32.load (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and
-          (i32.eq (i32.load (i32.add (local.get $list) (i32.const {LIST_RC_OFFSET})))
-                  (i32.const 1))
-          (i32.lt_s (local.get $len)
-                    (i32.load (i32.add (local.get $list) (i32.const {LIST_CAP_OFFSET})))))
-      (then
-        (i64.store (i32.add (i32.add (local.get $list) (i32.const {LIST_HEADER}))
-                            (i32.mul (local.get $len) (i32.const {ELEM_SIZE})))
-                   (local.get $val))
-        (i32.store (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))
-                   (i32.add (local.get $len) (i32.const 1)))
-        (call $rc_inc (local.get $list))
-        (return (local.get $list))))
-    (local.set $new (call $list_new
-      (i32.add (local.get $len) (i32.const 1))
-      (i32.add (i32.add (local.get $len) (local.get $len)) (i32.const {PUSH_HEADROOM}))))
-    (local.set $i (i32.const 0))
-    (block $cdone (loop $cloop
-      (br_if $cdone (i32.ge_s (local.get $i) (local.get $len)))
-      (i64.store (i32.add (i32.add (local.get $new) (i32.const {LIST_HEADER}))
-                          (i32.mul (local.get $i) (i32.const {ELEM_SIZE})))
-                 (i64.load (i32.add (i32.add (local.get $list) (i32.const {LIST_HEADER}))
-                                    (i32.mul (local.get $i) (i32.const {ELEM_SIZE})))))
-      (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $cloop)))
-    (i64.store (i32.add (i32.add (local.get $new) (i32.const {LIST_HEADER}))
-                        (i32.mul (local.get $len) (i32.const {ELEM_SIZE})))
-               (local.get $val))
-    (local.get $new))
-
   ;; append the decimal digits of a non-negative i64 at $cur; return new cursor
   (func $itoa_append (param $cur i32) (param $v i64) (result i32)
     (local $n i32)

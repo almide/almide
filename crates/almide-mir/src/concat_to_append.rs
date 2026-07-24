@@ -20,11 +20,12 @@
 //! SetLocal x ← d
 //! ```
 //!
-//! where the runtime `$list_append1` (render_wasm_p3.rs) BORROWS `x` and:
-//! - if `rc(x) == 1 && len < cap`: stores `e` in place, bumps `len`,
-//!   `rc_inc`s and returns `x` itself (the caller's `Drop x` rebalances to
-//!   rc 1 — the sole surviving handle is the rebound slot);
-//! - else: allocates `cap = 2·len + headroom` (amortized doubling), copies,
+//! where the runtime `__list_append1` (SELF-HOSTED in stdlib/list_concat.almd
+//! — §4.1 forbids growing the hand-written WAT floor) BORROWS `x` and:
+//! - if `rc(x) == 1 && len < cap`: stores `e` in place, bumps `len`, and
+//!   returns `x` itself — its own value-semantics return Dups (rc → 2), and
+//!   the caller's `Drop x` rebalances to rc 1 on the rebound slot;
+//! - else: allocates `cap = 2·len + 8` (amortized doubling), copies,
 //!   appends, returns the fresh block (the caller's `Drop x` releases the
 //!   old reference exactly as the concat shape did).
 //!
