@@ -319,7 +319,7 @@ fn render_op_call_light(
             s = local(*src)
         ),
         // A runtime call → a wasm `call` of the (bootstrap) runtime function.
-        Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off),
+        Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off, floats),
         // An indirect (closure) call: push the args, then the table index, and dispatch
         // through the module function table with the closure signature OF THIS ARITY
         // (`$closure_fnN`, N = arg count). The table + every `(type $closure_fnN)` are
@@ -337,7 +337,7 @@ fn render_op_call_light(
                     CallArg::Handle(v) if reprs.get(v).map_or(true, |r| r.is_heap()) => {
                         format!("(i64.extend_i32_u (local.get {}))", local(*v))
                     }
-                    other => render_arg_wasm(other, reprs),
+                    other => render_arg_wasm(other, reprs, floats),
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
@@ -383,16 +383,7 @@ fn render_op_call_light(
             }
             let argstr = args
                 .iter()
-                .map(|a| match a {
-                    // `__list_append1`'s element arg is FLEXIBLE for the f64
-                    // classifier (see classify_f64_op): an f64-classified
-                    // appended value crosses the i64 ABI with ONE boundary
-                    // reinterpret here, exactly like a ListLit element slot.
-                    CallArg::Scalar(v) if name == "__list_append1" && floats.contains(v) => {
-                        format!("(i64.reinterpret_f64 (local.get {}))", local(*v))
-                    }
-                    _ => render_arg_wasm(a, reprs),
-                })
+                .map(|a| render_arg_wasm(a, reprs, floats))
                 .collect::<Vec<_>>()
                 .join(" ");
             match dst {
@@ -412,7 +403,7 @@ fn render_op_call_light(
             let argstr = args
                 .iter()
                 .zip(abi.iter())
-                .map(|(a, ty)| render_import_arg_wasm(a, *ty))
+                .map(|(a, ty)| render_import_arg_wasm(a, *ty, floats))
                 .collect::<Vec<_>>()
                 .join(" ");
             let call = format!("(call ${sym} {argstr})");

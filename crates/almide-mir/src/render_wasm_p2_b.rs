@@ -223,6 +223,55 @@ fn render_op_misc(
                 format!("    (local.set {} (i64.const {value}))\n", local(*dst))
             }
         }
+        // REGION open/close (region_alloc.rs): multi-statement, so they render
+        // here rather than through render_op_prim's single-expression shape.
+        // Save packs `bump | freelist << 32` into the i64 dst and EMPTIES the
+        // free-list (allocations inside the region are pure frontier bumps);
+        // restore puts both back — the frontier reset reclaims the whole
+        // region, and the free-list is exactly the entry state.
+        Op::Prim { kind: PrimKind::RegionSave, dst: Some(d), .. } => format!(
+            "    (local.set {d} (i64.or (i64.extend_i32_u (global.get $bump))\n\
+             \x20                         (i64.shl (i64.extend_i32_u (global.get $freelist)) (i64.const 32))))\n\
+             \x20   (global.set $freelist (i32.const 0))\n",
+            d = local(*d)
+        ),
+        Op::Prim { kind: PrimKind::RegionRestore, args, .. } => format!(
+            "    (global.set $bump (i32.wrap_i64 (local.get {sp})))\n\
+             \x20   (global.set $freelist (i32.wrap_i64 (i64.shr_u (local.get {sp}) (i64.const 32))))\n",
+            sp = local(args[0])
+        ),
+        // Compact allocation (region_compact.rs): `$alloc`'s bump + grow tail
+        // INLINED — inside a region the free-list is empty by RegionSave, so
+        // the scan half of `$alloc` is dead and the call overhead (the single
+        // hottest per-node cost left) buys nothing. The grow arm is copied
+        // verbatim from `$alloc` for byte-identical behavior at the frontier.
+        // `zero: true` is the singleton twin: its fields must read as the
+        // original all-const block's padding (0), so the fill is part of the
+        // allocation.
+        Op::Prim { kind: PrimKind::RegionAllocC { bytes, zero }, dst: Some(d), .. } => {
+            let d = local(*d);
+            let mut s = format!(
+                "    (local.set {d} (global.get $bump))\n\
+                 \x20   (global.set $bump (i32.add (local.get {d}) (i32.const {bytes})))\n\
+                 \x20   (if (i32.gt_u (global.get $bump) (i32.mul (memory.size) (i32.const 65536)))\n\
+                 \x20       (then (drop (memory.grow (i32.add (i32.div_u (i32.sub (i32.sub (global.get $bump) (i32.const 1)) (i32.mul (memory.size) (i32.const 65536))) (i32.const 65536)) (i32.const 1))))))\n"
+            );
+            if *zero {
+                let mut off = 0;
+                while off + 8 <= *bytes {
+                    s.push_str(&format!(
+                        "    (i64.store offset={off} (local.get {d}) (i64.const 0))\n"
+                    ));
+                    off += 8;
+                }
+                if off < *bytes {
+                    s.push_str(&format!(
+                        "    (i32.store offset={off} (local.get {d}) (i32.const 0))\n"
+                    ));
+                }
+            }
+            s
+        }
         // A primitive-floor op, hand-mapped INLINE (no preamble func). The MIR is
         // i64-uniform; wrap to i32 at the wasm memory boundary, zero-extend a loaded /
         // returned i32 back to i64. This is the whole trusted floor for raw memory +
@@ -261,6 +310,18 @@ fn render_op_prim(
     floats: &BTreeSet<ValueId>,
     fuser: &mut Fuser,
 ) -> String {
+    // Compact-region tag read (region_compact.rs): pointer identity against the
+    // per-region singleton IS the tag. The else operand goes through the fuser
+    // so a constant fallback (single-dynamic-shape family) inlines.
+    if let PrimKind::RegionTagSel { tag } = kind {
+        let body = format!(
+            "(select (i64.const {tag}) {} (i32.eq (local.get {}) (local.get {})))",
+            fuser.operand(args[2]),
+            local(args[0]),
+            local(args[1]),
+        );
+        return format!("    (local.set {} {body})\n", local(dst.unwrap()));
+    }
     let body = render_op_prim_mem_io(kind, args)
         .unwrap_or_else(|| render_op_prim_float(kind, dst, args, floats, fuser));
     match dst {
@@ -301,6 +362,26 @@ fn render_op_prim_mem_io_a(kind: &PrimKind, args: &[ValueId]) -> Option<String> 
                 PrimKind::ElemAddr => {
                     format!("(i64.extend_i32_u (call $elem_addr_chk {} {}))", w(0), w(1))
                 }
+                // Compact-region block ops (region_compact.rs): the base arg is a
+                // Ptr local (raw i32 handle) and handle fields are raw 4-byte
+                // pointers, so none of the i64-uniform wrap/extend bridging
+                // applies — these are the flattest possible memory ops.
+                PrimKind::RegionLoadH { off } => {
+                    format!("(i32.load offset={off} (local.get {}))", local(args[0]))
+                }
+                PrimKind::RegionLoadS { off } => {
+                    format!("(i64.load offset={off} (local.get {}))", local(args[0]))
+                }
+                PrimKind::RegionStoreH { off } => format!(
+                    "(i32.store offset={off} (local.get {}) (local.get {}))",
+                    local(args[0]),
+                    local(args[1])
+                ),
+                PrimKind::RegionStoreS { off } => format!(
+                    "(i64.store offset={off} (local.get {}) (local.get {}))",
+                    local(args[0]),
+                    local(args[1])
+                ),
                 PrimKind::Die => format!("(call $__die {})", w(0)),
                 // proc_exit(code): the i64 user code wraps to the WASI i32. Never
                 // returns — nothing follows on this path at runtime.

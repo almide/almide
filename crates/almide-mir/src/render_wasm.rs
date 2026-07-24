@@ -101,8 +101,8 @@ const I32_SIZE: u32 = 4; // a wasm i32 field is 4 bytes
 const LIST_RC_OFFSET: u32 = 0; // the refcount cell — RuntimeModel.v's RC_OFFSET = 0
 const LIST_LEN_OFFSET: u32 = LIST_RC_OFFSET + I32_SIZE;
 const LIST_CAP_OFFSET: u32 = LIST_LEN_OFFSET + I32_SIZE;
-const LIST_HEADER: u32 = LIST_CAP_OFFSET + I32_SIZE; // rc + len + cap
-const ELEM_SIZE: u32 = 8; // i64 elements
+pub(crate) const LIST_HEADER: u32 = LIST_CAP_OFFSET + I32_SIZE; // rc + len + cap
+pub(crate) const ELEM_SIZE: u32 = 8; // i64 elements
 // A freshly allocated heap block has exactly one owner — the `Alloc`'s +1, the
 // initial value of the cell RuntimeModel.v's `exec` starts the fold from.
 const RC_INITIAL: i32 = 1;
@@ -447,6 +447,14 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
     } else {
         prog
     };
+    // Region-specialized allocation (region_alloc.rs, issue #838): rewrite
+    // qualifying `consume(produce(...))` windows to bump regions and append
+    // the `__rgn_` clones. BEFORE the prune, whose rendered-text reachability
+    // scan is what keeps the clones alive.
+    let mut regioned = prog.clone();
+    crate::region_alloc::apply_region_specialization(&mut regioned);
+    let prog = &regioned;
+
     // Dead-function elimination (#782, generalized): ALWAYS prune to exactly
     // what's reachable from main/exports — not just when a broken call forces
     // the issue. A dead function that happened to be well-formed used to ride
@@ -530,7 +538,24 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     let funcs = prog
         .functions
         .iter()
-        .map(|f| fold_const_wrap_roundtrips(&render_wasm_fn(f, &label_off, &func_slots, &param_counts)))
+        .map(|f| {
+            let body =
+                fold_const_wrap_roundtrips(&render_wasm_fn(f, &label_off, &func_slots, &param_counts));
+            // Inside a region clone the refcount is dead weight (nothing
+            // frees before the frontier reset), and a `Dup` singleton alias
+            // per instance would otherwise serialize on ONE rc cell's
+            // read-modify-write chain. MakeUnique is rejected by the region
+            // qualifier, so every `rc_inc` line in a clone body stems from a
+            // Dup — drop them all (region_alloc.rs's documented contract).
+            if f.name.starts_with("__rgn_") {
+                body.lines()
+                    .filter(|l| !l.contains("call $rc_inc"))
+                    .map(|l| format!("{l}\n"))
+                    .collect::<String>()
+            } else {
+                body
+            }
+        })
         .collect::<String>();
     // Closure dispatch: when any function makes an indirect (closure) call, emit a module
     // function table whose slot i holds function i (the lambda-lifting convention — a
