@@ -1,0 +1,62 @@
+// Region-specialized allocation (region_alloc.rs, issue #838): the
+// `consume(produce(scalars))` window becomes a bump region on the wasm leg.
+// These tests pin the OBSERVABLE behavior (values identical whether or not
+// the rewrite fires) across the shapes the analysis must distinguish.
+
+type Tree = Leaf | Node(Tree, Tree)
+
+fn make(depth: Int) -> Tree =
+  if depth == 0 then Leaf
+  else Node(make(depth - 1), make(depth - 1))
+
+fn check(tree: Tree) -> Int = match tree {
+  Leaf => 1,
+  Node(left, right) => check(left) + check(right) + 1,
+}
+
+// The window shape: produce → consume → drop, repeated in a loop (the region
+// resets between iterations; every tree must count the same).
+fn sum_checks(n: Int, depth: Int) -> Int = {
+  var total = 0
+  for _ in 0..n {
+    total = total + check(make(depth))
+  }
+  total
+}
+
+// The NON-window shape: the produced tree is held in a binding that outlives
+// the consumer — the rewrite must not fire, and the value must still be
+// readable afterwards.
+fn held_tree(depth: Int) -> Int = {
+  let t = make(depth)
+  let first = check(t)
+  let second = check(t)
+  first + second
+}
+
+test "region window: repeated produce/consume counts every node" {
+  assert_eq(sum_checks(4, 5), 4 * 63)
+  assert_eq(sum_checks(1, 0), 1)
+}
+
+test "region window: consumer result feeds arithmetic between call and drop" {
+  var acc = 100
+  acc = acc + check(make(3))
+  assert_eq(acc, 115)
+}
+
+test "held tree (no window): the value survives multiple consumers" {
+  assert_eq(held_tree(4), 62)
+}
+
+test "windows interleave with unrelated heap use" {
+  var xs: List[Int] = []
+  var total = 0
+  for i in 0..3 {
+    total = total + check(make(2))
+    list.push(xs, i * 10)
+  }
+  assert_eq(total, 21)
+  assert_eq(list.len(xs), 3)
+  assert_eq(xs[2], 20)
+}

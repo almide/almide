@@ -447,6 +447,14 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
     } else {
         prog
     };
+    // Region-specialized allocation (region_alloc.rs, issue #838): rewrite
+    // qualifying `consume(produce(...))` windows to bump regions and append
+    // the `__rgn_` clones. BEFORE the prune, whose rendered-text reachability
+    // scan is what keeps the clones alive.
+    let mut regioned = prog.clone();
+    crate::region_alloc::apply_region_specialization(&mut regioned);
+    let prog = &regioned;
+
     // Dead-function elimination (#782, generalized): ALWAYS prune to exactly
     // what's reachable from main/exports — not just when a broken call forces
     // the issue. A dead function that happened to be well-formed used to ride

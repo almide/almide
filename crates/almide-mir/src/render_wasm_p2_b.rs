@@ -223,6 +223,23 @@ fn render_op_misc(
                 format!("    (local.set {} (i64.const {value}))\n", local(*dst))
             }
         }
+        // REGION open/close (region_alloc.rs): multi-statement, so they render
+        // here rather than through render_op_prim's single-expression shape.
+        // Save packs `bump | freelist << 32` into the i64 dst and EMPTIES the
+        // free-list (allocations inside the region are pure frontier bumps);
+        // restore puts both back — the frontier reset reclaims the whole
+        // region, and the free-list is exactly the entry state.
+        Op::Prim { kind: PrimKind::RegionSave, dst: Some(d), .. } => format!(
+            "    (local.set {d} (i64.or (i64.extend_i32_u (global.get $bump))\n\
+             \x20                         (i64.shl (i64.extend_i32_u (global.get $freelist)) (i64.const 32))))\n\
+             \x20   (global.set $freelist (i32.const 0))\n",
+            d = local(*d)
+        ),
+        Op::Prim { kind: PrimKind::RegionRestore, args, .. } => format!(
+            "    (global.set $bump (i32.wrap_i64 (local.get {sp})))\n\
+             \x20   (global.set $freelist (i32.wrap_i64 (i64.shr_u (local.get {sp}) (i64.const 32))))\n",
+            sp = local(args[0])
+        ),
         // A primitive-floor op, hand-mapped INLINE (no preamble func). The MIR is
         // i64-uniform; wrap to i32 at the wasm memory boundary, zero-extend a loaded /
         // returned i32 back to i64. This is the whole trusted floor for raw memory +

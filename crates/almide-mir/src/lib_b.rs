@@ -275,6 +275,17 @@ pub enum PrimKind {
     F32Cmp(FCmpOp),
     /// A unary f32 op (neg/abs/…) over the low-32 pattern.
     F32Un(FUnOp),
+    /// REGION open (region_alloc.rs): `dst` = the packed allocator state
+    /// (`bump | freelist << 32`), then the free-list is emptied so every
+    /// allocation inside the region is a pure frontier bump — no free-list
+    /// block can be captured into (and then leak with) the region.
+    RegionSave,
+    /// REGION close: restore `bump` and `freelist` from the packed state in
+    /// `args[0]` — every block allocated inside the region is reclaimed
+    /// wholesale by the frontier reset (nothing escapes: see the
+    /// region_alloc.rs qualification), and the free-list is exactly what it
+    /// was at entry.
+    RegionRestore,
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).
