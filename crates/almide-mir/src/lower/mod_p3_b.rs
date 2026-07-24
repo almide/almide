@@ -181,6 +181,40 @@ impl LowerCtx {
                     // (rc_dec the replaced element + own the new), and the ordinary
                     // Assign machinery swaps the local (the map-insert discipline).
                     if matches!(&value.ty, Ty::String) || crate::lower::is_value_ty(&value.ty) {
+                        // C-067 (#807): the index-operator WRITE must abort on OOB
+                        // exactly like the read — but the functional `list.set` rebind
+                        // below is contractually a NO-OP on OOB (C-054), so the wasm
+                        // leg silently kept the old list where native aborted. Emit
+                        // the user-facing bounds guard FIRST: `$elem_addr_chk` traps
+                        // with the native-identical message + exit 1; its address
+                        // result is unused — the trap is the point. A non-lowerable
+                        // index cannot be guarded: STRICT mode refuses (this exact
+                        // silent-divergence class), the permissive classifier keeps
+                        // the prior behavior.
+                        match (self.value_for(target), self.lower_scalar_value(index)) {
+                            (Ok(list), Some(idx)) => {
+                                let h = self.fresh_value();
+                                self.ops.push(Op::Prim {
+                                    kind: crate::PrimKind::Handle,
+                                    dst: Some(h),
+                                    args: vec![list],
+                                });
+                                let addr = self.fresh_value();
+                                self.ops.push(Op::Prim {
+                                    kind: crate::PrimKind::ElemAddr,
+                                    dst: Some(addr),
+                                    args: vec![h, idx],
+                                });
+                            }
+                            _ if crate::lower::strict_values() => {
+                                return Err(LowerError::Unsupported(
+                                    "heap-element index-assign with a non-lowerable \
+                                     index — the C-067 bounds guard cannot be emitted"
+                                        .into(),
+                                ));
+                            }
+                            _ => {}
+                        }
                         {
                             let list_ty = Ty::Applied(
                                 almide_lang::types::constructor::TypeConstructorId::List,
