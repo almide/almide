@@ -915,6 +915,7 @@ statement = "The index-operator path `xs[i]` (both read `xs[i]` and write `xs[i]
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/index_bounds.almd", class = "fixture" },
+  { path = "spec/wasm_cross/index_bounds_write_heap.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1651,6 +1652,7 @@ since     = "0.28.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/loop_buffer_churn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/loop_push_trailing_increment.almd", class = "fixture" },
 ]
 
 [[contract]]
