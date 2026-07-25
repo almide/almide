@@ -2008,3 +2008,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/io_write_ordering.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-163"
+spec      = "ALS-M10"
+title     = "A heap-result if/match bound to a let/var executes the taken arm on both targets"
+statement = "`let x = if cond then <heap> else <heap>` (and the `match` form) computes the taken arm and binds ONE owned value on both targets — the same result the call-ARGUMENT and TAIL positions of the shape already produced. Only the BIND position walled on the v1 leg, so a whole enclosing function fell outside the MIR-lowering subset: native computed the value while a wasm-only build errored. The missing case was a String LITERAL payload under `some(...)` — the heap `some` arm admitted a Var, a call result and a list concat, but not a `LitStr` — which is exactly the archived cafe differential-fuzz finding (`let v = ok(if c then some(\"ΑΒΓ\") else some(\"café\"))`, two literal Some arms). The literal now allocates a fresh rc-1 block and moves into the Option with no Dup, the same `im` per-arm balance a bare literal arm already had."
+since     = "0.35.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/heap_result_if_bind.almd", class = "fixture" },
+]
