@@ -149,30 +149,43 @@ pub const SCALAR_TYPE_NAMES: &[&str] = &[
     "UInt8", "UInt16", "UInt32", "UInt64",
     "Float32", "Float64",
 ];
+/// The `Ty` a scalar type NAME denotes, for the const-generic bound syntax
+/// `[N: Int]`.
+///
+/// `Some` for exactly the names in [`SCALAR_TYPE_NAMES`] —
+/// `scalar_type_names_all_resolve` asserts the two agree. Before they shared
+/// this function, a name could sit in the list with no arm here and the const
+/// param would be silently skipped, so `[N: Int16]` would type-check as an
+/// ordinary generic and then fail in codegen.
+pub fn scalar_ty_by_name(name: &str) -> Option<Ty> {
+    Some(match name {
+        "Int" | "Int64" => Ty::Int,
+        "Float" | "Float64" => Ty::Float,
+        "Bool" => Ty::Bool,
+        "String" => Ty::String,
+        "Int8" => Ty::Int8,
+        "Int16" => Ty::Int16,
+        "Int32" => Ty::Int32,
+        "UInt8" => Ty::UInt8,
+        "UInt16" => Ty::UInt16,
+        "UInt32" => Ty::UInt32,
+        "UInt64" => Ty::UInt64,
+        "Float32" => Ty::Float32,
+        _ => return None,
+    })
+}
+
 /// Identify const (value) parameters in generic params. A param `N: Int` where `Int` is a scalar type (not a protocol) becomes a const param. Returns: param name → scalar Ty.
 pub fn collect_const_params(generics: &Option<Vec<ast::GenericParam>>) -> HashMap<Sym, Ty> {
     let mut cp = HashMap::new();
     let gs = match generics { Some(gs) => gs, None => return cp };
     for g in gs {
         if let Some(bounds) = &g.bounds {
-            // Single bound that is a scalar type name → const param
-            if bounds.len() == 1 && SCALAR_TYPE_NAMES.contains(&bounds[0].as_str()) {
-                let ty = match bounds[0].as_str() {
-                    "Int" | "Int64" => Ty::Int,
-                    "Float" | "Float64" => Ty::Float,
-                    "Bool" => Ty::Bool,
-                    "String" => Ty::String,
-                    "Int8" => Ty::Int8,
-                    "Int16" => Ty::Int16,
-                    "Int32" => Ty::Int32,
-                    "UInt8" => Ty::UInt8,
-                    "UInt16" => Ty::UInt16,
-                    "UInt32" => Ty::UInt32,
-                    "UInt64" => Ty::UInt64,
-                    "Float32" => Ty::Float32,
-                    _ => continue,
-                };
-                cp.insert(sym(&g.name), ty);
+            // A single scalar-type-name bound makes this a const param.
+            if let [only] = bounds.as_slice() {
+                if let Some(ty) = scalar_ty_by_name(only) {
+                    cp.insert(sym(&g.name), ty);
+                }
             }
         }
     }
@@ -610,3 +623,20 @@ fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&st
 }
 
 include!("registration_validate.rs");
+
+#[cfg(test)]
+mod scalar_name_tests {
+    use super::*;
+
+    /// Every name the const-generic bound syntax accepts must resolve to a type.
+    /// A name in the list with no `scalar_ty_by_name` arm silently downgrades
+    /// `[N: T]` to an ordinary generic, which then fails in codegen rather than
+    /// at the annotation.
+    #[test]
+    fn scalar_type_names_all_resolve() {
+        let unresolved: Vec<&str> = SCALAR_TYPE_NAMES.iter().copied()
+            .filter(|n| scalar_ty_by_name(n).is_none())
+            .collect();
+        assert!(unresolved.is_empty(), "scalar type names with no Ty: {unresolved:?}");
+    }
+}

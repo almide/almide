@@ -142,37 +142,31 @@ fn arity(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> usize {
 }
 
 /// Types of sub-patterns when specializing by a constructor.
+/// The positional field types a variant case binds.
+///
+/// A record payload returns no positional fields: those bind by name, which
+/// `fmt_arm_head` handles separately from the positional path.
+fn variant_payload_types(name: &Sym, resolved: &Ty) -> Vec<Ty> {
+    let Ty::Variant { cases, .. } = resolved else { return vec![] };
+    cases.iter().find(|c| c.name == *name).map_or(vec![], |c| match &c.payload {
+        VariantPayload::Unit => vec![],
+        VariantPayload::Tuple(tys) => tys.clone(),
+        VariantPayload::Record(_) => vec![],
+    })
+}
+
 fn field_types(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Vec<Ty> {
     let resolved = env.resolve_named(ty);
     match ctor {
-        CtorId::Variant(name) => match &resolved {
-            Ty::Variant { cases, .. } => {
-                cases.iter().find(|c| c.name == *name).map_or(vec![], |c| match &c.payload {
-                    VariantPayload::Unit => vec![],
-                    VariantPayload::Tuple(tys) => tys.clone(),
-                    VariantPayload::Record(_) => vec![], // Phase 4
-                })
-            }
-            _ => vec![],
-        },
-        CtorId::Some => match &resolved {
-            Ty::Applied(TypeConstructorId::Option, args) if !args.is_empty() => {
-                vec![args[0].clone()]
-            }
-            _ => vec![Ty::Unknown],
-        },
-        CtorId::Ok => match &resolved {
-            Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => {
-                vec![args[0].clone()]
-            }
-            _ => vec![Ty::Unknown],
-        },
-        CtorId::Err => match &resolved {
-            Ty::Applied(TypeConstructorId::Result, args) if args.len() >= 2 => {
-                vec![args[1].clone()]
-            }
-            _ => vec![Ty::Unknown],
-        },
+        CtorId::Variant(name) => variant_payload_types(name, &resolved),
+        // The wrapper constructors always bind exactly one field. When the
+        // subject type is not the matching wrapper — an inference failure
+        // upstream — the field is `Unknown` rather than absent, so the arity
+        // still lines up and the pattern engine does not see a phantom
+        // zero-field constructor.
+        CtorId::Some => vec![resolved.option_inner().unwrap_or(Ty::Unknown)],
+        CtorId::Ok => vec![resolved.result_ok_ty().unwrap_or(Ty::Unknown)],
+        CtorId::Err => vec![resolved.result_err_ty().unwrap_or(Ty::Unknown)],
         CtorId::Tuple => match &resolved {
             Ty::Tuple(tys) => tys.clone(),
             _ => vec![],

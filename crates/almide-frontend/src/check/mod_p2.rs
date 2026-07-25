@@ -123,73 +123,7 @@ impl Checker {
         let resolved = self.env.resolve_named(ty);
         match &resolved {
             Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().find(|(n, _)| n == field).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown),
-            Ty::TypeVar(tv) => {
-                // First check existing structural bounds
-                if let Some(bound) = self.env.structural_bounds.get(tv).cloned() {
-                    let result = self.resolve_field_type(&bound, field);
-                    if !matches!(result, Ty::Unknown) {
-                        return result;
-                    }
-                }
-                // Search env.types for record types with this field.
-                // Only unify if exactly one candidate exists (unambiguous).
-                let field_sym = almide_base::intern::sym(field);
-                let mut candidates: Vec<(almide_base::intern::Sym, Ty)> = Vec::new();
-                for (_name, reg_ty) in &self.env.types {
-                    match reg_ty {
-                        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                            if let Some((_, fty)) = fields.iter().find(|(n, _)| *n == field_sym) {
-                                candidates.push((*_name, fty.clone()));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                // Deduplicate: prefixed (`mod.Todo`) and unprefixed (`Todo`)
-                // aliases resolve to the same record definition; keep one.
-                // Sort first so dedup_by can catch non-adjacent duplicates.
-                candidates.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-                candidates.dedup_by(|a, b| {
-                    self.env.types.get(&a.0) == self.env.types.get(&b.0)
-                });
-                // A slice pattern carries the "exactly one candidate" check and
-                // the binding together, so the two cannot drift apart.
-                if let [(type_name, field_ty)] = candidates.as_slice() {
-                    let (type_name, field_ty) = (*type_name, field_ty.clone());
-                    let named = Ty::Named(type_name, vec![]);
-                    self.unify_infer(ty, &named);
-                    field_ty
-                } else if !candidates.is_empty() && candidates.iter().all(|(_, t)| *t == candidates[0].1) {
-                    // Multiple types share the same field name+type: safe to return
-                    // the type but don't unify the object (ambiguous which type it is).
-                    // Deferred field access will resolve once the parent chain is concrete.
-                    let field_ty = candidates[0].1.clone();
-                    let result = self.fresh_var();
-                    self.deferred_field_accesses.push((
-                        ty.clone(),
-                        almide_base::intern::sym(field),
-                        result.clone(),
-                        self.current_span,
-                    ));
-                    self.unify_infer(&result, &field_ty);
-                    field_ty
-                } else {
-                    // Ambiguous candidates (e.g. Cubic.a: Vec2, Color.a: Float).
-                    // If this is an inference var, defer — once the type resolves
-                    // the field lookup will succeed unambiguously.
-                    if tv.as_str().starts_with('?') {
-                        let result = self.fresh_var();
-                        self.deferred_field_accesses.push((
-                            ty.clone(),
-                            almide_base::intern::sym(field),
-                            result.clone(),
-                            self.current_span,
-                        ));
-                        return result;
-                    }
-                    Ty::Unknown
-                }
-            }
+            Ty::TypeVar(tv) => self.resolve_field_on_typevar(ty, tv, field),
             _ => {
                 // The type might be an inference variable that hasn't been
                 // resolved yet (e.g. lambda param `t` whose type `?x` will
@@ -208,6 +142,87 @@ impl Checker {
                 }
                 Ty::Unknown
             },
+        }
+    }
+
+    /// Resolve `field` on a type that is still a type VARIABLE.
+    ///
+    /// Four outcomes, in order: an existing structural bound answers directly;
+    /// exactly one registered record has the field, so the variable can be
+    /// unified with it; several records share the field AND its type, so the type
+    /// is known but the object is not, and the access is deferred; or the
+    /// candidates genuinely disagree (`Cubic.a: Vec2` vs `Color.a: Float`), where
+    /// an inference var defers and anything else recovers as `Unknown`.
+    fn resolve_field_on_typevar(
+        &mut self,
+        ty: &Ty,
+        tv: &almide_base::intern::Sym,
+        field: &str,
+    ) -> Ty {
+        // First check existing structural bounds
+        if let Some(bound) = self.env.structural_bounds.get(tv).cloned() {
+            let result = self.resolve_field_type(&bound, field);
+            if !matches!(result, Ty::Unknown) {
+                return result;
+            }
+        }
+        // Search env.types for record types with this field.
+        // Only unify if exactly one candidate exists (unambiguous).
+        let field_sym = almide_base::intern::sym(field);
+        let mut candidates: Vec<(almide_base::intern::Sym, Ty)> = Vec::new();
+        for (_name, reg_ty) in &self.env.types {
+            match reg_ty {
+                Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                    if let Some((_, fty)) = fields.iter().find(|(n, _)| *n == field_sym) {
+                        candidates.push((*_name, fty.clone()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Deduplicate: prefixed (`mod.Todo`) and unprefixed (`Todo`)
+        // aliases resolve to the same record definition; keep one.
+        // Sort first so dedup_by can catch non-adjacent duplicates.
+        candidates.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        candidates.dedup_by(|a, b| {
+            self.env.types.get(&a.0) == self.env.types.get(&b.0)
+        });
+        // A slice pattern carries the "exactly one candidate" check and
+        // the binding together, so the two cannot drift apart.
+        if let [(type_name, field_ty)] = candidates.as_slice() {
+            let (type_name, field_ty) = (*type_name, field_ty.clone());
+            let named = Ty::Named(type_name, vec![]);
+            self.unify_infer(ty, &named);
+            field_ty
+        } else if !candidates.is_empty() && candidates.iter().all(|(_, t)| *t == candidates[0].1) {
+            // Multiple types share the same field name+type: safe to return
+            // the type but don't unify the object (ambiguous which type it is).
+            // Deferred field access will resolve once the parent chain is concrete.
+            let field_ty = candidates[0].1.clone();
+            let result = self.fresh_var();
+            self.deferred_field_accesses.push((
+                ty.clone(),
+                almide_base::intern::sym(field),
+                result.clone(),
+                self.current_span,
+            ));
+            self.unify_infer(&result, &field_ty);
+            field_ty
+        } else {
+            // Ambiguous candidates (e.g. Cubic.a: Vec2, Color.a: Float).
+            // If this is an inference var, defer — once the type resolves
+            // the field lookup will succeed unambiguously.
+            if tv.as_str().starts_with('?') {
+                let result = self.fresh_var();
+                self.deferred_field_accesses.push((
+                    ty.clone(),
+                    almide_base::intern::sym(field),
+                    result.clone(),
+                    self.current_span,
+                ));
+                return result;
+            }
+            Ty::Unknown
         }
     }
 }
