@@ -343,182 +343,209 @@ impl Checker {
 
     fn infer_expr_member(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Member { object, field, .. } = &mut expr.kind else { unreachable!("infer_expr_member called on the wrong ExprKind") };
-                // `infer_expr(object)` below overwrites `current_span`
-                // with the object's range, so capture the Member expr's
-                // own span now. E013 uses it to position the
-                // `try_replace` rewrite that covers `object.field`.
-                let member_span = self.current_span;
-                // Module function used as a first-class value: `string.len`,
-                // `list.map`, etc. Detect this BEFORE inferring the object
-                // (which would fail because `string` is not a variable) and
-                // return the function's type signature.
-                if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
-                    if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
-                        self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
-                        return Ty::Fn {
-                            params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
-                            ret: Box::new(sig.ret.clone()),
-                        };
-                    }
-                    let resolved_mod_name = self.env.import_table.resolve(mod_name)
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| mod_name.to_string());
-                    let key = format!("{}.{}", resolved_mod_name, field);
-                    if let Some(sig) = self.env.functions.get(&sym(&key)).cloned() {
-                        self.type_map.insert(object.id, Ty::Unit);
-                        self.env.import_table.mark_used(mod_name);
-                        return Ty::Fn {
-                            params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
-                            ret: Box::new(sig.ret.clone()),
-                        };
-                    }
-                    // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
-                    // Spec Visibility section applies to fn, type, AND let.
-                    if let Some(let_ty) = self.env.top_lets.get(&sym(&key)).cloned() {
-                        if std::env::var_os("ALMIDE_TOPLET_DEBUG").is_some() {
-                            eprintln!("[toplet-debug] reader: key={} -> {:?}", key, let_ty);
-                        }
-                        self.type_map.insert(object.id, Ty::Unit);
-                        self.env.import_table.mark_used(mod_name);
-                        return let_ty;
-                    }
-                    // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
-                    if let Some((type_name, case)) = self.env.lookup_ctor(&sym(field)) {
-                        let resolved_mod = self.env.import_table.resolve(mod_name)
-                            .unwrap_or(sym(mod_name));
-                        let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
-                        if self.env.types.contains_key(&sym(&qualified)) {
-                            self.type_map.insert(object.id, Ty::Unit);
-                            let generic_args = self.instantiate_type_generics(type_name.as_str());
-                            // #433: return the qualified `mod.Type` (it exists and was
-                            // just confirmed) so the binding mangles to the namespaced
-                            // struct, not the ambiguous bare name.
-                            let qual_ty = sym(&qualified);
-                            return match &case.payload {
-                                VariantPayload::Unit => Ty::Named(qual_ty, generic_args),
-                                VariantPayload::Tuple(param_tys) => Ty::Fn {
-                                    params: param_tys.clone(),
-                                    ret: Box::new(Ty::Named(qual_ty, generic_args)),
-                                },
-                                VariantPayload::Record(_) => Ty::Named(qual_ty, generic_args),
-                            };
-                        }
-                    }
+        // `infer_expr(object)` below overwrites `current_span` with the object's
+        // range, so capture the Member expr's own span now. E013 uses it to
+        // position the `try_replace` rewrite that covers `object.field`.
+        let member_span = self.current_span;
+        // A module-qualified reference (`string.len`, `utils.CATEGORY_ORDER`) is
+        // resolved BEFORE the object is inferred, because inferring it would fail:
+        // `string` is a module name, not a variable.
+        if let Some(ty) = self.infer_module_qualified_member(object, field) {
+            return ty;
+        }
+        let obj_ty = self.infer_expr(object);
+        let concrete = resolve_ty(&obj_ty, &self.uf);
+        let field_ty = self.resolve_field_type(&concrete, field);
+        if matches!(field_ty, Ty::Unknown) {
+            self.report_unknown_member(object, field, &concrete, member_span);
+        }
+        field_ty
+    }
+
+    /// Resolve `mod.name` where `mod` names a module rather than a value.
+    ///
+    /// Covers a stdlib signature, a user module's fn, and a cross-module
+    /// top-level `let` — the Visibility section of the spec applies to `fn`,
+    /// `type` AND `let`. `None` means the object is not a module reference and
+    /// the caller should infer it as an ordinary expression.
+    fn infer_module_qualified_member(
+        &mut self,
+        object: &mut ast::Expr,
+        field: &almide_base::intern::Sym,
+    ) -> Option<Ty> {
+        if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
+            if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
+                self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
+                return Some(Ty::Fn {
+                    params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+                    ret: Box::new(sig.ret.clone()),
+                });
+            }
+            let resolved_mod_name = self.env.import_table.resolve(mod_name)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| mod_name.to_string());
+            let key = format!("{}.{}", resolved_mod_name, field);
+            if let Some(sig) = self.env.functions.get(&sym(&key)).cloned() {
+                self.type_map.insert(object.id, Ty::Unit);
+                self.env.import_table.mark_used(mod_name);
+                return Some(Ty::Fn {
+                    params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+                    ret: Box::new(sig.ret.clone()),
+                });
+            }
+            // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
+            // Spec Visibility section applies to fn, type, AND let.
+            if let Some(let_ty) = self.env.top_lets.get(&sym(&key)).cloned() {
+                if std::env::var_os("ALMIDE_TOPLET_DEBUG").is_some() {
+                    eprintln!("[toplet-debug] reader: key={} -> {:?}", key, let_ty);
                 }
-                let obj_ty = self.infer_expr(object);
-                let concrete = resolve_ty(&obj_ty, &self.uf);
-                let field_ty = self.resolve_field_type(&concrete, field);
-                // Almide-friendly diagnostic for list / string field access:
-                // LLMs trained on Haskell / Python / Ruby write `xs.head`,
-                // `xs.tail`, `xs.length`, `s.length`. In Almide these are
-                // stdlib calls — intercept here so rustc never leaks
-                // `error[E0609]: no field 'head' on type 'Vec<i64>'`.
-                if matches!(field_ty, Ty::Unknown) {
-                    // (field → (module_fn, args_template, display_suffix))
-                    // `args_template` is a tiny `("{0}", 1)`-style mini-
-                    // language: `{0}` is substituted with the object's
-                    // source slice; any trailing text goes verbatim.
-                    // `display_suffix` is comment-only info shown after
-                    // the mechanical replacement (e.g. the Option[T]
-                    // reminder for `head`).
-                    let module_and_subs: Option<(&str, Vec<(&str, &str, &str, &str)>)> = match &concrete {
-                        Ty::Applied(TypeConstructorId::List, _) => Some(("list", vec![
-                            ("head",   "list.first", "({0})", "  // returns Option[T]"),
-                            ("tail",   "list.drop",  "({0}, 1)", ""),
-                            ("length", "list.len",   "({0})", ""),
-                            ("len",    "list.len",   "({0})", ""),
-                            ("first",  "list.first", "({0})", ""),
-                            ("last",   "list.last",  "({0})", ""),
-                            ("size",   "list.len",   "({0})", ""),
-                        ])),
-                        Ty::String => Some(("string", vec![
-                            ("length", "string.len",      "({0})", ""),
-                            ("len",    "string.len",      "({0})", ""),
-                            ("size",   "string.len",      "({0})", ""),
-                            ("chars",  "string.to_chars", "({0})", ""),
-                        ])),
-                        _ => None,
+                self.type_map.insert(object.id, Ty::Unit);
+                self.env.import_table.mark_used(mod_name);
+                return Some(let_ty);
+            }
+            // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
+            if let Some((type_name, case)) = self.env.lookup_ctor(&sym(field)) {
+                let resolved_mod = self.env.import_table.resolve(mod_name)
+                    .unwrap_or(sym(mod_name));
+                let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
+                if self.env.types.contains_key(&sym(&qualified)) {
+                    self.type_map.insert(object.id, Ty::Unit);
+                    let generic_args = self.instantiate_type_generics(type_name.as_str());
+                    // #433: return the qualified `mod.Type` (it exists and was
+                    // just confirmed) so the binding mangles to the namespaced
+                    // struct, not the ambiguous bare name.
+                    let qual_ty = sym(&qualified);
+                    return Some(match &case.payload {
+                        VariantPayload::Unit => Ty::Named(qual_ty, generic_args),
+                        VariantPayload::Tuple(param_tys) => Ty::Fn {
+                            params: param_tys.clone(),
+                            ret: Box::new(Ty::Named(qual_ty, generic_args)),
+                        },
+                        VariantPayload::Record(_) => Ty::Named(qual_ty, generic_args),
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    /// Emit the E013 for a field access that resolved to no field.
+    ///
+    /// LLMs trained on Haskell / Python / Ruby write `xs.head`, `xs.tail`,
+    /// `xs.length`, `s.length`. In Almide those are stdlib calls, so the
+    /// diagnostic is intercepted here and carries the mechanical rewrite —
+    /// otherwise rustc leaks `error[E0609]: no field 'head' on type 'Vec<i64>'`
+    /// from generated code the user never wrote.
+    fn report_unknown_member(
+        &mut self,
+        object: &ast::Expr,
+        field: &almide_base::intern::Sym,
+        concrete: &Ty,
+        member_span: Option<crate::ast::Span>,
+    ) {
+                // (field → (module_fn, args_template, display_suffix))
+                // `args_template` is a tiny `("{0}", 1)`-style mini-
+                // language: `{0}` is substituted with the object's
+                // source slice; any trailing text goes verbatim.
+                // `display_suffix` is comment-only info shown after
+                // the mechanical replacement (e.g. the Option[T]
+                // reminder for `head`).
+                let module_and_subs: Option<(&str, Vec<(&str, &str, &str, &str)>)> = match &concrete {
+                    Ty::Applied(TypeConstructorId::List, _) => Some(("list", vec![
+                        ("head",   "list.first", "({0})", "  // returns Option[T]"),
+                        ("tail",   "list.drop",  "({0}, 1)", ""),
+                        ("length", "list.len",   "({0})", ""),
+                        ("len",    "list.len",   "({0})", ""),
+                        ("first",  "list.first", "({0})", ""),
+                        ("last",   "list.last",  "({0})", ""),
+                        ("size",   "list.len",   "({0})", ""),
+                    ])),
+                    Ty::String => Some(("string", vec![
+                        ("length", "string.len",      "({0})", ""),
+                        ("len",    "string.len",      "({0})", ""),
+                        ("size",   "string.len",      "({0})", ""),
+                        ("chars",  "string.to_chars", "({0})", ""),
+                    ])),
+                    _ => None,
+                };
+                // #847: a MISSING field on a closed record used to sail
+                // through as Unknown (no diagnostic at all — the failure
+                // surfaced as a codegen postcondition ICE, or leaked
+                // rustc's E0609). Report it here with the field roster.
+                let record_shape = self.env.resolve_named(&concrete);
+                if let Ty::Record { fields } = &record_shape {
+                    let available = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+                    let suggestion = almide_base::diagnostic::suggest(
+                        field, fields.iter().map(|(n, _)| n.as_str()));
+                    let hint = match &suggestion {
+                        Some(close) => format!("Did you mean `{}`? Available fields: {}", close, available),
+                        None => format!("Available fields: {}", available),
                     };
-                    // #847: a MISSING field on a closed record used to sail
-                    // through as Unknown (no diagnostic at all — the failure
-                    // surfaced as a codegen postcondition ICE, or leaked
-                    // rustc's E0609). Report it here with the field roster.
-                    let record_shape = self.env.resolve_named(&concrete);
-                    if let Ty::Record { fields } = &record_shape {
-                        let available = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
-                        let suggestion = almide_base::diagnostic::suggest(
-                            field, fields.iter().map(|(n, _)| n.as_str()));
-                        let hint = match &suggestion {
-                            Some(close) => format!("Did you mean `{}`? Available fields: {}", close, available),
-                            None => format!("Available fields: {}", available),
-                        };
-                        let mut diag = super::err(
-                            format!("no field '{}' on {}", field, concrete.display()),
-                            hint,
-                            format!("field access .{}", field),
-                        ).with_code("E013");
-                        if let (Some(close), Some(span)) = (&suggestion, member_span) {
-                            if let Some(obj_src) = object.span.and_then(|s| self.source_slice(s)) {
-                                diag = diag.with_try_replace(
-                                    span.line, span.col, span.end_col,
-                                    format!("{}.{}", obj_src, close),
-                                );
-                            }
+                    let mut diag = super::err(
+                        format!("no field '{}' on {}", field, concrete.display()),
+                        hint,
+                        format!("field access .{}", field),
+                    ).with_code("E013");
+                    if let (Some(close), Some(span)) = (&suggestion, member_span) {
+                        if let Some(obj_src) = object.span.and_then(|s| self.source_slice(s)) {
+                            diag = diag.with_try_replace(
+                                span.line, span.col, span.end_col,
+                                format!("{}.{}", obj_src, close),
+                            );
                         }
-                        self.emit(diag);
                     }
-                    if let Some((module, subs)) = module_and_subs {
-                        let matched = subs.iter().find(|(n, _, _, _)| n == field).cloned();
-                        let hint = if matched.is_some() {
-                            format!(
-                                "Almide values have no fields — use the `{m}` stdlib module. No method-call or field-access syntax is supported.",
-                                m = module
-                            )
-                        } else {
-                            format!(
-                                "Almide values have no fields. Use `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — see docs/stdlib/{m}.md for available functions.",
-                                m = module
-                            )
-                        };
-                        let mut diag = super::err(
-                            format!("no field '{}' on {}", field, module),
-                            hint,
-                            format!("field access .{}", field),
-                        ).with_code("E013");
-                        if let Some((_, fn_name, args_tpl, _display_suffix)) = matched {
-                            // Mechanical rewrite: substitute the object's
-                            // source text into `args_tpl`. `member_span`
-                            // now covers the full `object.field` (parser
-                            // upgrade from the E002 arc), so replacing
-                            // that range leaves the surrounding source
-                            // intact. Falls back to a display-only
-                            // snippet when source text isn't available.
-                            let rewrite = object.span
-                                .and_then(|s| self.source_slice(s))
-                                .and_then(|obj_src| {
-                                    let span = member_span?;
-                                    let args = args_tpl.replace("{0}", &obj_src);
-                                    Some((span, format!("{}{}", fn_name, args)))
-                                });
-                            if let Some((span, snippet)) = rewrite {
-                                diag = diag.with_try_replace(
-                                    span.line, span.col, span.end_col,
-                                    snippet,
-                                );
-                            } else {
-                                let display = format!(
-                                    "{}{}{}",
-                                    fn_name,
-                                    args_tpl.replace("{0}", "xs"),
-                                    _display_suffix,
-                                );
-                                diag = diag.with_try(display);
-                            }
-                        }
-                        self.emit(diag);
-                    }
+                    self.emit(diag);
                 }
-                field_ty
+                if let Some((module, subs)) = module_and_subs {
+                    let matched = subs.iter().find(|(n, _, _, _)| n == field).cloned();
+                    let hint = if matched.is_some() {
+                        format!(
+                            "Almide values have no fields — use the `{m}` stdlib module. No method-call or field-access syntax is supported.",
+                            m = module
+                        )
+                    } else {
+                        format!(
+                            "Almide values have no fields. Use `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — see docs/stdlib/{m}.md for available functions.",
+                            m = module
+                        )
+                    };
+                    let mut diag = super::err(
+                        format!("no field '{}' on {}", field, module),
+                        hint,
+                        format!("field access .{}", field),
+                    ).with_code("E013");
+                    if let Some((_, fn_name, args_tpl, _display_suffix)) = matched {
+                        // Mechanical rewrite: substitute the object's
+                        // source text into `args_tpl`. `member_span`
+                        // now covers the full `object.field` (parser
+                        // upgrade from the E002 arc), so replacing
+                        // that range leaves the surrounding source
+                        // intact. Falls back to a display-only
+                        // snippet when source text isn't available.
+                        let rewrite = object.span
+                            .and_then(|s| self.source_slice(s))
+                            .and_then(|obj_src| {
+                                let span = member_span?;
+                                let args = args_tpl.replace("{0}", &obj_src);
+                                Some((span, format!("{}{}", fn_name, args)))
+                            });
+                        if let Some((span, snippet)) = rewrite {
+                            diag = diag.with_try_replace(
+                                span.line, span.col, span.end_col,
+                                snippet,
+                            );
+                        } else {
+                            let display = format!(
+                                "{}{}{}",
+                                fn_name,
+                                args_tpl.replace("{0}", "xs"),
+                                _display_suffix,
+                            );
+                            diag = diag.with_try(display);
+                        }
+                    }
+                    self.emit(diag);
+                }
     }
 
     fn infer_expr_tuple_index(&mut self, expr: &mut ast::Expr) -> Ty {
