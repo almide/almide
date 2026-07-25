@@ -99,45 +99,31 @@ pub fn emit_module(module: &Module) -> String {
 fn _val(v: ValueId) -> String { format!("v{}", v.0) }
 
 fn emit_rust_type(ty: &DialectType) -> String {
+    if let Some(name) = crate::types::scalar_name(ty, true) {
+        return name.into();
+    }
+    let list = |ts: &[DialectType]| ts.iter().map(emit_rust_type).collect::<Vec<_>>().join(", ");
     match ty {
-        DialectType::I64 => "i64".into(),
-        DialectType::F64 => "f64".into(),
-        DialectType::Bool => "bool".into(),
-        DialectType::Unit => "()".into(),
-        DialectType::String => "String".into(),
-        DialectType::Bytes => "Vec<u8>".into(),
-        DialectType::I8 => "i8".into(),
-        DialectType::I16 => "i16".into(),
-        DialectType::I32 => "i32".into(),
-        DialectType::U8 => "u8".into(),
-        DialectType::U16 => "u16".into(),
-        DialectType::U32 => "u32".into(),
-        DialectType::U64 => "u64".into(),
-        DialectType::F32 => "f32".into(),
-        DialectType::Matrix => "Matrix".into(),
-        DialectType::RawPtr => "*mut u8".into(),
-        DialectType::Unknown => "()".into(),
         DialectType::List(inner) => format!("Vec<{}>", emit_rust_type(inner)),
-        DialectType::Map(k, v) => format!("HashMap<{}, {}>", emit_rust_type(k), emit_rust_type(v)),
         DialectType::Option(inner) => format!("Option<{}>", emit_rust_type(inner)),
-        DialectType::Result(ok, err) => format!("Result<{}, {}>", emit_rust_type(ok), emit_rust_type(err)),
-        DialectType::Tuple(elems) => {
-            let parts: Vec<_> = elems.iter().map(|e| emit_rust_type(e)).collect();
-            format!("({})", parts.join(", "))
+        DialectType::Map(k, v) => {
+            format!("HashMap<{}, {}>", emit_rust_type(k), emit_rust_type(v))
         }
+        DialectType::Result(ok, err) => {
+            format!("Result<{}, {}>", emit_rust_type(ok), emit_rust_type(err))
+        }
+        DialectType::Tuple(elems) => format!("({})", list(elems)),
         DialectType::Named(sym) => sym.as_str().to_string(),
-        DialectType::Record(fields) => {
-            // Anonymous records not supported as Rust types
-            "()".into()
-        }
+        // Anonymous records have no Rust type here.
+        DialectType::Record(_) => "()".into(),
         DialectType::Fn { params, ret } => {
-            let ps: Vec<_> = params.iter().map(|p| emit_rust_type(p)).collect();
-            format!("impl Fn({}) -> {}", ps.join(", "), emit_rust_type(ret))
+            format!("impl Fn({}) -> {}", list(params), emit_rust_type(ret))
         }
         DialectType::Closure { params, ret } => {
-            let ps: Vec<_> = params.iter().map(|p| emit_rust_type(p)).collect();
-            format!("Box<dyn Fn({}) -> {}>", ps.join(", "), emit_rust_type(ret))
+            format!("Box<dyn Fn({}) -> {}>", list(params), emit_rust_type(ret))
         }
+        // Every nullary variant was handled by the shared scalar table above.
+        _ => "()".into(),
     }
 }
 
@@ -230,6 +216,25 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
     let pad = "    ".repeat(indent);
     let result_name = op.result.map(|r| names.get(r)).unwrap_or_default();
 
+    let handled = emit_op_const(out, op, &pad, &result_name, indent, names)
+        || emit_op_scalar(out, op, &pad, &result_name, indent, names)
+        || emit_op_calls(out, op, &pad, &result_name, indent, names)
+        || emit_op_agg(out, op, &pad, &result_name, indent, names)
+        || emit_op_variant(out, op, &pad, &result_name, indent, names)
+        || emit_op_slot(out, op, &pad, &result_name, indent, names)
+        || emit_op_region(out, op, &pad, &result_name, indent, names);
+    if !handled {
+        out.push_str(&format!("{}let {} = (); // TODO: {:?}\n", pad, result_name, std::mem::discriminant(&op.kind)));
+    }
+}
+
+/// Constants.
+///
+/// Extracted from `emit_op` (name-router split). `false` means "not my group", so
+/// the router's dispatch order is the only ordering that matters and the trailing
+/// unhandled-op fallback still catches an op with no emitter.
+fn emit_op_const(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) -> bool {
+    let _ = (indent, &names);
     match &op.kind {
         OpKind::ConstInt(v) => {
             out.push_str(&format!("{}let {} = {}i64;\n", pad, result_name, v));
@@ -246,8 +251,20 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
         OpKind::ConstUnit => {
             out.push_str(&format!("{}let {} = ();\n", pad, result_name));
         }
+        _ => return false,
+    }
+    true
+}
 
-        OpKind::BinOp { .. } => emit_op_binop(out, op, &pad, &result_name, names),
+/// Operators and the unwrap forms.
+///
+/// Extracted from `emit_op` (name-router split). `false` means "not my group", so
+/// the router's dispatch order is the only ordering that matters and the trailing
+/// unhandled-op fallback still catches an op with no emitter.
+fn emit_op_scalar(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) -> bool {
+    let _ = (indent, &names);
+    match &op.kind {
+        OpKind::BinOp { .. } => emit_op_binop(out, op, pad, result_name, names),
         OpKind::UnOp { op, operand } => {
             let op_str = match op {
                 almide_ir::UnOp::NegInt | almide_ir::UnOp::NegFloat => "-",
@@ -255,8 +272,29 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             };
             out.push_str(&format!("{}let {} = {}{};\n", pad, result_name, op_str, names.get(*operand)));
         }
+        OpKind::UnwrapOp { value } => {
+            out.push_str(&format!("{}let {} = {}.unwrap();\n", pad, result_name, names.get(*value)));
+        }
+        OpKind::UnwrapOrOp { value, fallback } => {
+            out.push_str(&format!("{}let {} = {}.unwrap_or({});\n", pad, result_name, names.get(*value), names.get(*fallback)));
+        }
+        OpKind::TryOp { value } => {
+            out.push_str(&format!("{}let {} = {}?;\n", pad, result_name, names.get(*value)));
+        }
+        _ => return false,
+    }
+    true
+}
 
-        OpKind::CallOp { .. } => emit_op_call(out, op, &pad, &result_name, names),
+/// Calls — direct, computed, and intrinsic.
+///
+/// Extracted from `emit_op` (name-router split). `false` means "not my group", so
+/// the router's dispatch order is the only ordering that matters and the trailing
+/// unhandled-op fallback still catches an op with no emitter.
+fn emit_op_calls(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) -> bool {
+    let _ = (indent, &names);
+    match &op.kind {
+        OpKind::CallOp { .. } => emit_op_call(out, op, pad, result_name, names),
         OpKind::ComputedCallOp { callee, args } => {
             let callee_name = names.get(*callee);
             let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
@@ -266,7 +304,19 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
             out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, symbol, args_str.join(", ")));
         }
+        _ => return false,
+    }
+    true
+}
 
+/// Aggregate construction and element/field access.
+///
+/// Extracted from `emit_op` (name-router split). `false` means "not my group", so
+/// the router's dispatch order is the only ordering that matters and the trailing
+/// unhandled-op fallback still catches an op with no emitter.
+fn emit_op_agg(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) -> bool {
+    let _ = (indent, &names);
+    match &op.kind {
         OpKind::RecordOp { name, fields } => {
             let n = name.map(|s| s.as_str().to_string()).unwrap_or_default();
             let fs: Vec<_> = fields.iter().map(|(k, v)| format!("{}: {}", k, names.get(*v))).collect();
@@ -275,7 +325,6 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
         OpKind::MemberOp { object, field } => {
             out.push_str(&format!("{}let {} = {}.{}.clone();\n", pad, result_name, names.get(*object), field));
         }
-
         OpKind::ListOp { elements } => {
             let vals: Vec<_> = elements.iter().map(|v| names.get(*v)).collect();
             out.push_str(&format!("{}let {} = vec![{}];\n", pad, result_name, vals.join(", ")));
@@ -284,9 +333,39 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             let vals: Vec<_> = elements.iter().map(|v| names.get(*v)).collect();
             out.push_str(&format!("{}let {} = ({});\n", pad, result_name, vals.join(", ")));
         }
+        OpKind::MapOp { entries } => {
+            out.push_str(&format!("{}let {} = HashMap::from([", pad, result_name));
+            for (i, (k, v)) in entries.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                out.push_str(&format!("({}, {})", names.get(*k), names.get(*v)));
+            }
+            out.push_str("]);\n");
+        }
+        OpKind::EmptyMapOp => {
+            out.push_str(&format!("{}let {} = HashMap::new();\n", pad, result_name));
+        }
+        OpKind::IndexOp { object, index } => {
+            out.push_str(&format!("{}let {} = {}[{} as usize].clone();\n", pad, result_name, names.get(*object), names.get(*index)));
+        }
+        OpKind::MapAccessOp { object, key } => {
+            out.push_str(&format!("{}let {} = {}.get(&{}).cloned();\n", pad, result_name, names.get(*object), names.get(*key)));
+        }
+        OpKind::TupleIndexOp { object, index } => {
+            out.push_str(&format!("{}let {} = {}.{}.clone();\n", pad, result_name, names.get(*object), index));
+        }
+        _ => return false,
+    }
+    true
+}
 
-        OpKind::IfOp { .. } => emit_op_if(out, op, &pad, &result_name, indent, names),
-
+/// `Result`/`Option` construction.
+///
+/// Extracted from `emit_op` (name-router split). `false` means "not my group", so
+/// the router's dispatch order is the only ordering that matters and the trailing
+/// unhandled-op fallback still catches an op with no emitter.
+fn emit_op_variant(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) -> bool {
+    let _ = (indent, &names);
+    match &op.kind {
         OpKind::ResultOkOp { value } => {
             out.push_str(&format!("{}let {} = Ok({});\n", pad, result_name, names.get(*value)));
         }
@@ -299,7 +378,19 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
         OpKind::OptionNoneOp => {
             out.push_str(&format!("{}let {} = None;\n", pad, result_name));
         }
+        _ => return false,
+    }
+    true
+}
 
+/// Mutable-slot allocation, load and store.
+///
+/// Extracted from `emit_op` (name-router split). `false` means "not my group", so
+/// the router's dispatch order is the only ordering that matters and the trailing
+/// unhandled-op fallback still catches an op with no emitter.
+fn emit_op_slot(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) -> bool {
+    let _ = (indent, &names);
+    match &op.kind {
         OpKind::AllocVar { init, .. } => {
             out.push_str(&format!("{}let mut {} = {};\n", pad, result_name, names.get(*init)));
         }
@@ -309,53 +400,28 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
         OpKind::StoreVar { slot, value } => {
             out.push_str(&format!("{}{} = {};\n", pad, names.get(*slot), names.get(*value)));
         }
-
-        OpKind::MatchOp { .. } => emit_op_match(out, op, &pad, &result_name, indent, names),
-
-        OpKind::LambdaOp { .. } => emit_op_lambda(out, op, &pad, &result_name, indent, names),
-
-        OpKind::ForOp { .. } => emit_op_for(out, op, &pad, &result_name, indent, names),
-
-        OpKind::WhileOp { .. } => emit_op_while(out, op, &pad, &result_name, indent, names),
-
-        OpKind::FanOp { regions } => emit_op_fan(out, regions, &pad, &result_name, indent, names),
-
-        OpKind::UnwrapOp { value } => {
-            out.push_str(&format!("{}let {} = {}.unwrap();\n", pad, result_name, names.get(*value)));
-        }
-        OpKind::UnwrapOrOp { value, fallback } => {
-            out.push_str(&format!("{}let {} = {}.unwrap_or({});\n", pad, result_name, names.get(*value), names.get(*fallback)));
-        }
-        OpKind::TryOp { value } => {
-            out.push_str(&format!("{}let {} = {}?;\n", pad, result_name, names.get(*value)));
-        }
-
-        OpKind::MapOp { entries } => {
-            out.push_str(&format!("{}let {} = HashMap::from([", pad, result_name));
-            for (i, (k, v)) in entries.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                out.push_str(&format!("({}, {})", names.get(*k), names.get(*v)));
-            }
-            out.push_str("]);\n");
-        }
-        OpKind::EmptyMapOp => {
-            out.push_str(&format!("{}let {} = HashMap::new();\n", pad, result_name));
-        }
-
-        OpKind::IndexOp { object, index } => {
-            out.push_str(&format!("{}let {} = {}[{} as usize].clone();\n", pad, result_name, names.get(*object), names.get(*index)));
-        }
-        OpKind::MapAccessOp { object, key } => {
-            out.push_str(&format!("{}let {} = {}.get(&{}).cloned();\n", pad, result_name, names.get(*object), names.get(*key)));
-        }
-        OpKind::TupleIndexOp { object, index } => {
-            out.push_str(&format!("{}let {} = {}.{}.clone();\n", pad, result_name, names.get(*object), index));
-        }
-
-        _ => {
-            out.push_str(&format!("{}let {} = (); // TODO: {:?}\n", pad, result_name, std::mem::discriminant(&op.kind)));
-        }
+        _ => return false,
     }
+    true
+}
+
+/// Region-bearing ops — each already delegates to its own emitter.
+///
+/// Extracted from `emit_op` (name-router split). `false` means "not my group", so
+/// the router's dispatch order is the only ordering that matters and the trailing
+/// unhandled-op fallback still catches an op with no emitter.
+fn emit_op_region(out: &mut String, op: &Operation, pad: &str, result_name: &str, indent: usize, names: &mut NameMap) -> bool {
+    let _ = (indent, &names);
+    match &op.kind {
+        OpKind::IfOp { .. } => emit_op_if(out, op, pad, result_name, indent, names),
+        OpKind::MatchOp { .. } => emit_op_match(out, op, pad, result_name, indent, names),
+        OpKind::LambdaOp { .. } => emit_op_lambda(out, op, pad, result_name, indent, names),
+        OpKind::ForOp { .. } => emit_op_for(out, op, pad, result_name, indent, names),
+        OpKind::WhileOp { .. } => emit_op_while(out, op, pad, result_name, indent, names),
+        OpKind::FanOp { regions } => emit_op_fan(out, regions, pad, result_name, indent, names),
+        _ => return false,
+    }
+    true
 }
 
 fn emit_op_binop(out: &mut String, op: &Operation, pad: &str, result_name: &str, names: &mut NameMap) {

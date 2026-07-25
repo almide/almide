@@ -36,45 +36,27 @@ fn indent(out: &mut String, level: usize) {
 fn fmt_val(v: ValueId) -> String { format!("%{}", v.0) }
 
 fn fmt_type(ty: &DialectType) -> String {
+    if let Some(name) = crate::types::scalar_name(ty, false) {
+        return name.into();
+    }
+    let list = |ts: &[DialectType]| ts.iter().map(fmt_type).collect::<Vec<_>>().join(", ");
     match ty {
-        DialectType::I64 => "i64".into(),
-        DialectType::F64 => "f64".into(),
-        DialectType::Bool => "bool".into(),
-        DialectType::Unit => "unit".into(),
-        DialectType::String => "string".into(),
-        DialectType::Bytes => "bytes".into(),
-        DialectType::I8 => "i8".into(),
-        DialectType::I16 => "i16".into(),
-        DialectType::I32 => "i32".into(),
-        DialectType::U8 => "u8".into(),
-        DialectType::U16 => "u16".into(),
-        DialectType::U32 => "u32".into(),
-        DialectType::U64 => "u64".into(),
-        DialectType::F32 => "f32".into(),
-        DialectType::Matrix => "matrix".into(),
-        DialectType::RawPtr => "rawptr".into(),
-        DialectType::Unknown => "unknown".into(),
         DialectType::List(inner) => format!("list<{}>", fmt_type(inner)),
-        DialectType::Map(k, v) => format!("map<{}, {}>", fmt_type(k), fmt_type(v)),
         DialectType::Option(inner) => format!("option<{}>", fmt_type(inner)),
+        DialectType::Map(k, v) => format!("map<{}, {}>", fmt_type(k), fmt_type(v)),
         DialectType::Result(ok, err) => format!("result<{}, {}>", fmt_type(ok), fmt_type(err)),
-        DialectType::Tuple(elems) => {
-            let parts: Vec<_> = elems.iter().map(|e| fmt_type(e)).collect();
-            format!("tuple<{}>", parts.join(", "))
-        }
+        DialectType::Tuple(elems) => format!("tuple<{}>", list(elems)),
         DialectType::Named(sym) => format!("!{}", sym),
         DialectType::Record(fields) => {
             let parts: Vec<_> = fields.iter().map(|(n, t)| format!("{}: {}", n, fmt_type(t))).collect();
             format!("record<{}>", parts.join(", "))
         }
-        DialectType::Fn { params, ret } => {
-            let ps: Vec<_> = params.iter().map(|p| fmt_type(p)).collect();
-            format!("fn({}) -> {}", ps.join(", "), fmt_type(ret))
-        }
+        DialectType::Fn { params, ret } => format!("fn({}) -> {}", list(params), fmt_type(ret)),
         DialectType::Closure { params, ret } => {
-            let ps: Vec<_> = params.iter().map(|p| fmt_type(p)).collect();
-            format!("closure({}) -> {}", ps.join(", "), fmt_type(ret))
+            format!("closure({}) -> {}", list(params), fmt_type(ret))
         }
+        // Every nullary variant was handled by the shared scalar table above.
+        _ => "unknown".into(),
     }
 }
 
@@ -113,20 +95,41 @@ fn dump_op(out: &mut String, op: &Operation, level: usize) {
     if let Some(result) = op.result {
         out.push_str(&format!("{} = ", fmt_val(result)));
     }
+    let handled = dump_op_const(out, op)
+        || dump_op_value(out, op)
+        || dump_op_region(out, op);
+    debug_assert!(handled, "dump_op: no rendering for an op kind");
+    if !handled {
+        out.push_str("almide.unknown");
+    }
+    out.push_str(&format!(" : {}\n", fmt_type(&op.result_ty)));
+}
+
+/// Constants.
+///
+/// Extracted from `dump_op` (name-router split); `false` means "not my group".
+fn dump_op_const(out: &mut String, op: &Operation) -> bool {
     match &op.kind {
         OpKind::ConstInt(v) => out.push_str(&format!("almide.const {} : i64", v)),
         OpKind::ConstFloat(v) => out.push_str(&format!("almide.const {:.6} : f64", v)),
         OpKind::ConstBool(v) => out.push_str(&format!("almide.const {} : bool", v)),
         OpKind::ConstString(v) => out.push_str(&format!("almide.const \"{}\" : string", v.escape_default())),
         OpKind::ConstUnit => out.push_str("almide.const () : unit"),
-
+        _ => return false,
+    }
+    true
+}
+/// Value-producing ops with no nested region.
+///
+/// Extracted from `dump_op` (name-router split); `false` means "not my group".
+fn dump_op_value(out: &mut String, op: &Operation) -> bool {
+    match &op.kind {
         OpKind::BinOp { op: binop, lhs, rhs } => {
             out.push_str(&format!("almide.binop {:?} {}, {}", binop, fmt_val(*lhs), fmt_val(*rhs)));
         }
         OpKind::UnOp { op: unop, operand } => {
             out.push_str(&format!("almide.unop {:?} {}", unop, fmt_val(*operand)));
         }
-
         OpKind::CallOp { callee, args } => {
             let args_str: Vec<_> = args.iter().map(|a| fmt_val(*a)).collect();
             out.push_str(&format!("almide.call @{}({})", callee, args_str.join(", ")));
@@ -148,14 +151,6 @@ fn dump_op(out: &mut String, op: &Operation, level: usize) {
             let args_str: Vec<_> = args.iter().map(|a| fmt_val(*a)).collect();
             out.push_str(&format!("almide.intrinsic @{}({})", symbol, args_str.join(", ")));
         }
-
-        OpKind::IfOp { cond, .. } => {
-            out.push_str(&format!("almide.if {} ...", fmt_val(*cond)));
-        }
-        OpKind::MatchOp { subject, arms } => {
-            out.push_str(&format!("almide.match {} [{} arms]", fmt_val(*subject), arms.len()));
-        }
-
         OpKind::ListOp { elements } => {
             let vals: Vec<_> = elements.iter().map(|v| fmt_val(*v)).collect();
             out.push_str(&format!("almide.list [{}]", vals.join(", ")));
@@ -173,7 +168,6 @@ fn dump_op(out: &mut String, op: &Operation, level: usize) {
             let vals: Vec<_> = elements.iter().map(|v| fmt_val(*v)).collect();
             out.push_str(&format!("almide.tuple ({})", vals.join(", ")));
         }
-
         OpKind::MemberOp { object, field } => {
             out.push_str(&format!("almide.member {}.{}", fmt_val(*object), field));
         }
@@ -186,7 +180,6 @@ fn dump_op(out: &mut String, op: &Operation, level: usize) {
         OpKind::MapAccessOp { object, key } => {
             out.push_str(&format!("almide.map_access {}[{}]", fmt_val(*object), fmt_val(*key)));
         }
-
         OpKind::ResultOkOp { value } => out.push_str(&format!("almide.ok {}", fmt_val(*value))),
         OpKind::ResultErrOp { value } => out.push_str(&format!("almide.err {}", fmt_val(*value))),
         OpKind::OptionSomeOp { value } => out.push_str(&format!("almide.some {}", fmt_val(*value))),
@@ -196,12 +189,25 @@ fn dump_op(out: &mut String, op: &Operation, level: usize) {
         OpKind::UnwrapOrOp { value, fallback } => {
             out.push_str(&format!("almide.unwrap_or {}, {}", fmt_val(*value), fmt_val(*fallback)));
         }
-
+        _ => return false,
+    }
+    true
+}
+/// Region-bearing ops (dumped elided).
+///
+/// Extracted from `dump_op` (name-router split); `false` means "not my group".
+fn dump_op_region(out: &mut String, op: &Operation) -> bool {
+    match &op.kind {
+        OpKind::IfOp { cond, .. } => {
+            out.push_str(&format!("almide.if {} ...", fmt_val(*cond)));
+        }
+        OpKind::MatchOp { subject, arms } => {
+            out.push_str(&format!("almide.match {} [{} arms]", fmt_val(*subject), arms.len()));
+        }
         OpKind::LambdaOp { params, .. } => {
             let ps: Vec<_> = params.iter().map(|(v, t)| format!("{}: {}", fmt_val(*v), fmt_type(t))).collect();
             out.push_str(&format!("almide.lambda ({}) ...", ps.join(", ")));
         }
-
         OpKind::FanOp { regions } => {
             out.push_str(&format!("almide.fan [{} branches]", regions.len()));
         }
@@ -211,8 +217,9 @@ fn dump_op(out: &mut String, op: &Operation, level: usize) {
         OpKind::WhileOp { .. } => {
             out.push_str("almide.while ...");
         }
+        _ => return false,
     }
-    out.push_str(&format!(" : {}\n", fmt_type(&op.result_ty)));
+    true
 }
 
 fn dump_terminator(out: &mut String, term: &Terminator) {

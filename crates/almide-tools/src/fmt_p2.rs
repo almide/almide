@@ -1,53 +1,154 @@
+/// Render an expression.
+///
+/// Split into four EXHAUSTIVE groups by shape — leaf, wrapper (a fixed prefix or
+/// suffix around one child), infix, and the block-shaped forms that already have
+/// their own helpers. Each group returns `bool` (handled / not mine) instead of
+/// `Option`, so the compiler still cannot warn about a dropped arm; instead the
+/// `debug_assert` below fails loudly the first time a NEW `ExprKind` is added
+/// without a rendering, which is the property the original single match had by
+/// exhaustiveness. Splitting it any other way (a wildcard `_` in each group)
+/// would have silently shrunk the formatter's coverage — the one thing this
+/// function must not do, since a missing arm means source that fmt drops.
 fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
+    let handled = fmt_expr_leaf(out, expr)
+        || fmt_expr_wrapper(out, expr, depth)
+        || fmt_expr_infix(out, expr, depth)
+        || fmt_expr_compound(out, expr, depth);
+    debug_assert!(handled, "fmt_expr: no rendering for {:?}", std::mem::discriminant(&expr.kind));
+    if !handled {
+        // Release builds must still emit SOMETHING parseable rather than silently
+        // dropping the expression from the formatted output.
+        out.push_str("/* unformatted */");
+    }
+}
+
+/// Leaves: no child expressions.
+fn fmt_expr_leaf(out: &mut String, expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Int { raw, .. } => out.push_str(raw),
-        ExprKind::Float { value, .. } => { let s = format!("{value}"); if s.contains('.') { out.push_str(&s); } else { out.push_str(&s); out.push_str(".0"); } }
+        ExprKind::Float { value, .. } => {
+            let s = format!("{value}");
+            out.push_str(&s);
+            if !s.contains('.') { out.push_str(".0"); }
+        }
         ExprKind::String { value, .. } => fmt_expr_string(out, value),
-        ExprKind::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
         ExprKind::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
         ExprKind::Unit => out.push_str("()"),
         ExprKind::None => out.push_str("none"),
         ExprKind::Hole | ExprKind::Placeholder => out.push('_'),
         ExprKind::Error => out.push_str("/* error */"),
-        ExprKind::Todo { message, .. } => if message.is_empty() { out.push_str("todo"); } else { w!(out, "todo(\"{}\")", crate::fmt::escape_dquoted(message)); },
-        ExprKind::Some { expr: e, .. } => { out.push_str("some("); fmt_expr(out, e, depth); out.push(')'); }
-        ExprKind::Ok { expr: e, .. } => { out.push_str("ok("); fmt_expr(out, e, depth); out.push(')'); }
-        ExprKind::Err { expr: e, .. } => { out.push_str("err("); fmt_expr(out, e, depth); out.push(')'); }
-        ExprKind::Ident { name, .. } | ExprKind::TypeName { name, .. } => out.push_str(name),
-        ExprKind::Paren { expr: e, .. } => { out.push('('); fmt_expr(out, e, depth); out.push(')'); }
-        ExprKind::Tuple { elements, .. } => { out.push('('); comma_sep(out, elements, |out, e| fmt_expr(out, e, depth)); out.push(')'); }
-        ExprKind::List { elements, .. } => fmt_list(out, elements, depth),
         ExprKind::EmptyMap => out.push_str("[:]"),
+        ExprKind::Break => out.push_str("break"),
+        ExprKind::Continue => out.push_str("continue"),
+        ExprKind::Ident { name, .. } | ExprKind::TypeName { name, .. } => out.push_str(name),
+        ExprKind::Todo { message, .. } => {
+            if message.is_empty() {
+                out.push_str("todo");
+            } else {
+                w!(out, "todo(\"{}\")", crate::fmt::escape_dquoted(message));
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// One child wrapped in a fixed prefix and/or suffix.
+fn fmt_expr_wrapper(out: &mut String, expr: &Expr, depth: usize) -> bool {
+    let mut around = |pre: &str, e: &Expr, post: &str| {
+        out.push_str(pre);
+        fmt_expr(out, e, depth);
+        out.push_str(post);
+    };
+    match &expr.kind {
+        ExprKind::Some { expr: e, .. } => around("some(", e, ")"),
+        ExprKind::Ok { expr: e, .. } => around("ok(", e, ")"),
+        ExprKind::Err { expr: e, .. } => around("err(", e, ")"),
+        ExprKind::Paren { expr: e, .. } => around("(", e, ")"),
+        ExprKind::Try { expr: e, .. } => around("try ", e, ""),
+        ExprKind::Await { expr: e, .. } => around("await ", e, ""),
+        ExprKind::Unwrap { expr: e, .. } => around("", e, "!"),
+        ExprKind::ToOption { expr: e, .. } => around("", e, "?"),
+        ExprKind::Unary { op, operand, .. } => {
+            out.push_str(op);
+            if op == "not" { out.push(' '); }
+            fmt_expr(out, operand, depth);
+        }
+        ExprKind::Member { object, field, .. } => {
+            fmt_expr(out, object, depth);
+            w!(out, ".{field}");
+        }
+        ExprKind::TupleIndex { object, index, .. } => {
+            fmt_expr(out, object, depth);
+            w!(out, ".{index}");
+        }
+        ExprKind::OptionalChain { expr: e, field, .. } => {
+            fmt_expr(out, e, depth);
+            out.push_str("?.");
+            out.push_str(field);
+        }
+        ExprKind::IndexAccess { object, index, .. } => {
+            fmt_expr(out, object, depth);
+            out.push('[');
+            fmt_expr(out, index, depth);
+            out.push(']');
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Two children joined by an operator or separator.
+fn fmt_expr_infix(out: &mut String, expr: &Expr, depth: usize) -> bool {
+    let mut joined = |l: &Expr, sep: &str, r: &Expr| {
+        fmt_expr(out, l, depth);
+        out.push_str(sep);
+        fmt_expr(out, r, depth);
+    };
+    match &expr.kind {
+        ExprKind::Pipe { left, right, .. } => joined(left, " |> ", right),
+        ExprKind::Compose { left, right, .. } => joined(left, " >> ", right),
+        ExprKind::UnwrapOr { expr: e, fallback, .. } => joined(e, " ?? ", fallback),
+        ExprKind::Range { start, end, inclusive, .. } => {
+            joined(start, if *inclusive { "..=" } else { ".." }, end)
+        }
+        ExprKind::Binary { op, left, right, .. } => {
+            fmt_expr(out, left, depth);
+            w!(out, " {op} ");
+            fmt_expr(out, right, depth);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Collections, interpolation, and the block-shaped forms — each already owns a
+/// helper that handles its own line breaking.
+fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
+    match &expr.kind {
+        ExprKind::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
+        ExprKind::Tuple { elements, .. } => {
+            out.push('(');
+            comma_sep(out, elements, |out, e| fmt_expr(out, e, depth));
+            out.push(')');
+        }
+        ExprKind::List { elements, .. } => fmt_list(out, elements, depth),
         ExprKind::MapLiteral { entries, .. } => fmt_map(out, entries, depth),
         ExprKind::Record { .. } => fmt_expr_record(out, expr, depth),
         ExprKind::SpreadRecord { .. } => fmt_expr_spread_record(out, expr, depth),
         ExprKind::Call { .. } => fmt_expr_call(out, expr, depth),
-        ExprKind::Member { object, field, .. } => { fmt_expr(out, object, depth); w!(out, ".{field}"); }
-        ExprKind::TupleIndex { object, index, .. } => { fmt_expr(out, object, depth); w!(out, ".{index}"); }
-        ExprKind::IndexAccess { object, index, .. } => { fmt_expr(out, object, depth); out.push('['); fmt_expr(out, index, depth); out.push(']'); }
-        ExprKind::Pipe { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" |> "); fmt_expr(out, right, depth); }
-        ExprKind::Compose { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" >> "); fmt_expr(out, right, depth); }
-        ExprKind::Binary { op, left, right, .. } => { fmt_expr(out, left, depth); w!(out, " {op} "); fmt_expr(out, right, depth); }
-        ExprKind::Unary { op, operand, .. } => { out.push_str(op); if op == "not" { out.push(' '); } fmt_expr(out, operand, depth); }
-        ExprKind::Break => out.push_str("break"),
-        ExprKind::Continue => out.push_str("continue"),
-        ExprKind::Try { expr: e, .. } => { out.push_str("try "); fmt_expr(out, e, depth); }
-        ExprKind::Unwrap { expr: e, .. } => { fmt_expr(out, e, depth); out.push('!'); }
-        ExprKind::UnwrapOr { expr: e, fallback, .. } => { fmt_expr(out, e, depth); out.push_str(" ?? "); fmt_expr(out, fallback, depth); }
-        ExprKind::ToOption { expr: e, .. } => { fmt_expr(out, e, depth); out.push('?'); }
-        ExprKind::OptionalChain { expr: e, field, .. } => { fmt_expr(out, e, depth); out.push_str("?."); out.push_str(field); }
-        ExprKind::Await { expr: e, .. } => { out.push_str("await "); fmt_expr(out, e, depth); }
         ExprKind::If { .. } => fmt_expr_if(out, expr, depth),
         ExprKind::IfLet { .. } => fmt_expr_iflet(out, expr, depth),
         ExprKind::Match { .. } => fmt_expr_match(out, expr, depth),
         ExprKind::Block { .. } => fmt_expr_block(out, expr, depth),
         ExprKind::Fan { .. } => fmt_expr_fan(out, expr, depth),
-        ExprKind::Range { start, end, inclusive, .. } => { fmt_expr(out, start, depth); out.push_str(if *inclusive { "..=" } else { ".." }); fmt_expr(out, end, depth); }
         ExprKind::ForIn { .. } => fmt_expr_forin(out, expr, depth),
         ExprKind::While { .. } => fmt_expr_while(out, expr, depth),
         ExprKind::Lambda { .. } => fmt_expr_lambda(out, expr, depth),
         ExprKind::TypeAscription { .. } => fmt_expr_type_ascription(out, expr, depth),
+        _ => return false,
     }
+    true
 }
 
 fn fmt_expr_string(out: &mut String, value: &str) {
@@ -59,21 +160,32 @@ fn fmt_expr_string(out: &mut String, value: &str) {
     let chars: Vec<char> = value.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        let ch = chars[i];
-        if ch == '\n' { out.push_str("\\n"); }
-        else if ch == '\t' { out.push_str("\\t"); }
-        else if ch == '\r' { out.push_str("\\r"); }
-        else if ch == '\\' { out.push_str("\\\\"); }
-        else if ch == quote { out.push('\\'); out.push(ch); }
-        else if !use_single && ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
-            // Only escape ${ in double-quote strings (single-quote has no interpolation)
-            out.push_str("\\${");
-            i += 2; continue;
-        }
-        else { out.push(ch); }
-        i += 1;
+        i += push_escaped_char(out, &chars, i, quote, use_single);
     }
     out.push(quote);
+}
+
+/// Append the escaped form of `chars[i]` and return how many chars it consumed.
+/// Only `${` in a DOUBLE-quoted string consumes two (a single-quoted string has no
+/// interpolation, so `$` is literal there). Extracted so the escape table is a flat
+/// chain instead of a `while`-nested one — the nesting, not the arm count, was what
+/// tripped the depth limit.
+fn push_escaped_char(out: &mut String, chars: &[char], i: usize, quote: char, use_single: bool) -> usize {
+    let ch = chars[i];
+    let interp_open = !use_single && ch == '$' && chars.get(i + 1) == Some(&'{');
+    if interp_open {
+        out.push_str("\\${");
+        return 2;
+    }
+    match ch {
+        '\n' => out.push_str("\\n"),
+        '\t' => out.push_str("\\t"),
+        '\r' => out.push_str("\\r"),
+        '\\' => out.push_str("\\\\"),
+        c if c == quote => { out.push('\\'); out.push(c); }
+        c => out.push(c),
+    }
+    1
 }
 
 fn fmt_expr_record(out: &mut String, expr: &Expr, depth: usize) {
@@ -228,6 +340,22 @@ fn fmt_map(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
     out.push_str(close);
 }
 
+/// Escape an interpolated string's LITERAL run. Note the escape set differs from
+/// [`push_escaped_char`]'s deliberately: a `${` inside an interpolated literal is
+/// already a real interpolation boundary the parser consumed, so `$` stays literal
+/// here. Extracted to flatten the for-inside-match-inside-for nesting.
+fn push_escaped_lit(out: &mut String, value: &str, quote: char) {
+    for ch in value.chars() {
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\\' => out.push_str("\\\\"),
+            c if c == quote => { out.push('\\'); out.push(c); }
+            c => out.push(c),
+        }
+    }
+}
+
 fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {
     let has_interp = parts.iter().any(|p| matches!(p, StringPart::Expr { .. }));
     // Single quotes don't support interpolation, so only use them for pure-literal strings
@@ -239,15 +367,7 @@ fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {
     out.push(quote);
     for part in parts {
         match part {
-            StringPart::Lit { value } => {
-                for ch in value.chars() {
-                    if ch == '\n' { out.push_str("\\n"); }
-                    else if ch == '\t' { out.push_str("\\t"); }
-                    else if ch == '\\' { out.push_str("\\\\"); }
-                    else if ch == quote { out.push('\\'); out.push(ch); }
-                    else { out.push(ch); }
-                }
-            }
+            StringPart::Lit { value } => push_escaped_lit(out, value, quote),
             StringPart::Expr { expr } => {
                 out.push_str("${");
                 fmt_expr(out, expr, depth);

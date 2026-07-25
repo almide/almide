@@ -130,10 +130,17 @@ fn read_header(data: &[u8]) -> Result<(u64, u64, u64), String> {
     if version != FORMAT_VERSION {
         return Err(format!("unsupported .almdi format version {} (expected {})", version, FORMAT_VERSION));
     }
-    let source_hash = u64::from_le_bytes(data[8..16].try_into().unwrap());
-    let iface_len = u64::from_le_bytes(data[16..24].try_into().unwrap());
-    let ir_len = u64::from_le_bytes(data[24..32].try_into().unwrap());
-    Ok((source_hash, iface_len, ir_len))
+    // The `data.len() < header_size()` guard above already proves every window
+    // below is exactly 8 bytes, but say so with `?` rather than `unwrap` so a
+    // future header-layout edit surfaces as an error instead of a panic on a
+    // truncated file.
+    let le_u64 = |lo: usize| -> Result<u64, String> {
+        data.get(lo..lo + 8)
+            .and_then(|w| <[u8; 8]>::try_from(w).ok())
+            .map(u64::from_le_bytes)
+            .ok_or_else(|| format!("truncated .almdi header at byte {}", lo))
+    };
+    Ok((le_u64(8)?, le_u64(16)?, le_u64(24)?))
 }
 
 /// Rebuild transient fields that are `#[serde(skip)]` on IrProgram.
