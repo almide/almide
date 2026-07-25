@@ -783,7 +783,9 @@ include!("render_wasm_peephole.rs");
 /// resolves `mod X;`'s implicit file path from the physical file's own directory,
 /// not the logical include! chain: this file is `src/render_wasm.rs`, backing
 /// `pub mod render_wasm;`, so `mod registry;` correctly finds `render_wasm/registry.rs`.)
-mod registry;
+/// `pub(crate)` so the pipeline's link gate can ask which `module.fn` names the
+/// registry already serves (a bundled module's own Almide body must not shadow one).
+pub(crate) mod registry;
 pub use registry::self_host_runtime;
 
 #[cfg(test)]

@@ -55,13 +55,63 @@ pub(crate) fn is_linkable_module(m: &almide_ir::IrModule) -> bool {
         return true;
     }
     almide_lang::stdlib_info::is_bundled_module(n)
-        && m.functions.iter().all(|f| {
-            f.extern_attrs.is_empty()
-                && !f.attrs.iter().any(|a| {
-                    matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic")
-                })
-                && !matches!(f.body.kind, almide_ir::IrExprKind::Hole)
-        })
+        && m.functions.iter().all(is_pure_almide_fn)
+}
+
+/// A function with a real Almide body and no host boundary — linkable as an
+/// ordinary sibling fn.
+fn is_pure_almide_fn(f: &almide_ir::IrFunction) -> bool {
+    f.extern_attrs.is_empty()
+        && !f
+            .attrs
+            .iter()
+            .any(|a| matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic"))
+        && !matches!(f.body.kind, almide_ir::IrExprKind::Hole)
+}
+
+/// Every `module.fn` the self-host registry already serves. A bundled module's
+/// own Almide body must NOT shadow a registered self-host: the registry entry is
+/// the proven, rc-audited implementation the renderer links.
+fn registry_served_names() -> &'static std::collections::HashSet<&'static str> {
+    use std::sync::OnceLock;
+    static NAMES: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        crate::render_wasm::registry::self_host_runtime()
+            .iter()
+            .flat_map(|(_, pairs)| pairs.iter().map(|(_, call_name)| *call_name))
+            .collect()
+    })
+}
+
+/// The function names of `m` that resolve like ordinary user siblings.
+///
+/// A wholly-pure module contributes all of them ([`is_linkable_module`]). An
+/// INTRINSIC-BEARING bundled module (`list`, `string`, …) contributes its
+/// pure-Almide extensions only — `list.split_at`/`iterate`/`bundled_probe` have
+/// real Almide bodies and no registry entry, so before this they resolved to
+/// nothing and walled as "unlinked stdlib call" even though their source ships
+/// in the binary. Its intrinsic-backed fns keep registry-backed dispatch.
+pub(crate) fn linkable_module_fns(m: &almide_ir::IrModule) -> std::collections::HashSet<String> {
+    let all = |m: &almide_ir::IrModule| {
+        m.functions.iter().map(|f| f.name.as_str().to_string()).collect()
+    };
+    let n = m.name.as_str();
+    if !almide_lang::stdlib_info::is_any_stdlib(n) {
+        return all(m);
+    }
+    if !almide_lang::stdlib_info::is_bundled_module(n) {
+        return std::collections::HashSet::new();
+    }
+    if m.functions.iter().all(is_pure_almide_fn) {
+        return all(m);
+    }
+    let served = registry_served_names();
+    m.functions
+        .iter()
+        .filter(|f| is_pure_almide_fn(f))
+        .map(|f| f.name.as_str().to_string())
+        .filter(|f| !served.contains(format!("{n}.{f}").as_str()))
+        .collect()
 }
 
 fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
@@ -70,13 +120,8 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     let user_mods: std::collections::HashMap<String, std::collections::HashSet<String>> = ir
         .modules
         .iter()
-        .filter(|m| is_linkable_module(m))
-        .map(|m| {
-            (
-                m.name.as_str().to_string(),
-                m.functions.iter().map(|f| f.name.as_str().to_string()).collect(),
-            )
-        })
+        .map(|m| (m.name.as_str().to_string(), linkable_module_fns(m)))
+        .filter(|(_, fns)| !fns.is_empty())
         .collect();
     if user_mods.is_empty() {
         return; // single-file / stdlib-only — strict no-op.
