@@ -1,3 +1,16 @@
+/// What lowering one call argument produced.
+///
+/// Most arms yield a value the caller pushes. A few push their own arguments
+/// directly — a string interpolation becomes several — and those arms used to
+/// `return Ok(())` out of the whole function. Naming that outcome is what lets
+/// the table be split without an arm silently pushing twice or not at all.
+enum ArgOutcome {
+    /// The argument value; the caller pushes it.
+    Value(CallArg),
+    /// The arm already pushed everything it needed.
+    Pushed,
+}
+
 impl LowerCtx {
     /// Lower call arguments to [`CallArg`]s. A heap var is BORROWED (`Handle`), a
     /// scalar var is a `Scalar`, an int literal is an `Imm`. A nested CALL argument
@@ -387,11 +400,46 @@ impl LowerCtx {
         a: &IrExpr,
         out: &mut Vec<CallArg>,
     ) -> Result<(), LowerError> {
-        let arg = match &a.kind {
-            // A FUNCTION-typed var (`f` passed on to `__map_fill(…, f, …)`) is a SCALAR
-            // table slot, NOT a borrowed heap handle — pass it by value so the callee can
-            // CallIndirect through it. (Its `Ty::Fn` is_heap, so it must precede the heap
-            // Var arm.) This threads a closure through nested self-host helpers.
+        let mut outcome = None;
+        if outcome.is_none() {
+            outcome = self.lower_call_arg_leaf(a, out)?;
+        }
+        if outcome.is_none() {
+            outcome = self.lower_call_arg_aggregate(a, out)?;
+        }
+        if outcome.is_none() {
+            outcome = self.lower_call_arg_operator(a, out)?;
+        }
+        if outcome.is_none() {
+            outcome = self.lower_call_arg_call(a, out)?;
+        }
+        match outcome {
+            Some(ArgOutcome::Value(arg)) => {
+                out.push(arg);
+                Ok(())
+            }
+            Some(ArgOutcome::Pushed) => Ok(()),
+            None => Err(LowerError::Unsupported(format!(
+                "call argument {} not in this brick",
+                kind_name(&a.kind)
+            ))),
+        }
+    }
+
+    /// Variables, literals, lambdas and string interpolation — the argument forms
+    /// that materialize without lowering a sub-expression tree first.
+    ///
+    /// One group of `lower_call_arg_into`'s dispatch table, arms verbatim and in
+    /// source order. `Ok(None)` means "not my group" — the router tries the groups
+    /// in that order, so which rule an argument takes is unchanged, and an `Err`
+    /// still aborts the whole call as before.
+    fn lower_call_arg_leaf(
+        &mut self,
+        a: &IrExpr,
+        out: &mut Vec<CallArg>,
+    ) -> Result<Option<ArgOutcome>, LowerError> {
+        let _ = &out;
+        Ok(Some(ArgOutcome::Value(match &a.kind {
             IrExprKind::Var { id } if matches!(a.ty, Ty::Fn { .. }) => {
                 CallArg::Scalar(self.value_or_global(*id)?)
             }
@@ -544,6 +592,24 @@ impl LowerCtx {
             // dropped at scope end. `materialized_call_arg` already seeds the Tuple's `record_masks`
             // + recursive `$__drop_<R>` (calls_p4.rs), so the leaf fields then the block are freed —
             // no leak, no double-free. An unlowerable element returns `None` and WALLs (never Opaque).
+            _ => return Ok(None),
+        })))
+    }
+
+    /// Tuples, records, spreads and the branching forms whose value is an owned
+    /// block built from their parts.
+    ///
+    /// One group of `lower_call_arg_into`'s dispatch table, arms verbatim and in
+    /// source order. `Ok(None)` means "not my group" — the router tries the groups
+    /// in that order, so which rule an argument takes is unchanged, and an `Err`
+    /// still aborts the whole call as before.
+    fn lower_call_arg_aggregate(
+        &mut self,
+        a: &IrExpr,
+        out: &mut Vec<CallArg>,
+    ) -> Result<Option<ArgOutcome>, LowerError> {
+        let _ = &out;
+        Ok(Some(ArgOutcome::Value(match &a.kind {
             IrExprKind::Tuple { elements } => {
                 let repr = repr_of(&a.ty)?;
                 match self
@@ -688,7 +754,7 @@ impl LowerCtx {
                 {
                     if let Some(dst) = self.try_lower_scalar_list_slots(&[]) {
                         out.push(self.materialized_call_arg(dst, repr, &a.ty));
-                        return Ok(());
+                        return Ok(Some(ArgOutcome::Pushed));
                     }
                 }
                 if matches!(&a.kind, IrExprKind::List { .. }) {
@@ -697,14 +763,14 @@ impl LowerCtx {
                     // so pass the handle directly (a second materialized_call_arg would double-track).
                     if let Some(dst) = self.try_lower_record_list_literal(a) {
                         out.push(CallArg::Handle(dst));
-                        return Ok(());
+                        return Ok(Some(ArgOutcome::Pushed));
                     }
                     if let Some(dst) = self
                         .try_lower_str_list_literal(a)
                         .or_else(|| self.try_lower_scalar_list_construct(a))
                     {
                         out.push(self.materialized_call_arg(dst, repr, &a.ty));
-                        return Ok(());
+                        return Ok(Some(ArgOutcome::Pushed));
                     }
                     // `f([a, b])` where a/b are TRACKED heap Vars with FLAT content
                     // (`list.flatten([first, second])` — the fft two-accumulator merge;
@@ -716,7 +782,7 @@ impl LowerCtx {
                         // plain Drop is already tracked inside the builder) — pass the
                         // handle directly, NO materialized_call_arg re-track.
                         out.push(CallArg::Handle(dst));
-                        return Ok(());
+                        return Ok(Some(ArgOutcome::Pushed));
                     }
                 }
                 let init = alloc_init(a);
@@ -796,6 +862,23 @@ impl LowerCtx {
             // passes by value; a HEAP-String result (`option.unwrap_or_str` — a fresh owned
             // String, tracked for scope-end drop by the helper) passes as a borrowed Handle. A
             // non-String-heap / non-Option operand returns None and defers below.
+            _ => return Ok(None),
+        })))
+    }
+
+    /// `??`, the unwrap family, ranges and the operator forms.
+    ///
+    /// One group of `lower_call_arg_into`'s dispatch table, arms verbatim and in
+    /// source order. `Ok(None)` means "not my group" — the router tries the groups
+    /// in that order, so which rule an argument takes is unchanged, and an `Err`
+    /// still aborts the whole call as before.
+    fn lower_call_arg_operator(
+        &mut self,
+        a: &IrExpr,
+        out: &mut Vec<CallArg>,
+    ) -> Result<Option<ArgOutcome>, LowerError> {
+        let _ = &out;
+        Ok(Some(ArgOutcome::Value(match &a.kind {
             IrExprKind::UnwrapOr { expr, fallback } => {
                 let mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
@@ -927,7 +1010,7 @@ impl LowerCtx {
                     result: Some(repr),
                 });
                 out.push(self.materialized_call_arg(dst, repr, &a.ty));
-                return Ok(());
+                return Ok(Some(ArgOutcome::Pushed));
             }
             IrExprKind::BinOp { .. }
             | IrExprKind::UnOp { .. }
@@ -1052,7 +1135,7 @@ impl LowerCtx {
                             };
                             if let Some(v) = lifted {
                                 out.push(CallArg::Scalar(v));
-                                return Ok(());
+                                return Ok(Some(ArgOutcome::Pushed));
                             }
                             self.ops.truncate(mark);
                             // A scalar field access on a COMPUTED CALL result (`mk(5).x`)
@@ -1089,6 +1172,23 @@ impl LowerCtx {
             // Must PRECEDE the generic Named-call arm, which would emit a dangling
             // `CallFn "Num"` (an unlinked call = invalid wasm). Outside the subset (a
             // heap/recursive ctor field — ADT brick 5) it WALLs, never a wrong-bytes block.
+            _ => return Ok(None),
+        })))
+    }
+
+    /// Calls — named, module-qualified and computed — plus member access.
+    ///
+    /// One group of `lower_call_arg_into`'s dispatch table, arms verbatim and in
+    /// source order. `Ok(None)` means "not my group" — the router tries the groups
+    /// in that order, so which rule an argument takes is unchanged, and an `Err`
+    /// still aborts the whole call as before.
+    fn lower_call_arg_call(
+        &mut self,
+        a: &IrExpr,
+        out: &mut Vec<CallArg>,
+    ) -> Result<Option<ArgOutcome>, LowerError> {
+        let _ = &out;
+        Ok(Some(ArgOutcome::Value(match &a.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
                 if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
             {
@@ -1178,7 +1278,7 @@ impl LowerCtx {
                             // double-track → a double-free). A String result drops via the flat
                             // `Op::Drop` (rc_dec), already correct for the default scope-end drop.
                             out.push(CallArg::Handle(v));
-                            return Ok(());
+                            return Ok(Some(ArgOutcome::Pushed));
                         }
                         self.ops.truncate(mark);
                         self.live_heap_handles.truncate(lhh);
@@ -1195,7 +1295,7 @@ impl LowerCtx {
                                 self.emit_closure_call(blk, Some(dst), lowered, Some(crepr));
                                 self.live_heap_handles.push(dst);
                                 out.push(CallArg::Handle(dst));
-                                return Ok(());
+                                return Ok(Some(ArgOutcome::Pushed));
                             }
                             self.ops.truncate(mark);
                             self.live_heap_handles.truncate(lhh);
@@ -1233,15 +1333,8 @@ impl LowerCtx {
                     CallArg::Scalar(dst)
                 }
             }
-            other => {
-                return Err(LowerError::Unsupported(format!(
-                    "call argument {} not in this brick",
-                    kind_name(other)
-                )))
-            }
-        };
-        out.push(arg);
-        Ok(())
+            _ => return Ok(None),
+        })))
     }
 }
 
