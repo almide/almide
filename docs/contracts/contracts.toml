@@ -2019,3 +2019,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/heap_result_if_bind.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-164"
+spec      = "ALS-M12"
+title     = "List modifiers and suffix copies co-own tuple / record / nested-list elements"
+statement = "`list.set`/`insert`/`remove_at`/`swap`/`update` and `list.take_end`/`tail`/`drop_end` over a list whose element is a HEAP block that is neither String nor Value — a tuple, a record, a nested list — produce a result that CO-OWNS each copied element, and leave the source fully readable. The generic i64 implementation copied slots without `rc_inc`, so source and result co-referenced every element UN-OWNED and both released it at scope end: `list.remove_at` over a `List[(Float, Bool)]` trapped `unreachable` in `rc_dec` (#808's sibling). Those instantiations then routed to an unregistered `list.<fn>_heapelem` name and WALLED honestly rather than double-freeing, which kept the wasm leg sound but declined a shape any program may write. The `_heapelem` twins are now self-hosted (stdlib/list_heapelem.almd), mirroring the `_value` family one-for-one: the copy is element-type-BLIND (a slot holds a block handle; `rc_inc` on a handle is one instruction whatever the block contains), and the ONE place the `_value` twins are not blind — `set`/`update` freeing the replaced element with the Value-specific recursive `__drop_value` — is a plain `rc_dec` here, which is exact: the copy had just taken one reference and the source list holds its own for the whole call, so the count cannot reach 0 and no recursive free is owed. The RESULT list's recursive drop is routed by the CALL SITE's static element type, never by the twins. `__lsh_copy`/`__lsh_insert_fill`/`__lsh_set` are registered in the co-own trust anchor under the same CoownLoop.v grounding as their `_value` counterparts."
+since     = "0.35.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_heapelem_rc.almd", class = "fixture" },
+]

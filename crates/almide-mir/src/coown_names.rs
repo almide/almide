@@ -34,6 +34,14 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__vobj_fill",        // value.object — rc_inc each key/value (shallow copy)
     "__lsv_copy",         // list.set_value — rc-copy each Value element
     "__lsv_insert_fill",  // list.insert_value — rc_inc the inserted Value
+    // #850: the SAME two shapes for a heap element that is neither String nor Value
+    // (tuple / record / nested list). The copy is element-type-BLIND — a slot holds a
+    // block handle and rc_inc on a handle is one instruction whatever the block holds —
+    // so the CoownLoop.v grounding is literally the `__lsv_copy` one: +1 per element on
+    // the fill, returned by the RESULT list's recursive drop, which the call site routes
+    // from the element's static type (`__drop_list_<R>` / DropListStrStr / …).
+    "__lsh_copy",         // list.{set,insert,remove_at,swap,take_end,drop_end,tail}_heapelem
+    "__lsh_insert_fill",  // list.insert_heapelem — rc_inc the inserted element
     "__ls_insert_fill",   // list.insert_str — rc_inc the inserted String
     "__lsuv_val",         // list.update_value — rc_inc each shared (non-updated) Value element
     "__lsu_val_str",      // list.update_str — rc_inc each shared (non-updated) String element
@@ -98,6 +106,13 @@ pub const COOWN_SET_REPLACE: &[&str] = &[
     "list_set_str",    // (reaches rc via the helpers above; admitted by name)
     "__lsv_set",       // list.set_value — __drop_value replaced + rc_inc new
     "list_set_value",  //
+    // #850: the heap-element twin. It releases the replaced slot with a PLAIN rc_dec
+    // rather than a recursive drop, and that is exact: `__lsh_copy` had just taken one
+    // reference for that slot and the SOURCE list holds its own for the whole call, so
+    // the count cannot reach 0 here and no recursive free is owed. The element's real
+    // recursive free happens once, later, through whichever list drops last.
+    "__lsh_set",           // list.set_heapelem — rc_dec replaced + rc_inc new
+    "list_set_heapelem",   // (reaches rc via the helpers above; admitted by name)
 ];
 
 /// Every routine permitted to name `prim.rc_inc` / `prim.rc_dec` (the union of the three roles above).

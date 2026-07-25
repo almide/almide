@@ -38,3 +38,49 @@ test "the fuzz chain shape survives end to end" {
   let r = list.get_or(list.drop_while(list.flat_map(list.take_end(["hello"], 3), ((x) => [x])), ((s) => false)), 0, "  spaced  ")
   assert_eq(r, "hello")
 }
+
+// ── #850: the OTHER heap elements — tuples, records, nested lists ──
+// Before the `_heapelem` twins landed, these instantiations routed to an
+// unregistered name and WALLED on the wasm leg (an honest wall, but every one of
+// them is a shape an LLM would write). Each case below holds BOTH the source and
+// the derived list to scope end, so an un-owned alias trips the rc_dec sentinel.
+
+fn __pair_cell(p: (Float, Bool)) -> String = float.to_string(p.0) + (if p.1 then "T" else "F")
+
+test "tuple elements: modifiers co-own and leave the source intact" {
+  let src: List[(Float, Bool)] = [(1.0, true), (2.0, false), (3.0, true)]
+  let removed = list.remove_at(src, 1)
+  let replaced = list.set(src, 0, (9.0, false))
+  let inserted = list.insert(src, 1, (7.0, true))
+  let swapped = list.swap(src, 0, 2)
+  assert_eq(list.join(list.map(removed, __pair_cell), ","), "1.0T,3.0T")
+  assert_eq(list.join(list.map(replaced, __pair_cell), ","), "9.0F,2.0F,3.0T")
+  assert_eq(list.join(list.map(inserted, __pair_cell), ","), "1.0T,7.0T,2.0F,3.0T")
+  assert_eq(list.join(list.map(swapped, __pair_cell), ","), "3.0T,2.0F,1.0T")
+  // The source must be untouched and still readable after all of the above.
+  assert_eq(list.join(list.map(src, __pair_cell), ","), "1.0T,2.0F,3.0T")
+}
+
+test "tuple elements: suffix copies co-own" {
+  let src: List[(Float, Bool)] = [(1.0, true), (2.0, false), (3.0, true)]
+  let te = list.take_end(src, 2)
+  let de = list.drop_end(src, 1)
+  let tl = list.tail(src)
+  assert_eq(list.join(list.map(te, __pair_cell), ","), "2.0F,3.0T")
+  assert_eq(list.join(list.map(de, __pair_cell), ","), "1.0T,2.0F")
+  assert_eq(list.join(list.map(tl, __pair_cell), ","), "2.0F,3.0T")
+  assert_eq(list.len(src), 3)
+}
+
+fn __ints(xs: List[Int]) -> String = list.join(list.map(xs, int.to_string), "-")
+
+test "nested-list elements co-own through modifiers and suffix copies" {
+  let src: List[List[Int]] = [[1, 2], [3], [4, 5, 6]]
+  let removed = list.remove_at(src, 0)
+  let swapped = list.swap(src, 0, 2)
+  let te = list.take_end(src, 2)
+  assert_eq(list.join(list.map(removed, __ints), "|"), "3|4-5-6")
+  assert_eq(list.join(list.map(swapped, __ints), "|"), "4-5-6|3|1-2")
+  assert_eq(list.join(list.map(te, __ints), "|"), "3|4-5-6")
+  assert_eq(list.join(list.map(src, __ints), "|"), "1-2|3|4-5-6")
+}

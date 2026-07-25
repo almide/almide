@@ -1,0 +1,163 @@
+// list_heapelem — rc-correct list modifiers and suffix copies over a list whose
+// element is a HEAP block that is neither String nor Value: a tuple, a record, a
+// nested list.
+//
+// The generic i64 implementations copy slots WITHOUT rc_inc, so the source and the
+// result co-reference each element UN-OWNED and both release it at scope end — the
+// `list.remove_at` over a `List[(Float, Bool)]` that trapped unreachable in rc_dec
+// (#808/#850). Until these existed, those instantiations routed to an unregistered
+// `list.<fn>_heapelem` name and WALLED cleanly instead of double-freeing.
+//
+// The declared element type is `Value`, exactly as the `_value` family is — NOT because
+// the elements are Values, but because at the MIR level a slot is a block handle and
+// `Value` is the stdlib's name for "an opaque owned block". A self-host cannot be
+// generic (a generic fn with no in-file caller is DCE'd before the linker sees it), and
+// the declared type is only a vehicle: the RESULT list's recursive drop is routed by the
+// CALL SITE's static element type, never by these twins.
+//
+// The bodies mirror the `_value` family in stdlib/value_core.almd one-for-one. That
+// is sound because the copy is ELEMENT-TYPE-BLIND at this level: a slot holds a
+// block handle, and `rc_inc` on a handle is the same instruction whatever the block
+// contains. The one place the `_value` twins are NOT blind is `set`/`update`, which
+// free the REPLACED element with the Value-specific recursive `__drop_value`; here
+// that is a plain `prim.rc_dec`, which is both correct and sufficient — the copy
+// above took one reference, the source list still holds its own for the whole call,
+// so the count cannot reach 0 and no recursive free is owed. The element's real
+// recursive free happens later, once, through whichever list drops last, routed by
+// the CALL SITE's static type rather than by these twins.
+
+// Copy `n` slots src→dst, co-owning each (rc_inc). Type-blind by construction.
+fn __lsh_copy(src: Int, dst: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(src + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + i * 8, e)
+    __lsh_copy(src, dst, n, i + 1)
+  }
+
+// ── element modifiers ────────────────────────────────────────────────────────
+
+fn __lsh_set(bh: Int, n: Int, i: Int, x: Value) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    // Release the reference `__lsh_copy` took for the slot we are overwriting.
+    prim.rc_dec(prim.load64(bh + 12 + i * 8))
+    let xh = prim.handle(x)
+    prim.rc_inc(xh)
+    prim.store64(bh + 12 + i * 8, xh)
+    0
+  }
+
+fn list_set_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf: List[Value] = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __lsh_copy(h + 12, bh + 12, n, 0)
+  let _s = __lsh_set(bh, n, i, x)
+  buf
+}
+
+// `update` is `set` with the new element already computed by the caller — the
+// defunctionalizer applies the closure at the call site, so the twin is `set`.
+fn list_update_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] =
+  list_set_heapelem(xs, i, x)
+
+fn __lsh_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: Value) -> Int = {
+  let _a = __lsh_copy(srcbase, dstbase, idx, 0)
+  let xh = prim.handle(x)
+  prim.rc_inc(xh)
+  prim.store64(dstbase + idx * 8, xh)
+  let _b = __lsh_copy(srcbase + idx * 8, dstbase + (idx + 1) * 8, n - idx, 0)
+  0
+}
+
+// v0 clamps the index to [0, n]; a negative index appends.
+fn list_insert_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let idx = if i < 0 then n else (if i > n then n else i)
+  let buf: List[Value] = prim.alloc_list_str(n + 1)
+  let bh = prim.handle(buf)
+  let _r = __lsh_insert_fill(h + 12, bh + 12, n, idx, x)
+  buf
+}
+
+fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __lsh_copy(srcbase, dstbase, n, 0)
+  else {
+    let _a = __lsh_copy(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __lsh_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
+
+// The removed element is simply NOT copied, so the result never owns it and the
+// source's own drop frees it exactly once — no drop is owed here.
+fn list_remove_at_heapelem(xs: List[Value], i: Int) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let oob = if i < 0 then 1 else (if i >= n then 1 else 0)
+  let newlen = if oob == 1 then n else n - 1
+  let buf: List[Value] = prim.alloc_list_str(newlen)
+  let bh = prim.handle(buf)
+  let _r = __lsh_remove_fill(h + 12, bh + 12, n, i, oob)
+  buf
+}
+
+// Reordering two ALREADY-copied handles changes no reference count.
+fn __lsh_swap_slots(bh: Int, n: Int, i: Int, j: Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else if j < 0 then 0
+  else if j >= n then 0
+  else {
+    let ai = bh + 12 + i * 8
+    let aj = bh + 12 + j * 8
+    let vi = prim.load64(ai)
+    let vj = prim.load64(aj)
+    prim.store64(ai, vj)
+    prim.store64(aj, vi)
+    0
+  }
+
+fn list_swap_heapelem(xs: List[Value], i: Int, j: Int) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf: List[Value] = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __lsh_copy(h + 12, bh + 12, n, 0)
+  let _s = __lsh_swap_slots(bh, n, i, j)
+  buf
+}
+
+// ── suffix copies ────────────────────────────────────────────────────────────
+
+fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let cnt = len - start
+  let buf: List[Value] = prim.alloc_list_str(cnt)
+  let _c = __lsh_copy(h + 12 + start * 8, prim.handle(buf) + 12, cnt, 0)
+  buf
+}
+
+fn list_drop_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let endi = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let buf: List[Value] = prim.alloc_list_str(endi)
+  let _c = __lsh_copy(h + 12, prim.handle(buf) + 12, endi, 0)
+  buf
+}
+
+fn list_tail_heapelem(xs: List[Value]) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let newlen = if n > 0 then n - 1 else 0
+  let buf: List[Value] = prim.alloc_list_str(newlen)
+  let _c = __lsh_copy(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
+  buf
+}

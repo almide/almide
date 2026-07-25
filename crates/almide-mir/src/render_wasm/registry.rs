@@ -93,6 +93,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (include_str!("../../../../stdlib/list_map.almd"), &[("list_map", "list.map")]),
+        // #850: rc-correct twins for a heap element that is neither String nor Value
+        // (tuples, records, nested lists). Before these the instantiations routed to
+        // an unregistered `_heapelem` name and walled cleanly rather than double-free.
+        (include_str!("../../../../stdlib/list_heapelem.almd"), &[("list_set_heapelem", "list.set_heapelem"), ("list_update_heapelem", "list.update_heapelem"), ("list_insert_heapelem", "list.insert_heapelem"), ("list_remove_at_heapelem", "list.remove_at_heapelem"), ("list_swap_heapelem", "list.swap_heapelem"), ("list_take_end_heapelem", "list.take_end_heapelem"), ("list_drop_end_heapelem", "list.drop_end_heapelem"), ("list_tail_heapelem", "list.tail_heapelem")]),
         (include_str!("../../../../stdlib/list_partition.almd"), &[("list_partition", "list.partition"), ("list_partition_rc", "list.partition_rc")]),
         (include_str!("../../../../stdlib/list_pairs.almd"), &[("list_enumerate", "list.enumerate"), ("list_enumerate_str", "list.enumerate_str"), ("list_zip", "list.zip"), ("list_zip_rc", "list.zip_rc"), ("list_zip_sh", "list.zip_sh"), ("list_zip_hs", "list.zip_hs")]),
         (include_str!("../../../../stdlib/list_hshare.almd"), &[("list_get_or_hshare", "list.get_or_hshare"), ("list_get_hshare", "list.get_hshare"), ("list_first_hshare", "list.first_hshare"), ("list_last_hshare", "list.last_hshare"), ("list_take_hshare", "list.take_hshare"), ("list_unique_hshare", "list.unique_hshare"), ("list_dedup_hshare", "list.dedup_hshare"), ("list_contains_hshare", "list.contains_hshare"), ("list_index_of_hshare", "list.index_of_hshare")]),
