@@ -674,8 +674,9 @@ impl LowerCtx {
                 // layout-aware per-slot loader `let (a, b) = t` uses, when the subject is a tracked
                 // materialized aggregate (its slots are real). Falls back to the container-grain
                 // recursion below only when there is no per-slot subject (an untracked/None subject).
-                if let Some(subj) = subject {
-                    if self.materialized_aggregates.contains(&subj) || self.param_values.contains(&subj)
+                if let Some(subj) = subject
+                    .filter(|s| self.materialized_aggregates.contains(s) || self.param_values.contains(s))
+                {
                     {
                         if self.try_lower_tuple_destructure(elements, subj, None) {
                             return Ok(());

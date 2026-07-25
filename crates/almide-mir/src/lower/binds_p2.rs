@@ -297,7 +297,7 @@ impl LowerCtx {
         }
         self.ops.push(Op::Const { dst });
         self.record_elided_calls(value);
-        return Ok(());
+        Ok(())
     }
 
     /// The HEAP half of [`Self::lower_bind`]: the heap-`??` executable subset,

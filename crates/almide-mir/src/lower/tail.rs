@@ -412,7 +412,7 @@ impl LowerCtx {
     /// The UNIT-typed tail of [`Self::lower_tail`] (effects run, no value).
     /// Verbatim text move.
     fn lower_tail_unit(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
-        return match &tail.kind {
+        match &tail.kind {
             IrExprKind::Unit => Ok(None),
             // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`): lower it
             // through the STATEMENT dispatcher — the same one-dispatcher discipline
@@ -485,13 +485,13 @@ impl LowerCtx {
                 "Unit-typed tail {} not in this brick",
                 kind_name(other)
             ))),
-        };
+        }
     }
 
     /// The HEAP-typed tail of [`Self::lower_tail`] (the moved-out owned return).
     /// Verbatim text move.
     fn lower_tail_heap(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
-        return match &tail.kind {
+        match &tail.kind {
             IrExprKind::Var { .. } => self.lower_tail_heap_var(tail),
             // A TAIL `e!` (Unwrap — effect-fn error propagation in return position):
             // `f() = g()!` PROPAGATES g's Result unchanged (Ok→Ok, Err→Err), i.e. it IS
@@ -613,7 +613,7 @@ impl LowerCtx {
                 "heap move-out from {} (only a bound var, fresh literal, or call) not in this brick",
                 kind_name(other)
             ))),
-        };
+        }
     }
 
     /// Extracted from `Self::lower_tail_heap` (fourth-round split, cog reduction): the
