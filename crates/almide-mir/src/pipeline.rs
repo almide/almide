@@ -279,12 +279,25 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
     use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
     use almide_lang::intern::sym;
     use almide_lang::types::Ty;
-    if ir.functions.iter().any(|f| !f.is_test && f.name.as_str() == "main") {
-        // main-mode: both legs run main only (v0's `__main_runner` protocol); the
-        // test fns stay `is_test` and the render loop skips them as before.
-        return Ok(());
+    let has_tests = ir.functions.iter().any(|f| f.is_test);
+    if let Some(main_idx) =
+        ir.functions.iter().position(|f| !f.is_test && f.name.as_str() == "main")
+    {
+        if !has_tests {
+            // main-mode: both legs run main only (v0's `__main_runner` protocol).
+            return Ok(());
+        }
+        // main + test blocks. NATIVE test mode compiles `main` but never calls it —
+        // cargo's harness runs the `#[test]` fns alone. Mirror that: drop the user
+        // `main` so the synthesized runner is the entry and the TESTS run. The old
+        // behaviour kept `main` as the entry and left the tests unlowered, so the
+        // harness skipped the file to native ("wasm test-mode runs main only") —
+        // 17 of the 32 fallbacks in `almide test` were this one harness gap, not a
+        // v1 subset wall (#813). These fixtures' `main` is separately exercised in
+        // MAIN mode by the cross-target parity gate, so nothing loses coverage.
+        ir.functions.remove(main_idx);
     }
-    if ir.functions.iter().all(|f| !f.is_test) {
+    if !has_tests {
         return Err(LowerError::Unsupported(
             "test mode: no `main` and no test blocks — nothing to run".into(),
         ));

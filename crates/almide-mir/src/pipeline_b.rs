@@ -660,7 +660,7 @@ fn lower_main_and_sibling_fns(
     }
     if !walled.is_empty() && verbose {
         eprintln!(
-            "[render_program] {} of {} function(s) outside the lowering subset (NOT rendered):",
+            "[v1-wall] {} of {} function(s) outside the lowering subset (NOT rendered):",
             walled.len(),
             total_ir_fn_count
         );

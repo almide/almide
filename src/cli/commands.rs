@@ -222,14 +222,6 @@ fn wasm_test_preflight_outcome(
         }
         return Some(WasmTestOutcome::Fail { file: test_file.to_string(), detail });
     }
-    let has_main = program
-        .decls
-        .iter()
-        .any(|d| matches!(d, almide_lang::ast::Decl::Fn { name, .. } if name.as_str() == "main"));
-    let has_test = program.decls.iter().any(|d| matches!(d, almide_lang::ast::Decl::Test { .. }));
-    if has_main && has_test {
-        return Some(WasmTestOutcome::Skip { file: test_file.to_string(), reason: "main + test blocks: wasm test-mode runs main only, not the tests".to_string() });
-    }
     None
 }
 
@@ -391,15 +383,33 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     // `wat` ASSEMBLES without full stack-shape validation, so a structurally invalid v1
     // module (a def/callsite ABI residue) would only surface at wasmtime load — a FAIL
     // that routes to the slow native fallback. VALIDATE here instead: invalid → treat
-    // as a wall and fall through to the v0 emit (honest, and the file stays on wasm).
-    let v1_bytes: Option<Vec<u8>> = almide_mir::pipeline::try_render_wasm_source_tests(
-        &source_text,
-        &v1_self_modules,
-        false,
-    )
-    .ok()
-    .and_then(|wat_text| wat::parse_str(&wat_text).ok())
-    .filter(|bytes| wasmparser::validate(bytes).is_ok());
+    // as a wall (honest, and the file routes to the authoritative native leg).
+    //
+    // `ALMIDE_WALL_REASON=1` prints WHICH of the three stages declined. Without it a
+    // fallback file reports only "v1 wall", and diagnosing the #813 remainder meant
+    // re-deriving each one by hand through `render_program`.
+    let explain = std::env::var_os("ALMIDE_WALL_REASON").is_some();
+
+    let v1_bytes: Option<Vec<u8>> =
+        match almide_mir::pipeline::try_render_wasm_source_tests(&source_text, &v1_self_modules, explain) {
+            Err(e) => {
+                if explain { err(&format!("[wall] {}: render: {:?}", test_file, e)); }
+                None
+            }
+            Ok(wat_text) => match wat::parse_str(&wat_text) {
+                Err(e) => {
+                    if explain { err(&format!("[wall] {}: wat assemble: {}", test_file, e)); }
+                    None
+                }
+                Ok(bytes) => match wasmparser::validate(&bytes) {
+                    Err(e) => {
+                        if explain { err(&format!("[wall] {}: validate: {}", test_file, e)); }
+                        None
+                    }
+                    Ok(_) => Some(bytes),
+                },
+            },
+        };
     // Write the module and run it under wasmtime. `-S inherit-env=y` mirrors
     // `cmd_run_wasm`: `env.get` in a test observes the same host variables native
     // does (the env cross-target contract).
