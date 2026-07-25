@@ -307,5 +307,5 @@ pub fn almide_rt_list_binary_search(xs: &[i64], target: i64) -> Option<i64> {
 
 //__ALMIDE_RT_BOUNDARY__
 pub fn process(xs: Vec<i64>) -> i64 {
-    almide_rt_list_fold(almide_rt_list_filter(xs, (std::rc::Rc::new(move |x: i64| (x > 0i64)) as std::rc::Rc<dyn Fn(i64) -> bool>)), 0i64, (std::rc::Rc::new(move |acc: i64, x: i64| (acc + (x * 2i64))) as std::rc::Rc<dyn Fn(i64, i64) -> i64>))
+    almide_rt_list_fold(almide_rt_list_filter(xs, (std::rc::Rc::new(move |x: i64| (x > 0i64)) as std::rc::Rc<dyn Fn(i64) -> bool>)), 0i64, (std::rc::Rc::new(move |acc: i64, x: i64| (acc).wrapping_add((x).wrapping_mul(2i64))) as std::rc::Rc<dyn Fn(i64, i64) -> i64>))
 }

@@ -71,9 +71,12 @@ fn render_binop_matrix(ctx: &RenderContext, op: BinOp, left: &IrExpr, l: &str, r
 /// handling above). Extracted from `render_binop`'s fallback arm.
 fn binop_symbol(op: BinOp) -> &'static str {
     match op {
-        BinOp::AddInt | BinOp::AddFloat => "+",
-        BinOp::SubInt | BinOp::SubFloat => "-",
-        BinOp::MulInt | BinOp::MulFloat => "*",
+        // INT add/sub/mul are rendered as `wrapping_*` by the caller (the
+        // language's overflow law is two's-complement wrapping, C-001/C-047),
+        // so only the FLOAT forms reach this bare-operator table.
+        BinOp::AddFloat => "+",
+        BinOp::SubFloat => "-",
+        BinOp::MulFloat => "*",
         // DivInt/ModInt are matched above (totality macros) and must never
         // reach this bare-operator fallback — fall to "??" loudly if they do.
         BinOp::DivFloat => "/",
@@ -88,9 +91,32 @@ fn binop_symbol(op: BinOp) -> &'static str {
     }
 }
 
+/// The `i64::wrapping_*` method for an integer arithmetic op.
+///
+/// The language's overflow law is TWO'S-COMPLEMENT WRAPPING (C-001/C-047), which
+/// bare `+`/`-`/`*` only delivers in release: under `-C overflow-checks` (debug,
+/// `cargo test`) they panic, and in a CONST-EVALUABLE position rustc rejects the
+/// program outright — `let OVERFLOW = MAX_COUNT + 9223372036854775807` at module
+/// scope failed to build after `check` accepted it (differential fuzz), where the
+/// same expression in a local binding wrapped correctly. Spelling the wrap makes
+/// the law hold in every position and profile, and matches wasm's `i64.add` /
+/// `i64.sub` / `i64.mul`.
+fn int_wrapping_method(op: BinOp) -> Option<&'static str> {
+    match op {
+        BinOp::AddInt => Some("wrapping_add"),
+        BinOp::SubInt => Some("wrapping_sub"),
+        BinOp::MulInt => Some("wrapping_mul"),
+        _ => None,
+    }
+}
+
 fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _ty: &Ty) -> String {
     let l = render_expr(ctx, left);
     let r = render_expr(ctx, right);
+
+    if let Some(method) = int_wrapping_method(op) {
+        return format!("({l}).{method}({r})");
+    }
 
     // Type-dispatched operators
     match op {

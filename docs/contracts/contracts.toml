@@ -2089,3 +2089,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_repeat_size_ceiling.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-170"
+spec      = "ALS-M8"
+title     = "Integer arithmetic wraps in every position, including a module-level let"
+statement = "Integer `+` / `-` / `*` wrap on two's complement wherever they appear — in a local binding, in a module-level `let`, and under any build profile — and the position never changes the result. They were emitted as bare Rust `+`/`-`/`*`, which only delivers that law in a release profile: under `-C overflow-checks` (debug, `cargo test`) they panic, and in a CONST-EVALUABLE position rustc rejects the program outright with `this arithmetic operation will overflow`. So `let OVERFLOW = MAX_COUNT + 9223372036854775807` at module scope failed to BUILD after `check` accepted it, while the identical expression as a local binding wrapped correctly (differential fuzz) — an acceptance gap AND a position-dependent semantics. Native now emits `wrapping_add` / `wrapping_sub` / `wrapping_mul`, matching wasm's `i64.add` / `i64.sub` / `i64.mul` in every position and profile. `list.sum` / `list.product` already folded with the explicit wrapping ops for the same reason (C-056); this extends it to the operators themselves."
+since     = "0.36.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/toplevel_const_wrapping.almd", class = "fixture" },
+]
