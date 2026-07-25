@@ -133,9 +133,16 @@ if [ "${1:-}" = "--update" ]; then
 fi
 
 [ -f "$BASELINE" ] || { echo "output-parity: no baseline ($BASELINE) — run with --update first"; rm -rf "$TMP"; exit 0; }
+# `comm` requires BOTH inputs sorted under the SAME collation. `matches.txt` is
+# LC_ALL=C-sorted (above), but a committed baseline may have been generated under
+# a different locale, so `.`-vs-`_` ordering pairs (the *_interp_wasm cluster)
+# appeared as spurious REGRESSION *and* NEW-match every run. Re-sort the baseline
+# under the same C collation into a temp before comparing — the committed file is
+# left untouched (regenerated canonically on the next --update).
+LC_ALL=C sort "$BASELINE" > "$TMP/baseline_sorted.txt"
 # REGRESSION = a baseline must-match file that is no longer matching.
-regressions="$(comm -23 "$BASELINE" "$TMP/matches.txt")"
-gained="$(comm -13 "$BASELINE" "$TMP/matches.txt")"
+regressions="$(comm -23 "$TMP/baseline_sorted.txt" "$TMP/matches.txt")"
+gained="$(comm -13 "$TMP/baseline_sorted.txt" "$TMP/matches.txt")"
 [ -n "$gained" ] && { echo "output-parity: NEW matches not yet in baseline (run --update to ratchet):"; echo "$gained" | sed 's/^/  + /'; }
 if [ -n "$regressions" ]; then
   echo "output-parity: REGRESSION — these baseline files stopped byte-matching v0:" >&2
