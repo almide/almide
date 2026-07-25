@@ -302,7 +302,8 @@ fn source_to_ir_with(
     if let Ok(pat) = std::env::var("ALMIDE_DUMP_IR") {
         for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
             if f.name.as_str().contains(&pat) {
-                eprintln!("=== ALMIDE_DUMP_IR {} ===\n{:#?}", f.name.as_str(), f.body);
+                crate::trace::trace("ALMIDE_DUMP_IR", || format!(
+                    "=== ALMIDE_DUMP_IR {} ===\n{:#?}", f.name.as_str(), f.body));
             }
         }
     }
@@ -832,9 +833,7 @@ fn build_ir_with_drops(
     } else {
         ""
     };
-    if std::env::var("ALMIDE_DUMP_DROPS").is_ok() {
-        eprintln!("=== ALMIDE_DUMP_DROPS ===\n{drops}\n=== end ===");
-    }
+    crate::trace::trace("ALMIDE_DUMP_DROPS", || format!("=== ALMIDE_DUMP_DROPS ===\n{drops}\n=== end ==="));
     let mut ir = if drops.trim().is_empty() {
         ir
     } else {

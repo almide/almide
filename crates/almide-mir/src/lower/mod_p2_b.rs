@@ -150,10 +150,9 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .collect();
     });
     if abi_probe {
-        eprintln!(
+        crate::trace::trace("ALMIDE_ABI_PROBE", || format!(
             "[abi] can_err={can_err:?} lifted={lifted_effect_fns:?} auto_wrap={:?}",
-            auto_wrap_abi_snapshot()
-        );
+            auto_wrap_abi_snapshot()));
     }
     DECLARED_OPTION_FNS.with(|s| {
         *s.borrow_mut() = fns

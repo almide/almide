@@ -25,6 +25,9 @@
 
 #![forbid(unsafe_code)]
 
+/// The compiler's debug-trace channels.
+pub(crate) mod trace;
+
 pub mod alias_safety;
 pub mod certificate;
 pub mod concat_to_append;

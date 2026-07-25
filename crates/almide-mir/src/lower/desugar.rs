@@ -143,15 +143,18 @@ pub fn dump_desugared_ir(
     layouts: &crate::lower::VariantLayouts,
     record_layouts: &crate::lower::RecordLayouts,
 ) {
-    if std::env::var("DBG_DESUGAR_FN").is_ok_and(|v| v == fn_name) {
-        if std::env::var("DBG_DESUGAR_RAW").is_ok() {
-            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main", layouts, record_layouts, &[]));
-        } else {
-            eprintln!(
-                "=== DESUGARED {fn_name} ===\n{}",
-                dump_ir(&desugar_all(body, fn_name == "main", layouts, record_layouts, &[]))
-            );
-        }
+    if !crate::trace::enabled_for("DBG_DESUGAR_FN", fn_name) {
+        return;
+    }
+    let desugared = desugar_all(body, fn_name == "main", layouts, record_layouts, &[]);
+    // `RAW` is the `{:#?}` of the desugared tree; the default is the readable
+    // `dump_ir` form. Both describe the SAME value, so it is computed once —
+    // the previous form called `desugar_all` in each branch.
+    if crate::trace::enabled("DBG_DESUGAR_RAW") {
+        crate::trace::trace("DBG_DESUGAR_FN", || format!("=== RAW {fn_name} ===\n{desugared:#?}"));
+    } else {
+        crate::trace::trace("DBG_DESUGAR_FN", || format!(
+            "=== DESUGARED {fn_name} ===\n{}", dump_ir(&desugared)));
     }
 }
 

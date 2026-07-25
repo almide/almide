@@ -247,9 +247,8 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
         for op in &f.ops {
             if let Op::CallFn { name, .. } = op {
                 if !resolvable.contains(name) {
-                    if std::env::var("ALMIDE_DBG_UNLINKED").is_ok() {
-                        eprintln!("[unlinked] {} references {}", f.name, name);
-                    }
+                    crate::trace::trace("ALMIDE_DBG_UNLINKED", || format!(
+                        "[unlinked] {} references {}", f.name, name));
                     missing.insert(name.clone());
                 }
             }

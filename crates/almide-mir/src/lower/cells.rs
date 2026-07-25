@@ -111,12 +111,18 @@ pub(crate) fn collect_cell_vars(
         .filter(|v| !param_ids.contains(v))
         .copied()
         .collect();
-    if std::env::var("ALMIDE_DBG_CELLS").is_ok() {
-        eprintln!(
-            "[cells] captured={:?} mutated={:?} cells={:?}",
-            scan.captured, scan.mutated, out
-        );
-    }
+    crate::trace::trace("ALMIDE_DBG_CELLS", || {
+        // The three sets are `HashSet`s, so `{:?}` ordered them by hash and the
+        // same input printed differently between runs — unusable for diffing two
+        // compiles against each other, which is the whole point of this channel.
+        let show = |s: &std::collections::HashSet<VarId>| {
+            let mut v: Vec<u32> = s.iter().map(|x| x.0).collect();
+            v.sort_unstable();
+            format!("{v:?}")
+        };
+        format!("[cells] captured={} mutated={} cells={}",
+                show(&scan.captured), show(&scan.mutated), show(&out))
+    });
     out
 }
 
