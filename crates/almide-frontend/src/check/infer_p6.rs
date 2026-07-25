@@ -231,6 +231,34 @@ impl Checker {
         ).then(|| elem.clone())
     }
 
+    /// Pair each part of an aggregate literal with the type its annotation
+    /// declares for that part.
+    ///
+    /// Tuples pair positionally and records pair BY NAME — a record literal's
+    /// fields are in source order while the declaration's are in declaration
+    /// order, so position would pair the wrong types. `None` when the literal
+    /// and the annotation are not the same aggregate shape: that is a type
+    /// error the checker reports elsewhere, and pinning a literal against a
+    /// mismatched slot would report a second, misleading one.
+    fn annotated_component_tys<'a>(
+        declared: &Ty,
+        value: &'a ast::Expr,
+    ) -> Option<Vec<(&'a ast::Expr, Ty)>> {
+        match (&value.kind, declared) {
+            (ExprKind::Tuple { elements, .. }, Ty::Tuple(tys)) if elements.len() == tys.len() => {
+                Some(elements.iter().zip(tys.iter().cloned()).collect())
+            }
+            (ExprKind::Record { fields, .. }, Ty::Record { fields: decl } | Ty::OpenRecord { fields: decl }) => {
+                Some(fields.iter().filter_map(|f| {
+                    decl.iter()
+                        .find(|(n, _)| *n == f.name)
+                        .map(|(_, t)| (&f.value, t.clone()))
+                }).collect())
+            }
+            _ => None,
+        }
+    }
+
     /// Identify the underlying `Int` literal site (id, raw text, negated) of
     /// `value` — either a bare literal, a `-<literal>` unary, or a
     /// parenthesized literal. Verbatim text move out of
@@ -259,20 +287,34 @@ impl Checker {
         // rustc rejected `256i8` after `check` accepted (differential-fuzz, seed
         // 1784965680755102000; the same check-vs-build gap #626/index 92 closed for
         // scalar bindings). Recurses so a nested annotation reaches through.
+        if let ExprKind::Paren { expr } = &value.kind {
+            self.record_int_literal_context(expr, declared);
+            return;
+        }
         if let Some(elem_ty) = Self::annotated_element_ty(declared) {
-            match &value.kind {
-                ExprKind::List { elements, .. } => {
-                    for e in elements {
-                        self.record_int_literal_context(e, &elem_ty);
-                    }
-                    return;
+            if let ExprKind::List { elements, .. } = &value.kind {
+                for e in elements {
+                    self.record_int_literal_context(e, &elem_ty);
                 }
-                ExprKind::Paren { expr } => {
-                    self.record_int_literal_context(expr, declared);
-                    return;
-                }
-                _ => {}
+                return;
             }
+        }
+        // A TUPLE literal against an annotated tuple type pins each component,
+        // and a RECORD literal against a declared record pins each field BY
+        // NAME. Both narrow in codegen exactly as a collection element does, so
+        // both must face the same range check — `let r: Rec = { b: 65535 }` with
+        // `Rec.b: Int8` was accepted here and then rejected by rustc as
+        // `65535i8` (differential fuzz, seed 1784958133509490474; the same
+        // check-vs-build gap #626 closed for scalar bindings).
+        // A NOMINAL annotation (`let r: Rec = { … }`) must be expanded to its
+        // structural form first — the literal's fields pair against the
+        // declaration's, and `Ty::Named` carries none.
+        let structural = self.env.resolve_named(declared);
+        if let Some(parts) = Self::annotated_component_tys(&structural, value) {
+            for (part, ty) in parts {
+                self.record_int_literal_context(part, &ty);
+            }
+            return;
         }
         let (lit_id, raw, negated) = Self::int_literal_context_site(value);
         if let Some(id) = lit_id {

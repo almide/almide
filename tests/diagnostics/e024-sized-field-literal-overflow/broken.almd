@@ -1,0 +1,13 @@
+// A sized-numeric RECORD FIELD or TUPLE COMPONENT narrows its literal in
+// codegen exactly as a collection element does, so an out-of-range literal
+// there must be rejected at check time. It was not: `check` accepted, and
+// native rustc then rejected the emitted `65535i8` (differential fuzz, seed
+// 1784958133509490474 — the check-vs-build gap #626 closed for scalar
+// bindings, reopened for aggregate positions).
+type Rec = { b: Int8, n: Int }
+
+fn main() -> Unit = {
+  let r: Rec = { b: 65535, n: 9999 }
+  let n: ((Int8, Int), Int) = ((300, 1000), 2000)
+  println("${int.to_string(int.from_int8(r.b))}:${int.to_string(n.1)}")
+}
