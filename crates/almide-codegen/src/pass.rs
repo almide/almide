@@ -64,10 +64,6 @@ pub struct TargetAttrs {
     pub match_as_str: bool,
     /// Rust: top-level let → LazyLock
     pub lazy_init: bool,
-    /// TS: Option erasure — `some(x)` becomes just `x`
-    pub option_erased: bool,
-    /// TS: Result wrapped in `{ ok, value/error }` object
-    pub result_wrapped: bool,
 }
 
 // ── Nanopass Trait ──

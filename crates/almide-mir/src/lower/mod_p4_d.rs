@@ -32,6 +32,15 @@ fn list_call_name_element_modifiers(func: &str, arg_tys: &[Ty]) -> Option<String
     if s.len() == 1 && is_value_ty(&s[0]) {
         return Some(format!("list.{func}_value"));
     }
+    // Any OTHER heap element (tuples, records, nested lists): the generic i64
+    // impl copies slots WITHOUT rc_inc — source and result co-reference each
+    // element un-owned, the scope-end rc_dec double-free (#808's sibling:
+    // `list.remove_at` over a `List[(Float, Bool)]` trapped unreachable).
+    // Route to an UNREGISTERED `_heapelem` name → the render walls cleanly
+    // (the take_while-family precedent) until rc-correct twins exist.
+    if s.len() == 1 && is_heap_ty(&s[0]) {
+        return Some(format!("list.{func}_heapelem"));
+    }
     None
 }
 

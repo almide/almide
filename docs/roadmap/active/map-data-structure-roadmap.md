@@ -1,3 +1,4 @@
+<!-- description: Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong -->
 # Map / Set data-structure roadmap
 
 How `Map[K,V]` (and `Set[T]`) are represented, and where they should go.

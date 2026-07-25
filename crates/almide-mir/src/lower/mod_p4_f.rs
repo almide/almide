@@ -245,12 +245,26 @@ fn list_call_name_source_keyed(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Op
 /// which double-frees under the nested Option[List[String]] drop (is_balanced's fold). Verbatim.
 fn list_call_name_drop_end(func: &str, arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
-    if func != "drop_end" {
+    // The suffix-copy family (#808): drop_end / take_end / tail all clone a slot
+    // range of the source, so a heap element needs the rc-aware `_str`/`_value`
+    // twin (the generic i64 copy aliases each handle UN-OWNED — source and result
+    // both release it at scope end, the rc_dec double-free trap). Any OTHER heap
+    // element routes to an UNREGISTERED `_heapelem` name → the render walls
+    // cleanly instead of double-freeing (the take_while-family precedent).
+    if !matches!(func, "drop_end" | "take_end" | "tail") {
         return None;
     }
     if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
-        if a.len() == 1 && matches!(a[0], Ty::String) {
-            return Some("list.drop_end_str".to_string());
+        if a.len() == 1 {
+            if matches!(a[0], Ty::String) {
+                return Some(format!("list.{func}_str"));
+            }
+            if crate::lower::is_value_ty(&a[0]) {
+                return Some(format!("list.{func}_value"));
+            }
+            if is_heap_ty(&a[0]) {
+                return Some(format!("list.{func}_heapelem"));
+            }
         }
     }
     None

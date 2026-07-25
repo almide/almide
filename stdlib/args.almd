@@ -3,7 +3,7 @@
 
 fn raw() -> List[String] = env.args()
 
-fn flag?(name: String) -> Bool = {
+fn flag(name: String) -> Bool = {
   let args = env.args()
   let long = "--" + name
   let short = "-" + string.slice(name, 0, 1)

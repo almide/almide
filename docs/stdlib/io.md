@@ -57,3 +57,19 @@ Read N bytes from stdin (may return fewer on EOF).
 ```almd
 let bytes = io.read_n_bytes(4)
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (7 functions)
+
+```
+effect io.read_line() -> String
+effect io.print(s: String) -> Unit
+effect io.read_all() -> String
+io.read_byte() -> Int
+io.read_n_bytes(n: Int) -> List[Int]
+io.write_bytes(data: List[Int]) -> Unit
+io.write(data: Bytes) -> Unit
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

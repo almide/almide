@@ -53,17 +53,69 @@ fn constant_fold(program: &mut IrProgram) {
     for f in &mut program.functions {
         fold_expr(&mut f.body);
     }
-    for tl in &mut program.top_lets {
-        fold_expr(&mut tl.value);
-    }
     for m in &mut program.modules {
         for f in &mut m.functions {
             fold_expr(&mut f.body);
         }
+    }
+    // Top-lets fold in DECLARATION order (root first, then each module), with
+    // every earlier IMMUTABLE top-let that folded to a scalar literal
+    // substituted into later initializers (#809): `let DOUBLE_MAX = MAX_COUNT
+    // * 9223372036854775807` must fold to the WRAPPED literal here — left as
+    // a runtime expression it lands in a Rust `const` whose const-eval
+    // REJECTS the overflow that Almide defines as two's-complement wrap (both
+    // targets wrap at runtime; `fold_expr` already folds with wrapping ops).
+    // Mutable `var` top-lets never substitute, and only Int/Float/Bool
+    // literals do (a substituted String would clone its allocation site).
+    let mut env: std::collections::HashMap<VarId, IrExprKind> =
+        std::collections::HashMap::new();
+    let mut fold_top_let = |tl: &mut IrTopLet,
+                            env: &mut std::collections::HashMap<VarId, IrExprKind>| {
+        subst_const_vars(&mut tl.value, env);
+        fold_expr(&mut tl.value);
+        if !tl.mutable
+            && matches!(
+                tl.value.kind,
+                IrExprKind::LitInt { .. }
+                    | IrExprKind::LitFloat { .. }
+                    | IrExprKind::LitBool { .. }
+            )
+        {
+            env.insert(tl.var, tl.value.kind.clone());
+        }
+    };
+    for tl in &mut program.top_lets {
+        fold_top_let(tl, &mut env);
+    }
+    for m in &mut program.modules {
         for tl in &mut m.top_lets {
-            fold_expr(&mut tl.value);
+            fold_top_let(tl, &mut env);
         }
     }
+}
+
+/// Replace every `Var` reference to an already-folded earlier top-let with its
+/// literal, bottom-up through `map_children` (the wildcard-free traversal
+/// primitive — a hand-rolled match would silently drop future node kinds).
+/// VarIds are globally unique post-lowering, so no shadowing can capture a
+/// substitution.
+fn subst_const_vars(slot: &mut IrExpr, env: &std::collections::HashMap<VarId, IrExprKind>) {
+    if env.is_empty() {
+        return;
+    }
+    fn go(mut expr: IrExpr, env: &std::collections::HashMap<VarId, IrExprKind>) -> IrExpr {
+        expr = expr.map_children(&mut |e| go(e, env));
+        if let IrExprKind::Var { id } = &expr.kind {
+            if let Some(lit) = env.get(id) {
+                expr.kind = lit.clone();
+            }
+        }
+        expr
+    }
+    let placeholder =
+        IrExpr { kind: IrExprKind::Unit, ty: slot.ty.clone(), span: None, def_id: None };
+    let taken = std::mem::replace(slot, placeholder);
+    *slot = go(taken, env);
 }
 
 fn fold_expr(expr: &mut IrExpr) {

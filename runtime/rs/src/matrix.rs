@@ -85,12 +85,35 @@ impl AlmideRepr for AlmideMatrix {
     }
 }
 
+/// Largest element count a dimension-taking matrix constructor will allocate:
+/// 2^28 f64 = 2 GiB, comfortably inside wasm32's 4 GiB address space so BOTH
+/// targets accept exactly the same dimensions. Above it, both abort in the T6
+/// form instead of diverging into a native `capacity overflow` panic (exit 101)
+/// vs a wasm out-of-bounds trap (exit 134) — #849. Keep in sync with
+/// `__mx_dims` in stdlib/matrix_core.almd.
+pub const ALMIDE_MATRIX_MAX_ELEMS: i64 = 1 << 28;
+
+/// Normalize a constructor's `(rows, cols)`: a NEGATIVE dimension clamps to 0
+/// (the empty matrix), matching the C-034 signed-clamp rule the `repeat` family
+/// already follows; an element count over the shared ceiling aborts.
+pub fn almide_rt_matrix_dims(rows: i64, cols: i64) -> (usize, usize) {
+    let r = rows.max(0);
+    let c = cols.max(0);
+    if r.saturating_mul(c) > ALMIDE_MATRIX_MAX_ELEMS {
+        eprintln!("Error: matrix dimensions too large");
+        std::process::exit(1);
+    }
+    (r as usize, c as usize)
+}
+
 pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
-    vec![vec![0.0; cols as usize]; rows as usize].into()
+    let (r, c) = almide_rt_matrix_dims(rows, cols);
+    vec![vec![0.0; c]; r].into()
 }
 
 pub fn almide_rt_matrix_ones(rows: i64, cols: i64) -> AlmideMatrix {
-    vec![vec![1.0; cols as usize]; rows as usize].into()
+    let (r, c) = almide_rt_matrix_dims(rows, cols);
+    vec![vec![1.0; c]; r].into()
 }
 
 pub fn almide_rt_matrix_shape(m: &AlmideMatrix) -> (i64, i64) {

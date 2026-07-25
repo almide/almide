@@ -6,7 +6,8 @@
 // (runtime/rs/src/regex.rs) is the oracle. Covers: alternation, escape atoms
 // (incl. negated + escaped literals), class escapes ([\d] / [^\d]), capture
 // contents incl. optional-miss, multibyte '.' / class on 日本語, anchors,
-// quantifiers, replace (verbatim), split edges, full_match, find_all, empty
+// quantifiers incl. {n}/{n,}/{n,m} braces (#845), replace (verbatim), split
+// edges, full_match, find_all, empty
 // alternation arms (leading/trailing/middle), and replace over empty matches at
 // end-of-string (native end-index guard).
 import regex
@@ -121,4 +122,24 @@ fn main() -> Unit = {
   println("<" + regex.replace_first("x*", "ab", "-") + ">")  // replace_first empty-at-start
   println("<" + regex.replace_first("a*", "aaa", "-") + ">")
   println("<" + regex.replace_first("a|", "abc", "-") + ">")
+
+  // ── brace quantifiers {n} / {n,} / {n,m} (#845: used to silently never match) ──
+  println(b2s(regex.is_match(r"\d{3}", "abc123")))            // T
+  println(b2s(regex.is_match(r"\d{4}", "abc123")))            // F
+  println(b2s(regex.full_match(r"\d{3}", "123")))             // T
+  println(b2s(regex.full_match(r"\d{3}", "1234")))            // F
+  println(b2s(regex.full_match(r"\d{2,}", "12345")))          // T
+  println(b2s(regex.full_match(r"\d{6,}", "12345")))          // F
+  println(b2s(regex.full_match(r"\d{2,4}", "123")))           // T
+  println(b2s(regex.full_match(r"\d{2,4}", "12345")))         // F
+  println(ostr(regex.find(r"a{2,3}", "caaaab")))               // aaa (greedy)
+  println(olist(regex.captures(r"(\d{4})-(\d{2})-(\d{2})", "on 2026-03-09.")))
+  println("<" + regex.replace(r"o{2}", "foo book", "0") + ">") // f0 b0k
+  println(b2s(regex.full_match(r"(ab){2}", "abab")))           // grouped rep → T
+  println(b2s(regex.full_match(r"(ab){2}", "ab")))             // F
+  println(b2s(regex.full_match(r"a{0,2}b", "b")))              // zero-min → T
+  println(b2s(regex.full_match(r"あ{2}", "ああ")))             // multibyte reps → T
+  println(b2s(regex.full_match(r"a{x}", "a{x}")))              // malformed brace = literal → T
+  println(b2s(regex.full_match(r"a{,3}", "a{,3}")))            // {,m} unsupported = literal → T
+  println(b2s(regex.is_match(r"a{2", "a{2")))                  // unterminated = literal → T
 }

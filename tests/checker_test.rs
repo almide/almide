@@ -688,3 +688,37 @@ fn main_with_parameters_is_rejected() {
         "expected the E028 main-signature error, got: {errs:?}"
     );
 }
+
+// #847: a missing field on a CLOSED record must be a checker error (E013 with
+// a roster + suggestion), not a silent Unknown that ICEs in codegen.
+#[test]
+fn missing_record_field_reports_e013() {
+    let diags = check(
+        "type N = { alpha: Int, beta: Float }\n\
+         fn main() -> Unit = {\n\
+           let n = N { alpha: 1, beta: 2.0 }\n\
+           println(int.to_string(n.alpa))\n\
+         }\n",
+    );
+    assert!(
+        diags.iter().any(|(_, m)| m.contains("no field 'alpa'")),
+        "expected a missing-field diagnostic, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn present_record_field_is_clean() {
+    let diags = check(
+        "type N = { alpha: Int }\n\
+         fn main() -> Unit = {\n\
+           let n = N { alpha: 1 }\n\
+           println(int.to_string(n.alpha))\n\
+         }\n",
+    );
+    assert!(
+        !diags.iter().any(|(_, m)| m.contains("no field")),
+        "valid field access must not report: {:?}",
+        diags
+    );
+}

@@ -97,3 +97,29 @@ Map a function over a list and collect Results. All ok → ok(values), any err �
 ```almd
 result.collect_map([1, 2, 3], fn(x) => if x > 0 then ok(x) else err("neg"))
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (17 functions)
+
+```
+result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]
+result.map_err(r: Result[A, E], f: (E) -> F) -> Result[A, F]
+result.flat_map(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]
+result.unwrap_or(r: Result[A, E], default: A) -> A
+result.unwrap_or_else(r: Result[A, E], f: (E) -> A) -> A
+result.is_ok(r: Result[A, E]) -> Bool
+result.is_err(r: Result[A, E]) -> Bool
+result.to_option(r: Result[A, E]) -> Option[A]
+result.to_err_option(r: Result[A, E]) -> Option[E]
+result.collect(rs: List[Result[T, E]]) -> Result[List[T], List[E]]
+result.partition(rs: List[Result[T, E]]) -> ()
+result.collect_map(xs: List[T], f: (T) -> Result[U, E]) -> Result[List[U], List[E]]
+result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]
+result.to_list(r: Result[A, E]) -> List[A]
+result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(), E]
+result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]
+result.filter(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

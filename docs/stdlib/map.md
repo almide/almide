@@ -193,3 +193,36 @@ Remove all entries in place. Requires var binding.
 ```almd
 map.clear(m)
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (24 functions)
+
+```
+map.new() -> Map[K, V]
+map.get(m: Map[K, V], key: K) -> Option[V]
+map.get_or(m: Map[K, V], key: K, default: V) -> V
+map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]
+map.contains(m: Map[K, V], key: K) -> Bool
+map.remove(m: Map[K, V], key: K) -> Map[K, V]
+map.keys(m: Map[K, V]) -> List[K]
+map.values(m: Map[K, V]) -> List[V]
+map.len(m: Map[K, V]) -> Int
+map.entries(m: Map[K, V]) -> List[()]
+map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]
+map.is_empty(m: Map[K, V]) -> Bool
+map.from_list(pairs: List[()]) -> Map[K, V]
+map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]
+map.filter(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]
+map.fold(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A
+map.any(m: Map[K, V], f: (K, V) -> Bool) -> Bool
+map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool
+map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int
+map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[()]
+map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]
+map.insert(m: Map[K, V], key: K, value: V) -> Unit
+map.delete(m: Map[K, V], key: K) -> Unit
+map.clear(m: Map[K, V]) -> Unit
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

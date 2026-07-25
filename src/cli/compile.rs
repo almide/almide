@@ -3,15 +3,29 @@ use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, out, 
 /// Resolve a module name to a source file path.
 /// If the input looks like a file path (ends with .almd), use it directly.
 /// If it's a module name (e.g., "json", "parser"), resolve via the module system.
-fn resolve_module_to_file(module: &str) -> String {
+fn resolve_module_to_file(module: &str) -> (String, bool) {
     if module.ends_with(".almd") {
-        return module.to_string();
+        return (module.to_string(), false);
     }
 
-    // Check stdlib first
-    if almide::stdlib::is_stdlib_module(module) {
-        err(&format!("error: '{}' is a stdlib module (defined via TOML, no source file)", module));
-        err(&format!("  hint: stdlib interfaces are built into the compiler"));
+    // Stdlib modules are self-hosted `.almd` bundled into the compiler:
+    // serve the embedded source through the normal pipeline via a temp file
+    // so `almide compile string --json` works like any module.
+    //
+    // Keyed on `is_any_stdlib`, NOT the hardcoded stdlib list: `path`, `args`,
+    // `html` and `mem` exist only as bundled modules, so the narrower gate let
+    // them fall through to on-disk resolution and report "module not found"
+    // for a module the binary is carrying the source of (#863).
+    if almide::stdlib::is_any_stdlib(module) {
+        if let Some(src) = almide::stdlib::get_bundled_source(module) {
+            let tmp = std::env::temp_dir().join(format!("almide-stdlib-iface-{}.almd", module));
+            if let Err(e) = std::fs::write(&tmp, src) {
+                err(&format!("error: cannot stage bundled stdlib source for '{}': {}", module, e));
+                std::process::exit(1);
+            }
+            return (tmp.to_string_lossy().to_string(), true);
+        }
+        err(&format!("error: '{}' is a stdlib module with no bundled source wired in stdlib_info", module));
         std::process::exit(1);
     }
 
@@ -32,7 +46,7 @@ fn resolve_module_to_file(module: &str) -> String {
     ];
     for path in &candidates {
         if path.exists() {
-            return path.to_string_lossy().to_string();
+            return (path.to_string_lossy().to_string(), false);
         }
     }
 
@@ -46,7 +60,7 @@ fn resolve_module_to_file(module: &str) -> String {
             ];
             for path in &dep_candidates {
                 if path.exists() {
-                    return path.to_string_lossy().to_string();
+                    return (path.to_string_lossy().to_string(), false);
                 }
             }
         }
@@ -86,7 +100,7 @@ fn resolve_module_name(module: Option<&str>) -> String {
 /// `cmd_compile`'s parse + resolve + type-check phase. Exits the process on
 /// any parse/resolve/type error, matching the original inline behavior.
 /// Extracted verbatim.
-fn parse_and_typecheck_for_compile(file: &str) -> (almide::ast::Program, String, check::Checker) {
+fn parse_and_typecheck_for_compile(file: &str, lenient: bool) -> (almide::ast::Program, String, check::Checker) {
     let (mut program, source_text, parse_errors) = parse_file(file);
     if !parse_errors.is_empty() {
         for e in &parse_errors {
@@ -113,7 +127,7 @@ fn parse_and_typecheck_for_compile(file: &str) -> (almide::ast::Program, String,
     let errors: Vec<_> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Error)
         .collect();
-    if !errors.is_empty() {
+    if !errors.is_empty() && !lenient {
         for d in &errors {
             err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
         }
@@ -167,13 +181,16 @@ fn write_compile_output(iface: &almide::interface::ModuleInterface, ir: &almide:
 }
 
 pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: Option<&str>) {
-    let file = match module {
+    let (file, lenient) = match module {
         Some(m) => resolve_module_to_file(m),
-        None => crate::resolve_file(None),
+        None => (crate::resolve_file(None), false),
     };
     let module_name = resolve_module_name(module);
 
-    let (program, source_text, checker) = parse_and_typecheck_for_compile(&file);
+    // Bundled stdlib sources reference runtime-backed nominal types
+    // (JsonPath, HttpRequest, ...) that only exist when the module is
+    // IMPORTED — interface extraction doesn't need the body check to pass.
+    let (program, source_text, checker) = parse_and_typecheck_for_compile(&file, lenient);
 
     // Lower to IR
     let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);

@@ -373,9 +373,11 @@ effect fn main() -> Unit = {
 Command-line arguments are accessed via `process.args()` (not main parameters).
 
 ## Operators (precedence high→low)
-`. () ! ?? ?` > `not -` > `^` (power) > `* / %` > `+ -` > `== != < > <= >=` (non-assoc) > `and` > `or` > `|>` `>>`
+`. () [] ! ? ?. ??` (postfix) > `not -` (prefix) > `>>` > `^` (power) > `* / %` > `+ -` > `.. ..=` > `|>` > `== != < > <= >=` (non-assoc) > `and` > `or`
 
 `^` is exponentiation (right-associative, `**` also accepted). `+` is concatenation for strings and lists (overloaded with addition). XOR is available as `int.bxor(a, b)`.
+
+`|>` is asymmetric: its right-hand side is a single call/compose chain, so any operator after it applies to the piped result — `xs |> list.map(f) + ys` is `(xs |> list.map(f)) + ys`, and `xs |> f >> g` pipes into the composition `f >> g`.
 
 ## UFCS
 `f(x, y)` ≡ `x.f(y)` — compiler resolves automatically.
@@ -396,13 +398,13 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [result](stdlib/result.md) | Result type operations | auto-imported | 12 |
 | [option](stdlib/option.md) | Option type operations | auto-imported | 12 |
 | [json](stdlib/json.md) | JSON parsing and querying | `import json` | 29 |
-| [math](stdlib/math.md) | Mathematical functions | `import math` | 21 |
+| [math](stdlib/math.md) | Mathematical functions | auto-imported | 21 |
 | [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
-| [datetime](stdlib/datetime.md) | Date and time | `import datetime` | 21 |
-| [bytes](stdlib/bytes.md) | Binary data | `import bytes` | 67 |
-| [matrix](stdlib/matrix.md) | 2D matrix operations | `import matrix` | 39 |
+| [datetime](stdlib/datetime.md) | Date and time | auto-imported | 21 |
+| [bytes](stdlib/bytes.md) | Binary data | auto-imported | 67 |
+| [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported | 39 |
 | [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
-| [error](stdlib/error.md) | Error construction | `import error` | 3 |
+| [error](stdlib/error.md) | Error construction | auto-imported | 3 |
 | [fs](stdlib/fs.md) | File system | `import fs` | 24 |
 | [env](stdlib/env.md) | Environment and system | `import env` | 9 |
 | [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 12 |

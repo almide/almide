@@ -57,3 +57,19 @@ Assert that a Result is ok (not err).
 ```almd
 testing.assert_ok(ok("success"))
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (7 functions)
+
+```
+testing.assert_throws(f: () -> Unit, expected: String) -> Unit
+testing.assert_contains(haystack: String, needle: String) -> Unit
+testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit
+testing.assert_gt(a: Int, b: Int) -> Unit
+testing.assert_lt(a: Int, b: Int) -> Unit
+testing.assert_some(opt: Option[A]) -> Unit
+testing.assert_ok(result: Result[A, B]) -> Unit
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

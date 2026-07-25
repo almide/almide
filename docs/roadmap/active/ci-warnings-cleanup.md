@@ -1,3 +1,4 @@
+<!-- description: Standing ledger of compiler warnings CI tolerates, and the plan to drive each class to zero -->
 # CI Warnings Cleanup
 
 > **Status**: Active

@@ -1,4 +1,5 @@
 <!-- description: almide test stderr passthrough + almide explain <code> subcommand -->
+<!-- done: 2026-05-20 -->
 # DX: `almide test` stderr & `almide explain`
 
 [`dx-codegen-papercuts.md`](../done/dx-codegen-papercuts.md) の A / C 系は

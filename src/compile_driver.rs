@@ -61,6 +61,64 @@ fn report_check_diagnostics(
     Ok(())
 }
 
+/// Report the type errors an IMPORTED user module produced during
+/// `infer_module`, rendered against that module's own source (#862).
+///
+/// Before this, `infer_module`'s diagnostics were appended to the shared
+/// `checker.diagnostics` and never read: only the ENTRY program's return value
+/// from `infer_program` was reported. A module could carry an E006 (effect fn
+/// called from a pure fn) for weeks while every importer's `almide check` /
+/// `almide build` / `almide test` stayed green.
+pub(crate) fn report_module_diagnostics(
+    module_diags: &[(String, String, Vec<diagnostic::Diagnostic>)],
+) -> Result<(), String> {
+    let mut errors = 0usize;
+    for (path, source, diags) in module_diags {
+        for d in diags.iter().filter(|d| d.level == diagnostic::Level::Error) {
+            let mut d = d.clone();
+            if d.file.is_none() {
+                d.file = Some(path.clone());
+            }
+            err(&format!("{}", diagnostic_render::display_with_source(&d, source)));
+            errors += 1;
+        }
+    }
+    if errors > 0 {
+        err(&format!("\n{} error(s) found in imported module(s)", errors));
+        return Err(format!("{} error(s) found in imported module(s)", errors));
+    }
+    Ok(())
+}
+
+/// Run `infer_module` for `name` with the checker's reported source switched to
+/// that module's own file, and return the diagnostics it produced. The entry
+/// file's source is restored before returning, so the caller's own reporting is
+/// unaffected.
+pub(crate) fn infer_module_capturing(
+    checker: &mut check::Checker,
+    name: &str,
+    mod_prog: &mut ast::Program,
+    sources: &std::collections::HashMap<String, (String, String)>,
+    out: &mut Vec<(String, String, Vec<diagnostic::Diagnostic>)>,
+) {
+    let Some((path, text)) = sources.get(name) else {
+        // Bundled stdlib: compiled in and CI-gated, no user file to blame.
+        checker.infer_module(mod_prog, name);
+        return;
+    };
+    let saved_file = checker.source_file.clone();
+    let saved_text = checker.source_text.clone();
+    let before = checker.diagnostics.len();
+    checker.set_source(path, text);
+    checker.infer_module(mod_prog, name);
+    let produced: Vec<diagnostic::Diagnostic> = checker.diagnostics[before..].to_vec();
+    checker.source_file = saved_file;
+    checker.source_text = saved_text;
+    if !produced.is_empty() {
+        out.push((path.clone(), text.clone(), produced));
+    }
+}
+
 /// Register each resolved module's versioned name (dependency modules get a
 /// `pkg_id`-derived prefix) before root lowering. Extracted verbatim from
 /// `try_compile_with_ir`'s pre-registration loop — writes only to
@@ -122,6 +180,8 @@ pub(crate) fn lower_one_user_module(
     pkg_id: &mut Option<project::PkgId>,
     module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
     ir_program: &mut Option<almide::ir::IrProgram>,
+    sources: &std::collections::HashMap<String, (String, String)>,
+    module_diags: &mut Vec<(String, String, Vec<diagnostic::Diagnostic>)>,
 ) {
     if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { return; }
     // For dependency modules, temporarily set self_module_name to the package root
@@ -130,7 +190,7 @@ pub(crate) fn lower_one_user_module(
     if let Some(pid) = pkg_id.as_ref() {
         checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
     }
-    checker.infer_module(mod_prog, name);
+    infer_module_capturing(checker, name, mod_prog, sources, module_diags);
     let versioned = pkg_id.as_ref().map(|pid| {
         let base = pid.mod_name();
         if let Some(suffix) = name.strip_prefix(&pid.name) {
@@ -253,9 +313,18 @@ fn typecheck_and_lower_for_compile(
     let mut ir_program = lower_root_program_if_ready(parsed.has_parse_errors, program, &checker, parsed.source_text, parsed.file);
 
     // Lower user modules
+    let mut module_diags: Vec<(String, String, Vec<diagnostic::Diagnostic>)> = Vec::new();
+    let sources = std::mem::take(&mut resolved.sources);
     for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        lower_one_user_module(&mut checker, name, mod_prog, pkg_id, module_irs, &mut ir_program);
+        lower_one_user_module(
+            &mut checker, name, mod_prog, pkg_id, module_irs, &mut ir_program,
+            &sources, &mut module_diags,
+        );
     }
+    resolved.sources = sources;
+    // An imported module's own type errors are fatal for the importer too:
+    // a program that cannot be checked cannot be trusted to build (#862).
+    report_module_diagnostics(&module_diags)?;
     Ok(ir_program)
 }
 

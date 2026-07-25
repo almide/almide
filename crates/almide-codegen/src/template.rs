@@ -12,14 +12,14 @@
 //! [some_expr]
 //! template = "Some({inner})"
 //!
-//! [some_expr]
-//! when_attr = "option_erased"
-//! template = "{inner}"
+//! [[call_expr]]
+//! when_attr = "needs_try"
+//! template = "{callee}({args})?"
 //! ```
 //!
 //! Templates can have conditional variants selected by:
 //! - `when_type`: type of the expression (Int, Float, String, List, etc.)
-//! - `when_attr`: TargetAttrs flag (option_erased, needs_try, etc.)
+//! - `when_attr`: TargetAttrs flag (needs_try, needs_clone, etc.)
 //! - Default: the unguarded template
 
 use std::collections::HashMap;

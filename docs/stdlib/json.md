@@ -233,3 +233,41 @@ Convert a JSON object to a Map[String, String]. Values are stringified. Returns 
 ```almd
 let m = json.to_map(obj) ?? map.new()
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (29 functions)
+
+```
+json.parse(text: String) -> Result[Value, String]
+json.stringify(v: Value) -> String
+json.get(j: Value, key: String) -> Option[Value]
+json.keys(j: Value) -> List[String]
+json.from_string(s: String) -> Value
+json.from_int(n: Int) -> Value
+json.from_bool(b: Bool) -> Value
+json.null() -> Value
+json.array(items: List[Value]) -> Value
+json.from_float(n: Float) -> Value
+json.stringify_pretty(j: Value) -> String
+json.object(entries: List[()]) -> Value
+json.get_string(j: Value, key: String) -> Option[String]
+json.get_int(j: Value, key: String) -> Option[Int]
+json.get_float(j: Value, key: String) -> Option[Float]
+json.get_bool(j: Value, key: String) -> Option[Bool]
+json.get_array(j: Value, key: String) -> Option[List[Value]]
+json.as_string(j: Value) -> Option[String]
+json.as_int(j: Value) -> Option[Int]
+json.as_float(j: Value) -> Option[Float]
+json.as_bool(j: Value) -> Option[Bool]
+json.as_array(j: Value) -> Option[List[Value]]
+json.root() -> JsonPath
+json.field(path: JsonPath, name: String) -> JsonPath
+json.index(path: JsonPath, i: Int) -> JsonPath
+json.get_path(j: Value, path: JsonPath) -> Option[Value]
+json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]
+json.remove_path(j: Value, path: JsonPath) -> Value
+json.to_map(j: Value) -> Option[Map[String, String]]
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

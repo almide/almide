@@ -107,23 +107,25 @@ let r = "hello".split(" ").reverse()  // chaining works too
 
 ```
 AUTO-IMPORTED (no import needed):
-  string: len trim split join lines contains? starts_with? ends_with? replace
+  string: len trim split join lines contains starts_with ends_with replace
           index_of slice to_upper to_lower to_int chars pad_start pad_end
   list:   len get get_or first last map flat_map filter find fold enumerate
-          zip sort sort_by reverse any? all? take drop unique join sum
-  map:    new get set contains? remove keys values entries from_list merge len
+          zip sort sort_by reverse any all take drop unique join sum
+  map:    new get set contains remove keys values entries from_list merge len
+  set:    new add contains remove union intersect len
   int:    to_string parse abs min max clamp to_hex parse_hex
   float:  to_string from_int abs min max round floor ceil
-  fs:     read_text write read_lines append exists? mkdir_p remove list_dir
-  path:   join dirname basename extension stem normalize is_absolute?
-  env:    get get_or
-  process: exec exec_status
-  io:     read_line print read_all
+  math:   sqrt pow log sin cos pi e
+  datetime, error, value, option, result, bytes — also auto-imported
 
-IMPORT REQUIRED:
+IMPORT REQUIRED (effectful / platform / opt-in):
+  import fs      — read_text write read_lines append exists mkdir_p remove list_dir
+  import env     — get get_or
+  import process — exec exec_status
+  import io      — read_line print read_all
   import json    — parse stringify get get_string get_int get_array keys
-  import math    — sqrt pow log sin cos pi e
   import random  — int float shuffle
-  import regex   — match? find find_all replace split captures
-  import args    — flag? option option_or positional positional_at
+  import regex   — is_match find find_all replace split captures
+  import path    — join dirname basename extension stem normalize is_absolute
+  import args    — flag option option_or positional positional_at
 ```

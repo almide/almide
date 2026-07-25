@@ -148,12 +148,31 @@ fn seed_record_names(program: &IrProgram) {
 /// round): only ever writes into `borrows` via index, never reads `sigs` —
 /// a safe write-only accumulator to thread out.
 fn apply_intrinsic_mut_overrides(
+    symbol: &str,
     params: &[almide_lang::ast::Param],
     attrs: &[almide_lang::ast::Attribute],
     return_type: &almide_lang::ast::TypeExpr,
     borrow_ref_names: &[&str],
     borrows: &mut [ParamBorrow],
 ) {
+    // The native runtime's own signature is the ground truth when the symbol
+    // has a Rust body: promote exactly the params it declares `&mut`. The
+    // `mut`/`@mutating`/implicit-Unit shapes below are only a FALLBACK for
+    // symbols with no native body (wasm-only prims, self-hosted intrinsics).
+    if let Some(native) = crate::generated::runtime_fn_modes::runtime_param_mutability(symbol) {
+        for (idx, b) in borrows.iter_mut().enumerate() {
+            let is_borrow_ref = params.get(idx)
+                .map(|p| borrow_ref_names.iter().any(|r| r == &p.name.as_str()))
+                .unwrap_or(false);
+            if !is_borrow_ref
+                && native.get(idx).copied().unwrap_or(false)
+                && matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr)
+            {
+                *b = ParamBorrow::RefMut;
+            }
+        }
+        return;
+    }
     // Mutated parameters: explicit `mut` keyword, `@mutating`,
     // or implicit (returns Unit with Ref-mode container first arg).
     // `@borrow_ref(param)` always wins over mutation inference.
@@ -246,7 +265,7 @@ fn seed_intrinsic_sig_for_fn(
             borrows[idx] = ParamBorrow::Ref;
         }
     }
-    apply_intrinsic_mut_overrides(params, attrs, return_type, &borrow_ref_names, &mut borrows);
+    apply_intrinsic_mut_overrides(symbol, params, attrs, return_type, &borrow_ref_names, &mut borrows);
     sigs.insert(symbol.clone(), borrows);
 }
 

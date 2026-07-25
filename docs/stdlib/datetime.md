@@ -185,3 +185,34 @@ Check if timestamp a is after timestamp b.
 ```almd
 datetime.is_after(later, earlier) // => true
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (22 functions)
+
+```
+datetime.add_days(ts: Int, n: Int) -> Int
+datetime.add_hours(ts: Int, n: Int) -> Int
+datetime.add_minutes(ts: Int, n: Int) -> Int
+datetime.add_seconds(ts: Int, n: Int) -> Int
+datetime.day(ts: Int) -> Int
+datetime.diff_seconds(a: Int, b: Int) -> Int
+datetime.format(ts: Int, pattern: String) -> String
+datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int
+datetime.from_unix(seconds: Int) -> Int
+datetime.hour(ts: Int) -> Int
+datetime.is_after(a: Int, b: Int) -> Bool
+datetime.is_before(a: Int, b: Int) -> Bool
+datetime.minute(ts: Int) -> Int
+datetime.month(ts: Int) -> Int
+datetime.now() -> Int
+datetime.monotonic_ns() -> Int
+datetime.parse_iso(s: String) -> Result[Int, String]
+datetime.second(ts: Int) -> Int
+datetime.to_iso(ts: Int) -> String
+datetime.to_unix(ts: Int) -> Int
+datetime.weekday(ts: Int) -> String
+datetime.year(ts: Int) -> Int
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

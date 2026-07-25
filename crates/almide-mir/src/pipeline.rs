@@ -43,19 +43,85 @@ fn user_module_fn_name(module: &str, func: &str) -> String {
 /// dotted stdlib call (`is_known_free`). A self-pkg call to an EFFECTFUL user fn therefore
 /// surfaces its capability transitively, exactly like any direct user call. A STDLIB module
 /// (`string`, bundled `json`, …) is NOT rewritten. No-op when there are no linked user modules.
+/// A module whose functions should link like ordinary user siblings.
+/// User modules always; a BUNDLED stdlib module qualifies too when ALL its
+/// fns are pure Almide (no @intrinsic / @inline_rust / @wasm_intrinsic /
+/// @extern, no hole bodies) — `import path` / `import args` then lower as
+/// real linked modules instead of walling as "unlinked stdlib call".
+/// Intrinsic-bearing bundled modules (json, …) keep registry-backed dispatch.
+pub(crate) fn is_linkable_module(m: &almide_ir::IrModule) -> bool {
+    let n = m.name.as_str();
+    if !almide_lang::stdlib_info::is_any_stdlib(n) {
+        return true;
+    }
+    almide_lang::stdlib_info::is_bundled_module(n)
+        && m.functions.iter().all(is_pure_almide_fn)
+}
+
+/// A function with a real Almide body and no host boundary — linkable as an
+/// ordinary sibling fn.
+fn is_pure_almide_fn(f: &almide_ir::IrFunction) -> bool {
+    f.extern_attrs.is_empty()
+        && !f
+            .attrs
+            .iter()
+            .any(|a| matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic"))
+        && !matches!(f.body.kind, almide_ir::IrExprKind::Hole)
+}
+
+/// Every `module.fn` the self-host registry already serves. A bundled module's
+/// own Almide body must NOT shadow a registered self-host: the registry entry is
+/// the proven, rc-audited implementation the renderer links.
+fn registry_served_names() -> &'static std::collections::HashSet<&'static str> {
+    use std::sync::OnceLock;
+    static NAMES: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        crate::render_wasm::registry::self_host_runtime()
+            .iter()
+            .flat_map(|(_, pairs)| pairs.iter().map(|(_, call_name)| *call_name))
+            .collect()
+    })
+}
+
+/// The function names of `m` that resolve like ordinary user siblings.
+///
+/// A wholly-pure module contributes all of them ([`is_linkable_module`]). An
+/// INTRINSIC-BEARING bundled module (`list`, `string`, …) contributes its
+/// pure-Almide extensions only — `list.split_at`/`iterate`/`bundled_probe` have
+/// real Almide bodies and no registry entry, so before this they resolved to
+/// nothing and walled as "unlinked stdlib call" even though their source ships
+/// in the binary. Its intrinsic-backed fns keep registry-backed dispatch.
+pub fn linkable_module_fns(m: &almide_ir::IrModule) -> std::collections::HashSet<String> {
+    let all = |m: &almide_ir::IrModule| {
+        m.functions.iter().map(|f| f.name.as_str().to_string()).collect()
+    };
+    let n = m.name.as_str();
+    if !almide_lang::stdlib_info::is_any_stdlib(n) {
+        return all(m);
+    }
+    if !almide_lang::stdlib_info::is_bundled_module(n) {
+        return std::collections::HashSet::new();
+    }
+    if m.functions.iter().all(is_pure_almide_fn) {
+        return all(m);
+    }
+    let served = registry_served_names();
+    m.functions
+        .iter()
+        .filter(|f| is_pure_almide_fn(f))
+        .map(|f| f.name.as_str().to_string())
+        .filter(|f| !served.contains(format!("{n}.{f}").as_str()))
+        .collect()
+}
+
 fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     use almide_ir::{walk_expr_mut, CallTarget, IrExprKind, IrMutVisitor};
     use almide_lang::intern::sym;
     let user_mods: std::collections::HashMap<String, std::collections::HashSet<String>> = ir
         .modules
         .iter()
-        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
-        .map(|m| {
-            (
-                m.name.as_str().to_string(),
-                m.functions.iter().map(|f| f.name.as_str().to_string()).collect(),
-            )
-        })
+        .map(|m| (m.name.as_str().to_string(), linkable_module_fns(m)))
+        .filter(|(_, fns)| !fns.is_empty())
         .collect();
     if user_mods.is_empty() {
         return; // single-file / stdlib-only — strict no-op.
@@ -258,12 +324,25 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
     use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
     use almide_lang::intern::sym;
     use almide_lang::types::Ty;
-    if ir.functions.iter().any(|f| !f.is_test && f.name.as_str() == "main") {
-        // main-mode: both legs run main only (v0's `__main_runner` protocol); the
-        // test fns stay `is_test` and the render loop skips them as before.
-        return Ok(());
+    let has_tests = ir.functions.iter().any(|f| f.is_test);
+    if let Some(main_idx) =
+        ir.functions.iter().position(|f| !f.is_test && f.name.as_str() == "main")
+    {
+        if !has_tests {
+            // main-mode: both legs run main only (v0's `__main_runner` protocol).
+            return Ok(());
+        }
+        // main + test blocks. NATIVE test mode compiles `main` but never calls it —
+        // cargo's harness runs the `#[test]` fns alone. Mirror that: drop the user
+        // `main` so the synthesized runner is the entry and the TESTS run. The old
+        // behaviour kept `main` as the entry and left the tests unlowered, so the
+        // harness skipped the file to native ("wasm test-mode runs main only") —
+        // 17 of the 32 fallbacks in `almide test` were this one harness gap, not a
+        // v1 subset wall (#813). These fixtures' `main` is separately exercised in
+        // MAIN mode by the cross-target parity gate, so nothing loses coverage.
+        ir.functions.remove(main_idx);
     }
-    if ir.functions.iter().all(|f| !f.is_test) {
+    if !has_tests {
         return Err(LowerError::Unsupported(
             "test mode: no `main` and no test blocks — nothing to run".into(),
         ));
@@ -509,6 +588,57 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
 /// Returns `Ok(wat)` when the WHOLE program lowers (every function in-subset, `main` present, no
 /// unlinked call), else `Err(LowerError::Unsupported(..))` — a clean WALL the caller can fall back
 /// from (v0 codegen). NEVER a wrong module: honest-wall.
+/// Resolve the BUNDLED stdlib modules a single-file program needs — the
+/// standalone-harness subset of the CLI resolver (`src/resolve.rs`): every
+/// auto-import bundled module, plus every explicitly imported bundled module,
+/// each with its bundled dependencies, depth-first in import order (the same
+/// visit order `load_bundled_module` produces — deterministic, deduped).
+/// Callers with a real resolver (the CLI) never need this; the wasmgen
+/// harnesses do, so a fixture with `import path` renders instead of walling.
+pub fn bundled_self_modules(source: &str) -> Vec<(String, almide_lang::ast::Program, bool)> {
+    use std::collections::HashSet;
+    fn add(
+        name: &str,
+        out: &mut Vec<(String, almide_lang::ast::Program, bool)>,
+        seen: &mut HashSet<String>,
+    ) {
+        if seen.contains(name) {
+            return;
+        }
+        let Some(src) = almide_lang::stdlib_info::bundled_source(name) else { return };
+        let Some(prog) = almide_lang::parse_cached(src) else { return };
+        let prog = prog.clone();
+        seen.insert(name.to_string());
+        for imp in &prog.imports {
+            if let almide_lang::ast::Decl::Import { path, .. } = imp {
+                if let Some(dep) = path.first() {
+                    add(dep.as_str(), out, seen);
+                }
+            }
+        }
+        out.push((name.to_string(), prog, false));
+    }
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    // The top source is caller-owned (not 'static) — parse directly instead
+    // of through the 'static-keyed AST cache.
+    let tokens = almide_lang::lexer::Lexer::tokenize(source);
+    let mut parser = almide_lang::parser::Parser::new(tokens);
+    if let Ok(prog) = parser.parse() {
+        for imp in &prog.imports {
+            if let almide_lang::ast::Decl::Import { path, .. } = imp {
+                if let Some(root) = path.first() {
+                    add(root.as_str(), &mut out, &mut seen);
+                }
+            }
+        }
+    }
+    for name in almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED {
+        add(name, &mut out, &mut seen);
+    }
+    out
+}
+
 pub fn try_render_wasm_source(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],

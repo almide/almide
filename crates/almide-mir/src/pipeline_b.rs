@@ -177,8 +177,13 @@ fn inline_and_classify_cross_module_fns(
     let mut module_fn_sibs: Vec<almide_ir::IrFunction> = ir
         .modules
         .iter()
-        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
-        .flat_map(|m| {
+        // An intrinsic-bearing bundled module contributes only its pure-Almide
+        // extensions (`list.split_at`); its intrinsic-backed fns stay on the
+        // registry. `linkable_module_fns` is the single source of truth shared
+        // with the call-site rewrite, so a linked CALL always has a linked DEF.
+        .map(|m| (m, crate::pipeline::linkable_module_fns(m)))
+        .filter(|(_, fns)| !fns.is_empty())
+        .flat_map(|(m, linkable)| {
             let mname = m.name.as_str().to_string();
             // INTRA-MODULE bare sibling calls resolve MODULE-LOCALLY (the #692 rule:
             // current-module qualified > bare > any-module) — a clone body left with a
@@ -187,7 +192,10 @@ fn inline_and_classify_cross_module_fns(
             // arity mismatch — wasm_same_name_crossmod_test).
             let sibs: std::collections::HashSet<String> =
                 m.functions.iter().map(|f| f.name.as_str().to_string()).collect();
-            m.functions.iter().filter(|f| !f.is_test).map(move |f| {
+            m.functions
+                .iter()
+                .filter(move |f| !f.is_test && linkable.contains(f.name.as_str()))
+                .map(move |f| {
                 let mut nf = f.clone();
                 nf.name = almide_lang::intern::sym(&user_module_fn_name(&mname, f.name.as_str()));
                 struct Rw<'a> {
@@ -316,7 +324,7 @@ fn bridge_cross_module_derived_methods(
         ir.type_decls.iter().map(|td| td.name.as_str()).collect();
     let mut owners: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
     for m in &ir.modules {
-        if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+        if !crate::pipeline::is_linkable_module(m) {
             continue;
         }
         for td in &m.type_decls {
@@ -660,7 +668,7 @@ fn lower_main_and_sibling_fns(
     }
     if !walled.is_empty() && verbose {
         eprintln!(
-            "[render_program] {} of {} function(s) outside the lowering subset (NOT rendered):",
+            "[v1-wall] {} of {} function(s) outside the lowering subset (NOT rendered):",
             walled.len(),
             total_ir_fn_count
         );

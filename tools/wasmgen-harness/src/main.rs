@@ -14,7 +14,10 @@ fn main() {
     let inp = args.get(1).expect("usage: wasmgen-harness <in.almd> <out.wasm>");
     let outp = args.get(2).expect("usage: wasmgen-harness <in.almd> <out.wasm>");
     let source = std::fs::read_to_string(inp).expect("read input");
-    match almide_mir::pipeline::try_render_wasm_source(&source, &[], false) {
+    // Bundled imports (path/args/…) link like the CLI does — without this a
+    // fixture importing a bundled module walls here while the CLI renders it.
+    let bundled = almide_mir::pipeline::bundled_self_modules(&source);
+    match almide_mir::pipeline::try_render_wasm_source(&source, &bundled, false) {
         Ok(wat_text) => {
             let bytes = wat::parse_str(&wat_text).expect("v1 WAT must parse");
             std::fs::write(outp, &bytes).expect("write output");

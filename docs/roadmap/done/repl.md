@@ -1,4 +1,5 @@
 <!-- description: Interactive REPL — `almide` with no args starts an interactive session -->
+<!-- done: 2026-05-20 -->
 # REPL
 
 > **Status: Done** — shipped in v0.19.0.

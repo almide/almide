@@ -1,3 +1,4 @@
+<!-- description: Closing the closure feature gap between the native and wasm legs, sweep by sweep -->
 # Closure cross-target completeness
 
 **Goal:** make native (Rust) and WASM agree on *every* closure program — not by passing more

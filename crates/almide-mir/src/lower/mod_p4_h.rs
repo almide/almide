@@ -153,6 +153,19 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// → `list.map_str`, a DynListStr-result impl). The element repr (i64 vs i32 handle) demands a
 /// separate variant; the variant reads/writes via the heap-aware prim ops. Scalar-result lists keep
 /// the plain name. `module.func` is unchanged for everything else.
+/// The BASE name of a stdlib call: the monomorphizer suffixes a generic
+/// intrinsic's instantiation (`option.collect__Int`, `result.or_else__Int_String_String`),
+/// and every name-keyed stdlib decision — registry routing, materialized-variant
+/// read-shape tracking — is about the BASE fn. The instantiation's types travel
+/// separately in `arg_tys`/`result_ty`, so the suffix carries no information any
+/// of them needs. Keying on the suffixed form silently loses the decision: the
+/// C-145 registry miss walled every `or_else` instantiation, and the same miss in
+/// `is_self_host_option_module_fn` left a `match` over a mono-specialized
+/// `option.collect` result UNTRACKED, walling the whole function.
+pub(crate) fn base_stdlib_fn_name(func: &str) -> &str {
+    func.split_once("__").map_or(func, |(base, _)| base)
+}
+
 pub(crate) fn list_heap_call_name(
     module: &str,
     func: &str,
@@ -171,7 +184,7 @@ pub(crate) fn list_heap_call_name(
     // fell through every router arm to an UNLINKED dotted name and walled the fn
     // (fuzz B-198's or_else). The instantiation's types are already in
     // `arg_tys`/`result_ty` — the suffix carries no information the router needs.
-    let func = func.split_once("__").map_or(func, |(base, _)| base);
+    let func = base_stdlib_fn_name(func);
     // #781/codopsy8: the monolithic 780-line dispatch (cog 324) is decomposed into
     // a special-case pre-router (fold/random/fan) then a per-module router — a
     // pure text-move split of the original two-phase structure (the ORIGINAL code

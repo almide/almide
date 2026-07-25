@@ -22,11 +22,11 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 
 | Ambiguity source | What Almide does | Why it matters for LLMs |
 |---|---|---|
-| Name resolution | Core modules (`int`, `string`, `list`, `map`, `env`) are auto-imported; only `fs` requires explicit `import` | LLM never guesses at available names; core operations always work |
+| Name resolution | Core modules (`int`, `string`, `list`, `map`, `math`, `datetime`, ...) are auto-imported; effectful platform modules (`fs`, `env`, `io`, `json`, `random`, ...) require explicit `import` | LLM never guesses at available names; core operations always work |
 | Type inference | Local only — annotations required on function signatures | No inference across distant definitions |
 | Overloading | None — names do not participate in ad-hoc overload resolution | No dispatch ambiguity |
 | Implicit conversions | None — `int.to_string(n)`, never auto-coerce | Every conversion visible in source |
-| Trait/interface lookup | Traits exist but all `impl` is explicit — no implicit instance resolution | No global instance search |
+| Protocol lookup | Protocols exist but conformance is explicit convention methods (`fn Type.method`) — no implicit instance resolution | No global instance search |
 | Method resolution | Canonical resolution is module-qualified function form; UFCS is parse-time sugar for chaining | Resolution is always local — no method lookup tables |
 | Declaration order | Functions can reference each other freely | No forward-declaration confusion |
 | Import style | `import module` or `import self as alias` — one form per purpose; aliases only for self-imports and submodules; core modules are auto-imported | Two import forms, no `from`, no `*` |

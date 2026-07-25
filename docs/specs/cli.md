@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-06-06
+> Last updated: 2026-07-25
 
 ## Overview
 
@@ -28,7 +28,7 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 
 | オプション | 説明 |
 |---|---|
-| `--target rust\|wasm` | 実行ターゲット。`rust`（既定、ネイティブバイナリ）または `wasm`（`wasm32-wasi` をビルドし `wasmtime` CLI で実行）。両ターゲットは同一の観測可能挙動（stdout/stderr/exit）を出す（クロスターゲット等価性保証）。`wasm` には PATH に `wasmtime` が必要 |
+| `--target rust\|wasm` | 実行ターゲット。`rust`（既定、ネイティブバイナリ）または `wasm`（v1 trust-spine が直接 WASM を生成し `wasmtime` CLI で実行。rustc 不要）。両ターゲットは同一の観測可能挙動（stdout/stderr/exit）を出す（クロスターゲット等価性保証）。`wasm` には PATH に `wasmtime` が必要 |
 | `--no-check` | 型チェックをスキップ |
 | `--release` | 最適化ビルド (cargo --release) |
 
@@ -121,7 +121,7 @@ almide check --effects                  # 各関数のエフェクト分析を�
 |---|---|
 | `--deny-warnings` | 警告をエラー扱い |
 | `--json` | 診断を JSON で出力（エディタ統合用） |
-| `--explain <code>` | エラーコード (E001〜E010) の説明 |
+| `--explain <code>` | エラーコード (E001〜E030, E420) の説明 |
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析 |
 
 エラーコード:
@@ -138,6 +138,8 @@ almide check --effects                  # 各関数のエフェクト分析を�
 | E008 | fan 内での var キャプチャ |
 | E009 | let/パラメータへの代入 |
 | E010 | 非網羅的 match |
+
+E001〜E030 + E420 の全コード解説は [../diagnostics/](../diagnostics/) を参照（上表は代表例）。
 
 ---
 
@@ -293,7 +295,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | オプション | 説明 |
 |---|---|
 | `-h, --help` | ヘルプ表示（各コマンドにも付く） |
-| `-V, --version` | バージョン表示（例: `almide 0.9.5`） |
+| `-V, --version` | バージョン表示（例: `almide 0.34.2`） |
 
 ---
 

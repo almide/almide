@@ -1,3 +1,4 @@
+<!-- description: Routing almide build --target rust through the same v1 Perceus MIR as wasm, so one memory model serves both legs -->
 # Native Trust Spine — Perceus as the single memory model (#764)
 
 > Goal: `almide build --target rust` flows through the SAME v1 Perceus MIR as the

@@ -12,6 +12,7 @@ pub mod int;
 pub mod string;
 pub mod list;
 pub mod bytes;
+pub mod mem;
 pub mod matrix;
 pub mod value;
 pub mod datetime;

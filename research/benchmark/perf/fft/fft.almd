@@ -25,8 +25,8 @@ effect fn main() -> Unit = {
     let theta = float.from_int(i) / float.from_int(n) * pi()
     let re = 1.0 * math.cos(10.0 * theta) + 0.5 * math.cos(25.0 * theta)
     let im = 1.0 * math.sin(10.0 * theta) + 0.5 * math.sin(25.0 * theta)
-    data = data ++ [float.round(re * 100.0) / 100.0]
-    data = data ++ [float.round(im * 100.0) / 100.0]
+    data = data + [float.round(re * 100.0) / 100.0]
+    data = data + [float.round(im * 100.0) / 100.0]
   }
 
   let start = env.millis()

@@ -14,6 +14,7 @@ pub mod diagnostic_render;
 pub use almide_lang::ast;
 pub use almide_lang::lexer;
 pub use almide_lang::parser;
+pub use almide_lang::stdlib_info;
 
 // ── IR (almide-ir) ──
 pub use almide_ir as ir;

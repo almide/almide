@@ -185,6 +185,13 @@ fn remap_codegen_annotations(ann: &mut CodegenAnnotations, map: &HashMap<String,
         .map(|(c, f)| (remap(&c), f)).collect();
     ann.ctor_to_enum = std::mem::take(&mut ann.ctor_to_enum).into_iter()
         .map(|(c, e)| (remap(&c), remap(&e))).collect();
+    // #844: recursive_enums is keyed by the PRE-flatten qualified name
+    // (`mod.Type`). Without remapping it, the enum DECL renderer (which checks
+    // the post-flatten `almide_rt_mod_Type` name) stops seeing the type as
+    // recursive and emits an unboxed field, while construction sites still hit
+    // the ctor-keyed boxed_fields and wrap in Box::new — invalid Rust.
+    ann.recursive_enums = std::mem::take(&mut ann.recursive_enums).into_iter()
+        .map(|n| remap(&n)).collect();
 }
 
 fn rename_type_decl_kind(kind: &mut IrTypeDeclKind, map: &HashMap<String, Sym>) {

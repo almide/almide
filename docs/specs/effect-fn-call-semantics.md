@@ -1,4 +1,4 @@
-> Last updated: 2026-05-21
+> Last updated: 2026-07-25
 
 # Effect Fn Call Semantics — 型の解釈
 
@@ -112,33 +112,21 @@ effect fn main() -> Unit = {
 }
 ```
 
-## 移行計画
+## 移行の記録（完了済み）
 
-### Phase 1: 現状の安定化 (v0.20.x)
+上記の checker lift（方式 D）は**実装済み**。lifted effect fn の ABI は
+v0.34.x で完全統一された: never-err な lifted effect fn は raw `T` を返し
+呼び出し網が rewrap、can-err は常時 `Result` wrap（#840 / #841）。
+現行挙動は [effect-system.md](./effect-system.md) と
+[../HIDDEN_OPERATIONS.md](../HIDDEN_OPERATIONS.md) §2 が記述する。
 
-現行の transparent pass-through (`!` on effect fn call = no-op) を維持。これは方式 D の **近似** であり、実用上の問題はない。
-
-ただし以下の制約を文書化:
-- `let r: Result[T, String] = foo()` は型エラー (checker は T を返す)
-- match arm で effect fn call と pure 値を混ぜると型不一致
-
-### Phase 2: Checker lift (v0.21 or later)
-
-1. `check_named_call` で user effect fn call の返り値を `Result[T, String]` にする
-2. `infer.rs` の let 束縛で auto-`?` を挿入 (型の期待が T なら Try を挿入)
-3. match arm の型統一で、Result arm と non-Result arm の混在を auto-wrap
-4. ResultPropagation pass を簡素化 (checker が既に Result 型を提供)
-5. 全テスト更新
-
-### Phase 3: ドキュメント更新
-
-- `effect-system.md` のセクション 3, 4 を方式 D に合わせて書き換え
-- CHEATSHEET.md の effect fn セクション更新
-- error code に新しいエラー追加 (auto-? が挿入できない文脈)
-
-## 検証テスト (Phase 2 実装時に追加)
+## 検証テスト
 
 ```
-spec/lang/effect_call_semantics_test.almd
-spec/integration/cross_module_effect_test.almd
+spec/lang/effect_fn_test.almd
+spec/lang/effect_assign_unwrap_test.almd
+spec/lang/effect_if_branch_unwrap_test.almd
+spec/lang/effect_result_arg_test.almd
+spec/lang/match_arm_effect_unify_test.almd
+spec/integration/codegen_effect_fn_test.almd
 ```

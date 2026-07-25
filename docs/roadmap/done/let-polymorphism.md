@@ -1,3 +1,4 @@
+<!-- description: Let-polymorphism via Algorithm W -->
 <!-- done: 2026-03-16 -->
 # Let-Polymorphism (Algorithm W)
 

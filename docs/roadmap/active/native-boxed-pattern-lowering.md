@@ -1,3 +1,4 @@
+<!-- description: Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field -->
 # native: nested ctor/literal pattern at a Box'd (recursive-variant) field
 
 Status: active — analyzed, ready to implement (#610)

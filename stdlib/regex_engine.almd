@@ -82,12 +82,58 @@ fn __rx_atom_end(p: Int, pe: Int) -> Int = {
   else p + __rx_w(p)
 }
 
-// End of the PIECE (atom + one optional quantifier byte * + ?).
+// End of a WELL-FORMED brace quantifier `{n}` / `{n,}` / `{n,m}` starting at
+// the '{' at `p`: the address just past '}', or -1 if malformed (then the
+// '{' stays a literal piece — same fallback as the native engine, #845).
+fn __rx_brace_end(p: Int, pe: Int) -> Int = {
+  let d1 = __rx_digits_end(p + 1, pe)
+  if d1 == p + 1 then 0 - 1
+  else if d1 < pe and prim.load8(d1) == 125 then d1 + 1
+  else if d1 < pe and prim.load8(d1) == 44 then {
+    let d2 = __rx_digits_end(d1 + 1, pe)
+    if d2 < pe and prim.load8(d2) == 125 then d2 + 1 else 0 - 1
+  }
+  else 0 - 1
+}
+
+// First non-digit address in [p, pe).
+fn __rx_digits_end(p: Int, pe: Int) -> Int =
+  if p < pe and prim.load8(p) >= 48 and prim.load8(p) <= 57 then __rx_digits_end(p + 1, pe)
+  else p
+
+// Decimal value of the digit run [p, e).
+fn __rx_digits_val(p: Int, e: Int, acc: Int) -> Int =
+  if p >= e then acc
+  else __rx_digits_val(p + 1, e, acc * 10 + (prim.load8(p) - 48))
+
+// min of the brace quantifier whose '{' is at `p` (well-formed by construction).
+fn __rx_brace_min(p: Int, pe: Int) -> Int = {
+  let d1 = __rx_digits_end(p + 1, pe)
+  __rx_digits_val(p + 1, d1, 0)
+}
+
+// max of the brace quantifier whose '{' is at `p`; -1 = unbounded ({n,}).
+fn __rx_brace_max(p: Int, pe: Int) -> Int = {
+  let d1 = __rx_digits_end(p + 1, pe)
+  if prim.load8(d1) == 125 then __rx_digits_val(p + 1, d1, 0)
+  else {
+    let d2 = __rx_digits_end(d1 + 1, pe)
+    if d2 == d1 + 1 then 0 - 1
+    else __rx_digits_val(d1 + 1, d2, 0)
+  }
+}
+
+// End of the PIECE (atom + one optional quantifier: * + ? or {n,m}).
 fn __rx_piece_end(p: Int, pe: Int) -> Int = {
   let ae = __rx_atom_end(p, pe)
   if ae < pe then {
     let q = prim.load8(ae)
-    if q == 42 or q == 43 or q == 63 then ae + 1 else ae
+    if q == 42 or q == 43 or q == 63 then ae + 1
+    else if q == 123 then {
+      let be = __rx_brace_end(ae, pe)
+      if be >= 0 then be else ae
+    }
+    else ae
   } else ae
 }
 
@@ -203,6 +249,11 @@ fn __rx_seq(p: Int, pend: Int, t: Int, ts: Int, te: Int) -> Int =
           if r >= 0 then r else __rx_seq(pnext, pend, t, ts, te)
         } else __rx_seq(pnext, pend, t, ts, te)
       }
+      else if q == 123 and pnext > ae then {
+        let mn = __rx_brace_min(ae, pnext)
+        let mx = __rx_brace_max(ae, pnext)
+        __rx_rep_bounded(p, ae, pnext, pend, t, ts, te, 0, mn, mx)
+      }
       else {
         let t2 = __rx_one(p, ae, t, ts, te)
         if t2 < 0 then 0 - 1 else __rx_seq(pnext, pend, t2, ts, te)
@@ -218,6 +269,23 @@ fn __rx_rep(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, co
     let r = __rx_rep(p, ae, pnext, pend, t2, ts, te, count + 1)
     if r >= 0 then r else __rx_seq(pnext, pend, t, ts, te)
   } else __rx_seq(pnext, pend, t, ts, te)
+}
+
+// GREEDY bounded repetition for {min,max} (max = -1 means unbounded): try one
+// more while under max (same zero-width guard as __rx_rep), fall back to the
+// rest only once at least `min` repetitions matched.
+fn __rx_rep_bounded(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, count: Int, mn: Int, mx: Int) -> Int = {
+  let under_max = if mx < 0 then true else count < mx
+  if under_max then {
+    let t2 = __rx_one(p, ae, t, ts, te)
+    if t2 >= 0 and (t2 > t or count == 0) then {
+      let r = __rx_rep_bounded(p, ae, pnext, pend, t2, ts, te, count + 1, mn, mx)
+      if r >= 0 then r
+      else { if count >= mn then __rx_seq(pnext, pend, t, ts, te) else 0 - 1 }
+    }
+    else { if count >= mn then __rx_seq(pnext, pend, t, ts, te) else 0 - 1 }
+  }
+  else { if count >= mn then __rx_seq(pnext, pend, t, ts, te) else 0 - 1 }
 }
 
 // ONE atom at [p, ae) at text `t`: a group matches its alternatives (first-win,
@@ -490,12 +558,43 @@ fn __rx_seq_c(p: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, nslots: In
           __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0)
         }
       }
+      else if q == 123 and pnext > ae then {
+        let mn = __rx_brace_min(ae, pnext)
+        let mx = __rx_brace_max(ae, pnext)
+        __rx_rep_bounded_c(p, ae, pnext, pend, t, ts, te, 0, mn, mx, caps, nslots, pat0)
+      }
       else {
         let t2 = __rx_one_c(p, ae, t, ts, te, caps, nslots, pat0)
         if t2 < 0 then 0 - 1 else __rx_seq_c(pnext, pend, t2, ts, te, caps, nslots, pat0)
       }
     }
   }
+
+// {min,max} repetition for the capture-threading family: same greedy shape as
+// __rx_rep_bounded, with __rx_rep_c's save/restore of the caps buffer around
+// every extension try.
+fn __rx_rep_bounded_c(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, count: Int, mn: Int, mx: Int, caps: Int, nslots: Int, pat0: Int) -> Int = {
+  let under_max = if mx < 0 then true else count < mx
+  if under_max then {
+    let save = prim.alloc_list(nslots)
+    let sd = prim.handle(save) + 12
+    let _ = __rx_copy64(caps, sd, nslots)
+    let t2 = __rx_one_c(p, ae, t, ts, te, caps, nslots, pat0)
+    if t2 >= 0 and (t2 > t or count == 0) then {
+      let r = __rx_rep_bounded_c(p, ae, pnext, pend, t2, ts, te, count + 1, mn, mx, caps, nslots, pat0)
+      if r >= 0 then r
+      else {
+        let _ = __rx_copy64(sd, caps, nslots)
+        if count >= mn then __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0) else 0 - 1
+      }
+    }
+    else {
+      let _ = __rx_copy64(sd, caps, nslots)
+      if count >= mn then __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0) else 0 - 1
+    }
+  }
+  else { if count >= mn then __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0) else 0 - 1 }
+}
 
 fn __rx_rep_c(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, count: Int, caps: Int, nslots: Int, pat0: Int) -> Int = {
   let save = prim.alloc_list(nslots)

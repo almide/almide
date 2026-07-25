@@ -160,3 +160,28 @@ test "regex.replace over empty matches" {
   assert_eq(regex.replace_first("x*", "ab", "-"), "-ab");
   assert_eq(regex.replace_first("a*", "aaa", "-"), "-")
 }
+
+// {n} / {n,} / {n,m} brace quantifiers (#845: previously lexed but silently
+// never matched). Malformed braces stay literal, matching the native engine.
+test "regex brace quantifiers" {
+  assert_eq(regex.is_match(r"\d{3}", "abc123"), true);
+  assert_eq(regex.is_match(r"\d{4}", "abc123"), false);
+  assert_eq(regex.full_match(r"\d{3}", "123"), true);
+  assert_eq(regex.full_match(r"\d{3}", "1234"), false);
+  assert_eq(regex.full_match(r"\d{2,}", "12345"), true);
+  assert_eq(regex.full_match(r"\d{6,}", "12345"), false);
+  assert_eq(regex.full_match(r"\d{2,4}", "123"), true);
+  assert_eq(regex.full_match(r"\d{2,4}", "12345"), false);
+  assert_eq(regex.find(r"a{2,3}", "caaaab"), some("aaa"));
+  assert_eq(regex.captures(r"(\d{4})-(\d{2})-(\d{2})", "on 2026-03-09."), some(["2026", "03", "09"]));
+  assert_eq(regex.replace(r"o{2}", "foo book", "0"), "f0 b0k");
+  assert_eq(regex.full_match(r"(ab){2}", "abab"), true);
+  assert_eq(regex.full_match(r"(ab){2}", "ab"), false);
+  assert_eq(regex.full_match(r"a{0,2}b", "aab"), true)
+}
+
+test "regex malformed braces stay literal" {
+  assert_eq(regex.full_match(r"a{x}", "a{x}"), true);
+  assert_eq(regex.full_match(r"a{,3}", "a{,3}"), true);
+  assert_eq(regex.is_match(r"a{2", "a{2"), true)
+}

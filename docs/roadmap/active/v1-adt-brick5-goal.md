@@ -1,3 +1,4 @@
+<!-- description: Goal prompt for ADT brick 5 — heap-field bind plus recursive drop, the highest-leverage remaining ADT step -->
 # GOAL PROMPT — finish ADT brick 5 (heap-field bind + recursive drop) to the #1 lever
 
 You are continuing the v1 trust-spine ADT value-model work on branch **`develop-v1`**. Bricks

@@ -497,6 +497,39 @@ fn list_swap_value(xs: List[Value], i: Int, j: Int) -> List[Value] = {
   buf
 }
 
+// list.take_end / list.drop_end / list.tail over a List[Value] — the rc-aware
+// counterparts of the generic i64 versions (#808 class: the raw __copy_slots copy
+// aliases each Value handle un-owned → source and result both release it at scope
+// end, the rc_dec double-free trap). Each copied element is CO-OWNED via __lsv_copy;
+// the result drops via the recursive DropListValue.
+fn list_take_end_value(xs: List[Value], n: Int) -> List[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let cnt = len - start
+  let buf = prim.alloc_list_str(cnt)
+  let _c = __lsv_copy(h + 12 + start * 8, prim.handle(buf) + 12, cnt, 0)
+  buf
+}
+
+fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let endi = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let buf = prim.alloc_list_str(endi)
+  let _c = __lsv_copy(h + 12, prim.handle(buf) + 12, endi, 0)
+  buf
+}
+
+fn list_tail_value(xs: List[Value]) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let newlen = if n > 0 then n - 1 else 0
+  let buf = prim.alloc_list_str(newlen)
+  let _c = __lsv_copy(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
+  buf
+}
+
 // value.merge — the SHALLOW Object merge v0 does (almide_rt_value_merge): when BOTH a and b are tag-6
 // Objects, the result keeps a's keys IN A'S POSITIONS with b's value overriding where b has the same
 // key, then APPENDS b's keys not in a (b's order) — exactly v0's `pa[pos] = (k, v)` else `pa.push`.

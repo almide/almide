@@ -84,7 +84,7 @@ fn try_fold(expr: &IrExpr) -> Option<IrExprKind> {
         }
         IrExprKind::UnOp { op, operand } => {
             match (&op, &operand.kind) {
-                (UnOp::NegInt, IrExprKind::LitInt { value }) => Some(IrExprKind::LitInt { value: -value }),
+                (UnOp::NegInt, IrExprKind::LitInt { value }) => Some(IrExprKind::LitInt { value: value.wrapping_neg() }),
                 (UnOp::NegFloat, IrExprKind::LitFloat { value }) => Some(IrExprKind::LitFloat { value: -value }),
                 (UnOp::Not, IrExprKind::LitBool { value }) => Some(IrExprKind::LitBool { value: !value }),
                 _ => None,

@@ -1,0 +1,32 @@
+// @contract: C-160
+// Pure-Almide BUNDLED stdlib modules (`import path`, `import args`) link as
+// ordinary modules on the wasm target and behave byte-identically to native.
+// Before C-160 they walled as "unlinked stdlib call": the module-call resolver
+// excluded every stdlib-named module from linking, and env.args's WASI
+// out-pointers were allocated unaligned (trapping on the second call).
+import path
+import args
+
+fn b2s(b: Bool) -> String = if b then "T" else "F"
+
+fn ostr(o: Option[String]) -> String =
+  match o { some(s) => s, none => "NONE" }
+
+effect fn main() -> Result[Unit, String] = {
+  // path: pure string plumbing through the linked bundled module
+  println(path.join("/usr", "bin"))
+  println(path.join("rel", "sub"))
+  println(path.dirname("/usr/bin/node"))
+  println(path.basename("/usr/bin/node"))
+  println(ostr(path.extension("file.txt")))
+  println(ostr(path.extension("Makefile")))
+  println(b2s(path.is_absolute("/usr")))
+  println(b2s(path.is_absolute("relative/path")))
+
+  // args: exercises env.args() TWICE through the bundled module (the second
+  // WASI args_sizes_get call is the alignment regression)
+  println(b2s(args.flag("verbose")))
+  println(args.option_or("output", "out.txt"))
+  println(ostr(args.option("output")))
+  ok(())
+}

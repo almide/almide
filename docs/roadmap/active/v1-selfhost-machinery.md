@@ -1,3 +1,4 @@
+<!-- description: The stdlib self-host machinery phase — Option, list building, and closures -->
 # v1 stdlib self-host — the machinery phase (Option / List-building / closures)
 
 Status: **~28 functions self-hosted + executing = v0 (corpus-wall ACCEPT 13139/4083/3582

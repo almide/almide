@@ -1,3 +1,4 @@
+<!-- description: Making every codegen traversal exhaustive by construction, so a new IR node cannot be silently skipped -->
 # Codegen traversal totality
 
 **Goal:** make "a pass forgot to recurse into a node kind" a **compile error or a CI failure**, never

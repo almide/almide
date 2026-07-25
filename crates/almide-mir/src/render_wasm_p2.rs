@@ -194,11 +194,16 @@ fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
         Op::ListGetScalar { dst, list, idx } => {
             // #806 step 3a: an f64-classified dst loads the slot as a REAL f64
             // (`f64.load` moves the same 8 bytes bit-exactly — no reinterpret).
+            // The bounds compare runs on the FULL i64 index (C-067): wrapping
+            // first let an index >= 2^32 truncate into range and silently read
+            // the wrong slot (`xs[2^32+1]` returned `xs[1]` where native
+            // aborts). len < 2^31, so the zero-extended len compare is exact;
+            // the address math after the check keeps the (now proven-safe) wrap.
             let load = if floats.contains(dst) { "f64.load" } else { "i64.load" };
             format!(
-                "    (if (i32.or (i32.lt_s (i32.wrap_i64 (local.get {i})) (i32.const 0))\n\
-                 \x20                (i32.ge_s (i32.wrap_i64 (local.get {i}))\n\
-                 \x20                          (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET})))))\n\
+                "    (if (i32.or (i64.lt_s (local.get {i}) (i64.const 0))\n\
+                 \x20                (i64.ge_s (local.get {i})\n\
+                 \x20                          (i64.extend_i32_u (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET}))))))\n\
                  \x20     (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))\n\
                  \x20   (local.set {d} ({load} (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
                  \x20                                     (i32.mul (i32.wrap_i64 (local.get {i})) (i32.const {ELEM_SIZE})))))\n",
@@ -211,11 +216,13 @@ fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
         // MakeUnique before this op) — the inline-expanded twin of the load above.
         Op::ListSetScalar { list, idx, val } => {
             // #806 step 3a: an f64-classified val stores as a REAL f64 (bit-exact).
+            // Full-i64 bounds compare — same C-067 clause as the load above
+            // (a wrapped index >= 2^32 silently stored into the wrong slot).
             let store = if floats.contains(val) { "f64.store" } else { "i64.store" };
             format!(
-                "    (if (i32.or (i32.lt_s (i32.wrap_i64 (local.get {i})) (i32.const 0))\n\
-                 \x20                (i32.ge_s (i32.wrap_i64 (local.get {i}))\n\
-                 \x20                          (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET})))))\n\
+                "    (if (i32.or (i64.lt_s (local.get {i}) (i64.const 0))\n\
+                 \x20                (i64.ge_s (local.get {i})\n\
+                 \x20                          (i64.extend_i32_u (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET}))))))\n\
                  \x20     (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))\n\
                  \x20   ({store} (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
                  \x20                       (i32.mul (i32.wrap_i64 (local.get {i})) (i32.const {ELEM_SIZE})))\n\

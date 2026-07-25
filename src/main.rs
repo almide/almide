@@ -56,14 +56,15 @@ enum Commands {
         #[arg(long)]
         target: Option<String>,
         /// The v1 PCC-verified trust-spine renderer is the DEFAULT on BOTH
-        /// targets (wasm since 0.29.0; native since 0.30.0 — #764 rung 5):
-        /// v1-first, v0 fallback where v1 walls; byte-identical where it
-        /// lowers and never wrong — honest-wall. `--verified` is kept as an
+        /// targets (wasm since 0.29.0; native since 0.30.0). On wasm it is the
+        /// ONLY path (the v0 emitter was retired in #782 — a wall is a hard,
+        /// diagnosed error); on native, v1 renders first and classic codegen
+        /// source is the fallback on a wall. `--verified` is kept as an
         /// accepted no-op for compatibility.
         #[arg(long)]
         verified: bool,
-        /// Opt out of the v1-first verified renderer on BOTH targets and use
-        /// the legacy v0 codegen path directly.
+        /// Removed (#782): the legacy v0 escape hatch is a hard error. Only
+        /// the sanctioned oracle harnesses may set ALMIDE_NO_VERIFIED_OK=1.
         #[arg(long)]
         no_verified: bool,
         /// Arguments passed to the program. Almide's own flags (`--target`,
@@ -106,15 +107,16 @@ enum Commands {
         #[arg(long)]
         emit_unverified: bool,
         /// The v1 PCC-verified trust-spine renderer is the DEFAULT on BOTH
-        /// targets (wasm since 0.29.0; native since 0.30.0 — #764 rung 5): v1
-        /// first, v0 fallback where v1 walls, byte-identical where it lowers.
-        /// A v1-produced wasm module ships VERBATIM (wasm-opt skipped); a
-        /// v0-fallback build still gets wasm-opt. This flag is a no-op kept
+        /// targets (wasm since 0.29.0; native since 0.30.0). On wasm it is the
+        /// ONLY path (the v0 emitter was retired in #782 — a wall is a hard,
+        /// diagnosed error); on native, v1 renders first and classic codegen
+        /// source is the fallback on a wall. The wasm module ships VERBATIM
+        /// (wasm-opt skipped unless --wasm-opt). This flag is a no-op kept
         /// for compatibility.
         #[arg(long)]
         verified: bool,
-        /// Opt out of the v1-first verified renderer on BOTH targets and use
-        /// the legacy v0 codegen path directly (its wasm gets wasm-opt).
+        /// Removed (#782): the legacy v0 escape hatch is a hard error. Only
+        /// the sanctioned oracle harnesses may set ALMIDE_NO_VERIFIED_OK=1.
         #[arg(long)]
         no_verified: bool,
         /// Run `wasm-opt -Oz` on the wasm output after the verified renderer

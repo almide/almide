@@ -1,0 +1,42 @@
+// Read-only `@intrinsic` fns returning `Unit` must NOT take their first
+// heap argument by `&mut` (#803).
+//
+// `BorrowInferencePass` used to guess "returns Unit ⇒ mutates arg 0 in
+// place", which emitted `almide_rt_io_write(&mut chunk)` against the
+// runtime's `fn almide_rt_io_write(data: &Vec<u8>)` — E0596 in generated
+// Rust, breaking the generated-Rust-must-compile invariant. The borrow
+// mode now comes from the runtime signature itself (`runtime_fn_modes`),
+// so a read-only helper stays a shared borrow no matter what it returns.
+//
+// The `for x in xs { io.write(x) }` shape is the mandelbrot bench repro:
+// the loop pattern binding is immutable, so a `&mut` on it cannot compile.
+// Every write here is zero-length, so the tests emit no stdout of their own.
+
+import io
+
+test "read-only Unit intrinsic borrows a let-bound Bytes immutably" {
+  let empty = bytes.new(0)
+  io.write(empty)
+  assert_eq(bytes.len(empty), 0)
+}
+
+test "read-only Unit intrinsic borrows a for-loop binding immutably" {
+  let chunks = list.map([0, 0], (n) => bytes.new(n))
+  for chunk in chunks {
+    io.write(chunk)
+  }
+  assert_eq(list.len(chunks), 2)
+}
+
+test "read-only Unit intrinsic over List[Int] leaves the list readable" {
+  let payload: List[Int] = []
+  io.write_bytes(payload)
+  assert_eq(list.len(payload), 0)
+}
+
+test "mutating Unit intrinsic still takes its buffer by &mut" {
+  var buf: Bytes = bytes.from_list([1, 2])
+  bytes.push(buf, 3)
+  assert_eq(bytes.len(buf), 3)
+  assert_eq(buf[2], 3)
+}

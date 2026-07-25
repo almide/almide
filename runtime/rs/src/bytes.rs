@@ -1,6 +1,12 @@
 // bytes extern — Rust native implementations
 // Signatures match TOML templates: &Vec<u8> for read-only
 
+// A NEGATIVE `pos` becomes a huge `usize`, so the historical `p + N > b.len()`
+// guards WRAPPED back into range and the slice index then panicked (exit 101,
+// a forbidden T6 form: `bytes.read_f16_le(b, -1)` reproduced it). Every offset
+// guard in this file is `checked_add`, so an out-of-range read takes its
+// documented default on both targets instead.
+
 #[inline(always)] pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
 pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
 #[inline(always)] pub fn almide_rt_bytes_get(b: &Vec<u8>, i: i64) -> Option<i64> { b.get(i as usize).map(|&x| x as i64) }
@@ -36,27 +42,27 @@ pub fn almide_rt_bytes_from_string(s: &str) -> Vec<u8> { s.as_bytes().to_vec() }
 
 pub fn almide_rt_bytes_read_i16_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 2 > b.len() { return 0; }
+    if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
     i16::from_le_bytes([b[p], b[p+1]]) as i64
 }
 pub fn almide_rt_bytes_read_i16_be(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 2 > b.len() { return 0; }
+    if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
     i16::from_be_bytes([b[p], b[p+1]]) as i64
 }
 pub fn almide_rt_bytes_read_u16_be(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 2 > b.len() { return 0; }
+    if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
     u16::from_be_bytes([b[p], b[p+1]]) as i64
 }
 pub fn almide_rt_bytes_read_i32_be(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 4 > b.len() { return 0; }
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     i32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64
 }
 pub fn almide_rt_bytes_read_f32_be(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
-    if p + 4 > b.len() { return 0.0; }
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0.0; }
     f32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64
 }
 
@@ -69,7 +75,7 @@ macro_rules! u16_le_array_impl {
             let n = count as usize;
             let mut out = Vec::with_capacity(n);
             for _ in 0..n {
-                if p + 2 > b.len() { out.push(0); p += 2; continue; }
+                if p.checked_add(2).is_none_or(|__e| __e > b.len()) { out.push(0); p += 2; continue; }
                 let v: $ty = $from([b[p], b[p+1]]);
                 out.push(v as i64);
                 p += 2;
@@ -322,17 +328,17 @@ pub fn almide_rt_bytes_write_bool(b: &mut Vec<u8>, val: bool) { b.push(if val { 
 
 pub fn almide_rt_bytes_read_i64_be(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 8 > b.len() { return 0; }
+    if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0; }
     i64::from_be_bytes(b[p..p+8].try_into().unwrap())
 }
 pub fn almide_rt_bytes_read_f64_be(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
-    if p + 8 > b.len() { return 0.0; }
+    if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0.0; }
     f64::from_be_bytes(b[p..p+8].try_into().unwrap())
 }
 pub fn almide_rt_bytes_read_u32_be(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 4 > b.len() { return 0; }
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     u32::from_be_bytes(b[p..p+4].try_into().unwrap()) as i64
 }
 pub fn almide_rt_bytes_read_u8(b: &Vec<u8>, pos: i64) -> i64 {
@@ -343,7 +349,7 @@ pub fn almide_rt_bytes_read_bool(b: &Vec<u8>, pos: i64) -> bool {
 }
 pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> String {
     let p = pos as usize;
-    if p + 4 > b.len() { return String::new(); }
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return String::new(); }
     let slen = u32::from_be_bytes(b[p..p+4].try_into().unwrap()) as usize;
     if p + 4 + slen > b.len() { return String::new(); }
     String::from_utf8_lossy(&b[p+4..p+4+slen]).into_owned()
@@ -471,7 +477,7 @@ pub fn almide_rt_bytes_read_bool_at(b: &Vec<u8>, pos: i64) -> (i64, Option<bool>
 /// runs off the end.
 pub fn almide_rt_bytes_read_string_be_at(b: &Vec<u8>, pos: i64) -> (i64, Option<String>) {
     let p = pos as usize;
-    if p + 4 > b.len() { return (pos, None); }
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return (pos, None); }
     let slen = u32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as usize;
     if p + 4 + slen > b.len() { return (pos, None); }
     let s = String::from_utf8_lossy(&b[p+4..p+4+slen]).into_owned();
@@ -481,7 +487,7 @@ pub fn almide_rt_bytes_read_string_be_at(b: &Vec<u8>, pos: i64) -> (i64, Option<
 pub fn almide_rt_bytes_take_at(b: &Vec<u8>, pos: i64, n: i64) -> (i64, Option<Vec<u8>>) {
     let p = pos as usize;
     let nn = n as usize;
-    if p + nn > b.len() {
+    if p.checked_add(nn).is_none_or(|__e| __e > b.len()) {
         return (pos, None);
     }
     (pos + n, Some(b[p..p + nn].to_vec()))
@@ -515,7 +521,7 @@ pub fn almide_rt_bytes_read_u32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 4 > b.len() { out.push(0); p += 4; continue; }
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
         out.push(u32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
         p += 4;
     }
@@ -526,7 +532,7 @@ pub fn almide_rt_bytes_read_i32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 4 > b.len() { out.push(0); p += 4; continue; }
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
         out.push(i32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
         p += 4;
     }
@@ -537,7 +543,7 @@ pub fn almide_rt_bytes_read_i64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 8 > b.len() { out.push(0); p += 8; continue; }
+        if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0); p += 8; continue; }
         out.push(i64::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
         p += 8;
     }
@@ -548,7 +554,7 @@ pub fn almide_rt_bytes_read_f32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 4 > b.len() { out.push(0.0); p += 4; continue; }
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 4; continue; }
         out.push(f32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64);
         p += 4;
     }
@@ -559,7 +565,7 @@ pub fn almide_rt_bytes_read_f64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 8 > b.len() { out.push(0.0); p += 8; continue; }
+        if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 8; continue; }
         out.push(f64::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
         p += 8;
     }
@@ -574,38 +580,38 @@ pub fn almide_rt_bytes_data_ptr(b: &Vec<u8>) -> i64 {
 
 pub fn almide_rt_bytes_read_i32_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 4 > b.len() { return 0; }
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     i32::from_le_bytes(b[p..p+4].try_into().unwrap()) as i64
 }
 pub fn almide_rt_bytes_read_u32_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 4 > b.len() { return 0; }
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     u32::from_le_bytes(b[p..p+4].try_into().unwrap()) as i64
 }
 pub fn almide_rt_bytes_read_u16_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 2 > b.len() { return 0; }
+    if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
     u16::from_le_bytes(b[p..p+2].try_into().unwrap()) as i64
 }
 pub fn almide_rt_bytes_read_i64_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
-    if p + 8 > b.len() { return 0; }
+    if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0; }
     i64::from_le_bytes(b[p..p+8].try_into().unwrap())
 }
 pub fn almide_rt_bytes_read_f32_le(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
-    if p + 4 > b.len() { return 0.0; }
+    if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0.0; }
     f32::from_le_bytes(b[p..p+4].try_into().unwrap()) as f64
 }
 pub fn almide_rt_bytes_read_f64_le(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
-    if p + 8 > b.len() { return 0.0; }
+    if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0.0; }
     f64::from_le_bytes(b[p..p+8].try_into().unwrap())
 }
 // F16 → F32: reassemble the u16 bits and expand.
 pub fn almide_rt_bytes_read_f16_le(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
-    if p + 2 > b.len() { return 0.0; }
+    if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0.0; }
     let bits = u16::from_le_bytes(b[p..p+2].try_into().unwrap());
     f16_bits_to_f64(bits) as f64
 }
@@ -615,7 +621,7 @@ pub fn almide_rt_bytes_read_f16_le(b: &Vec<u8>, pos: i64) -> f64 {
 pub fn almide_rt_bytes_read_string_at(b: &Vec<u8>, pos: i64, len: i64) -> String {
     let p = pos as usize;
     let n = len as usize;
-    if p + n > b.len() { return String::new(); }
+    if p.checked_add(n).is_none_or(|__e| __e > b.len()) { return String::new(); }
     String::from_utf8_lossy(&b[p..p + n]).into_owned()
 }
 
@@ -626,7 +632,7 @@ pub fn almide_rt_bytes_read_i32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 4 > b.len() { out.push(0); p += 4; continue; }
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
         out.push(i32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
         p += 4;
     }
@@ -638,7 +644,7 @@ pub fn almide_rt_bytes_read_i64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 8 > b.len() { out.push(0); p += 8; continue; }
+        if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0); p += 8; continue; }
         out.push(i64::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
         p += 8;
     }
@@ -650,7 +656,7 @@ pub fn almide_rt_bytes_read_u32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 4 > b.len() { out.push(0); p += 4; continue; }
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0); p += 4; continue; }
         out.push(u32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64);
         p += 4;
     }
@@ -662,7 +668,7 @@ pub fn almide_rt_bytes_read_f64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 8 > b.len() { out.push(0.0); p += 8; continue; }
+        if p.checked_add(8).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 8; continue; }
         out.push(f64::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3], b[p+4], b[p+5], b[p+6], b[p+7]]));
         p += 8;
     }
@@ -674,7 +680,7 @@ pub fn almide_rt_bytes_read_f32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 4 > b.len() { out.push(0.0); p += 4; continue; }
+        if p.checked_add(4).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 4; continue; }
         out.push(f32::from_le_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64);
         p += 4;
     }
@@ -686,7 +692,7 @@ pub fn almide_rt_bytes_read_f16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     let n = count as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 2 > b.len() { out.push(0.0); p += 2; continue; }
+        if p.checked_add(2).is_none_or(|__e| __e > b.len()) { out.push(0.0); p += 2; continue; }
         let bits = u16::from_le_bytes([b[p], b[p+1]]);
         out.push(f16_bits_to_f64(bits) as f64);
         p += 2;
@@ -702,9 +708,9 @@ pub fn almide_rt_bytes_skip_length_prefixed_le(b: &Vec<u8>, pos: i64, count: i64
     let n = count as usize;
     let buf = b.as_slice();
     for _ in 0..n {
-        if p + 4 > buf.len() { return p as i64; }
+        if p.checked_add(4).is_none_or(|__e| __e > buf.len()) { return p as i64; }
         let len = u32::from_le_bytes([buf[p], buf[p+1], buf[p+2], buf[p+3]]) as usize;
-        p += 4 + len;
+        p = p.saturating_add(4).saturating_add(len);
     }
     p as i64
 }
@@ -733,10 +739,10 @@ pub fn almide_rt_bytes_read_length_prefixed_strings_le(b: &Vec<u8>, pos: i64, co
     let buf = b.as_slice();
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        if p + 4 > buf.len() { break; }
+        if p.checked_add(4).is_none_or(|__e| __e > buf.len()) { break; }
         let len = u32::from_le_bytes([buf[p], buf[p+1], buf[p+2], buf[p+3]]) as usize;
         p += 4;
-        if p + len > buf.len() { break; }
+        if p.checked_add(len).is_none_or(|__e| __e > buf.len()) { break; }
         out.push(String::from_utf8_lossy(&buf[p..p+len]).into_owned());
         p += len;
     }

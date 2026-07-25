@@ -58,7 +58,7 @@ Almide is a programming language (.almd files) compiled via a pure-Rust compiler
 
 - **Architecture**: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — compiler pipeline, module map
 - **Language reference**: [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — syntax, stdlib, idioms (for AI code generation)
-- **Stdlib spec**: [docs/STDLIB-SPEC.md](./docs/STDLIB-SPEC.md) — stdlib function reference
+- **Stdlib**: self-hosted `.almd` modules in `stdlib/` — registry in `crates/almide-types/src/stdlib_info.rs`, per-module docs in [docs/stdlib/](./docs/stdlib/)
 - **Module system**: [docs/specs/module-system.md](./docs/specs/module-system.md) — import, サブモジュール, ダイヤモンド依存
 - **Package system**: [docs/specs/package-system.md](./docs/specs/package-system.md) — 依存管理, MVS, バージョン共存
 
@@ -128,11 +128,12 @@ Changes to the compiler MUST be verified against **all exercises and tests**:
 almide test
 ```
 
-When adding or modifying stdlib functions:
-- Add/edit the definition in `stdlib/defs/<module>.toml` (type sig + codegen templates)
-- Implement the Rust runtime in `runtime/rust/<module>.rs`
-- `cargo build` auto-generates all codegen dispatch — no manual edits needed
-- Write a test in `spec/stdlib/` (as `*_test.almd` or inline `test` block)
+When adding or modifying stdlib functions (the stdlib is self-hosted — `stdlib/defs/*.toml` and `runtime/rust/` no longer exist):
+- Write the implementation in pure Almide in `stdlib/<module>[_<part>].almd`
+- For WASM/v1 coverage, register it in `crates/almide-mir/src/render_wasm/registry.rs` (`include_str!` + `(impl_fn, "module.fn")` mapping); adjust `purity.rs` if needed. Unlinked stdlib calls are a wall error in the wasm renderer
+- Only if a native intrinsic is required: implement `almide_rt_*` in `runtime/rs/src/<module>.rs` and declare it with `@intrinsic("almide_rt_*")` in the module's `.almd`
+- New modules: update `STDLIB_MODULES` / `BUNDLED_MODULES` / `bundled_source()` (and `AUTO_IMPORT_BUNDLED` if auto-imported) in `crates/almide-types/src/stdlib_info.rs`
+- Write a test in `spec/stdlib/` (as `*_test.almd` or inline `test` block); add the almide-interp bridge glue so the 3-way oracle covers it
 
 When modifying codegen:
 - Test ownership: variables used after `for...in` must still work
@@ -252,8 +253,8 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 ```
 
 ### Imports
-- Stdlib modules (`string`, `int`, `float`, `list`, `value`, `map`, `set`, etc.) are auto-imported — do NOT write `import string`
-- `json` requires explicit `import json`
+- Stdlib modules (`string`, `int`, `float`, `list`, `value`, `map`, `set`, `math`, `datetime`, `error`, `bytes`, sized ints, etc.) are auto-imported — do NOT write `import string`. Authoritative lists: `import_table.rs` seed + `AUTO_IMPORT_BUNDLED` in `stdlib_info.rs`
+- `json`, `fs`, `http`, `env`, `io`, `random`, `regex`, `process`, `testing` require explicit `import`
 - External packages require `import pkg_name`
 - Package self-reference: `import self as pkg_name`
 

@@ -398,8 +398,11 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (local $result i32) (local $i i32) (local $cstr i32) (local $slen i32)
     (local $str i32) (local $j i32)
     ;; Phase 1: argc + total argv buffer size (two i32 out-params from the bump heap).
-    (local.set $argc_ptr (call $alloc (i32.const 4)))
-    (local.set $bufsz_ptr (call $alloc (i32.const 4)))
+    ;; The WASI ABI validates POINTER ALIGNMENT on its out-params and the bump
+    ;; allocator packs bytes tightly, so round the block up to 4 (over-alloc 3
+    ;; slack bytes; both i32 cells live in one aligned 8-byte region).
+    (local.set $argc_ptr (i32.and (i32.add (call $alloc (i32.const 11)) (i32.const 3)) (i32.const -4)))
+    (local.set $bufsz_ptr (i32.add (local.get $argc_ptr) (i32.const 4)))
     (drop (call $args_sizes_get (local.get $argc_ptr) (local.get $bufsz_ptr)))
     (local.set $argc (i32.load (local.get $argc_ptr)))
     (local.set $bufsz (i32.load (local.get $bufsz_ptr)))
@@ -410,7 +413,8 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
               (i32.ge_u (local.get $argc) (local.get $skip))))
     ;; Phase 2: alloc the pointer array (argc i32 ptrs, +4 guard) + the string buffer,
     ;; then fill them via args_get.
-    (local.set $argv (call $alloc (i32.add (i32.mul (local.get $argc) (i32.const 4)) (i32.const 4))))
+    ;; argv is an i32 pointer array — args_get validates its alignment too.
+    (local.set $argv (i32.and (i32.add (call $alloc (i32.add (i32.mul (local.get $argc) (i32.const 4)) (i32.const 7))) (i32.const 3)) (i32.const -4)))
     (local.set $argbuf (call $alloc (i32.add (local.get $bufsz) (i32.const 4))))
     (drop (call $args_get (local.get $argv) (local.get $argbuf)))
     ;; Phase 3: build the List[String] (len = cap = count). Per result slot $i, take

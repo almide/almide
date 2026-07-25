@@ -3,14 +3,25 @@ fn discover_self_modules(
     path: &Path,
     prog: &almide_lang::ast::Program,
 ) -> Vec<(String, almide_lang::ast::Program, bool)> {
-    // Resolve a `self.<submodule>` OR an EXTERNAL (non-stdlib) package import — so a
-    // cross-module file works under `almide run`-equivalent resolution (incl. fetched deps),
-    // not just self-imports. A lone / stdlib-only file stays a strict no-op.
+    // Resolve a `self.<submodule>`, an EXTERNAL (non-stdlib) package import, OR a
+    // BUNDLED stdlib module — so a cross-module file works under `almide run`-equivalent
+    // resolution (incl. fetched deps), not just self-imports. A lone file with only
+    // hardcoded-stdlib imports stays a strict no-op.
+    //
+    // The bundled arm matters for the WALL REPORT's fidelity: `is_stdlib_module` is the
+    // HARDCODED list, so `import args` / `import path` did not trigger resolution here and
+    // the bundled module never reached `ir.modules`. Its calls then stayed `CallTarget::
+    // Module` and walled as "effectful/impure stdlib Module call args.flag needs a declared
+    // capability" — a wall the REAL pipeline does not have, because there the module links
+    // like a user sibling (C-160) and its caps are counted transitively. Same gap 26cd91d7
+    // closed in the wasmgen harnesses.
     let needs_resolve = prog.imports.iter().any(|d| {
         matches!(d, almide_lang::ast::Decl::Import { path, .. }
             if path.first().map(|s| {
                 let s = s.as_str();
-                s == "self" || !almide_lang::stdlib_info::is_stdlib_module(s)
+                s == "self"
+                    || !almide_lang::stdlib_info::is_stdlib_module(s)
+                    || almide_lang::stdlib_info::is_bundled_module(s)
             }).unwrap_or(false))
     });
     if !needs_resolve {
@@ -199,13 +210,13 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     let user_mods: BTreeMap<String, HashSet<String>> = ir
         .modules
         .iter()
-        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
-        .map(|m| {
-            (
-                m.name.as_str().to_string(),
-                m.functions.iter().map(|f| f.name.as_str().to_string()).collect(),
-            )
-        })
+        // The SAME admission the real pipeline uses (`pipeline::linkable_module_fns`):
+        // a bundled stdlib module contributes its pure-Almide fns, so `args.flag` links
+        // like a user sibling instead of walling as an unverified-caps stdlib call.
+        // Keeping a local copy of this rule is what let the two drift apart — the wall
+        // report then described a program the real pipeline never compiles.
+        .map(|m| (m.name.as_str().to_string(), almide_mir::pipeline::linkable_module_fns(m)))
+        .filter(|(_, fns): &(String, HashSet<String>)| !fns.is_empty())
         .collect();
     if user_mods.is_empty() {
         return;

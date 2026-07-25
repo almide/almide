@@ -97,3 +97,25 @@ Get the current process ID.
 ```almd
 let my_pid = process.pid()
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (13 functions)
+
+```
+effect process.exec(cmd: String, args: List[String]) -> String
+effect process.exit(code: Int) -> ?
+process.args() -> List[String]
+effect process.stdin_lines() -> List[String]
+effect process.exec_in(dir: String, cmd: String, args: List[String]) -> String
+effect process.exec_with_stdin(cmd: String, args: List[String], input: String) -> String
+effect process.exec_status(cmd: String, args: List[String]) -> ProcessStatus
+process.pid() -> Int
+process.env(key: String) -> Option[String]
+effect process.spawn(cmd: String, args: List[String]) -> Int
+effect process.kill(pid: Int, signal: Int) -> Unit
+process.sleep(ms: Int) -> Unit
+process.is_alive(pid: Int) -> Bool
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

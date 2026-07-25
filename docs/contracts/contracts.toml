@@ -454,7 +454,7 @@ evidence  = [
 id        = "C-032"
 spec      = "ALS-D4"
 title     = "Regex engine is byte-identical to the native engine over a fuzzed grammar"
-statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers, replace, split edges, full_match, find_all, empty alternation arms, and end-of-string empty-match replace. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus."
+statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers (incl. {n}/{n,}/{n,m} braces; malformed braces stay literal), replace, split edges, full_match, find_all, empty alternation arms, and end-of-string empty-match replace. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -493,6 +493,8 @@ evidence  = [
   { path = "spec/wasm_cross/list_slice_oob.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_sort_short.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_with_capacity.almd", class = "fixture" },
+  { path = "spec/wasm_cross/negative_offset_and_width_totality.almd", class = "fixture" },
+  { path = "spec/wasm_cross/repeat_size_ceiling.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -506,6 +508,7 @@ evidence  = [
   { path = "spec/wasm_cross/int_div_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/early_return_control_flow.almd", class = "fixture" },
 ]
 
 # ── RECORDS / VARIANTS / SIZED INTEGERS ──────────────────────────────
@@ -763,7 +766,7 @@ evidence  = [
 id        = "C-054"
 spec      = "ALS-T16"
 title     = "List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB"
-statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The `repeat` family (`string.repeat`/`list.repeat`/`bytes.repeat`) clamps SIGNED: a negative count yields the EMPTY string/list/bytes on BOTH targets — previously `string.repeat(s, -2^31)` panicked natively (Rust capacity overflow, raw exit 101) while the wasm leg trapped on the negative alloc size (exit 134): differential-fuzz, neither a T6 form. bytes/list already clamped; string now matches. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent."
+statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The `repeat` family (`string.repeat`/`list.repeat`/`bytes.repeat`) clamps SIGNED: a negative count yields the EMPTY string/list/bytes on BOTH targets — previously `string.repeat(s, -2^31)` panicked natively (Rust capacity overflow, raw exit 101) while the wasm leg trapped on the negative alloc size (exit 134): differential-fuzz, neither a T6 form. bytes/list already clamped; string now matches. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent. The same rule binds byte OFFSETS and pad WIDTHS. `bytes.read_*` guards were `p + N > b.len()` computed on `pos as usize`, so a NEGATIVE pos became ~1.8e19 and the addition WRAPPED back into range — the slice index then panicked (exit 101, a forbidden T6 form); every guard in the native runtime is `checked_add` now, and `bytes.read_f16_le`'s wasm self-host gained the negative guard its bytes_core siblings already had (without it `i64::MIN` reached a wrapped address and returned the value at offset 0 where native returned the 0.0 default). `string.pad_start`/`pad_end` took `width as usize` natively, so a NEGATIVE width asked for an astronomical pad and panicked with a capacity overflow where the wasm self-host returned the string unchanged; the width now clamps SIGNED, matching the self-host and the repeat family. `bytes.copy_to_ptr`'s cap is UNSIGNED (native `b.len().min(cap as usize)`), so a negative cap saturates to the whole buffer; the wasm self-host compared it SIGNED and returned the raw negative count. Finally, a `repeat` whose RESULT would exceed a shared 2^31-byte ceiling ABORTS in the T6 form on both (`Error: repeat result too large` + exit 1) instead of failing in two different forms — native a raw allocation failure, wasm an out-of-bounds trap; the C-161 rule applied to the repeat family, with `ALMIDE_REPEAT_MAX_BYTES` (runtime/rs/src/string.rs) and the `string_repeat.almd` guard as the two halves that must stay in sync."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -915,6 +918,9 @@ statement = "The index-operator path `xs[i]` (both read `xs[i]` and write `xs[i]
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/index_bounds.almd", class = "fixture" },
+  { path = "spec/wasm_cross/index_bounds_write_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/index_bounds_i64.almd", class = "fixture" },
+  { path = "spec/wasm_cross/index_bounds_write_only_var.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1628,6 +1634,7 @@ evidence  = [
   { path = "spec/wasm_cross/list_chunk_windows.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_chunk_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_windows_zero.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_window_zero.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1651,6 +1658,7 @@ since     = "0.28.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/loop_buffer_churn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/loop_push_trailing_increment.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1755,6 +1763,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/to_fixed_domain_abort.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_fixed_domain_abort_hi.almd", class = "fixture" },
+  { path = "spec/wasm_cross/to_fixed_wide_precision.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1968,4 +1977,60 @@ since     = "0.32.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/binary_search_duplicate_keys.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-160"
+spec      = "ALS-D4"
+title     = "Pure-Almide bundled stdlib modules link and run byte-identically on wasm"
+statement = "A BUNDLED stdlib module whose functions are all pure Almide (no @intrinsic / @inline_rust / @wasm_intrinsic / @extern, no hole bodies — today `path` and `args`) links on the wasm target exactly like a user sibling module and produces byte-identical observable output to native. Previously every stdlib-named module was excluded from call resolution, so `import path` walled as an unlinked stdlib call; additionally env.args's WASI out-pointers came from the tightly-packing bump allocator unaligned, trapping (`Pointer not aligned to 4`) on the second args_sizes_get call. Intrinsic-bearing bundled modules (json, ...) keep registry-backed dispatch."
+since     = "0.34.4"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bundled_pure_modules.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-161"
+spec      = "ALS-T6"
+title     = "Matrix constructor dimensions clamp negatives and abort over a shared ceiling"
+statement = "A dimension-taking matrix constructor (`matrix.zeros`/`ones` and their `_f32` aliases) normalizes `(rows, cols)` identically on both targets. A NEGATIVE dimension clamps to 0 — the empty matrix — matching the C-034 signed-clamp rule the `repeat` family already follows; an element count above the shared 2^28 (2 GiB of f64, inside wasm32's address space so both targets accept exactly the same shapes) ABORTS in the T6 form: one `Error: matrix dimensions too large` line on stderr and exit 1. Before, a transformer-shaped program built with `seq = -2147483648` crashed on BOTH targets in DIFFERENT forms — native a raw-vec `capacity overflow` panic (exit 101), wasm an out-of-bounds memory fault in `__mx_rms_rows` (exit 134) — and neither is a permitted observable: the T6 convention forbids a native panic and a wasm `unreachable` alike. The guard fires before either allocator is asked for anything, so the ceiling costs no memory to enforce; `ALMIDE_MATRIX_MAX_ELEMS` (runtime/rs/src/matrix.rs) and `__mx_max_elems` (stdlib/matrix_core.almd) are the two halves that must stay in sync."
+since     = "0.35.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_dims_guard.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_dims_guard_overflow.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-162"
+spec      = "ALS-T5"
+title     = "io.write / io.write_bytes emit in program order, interleaved with println"
+statement = "`io.write(Bytes)` and `io.write_bytes(List[Int])` write their payload to stdout at the point of the call, so a program interleaving them with `println` produces the SAME byte stream in the SAME order on native and wasm. Two defects met here. (1) Neither fn had a wasm self-host: `io.write` was not in the admitted-effectful set, so it walled as `effectful/impure stdlib Module call io.write needs a declared capability` and any byte-streaming program was native-only; both are now self-hosted in stdlib/io_write.almd over the single-iovec `prim.fd_write` floor, carrying the SAME Capability::Stdout as `io.print` (a stdout write is a stdout write). (2) Once linked, the ORDER diverged: native routed the byte writers through a 64 KiB `BufWriter<Stdout>` flushed only at exit, while `println!` wrote through Rust's own `Stdout` handle — two independent buffers over one fd, so every `io.write` landed AFTER every line write (wrong even native-only), where the wasm leg's direct `fd_write` kept program order. Native now flushes at the end of each write; the buffer still batches WITHIN one call, which is where the byte-streaming benches spend their time. A zero-length write emits nothing and disturbs no ordering."
+since     = "0.35.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/io_write_ordering.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-163"
+spec      = "ALS-M10"
+title     = "A heap-result if/match bound to a let/var executes the taken arm on both targets"
+statement = "`let x = if cond then <heap> else <heap>` (and the `match` form) computes the taken arm and binds ONE owned value on both targets — the same result the call-ARGUMENT and TAIL positions of the shape already produced. Only the BIND position walled on the v1 leg, so a whole enclosing function fell outside the MIR-lowering subset: native computed the value while a wasm-only build errored. The missing case was a String LITERAL payload under `some(...)` — the heap `some` arm admitted a Var, a call result and a list concat, but not a `LitStr` — which is exactly the archived cafe differential-fuzz finding (`let v = ok(if c then some(\"ΑΒΓ\") else some(\"café\"))`, two literal Some arms). The literal now allocates a fresh rc-1 block and moves into the Option with no Dup, the same `im` per-arm balance a bare literal arm already had."
+since     = "0.35.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/heap_result_if_bind.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-164"
+spec      = "ALS-M12"
+title     = "List modifiers and suffix copies co-own tuple / record / nested-list elements"
+statement = "`list.set`/`insert`/`remove_at`/`swap`/`update` and `list.take_end`/`tail`/`drop_end` over a list whose element is a HEAP block that is neither String nor Value — a tuple, a record, a nested list — produce a result that CO-OWNS each copied element, and leave the source fully readable. The generic i64 implementation copied slots without `rc_inc`, so source and result co-referenced every element UN-OWNED and both released it at scope end: `list.remove_at` over a `List[(Float, Bool)]` trapped `unreachable` in `rc_dec` (#808's sibling). Those instantiations then routed to an unregistered `list.<fn>_heapelem` name and WALLED honestly rather than double-freeing, which kept the wasm leg sound but declined a shape any program may write. The `_heapelem` twins are now self-hosted (stdlib/list_heapelem.almd), mirroring the `_value` family one-for-one: the copy is element-type-BLIND (a slot holds a block handle; `rc_inc` on a handle is one instruction whatever the block contains), and the ONE place the `_value` twins are not blind — `set`/`update` freeing the replaced element with the Value-specific recursive `__drop_value` — is a plain `rc_dec` here, which is exact: the copy had just taken one reference and the source list holds its own for the whole call, so the count cannot reach 0 and no recursive free is owed. The RESULT list's recursive drop is routed by the CALL SITE's static element type, never by the twins. `__lsh_copy`/`__lsh_insert_fill`/`__lsh_set` are registered in the co-own trust anchor under the same CoownLoop.v grounding as their `_value` counterparts."
+since     = "0.35.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_heapelem_rc.almd", class = "fixture" },
 ]

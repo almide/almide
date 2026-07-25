@@ -77,3 +77,33 @@ Convert Object keys from camelCase to snake_case.
 ### `value.stringify(v: Value) -> String`
 
 Convert a Value to a JSON-like string representation.
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (21 functions)
+
+```
+value.array(items: List[Value]) -> Value
+value.as_array(v: Value) -> Result[List[Value], String]
+value.as_bool(v: Value) -> Result[Bool, String]
+value.as_float(v: Value) -> Result[Float, String]
+value.as_int(v: Value) -> Result[Int, String]
+value.as_string(v: Value) -> Result[String, String]
+value.bool(b: Bool) -> Value
+value.float(f: Float) -> Value
+value.get(v: Value, key: String) -> Result[Value, String]
+value.int(n: Int) -> Value
+value.merge(a: Value, b: Value) -> Value
+value.null() -> Value
+value.object(pairs: List[()]) -> Value
+value.omit(v: Value, keys: List[String]) -> Value
+value.pick(v: Value, keys: List[String]) -> Value
+value.str(s: String) -> Value
+value.stringify(v: Value) -> String
+value.to_camel_case(v: Value) -> Value
+value.to_snake_case(v: Value) -> Value
+value.field(v: Value, key: String) -> Result[Value, String]
+value.keys(v: Value) -> List[String]
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

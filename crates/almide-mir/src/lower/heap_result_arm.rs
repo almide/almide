@@ -496,6 +496,23 @@ impl LowerCtx {
                         self.drop_arm_locals(arm_mark);
                         p
                     }
+                    // `some("café")` — a String LITERAL payload. The bare-payload arm
+                    // right above already lowers a literal this way (`Init::Str` into a
+                    // fresh owned block); wrapping it in `Some` needs the same alloc, then
+                    // the move into the Option. Missing it walled the whole enclosing
+                    // function — `let v = ok(if c then some("ΑΒΓ") else some("café"))`,
+                    // the archived café fuzz finding, is exactly two literal Some arms.
+                    // The block is fresh and rc 1, so it moves in with no Dup.
+                    IrExprKind::LitStr { value } => {
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::Alloc {
+                            dst: p,
+                            repr: pr,
+                            init: Init::Str(value.clone()),
+                        });
+                        p
+                    }
                     _ => return None,
                 };
                 let obj = self.materialize_opt_str_some(piece, repr);

@@ -1,5 +1,12 @@
 # Bubblewrap — WASM Agent Orchestration Layer
 
+> **ARCHIVED DESIGN NOTE — not current architecture.**
+> Written 2026-04-07, before the v1 MIR trust spine became the sole wasm path
+> (#782 retired the v0 emitter). Kept for the design history; do NOT read it as a
+> description of what ships. For the current wasm architecture see
+> [docs/wasm/README.md](../README.md) and
+> [docs/roadmap/active/v1-mir-architecture.md](../../roadmap/active/v1-mir-architecture.md).
+
 Almide 製の WASM モジュールが複数の WASM エージェントを統制する。ポリシー判定、ライフサイクル管理、エージェント間通信の仲介を行う。Bubblewrap 自身も WASM で動くため、ポータブルかつ自身もサンドボックス内に閉じ込められる。
 
 ---
@@ -333,7 +340,7 @@ Layer 3: WASI runtime             — --dir / --env scoping
 Layer 4: Host runtime             — memory isolation, fuel limits
 ```
 
-既存の 3 層防御（[Capability System](./capability-system.md)）に Layer 2（Bubblewrap ランタイムポリシー）が加わり、4 + 1 層になる。
+既存の 3 層防御（[Capability System](../capability-system.md)）に Layer 2（Bubblewrap ランタイムポリシー）が加わり、4 + 1 層になる。
 
 ---
 
@@ -341,7 +348,7 @@ Layer 4: Host runtime             — memory isolation, fuel limits
 
 | Component | Role | Doc |
 |---|---|---|
-| **Capability System** | コンパイル時の 13 カテゴリ権限チェック | [capability-system.md](./capability-system.md) |
+| **Capability System** | コンパイル時の 13 カテゴリ権限チェック | [capability-system.md](../capability-system.md) |
 | **hatch** | MCP ↔ WASM ブリッジ（シングルエージェント） | [hatch-design.md](./hatch-design.md) |
 | **Agent Container** | Claude Code との統合モデル | [agent-container.md](./agent-container.md) |
 | **Bubblewrap** | マルチエージェントオーケストレーション（WASM 内） | this document |

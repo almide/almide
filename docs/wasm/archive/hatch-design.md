@@ -1,5 +1,12 @@
 # hatch — Almide WASM Agent MCP Bridge
 
+> **ARCHIVED DESIGN NOTE — not current architecture.**
+> Written 2026-04-07, before the v1 MIR trust spine became the sole wasm path
+> (#782 retired the v0 emitter). Kept for the design history; do NOT read it as a
+> description of what ships. For the current wasm architecture see
+> [docs/wasm/README.md](../README.md) and
+> [docs/roadmap/active/v1-mir-architecture.md](../../roadmap/active/v1-mir-architecture.md).
+
 Standalone tool that loads an Almide-compiled WASM binary and exposes it as an MCP server over JSON-RPC 2.0 / stdio. hatch is the bridge between the Almide capability-checked WASM sandbox and any MCP client (Claude Code, Cursor, GitHub Copilot, OpenAI Agents SDK, or custom).
 
 ## Why standalone

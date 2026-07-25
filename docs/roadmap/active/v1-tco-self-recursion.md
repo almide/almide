@@ -1,3 +1,4 @@
+<!-- description: Self-recursive tail calls to a scalar-state loop — the yaml-parser keystone -->
 # v1 TCO — self-recursive tail calls → scalar-state loop (the yaml parser keystone)
 
 **Status: DESIGN (2026-06-19). Soundness-critical → design-first, implement fresh + adversarial, verify against the proven checker before shipping. NEVER ship a checker-rejected witness.**

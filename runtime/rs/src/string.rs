@@ -19,7 +19,21 @@ pub fn almide_rt_string_join(parts: &[String], sep: &str) -> String { parts.join
 // Negative counts clamp to 0 (C-054 discipline; `n as usize` on a negative
 // i64 reinterpreted to a huge count — a native "capacity overflow" panic
 // while the wasm leg trapped on the negative alloc size).
-pub fn almide_rt_string_repeat(s: &str, n: i64) -> String { s.repeat(n.max(0) as usize) }
+/// Largest byte length a `repeat` may produce: 2^31, comfortably inside wasm32's
+/// address space so BOTH targets accept exactly the same counts. Above it, both
+/// abort in the T6 form instead of diverging into a native allocation failure
+/// (exit 1) vs a wasm out-of-bounds trap (exit 134) — the C-161 rule, applied to
+/// the repeat family.
+pub const ALMIDE_REPEAT_MAX_BYTES: i64 = 1 << 31;
+
+pub fn almide_rt_string_repeat(s: &str, n: i64) -> String {
+    let n = n.max(0);
+    if (s.len() as i64).saturating_mul(n) > ALMIDE_REPEAT_MAX_BYTES {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    s.repeat(n as usize)
+}
 pub fn almide_rt_string_reverse(s: &str) -> String { s.chars().rev().collect() }
 pub fn almide_rt_string_chars(s: &str) -> Vec<String> { s.chars().map(|c| c.to_string()).collect() }
 pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<String> {
@@ -64,15 +78,20 @@ pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> String {
     else { s.chars().skip(s_idx).take(e_idx - s_idx).collect() }
 }
 
+// A NEGATIVE width means "no padding needed" — the SAME answer the wasm self-host
+// gives (`if scount >= width then copy`), and the C-034 signed-clamp rule the
+// `repeat` family follows. The old `width as usize` turned -128 into ~1.8e19, so
+// `w - len` was astronomical and native panicked with a raw-vec capacity overflow
+// (exit 101) where wasm returned the string unchanged (differential-fuzz).
 pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
-    let w = width as usize; let len = s.chars().count();
+    let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
     format!("{}{}", std::iter::repeat(p).take(w - len).collect::<String>(), s)
 }
 
 pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> String {
-    let w = width as usize; let len = s.chars().count();
+    let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
     format!("{}{}", s, std::iter::repeat(p).take(w - len).collect::<String>())

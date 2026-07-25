@@ -1,3 +1,4 @@
+<!-- description: Goal prompt: take the records feature to full coverage against the svg package -->
 # v1 — records feature: svg FULL CONQUEST (goal prompt)
 
 ## BIG-PICTURE GOAL

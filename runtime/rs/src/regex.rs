@@ -56,12 +56,53 @@ fn rx_parse_piece(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxPiece 
             '*' => { *pos += 1; (0, None) }
             '+' => { *pos += 1; (1, None) }
             '?' => { *pos += 1; (0, Some(1)) }
+            '{' => {
+                // {n}, {n,}, {n,m}. A malformed brace ({, {a}, {,3}) is left in
+                // place and lexes as a literal `{` piece next — same fallback
+                // most engines use.
+                if let Some((min, max, consumed)) = rx_parse_brace(chars, *pos) {
+                    *pos += consumed;
+                    (min, max)
+                } else {
+                    (1, Some(1))
+                }
+            }
             _ => (1, Some(1)),
         }
     } else {
         (1, Some(1))
     };
     RxPiece { node, min, max }
+}
+
+/// Parse a `{n}` / `{n,}` / `{n,m}` quantifier starting at the `{` at `start`.
+/// Returns (min, max, chars consumed including both braces), or None if the
+/// brace expression is malformed (then the `{` stays a literal).
+fn rx_parse_brace(chars: &[char], start: usize) -> Option<(usize, Option<usize>, usize)> {
+    let mut i = start + 1; // past '{'
+    let mut min_digits = String::new();
+    while i < chars.len() && chars[i].is_ascii_digit() {
+        min_digits.push(chars[i]);
+        i += 1;
+    }
+    if min_digits.is_empty() { return None; }
+    let min: usize = min_digits.parse().ok()?;
+    let max = if i < chars.len() && chars[i] == ',' {
+        i += 1;
+        let mut max_digits = String::new();
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            max_digits.push(chars[i]);
+            i += 1;
+        }
+        if max_digits.is_empty() { None } else { Some(max_digits.parse().ok()?) }
+    } else {
+        Some(min)
+    };
+    if i < chars.len() && chars[i] == '}' {
+        Some((min, max, i - start + 1))
+    } else {
+        None
+    }
 }
 
 fn rx_parse_atom(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxNode {
@@ -361,6 +402,38 @@ pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // {n} / {n,} / {n,m} quantifiers (previously unsupported: they silently
+    // never matched — almide#845).
+    #[test]
+    fn brace_quantifiers() {
+        assert!(almide_regex_is_match(r"\d{3}", "abc123"));
+        assert!(!almide_regex_is_match(r"\d{4}", "abc123"));
+        assert!(almide_regex_full_match(r"\d{3}", "123"));
+        assert!(!almide_regex_full_match(r"\d{3}", "12"));
+        assert!(!almide_regex_full_match(r"\d{3}", "1234"));
+        assert!(almide_regex_full_match(r"\d{2,}", "12345"));
+        assert!(!almide_regex_full_match(r"\d{6,}", "12345"));
+        assert!(almide_regex_full_match(r"\d{2,4}", "123"));
+        assert!(!almide_regex_full_match(r"\d{2,4}", "12345"));
+        assert_eq!(almide_regex_find(r"a{2,3}", "caaaab"), Some("aaa".to_string()));
+        assert_eq!(
+            almide_regex_captures(r"(\d{4})-(\d{2})-(\d{2})", "on 2026-03-09."),
+            Some(vec!["2026".to_string(), "03".to_string(), "09".to_string()])
+        );
+        assert_eq!(almide_regex_replace(r"o{2}", "foo book", "0"), "f0 b0k");
+        // Grouped repetition
+        assert!(almide_regex_full_match(r"(ab){2}", "abab"));
+        assert!(!almide_regex_full_match(r"(ab){2}", "ab"));
+        // {0,n} and zero-width safety
+        assert!(almide_regex_full_match(r"a{0,2}b", "b"));
+        assert!(almide_regex_full_match(r"a{0,2}b", "aab"));
+        // Malformed braces stay literal
+        assert!(almide_regex_is_match(r"a\{x", "a{x"));
+        assert!(almide_regex_full_match(r"a{x}", "a{x}"));
+        assert!(almide_regex_full_match(r"a{,3}", "a{,3}"));
+        assert!(almide_regex_full_match(r"a{2", "a{2"));
+    }
 
     // Regression: `replace` over a pattern that matches EMPTY at end-of-string
     // (e.g. `x*`, `a*`, ``) must NOT panic indexing `chars[len]`. The zero-width

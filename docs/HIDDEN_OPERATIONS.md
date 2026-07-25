@@ -19,13 +19,14 @@
 
 ### ファイル
 
-- `src/emit_rust/lower_rust_expr.rs` — Var 参照時の clone 判定
-- `src/ir/use_count.rs` — use-count 分析
+- `crates/almide-codegen/src/pass_clone.rs` — Clone 挿入パス
+- `crates/almide-ir/src/use_count.rs` — use-count 分析
 
 ### ユーザーへの影響
 
 - パフォーマンス: 不要な clone が挿入される可能性（正確性優先の設計）
-- 最適化: 各 1.x リリースで clone 削減を改善（既存コードの動作は変わらない）
+- 最適化: borrow inference (`pass_borrow_inference*.rs`) と alias COW
+  (`pass_alias_cow.rs`) が clone を削減する（既存コードの動作は変わらない）
 
 ---
 
@@ -63,69 +64,49 @@ fn load() -> Result<String, String> {
 
 ### ファイル
 
-- `src/emit_rust/lower_rust.rs:113` — `auto_try` フラグの設定
-- `src/emit_rust/lower_rust_expr.rs:329-586` — Call 式の `?` 挿入判定
+- `crates/almide-codegen/src/pass_result_propagation.rs` — `Try { expr }` 挿入パス
+- 詳細仕様: [specs/effect-fn-call-semantics.md](./specs/effect-fn-call-semantics.md)
 
 ---
 
-## 3. Result 消去 (TS target)
+## 3. Runtime 埋め込み
 
 ### 何が起きるか
 
-TS ターゲットでは `Result[T, E]` が消去される:
-- `ok(x)` → `x` (値をそのまま返す)
-- `err(e)` → `throw new Error(e)` (例外を投げる)
-
-```almide
-effect fn parse(s: String) -> Result[Int, String] = ...
-```
-
-生成 TS:
-```typescript
-function parse(s: string): number {
-    // ok(42) → return 42
-    // err("bad") → throw new Error("bad")
-}
-```
-
-### 理由
-
-JavaScript/TypeScript のネイティブなエラー処理は例外。Result 型を保持すると TS エコシステムとの相互運用性が下がる。
-
-### ファイル
-
-- `src/emit_ts/lower_ts.rs` — Result 消去ロジック
-
----
-
-## 4. Runtime 埋め込み
-
-### 何が起きるか
-
-生成コードに Almide ランタイムが自動埋め込まれる。外部 crate/npm パッケージは不要。
+生成コードに Almide ランタイムが自動埋め込まれる。外部 crate は不要。
 
 ### Rust target
 
-`src/emit_rust/core_runtime.txt` + `runtime/rs/src/*.rs` の内容が生成 `.rs` ファイルに `include_str!` で埋め込まれる。
+`runtime/rs/src/*.rs` の内容が生成 `.rs` ファイルに埋め込まれる
+（`crates/almide-codegen/build.rs` が `generated/rust_runtime.rs` を生成）。
 
 含まれるもの:
 - `almide_eq!` / `almide_ne!` マクロ (深い等値比較)
 - `AlmideConcat` trait (String + List 連結)
-- 各 stdlib モジュールのランタイム関数 (22 モジュール)
+- `@intrinsic` 宣言された stdlib ランタイム関数
 
-### TS target
+### WASM target
 
-`runtime/ts/*.ts` の内容が生成 `.ts` ファイルの先頭に埋め込まれる。
+外部ランタイムは存在しない。stdlib は self-hosted な純 Almide 実装
+（`stdlib/*.almd` → `crates/almide-mir/src/render_wasm/registry.rs`）が
+ユーザコードと一緒に WAT へコンパイルされ、少数の手書き WAT プリアンブルと
+共にモジュールへ埋め込まれる。詳細: [WASM-OUTPUT.md](./WASM-OUTPUT.md)。
 
-含まれるもの:
-- `__deep_eq` (深い等値比較)
-- `__concat` (String + List 連結)
-- 各 stdlib モジュールの TS 実装
+---
 
-### ファイル
+## 4. Perceus RC 挿入 (v1 trust-spine: WASM / native render)
 
-- `src/generated/rust_runtime.rs` — Rust ランタイム埋め込み (build.rs で生成)
-- `src/emit_ts/mod.rs` — TS ランタイム埋め込み
+### 何が起きるか
+
+v1 MIR (`crates/almide-mir`) は Perceus 方式で参照カウント操作
+（dup / drop）と、in-place 変異のための一意性検査（MakeUnique）を自動挿入する。
+所有権とメモリレイアウトの単一真実源はこの MIR。
+
+### ユーザーへの影響
+
+- 言語上の意味は変わらない（native / wasm / interp の 3-way oracle で保証）
+- 性能特性のみが対象。MakeUnique elision 等の最適化はリリースごとに強化される
+- 証明: `crates/almide-perceus-belt/`（Lean 4）が RC 規律を検証する
 
 ---
 
@@ -151,7 +132,7 @@ std::thread::scope(|__s| -> Result<_, String> {
 
 ### ファイル
 
-- `src/emit_rust/lower_rust_expr.rs` — `lower_fan`, `lower_fan_call`
+- `crates/almide-codegen/src/pass_fan_lowering.rs` — fan lowering パス
 
 ---
 

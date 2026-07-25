@@ -453,8 +453,16 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
             .collect();
 
         if !captures.is_empty() {
+            // Captures THIS lambda mutates (assigned, or passed `&mut` to a
+            // method like `list.push`) keep the BARE `Var` bind — the
+            // shared-cell wiring pattern-matches it; a Clone would sever the
+            // sharing. Read-only captures clone explicitly (#809).
+            let mut lam_mutated = HashSet::new();
+            if let IrExprKind::Lambda { body, .. } = &expr.kind {
+                collect_mutated_vars(body, &mut lam_mutated);
+            }
             // Wrap this lambda in a block: { let __cap = var; lambda_with_cap }
-            wrap_lambda_with_clones(expr, &captures, vt);
+            wrap_lambda_with_clones(expr, &captures, vt, &lam_mutated);
             changed = true;
         }
     }
@@ -497,7 +505,12 @@ fn transform_stmt(stmt: &mut IrStmt, vt: &mut VarTable, scope_vars: &HashSet<Var
 ///   move |params| { body using `x` }
 /// Into:
 ///   { let __cap_N = x; move |params| { body using `__cap_N` } }
-fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTable) {
+fn wrap_lambda_with_clones(
+    expr: &mut IrExpr,
+    captures: &[VarId],
+    vt: &mut VarTable,
+    lam_mutated: &HashSet<VarId>,
+) {
     let mut stmts = Vec::new();
     let mut renames = std::collections::HashMap::new();
 
@@ -547,7 +560,37 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
                 },
                 ty: ty.clone(), span: None, def_id: None,
             },
-            _ => IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None, def_id: None },
+            // The default capture bind CLONES explicitly (#809): CloneInsertion's
+            // last-use analysis would MOVE the var here when this is its last
+            // syntactic use — but a runtime-template borrow (`&{m}` — e.g.
+            // `map.fold`'s first arg) in the SAME statement is invisible at the
+            // IR level and stays live until the call, so the move was an E0505.
+            // READ-ONLY captures only: a capture THIS lambda mutates keeps the
+            // bare `Var` bind — the shared-cell wiring (Closure v2 P3/P6)
+            // pattern-matches it, and a `Clone` wrapper severed the sharing
+            // (each closure mutated its own copy — the wasm_runtime
+            // closure-capture cross-target mismatches). NOTE the mutability
+            // FLAG cannot gate this: a non-Copy `var` mutated only through a
+            // method (`list.push`) is recorded `Mutability::Let`.
+            _ if !lam_mutated.contains(&var_id) => IrExpr {
+                kind: IrExprKind::Clone {
+                    expr: Box::new(IrExpr {
+                        kind: IrExprKind::Var { id: var_id },
+                        ty: ty.clone(),
+                        span: None,
+                        def_id: None,
+                    }),
+                },
+                ty: ty.clone(),
+                span: None,
+                def_id: None,
+            },
+            _ => IrExpr {
+                kind: IrExprKind::Var { id: var_id },
+                ty: ty.clone(),
+                span: None,
+                def_id: None,
+            },
         };
 
         stmts.push(IrStmt {

@@ -15,6 +15,12 @@ pub struct ResolvedModules {
     /// Third element is the PkgId (None for local modules).
     /// Fourth element: true if this is a self-import (same project).
     pub modules: Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
+    /// Module name → (display path, source text) for the modules read off
+    /// disk. Bundled stdlib modules are absent: their sources are compiled
+    /// into the binary and are gated by CI, so a diagnostic in one is a
+    /// compiler bug, not user input. Used to attribute a module's own type
+    /// errors to its own file when the ENTRY program imports it (#862).
+    pub sources: std::collections::HashMap<String, (String, String)>,
 }
 
 /// Threaded through the recursive `load_*`/`resolve_*` helpers below.
@@ -27,6 +33,14 @@ struct ResolveCtx<'a> {
     loaded: &'a mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
     loaded_names: &'a mut HashSet<String>,
     loading: &'a mut HashSet<String>,
+    /// Populated alongside `loaded` — see `ResolvedModules::sources`.
+    sources: &'a mut std::collections::HashMap<String, (String, String)>,
+}
+
+/// Record a disk-loaded module's path + source so its own diagnostics can be
+/// rendered against its own file (#862).
+fn record_module_source(ctx: &mut ResolveCtx, name: &str, file_path: &Path, source: String) {
+    ctx.sources.insert(name.to_string(), (file_path.display().to_string(), source));
 }
 
 /// Read + tokenize + parse a module's source file, producing the exact
@@ -34,7 +48,7 @@ struct ResolveCtx<'a> {
 /// used to assemble inline. `kind` is "module" or "sub-module" (matches
 /// each call site's original wording); `display_label` is the name/path
 /// already formatted the way that call site formatted it.
-fn parse_module_source(kind: &str, display_label: &str, file_path: &Path) -> Result<ast::Program, String> {
+fn parse_module_source(kind: &str, display_label: &str, file_path: &Path) -> Result<(ast::Program, String), String> {
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("error reading {} '{}': {}", kind, display_label, e))?;
 
@@ -45,7 +59,7 @@ fn parse_module_source(kind: &str, display_label: &str, file_path: &Path) -> Res
     if !parser.errors.is_empty() {
         return Err(format!("parse error in {} '{}': {}", kind, display_label, parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
-    Ok(program)
+    Ok((program, source))
 }
 
 /// Find the project root (directory containing almide.toml), searching upward from base_dir.
@@ -190,7 +204,8 @@ pub fn resolve_imports_with_deps(
     let mut loaded: Vec<(String, ast::Program, Option<project::PkgId>, bool)> = Vec::new();
     let mut loaded_names: HashSet<String> = HashSet::new();
     let mut loading: HashSet<String> = HashSet::new();
-    let mut ctx = ResolveCtx { base_dir, dep_paths, loaded: &mut loaded, loaded_names: &mut loaded_names, loading: &mut loading };
+    let mut sources: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
+    let mut ctx = ResolveCtx { base_dir, dep_paths, loaded: &mut loaded, loaded_names: &mut loaded_names, loading: &mut loading, sources: &mut sources };
 
     for import in &program.imports {
         if let ast::Decl::Import { path, alias, .. } = import {
@@ -213,7 +228,7 @@ pub fn resolve_imports_with_deps(
         }
     }
 
-    Ok(ResolvedModules { modules: loaded })
+    Ok(ResolvedModules { modules: loaded, sources })
 }
 
 /// Load a bundled stdlib module from embedded source.
@@ -302,7 +317,8 @@ fn load_self_module(
 
     let file_path = find_self_module_file(mod_path, src_dir)?;
     let display_label = format!("self.{}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."));
-    let program = parse_module_source("module", &display_label, &file_path)?;
+    let (program, mod_source) = parse_module_source("module", &display_label, &file_path)?;
+    record_module_source(ctx, mod_name, &file_path, mod_source);
 
     // Recursively resolve this module's imports
     for import in &program.imports {
@@ -373,7 +389,8 @@ fn load_module(name: &str, ctx: &mut ResolveCtx) -> Result<(), String> {
     ctx.loading.insert(name.to_string());
 
     let (file_path, pkg_id) = find_module_file(name, ctx.base_dir, ctx.dep_paths)?;
-    let program = parse_module_source("module", name, &file_path)?;
+    let (program, mod_source) = parse_module_source("module", name, &file_path)?;
+    record_module_source(ctx, name, &file_path, mod_source);
 
     // Recursively resolve this module's imports (depth-first -> leaves first)
     for import in &program.imports {
@@ -399,7 +416,7 @@ fn load_module(name: &str, ctx: &mut ResolveCtx) -> Result<(), String> {
 }
 
 /// Parse a single .almd file and return its Program.
-fn parse_almd_file(file_path: &Path, display_name: &str) -> Result<ast::Program, String> {
+fn parse_almd_file(file_path: &Path, display_name: &str) -> Result<(ast::Program, String), String> {
     parse_module_source("sub-module", display_name, file_path)
 }
 
@@ -428,7 +445,8 @@ fn load_sub_namespace_file(pkg_name: &str, file_path: &Path, pkg_id: &Option<pro
     if ctx.loaded_names.contains(&sub_name) {
         return Ok(());
     }
-    let program = parse_almd_file(file_path, &sub_name)?;
+    let (program, mod_source) = parse_almd_file(file_path, &sub_name)?;
+    record_module_source(ctx, &sub_name, file_path, mod_source);
     resolve_submodule_imports(&program, ctx)?;
     ctx.loaded_names.insert(sub_name.clone());
     ctx.loaded.push((sub_name, program, pkg_id.clone(), false));
@@ -444,7 +462,8 @@ fn load_sub_namespace_dir(pkg_name: &str, subdir: &Path, pkg_id: &Option<project
         // Check for mod.almd in subdirectory
         let sub_mod = subdir.join("mod.almd");
         if sub_mod.exists() {
-            let program = parse_almd_file(&sub_mod, &sub_name)?;
+            let (program, mod_source) = parse_almd_file(&sub_mod, &sub_name)?;
+            record_module_source(ctx, &sub_name, &sub_mod, mod_source);
             resolve_submodule_imports(&program, ctx)?;
             ctx.loaded_names.insert(sub_name.clone());
             ctx.loaded.push((sub_name.clone(), program, pkg_id.clone(), false));
@@ -517,7 +536,8 @@ fn load_submodule(pkg_name: &str, sub_path: &[crate::intern::Sym], mod_name: &st
         ))?;
 
     let display_label = format!("{}.{}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."));
-    let program = parse_module_source("sub-module", &display_label, file_path)?;
+    let (program, mod_source) = parse_module_source("sub-module", &display_label, file_path)?;
+    record_module_source(ctx, mod_name, file_path, mod_source);
 
     // Recursively resolve this sub-module's imports. Without this, bundled
     // stdlib modules (fs, process, math, ...) that the sub-module imports

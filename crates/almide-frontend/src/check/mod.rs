@@ -108,7 +108,7 @@ pub struct Checker {
     /// Registered when `obj.field` is inferred while `obj` is an unresolved
     /// inference var. After solving, `object_ty` should be concrete and the
     /// field type can be looked up and unified with `result_var`.
-    pub(crate) deferred_field_accesses: Vec<(Ty, almide_base::intern::Sym, Ty)>,
+    pub(crate) deferred_field_accesses: Vec<(Ty, almide_base::intern::Sym, Ty, Option<crate::ast::Span>)>,
     /// Map literal key types to validate after constraint solving.
     /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
     pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
@@ -462,18 +462,45 @@ impl Checker {
             if pending.is_empty() { break; }
             let mut still_pending = Vec::new();
             let mut progressed = false;
-            for (obj_ty, field, result_ty) in pending {
+            for (obj_ty, field, result_ty, span) in pending {
                 let resolved = resolve_ty(&obj_ty, &self.uf);
                 let field_ty = self.resolve_field_type(&resolved, field.as_str());
                 if !matches!(field_ty, Ty::Unknown) {
                     self.unify_infer(&result_ty, &field_ty);
                     progressed = true;
                 } else {
-                    still_pending.push((obj_ty, field, result_ty));
+                    still_pending.push((obj_ty, field, result_ty, span));
                 }
             }
             self.deferred_field_accesses = still_pending;
             if !progressed { break; }
+        }
+        // #847: leftovers whose object DID resolve to a closed record are
+        // definitively missing fields — silently dropping them let the
+        // Unknown flow to codegen (postcondition ICE / leaked rustc E0609).
+        for (obj_ty, field, _result_ty, span) in std::mem::take(&mut self.deferred_field_accesses) {
+            let resolved = resolve_ty(&obj_ty, &self.uf);
+            let shape = self.env.resolve_named(&resolved);
+            if let Ty::Record { fields } = &shape {
+                let available = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+                let suggestion = almide_base::diagnostic::suggest(
+                    field.as_str(), fields.iter().map(|(n, _)| n.as_str()));
+                let hint = match &suggestion {
+                    Some(close) => format!("Did you mean `{}`? Available fields: {}", close, available),
+                    None => format!("Available fields: {}", available),
+                };
+                let mut diag = err(
+                    format!("no field '{}' on {}", field, resolved.display()),
+                    hint,
+                    format!("field access .{}", field),
+                ).with_code("E013");
+                if let Some(s) = span {
+                    diag.file = self.source_file.clone();
+                    diag.line = Some(s.line);
+                    diag.col = Some(s.col);
+                }
+                self.emit(diag);
+            }
         }
     }
 

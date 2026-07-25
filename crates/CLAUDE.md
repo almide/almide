@@ -9,7 +9,8 @@ Source (.almd)
   → almide-syntax    Lex + parse → AST
   → almide-frontend  Type check + lower → IR
   → almide-optimize  Monomorphize + DCE → IR
-  → almide-codegen   Nanopass + emit → Rust / WASM
+  → almide-codegen   Nanopass + emit → Rust (+ WGSL)
+  → almide-mir       v1 trust-spine → WASM (WAT) / native Rust render
 ```
 
 ## Dependency Graph
@@ -26,7 +27,8 @@ almide-ir             Typed IR, VarTable, visitors
   ↕
 almide-frontend       Type checker, constraint solver, AST→IR lowering
 almide-optimize       Monomorphization, DCE, constant propagation
-almide-codegen        Nanopass pipeline, TOML templates, walker, WASM emit
+almide-codegen        Nanopass pipeline, TOML templates, walker, WGSL emit
+almide-mir            v1 Middle IR: ownership/layout SoT, WASM (WAT) + native renderers
 almide-interp         Pre-codegen IR tree-walker — 3rd cross-target oracle / executable spec
 almide-tools          Formatter, module interface, language server
 ```
@@ -54,6 +56,6 @@ so it shares no codegen pass with either backend. See
 ## When Adding a New Feature
 
 - **New syntax** → almide-syntax (parser) → almide-frontend (checker + lowering) → almide-codegen (passes + templates)
-- **New stdlib function** → `stdlib/defs/<module>.toml` + `runtime/rs/<module>.rs` + WASM runtime in `emit_wasm/rt_*.rs`. To keep the 3-way oracle covering it (instead of skipping it), also add the glue to almide-interp's bridge — it is hand-maintained, NOT auto-generated. See [almide-interp/CLAUDE.md](./almide-interp/CLAUDE.md#coverage-model--does-a-new-stdlib-fn-get-covered-automatically).
+- **New stdlib function** → pure-Almide impl in `stdlib/<module>[_<part>].almd`; register for WASM in `almide-mir/src/render_wasm/registry.rs`; native intrinsics (only when needed) in `runtime/rs/src/<module>.rs` + `@intrinsic` declaration. To keep the 3-way oracle covering it (instead of skipping it), also add the glue to almide-interp's bridge — it is hand-maintained, NOT auto-generated. See [almide-interp/CLAUDE.md](./almide-interp/CLAUDE.md#coverage-model--does-a-new-stdlib-fn-get-covered-automatically).
 - **New type** → almide-types (Ty variant) → almide-frontend (inference rules) → almide-ir (IR nodes) → almide-codegen (emission)
 - **New codegen target** → almide-codegen (pass pipeline + TOML template + target entry)

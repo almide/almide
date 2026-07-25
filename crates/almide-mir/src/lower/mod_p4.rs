@@ -257,6 +257,7 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 /// subject path (control.rs) — keep them in sync to avoid tracking a non-materialized
 /// call (which would misread as `None`). Add a name only when its self-host impl lands.
 pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
+    let func = base_stdlib_fn_name(func);
     match module {
         "list" => {
             // `fold` is here for the ONE Option-returning variant (`list.fold_ols`,

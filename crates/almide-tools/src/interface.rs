@@ -380,6 +380,21 @@ fn resolve_ty(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Type
         Ty::Unit => TypeRef::Unit,
         Ty::Bytes => TypeRef::Bytes,
         Ty::Matrix => TypeRef::Matrix,
+        // The SIZED numerics are their own `Ty` variants, not `Named`, so without
+        // these arms every `int8`/`uint32`/`float32` signature serialized as
+        // `unknown` — the module interface could not name the very types those
+        // modules exist to convert between, and the machine-owned signature index
+        // in docs/stdlib rendered `x: ?`.
+        Ty::Int8 => TypeRef::Named { name: "Int8".into(), args: Vec::new() },
+        Ty::Int16 => TypeRef::Named { name: "Int16".into(), args: Vec::new() },
+        Ty::Int32 => TypeRef::Named { name: "Int32".into(), args: Vec::new() },
+        Ty::Int64 => TypeRef::Named { name: "Int64".into(), args: Vec::new() },
+        Ty::UInt8 => TypeRef::Named { name: "UInt8".into(), args: Vec::new() },
+        Ty::UInt16 => TypeRef::Named { name: "UInt16".into(), args: Vec::new() },
+        Ty::UInt32 => TypeRef::Named { name: "UInt32".into(), args: Vec::new() },
+        Ty::UInt64 => TypeRef::Named { name: "UInt64".into(), args: Vec::new() },
+        Ty::Float32 => TypeRef::Named { name: "Float32".into(), args: Vec::new() },
+        Ty::Float64 => TypeRef::Named { name: "Float64".into(), args: Vec::new() },
         Ty::Applied(id, args) => match id {
             TypeConstructorId::List if args.len() == 1 =>
                 TypeRef::List { inner: Box::new(resolve_ty(&args[0], records, variants)) },

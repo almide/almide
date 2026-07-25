@@ -1,0 +1,63 @@
+// Executable check on the worked examples in docs/stdlib/{path,args,html,mem,
+// base64,hex}.md. Those pages were written from the modules' real interfaces
+// (`almide compile <mod> --json`), and their signature index is machine-owned
+// and CI-gated — but the PROSE examples are hand-written, so nothing stopped
+// them drifting. Every assertion below is copied from a page.
+//
+// Writing them already caught two defects: `base64.encode_url` KEEPS its
+// padding (the page had claimed the JWT convention), and `mem.save`/`restore`
+// declared `almide_rt_mem_*` symbols the native runtime never defined, so any
+// program calling them emitted invalid Rust (E0425).
+//
+// `net`/`zlib` are excluded: both are native-only host boundaries whose own
+// suites already carry `// wasm:skip`. `mem` has no test at all: its example runs
+// on both legs from `main` but walls inside a promoted test fn, and the
+// walled-real ratchet treats a walled function as a regression (see docs/stdlib/mem.md).
+//
+// This file itself still runs on the NATIVE leg: `path`/`html` link per-function
+// on wasm now, which surfaces a `list.fold_hacc` (heap-accumulator fold) inside
+// their own bodies — the largest bucket in the #812 subset ledger, not a defect
+// here. `spec/stdlib/path_args_test.almd` covers the same modules on the wasm leg.
+
+import path
+import html
+import base64
+import hex
+
+test "docs path examples" {
+  assert_eq(path.join("/usr", "bin"), "/usr/bin")
+  assert_eq(path.join("/usr/", "bin"), "/usr/bin")
+  assert_eq(path.dirname("/usr/bin/node"), "/usr/bin")
+  assert_eq(path.basename("/usr/bin/node"), "node")
+  assert_eq(path.stem("/tmp/report.tar.gz"), "report.tar")
+  assert_eq(path.extension("file.txt"), some("txt"))
+  assert_eq(path.extension("Makefile"), none)
+  assert_eq(path.is_absolute("/usr"), true)
+  assert_eq(path.is_absolute("relative/path"), false)
+  assert_eq(path.normalize("/a/./b/../c"), "/a/c")
+}
+
+test "docs html examples" {
+  assert_eq(html.to_string(html.escape("<script>")), "&lt;script&gt;")
+  assert_eq(html.to_string(html.raw("<br>")), "<br>")
+  assert_eq(html.to_string(html.empty()), "")
+  assert_eq(html.to_string(html.concat(html.raw("<li>"), html.escape("a&b"))), "<li>a&amp;b")
+}
+
+test "docs base64 examples" {
+  assert_eq(base64.encode(bytes.from_string("hello")), "aGVsbG8=")
+  assert_eq(base64.encode_url(bytes.from_string("hi?>")), "aGk_Pg==")
+  match base64.decode("aGVsbG8=") {
+    ok(b) => assert_eq(bytes.to_string_lossy(b), "hello"),
+    err(_) => assert_eq(true, false),
+  }
+}
+
+test "docs hex examples" {
+  assert_eq(hex.encode(bytes.from_list([222, 173, 190, 239])), "deadbeef")
+  assert_eq(hex.encode_upper(bytes.from_list([222, 173])), "DEAD")
+  match hex.decode("DeAd") {
+    ok(b) => assert_eq(bytes.len(b), 2),
+    err(_) => assert_eq(true, false),
+  }
+}

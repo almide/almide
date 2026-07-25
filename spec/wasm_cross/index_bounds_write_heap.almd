@@ -1,0 +1,15 @@
+// @contract: C-067
+// #807: the HEAP-element WRITE path. `xs[i] = "Z"` over a List[String]/List[Value]
+// desugars to the functional `list.set` rebind, whose OOB behavior is contractually
+// a NO-OP (C-054) — so the index-SYNTAX abort guard must be emitted separately at
+// the desugar site. Previously the wasm leg silently kept the old list (exit 0)
+// while native aborted. In-bounds writes stay correct; the OOB write aborts with
+// the unified "Error: index out of bounds\n" + exit 1, byte-identical native == wasm.
+effect fn main() -> Unit = {
+  var xs = ["a", "b"]
+  xs[0] = "y"
+  println(xs[0])
+  println(xs[1])
+  xs[7] = "Z"
+  println("unreachable")
+}

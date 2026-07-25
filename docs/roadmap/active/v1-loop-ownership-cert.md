@@ -1,3 +1,4 @@
+<!-- description: Loop-carried heap ownership as a certificate-spine extension — the completeness fix, not a special case -->
 # v1 heap-loop-carried ownership — option C (cert-spine extension), the COMPLETENESS fix
 
 **CEO chose C ("C一択", 2026-06-20): close the proof spine's completeness gap at the ROOT — teach the

@@ -1,0 +1,29 @@
+// @contract: C-161
+// #849: a matrix constructor's DIMENSIONS are normalized identically on both
+// targets. A negative dimension clamps to 0 (the empty matrix, matching the
+// C-034 signed-clamp rule the `repeat` family follows); before this, the
+// archived transformer-shaped fuzz finding with `seq = -2147483648` panicked
+// natively with a raw-vec `capacity overflow` (exit 101) while wasm allocated a
+// bogus block and took an out-of-bounds memory fault (exit 134) — neither of
+// them a T6 form, and two DIFFERENT crash forms for one program.
+//
+// The over-ceiling case (`matrix_dims_guard_overflow.almd`) is the sibling
+// fixture; this one pins the clamp and that the clamped matrix still flows
+// through the fused ops.
+effect fn main() -> Unit = {
+  let neg = matrix.ones(-2147483648, 16)
+  let (r, c) = matrix.shape(neg)
+  println("neg rows: " + int.to_string(r) + " x " + int.to_string(c))
+
+  let neg_cols = matrix.zeros(4, -7)
+  let (r2, c2) = matrix.shape(neg_cols)
+  println("neg cols: " + int.to_string(r2) + " x " + int.to_string(c2))
+
+  let normed = matrix.rms_norm_rows(neg, list.repeat(1.0, 16), 0.000001)
+  let (r3, c3) = matrix.shape(normed)
+  println("normed: " + int.to_string(r3) + " x " + int.to_string(c3))
+
+  let small = matrix.ones(2, 3)
+  let (r4, c4) = matrix.shape(small)
+  println("ok: " + int.to_string(r4) + " x " + int.to_string(c4))
+}

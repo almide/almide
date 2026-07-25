@@ -138,7 +138,13 @@ pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
     }
     xs
 }
+// Same ALS-T6 guard as `almide_rt_list_windows`: n == 0 aborts with the
+// unified `Error: …` + exit 1 form (std's `windows(0)` panics — a raw Rust
+// panic exit 101 the wasm leg never shows). n > len returns empty like the
+// plural twin instead of leaking std's behavior.
 pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+    if n == 0 { eprintln!("Error: window size must be positive"); std::process::exit(1); }
+    if (n as usize) > xs.len() { return vec![]; }
     xs.windows(n as usize).map(|w| w.to_vec()).collect()
 }
 

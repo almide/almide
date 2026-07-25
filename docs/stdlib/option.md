@@ -97,3 +97,26 @@ Convert some(x) to [x], none to [].
 ```almd
 option.to_list(some(42)) // => [42]
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (14 functions)
+
+```
+option.map(o: Option[A], f: (A) -> B) -> Option[B]
+option.flat_map(o: Option[A], f: (A) -> Option[B]) -> Option[B]
+option.flatten(o: Option[Option[A]]) -> Option[A]
+option.unwrap_or(o: Option[A], default: A) -> A
+option.unwrap_or_else(o: Option[A], f: () -> A) -> A
+option.is_some(o: Option[A]) -> Bool
+option.is_none(o: Option[A]) -> Bool
+option.to_result(o: Option[A], msg: String) -> Result[A, String]
+option.filter(o: Option[A], f: (A) -> Bool) -> Option[A]
+option.zip(a: Option[A], b: Option[B]) -> Option[()]
+option.or_else(o: Option[A], f: () -> Option[A]) -> Option[A]
+option.to_list(o: Option[A]) -> List[A]
+option.collect(xs: List[Option[T]]) -> Option[List[T]]
+option.collect_map(xs: List[T], f: (T) -> Option[U]) -> Option[List[U]]
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

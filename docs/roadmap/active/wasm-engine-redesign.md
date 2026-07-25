@@ -1,3 +1,4 @@
+<!-- description: Complete redesign of the WASM engine around LayoutRegistry, WasmIR, and WasmBuilder -->
 # Almide WASM Engine — Complete Redesign
 
 > **Status**: Design phase — foundation (LayoutRegistry + WasmIR + WasmBuilder) exists, full recreate planned
