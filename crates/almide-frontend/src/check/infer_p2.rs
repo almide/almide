@@ -6,6 +6,18 @@
 
 impl Checker {
     pub(super) fn infer_expr_inner_g2(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        if let Some(ty) = self.infer_expr_g2_literal(expr) { return Some(ty); }
+        if let Some(ty) = self.infer_expr_g2_collection(expr) { return Some(ty); }
+        None
+    }
+
+    /// Scalar literals, interpolated strings, and bare identifiers — the leaf forms
+    /// whose type needs no sub-expression.
+    ///
+    /// One group of the `infer_expr_inner` arm table, arms verbatim and in
+    /// source order. `None` means "not my group" — the dispatcher tries the
+    /// groups in that order, so the dispatch an expression sees is unchanged.
+    pub(super) fn infer_expr_g2_literal(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
         Some(match &mut expr.kind {
             ExprKind::Int { .. } => Ty::Int,
             ExprKind::Float { .. } => Ty::Float,
@@ -24,6 +36,18 @@ impl Checker {
             ExprKind::None => Ty::option(self.fresh_var()),
 
             ExprKind::Ident { name, .. } => self.infer_expr_g2_ident(expr),
+            _ => return None,
+        })
+    }
+
+    /// Collections, indexing, operators, and the branching forms whose type is the
+    /// join of their parts.
+    ///
+    /// One group of the `infer_expr_inner` arm table, arms verbatim and in
+    /// source order. `None` means "not my group" — the dispatcher tries the
+    /// groups in that order, so the dispatch an expression sees is unchanged.
+    pub(super) fn infer_expr_g2_collection(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        Some(match &mut expr.kind {
             ExprKind::List { elements, .. } => {
                 if elements.is_empty() {
                     let ty = Ty::list(self.fresh_var());

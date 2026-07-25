@@ -7,6 +7,19 @@
 
 impl Checker {
     pub(super) fn infer_expr_inner_g3(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        if let Some(ty) = self.infer_expr_g3_scoped(expr) { return Some(ty); }
+        if let Some(ty) = self.infer_expr_g3_operand(expr) { return Some(ty); }
+        if let Some(ty) = self.infer_expr_g3_postfix(expr) { return Some(ty); }
+        None
+    }
+
+    /// Blocks, fan, calls, pipes, composition, lambdas and the loop forms — the
+    /// expressions that introduce or thread a scope.
+    ///
+    /// One group of the `infer_expr_inner` arm table, arms verbatim and in
+    /// source order. `None` means "not my group" — the dispatcher tries the
+    /// groups in that order, so the dispatch an expression sees is unchanged.
+    pub(super) fn infer_expr_g3_scoped(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
         Some(match &mut expr.kind {
             ExprKind::Block { .. } => self.infer_expr_g3_block(expr),
             ExprKind::Fan { .. } => self.infer_expr_g3_fan(expr),
@@ -44,6 +57,18 @@ impl Checker {
                 Ty::Unit
             }
 
+            _ => return None,
+        })
+    }
+
+    /// Ranges, the `Option`/`Result` constructors, `?`, parenthesised expressions,
+    /// `break`, and the typed hole.
+    ///
+    /// One group of the `infer_expr_inner` arm table, arms verbatim and in
+    /// source order. `None` means "not my group" — the dispatcher tries the
+    /// groups in that order, so the dispatch an expression sees is unchanged.
+    pub(super) fn infer_expr_g3_operand(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        Some(match &mut expr.kind {
             ExprKind::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::list(st) }
 
             ExprKind::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::option(inner) }
@@ -74,6 +99,18 @@ impl Checker {
             ExprKind::Paren { expr, .. } => self.infer_expr(expr),
             ExprKind::Break | ExprKind::Continue => Ty::Unit,
             ExprKind::Hole | ExprKind::Todo { .. } => self.fresh_var(),
+            _ => return None,
+        })
+    }
+
+    /// `await`, the unwrap family, `err(..)`, the map-literal forms, and type
+    /// ascription.
+    ///
+    /// One group of the `infer_expr_inner` arm table, arms verbatim and in
+    /// source order. `None` means "not my group" — the dispatcher tries the
+    /// groups in that order, so the dispatch an expression sees is unchanged.
+    pub(super) fn infer_expr_g3_postfix(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        Some(match &mut expr.kind {
             ExprKind::Await { expr, .. } => self.infer_expr(expr),
 
             ExprKind::Unwrap { .. } => self.infer_expr_g3_unwrap(expr),
