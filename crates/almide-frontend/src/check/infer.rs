@@ -441,109 +441,135 @@ impl Checker {
         concrete: &Ty,
         member_span: Option<crate::ast::Span>,
     ) {
-                // (field → (module_fn, args_template, display_suffix))
-                // `args_template` is a tiny `("{0}", 1)`-style mini-
-                // language: `{0}` is substituted with the object's
-                // source slice; any trailing text goes verbatim.
-                // `display_suffix` is comment-only info shown after
-                // the mechanical replacement (e.g. the Option[T]
-                // reminder for `head`).
-                let module_and_subs: Option<(&str, Vec<(&str, &str, &str, &str)>)> = match &concrete {
-                    Ty::Applied(TypeConstructorId::List, _) => Some(("list", vec![
-                        ("head",   "list.first", "({0})", "  // returns Option[T]"),
-                        ("tail",   "list.drop",  "({0}, 1)", ""),
-                        ("length", "list.len",   "({0})", ""),
-                        ("len",    "list.len",   "({0})", ""),
-                        ("first",  "list.first", "({0})", ""),
-                        ("last",   "list.last",  "({0})", ""),
-                        ("size",   "list.len",   "({0})", ""),
-                    ])),
-                    Ty::String => Some(("string", vec![
-                        ("length", "string.len",      "({0})", ""),
-                        ("len",    "string.len",      "({0})", ""),
-                        ("size",   "string.len",      "({0})", ""),
-                        ("chars",  "string.to_chars", "({0})", ""),
-                    ])),
-                    _ => None,
-                };
-                // #847: a MISSING field on a closed record used to sail
-                // through as Unknown (no diagnostic at all — the failure
-                // surfaced as a codegen postcondition ICE, or leaked
-                // rustc's E0609). Report it here with the field roster.
-                let record_shape = self.env.resolve_named(&concrete);
-                if let Ty::Record { fields } = &record_shape {
-                    let available = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
-                    let suggestion = almide_base::diagnostic::suggest(
-                        field, fields.iter().map(|(n, _)| n.as_str()));
-                    let hint = match &suggestion {
-                        Some(close) => format!("Did you mean `{}`? Available fields: {}", close, available),
-                        None => format!("Available fields: {}", available),
-                    };
-                    let mut diag = super::err(
-                        format!("no field '{}' on {}", field, concrete.display()),
-                        hint,
-                        format!("field access .{}", field),
-                    ).with_code("E013");
-                    if let (Some(close), Some(span)) = (&suggestion, member_span) {
-                        if let Some(obj_src) = object.span.and_then(|s| self.source_slice(s)) {
-                            diag = diag.with_try_replace(
-                                span.line, span.col, span.end_col,
-                                format!("{}.{}", obj_src, close),
-                            );
-                        }
-                    }
-                    self.emit(diag);
-                }
-                if let Some((module, subs)) = module_and_subs {
-                    let matched = subs.iter().find(|(n, _, _, _)| n == field).cloned();
-                    let hint = if matched.is_some() {
-                        format!(
-                            "Almide values have no fields — use the `{m}` stdlib module. No method-call or field-access syntax is supported.",
-                            m = module
-                        )
-                    } else {
-                        format!(
-                            "Almide values have no fields. Use `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — see docs/stdlib/{m}.md for available functions.",
-                            m = module
-                        )
-                    };
-                    let mut diag = super::err(
-                        format!("no field '{}' on {}", field, module),
-                        hint,
-                        format!("field access .{}", field),
-                    ).with_code("E013");
-                    if let Some((_, fn_name, args_tpl, _display_suffix)) = matched {
-                        // Mechanical rewrite: substitute the object's
-                        // source text into `args_tpl`. `member_span`
-                        // now covers the full `object.field` (parser
-                        // upgrade from the E002 arc), so replacing
-                        // that range leaves the surrounding source
-                        // intact. Falls back to a display-only
-                        // snippet when source text isn't available.
-                        let rewrite = object.span
-                            .and_then(|s| self.source_slice(s))
-                            .and_then(|obj_src| {
-                                let span = member_span?;
-                                let args = args_tpl.replace("{0}", &obj_src);
-                                Some((span, format!("{}{}", fn_name, args)))
-                            });
-                        if let Some((span, snippet)) = rewrite {
-                            diag = diag.with_try_replace(
-                                span.line, span.col, span.end_col,
-                                snippet,
-                            );
-                        } else {
-                            let display = format!(
-                                "{}{}{}",
-                                fn_name,
-                                args_tpl.replace("{0}", "xs"),
-                                _display_suffix,
-                            );
-                            diag = diag.with_try(display);
-                        }
-                    }
-                    self.emit(diag);
-                }
+        self.report_missing_record_field(object, field, concrete, member_span);
+        self.suggest_stdlib_for_member(object, field, concrete, member_span);
+    }
+
+    /// #847: a MISSING field on a CLOSED record used to sail through as
+    /// `Unknown` with no diagnostic at all — the failure surfaced as a codegen
+    /// postcondition ICE, or leaked rustc's E0609 from code the user never wrote.
+    /// Reported here with the record's field roster.
+    fn report_missing_record_field(
+        &mut self,
+        object: &ast::Expr,
+        field: &almide_base::intern::Sym,
+        concrete: &Ty,
+        member_span: Option<crate::ast::Span>,
+    ) {
+    // #847: a MISSING field on a closed record used to sail
+    // through as Unknown (no diagnostic at all — the failure
+    // surfaced as a codegen postcondition ICE, or leaked
+    // rustc's E0609). Report it here with the field roster.
+    let record_shape = self.env.resolve_named(&concrete);
+    if let Ty::Record { fields } = &record_shape {
+        let available = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+        let suggestion = almide_base::diagnostic::suggest(
+            field, fields.iter().map(|(n, _)| n.as_str()));
+        let hint = match &suggestion {
+            Some(close) => format!("Did you mean `{}`? Available fields: {}", close, available),
+            None => format!("Available fields: {}", available),
+        };
+        let mut diag = super::err(
+            format!("no field '{}' on {}", field, concrete.display()),
+            hint,
+            format!("field access .{}", field),
+        ).with_code("E013");
+        if let (Some(close), Some(span)) = (&suggestion, member_span) {
+            if let Some(obj_src) = object.span.and_then(|s| self.source_slice(s)) {
+                diag = diag.with_try_replace(
+                    span.line, span.col, span.end_col,
+                    format!("{}.{}", obj_src, close),
+                );
+            }
+        }
+        self.emit(diag);
+    }
+    }
+
+    /// Rewrite a Haskell/Python/Ruby-style field access into the Almide stdlib
+    /// call it means (`xs.head` → `list.first(xs)`).
+    fn suggest_stdlib_for_member(
+        &mut self,
+        object: &ast::Expr,
+        field: &almide_base::intern::Sym,
+        concrete: &Ty,
+        member_span: Option<crate::ast::Span>,
+    ) {
+    // (field → (module_fn, args_template, display_suffix))
+    // `args_template` is a tiny `("{0}", 1)`-style mini-
+    // language: `{0}` is substituted with the object's
+    // source slice; any trailing text goes verbatim.
+    // `display_suffix` is comment-only info shown after
+    // the mechanical replacement (e.g. the Option[T]
+    // reminder for `head`).
+    let module_and_subs: Option<(&str, Vec<(&str, &str, &str, &str)>)> = match &concrete {
+        Ty::Applied(TypeConstructorId::List, _) => Some(("list", vec![
+            ("head",   "list.first", "({0})", "  // returns Option[T]"),
+            ("tail",   "list.drop",  "({0}, 1)", ""),
+            ("length", "list.len",   "({0})", ""),
+            ("len",    "list.len",   "({0})", ""),
+            ("first",  "list.first", "({0})", ""),
+            ("last",   "list.last",  "({0})", ""),
+            ("size",   "list.len",   "({0})", ""),
+        ])),
+        Ty::String => Some(("string", vec![
+            ("length", "string.len",      "({0})", ""),
+            ("len",    "string.len",      "({0})", ""),
+            ("size",   "string.len",      "({0})", ""),
+            ("chars",  "string.to_chars", "({0})", ""),
+        ])),
+        _ => None,
+    };
+    if let Some((module, subs)) = module_and_subs {
+        let matched = subs.iter().find(|(n, _, _, _)| n == field).cloned();
+        let hint = if matched.is_some() {
+            format!(
+                "Almide values have no fields — use the `{m}` stdlib module. No method-call or field-access syntax is supported.",
+                m = module
+            )
+        } else {
+            format!(
+                "Almide values have no fields. Use `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — see docs/stdlib/{m}.md for available functions.",
+                m = module
+            )
+        };
+        let mut diag = super::err(
+            format!("no field '{}' on {}", field, module),
+            hint,
+            format!("field access .{}", field),
+        ).with_code("E013");
+        if let Some((_, fn_name, args_tpl, _display_suffix)) = matched {
+            // Mechanical rewrite: substitute the object's
+            // source text into `args_tpl`. `member_span`
+            // now covers the full `object.field` (parser
+            // upgrade from the E002 arc), so replacing
+            // that range leaves the surrounding source
+            // intact. Falls back to a display-only
+            // snippet when source text isn't available.
+            let rewrite = object.span
+                .and_then(|s| self.source_slice(s))
+                .and_then(|obj_src| {
+                    let span = member_span?;
+                    let args = args_tpl.replace("{0}", &obj_src);
+                    Some((span, format!("{}{}", fn_name, args)))
+                });
+            if let Some((span, snippet)) = rewrite {
+                diag = diag.with_try_replace(
+                    span.line, span.col, span.end_col,
+                    snippet,
+                );
+            } else {
+                let display = format!(
+                    "{}{}{}",
+                    fn_name,
+                    args_tpl.replace("{0}", "xs"),
+                    _display_suffix,
+                );
+                diag = diag.with_try(display);
+            }
+        }
+        self.emit(diag);
+    }
     }
 
     fn infer_expr_tuple_index(&mut self, expr: &mut ast::Expr) -> Ty {

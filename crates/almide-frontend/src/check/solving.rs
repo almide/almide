@@ -147,28 +147,7 @@ impl Checker {
                     && args_a.iter().zip(args_b.iter()).all(|(ta, tb)| self.unify_infer(ta, tb))
                     || (args_a.is_empty() || args_b.is_empty())
             }
-            // DIFFERENT-named nominal pair: expanding both sides and recursing
-            // into the fields loops forever on RECURSIVE types (`El = { children:
-            // List[El] }` vs its module twin `lib.El` re-reaches El×lib.El inside
-            // `children` — the svg cross-module `render(group(..))` stack
-            // overflow). Equi-recursive unification: mark the pair in progress
-            // and treat a re-encounter as success — the pair unifies iff every
-            // OTHER field path unifies, which the outer frames still check.
-            (Ty::Named(na, _), Ty::Named(nb, _)) => {
-                let key = if na.as_str() <= nb.as_str() { (*na, *nb) } else { (*nb, *na) };
-                if !self.unify_named_in_progress.insert(key) {
-                    return Some(true);
-                }
-                let ra = self.env.resolve_named(a);
-                let rb = self.env.resolve_named(b);
-                let out = if ra != *a || rb != *b {
-                    self.unify_infer(&ra, &rb)
-                } else {
-                    a.compatible(b)
-                };
-                self.unify_named_in_progress.remove(&key);
-                out
-            }
+            (Ty::Named(na, _), Ty::Named(nb, _)) => self.unify_distinct_nominals(a, b, *na, *nb),
             (Ty::Named(_, _), _) => {
                 let resolved = self.env.resolve_named(a);
                 if resolved != *a { self.unify_infer(&resolved, b) } else { a.compatible(b) }
@@ -179,6 +158,38 @@ impl Checker {
             }
             _ => return None,
         })
+    }
+
+    /// Unify two nominal types with DIFFERENT names by expanding both to their
+    /// structural forms.
+    ///
+    /// Expanding and recursing into the fields loops forever on a RECURSIVE type
+    /// — `El = { children: List[El] }` against its module twin `lib.El`
+    /// re-reaches the `El` × `lib.El` pair inside `children`, which is the svg
+    /// cross-module `render(group(..))` stack overflow. So the unification is
+    /// equi-recursive: the pair is marked in progress and a re-encounter counts
+    /// as success. That is sound because the pair unifies iff every OTHER field
+    /// path unifies, and the outer frames still check those.
+    fn unify_distinct_nominals(
+        &mut self,
+        a: &Ty,
+        b: &Ty,
+        na: almide_base::intern::Sym,
+        nb: almide_base::intern::Sym,
+    ) -> bool {
+        let key = if na.as_str() <= nb.as_str() { (na, nb) } else { (nb, na) };
+        if !self.unify_named_in_progress.insert(key) {
+            return true;
+        }
+        let ra = self.env.resolve_named(a);
+        let rb = self.env.resolve_named(b);
+        let out = if ra != *a || rb != *b {
+            self.unify_infer(&ra, &rb)
+        } else {
+            a.compatible(b)
+        };
+        self.unify_named_in_progress.remove(&key);
+        out
     }
 
     /// `ConstParam` / `ConstValue` unify with their underlying type on either
@@ -241,79 +252,102 @@ fn unit_leak_snippet(context: &str, exp: &Ty, act: &Ty, fix_hint: Option<&FixHin
     };
     let exp_str = real_ty.display();
     if context.starts_with("fn '") {
-        // Try to specialize using the real binding name from the fn body
-        // AST — turns a generic "add a final expression" template into
-        // copy-pasteable code like `result` on its own line.
-        if let Some(FixHint::LastLetName(name)) = fix_hint {
-            return Some(format!(
-                "// fn body ends with `let {n} = ...` (a statement, returns Unit).\n\
-                // Add `{n}` as the trailing expression so the fn returns {t}:\n\
-                //\n\
-                //   let {n} = <computation>\n\
-                //   {n}                         // <-- add this line\n\
-                //\n\
-                // Or inline the computation as the tail expression directly.",
-                n = name, t = exp_str
-            ));
-        }
-        Some(format!(
-            "// fn body ends with a statement (returns Unit); \
-            add a final expression that evaluates to {t}:\n\
-            //   let tmp = <computation>\n\
-            //   tmp                            // <-- the returned value\n\
-            // Or inline:\n\
-            //   <expression>                   // must have type {t}",
-            t = exp_str
-        ))
-    } else if context == "if branches" || context == "if arm" {
-        // Specialize when we captured the actual variable being assigned in
-        // the Unit arm — turns the generic template into a rewrite that
-        // names the real variable so the LLM can copy-paste the structure.
-        if let Some(FixHint::IfArmAssign { arm, var_name }) = fix_hint {
-            let (unit_arm, good_arm) = match arm {
-                IfArm::Then => ("then", "else"),
-                IfArm::Else => ("else", "then"),
-            };
-            return Some(format!(
-                "// the {unit_arm}-arm is `{v} = ...` (assignment, returns Unit).\n\
-                // if/else is an *expression*: both arms must produce {t}.\n\
-                // Rewrite as a rebinding of `{v}`:\n\
-                //\n\
-                //   let new_{v} = if cond then <new-value-for-{v}> else {v}\n\
-                //\n\
-                // Or, if {v} is a loop-like accumulator, use recursion instead of mutation.",
-                unit_arm = unit_arm, v = var_name, t = exp_str
-            ));
-        }
-        if let Some(FixHint::IfArmsAssign { then_var, else_var }) = fix_hint {
-            let primary = then_var.as_deref().or(else_var.as_deref()).unwrap_or("x");
-            return Some(format!(
-                "// both arms are assignments (each returns Unit).\n\
-                // if/else is an *expression*: rebind `{v}` instead of mutating it:\n\
-                //\n\
-                //   let new_{v} = if cond then <value-when-true> else <value-when-false>",
-                v = primary
-            ));
-        }
-        Some(format!(
-            "// an if-arm is a statement (e.g. `x = y` or a bare `let`) — returns Unit.\n\
-            // if/else is an *expression*: both arms must produce {t}. Rebind via let instead:\n\
-            //   let new_x = if cond then <then-value> else <else-value>\n\
-            // Or for loop-like state, use recursion:\n\
-            //   fn step(x: {t}) -> {t} = if cond then step(<update>) else x",
-            t = exp_str
-        ))
-    } else if context == "match arm" {
-        Some(format!(
-            "// a match arm is a statement (returns Unit). \
-            Each arm must produce {t}.\n\
-            //   match expr {{\n\
-            //     PatA => value_a,   // <-- must be {t}\n\
-            //     PatB => value_b,\n\
-            //   }}",
-            t = exp_str
-        ))
-    } else {
-        None
+        return fn_body_unit_leak(&exp_str, fix_hint);
     }
+    if context == "if branches" || context == "if arm" {
+        return if_arm_unit_leak(&exp_str, fix_hint);
+    }
+    if context == "match arm" {
+        return match_arm_unit_leak(&exp_str);
+    }
+    None
+}
+
+/// The fn-body form: the body's last statement produced no value.
+///
+/// When the AST gave us the name of that last `let`, the snippet names it, so
+/// the fix is copy-pasteable rather than a template to fill in.
+fn fn_body_unit_leak(exp_str: &str, fix_hint: Option<&FixHint>) -> Option<String> {
+    // Try to specialize using the real binding name from the fn body
+    // AST — turns a generic "add a final expression" template into
+    // copy-pasteable code like `result` on its own line.
+    if let Some(FixHint::LastLetName(name)) = fix_hint {
+        return Some(format!(
+            "// fn body ends with `let {n} = ...` (a statement, returns Unit).\n\
+            // Add `{n}` as the trailing expression so the fn returns {t}:\n\
+            //\n\
+            //   let {n} = <computation>\n\
+            //   {n}                         // <-- add this line\n\
+            //\n\
+            // Or inline the computation as the tail expression directly.",
+            n = name, t = exp_str
+        ));
+    }
+    Some(format!(
+        "// fn body ends with a statement (returns Unit); \
+        add a final expression that evaluates to {t}:\n\
+        //   let tmp = <computation>\n\
+        //   tmp                            // <-- the returned value\n\
+        // Or inline:\n\
+        //   <expression>                   // must have type {t}",
+        t = exp_str
+    ))
+}
+
+/// The if-branch form: one branch assigns instead of yielding.
+///
+/// Two specialisations, by how much the AST captured: one arm's assigned
+/// variable, or both arms'. Naming the real variable turns a generic template
+/// into the actual rewrite.
+fn if_arm_unit_leak(exp_str: &str, fix_hint: Option<&FixHint>) -> Option<String> {
+    // Specialize when we captured the actual variable being assigned in
+    // the Unit arm — turns the generic template into a rewrite that
+    // names the real variable so the LLM can copy-paste the structure.
+    if let Some(FixHint::IfArmAssign { arm, var_name }) = fix_hint {
+        let (unit_arm, good_arm) = match arm {
+            IfArm::Then => ("then", "else"),
+            IfArm::Else => ("else", "then"),
+        };
+        return Some(format!(
+            "// the {unit_arm}-arm is `{v} = ...` (assignment, returns Unit).\n\
+            // if/else is an *expression*: both arms must produce {t}.\n\
+            // Rewrite as a rebinding of `{v}`:\n\
+            //\n\
+            //   let new_{v} = if cond then <new-value-for-{v}> else {v}\n\
+            //\n\
+            // Or, if {v} is a loop-like accumulator, use recursion instead of mutation.",
+            unit_arm = unit_arm, v = var_name, t = exp_str
+        ));
+    }
+    if let Some(FixHint::IfArmsAssign { then_var, else_var }) = fix_hint {
+        let primary = then_var.as_deref().or(else_var.as_deref()).unwrap_or("x");
+        return Some(format!(
+            "// both arms are assignments (each returns Unit).\n\
+            // if/else is an *expression*: rebind `{v}` instead of mutating it:\n\
+            //\n\
+            //   let new_{v} = if cond then <value-when-true> else <value-when-false>",
+            v = primary
+        ));
+    }
+    Some(format!(
+        "// an if-arm is a statement (e.g. `x = y` or a bare `let`) — returns Unit.\n\
+        // if/else is an *expression*: both arms must produce {t}. Rebind via let instead:\n\
+        //   let new_x = if cond then <then-value> else <else-value>\n\
+        // Or for loop-like state, use recursion:\n\
+        //   fn step(x: {t}) -> {t} = if cond then step(<update>) else x",
+        t = exp_str
+    ))
+}
+
+/// The match-arm form.
+fn match_arm_unit_leak(exp_str: &str) -> Option<String> {
+    Some(format!(
+        "// a match arm is a statement (returns Unit). \
+        Each arm must produce {t}.\n\
+        //   match expr {{\n\
+        //     PatA => value_a,   // <-- must be {t}\n\
+        //     PatB => value_b,\n\
+        //   }}",
+        t = exp_str
+    ))
 }

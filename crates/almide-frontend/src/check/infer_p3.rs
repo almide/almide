@@ -68,6 +68,17 @@ impl Checker {
     /// source order. `None` means "not my group" — the dispatcher tries the
     /// groups in that order, so the dispatch an expression sees is unchanged.
     pub(super) fn infer_expr_g3_operand(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        if let Some(ty) = self.infer_expr_g3_range_ctor(expr) { return Some(ty); }
+        if let Some(ty) = self.infer_expr_g3_grouping(expr) { return Some(ty); }
+        None
+    }
+
+    /// Ranges and the `Option` / `Result` constructors.
+    ///
+    /// One group of `infer_expr_inner`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group" — the router tries the groups in that
+    /// order, so the dispatch is unchanged.
+    pub(super) fn infer_expr_g3_range_ctor(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
         Some(match &mut expr.kind {
             ExprKind::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::list(st) }
 
@@ -88,6 +99,17 @@ impl Checker {
                 };
                 Ty::result(ok_ty, err_ty)
             }
+            _ => return None,
+        })
+    }
+
+    /// `?`, parenthesised expressions, `break`, and the typed hole.
+    ///
+    /// One group of `infer_expr_inner`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group" — the router tries the groups in that
+    /// order, so the dispatch is unchanged.
+    pub(super) fn infer_expr_g3_grouping(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        Some(match &mut expr.kind {
             ExprKind::Try { expr, .. } => {
                 let ty = self.infer_expr(expr);
                 match &ty {

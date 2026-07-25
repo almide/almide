@@ -89,6 +89,17 @@ impl Checker {
     /// order. `None` means "not my group" — the router tries the groups in that
     /// order, so which rule a call gets is unchanged.
     pub(super) fn check_builtin_ctor(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        if let Some(ty) = self.check_builtin_result_ctor(name, arg_tys) { return Some(ty); }
+        if let Some(ty) = self.check_builtin_option_ctor(name, arg_tys) { return Some(ty); }
+        None
+    }
+
+    /// `ok` and `err`.
+    ///
+    /// One group of `check_builtin_call`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group" — the router tries the groups in that
+    /// order, so the dispatch is unchanged.
+    pub(super) fn check_builtin_result_ctor(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
         match name {
             "ok" => {
                 let ok_ty = arg_tys.first().cloned().unwrap_or(Ty::Unit);
@@ -106,6 +117,17 @@ impl Checker {
                 };
                 Some(Ty::result(ok_ty, err_ty))
             }
+            _ => return None,
+        }
+    }
+
+    /// `some`, and `unwrap_or`'s fallback typing.
+    ///
+    /// One group of `check_builtin_call`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group" — the router tries the groups in that
+    /// order, so the dispatch is unchanged.
+    pub(super) fn check_builtin_option_ctor(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        match name {
             "some" => Some(Ty::option(arg_tys.first().cloned().unwrap_or_else(|| self.fresh_var()))),
             "unwrap_or" if arg_tys.len() >= 2 => {
                 let concrete = resolve_ty(&arg_tys[0], &self.uf);

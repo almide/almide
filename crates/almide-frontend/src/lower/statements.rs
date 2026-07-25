@@ -8,16 +8,7 @@ use super::LowerCtx;
 use super::expressions::lower_expr;
 
 pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
-    let span = match stmt {
-        ast::Stmt::Let { span, .. } | ast::Stmt::Var { span, .. }
-        | ast::Stmt::Assign { span, .. } | ast::Stmt::Guard { span, .. }
-        | ast::Stmt::GuardLet { span, .. }
-        | ast::Stmt::Expr { span, .. } | ast::Stmt::IndexAssign { span, .. }
-        | ast::Stmt::FieldAssign { span, .. } | ast::Stmt::LetDestructure { span, .. }
-        | ast::Stmt::Error { span, .. } => *span,
-        ast::Stmt::Comment { .. } => None,
-    };
-
+    let span = stmt_span(stmt);
     let kind = match stmt {
         ast::Stmt::Let { name, ty, value, .. } =>
             lower_bind(ctx, name, ty.as_ref(), value, Mutability::Let, span),
@@ -84,6 +75,22 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     };
 
     IrStmt { kind, span }
+}
+
+/// The source span of a statement.
+///
+/// A comment has no span of its own: it is attached to whatever follows it, so
+/// pointing a diagnostic at the comment would point away from the code.
+fn stmt_span(stmt: &ast::Stmt) -> Option<ast::Span> {
+    match stmt {
+        ast::Stmt::Let { span, .. } | ast::Stmt::Var { span, .. }
+        | ast::Stmt::Assign { span, .. } | ast::Stmt::Guard { span, .. }
+        | ast::Stmt::GuardLet { span, .. }
+        | ast::Stmt::Expr { span, .. } | ast::Stmt::IndexAssign { span, .. }
+        | ast::Stmt::FieldAssign { span, .. } | ast::Stmt::LetDestructure { span, .. }
+        | ast::Stmt::Error { span, .. } => *span,
+        ast::Stmt::Comment { .. } => None,
+    }
 }
 
 /// Lower a `let` or `var` binding.

@@ -502,10 +502,21 @@ impl Checker {
             if !undecidable { continue; }
             let key = (site.span.map(|s| s.line as u32), site.span.map(|s| s.col as u32));
             if !reported.insert(key) { continue; }
-            let what = match &site.name {
-                Some(n) => format!("binding '{}'", n),
-                None => "this expression".to_string(),
-            };
+            self.emit_unresolved_binding_diagnostic(&site, &resolved);
+        }
+    }
+
+    /// Emit the E025 for a binding whose type keeps an undecidable slot.
+    ///
+    /// The wording splits on whether the site has a NAME: a named binding can be
+    /// annotated in place and gets a `try` line naming it, while a bare
+    /// expression has to be bound first before there is anywhere to put the
+    /// annotation.
+    fn emit_unresolved_binding_diagnostic(&mut self, site: &UnresolvedBindingSite, resolved: &Ty) {
+        let what = match &site.name {
+            Some(n) => format!("binding '{}'", n),
+            None => "this expression".to_string(),
+        };
             let fix = match &site.name {
                 Some(n) => format!(
                     "Annotate the binding with the full type, e.g. `let {}: Result[Int, String] = ...`. \
@@ -534,7 +545,6 @@ impl Checker {
                 if s.end_col > s.col { diag.end_col = Some(s.end_col); }
             }
             self.diagnostics.push(diag);
-        }
     }
 
     /// True when `ty` (already resolved against the union-find) is a collection
