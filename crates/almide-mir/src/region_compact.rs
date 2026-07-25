@@ -164,126 +164,13 @@ fn analyze(prog: &MirProgram, idxs: &[usize], shapes: &[Vec<i64>]) -> Option<Pla
     let mut all_covs: Vec<BTreeMap<usize, usize>> = Vec::new();
 
     for &fi in idxs {
-        let f = &prog.functions[fi];
-        let (def, consts) = fn_tables(f);
-        let mut chain_ops: BTreeSet<usize> = BTreeSet::new();
-        let mut chain_vals: BTreeSet<ValueId> = BTreeSet::new();
-        // dst → per-slot construction-store count (must end exactly-once each).
-        let mut site_cov: BTreeMap<ValueId, BTreeMap<usize, usize>> = BTreeMap::new();
-
-        // Block sources first: exactly the DynList-const shape, nothing else.
-        for (i, op) in f.ops.iter().enumerate() {
-            match op {
-                Op::Alloc { dst, init: Init::DynList { len }, .. } => {
-                    let &n = consts.get(len)?;
-                    let n = usize::try_from(n).ok().filter(|n| (1..=16).contains(n))?;
-                    match n_elems {
-                        Some(prev) if prev != n => return None,
-                        _ => n_elems = Some(n),
-                    }
-                    site_cov.insert(*dst, BTreeMap::new());
-                    rewrites.insert((fi, i), Rw::AllocC { dst: *dst });
-                }
-                Op::Alloc { .. } | Op::ListLit { .. } | Op::ListSetScalar { .. } => return None,
-                Op::Prim { kind: PrimKind::ElemAddr, .. } => return None,
-                _ => {}
-            }
-        }
-
-        for (i, op) in f.ops.iter().enumerate() {
-            match op {
-                Op::ListGetScalar { dst, list, idx } => {
-                    let &k = consts.get(idx)?;
-                    let k = usize::try_from(k).ok()?;
-                    if k == 0 {
-                        rewrites.insert((fi, i), Rw::TagRead { dst: *dst, base: *list });
-                    } else {
-                        max_k = max_k.max(k);
-                        unify_slot(&mut slot_map, k, false)?;
-                        rewrites.insert((fi, i), Rw::LoadS { dst: *dst, base: *list, k });
-                    }
-                }
-                Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } => {
-                    let (base, k) =
-                        chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                    if k == 0 {
-                        return None; // a tag is never a handle
-                    }
-                    max_k = max_k.max(k);
-                    unify_slot(&mut slot_map, k, true)?;
-                    rewrites.insert((fi, i), Rw::LoadH { dst: *d, base, k });
-                }
-                Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(d), args } => {
-                    let (base, k) =
-                        chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                    if k == 0 {
-                        rewrites.insert((fi, i), Rw::TagRead { dst: *d, base });
-                    } else {
-                        max_k = max_k.max(k);
-                        unify_slot(&mut slot_map, k, false)?;
-                        rewrites.insert((fi, i), Rw::LoadS { dst: *d, base, k });
-                    }
-                }
-                Op::Prim { kind: PrimKind::Load { .. }, .. } => return None,
-                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } => {
-                    let (base, k) =
-                        chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                    // Construction only: the root must be this family's own
-                    // fresh Alloc (no writes into loaded/param blocks).
-                    let cov = site_cov.get_mut(&base)?;
-                    *cov.entry(k).or_insert(0) += 1;
-                    if k == 0 {
-                        let &t = consts.get(&args[1])?;
-                        match tag {
-                            Some(prev) if prev != t => return None,
-                            _ => tag = Some(t),
-                        }
-                        rewrites.insert((fi, i), Rw::Delete);
-                    } else if let Some(&hd) = def.get(&args[1]) {
-                        max_k = max_k.max(k);
-                        if let Op::Prim { kind: PrimKind::Handle, args: hargs, .. } = &f.ops[hd] {
-                            // A handle bridged to i64 for the old 8-byte slot:
-                            // store the raw i32 pointer instead.
-                            chain_ops.insert(hd);
-                            chain_vals.insert(args[1]);
-                            unify_slot(&mut slot_map, k, true)?;
-                            rewrites
-                                .insert((fi, i), Rw::StoreH { base, val: hargs[0], k });
-                        } else {
-                            unify_slot(&mut slot_map, k, false)?;
-                            rewrites.insert((fi, i), Rw::StoreS { base, val: args[1], k });
-                        }
-                    } else {
-                        max_k = max_k.max(k);
-                        unify_slot(&mut slot_map, k, false)?;
-                        rewrites.insert((fi, i), Rw::StoreS { base, val: args[1], k });
-                    }
-                }
-                Op::Prim { kind: PrimKind::Store { .. }, .. } => return None,
-                _ => {}
-            }
-        }
-
-        // Escape audit: a chased address (or bridged handle-int) may only be
-        // consumed by its own chain or by an op this pass rewrites away.
-        let mut vals: Vec<ValueId> = Vec::new();
-        for (i, op) in f.ops.iter().enumerate() {
-            if chain_ops.contains(&i) || rewrites.contains_key(&(fi, i)) {
-                continue;
-            }
-            vals.clear();
-            op_values(op, &mut vals);
-            let dst = defined_value(op);
-            if vals.iter().any(|v| Some(*v) != dst && chain_vals.contains(v)) {
-                return None;
-            }
-        }
-        if let Some(r) = f.ret {
-            if chain_vals.contains(&r) {
-                return None;
-            }
-        }
-        all_covs.extend(site_cov.into_values());
+        scan_region_function(
+            prog, fi,
+            &mut ScanState {
+                n_elems: &mut n_elems, tag: &mut tag, slot_map: &mut slot_map,
+                rewrites: &mut rewrites, max_k: &mut max_k, all_covs: &mut all_covs,
+            },
+        )?;
     }
 
     let n = n_elems?;
@@ -309,6 +196,166 @@ fn analyze(prog: &MirProgram, idxs: &[usize], shapes: &[Vec<i64>]) -> Option<Pla
     }
     let slots: Vec<bool> = (1..n).map(|k| slot_map.get(&k).copied()).collect::<Option<_>>()?;
     Some(Plan { tag: tag?, slots, rewrites })
+}
+
+/// The analysis state one function's scan reads and extends.
+///
+/// Every field accumulates ACROSS the functions of a clone family — a family
+/// shares one compact layout, so the element count, tag and slot map must agree
+/// on all of them. Threading them as one value is what keeps `scan_region_function`
+/// from being handed a partial set.
+struct ScanState<'a> {
+    /// The family's element count; `None` until the first alloc site fixes it.
+    n_elems: &'a mut Option<usize>,
+    /// The family's tag value.
+    tag: &'a mut Option<i64>,
+    /// Per-slot: whether the slot holds a handle.
+    slot_map: &'a mut BTreeMap<usize, bool>,
+    /// The rewrites the apply pass will perform, keyed by (function, op).
+    rewrites: &'a mut BTreeMap<(usize, usize), Rw>,
+    /// The highest slot index any in-family read touches.
+    max_k: &'a mut usize,
+    /// Per-site construction coverage, validated against the FINAL element
+    /// count — a consumer-only member can run before any alloc is seen.
+    all_covs: &'a mut Vec<BTreeMap<usize, usize>>,
+}
+
+/// Scan one function of a clone family.
+///
+/// `None` rejects the whole family: the layouts must agree across it, so a
+/// single member that cannot be compacted disqualifies the rest.
+fn scan_region_function(
+    prog: &MirProgram,
+    fi: usize,
+    st: &mut ScanState<'_>,
+) -> Option<()> {
+    let ScanState { n_elems, tag, slot_map, rewrites, max_k, all_covs } = st;
+    // Re-borrow through the struct's references so the moved body, which was
+    // written against plain locals, keeps its `*n_elems = Some(n)` / `*max_k`
+    // spellings.
+    let (n_elems, tag, mut slot_map, mut rewrites, max_k, mut all_covs) =
+        (&mut **n_elems, &mut **tag, &mut **slot_map, &mut **rewrites, &mut **max_k, &mut **all_covs);
+    let f = &prog.functions[fi];
+    let (def, consts) = fn_tables(f);
+    let mut chain_ops: BTreeSet<usize> = BTreeSet::new();
+    let mut chain_vals: BTreeSet<ValueId> = BTreeSet::new();
+    // dst → per-slot construction-store count (must end exactly-once each).
+    let mut site_cov: BTreeMap<ValueId, BTreeMap<usize, usize>> = BTreeMap::new();
+
+    // Block sources first: exactly the DynList-const shape, nothing else.
+    for (i, op) in f.ops.iter().enumerate() {
+        match op {
+            Op::Alloc { dst, init: Init::DynList { len }, .. } => {
+                let &n = consts.get(len)?;
+                let n = usize::try_from(n).ok().filter(|n| (1..=16).contains(n))?;
+                match n_elems {
+                    Some(prev) if *prev != n => return None,
+                    _ => *n_elems = Some(n),
+                }
+                site_cov.insert(*dst, BTreeMap::new());
+                rewrites.insert((fi, i), Rw::AllocC { dst: *dst });
+            }
+            Op::Alloc { .. } | Op::ListLit { .. } | Op::ListSetScalar { .. } => return None,
+            Op::Prim { kind: PrimKind::ElemAddr, .. } => return None,
+            _ => {}
+        }
+    }
+
+    for (i, op) in f.ops.iter().enumerate() {
+        match op {
+            Op::ListGetScalar { dst, list, idx } => {
+                let &k = consts.get(idx)?;
+                let k = usize::try_from(k).ok()?;
+                if k == 0 {
+                    rewrites.insert((fi, i), Rw::TagRead { dst: *dst, base: *list });
+                } else {
+                    *max_k = (*max_k).max(k);
+                    unify_slot(&mut slot_map, k, false)?;
+                    rewrites.insert((fi, i), Rw::LoadS { dst: *dst, base: *list, k });
+                }
+            }
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } => {
+                let (base, k) =
+                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
+                if k == 0 {
+                    return None; // a tag is never a handle
+                }
+                *max_k = (*max_k).max(k);
+                unify_slot(&mut slot_map, k, true)?;
+                rewrites.insert((fi, i), Rw::LoadH { dst: *d, base, k });
+            }
+            Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(d), args } => {
+                let (base, k) =
+                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
+                if k == 0 {
+                    rewrites.insert((fi, i), Rw::TagRead { dst: *d, base });
+                } else {
+                    *max_k = (*max_k).max(k);
+                    unify_slot(&mut slot_map, k, false)?;
+                    rewrites.insert((fi, i), Rw::LoadS { dst: *d, base, k });
+                }
+            }
+            Op::Prim { kind: PrimKind::Load { .. }, .. } => return None,
+            Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } => {
+                let (base, k) =
+                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
+                // Construction only: the root must be this family's own
+                // fresh Alloc (no writes into loaded/param blocks).
+                let cov = site_cov.get_mut(&base)?;
+                *cov.entry(k).or_insert(0) += 1;
+                if k == 0 {
+                    let &t = consts.get(&args[1])?;
+                    match tag {
+                        Some(prev) if *prev != t => return None,
+                        _ => *tag = Some(t),
+                    }
+                    rewrites.insert((fi, i), Rw::Delete);
+                } else if let Some(&hd) = def.get(&args[1]) {
+                    *max_k = (*max_k).max(k);
+                    if let Op::Prim { kind: PrimKind::Handle, args: hargs, .. } = &f.ops[hd] {
+                        // A handle bridged to i64 for the old 8-byte slot:
+                        // store the raw i32 pointer instead.
+                        chain_ops.insert(hd);
+                        chain_vals.insert(args[1]);
+                        unify_slot(&mut slot_map, k, true)?;
+                        rewrites
+                            .insert((fi, i), Rw::StoreH { base, val: hargs[0], k });
+                    } else {
+                        unify_slot(&mut slot_map, k, false)?;
+                        rewrites.insert((fi, i), Rw::StoreS { base, val: args[1], k });
+                    }
+                } else {
+                    *max_k = (*max_k).max(k);
+                    unify_slot(&mut slot_map, k, false)?;
+                    rewrites.insert((fi, i), Rw::StoreS { base, val: args[1], k });
+                }
+            }
+            Op::Prim { kind: PrimKind::Store { .. }, .. } => return None,
+            _ => {}
+        }
+    }
+
+    // Escape audit: a chased address (or bridged handle-int) may only be
+    // consumed by its own chain or by an op this pass rewrites away.
+    let mut vals: Vec<ValueId> = Vec::new();
+    for (i, op) in f.ops.iter().enumerate() {
+        if chain_ops.contains(&i) || rewrites.contains_key(&(fi, i)) {
+            continue;
+        }
+        vals.clear();
+        op_values(op, &mut vals);
+        let dst = defined_value(op);
+        if vals.iter().any(|v| Some(*v) != dst && chain_vals.contains(v)) {
+            return None;
+        }
+    }
+    if let Some(r) = f.ret {
+        if chain_vals.contains(&r) {
+            return None;
+        }
+    }
+    all_covs.extend(site_cov.into_values());
+    Some(())
 }
 
 fn apply(prog: &mut MirProgram, idxs: &[usize], plan: &Plan, shapes: &[Vec<i64>]) {
