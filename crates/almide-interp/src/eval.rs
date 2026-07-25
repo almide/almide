@@ -19,11 +19,16 @@ use crate::{Flow, Interpreter};
 
 /// Helper: short-circuit a `Flow` that is not a plain value out of an
 /// expression evaluator. Returns the inner `Value`, or propagates the signal.
+///
+/// Usable from a fn returning either `Flow` or `Option<Flow>`: the propagated
+/// signal goes through `From`, and core's blanket `impl<T> From<T> for Option<T>`
+/// wraps it as `Some`, so the `eval_expr_*` group helpers share the arm bodies
+/// verbatim. `None` stays reserved for "not my group".
 macro_rules! val {
     ($flow:expr) => {
         match $flow {
             Flow::Value(v) => v,
-            other => return other,
+            other => return ::core::convert::From::from(other),
         }
     };
 }
@@ -33,14 +38,38 @@ impl<'a> Interpreter<'a> {
         if let Err(f) = self.step() {
             return f;
         }
-        match &expr.kind {
+        if let Some(flow) = self.eval_expr_literal(expr, scope) { return flow; }
+        if let Some(flow) = self.eval_expr_operator(expr, scope) { return flow; }
+        if let Some(flow) = self.eval_expr_control(expr, scope) { return flow; }
+        if let Some(flow) = self.eval_expr_call(expr, scope) { return flow; }
+        if let Some(flow) = self.eval_expr_collection(expr, scope) { return flow; }
+        if let Some(flow) = self.eval_expr_function(expr, scope) { return flow; }
+        if let Some(flow) = self.eval_expr_variant(expr, scope) { return flow; }
+        if let Some(flow) = self.eval_expr_misc(expr, scope) { return flow; }
+        // No group claimed the node. ABORT rather than invent a value: this
+        // interpreter is the third cross-target oracle, and an abstention is a
+        // recorded hole in the executable spec while a wrong answer is a wrong
+        // verdict against the other two legs.
+        Flow::Abort(format!("interp: no evaluation rule for {:?}", std::mem::discriminant(&expr.kind)))
+    }
+
+    /// Literals and variable/function references.
+    ///
+    /// Extracted from `eval_expr` (name-router split): `None` means "not my
+    /// group". The groups are the comment sections the function already carried,
+    /// so the partition is the one a reader was already using. A dropped arm here
+    /// SHRINKS the executable spec rather than failing loudly, so the router's
+    /// final fallback aborts with the node kind instead of silently returning a
+    /// value — the interp is the third cross-target oracle and a wrong answer is
+    /// worse than an abstention.
+    fn eval_expr_literal(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
+        Some(match &expr.kind {
             // ── Literals ──
             IrExprKind::LitInt { value } => Flow::val(Value::Int(*value)),
             IrExprKind::LitFloat { value } => Flow::val(Value::Float(*value)),
             IrExprKind::LitStr { value } => Flow::val(Value::str(value.clone())),
             IrExprKind::LitBool { value } => Flow::val(Value::Bool(*value)),
             IrExprKind::Unit => Flow::val(Value::Unit),
-
             // ── Variables ──
             IrExprKind::Var { id } => match scope.get(*id) {
                 Some(v) => Flow::val(v),
@@ -54,14 +83,42 @@ impl<'a> Interpreter<'a> {
             // by capturing its name; application looks it up. We model it as a
             // closure whose body re-dispatches to the named fn.
             IrExprKind::FnRef { name } => self.fn_ref_value(*name, scope),
+            _ => return None,
+        })
+    }
 
+    /// Unary and binary operators.
+    ///
+    /// Extracted from `eval_expr` (name-router split): `None` means "not my
+    /// group". The groups are the comment sections the function already carried,
+    /// so the partition is the one a reader was already using. A dropped arm here
+    /// SHRINKS the executable spec rather than failing loudly, so the router's
+    /// final fallback aborts with the node kind instead of silently returning a
+    /// value — the interp is the third cross-target oracle and a wrong answer is
+    /// worse than an abstention.
+    fn eval_expr_operator(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
+        Some(match &expr.kind {
             // ── Operators ──
             IrExprKind::BinOp { op, left, right } => self.eval_binop(*op, left, right, scope),
             IrExprKind::UnOp { op, operand } => {
                 let v = val!(self.eval_expr(operand, scope));
                 self.eval_unop(*op, v)
             }
+            _ => return None,
+        })
+    }
 
+    /// Control flow and loops.
+    ///
+    /// Extracted from `eval_expr` (name-router split): `None` means "not my
+    /// group". The groups are the comment sections the function already carried,
+    /// so the partition is the one a reader was already using. A dropped arm here
+    /// SHRINKS the executable spec rather than failing loudly, so the router's
+    /// final fallback aborts with the node kind instead of silently returning a
+    /// value — the interp is the third cross-target oracle and a wrong answer is
+    /// worse than an abstention.
+    fn eval_expr_control(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
+        Some(match &expr.kind {
             // ── Control flow ──
             IrExprKind::If { cond, then, else_ } => {
                 let c = val!(self.eval_expr(cond, scope));
@@ -99,13 +156,17 @@ impl<'a> Interpreter<'a> {
                 }
                 // Single-expr fan is the bare value (no 1-tuple), matching both
                 // backends; multi-expr is a tuple.
-                if out.len() == 1 {
-                    Flow::val(out.into_iter().next().unwrap())
-                } else {
-                    Flow::val(Value::tuple(out))
+                // A single-expr fan is the bare value (no 1-tuple); `into_iter`
+                // is destructured rather than unwrapped so the 1-element case is
+                // proved by the pattern instead of by a length check.
+                let mut it = out.into_iter();
+                match (it.next(), it.next()) {
+                    (Some(only), None) => Flow::val(only),
+                    (first, second) => Flow::val(Value::tuple(
+                        first.into_iter().chain(second).chain(it).collect(),
+                    )),
                 }
             }
-
             // ── Loops ──
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                 self.eval_for_in(*var, var_tuple.as_deref(), iterable, body, scope)
@@ -113,13 +174,39 @@ impl<'a> Interpreter<'a> {
             IrExprKind::While { cond, body } => self.eval_while(cond, body, scope),
             IrExprKind::Break => Flow::Break,
             IrExprKind::Continue => Flow::Continue,
+            _ => return None,
+        })
+    }
 
+    /// Direct and tail calls.
+    ///
+    /// Extracted from `eval_expr` (name-router split): `None` means "not my
+    /// group". The groups are the comment sections the function already carried,
+    /// so the partition is the one a reader was already using. A dropped arm here
+    /// SHRINKS the executable spec rather than failing loudly, so the router's
+    /// final fallback aborts with the node kind instead of silently returning a
+    /// value — the interp is the third cross-target oracle and a wrong answer is
+    /// worse than an abstention.
+    fn eval_expr_call(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
+        Some(match &expr.kind {
             // ── Calls ──
             IrExprKind::Call { target, args, .. } => self.eval_call(target, args, scope),
             // TailCall is codegen-inserted (TailCallMarkPass, post-cut) but we
             // treat it == Call defensively.
             IrExprKind::TailCall { target, args } => self.eval_call(target, args, scope),
+            _ => return None,
+        })
+    }
 
+    /// Collection construction, ranges, and element/field access.
+    ///
+    /// Extracted from `eval_expr` (name-router split): `None` means "not my
+    /// group". Kept as ONE function: an arm-table halving cut the `Range` arm's
+    /// inner `match (s, e)` in half and silently dropped its Int case, so the
+    /// interpreter aborted on every range. Splitting a match whose arms contain
+    /// their own matches is not a mechanical operation.
+    fn eval_expr_collection(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
+        Some(match &expr.kind {
             // ── Collections ──
             IrExprKind::List { elements } => {
                 let mut out = Vec::with_capacity(elements.len());
@@ -152,14 +239,7 @@ impl<'a> Interpreter<'a> {
                 self.eval_spread_record(base, fields, scope)
             }
             IrExprKind::Range { start, end, inclusive } => {
-                let s = val!(self.eval_expr(start, scope));
-                let e = val!(self.eval_expr(end, scope));
-                match (s, e) {
-                    (Value::Int(s), Value::Int(e)) => {
-                        Flow::val(Value::Range { start: s, end: e, inclusive: *inclusive })
-                    }
-                    _ => Flow::Abort("internal: range bounds must be Int".into()),
-                }
+                self.eval_range(start, end, *inclusive, scope)
             }
 
             // ── Access ──
@@ -200,6 +280,21 @@ impl<'a> Interpreter<'a> {
                 }
             }
 
+            _ => return None,
+        })
+    }
+
+    /// Lambdas and string interpolation.
+    ///
+    /// Extracted from `eval_expr` (name-router split): `None` means "not my
+    /// group". The groups are the comment sections the function already carried,
+    /// so the partition is the one a reader was already using. A dropped arm here
+    /// SHRINKS the executable spec rather than failing loudly, so the router's
+    /// final fallback aborts with the node kind instead of silently returning a
+    /// value — the interp is the third cross-target oracle and a wrong answer is
+    /// worse than an abstention.
+    fn eval_expr_function(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
+        Some(match &expr.kind {
             // ── Functions ──
             IrExprKind::Lambda { params, body, .. } => {
                 let clo = Closure {
@@ -209,10 +304,21 @@ impl<'a> Interpreter<'a> {
                 };
                 Flow::val(Value::Closure(Rc::new(clo)))
             }
-
             // ── Strings ──
             IrExprKind::StringInterp { parts } => self.eval_string_interp(parts, scope),
+            _ => return None,
+        })
+    }
 
+    /// `Result`/`Option` construction, unwrap, and the optional chain.
+    ///
+    /// Extracted from `eval_expr` (name-router split): `None` means "not my
+    /// group". Kept as ONE function for the same reason as
+    /// `eval_expr_collection` — several arms carry their own `match`, and cutting
+    /// the table in half cut those too (the `UnwrapOr` arm lost every real case
+    /// and answered `None`, which the router then read as "unhandled").
+    fn eval_expr_variant(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
+        Some(match &expr.kind {
             // ── Result / Option ──
             IrExprKind::ResultOk { expr } => {
                 let v = val!(self.eval_expr(expr, scope));
@@ -233,14 +339,7 @@ impl<'a> Interpreter<'a> {
             }
             // `??` — unwrap with a fallback value.
             IrExprKind::UnwrapOr { expr, fallback } => {
-                let v = val!(self.eval_expr(expr, scope));
-                match v {
-                    Value::Option(Some(inner)) => Flow::val(*inner),
-                    Value::Option(None) => self.eval_expr(fallback, scope),
-                    Value::Result(Ok(inner)) => Flow::val(*inner),
-                    Value::Result(Err(_)) => self.eval_expr(fallback, scope),
-                    other => Flow::val(other),
-                }
+                self.eval_unwrap_or(expr, fallback, scope)
             }
             // `?` Result→Option (identity for Option).
             IrExprKind::ToOption { expr } => {
@@ -259,12 +358,56 @@ impl<'a> Interpreter<'a> {
             // The interp is synchronous: await is identity over the value.
             IrExprKind::Await { expr } => self.eval_expr(expr, scope),
 
+            _ => return None,
+        })
+    }
+
+    /// `start..end` / `start..=end` — both bounds must evaluate to `Int`.
+    /// Extracted so its inner `match (s, e)` does not nest inside the group's
+    /// arm table (an earlier mechanical halving cut exactly this match and
+    /// dropped its only real case, aborting every range).
+    fn eval_range(&mut self, start: &IrExpr, end: &IrExpr, inclusive: bool, scope: &Scope) -> Flow {
+        let s = val!(self.eval_expr(start, scope));
+        let e = val!(self.eval_expr(end, scope));
+        match (s, e) {
+            (Value::Int(s), Value::Int(e)) => {
+                Flow::val(Value::Range { start: s, end: e, inclusive })
+            }
+            _ => Flow::Abort("internal: range bounds must be Int".into()),
+        }
+    }
+
+    /// `x ?? fallback` — the fallback is taken for `none` and for `err(_)`; any
+    /// other value passes through unchanged. Extracted for the same nesting
+    /// reason as `eval_range`.
+    fn eval_unwrap_or(&mut self, expr: &IrExpr, fallback: &IrExpr, scope: &Scope) -> Flow {
+        let v = val!(self.eval_expr(expr, scope));
+        match v {
+            Value::Option(Some(inner)) => Flow::val(*inner),
+            Value::Option(None) => self.eval_expr(fallback, scope),
+            Value::Result(Ok(inner)) => Flow::val(*inner),
+            Value::Result(Err(_)) => self.eval_expr(fallback, scope),
+            other => Flow::val(other),
+        }
+    }
+
+    /// Holes, `todo`, and the codegen-inserted nodes that are UNREACHABLE at
+    /// the pre-codegen cut point this interpreter runs at.
+    ///
+    /// Extracted from `eval_expr` (name-router split): `None` means "not my
+    /// group". The groups are the comment sections the function already carried,
+    /// so the partition is the one a reader was already using. A dropped arm here
+    /// SHRINKS the executable spec rather than failing loudly, so the router's
+    /// final fallback aborts with the node kind instead of silently returning a
+    /// value — the interp is the third cross-target oracle and a wrong answer is
+    /// worse than an abstention.
+    fn eval_expr_misc(&mut self, expr: &IrExpr, scope: &Scope) -> Option<Flow> {
+        Some(match &expr.kind {
             // ── Misc ──
             IrExprKind::Hole => Flow::Abort(
                 "internal: evaluated a Hole (intrinsic-stub body reached as an expr)".into(),
             ),
             IrExprKind::Todo { message } => Flow::Abort(message.clone()),
-
             // ── Codegen-inserted: UNREACHABLE at the pre-codegen cut point ──
             IrExprKind::RuntimeCall { .. } => unreachable!(
                 "RuntimeCall is codegen-inserted (IntrinsicLowering); interp runs pre-codegen"
@@ -305,7 +448,8 @@ impl<'a> Interpreter<'a> {
             IrExprKind::IterChain { .. } => unreachable!(
                 "IterChain is codegen-inserted (StdlibLowering); interp runs pre-codegen"
             ),
-        }
+            _ => return None,
+        })
     }
 
     // ── `?` / `!` / `?.field` ───────────────────────────────────

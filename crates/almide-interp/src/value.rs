@@ -145,54 +145,79 @@ impl Value {
 // closure value has no PartialEq) — comparing them yields `false`.
 
 impl PartialEq for Value {
+    /// Structural equality, split into two halves purely to keep each arm table
+    /// under the complexity threshold. The halves are free fns rather than trait
+    /// methods (a trait impl admits only its own items) and return `Option<bool>`
+    /// so "not my half" is distinct from "not equal".
     fn eq(&self, other: &Value) -> bool {
-        use Value::*;
-        match (self, other) {
-            (Unit, Unit) => true,
-            (Bool(a), Bool(b)) => a == b,
-            (Int(a), Int(b)) => a == b,
-            // f64 PartialEq: NaN != NaN, matching Rust `==` semantics that
-            // codegen lowers `almide_eq!` to.
-            (Float(a), Float(b)) => a == b,
-            (Str(a), Str(b)) => a == b,
-            (List(a), List(b)) => a == b,
-            (Tuple(a), Tuple(b)) => a == b,
-            // #556: Map/Set `==` is order-INDEPENDENT on both backends
-            // (runtime/rs/src/{map,set}.rs match std HashMap/HashSet); comparing
-            // the ordered entry vecs cast a FALSE clean vote as the third judge
-            // (`["a":1,"b":2] == ["b":2,"a":1]` → backends true, interp false).
-            (Map(a), Map(b)) => {
-                a.len() == b.len()
-                    && a.iter().all(|(k, v)| {
-                        b.iter().any(|(k2, v2)| k == k2 && v == v2)
-                    })
-            }
-            (Set(a), Set(b)) => {
-                a.len() == b.len()
-                    && a.iter().all(|x| b.iter().any(|y| x == y))
-            }
-            (
-                Record { name: n1, fields: f1 },
-                Record { name: n2, fields: f2 },
-            ) => n1 == n2 && f1 == f2,
-            (
-                Variant { ty: t1, ctor: c1, payload: p1 },
-                Variant { ty: t2, ctor: c2, payload: p2 },
-            ) => t1 == t2 && c1 == c2 && p1 == p2,
-            (Option(a), Option(b)) => a == b,
-            (Result(a), Result(b)) => a == b,
-            (
-                Range { start: s1, end: e1, inclusive: i1 },
-                Range { start: s2, end: e2, inclusive: i2 },
-            ) => s1 == s2 && e1 == e2 && i1 == i2,
-            // A materialized range compares equal to the equivalent list.
-            (Range { .. }, List(_)) | (List(_), Range { .. }) => {
-                self.as_iter_items() == other.as_iter_items()
-            }
-            (Closure(_), Closure(_)) => false,
-            _ => false,
-        }
+        value_eq_a(self, other)
+            .or_else(|| value_eq_b(self, other))
+            // Two different variants that neither half pairs up are not equal.
+            .unwrap_or(false)
     }
+}
+
+/// The first half of `eq`'s arm table.
+///
+/// Extracted from `eq` (arm-table halving): arms verbatim and in
+/// source order, so the router's order is the only ordering that matters.
+fn value_eq_a(a: &Value, b: &Value) -> Option<bool> {
+    use Value::*;
+    Some(match (a, b) {
+        (Unit, Unit) => true,
+        (Bool(a), Bool(b)) => a == b,
+        (Int(a), Int(b)) => a == b,
+        // f64 PartialEq: NaN != NaN, matching Rust `==` semantics that
+        // codegen lowers `almide_eq!` to.
+        (Float(a), Float(b)) => a == b,
+        (Str(a), Str(b)) => a == b,
+        (List(a), List(b)) => a == b,
+        (Tuple(a), Tuple(b)) => a == b,
+        // #556: Map/Set `==` is order-INDEPENDENT on both backends
+        // (runtime/rs/src/{map,set}.rs match std HashMap/HashSet); comparing
+        // the ordered entry vecs cast a FALSE clean vote as the third judge
+        // (`["a":1,"b":2] == ["b":2,"a":1]` → backends true, interp false).
+        (Map(a), Map(b)) => {
+            a.len() == b.len()
+                && a.iter().all(|(k, v)| {
+                    b.iter().any(|(k2, v2)| k == k2 && v == v2)
+                })
+        }
+        _ => return None,
+    })
+}
+/// The second half of `eq`'s arm table.
+///
+/// Extracted from `eq` (arm-table halving): arms verbatim and in
+/// source order, so the router's order is the only ordering that matters.
+fn value_eq_b(a: &Value, b: &Value) -> Option<bool> {
+    use Value::*;
+    Some(match (a, b) {
+        (Set(a), Set(b)) => {
+            a.len() == b.len()
+                && a.iter().all(|x| b.iter().any(|y| x == y))
+        }
+        (
+            Record { name: n1, fields: f1 },
+            Record { name: n2, fields: f2 },
+        ) => n1 == n2 && f1 == f2,
+        (
+            Variant { ty: t1, ctor: c1, payload: p1 },
+            Variant { ty: t2, ctor: c2, payload: p2 },
+        ) => t1 == t2 && c1 == c2 && p1 == p2,
+        (Option(a), Option(b)) => a == b,
+        (Result(a), Result(b)) => a == b,
+        (
+            Range { start: s1, end: e1, inclusive: i1 },
+            Range { start: s2, end: e2, inclusive: i2 },
+        ) => s1 == s2 && e1 == e2 && i1 == i2,
+        // A materialized range compares equal to the equivalent list.
+        (Range { .. }, List(_)) | (List(_), Range { .. }) => {
+            a.as_iter_items() == b.as_iter_items()
+        }
+        (Closure(_), Closure(_)) => false,
+        _ => return None,
+    })
 }
 
 // ── Ordering (for <, >, <=, >= and sort) ────────────────────────
@@ -283,7 +308,20 @@ impl Value {
     /// (crates/almide-codegen/src/lib.rs:370). Used for compound string-interp
     /// parts and for any value nested inside a container.
     pub fn almide_repr(&self) -> String {
-        match self {
+        self.almide_repr_scalar()
+            .or_else(|| self.almide_repr_seq())
+            .or_else(|| self.almide_repr_variant())
+            .unwrap_or_else(|| "<unrepresentable>".to_string())
+    }
+
+    /// Scalars.
+    ///
+    /// Extracted from `almide_repr` (name-router split, arms verbatim). This is
+    /// the `repr` the third oracle compares against the other two legs, so an arm
+    /// must never be dropped: the router falls through to a marker string rather
+    /// than to a plausible-looking rendering.
+    fn almide_repr_scalar(&self) -> Option<String> {
+        Some(match self {
             Value::Unit => "()".to_string(),
             Value::Bool(b) => b.to_string(),
             Value::Int(n) => n.to_string(),
@@ -293,6 +331,18 @@ impl Value {
             // A string inside a container is double-quoted + escaped with the
             // exact set `\\ \" \n \r \t`.
             Value::Str(s) => repr_str(s),
+            _ => return None,
+        })
+    }
+
+    /// Sequences and maps.
+    ///
+    /// Extracted from `almide_repr` (name-router split, arms verbatim). This is
+    /// the `repr` the third oracle compares against the other two legs, so an arm
+    /// must never be dropped: the router falls through to a marker string rather
+    /// than to a plausible-looking rendering.
+    fn almide_repr_seq(&self) -> Option<String> {
+        Some(match self {
             Value::List(xs) => repr_seq("[", "]", xs),
             // A range renders as its materialized list.
             Value::Range { .. } => {
@@ -305,7 +355,7 @@ impl Value {
                 // Map: `["k": v]` insertion order (runtime/rs/src/map.rs:74),
                 // empty map `[:]`.
                 if entries.is_empty() {
-                    return "[:]".to_string();
+                    return Some("[:]".to_string());
                 }
                 let mut o = String::from("[");
                 for (i, (k, v)) in entries.iter().enumerate() {
@@ -319,6 +369,18 @@ impl Value {
                 o.push(']');
                 o
             }
+            _ => return None,
+        })
+    }
+
+    /// `Option`/`Result`, records, user variants, and closures.
+    ///
+    /// Extracted from `almide_repr` (name-router split, arms verbatim). This is
+    /// the `repr` the third oracle compares against the other two legs, so an arm
+    /// must never be dropped: the router falls through to a marker string rather
+    /// than to a plausible-looking rendering.
+    fn almide_repr_variant(&self) -> Option<String> {
+        Some(match self {
             Value::Option(opt) => match opt {
                 Some(v) => format!("some({})", v.almide_repr()),
                 None => "none".to_string(),
@@ -343,7 +405,8 @@ impl Value {
                 }
             },
             Value::Closure(_) => "<closure>".to_string(),
-        }
+            _ => return None,
+        })
     }
 }
 

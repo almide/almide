@@ -1,5 +1,72 @@
+/// A `for-in`'s binding form: one variable, or a tuple destructure.
+/// Bundled so the lazy-Range loop takes 4 parameters instead of 8 — the shape
+/// and the range are two independent facts, not six loose scalars.
+struct ForInBinder<'v> {
+    var: VarId,
+    var_tuple: Option<&'v [VarId]>,
+}
+
+/// The half-open or inclusive integer range a lazy `for-in` walks.
+struct RangeSpec {
+    start: i64,
+    end: i64,
+    inclusive: bool,
+}
+
+/// What one iteration of a loop body decided.
+enum LoopStep {
+    /// Ran to completion (or hit `continue`) — keep looping.
+    Next,
+    /// `break` — the loop's value is Unit.
+    Break,
+    /// A signal that leaves the loop entirely (return / abort / fuel).
+    Signal(Flow),
+}
+
 impl<'a> Interpreter<'a> {
     // ── Loops ───────────────────────────────────────────────────
+
+    /// Run one loop body. All three loops (`for-in`, its lazy Range twin, and
+    /// `while`) made the same break/continue/propagate decision inline; sharing it
+    /// is what keeps their own bodies at the binder logic. `continue` ends this
+    /// iteration only, which is why it maps to `Next` rather than a signal.
+    fn run_loop_body(&mut self, body: &[IrStmt], frame: &Scope) -> LoopStep {
+        for stmt in body {
+            match self.exec_stmt(stmt, frame) {
+                Ok(()) => {}
+                Err(Flow::Break) => return LoopStep::Break,
+                Err(Flow::Continue) => return LoopStep::Next,
+                Err(other) => return LoopStep::Signal(other),
+            }
+        }
+        LoopStep::Next
+    }
+
+    /// Bind a for-in element into `frame`: either the single binder, or the
+    /// tuple-destructure form `for (a, b) in …` (shape-checked). Extracted from
+    /// both for-in paths, which had the same nested match.
+    fn bind_for_in_item(
+        frame: &Scope,
+        var: VarId,
+        var_tuple: Option<&[VarId]>,
+        item: Value,
+    ) -> Option<Flow> {
+        let Some(vars) = var_tuple else {
+            frame.bind(var, item);
+            return None;
+        };
+        match &item {
+            Value::Tuple(elems) if elems.len() == vars.len() => {
+                for (vid, ev) in vars.iter().zip(elems.iter()) {
+                    frame.bind(*vid, ev.clone());
+                }
+                None
+            }
+            _ => Some(Flow::Abort(
+                "internal: for-in tuple destructure shape mismatch".into(),
+            )),
+        }
+    }
 
     fn eval_for_in(
         &mut self,
@@ -18,7 +85,12 @@ impl<'a> Interpreter<'a> {
         // fuel-bounded: it stops at `Flow::Fuel`, never allocating the range.
         let items: Vec<Value> = match &iter_v {
             Value::Range { start, end, inclusive } => {
-                return self.eval_for_in_range(var, var_tuple, *start, *end, *inclusive, body, scope);
+                return self.eval_for_in_range(
+                    ForInBinder { var, var_tuple },
+                    RangeSpec { start: *start, end: *end, inclusive: *inclusive },
+                    body,
+                    scope,
+                );
             }
             _ => match iter_v.as_iter_items() {
                 Some(items) => items,
@@ -35,30 +107,13 @@ impl<'a> Interpreter<'a> {
                 return f;
             }
             let frame = scope.child();
-            // Destructure tuple binding `for (a, b) in ...`.
-            if let Some(vars) = var_tuple {
-                match &item {
-                    Value::Tuple(elems) if elems.len() == vars.len() => {
-                        for (vid, ev) in vars.iter().zip(elems.iter()) {
-                            frame.bind(*vid, ev.clone());
-                        }
-                    }
-                    _ => {
-                        return Flow::Abort(
-                            "internal: for-in tuple destructure shape mismatch".into(),
-                        )
-                    }
-                }
-            } else {
-                frame.bind(var, item);
+            if let Some(abort) = Self::bind_for_in_item(&frame, var, var_tuple, item) {
+                return abort;
             }
-            for stmt in body {
-                match self.exec_stmt(stmt, &frame) {
-                    Ok(()) => {}
-                    Err(Flow::Break) => return Flow::val(Value::Unit),
-                    Err(Flow::Continue) => break,
-                    Err(other) => return other,
-                }
+            match self.run_loop_body(body, &frame) {
+                LoopStep::Next => {}
+                LoopStep::Break => return Flow::val(Value::Unit),
+                LoopStep::Signal(f) => return f,
             }
         }
         Flow::val(Value::Unit)
@@ -71,14 +126,13 @@ impl<'a> Interpreter<'a> {
     /// tuples), matching the eager path's mismatch abort.
     fn eval_for_in_range(
         &mut self,
-        var: VarId,
-        var_tuple: Option<&[VarId]>,
-        start: i64,
-        end: i64,
-        inclusive: bool,
+        binder: ForInBinder<'_>,
+        range: RangeSpec,
         body: &[IrStmt],
         scope: &Scope,
     ) -> Flow {
+        let ForInBinder { var, var_tuple } = binder;
+        let RangeSpec { start, end, inclusive } = range;
         let last = if inclusive { end } else { end - 1 };
         let mut i = start;
         while i <= last {
@@ -92,13 +146,10 @@ impl<'a> Interpreter<'a> {
                 );
             }
             frame.bind(var, Value::Int(i));
-            for stmt in body {
-                match self.exec_stmt(stmt, &frame) {
-                    Ok(()) => {}
-                    Err(Flow::Break) => return Flow::val(Value::Unit),
-                    Err(Flow::Continue) => break,
-                    Err(other) => return other,
-                }
+            match self.run_loop_body(body, &frame) {
+                LoopStep::Next => {}
+                LoopStep::Break => return Flow::val(Value::Unit),
+                LoopStep::Signal(f) => return f,
             }
             i += 1;
         }
@@ -122,20 +173,10 @@ impl<'a> Interpreter<'a> {
                 }
             }
             let frame = scope.child();
-            let mut broke = false;
-            for stmt in body {
-                match self.exec_stmt(stmt, &frame) {
-                    Ok(()) => {}
-                    Err(Flow::Break) => {
-                        broke = true;
-                        break;
-                    }
-                    Err(Flow::Continue) => break,
-                    Err(other) => return other,
-                }
-            }
-            if broke {
-                return Flow::val(Value::Unit);
+            match self.run_loop_body(body, &frame) {
+                LoopStep::Next => {}
+                LoopStep::Break => return Flow::val(Value::Unit),
+                LoopStep::Signal(f) => return f,
             }
         }
     }
@@ -192,32 +233,11 @@ impl<'a> Interpreter<'a> {
             IrStmtKind::FieldAssign { target, field, value } => {
                 self.exec_stmt_field_assign(*target, *field, value, scope)
             }
-            IrStmtKind::Guard { cond, else_ } => {
-                let c = match self.eval_expr(cond, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
-                match c {
-                    Value::Bool(true) => Ok(()),
-                    Value::Bool(false) => {
-                        // The else branch is an early-return expression.
-                        match self.eval_expr(else_, scope) {
-                            Flow::Value(v) => Err(Flow::Return(v)),
-                            other => Err(other),
-                        }
-                    }
-                    other => Err(Flow::Abort(format!(
-                        "internal: guard condition is {} not Bool",
-                        other.type_name()
-                    ))),
-                }
-            }
-            IrStmtKind::Expr { expr } => {
-                match self.eval_expr(expr, scope) {
-                    Flow::Value(_) => Ok(()),
-                    other => Err(other),
-                }
-            }
+            IrStmtKind::Guard { cond, else_ } => self.exec_stmt_guard(cond, else_, scope),
+            IrStmtKind::Expr { expr } => match self.eval_expr(expr, scope) {
+                Flow::Value(_) => Ok(()),
+                other => Err(other),
+            },
             IrStmtKind::Comment { .. } => Ok(()),
 
             // ── Codegen-inserted statement kinds ──
@@ -231,6 +251,29 @@ impl<'a> Interpreter<'a> {
             | IrStmtKind::ListCopySlice { .. } => unreachable!(
                 "list peephole stmt is codegen-inserted (PeepholePass); interp runs pre-codegen"
             ),
+        }
+    }
+
+    /// `guard cond else E` — the early-return form. A false condition evaluates
+    /// `E` and returns its value from the ENCLOSING function, so the else branch
+    /// leaves as `Flow::Return`, not as a value. Extracted from `exec_stmt`: this
+    /// one arm carried three nested matches, which was most of that function's
+    /// complexity.
+    fn exec_stmt_guard(&mut self, cond: &IrExpr, else_: &IrExpr, scope: &Scope) -> Result<(), Flow> {
+        let c = match self.eval_expr(cond, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        match c {
+            Value::Bool(true) => Ok(()),
+            Value::Bool(false) => match self.eval_expr(else_, scope) {
+                Flow::Value(v) => Err(Flow::Return(v)),
+                other => Err(other),
+            },
+            other => Err(Flow::Abort(format!(
+                "internal: guard condition is {} not Bool",
+                other.type_name()
+            ))),
         }
     }
 

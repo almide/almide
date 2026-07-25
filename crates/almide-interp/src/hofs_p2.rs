@@ -96,6 +96,15 @@ impl<'a> Interpreter<'a> {
     /// `take(-1)` is the whole list and `drop(-1)` is empty), and an INDEX is
     /// unsigned too, so a negative or huge index takes the no-op path.
     fn eval_container_op_list_slice(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        self.eval_list_slice_a(func, args)
+            .or_else(|| self.eval_list_slice_b(func, args))
+    }
+
+    /// The first half of `eval_container_op_list_slice`'s arm table.
+    ///
+    /// Extracted from `eval_container_op_list_slice` (arm-table halving): arms verbatim and in
+    /// source order, so the router's order is the only ordering that matters.
+    fn eval_list_slice_a(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         let items = args.first().and_then(|v| v.as_iter_items())?;
         let n = items.len();
         // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
@@ -114,6 +123,28 @@ impl<'a> Interpreter<'a> {
             "take_end" => { let k = count(int_arg(1)?); out(items[n - k..].to_vec()) }
             "drop_end" => { let k = count(int_arg(1)?); out(items[..n - k].to_vec()) }
             "tail" => out(if n == 0 { Vec::new() } else { items[1..].to_vec() }),
+            _ => None,
+        }
+    }
+
+    /// The second half of `eval_container_op_list_slice`'s arm table.
+    ///
+    /// Extracted from `eval_container_op_list_slice` (arm-table halving): arms verbatim and in
+    /// source order, so the router's order is the only ordering that matters.
+    fn eval_list_slice_b(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        let items = args.first().and_then(|v| v.as_iter_items())?;
+        let n = items.len();
+        // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
+        let count = |i: i64| -> usize { if i < 0 { n } else { (i as usize).min(n) } };
+        // An unsigned index; `None` when out of range (the no-op / default path).
+        let index = |i: i64| -> Option<usize> {
+            if i < 0 { None } else { let u = i as usize; (u < n).then_some(u) }
+        };
+        let int_arg = |k: usize| -> Option<i64> {
+            match args.get(k) { Some(Value::Int(i)) => Some(*i), _ => None }
+        };
+        let out = |v: Vec<Value>| Some(Flow::val(Value::list(v)));
+        match func {
             "slice" => {
                 let start = count(int_arg(1)?);
                 let end = count(int_arg(2)?).max(start);

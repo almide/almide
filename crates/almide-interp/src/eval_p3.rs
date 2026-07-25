@@ -42,7 +42,29 @@ impl<'a> Interpreter<'a> {
         value: &Value,
         binds: &mut Vec<(VarId, Value)>,
     ) -> bool {
-        match pattern {
+        if let Some(m) = self.try_match_leaf(pattern, value, binds) { return m; }
+        if let Some(m) = self.try_match_container(pattern, value, binds) { return m; }
+        if let Some(m) = self.try_match_variant(pattern, value, binds) { return m; }
+        // Every `IrPattern` variant is claimed by one of the three groups, so this
+        // is unreachable in practice; a NEW variant reads as "does not match"
+        // rather than matching everything, which is the safe direction for an
+        // oracle (a false negative shows up as an unmatched arm, not a wrong one).
+        false
+    }
+
+    /// Wildcard, binding, and literal patterns.
+    ///
+    /// Extracted from `try_match` (name-router split, arms verbatim and in source
+    /// order). `None` means "not my group". A pattern no group claims cannot
+    /// match, which is what the router returns — the same answer the original
+    /// exhaustive match gave, since every `IrPattern` variant is covered here.
+    fn try_match_leaf(
+        &mut self,
+        pattern: &IrPattern,
+        value: &Value,
+        binds: &mut Vec<(VarId, Value)>,
+    ) -> Option<bool> {
+        Some(match pattern {
             IrPattern::Wildcard => true,
             IrPattern::Bind { var, .. } => {
                 binds.push((*var, value.clone()));
@@ -56,6 +78,24 @@ impl<'a> Interpreter<'a> {
                     _ => false,
                 }
             }
+            _ => return None,
+        })
+    }
+
+    /// Positional container patterns (tuple, list) — arity-checked, then
+    /// element-wise.
+    ///
+    /// Extracted from `try_match` (name-router split, arms verbatim and in source
+    /// order). `None` means "not my group". A pattern no group claims cannot
+    /// match, which is what the router returns — the same answer the original
+    /// exhaustive match gave, since every `IrPattern` variant is covered here.
+    fn try_match_container(
+        &mut self,
+        pattern: &IrPattern,
+        value: &Value,
+        binds: &mut Vec<(VarId, Value)>,
+    ) -> Option<bool> {
+        Some(match pattern {
             IrPattern::Tuple { elements } => match value {
                 Value::Tuple(items) if items.len() == elements.len() => elements
                     .iter()
@@ -70,6 +110,23 @@ impl<'a> Interpreter<'a> {
                     .all(|(p, v)| self.try_match(p, v, binds)),
                 _ => false,
             },
+            _ => return None,
+        })
+    }
+
+    /// `Option`/`Result` patterns, user constructors, and records.
+    ///
+    /// Extracted from `try_match` (name-router split, arms verbatim and in source
+    /// order). `None` means "not my group". A pattern no group claims cannot
+    /// match, which is what the router returns — the same answer the original
+    /// exhaustive match gave, since every `IrPattern` variant is covered here.
+    fn try_match_variant(
+        &mut self,
+        pattern: &IrPattern,
+        value: &Value,
+        binds: &mut Vec<(VarId, Value)>,
+    ) -> Option<bool> {
+        Some(match pattern {
             IrPattern::Some { inner } => match value {
                 Value::Option(Some(v)) => self.try_match(inner, v, binds),
                 _ => false,
@@ -97,7 +154,8 @@ impl<'a> Interpreter<'a> {
             IrPattern::RecordPattern { name, fields, rest } => {
                 self.try_match_record(name, fields, *rest, value, binds)
             }
-        }
+            _ => return None,
+        })
     }
 
     /// `try_match`'s `RecordPattern` arm, split out as its own method — see
@@ -184,8 +242,22 @@ impl<'a> Interpreter<'a> {
     }
 
     pub(crate) fn apply_binop(&mut self, op: BinOp, l: Value, r: Value) -> Flow {
+        // `l`/`r` are moved into the half that claims the operator, so the first
+        // attempt gets clones and the second gets the originals.
+        if let Some(f) = self.apply_binop_a(op, l.clone(), r.clone()) {
+            return f;
+        }
+        self.apply_binop_b(op, l, r)
+            .unwrap_or_else(|| Flow::Abort(format!("internal: no rule for binop {:?}", op)))
+    }
+
+    /// The first half of `apply_binop`'s arm table.
+    ///
+    /// Extracted from `apply_binop` (arm-table halving): arms verbatim and in
+    /// source order, so the router's order is the only ordering that matters.
+    pub(crate) fn apply_binop_a(&mut self, op: BinOp, l: Value, r: Value) -> Option<Flow> {
         use BinOp::*;
-        match op {
+        Some(match op {
             // Integer arithmetic. Native release emits bare `+`/`-`/`*` which
             // WRAP (no panic) — replicate with wrapping ops.
             AddInt => int2(l, r, |a, b| Flow::val(Value::Int(a.wrapping_add(b)))),
@@ -208,6 +280,17 @@ impl<'a> Interpreter<'a> {
             AddFloat => float2(l, r, |a, b| a + b),
             SubFloat => float2(l, r, |a, b| a - b),
             MulFloat => float2(l, r, |a, b| a * b),
+            _ => return None,
+        })
+    }
+
+    /// The second half of `apply_binop`'s arm table.
+    ///
+    /// Extracted from `apply_binop` (arm-table halving): arms verbatim and in
+    /// source order, so the router's order is the only ordering that matters.
+    pub(crate) fn apply_binop_b(&mut self, op: BinOp, l: Value, r: Value) -> Option<Flow> {
+        use BinOp::*;
+        Some(match op {
             DivFloat => float2(l, r, |a, b| a / b),
             ModFloat => float2(l, r, |a, b| a % b),
             PowFloat => float2(l, r, |a, b| a.powf(b)),
@@ -263,7 +346,8 @@ impl<'a> Interpreter<'a> {
             MulMatrix | AddMatrix | SubMatrix | ScaleMatrix => {
                 Flow::Unsupported("matrix arithmetic".into())
             }
-        }
+            _ => return None,
+        })
     }
 
     fn eval_unop(&mut self, op: UnOp, v: Value) -> Flow {

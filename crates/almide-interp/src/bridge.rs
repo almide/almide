@@ -125,6 +125,15 @@ fn abort_args(module: &str, func: &str) -> Flow {
 // ── int ─────────────────────────────────────────────────────────
 
 fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    int_fn_a(func, args)
+        .or_else(|| int_fn_b(func, args))
+}
+
+/// The first half of the `int.*` arm table.
+///
+/// Extracted from `int_fn` (arm-table halving): arms verbatim and in
+/// source order, so the router's order is the only ordering that matters.
+fn int_fn_a(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
         "to_string" => {
             let n = as_int(args.first())?;
@@ -149,6 +158,17 @@ fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
             Flow::val(Value::Int(n.clamp(lo, hi)))
         }
         "to_hex" => Flow::val(Value::str(format!("{:x}", as_int(args.first())?))),
+        _ => return None,
+    };
+    Some(f)
+}
+
+/// The second half of the `int.*` arm table.
+///
+/// Extracted from `int_fn` (arm-table halving): arms verbatim and in
+/// source order, so the router's order is the only ordering that matters.
+fn int_fn_b(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
         "parse" | "from_string" => {
             let s = as_str(args.first())?;
             // Returns Result[Int, String] — matches almide_rt_int_parse.
@@ -172,8 +192,34 @@ fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
 // ── float ───────────────────────────────────────────────────────
 
 fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    float_fn_core(func, args).or_else(|| float_fn_convert(func, args))
+}
+
+/// Rounding, sign, and the total-order predicates.
+///
+/// Extracted from `float_fn` (name-router split, arms verbatim and in source order).
+fn float_fn_core(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
-        // The `.0`-suffixed form — the ONLY display path that uses it.
+
+        _ => return None,
+    };
+    Some(f)
+}
+
+/// Conversions to/from other numeric types and to string.
+///
+/// Extracted from `float_fn` (name-router split, arms verbatim and in source order).
+fn float_fn_convert(func: &str, args: &[Value]) -> Option<Flow> {
+    float_fn_convert_a(func, args)
+        .or_else(|| float_fn_convert_b(func, args))
+}
+
+/// The first half of `float_fn_convert`'s arm table.
+///
+/// Extracted from `float_fn_convert` (arm-table halving): arms verbatim and in
+/// source order, so the router's order is the only ordering that matters.
+fn float_fn_convert_a(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
         "to_string" => Flow::val(Value::str(float_to_string(as_float(args.first())?))),
         "to_int" => Flow::val(Value::Int(as_float(args.first())? as i64)),
         "from_int" => Flow::val(Value::Float(as_int(args.first())? as f64)),
@@ -185,6 +231,17 @@ fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
         // Explicit NaN/tie tree mirroring runtime/rs/src/float.rs
         // almide_rt_float_min/max — NOT f64::min/max (llvm.minnum/maxnum has
         // unspecified ±0-tie order). Ties return the FIRST operand (C-049).
+        _ => return None,
+    };
+    Some(f)
+}
+
+/// The second half of `float_fn_convert`'s arm table.
+///
+/// Extracted from `float_fn_convert` (arm-table halving): arms verbatim and in
+/// source order, so the router's order is the only ordering that matters.
+fn float_fn_convert_b(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
         "min" => {
             let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
             Flow::val(Value::Float(if a.is_nan() { b } else if b.is_nan() { a } else if a > b { b } else { a }))
@@ -289,11 +346,18 @@ fn bool_fn(func: &str, args: &[Value]) -> Option<Flow> {
 // ── string ──────────────────────────────────────────────────────
 
 fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    string_fn_whole(func, args)
+        .or_else(|| string_fn_slice(func, args))
+        .or_else(|| string_fn_structural(func, args))
+}
+
+/// Whole-string predicates and transforms — no index arithmetic.
+///
+/// Extracted from `string_fn` (name-router split, arms verbatim and in source
+/// order). `None` means "not my group", so the router's order is the only
+/// ordering that matters.
+fn string_fn_whole(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
-        // CODEPOINT unit (#419, C-065): string.len/index_of count chars, not
-        // bytes, on BOTH targets — the interp lagging this was the third
-        // judge's FIRST catch (fuzz 3-way: both targets agreed, interp voted
-        // bytes).
         "len" | "length" => Flow::val(Value::Int(as_str(args.first())?.chars().count() as i64)),
         "char_count" => Flow::val(Value::Int(as_str(args.first())?.chars().count() as i64)),
         "is_empty" => Flow::val(Value::Bool(as_str(args.first())?.is_empty())),
@@ -325,6 +389,20 @@ fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
         // Codepoint-count take, the C-054 unsigned discipline (mirrors
         // runtime/rs almide_rt_string_take: `chars().take(n as usize)` — a
         // negative n is enormous as usize, so take(-1) keeps the whole string).
+        _ => return None,
+    };
+    Some(f)
+}
+
+/// Codepoint-indexed slicing and counting. Every clamp mirrors C-034: an
+/// UNSIGNED count saturates (a negative one is enormous as a `usize`), and
+/// `slice`'s start/end clamp SIGNED — the one documented exception.
+///
+/// Extracted from `string_fn` (name-router split, arms verbatim and in source
+/// order). `None` means "not my group", so the router's order is the only
+/// ordering that matters.
+fn string_fn_slice(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
         "take" => Flow::val(Value::str(
             as_str(args.first())?
                 .chars()
@@ -368,6 +446,18 @@ fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
         }
         // index_of returns Option[Int] of the CODEPOINT index (#419 unified
         // the unit; the old byte-offset comment predated that change).
+        _ => return None,
+    };
+    Some(f)
+}
+
+/// Search, split/join, and parsing — the arms that build or consume lists.
+///
+/// Extracted from `string_fn` (name-router split, arms verbatim and in source
+/// order). `None` means "not my group", so the router's order is the only
+/// ordering that matters.
+fn string_fn_structural(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
         "index_of" => {
             let s = as_str(args.first())?;
             Flow::val(Value::Option(
