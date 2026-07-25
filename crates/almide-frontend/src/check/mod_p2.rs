@@ -443,35 +443,7 @@ impl Checker {
         for site in checks {
             let resolved = resolve_ty(&site.ty, &self.uf);
             if !Self::has_unconstrained_element(&resolved) { continue; }
-            // `what` names the construct; `fix` is a CONCRETE, parseable
-            // annotation that resolves it. The let-binding form is the primary
-            // fix (it always works); the inline `[]: List[Int]` call-arg form is
-            // offered only for the bare list literal, where it is verified to
-            // parse and infer.
-            let (what, fix) = match site.kind {
-                EmptyCollectionKind::ListLiteral => (
-                    "empty list `[]`",
-                    "bind it with an explicit element type, e.g. `let xs: List[Int] = []`, \
-                     or annotate the literal inline: `list.len([]: List[Int])`",
-                ),
-                EmptyCollectionKind::MapLiteral => (
-                    "empty map `[:]`",
-                    "bind it with explicit key/value types, e.g. `let m: Map[String, Int] = [:]`",
-                ),
-                EmptyCollectionKind::SetNew => (
-                    "`set.new()`",
-                    "bind it with an explicit element type, e.g. `let s: Set[Int] = set.new()`",
-                ),
-                EmptyCollectionKind::ListWithCapacity => (
-                    "`list.with_capacity(n)`",
-                    "bind it with an explicit element type, e.g. `let xs: List[Int] = list.with_capacity(n)`",
-                ),
-                EmptyCollectionKind::ForInEmpty => (
-                    "the empty list iterated by `for`",
-                    "bind the list to an explicitly-typed variable first, e.g. \
-                     `let xs: List[Int] = []` then `for _ in xs { ... }`",
-                ),
-            };
+            let EmptyCollectionAdvice { what, fix, try_fix } = empty_collection_advice(site.kind);
             let hint = format!(
                 "{}'s element type cannot be inferred here. An empty collection \
                  carries no element to infer from — {}. (Almide follows Rust/Swift: \
@@ -479,13 +451,6 @@ impl Checker {
                  never read; it is never silently defaulted.)",
                 what, fix,
             );
-            let try_fix = match site.kind {
-                EmptyCollectionKind::ListLiteral => "let xs: List[Int] = []",
-                EmptyCollectionKind::MapLiteral => "let m: Map[String, Int] = [:]",
-                EmptyCollectionKind::SetNew => "let s: Set[Int] = set.new()",
-                EmptyCollectionKind::ListWithCapacity => "let xs: List[Int] = list.with_capacity(n)",
-                EmptyCollectionKind::ForInEmpty => "let xs: List[Int] = []\nfor _ in xs { ... }",
-            };
             let mut diag = err(
                 format!("cannot infer the element type of {}", what),
                 hint,
@@ -695,3 +660,52 @@ fn ty_reimpl_eq(stdlib_ty: &Ty, user_ty: &Ty) -> bool {
         _ => stdlib_ty == user_ty,
     }
 }
+
+/// What the E018 diagnostic says about one kind of empty collection.
+///
+/// `what` names the construct, `fix` is prose describing the annotation that
+/// resolves it, and `try_fix` is a concrete parseable line the user can paste.
+/// The three used to be two separate `match`es over the same enum, so a new kind
+/// could get a `fix` and no `try_fix`; one table makes that impossible.
+struct EmptyCollectionAdvice {
+    what: &'static str,
+    fix: &'static str,
+    try_fix: &'static str,
+}
+
+/// The let-binding form is the primary fix because it always works. The inline
+/// `[]: List[Int]` call-argument form is offered only for the bare list literal,
+/// where it is verified to parse and infer.
+fn empty_collection_advice(kind: EmptyCollectionKind) -> EmptyCollectionAdvice {
+    let (what, fix, try_fix) = match kind {
+        EmptyCollectionKind::ListLiteral => (
+            "empty list `[]`",
+            "bind it with an explicit element type, e.g. `let xs: List[Int] = []`, \
+             or annotate the literal inline: `list.len([]: List[Int])`",
+            "let xs: List[Int] = []",
+        ),
+        EmptyCollectionKind::MapLiteral => (
+            "empty map `[:]`",
+            "bind it with explicit key/value types, e.g. `let m: Map[String, Int] = [:]`",
+            "let m: Map[String, Int] = [:]",
+        ),
+        EmptyCollectionKind::SetNew => (
+            "`set.new()`",
+            "bind it with an explicit element type, e.g. `let s: Set[Int] = set.new()`",
+            "let s: Set[Int] = set.new()",
+        ),
+        EmptyCollectionKind::ListWithCapacity => (
+            "`list.with_capacity(n)`",
+            "bind it with an explicit element type, e.g. `let xs: List[Int] = list.with_capacity(n)`",
+            "let xs: List[Int] = list.with_capacity(n)",
+        ),
+        EmptyCollectionKind::ForInEmpty => (
+            "the empty list iterated by `for`",
+            "bind the list to an explicitly-typed variable first, e.g. \
+             `let xs: List[Int] = []` then `for _ in xs { ... }`",
+            "let xs: List[Int] = []\nfor _ in xs { ... }",
+        ),
+    };
+    EmptyCollectionAdvice { what, fix, try_fix }
+}
+

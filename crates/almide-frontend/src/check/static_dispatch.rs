@@ -138,6 +138,24 @@ impl Checker {
                 "Mark the enclosing function as `effect fn`",
                 format!("call to fan.{}()", field)));
         }
+        if let Some(ty) = self.resolve_fan_mapping(field, arg_tys) { return Some(ty); }
+        if let Some(ty) = self.resolve_fan_collecting(field, arg_tys) { return Some(ty); }
+        // Every known fan fn is handled above, so reaching here means the name is
+        // not one — and `fan.*` always RESOLVES rather than falling through to
+        // UFCS, so the diagnostic is emitted and `Unknown` recovers.
+        self.emit(super::err(
+            format!("unknown function 'fan.{}'", field),
+            "Available: fan.map, fan.race, fan.any, fan.settle",
+            format!("call to fan.{}()", field)));
+        Some(Ty::Unknown)
+    }
+
+    /// `fan.map` and `fan.race` — the fan primitives that consume a mapper.
+    ///
+    /// One group of `resolve_fan_call`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group"; the router tries the groups in that
+    /// order and only then reports the unknown-fan-fn diagnostic.
+    fn resolve_fan_mapping(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         match field {
             "map" => {
                 // fan.map(xs, f) -> Result[List[B], String] where xs: List[A],
@@ -219,6 +237,17 @@ impl Checker {
                 let list_ty = resolve_ty(&arg_tys[0], &self.uf);
                 Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String))
             }
+            _ => return None,
+        }
+    }
+
+    /// `fan.any`, `fan.settle`, and the removed `fan.timeout` tombstone.
+    ///
+    /// One group of `resolve_fan_call`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group"; the router tries the groups in that
+    /// order and only then reports the unknown-fan-fn diagnostic.
+    fn resolve_fan_collecting(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        match field {
             "any" => {
                 // fan.any(thunks) -> Result[T, String] — try thunks in LIST
                 // ORDER, return the FIRST Ok (deterministic); if ALL fail,
@@ -264,13 +293,7 @@ impl Checker {
                     "call to fan.timeout()".to_string()).with_code("E027"));
                 Some(Ty::Unknown)
             }
-            _ => {
-                self.emit(super::err(
-                    format!("unknown function 'fan.{}'", field),
-                    "Available: fan.map, fan.race, fan.any, fan.settle",
-                    format!("call to fan.{}()", field)));
-                Some(Ty::Unknown)
-            }
+            _ => return None,
         }
     }
 
