@@ -783,4 +783,28 @@ impl LowerCtx {
             .or_else(|| self.try_lower_result_err_heap_ok_result(value, ty))
             .or_else(|| self.try_lower_result_err_heap_fallback(value, ty))
     }
+
+    /// Does `value` construct an `Option`/`Result` around a HEAP payload that
+    /// no strategy above could materialize?
+    ///
+    /// Such a value falls through to the deferred `Alloc { Init::Opaque }` bind
+    /// — an EMPTY block — and then reads back as `none` / an all-zero payload.
+    /// That is a WRONG VALUE, not a memory-safety problem, so the certificate
+    /// accepts it and the program runs: `some(option.unwrap_or(some((2, 3)),
+    /// (2, 4)))` printed `some((2, 3))` natively and `none` on wasm
+    /// (differential fuzz). The caller uses this to WALL instead, which is the
+    /// v1 discipline — a wall is never a miscompile.
+    pub(crate) fn opt_ctor_payload_is_deferred(&mut self, payload: &IrExpr) -> bool {
+        // The question is whether ANY construction strategy claims the payload.
+        // Asking is the only reliable test — the strategies key on expression
+        // SHAPE and payload type together, and enumerating the admitted pairs
+        // here would be a second copy that drifts. The probe is speculative, so
+        // it runs against a snapshot of the op stream and rolls back.
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let claimed = self.opt_heap_general_piece(payload).is_some();
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+        !claimed
+    }
 }
