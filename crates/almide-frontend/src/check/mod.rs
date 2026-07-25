@@ -644,6 +644,14 @@ impl Checker {
         user_ret: &Ty,
     ) -> Option<(&'static str, &'static str)> {
         let user_lc = user_name.to_ascii_lowercase();
+        // Best match, not first match. `atan` passes the gates against
+        // both `math.atan` (distance 0) and `math.tan` (distance 1), so
+        // taking the first candidate named whichever of the two the
+        // module's fn list happened to yield first. Ranking by distance
+        // makes the suggestion the closest name, and `module_fn_names`
+        // is sorted, so the enumeration order breaks ties the same way
+        // on every run.
+        let mut best: Option<(usize, &'static str, &'static str)> = Option::None;
         for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
             for fn_name in crate::stdlib::module_functions_all(module) {
                 // Name-similarity filter: coarse `≤ 2` Levenshtein
@@ -656,7 +664,11 @@ impl Checker {
                 // (`my_binary_search` ⊃ `binary_search`), and exact
                 // matches, while excluding short stdlib names with
                 // unrelated user fns.
-                if almide_base::diagnostic::levenshtein(user_name, fn_name) > 2 {
+                let dist = almide_base::diagnostic::levenshtein(user_name, fn_name);
+                if dist > 2 {
+                    continue;
+                }
+                if best.as_ref().is_some_and(|(d, _, _)| *d <= dist) {
                     continue;
                 }
                 let fn_lc = fn_name.to_ascii_lowercase();
@@ -668,10 +680,13 @@ impl Checker {
                 if !sigs_match_structurally(&sig.params, &sig.ret, user_param_tys, user_ret) {
                     continue;
                 }
-                return Some((module, fn_name));
+                if dist == 0 {
+                    return Some((module, fn_name));
+                }
+                best = Some((dist, module, fn_name));
             }
         }
-        Option::None
+        best.map(|(_, module, fn_name)| (module, fn_name))
     }
 
 }
