@@ -603,80 +603,8 @@ fn insert_try_stmt(stmt: IrStmt, ctx: &mut TryCtx) -> IrStmt {
 /// hands it back as `Err` for the next group to try.
 fn insert_try_stmt_bind(kind: IrStmtKind, ctx: &mut TryCtx) -> Result<IrStmtKind, IrStmtKind> {
     Ok(match kind {
-        IrStmtKind::Bind { var, mutability, ty, value } => {
-            // A binding consumed by `??` / `== ok(v)` / `match { ok/err }` is kept a
-            // Result so that usage type-checks — BUT only when the binding's value
-            // is genuinely Result-fronted at that consumer. An effect fn that
-            // returns `Option[T]` is lifted to `Result[Option[T], String]`; binding
-            // it and consuming with `??` is an OPTION-fallback, so the auto-? MUST
-            // strip the effect `Result`, leaving `Option[T]` for `??`. Keeping the
-            // `Result` there made native emit invalid Rust and wasm read the wrong
-            // value (#629). So only honor the skip when the value's effect-Result
-            // OK type is itself a Result (a real Result-fallback) or the binding is
-            // an explicitly annotated Result (handled by `annotated_result_vars`).
-            // A `match { ok/err }` / `== ok/err` consumer (force) needs the FULL Result
-            // UNCONDITIONALLY — its OK type may be any type (base64 decode's `let bs =
-            // decode_with(..)` is Result[List[Int],String], matched ok/err; the old
-            // value_ok_is_result gate wrongly stripped it to List[Int], so the v1 MIR saw a
-            // non-Result `match` and walled / native emitted invalid Rust). A `??`-only
-            // consumer (skip, not force) keeps the #629 effect-Result[Option,_] strip rule.
-            if ctx.force_skip.contains(&var.0)
-                || (ctx.skip_unwrap.contains(&var.0)
-                    && (ctx.annotated_result_vars.contains(&var) || value_ok_is_result(&value)))
-            {
-                let new_value = insert_try(value, false, ctx);
-                let unwrapped = strip_top_try(new_value);
-                IrStmtKind::Bind { var, mutability, ty, value: unwrapped }
-            }
-            // An ANNOTATED-Result binding (`let r: Result[T, E] = step()`)
-            // keeps the Result: strip the Try that `insert_try` wrapped
-            // around the call. Bind.ty alone cannot decide this — an
-            // un-annotated `let v = boom()` where boom DECLARES `-> Result`
-            // carries the identical Result Bind.ty but must auto-unwrap, so
-            // the lowering records the annotated VarIds explicitly.
-            else if ctx.annotated_result_vars.contains(&var) {
-                let new_value = coerce_to_target(insert_try(value, false, ctx), true);
-                IrStmtKind::Bind { var, mutability, ty, value: new_value }
-            } else {
-                let mut new_value = insert_try(value, false, ctx);
-                // NOTE: a binding USED as a Result (`r ?? d`, `r == ok(v)`, `match r {
-                // ok/err }`) is kept a Result by the usage-based skip set
-                // (`collect_result_match_vars`), applied in `insert_try_stmt_with_skip`.
-                // An earlier `if ty.is_result()` undo here was too broad — it also
-                // un-did the auto-? for a plain `let v = effectCall()` whose inferred
-                // type is the effect's `Result` (e.g. `effect fn boom() -> Result[..]`),
-                // leaving `v` a Result and breaking error propagation. Removed.
-                if !matches!(&new_value.kind, IrExprKind::Try { .. })
-                    && is_result_value(&new_value)
-                {
-                    let inner_ty = match &new_value.ty {
-                        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                        _ => new_value.ty.clone(),
-                    };
-                    let span = new_value.span;
-                    new_value = IrExpr {
-                        kind: IrExprKind::Try { expr: Box::new(new_value) },
-                        ty: inner_ty,
-                        span, def_id: None,
-                    };
-                }
-                // The binding type IS the value's type. A top-level Try unwraps
-                // Result→T; an `if`/`match`/block whose effect branches were just
-                // auto-?'d likewise now yields T (its node type was recomputed
-                // above, #717). Either way `new_value.ty` is authoritative — the
-                // old `else { ty }` kept the stale effect-lifted `Result[T]` for
-                // those non-Try forms, emitting `Result<T>` over `?`-branches.
-                let _ = ty;
-                let new_ty = new_value.ty.clone();
-                // Keep the var table in sync with the unwrap: a later
-                // `v = effectCall()` reads this entry to decide its own
-                // wrap/strip, so a stale Result type would invert that rule.
-                if ctx.var_table.get(var).ty != new_ty {
-                    ctx.var_table.entries[var.0 as usize].ty = new_ty.clone();
-                }
-                IrStmtKind::Bind { var, mutability, ty: new_ty, value: new_value }
-            }
-        }
+        IrStmtKind::Bind { var, mutability, ty, value } =>
+            insert_try_bind(var, mutability, ty, value, ctx),
         IrStmtKind::Assign { var, value } => {
             // #485: target-directed — `x = step(x)` keeps the Try (`?`) iff
             // x is not itself Result-typed; `r = step(x)` with r: Result
@@ -712,6 +640,97 @@ fn insert_try_stmt_bind(kind: IrStmtKind, ctx: &mut TryCtx) -> Result<IrStmtKind
         }
         other => return Err(other),
     })
+}
+
+
+/// Auto-`?` a `let` / `var` binding.
+///
+/// Three outcomes, and which one applies is decided by how the binding is USED,
+/// not by its own type: a binding consumed as a Result keeps the Result, an
+/// explicitly annotated Result keeps it too, and everything else is unwrapped so
+/// errors propagate. `Bind.ty` alone cannot separate the second case from the
+/// third — an un-annotated `let v = boom()` where `boom` DECLARES `-> Result`
+/// carries an identical `Bind.ty` but must auto-unwrap — which is why lowering
+/// records the annotated `VarId`s explicitly.
+fn insert_try_bind(
+    var: VarId,
+    mutability: Mutability,
+    ty: Ty,
+    value: IrExpr,
+    ctx: &mut TryCtx,
+) -> IrStmtKind {
+    // A binding consumed by `??` / `== ok(v)` / `match { ok/err }` is kept a
+    // Result so that usage type-checks — BUT only when the binding's value
+    // is genuinely Result-fronted at that consumer. An effect fn that
+    // returns `Option[T]` is lifted to `Result[Option[T], String]`; binding
+    // it and consuming with `??` is an OPTION-fallback, so the auto-? MUST
+    // strip the effect `Result`, leaving `Option[T]` for `??`. Keeping the
+    // `Result` there made native emit invalid Rust and wasm read the wrong
+    // value (#629). So only honor the skip when the value's effect-Result
+    // OK type is itself a Result (a real Result-fallback) or the binding is
+    // an explicitly annotated Result (handled by `annotated_result_vars`).
+    // A `match { ok/err }` / `== ok/err` consumer (force) needs the FULL Result
+    // UNCONDITIONALLY — its OK type may be any type (base64 decode's `let bs =
+    // decode_with(..)` is Result[List[Int],String], matched ok/err; the old
+    // value_ok_is_result gate wrongly stripped it to List[Int], so the v1 MIR saw a
+    // non-Result `match` and walled / native emitted invalid Rust). A `??`-only
+    // consumer (skip, not force) keeps the #629 effect-Result[Option,_] strip rule.
+    if ctx.force_skip.contains(&var.0)
+        || (ctx.skip_unwrap.contains(&var.0)
+            && (ctx.annotated_result_vars.contains(&var) || value_ok_is_result(&value)))
+    {
+        let new_value = insert_try(value, false, ctx);
+        let unwrapped = strip_top_try(new_value);
+        IrStmtKind::Bind { var, mutability, ty, value: unwrapped }
+    }
+    // An ANNOTATED-Result binding (`let r: Result[T, E] = step()`)
+    // keeps the Result: strip the Try that `insert_try` wrapped
+    // around the call. Bind.ty alone cannot decide this — an
+    // un-annotated `let v = boom()` where boom DECLARES `-> Result`
+    // carries the identical Result Bind.ty but must auto-unwrap, so
+    // the lowering records the annotated VarIds explicitly.
+    else if ctx.annotated_result_vars.contains(&var) {
+        let new_value = coerce_to_target(insert_try(value, false, ctx), true);
+        IrStmtKind::Bind { var, mutability, ty, value: new_value }
+    } else {
+        let mut new_value = insert_try(value, false, ctx);
+        // NOTE: a binding USED as a Result (`r ?? d`, `r == ok(v)`, `match r {
+        // ok/err }`) is kept a Result by the usage-based skip set
+        // (`collect_result_match_vars`), applied in `insert_try_stmt_with_skip`.
+        // An earlier `if ty.is_result()` undo here was too broad — it also
+        // un-did the auto-? for a plain `let v = effectCall()` whose inferred
+        // type is the effect's `Result` (e.g. `effect fn boom() -> Result[..]`),
+        // leaving `v` a Result and breaking error propagation. Removed.
+        if !matches!(&new_value.kind, IrExprKind::Try { .. })
+            && is_result_value(&new_value)
+        {
+            let inner_ty = match &new_value.ty {
+                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+                _ => new_value.ty.clone(),
+            };
+            let span = new_value.span;
+            new_value = IrExpr {
+                kind: IrExprKind::Try { expr: Box::new(new_value) },
+                ty: inner_ty,
+                span, def_id: None,
+            };
+        }
+        // The binding type IS the value's type. A top-level Try unwraps
+        // Result→T; an `if`/`match`/block whose effect branches were just
+        // auto-?'d likewise now yields T (its node type was recomputed
+        // above, #717). Either way `new_value.ty` is authoritative — the
+        // old `else { ty }` kept the stale effect-lifted `Result[T]` for
+        // those non-Try forms, emitting `Result<T>` over `?`-branches.
+        let _ = ty;
+        let new_ty = new_value.ty.clone();
+        // Keep the var table in sync with the unwrap: a later
+        // `v = effectCall()` reads this entry to decide its own
+        // wrap/strip, so a stale Result type would invert that rule.
+        if ctx.var_table.get(var).ty != new_ty {
+            ctx.var_table.entries[var.0 as usize].ty = new_ty.clone();
+        }
+        IrStmtKind::Bind { var, mutability, ty: new_ty, value: new_value }
+    }
 }
 
 /// Assignment and the remaining statement forms.

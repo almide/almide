@@ -49,62 +49,17 @@ impl Checker {
     /// Resolve a member call statically (module.func, alias, TypeName.method, codec).
     /// Returns Some(Ty) if resolved, None to fall through to UFCS/convention dispatch.
     pub(super) fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
-        // Detect dot-chain submodule access and emit helpful error
-        if let Some(dotted) = self.resolve_dotted_module(&object.kind) {
-            let key = format!("{}.{}", dotted, field);
-            if self.env.functions.contains_key(&sym(&key)) {
-                // Extract the last segment of the dotted path for the import suggestion
-                let last_seg = dotted.rsplit('.').next().unwrap_or(&dotted);
-                self.emit(super::err(
-                    format!("dot-chain submodule access is no longer supported"),
-                    format!("Add `import {}` and call `{}.{}()` instead", dotted, last_seg, field),
-                    format!("call to {}.{}", dotted, field),
-                ));
-                // Still resolve so codegen doesn't break
-                return Some(self.check_named_call(&key, arg_tys));
+        if let Some(ty) = self.resolve_dot_chain_submodule(object, field, arg_tys) {
+            return Some(ty);
+        }
+        if let Some(ty) = self.resolve_cross_module_convention(object, field, arg_tys) {
+            return Some(ty);
+        }
+        if let ExprKind::Ident { name, .. } = &object.kind {
+            if let Some(ty) = self.resolve_module_call_member(name.as_str(), field, arg_tys) {
+                return Some(ty);
             }
         }
-
-        // `module.Type.method(...)` — a convention/Codec method on a cross-module
-        // type, e.g. `shapes.Dot.encode(d)`. The object is `Member(Ident(mod), Type)`;
-        // the method is registered (by the Codec derive / an impl) under the bare key
-        // `Type.method`. Resolve it before UFCS infers `module` as a variable (E003).
-        if let ExprKind::Member { object: inner, field: type_name } = &object.kind {
-            if let ExprKind::Ident { name: module, .. } = &inner.kind {
-                if self.env.import_table.resolve(module).is_some() {
-                    let key = format!("{}.{}", type_name, field);
-                    if self.env.functions.contains_key(&sym(&key)) {
-                        self.env.import_table.mark_used(module);
-                        return Some(self.check_named_call(&key, arg_tys));
-                    }
-                }
-            }
-        }
-
-        let module_name = match &object.kind {
-            ExprKind::Ident { name, .. } => Some(name.as_str()),
-            _ => None,
-        };
-
-        if let Some(module) = module_name {
-            // fan.map / fan.race — compiler-known concurrency primitives
-            if module == "fan" {
-                return self.resolve_fan_call(field, arg_tys);
-            }
-
-            // Codec convenience: json.encode(t) -> String when t has T.encode
-            if field == "encode" && arg_tys.len() == 1 {
-                let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
-                if self.has_codec_encode(&arg_concrete) {
-                    return Some(Ty::String);
-                }
-            }
-
-            if let Some(result) = self.resolve_module_member(module, field, arg_tys) {
-                return Some(result);
-            }
-        }
-
         // TypeName.method() — direct convention call
         if let ExprKind::TypeName { name: type_name, .. } = &object.kind {
             let key = format!("{}.{}", type_name, field);
@@ -112,8 +67,63 @@ impl Checker {
                 return Some(self.check_named_call(&key, arg_tys));
             }
         }
-
         None
+    }
+
+    /// Dot-chain submodule access (`a.b.fn(...)`), which the module system no
+    /// longer supports.
+    ///
+    /// The call still RESOLVES after the diagnostic is emitted, so lowering and
+    /// codegen see a well-formed call and the user gets the one real error rather
+    /// than a cascade behind it.
+    fn resolve_dot_chain_submodule(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        let dotted = self.resolve_dotted_module(&object.kind)?;
+        let key = format!("{}.{}", dotted, field);
+        if !self.env.functions.contains_key(&sym(&key)) {
+            return None;
+        }
+        let last_seg = dotted.rsplit('.').next().unwrap_or(&dotted);
+        self.emit(super::err(
+            "dot-chain submodule access is no longer supported".to_string(),
+            format!("Add `import {}` and call `{}.{}()` instead", dotted, last_seg, field),
+            format!("call to {}.{}", dotted, field),
+        ));
+        Some(self.check_named_call(&key, arg_tys))
+    }
+
+    /// `module.Type.method(...)` — a convention or Codec method on a cross-module
+    /// type, e.g. `shapes.Dot.encode(d)`.
+    ///
+    /// The object parses as `Member(Ident(mod), Type)` while the method is
+    /// registered under the BARE key `Type.method` (by the Codec derive or an
+    /// impl). Resolving here, before UFCS runs, is what stops `module` being
+    /// inferred as a variable and reported as E003.
+    fn resolve_cross_module_convention(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        let ExprKind::Member { object: inner, field: type_name } = &object.kind else { return None };
+        let ExprKind::Ident { name: module, .. } = &inner.kind else { return None };
+        self.env.import_table.resolve(module)?;
+        let key = format!("{}.{}", type_name, field);
+        if !self.env.functions.contains_key(&sym(&key)) {
+            return None;
+        }
+        self.env.import_table.mark_used(module);
+        Some(self.check_named_call(&key, arg_tys))
+    }
+
+    /// `module.fn(...)` where the object is a plain module name.
+    fn resolve_module_call_member(&mut self, module: &str, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        // fan.map / fan.race — compiler-known concurrency primitives.
+        if module == "fan" {
+            return self.resolve_fan_call(field, arg_tys);
+        }
+        // Codec convenience: `json.encode(t)` is String when `t` has `T.encode`.
+        if field == "encode" && arg_tys.len() == 1 {
+            let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
+            if self.has_codec_encode(&arg_concrete) {
+                return Some(Ty::String);
+            }
+        }
+        self.resolve_module_member(module, field, arg_tys)
     }
 
     /// `fan.*` dispatch of [`Self::resolve_static_member`] — compiler-known
