@@ -225,9 +225,17 @@ impl Checker {
         use almide_lang::types::constructor::TypeConstructorId as TC;
         let Ty::Applied(TC::List | TC::Set, args) = declared else { return None };
         let [elem] = args.as_slice() else { return None };
+        // A sized element pins its literals directly; an AGGREGATE element is
+        // recursed into, because the sized slot may sit inside it —
+        // `List[(Int8, Int)]` narrows the tuple's first component exactly as
+        // `List[Int8]` narrows the element. Returning `None` for the aggregate
+        // case stopped the walk at the list and left the component unchecked
+        // (differential fuzz, seed 1784958133509490474).
         matches!(elem,
             Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
             | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Tuple(_) | Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Named(..)
+            | Ty::Applied(TC::List | TC::Set, _)
         ).then(|| elem.clone())
     }
 

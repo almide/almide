@@ -3,5 +3,6 @@ type Rec = { b: Int8, n: Int }
 fn main() -> Unit = {
   let r: Rec = { b: 127, n: 9999 }
   let n: ((Int8, Int), Int) = ((127, 1000), 2000)
-  println("${int.to_string(int.from_int8(r.b))}:${int.to_string(n.1)}")
+  let a: List[(Int8, Int)] = [(1, 100), (120, 200)]
+  println("${int.to_string(int.from_int8(r.b))}:${int.to_string(n.1)}:${int.to_string(list.len(a))}")
 }
