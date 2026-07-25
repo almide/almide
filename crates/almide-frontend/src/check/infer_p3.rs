@@ -199,7 +199,7 @@ impl Checker {
             }
         }).collect();
         match tys.len() {
-            1 => tys.into_iter().next().unwrap(),
+            1 => tys.into_iter().next().unwrap_or(Ty::Unknown),
             _ => Ty::Tuple(tys.iter().map(|t| resolve_ty(t, &self.uf)).collect()),
         }
     }
@@ -682,7 +682,8 @@ impl Checker {
     fn effect_unwrap_rhs(&self, t: Ty, target_keeps_result: bool) -> Ty {
         if self.env.auto_unwrap && !target_keeps_result {
             match t {
-                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 =>
+                    args.into_iter().next().unwrap_or(Ty::Unknown),
                 other => other,
             }
         } else { t }
@@ -835,8 +836,9 @@ impl Checker {
         };
         // Intra-module access (same package) is always allowed, regardless of
         // whether it's `mod fn` or `local fn`. This matches the spec for
-        // `mod fn` and is a pragmatic relaxation for `local fn` (strict
-        // same-file enforcement needs per-fn file tracking — TODO).
+        // `mod fn`; for `local fn` it is a deliberate relaxation, because
+        // strict same-file enforcement needs per-fn file tracking the checker
+        // does not carry (issue #870).
         if let Some(self_mod) = self.env.self_module_name {
             if self_mod.as_str() == callee_module {
                 return;

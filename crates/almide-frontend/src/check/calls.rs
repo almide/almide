@@ -535,8 +535,9 @@ impl Checker {
             diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));
         }
         self.emit(diag);
-        return Ty::Unknown;
+        Ty::Unknown
     }
+
     /// Validate that arguments passed to `mut` parameters are mutable (`var`) bindings. Called after `check_named_call_with_type_args` which populates `self.last_mut_params`.
     pub(crate) fn validate_mut_args(&mut self, fn_name: &str, arg_exprs: &[&ast::Expr]) {
         let mut_params = std::mem::take(&mut self.last_mut_params);

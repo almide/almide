@@ -152,8 +152,10 @@ impl Checker {
                 candidates.dedup_by(|a, b| {
                     self.env.types.get(&a.0) == self.env.types.get(&b.0)
                 });
-                if candidates.len() == 1 {
-                    let (type_name, field_ty) = candidates.pop().unwrap();
+                // A slice pattern carries the "exactly one candidate" check and
+                // the binding together, so the two cannot drift apart.
+                if let [(type_name, field_ty)] = candidates.as_slice() {
+                    let (type_name, field_ty) = (*type_name, field_ty.clone());
                     let named = Ty::Named(type_name, vec![]);
                     self.unify_infer(ty, &named);
                     field_ty

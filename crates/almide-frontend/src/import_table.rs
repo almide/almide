@@ -187,6 +187,17 @@ fn build_import_table_process_import(
     register_import_selective(names, &canonical, table);
 }
 
+/// The last segment of an import path — the name the path introduces into
+/// scope.
+///
+/// An empty path yields an empty name rather than panicking. The parser does
+/// not produce one, but error recovery can, and an empty used-name is already a
+/// value the table handles: the unused-import lint skips it, so recovery stays
+/// quiet instead of aborting the whole check.
+fn import_leaf_name(path: &[Sym]) -> String {
+    path.last().map(|s| s.to_string()).unwrap_or_default()
+}
+
 /// Steps 1-2 of [`build_import_table_process_import`]: build the canonical
 /// module name from the import path, resolving `import self` (and
 /// `import self.a.b`) — the resolver's registration is asymmetric (the
@@ -204,7 +215,7 @@ fn resolve_import_canonical(path: &[Sym], module_name: Option<&str>, user_module
             }
         } else {
             // import self.a.b → prefer "<module>.a.b" if registered, else "b"
-            let leaf = path.last().unwrap().to_string();
+            let leaf = import_leaf_name(path);
             let fqn = if let Some(mod_name) = module_name {
                 let suffix = path[1..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
                 format!("{}.{}", mod_name, suffix)
@@ -228,12 +239,12 @@ fn resolve_import_used_name(path: &[Sym], alias: &Option<Sym>, is_self: bool, ca
         a.to_string()
     } else if path.len() > 1 {
         // Go-style: last segment is the namespace
-        path.last().unwrap().to_string()
+        import_leaf_name(path)
     } else if is_self {
         // import self → use the resolved package name
         canonical.split('.').last().unwrap_or(canonical).to_string()
     } else {
-        path.last().unwrap().to_string()
+        import_leaf_name(path)
     }
 }
 

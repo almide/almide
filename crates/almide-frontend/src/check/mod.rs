@@ -35,6 +35,22 @@ use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeEnv};
 use types::{TyVarId, Constraint, FixHint, UnionFind, resolve_ty};
 
+/// Print a compiler trace line when the named debug channel is switched on.
+///
+/// Cross-module top-let types are written in one pass and read in another, and
+/// the failure mode (a `Ty::Unknown` reaching lowering, which then emits
+/// `LazyLock<_>`) is invisible in the compiler's normal output — so the write
+/// and the read each announce themselves under `ALMIDE_<CHANNEL>_DEBUG`.
+///
+/// Traces go to stderr because stdout is the compiler's data channel: `almide
+/// compile --json` and `--target rust` write their real output there, and a
+/// trace line mixed into it would corrupt a machine-read result.
+pub(crate) fn debug_trace(channel: &str, line: impl FnOnce() -> String) {
+    if std::env::var_os(format!("ALMIDE_{channel}_DEBUG")).is_some() {
+        eprintln!("[{}-debug] {}", channel.to_lowercase(), line());
+    }
+}
+
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
     Diagnostic::error(msg, hint, ctx)
 }
