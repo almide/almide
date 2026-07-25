@@ -260,154 +260,9 @@ impl LowerCtx {
         // must not interleave with the store sequence).
         let mut objs: Vec<ValueId> = Vec::with_capacity(elements.len());
         for e in elements {
-            // When the element type is forced (a structural record LITERAL in a `List[Named]` context),
-            // materialize the element AS the Named type so `try_lower_record_construct` lays it out by
-            // the DECLARED field order (matching the `$__drop_list_<Named>` teardown). Field-by-name
-            // assignment makes this order-correct regardless of the literal's source field order.
-            let forced_e;
-            let e_ref = match forced_elem {
-                Some(ft) if matches!(e.kind, IrExprKind::Record { .. }) => {
-                    forced_e = IrExpr { ty: ft.clone(), ..e.clone() };
-                    &forced_e
-                }
-                _ => e,
-            };
-            // A CTOR-class element (`some(1)`, `err("x")`) materializes through the Option/Result
-            // ctor builder (a fresh OWNED wrapper block; the ctor arms leave tracking to callers,
-            // so push it for the uniform Consume below). A Var/call element of the SAME type takes
-            // `lower_owned_heap_field` (Dup / fresh CallFn result) — the drop class is TYPE-driven,
-            // so both produce blocks the registered list drop frees exactly.
-            if matches!(kind, ListElemDrop::ListStr) {
-                // An inner `List[String]` LITERAL element builds through the str-list
-                // builder (fresh owned, tracked by it); a Var/call element of the exact
-                // element type takes the generic owned-field path below. A type-rewritten
-                // (never-err-lifted) element declines — the same guard as the ctor class.
-                if matches!(e_ref.kind, IrExprKind::List { .. }) {
-                    if let Some(obj) = self.try_lower_str_list_literal(e_ref) {
-                        if !self.live_heap_handles.contains(&obj) {
-                            self.live_heap_handles.push(obj);
-                        }
-                        objs.push(obj);
-                        continue;
-                    }
-                    return None;
-                }
-                if e_ref.ty != elem_ty {
-                    return None;
-                }
+            if let Some(obj) = self.lower_record_list_element(e, forced_elem, &elem_ty, kind.clone())? {
+                objs.push(obj);
             }
-            if matches!(kind, ListElemDrop::ScalarAggregate) {
-                // An inner `List[<scalar>]` LITERAL element builds through the flat
-                // slots builder (fresh owned; the uniform Consume below moves it in).
-                if let IrExprKind::List { elements: iels } = &e_ref.kind {
-                    let iels = iels.clone();
-                    if let Some(obj) = self.try_lower_scalar_list_slots(&iels) {
-                        if !self.live_heap_handles.contains(&obj) {
-                            self.live_heap_handles.push(obj);
-                        }
-                        objs.push(obj);
-                        continue;
-                    }
-                    return None;
-                }
-                if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
-                    let tels = tels.clone();
-                    if let Some(obj) = self.try_lower_scalar_tuple_construct(&tels) {
-                        if !self.live_heap_handles.contains(&obj) {
-                            self.live_heap_handles.push(obj);
-                        }
-                        objs.push(obj);
-                        continue;
-                    }
-                    return None;
-                }
-            }
-            if matches!(kind, ListElemDrop::RecordInt(_)) {
-                // The tuple's record slot is a STRUCTURAL literal (`({name: …, age: …}, 1)`) —
-                // FORCE it to the classified type (the forced_elem precedent, extended into the
-                // tuple slot) so `lower_owned_heap_field`'s recursive-record arm constructs the
-                // SAME layout the registered `$__drop_list_<R>_int` tears down. A non-literal
-                // slot must already carry the exact classified type; anything else declines.
-                if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
-                    let Ty::Tuple(tys) = &elem_ty else { return None };
-                    let mut tels = tels.clone();
-                    if matches!(tels[0].kind, IrExprKind::Record { .. }) {
-                        tels[0].ty = tys[0].clone();
-                    } else if tels[0].ty != tys[0] {
-                        return None;
-                    }
-                    if let Some(obj) = self.try_lower_tuple_construct(&tels) {
-                        if !self.live_heap_handles.contains(&obj) {
-                            self.live_heap_handles.push(obj);
-                        }
-                        objs.push(obj);
-                        continue;
-                    }
-                }
-                return None;
-            }
-            if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr | ListElemDrop::StrVariant(_) | ListElemDrop::StrMapStr | ListElemDrop::StrListOpt) {
-                // A `(String, Int)` / `(Int, String)` / `(String, <rich variant>)` TUPLE LITERAL
-                // element builds through the general masked-tuple builder (String slot fresh
-                // OWNED + moved in, the other slot a scalar store OR — for `StrVariant` — a
-                // fresh OWNED variant ctor block via `lower_owned_heap_field`'s existing
-                // ctor-call dispatch; `try_lower_tuple_construct` already handles arbitrary
-                // heap/scalar slot mixes for other callers, so no new construction path is
-                // needed here). The list's OWN drop (registered below via
-                // `variant_drop_handles`) frees each tuple's slots recursively, so the tuple's
-                // own `record_masks` entry never scope-end-fires — mirrored from the
-                // `(Int, String)` precedent in calls_p2.rs/binds.rs.
-                if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
-                    let tels = tels.clone();
-                    if let Some(obj) = self.try_lower_tuple_construct(&tels) {
-                        if !self.live_heap_handles.contains(&obj) {
-                            self.live_heap_handles.push(obj);
-                        }
-                        objs.push(obj);
-                        continue;
-                    }
-                    return None;
-                }
-            }
-            if matches!(kind, ListElemDrop::Closure) {
-                // A LAMBDA literal element: lift it to a fresh `__lambda_*` fn + closure block
-                // via the SAME proven mechanism a call-argument lambda already uses (calls_p2.rs).
-                if let IrExprKind::Lambda { params, body, .. } = &e_ref.kind {
-                    if let Some(obj) = self.lift_lambda(params, body) {
-                        if !self.live_heap_handles.contains(&obj) {
-                            self.live_heap_handles.push(obj);
-                        }
-                        objs.push(obj);
-                        continue;
-                    }
-                    return None;
-                }
-                // A non-lambda element (a Var holding a closure / a call returning one) must
-                // carry the list's element type; anything else declines rather than storing a
-                // mismatched value into a closure-drop-typed slot.
-                if e_ref.ty != elem_ty {
-                    return None;
-                }
-            }
-            if matches!(kind, ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop) {
-                if let Some(obj) = self.try_lower_option_ctor(e_ref, &elem_ty) {
-                    if !self.live_heap_handles.contains(&obj) {
-                        self.live_heap_handles.push(obj);
-                    }
-                    objs.push(obj);
-                    continue;
-                }
-                // A non-ctor element (a Var / call) must CARRY the list's element type — a
-                // never-err LIFTED effect call (`[step(), step()]`, autotry_construction) has
-                // its call type rewritten to the RAW payload (Int), so lowering it here would
-                // store a SCALAR where the registered drop expects an owned handle (invalid
-                // wasm + an unacquired `m` witness — the PCC gate caught exactly this).
-                // Decline → the caller walls, never a wrong byte.
-                if e_ref.ty != elem_ty {
-                    return None;
-                }
-            }
-            objs.push(self.lower_owned_heap_field(e_ref)?);
         }
         let n = elements.len();
         let len = self.fresh_value();
@@ -502,6 +357,165 @@ impl LowerCtx {
         self.materialized_lists.insert(dst);
         self.live_heap_handles.push(dst);
         Some(dst)
+    }
+
+    /// Lower one element of a record-list literal to an OWNED handle.
+    ///
+    /// `None` from the outer `Option` declines the whole literal, so the caller
+    /// walls rather than storing a wrong shape. `Some(None)` means the element
+    /// materialized itself and already registered its own handle, so the caller
+    /// adds nothing.
+    fn lower_record_list_element(
+        &mut self,
+        e: &IrExpr,
+        forced_elem: Option<&Ty>,
+        elem_ty: &Ty,
+        kind: ListElemDrop,
+    ) -> Option<Option<ValueId>> {
+        use crate::{IntOp, PrimKind};
+        use almide_lang::types::constructor::TypeConstructorId;
+        // When the element type is forced (a structural record LITERAL in a `List[Named]` context),
+        // materialize the element AS the Named type so `try_lower_record_construct` lays it out by
+        // the DECLARED field order (matching the `$__drop_list_<Named>` teardown). Field-by-name
+        // assignment makes this order-correct regardless of the literal's source field order.
+        let forced_e;
+        let e_ref = match forced_elem {
+            Some(ft) if matches!(e.kind, IrExprKind::Record { .. }) => {
+                forced_e = IrExpr { ty: ft.clone(), ..e.clone() };
+                &forced_e
+            }
+            _ => e,
+        };
+        // A CTOR-class element (`some(1)`, `err("x")`) materializes through the Option/Result
+        // ctor builder (a fresh OWNED wrapper block; the ctor arms leave tracking to callers,
+        // so push it for the uniform Consume below). A Var/call element of the SAME type takes
+        // `lower_owned_heap_field` (Dup / fresh CallFn result) — the drop class is TYPE-driven,
+        // so both produce blocks the registered list drop frees exactly.
+        if matches!(kind, ListElemDrop::ListStr) {
+            // An inner `List[String]` LITERAL element builds through the str-list
+            // builder (fresh owned, tracked by it); a Var/call element of the exact
+            // element type takes the generic owned-field path below. A type-rewritten
+            // (never-err-lifted) element declines — the same guard as the ctor class.
+            if matches!(e_ref.kind, IrExprKind::List { .. }) {
+                if let Some(obj) = self.try_lower_str_list_literal(e_ref) {
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    return Some(Some(obj));
+                }
+                return None;
+            }
+            if e_ref.ty != *elem_ty {
+                return None;
+            }
+        }
+        if matches!(kind, ListElemDrop::ScalarAggregate) {
+            // An inner `List[<scalar>]` LITERAL element builds through the flat
+            // slots builder (fresh owned; the uniform Consume below moves it in).
+            if let IrExprKind::List { elements: iels } = &e_ref.kind {
+                let iels = iels.clone();
+                if let Some(obj) = self.try_lower_scalar_list_slots(&iels) {
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    return Some(Some(obj));
+                }
+                return None;
+            }
+            if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
+                let tels = tels.clone();
+                if let Some(obj) = self.try_lower_scalar_tuple_construct(&tels) {
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    return Some(Some(obj));
+                }
+                return None;
+            }
+        }
+        if matches!(kind, ListElemDrop::RecordInt(_)) {
+            // The tuple's record slot is a STRUCTURAL literal (`({name: …, age: …}, 1)`) —
+            // FORCE it to the classified type (the forced_elem precedent, extended into the
+            // tuple slot) so `lower_owned_heap_field`'s recursive-record arm constructs the
+            // SAME layout the registered `$__drop_list_<R>_int` tears down. A non-literal
+            // slot must already carry the exact classified type; anything else declines.
+            if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
+                let Ty::Tuple(tys) = &elem_ty else { return None };
+                let mut tels = tels.clone();
+                if matches!(tels[0].kind, IrExprKind::Record { .. }) {
+                    tels[0].ty = tys[0].clone();
+                } else if tels[0].ty != tys[0] {
+                    return None;
+                }
+                if let Some(obj) = self.try_lower_tuple_construct(&tels) {
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    return Some(Some(obj));
+                }
+            }
+            return None;
+        }
+        if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr | ListElemDrop::StrVariant(_) | ListElemDrop::StrMapStr | ListElemDrop::StrListOpt) {
+            // A `(String, Int)` / `(Int, String)` / `(String, <rich variant>)` TUPLE LITERAL
+            // element builds through the general masked-tuple builder (String slot fresh
+            // OWNED + moved in, the other slot a scalar store OR — for `StrVariant` — a
+            // fresh OWNED variant ctor block via `lower_owned_heap_field`'s existing
+            // ctor-call dispatch; `try_lower_tuple_construct` already handles arbitrary
+            // heap/scalar slot mixes for other callers, so no new construction path is
+            // needed here). The list's OWN drop (registered below via
+            // `variant_drop_handles`) frees each tuple's slots recursively, so the tuple's
+            // own `record_masks` entry never scope-end-fires — mirrored from the
+            // `(Int, String)` precedent in calls_p2.rs/binds.rs.
+            if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
+                let tels = tels.clone();
+                if let Some(obj) = self.try_lower_tuple_construct(&tels) {
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    return Some(Some(obj));
+                }
+                return None;
+            }
+        }
+        if matches!(kind, ListElemDrop::Closure) {
+            // A LAMBDA literal element: lift it to a fresh `__lambda_*` fn + closure block
+            // via the SAME proven mechanism a call-argument lambda already uses (calls_p2.rs).
+            if let IrExprKind::Lambda { params, body, .. } = &e_ref.kind {
+                if let Some(obj) = self.lift_lambda(params, body) {
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    return Some(Some(obj));
+                }
+                return None;
+            }
+            // A non-lambda element (a Var holding a closure / a call returning one) must
+            // carry the list's element type; anything else declines rather than storing a
+            // mismatched value into a closure-drop-typed slot.
+            if e_ref.ty != *elem_ty {
+                return None;
+            }
+        }
+        if matches!(kind, ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop) {
+            if let Some(obj) = self.try_lower_option_ctor(e_ref, &elem_ty) {
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                return Some(Some(obj));
+            }
+            // A non-ctor element (a Var / call) must CARRY the list's element type — a
+            // never-err LIFTED effect call (`[step(), step()]`, autotry_construction) has
+            // its call type rewritten to the RAW payload (Int), so lowering it here would
+            // store a SCALAR where the registered drop expects an owned handle (invalid
+            // wasm + an unacquired `m` witness — the PCC gate caught exactly this).
+            // Decline → the caller walls, never a wrong byte.
+            if e_ref.ty != *elem_ty {
+                return None;
+            }
+        }
+        return Some(Some(self.lower_owned_heap_field(e_ref)?));
+        Some(Some(self.lower_owned_heap_field(e_ref)?))
     }
 
     /// A heap-element `List` LITERAL RETURNED in TAIL position (`fn aliases() ->

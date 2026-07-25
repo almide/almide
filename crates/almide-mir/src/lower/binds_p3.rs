@@ -5,6 +5,7 @@
 /// per-element `rc_dec` of `DropListStr` is exact) or a LenLoop class (owned handle slots — the
 /// generated `$__drop_list_lenlist`). Moved to module scope (was function-local) so
 /// `LowerCtx::classify_list_elem_drop` can return it — pure text move, no behavior change.
+#[derive(Clone)]
 enum ListElemDrop {
     Record(String),
     StrStr,
