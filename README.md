@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="./docs/assets/almide.svg" alt="Almide" width="200">
+  <img src="./docs/assets/almide-banner.jpg" alt="Almide" width="720">
 </p>
-
-<h1 align="center">Almide</h1>
 
 <p align="center">A programming language designed for LLM code generation.</p>
 

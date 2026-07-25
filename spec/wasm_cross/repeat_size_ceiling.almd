@@ -1,0 +1,23 @@
+// @contract: C-034
+// A `repeat` whose result would exceed the shared 2^31-byte ceiling ABORTS in the
+// T6 form on BOTH targets: one `Error: repeat result too large` line and exit 1.
+// Before, an absurd count failed on both but in DIFFERENT forms — native a raw
+// allocation failure ("memory allocation of N bytes failed", exit 1), wasm an
+// out-of-bounds memory trap (exit 134) — and neither is a permitted observable
+// (differential-fuzz; the same rule C-161 set for matrix dimensions).
+//
+// The count is read from argv so the compiler cannot constant-fold it away.
+import env
+
+effect fn main() -> Unit = {
+  // Ordinary repeats are unaffected.
+  println("small = " + string.repeat("ab", 3))
+  println("zero  = [" + string.repeat("ab", 0) + "]")
+  println("neg   = [" + string.repeat("ab", -5) + "]")
+
+  let n = list.len(env.args())
+  let huge = 9223372036854775807 - n
+  println("about to overflow")
+  println(int.to_string(string.len(string.repeat("b", huge))))
+  println("unreachable")
+}

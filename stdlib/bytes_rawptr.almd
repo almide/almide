@@ -30,7 +30,13 @@ fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
   let dst = prim.ptr_to_int(ptr)
   let h = prim.handle(b)
   let len = prim.load32(h + 4)
-  let n = if len < cap then len else cap
+  // `cap` is an UNSIGNED capacity, matching the native oracle's
+  // `b.len().min(cap as usize)`: a NEGATIVE cap is enormous as a usize and
+  // saturates to the whole buffer (the C-034 unsigned-count rule). Comparing
+  // it SIGNED returned the raw negative count and copied nothing, where native
+  // copied the whole buffer and returned its length (differential-fuzz).
+  let capped = if cap < 0 then len else cap
+  let n = if len < capped then len else capped
   let _c = __brp_copy(dst, h + 12, n, 0)
   n
 }

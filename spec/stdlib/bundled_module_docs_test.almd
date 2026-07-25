@@ -10,13 +10,18 @@
 // program calling them emitted invalid Rust (E0425).
 //
 // `net`/`zlib` are excluded: both are native-only host boundaries whose own
-// suites already carry `// wasm:skip`.
+// suites already carry `// wasm:skip`. `mem` lives in its own file — its example
+// runs on BOTH legs from `main` but walls inside a promoted test fn.
+//
+// This file itself still runs on the NATIVE leg: `path`/`html` link per-function
+// on wasm now, which surfaces a `list.fold_hacc` (heap-accumulator fold) inside
+// their own bodies — the largest bucket in the #812 subset ledger, not a defect
+// here. `spec/stdlib/path_args_test.almd` covers the same modules on the wasm leg.
 
 import path
 import html
 import base64
 import hex
-import mem
 
 test "docs path examples" {
   assert_eq(path.join("/usr", "bin"), "/usr/bin")
@@ -54,10 +59,4 @@ test "docs hex examples" {
     ok(b) => assert_eq(bytes.len(b), 2),
     err(_) => assert_eq(true, false),
   }
-}
-
-test "docs mem save/restore round-trip" {
-  let mark = mem.save()
-  mem.restore(mark)
-  assert_eq(1, 1)
 }

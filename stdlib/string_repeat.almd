@@ -27,6 +27,14 @@ fn string_repeat(s: String, n: Int) -> String = {
   let slen = prim.load32(h + 4)              // byte length at LIST_LEN_OFFSET(4)
   let count = if n > 0 then n else 0         // C-054 clamp (negative → empty; the
                                              // bytes/list repeats already clamp)
+  // A result larger than the shared 2^31 ceiling ABORTS in the T6 form on both
+  // targets. Before, an absurd count failed on both but in DIFFERENT forms —
+  // native an allocation failure (exit 1), wasm an out-of-bounds trap (exit 134),
+  // neither a permitted observable (differential-fuzz; the C-161 rule).
+  // Keep in sync with ALMIDE_REPEAT_MAX_BYTES in runtime/rs/src/string.rs.
+  if slen > 0 and count > 2147483648 / slen then
+    prim.die(prim.handle("Error: repeat result too large\n"))
+  else ()
   let buf = prim.alloc_str(slen * count)     // owned rc=1 String, slen*count bytes
   let _e = __str_repeat(h + 12, prim.handle(buf) + 12, slen, count)
   buf

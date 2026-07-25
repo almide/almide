@@ -38,6 +38,14 @@ effect fn main() -> Unit = {
   println("pad_s.ok  = [" + string.pad_start("ab", 5, "·") + "]")
   println("pad_e.ok  = [" + string.pad_end("ab", 5, "·") + "]")
 
+  // `bytes.copy_to_ptr`'s cap is an UNSIGNED capacity: a negative one saturates
+  // to the whole buffer (the wasm self-host used to compare it SIGNED, returning
+  // the raw negative count where native copied everything).
+  var dst = bytes.new(4)
+  println("cp.neg    = " + int.to_string(bytes.copy_to_ptr(b, bytes.as_mut_ptr(dst), -2147483648)))
+  println("cp.neg1   = " + int.to_string(bytes.copy_to_ptr(b, bytes.as_mut_ptr(dst), -1)))
+  println("cp.ok     = " + int.to_string(bytes.copy_to_ptr(b, bytes.as_mut_ptr(dst), 2)))
+
   // An EMPTY needle matches at position 0 even in an empty haystack.
   println("rf.empty  = [" + string.replace_first("", "", "X") + "]")
   println("rf.head   = [" + string.replace_first("abc", "", "X") + "]")
