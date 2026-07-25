@@ -197,12 +197,14 @@ fn try_render_wasm_source_impl_rest(
 
     repair_and_substitute_globals(ir, &mut inlined_fns, &mut module_fn_sibs, &layouts, &all_fns);
 
+    let mut main_wall: Option<String> = None;
     let mut functions = lower_main_and_sibling_fns(
         &inlined_fns,
         &module_fn_sibs,
         &layouts,
         ir.functions.len(),
         verbose,
+        &mut main_wall,
     );
 
     // Self-append windows (`x = x + [e]`, incl. the `list.push` desugar) →
@@ -324,9 +326,14 @@ fn try_render_wasm_source_impl_rest(
     // `(func (export "_start") (call $main))`. Wall the WHOLE program cleanly instead of a
     // main-less (invalid) module.
     if !functions.iter().any(|f| f.name == "main") {
-        return Err(LowerError::Unsupported(
-            "main is outside the MIR-lowering subset".into(),
-        ));
+        // Name the CAUSE, not just the absence. `main` walling is the single
+        // most common wall, and reporting it as "main is outside the subset"
+        // collapsed every distinct reason into one bucket that no burn-down
+        // could act on (#812).
+        return Err(LowerError::Unsupported(match &main_wall {
+            Some(reason) => format!("main is outside the MIR-lowering subset: {reason}"),
+            None => "main is outside the MIR-lowering subset (no main in the IR)".into(),
+        }));
     }
 
     // `pub fn` EXPORT roots (#457): a Public non-test MAIN-program fn must be a named wasm
