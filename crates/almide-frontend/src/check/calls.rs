@@ -21,6 +21,22 @@ pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
     }
 }
 
+/// The per-argument state of a call that has just been checked.
+///
+/// The three are parallel views of the same argument list and are only correct
+/// together: `aligned_raw` re-indexes `arg_tys` for a named call, and
+/// `e005_fired` is indexed the same way. Passing them separately allowed an
+/// unaligned pair, which reports the wrong parameter.
+#[derive(Copy, Clone)]
+pub(crate) struct CheckedArgs<'a> {
+    pub arg_tys: &'a [Ty],
+    /// Realigned inference types for a named call; a `None` slot was filled from
+    /// a default and gets no constraint.
+    pub aligned_raw: &'a Option<Vec<Option<Ty>>>,
+    /// Which parameters already reported E005, so E001 is not also emitted.
+    pub e005_fired: &'a [bool],
+}
+
 /// Which call argument a check is looking at.
 ///
 /// The callee name and the parameter name travelled as two adjacent `&str`-ish
@@ -253,7 +269,9 @@ impl Checker {
         }
 
         self.check_protocol_bounds(name, &sig, &bindings);
-        self.propagate_call_arg_types(name, &sig, arg_tys, &aligned_raw, &e005_fired, &bindings);
+        self.propagate_call_arg_types(name, &sig, CheckedArgs {
+            arg_tys, aligned_raw: &aligned_raw, e005_fired: &e005_fired,
+        }, &bindings);
 
         self.finalize_call_return_ty(name, &sig, bindings)
     }
@@ -364,9 +382,10 @@ impl Checker {
     }
     /// Propagate resolved types back to inference variables, skipping params where E005 already fired (avoids a duplicate E001). Verbatim text move out of [`Self::check_named_call_with_type_args`].
     fn propagate_call_arg_types(
-        &mut self, name: &str, sig: &crate::types::FnSig, arg_tys: &[Ty],
-        aligned_raw: &Option<Vec<Option<Ty>>>, e005_fired: &[bool], bindings: &HashMap<Sym, Ty>,
+        &mut self, name: &str, sig: &crate::types::FnSig,
+        args: CheckedArgs<'_>, bindings: &HashMap<Sym, Ty>,
     ) {
+        let CheckedArgs { arg_tys, aligned_raw, e005_fired } = args;
         for (i, (_, pty)) in sig.params.iter().enumerate() {
             if e005_fired.get(i).copied().unwrap_or(false) { continue; }
             // The arg inference ty for param i — realigned for named calls; a None slot (default-filled) gets no constraint.

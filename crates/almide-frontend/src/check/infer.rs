@@ -626,3 +626,4 @@ include!("infer_p2.rs");
 include!("infer_p3.rs");
 include!("infer_p4.rs");
 include!("infer_p5.rs");
+include!("infer_p6.rs");
