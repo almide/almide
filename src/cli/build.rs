@@ -288,13 +288,15 @@ pub(super) fn lower_one_wasm_module(
     mod_prog: &mut almide::ast::Program,
     pkg_id: &mut Option<project::PkgId>,
     ir_program: &mut almide::ir::IrProgram,
+    sources: &std::collections::HashMap<String, (String, String)>,
+    module_diags: &mut Vec<(String, String, Vec<crate::diagnostic::Diagnostic>)>,
 ) {
     if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { return; }
     let saved_self = checker.env.self_module_name;
     if let Some(pid) = pkg_id.as_ref() {
         checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
     }
-    checker.infer_module(mod_prog, name);
+    crate::compile_driver::infer_module_capturing(checker, name, mod_prog, sources, module_diags);
     let versioned = pkg_id.as_ref().map(|pid| {
         let base = pid.mod_name();
         if let Some(suffix) = name.strip_prefix(&pid.name) {
@@ -381,7 +383,7 @@ fn typecheck_wasm_program(file: &str, source_text: &str, program: &mut almide::a
 /// module names, lower the entry program, lower each resolved user module
 /// (bundled stdlib included so `@inline_rust` fns reach the bundled-dispatch
 /// path), link, optimize, and monomorphize. Extracted verbatim.
-fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> almide::ir::IrProgram {
+fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, ()> {
     // Pre-register versioned names before root lowering
     for (name, _, pkg_id, _) in &resolved.modules {
         if let Some(pid) = pkg_id.as_ref() {
@@ -395,9 +397,16 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // Lower user modules to IR. Bundled stdlib modules (stdlib/<m>.almd) are
     // included so their fns can be invoked through the bundled-dispatch path;
     // colliding TOML-runtime fns are pruned to avoid duplicate definitions.
+    let mut module_diags = Vec::new();
+    let sources = std::mem::take(&mut resolved.sources);
     for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        lower_one_wasm_module(checker, name, mod_prog, pkg_id, &mut ir_program);
+        lower_one_wasm_module(
+            checker, name, mod_prog, pkg_id, &mut ir_program, &sources, &mut module_diags,
+        );
     }
+    resolved.sources = sources;
+    // An imported module's own type errors abort the wasm build too (#862).
+    crate::compile_driver::report_module_diagnostics(&module_diags).map_err(|_| ())?;
 
     // IR link: merge dependency modules into root
     almide::ir_link::ir_link(&mut ir_program);
@@ -408,7 +417,7 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // Monomorphize
     almide::mono::monomorphize(&mut ir_program);
 
-    ir_program
+    Ok(ir_program)
 }
 
 /// `compile_to_wasm_bytes`'s IR-integrity gate — the same check the native
@@ -498,7 +507,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
 
     let mut checker = typecheck_wasm_program(file, &source_text, &mut program, &resolved)?;
-    let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved);
+    let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
 

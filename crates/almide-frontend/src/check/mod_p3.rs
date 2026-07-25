@@ -22,11 +22,16 @@ impl Checker {
         self.env.import_table = mod_table;
         self.diagnostics.extend(diags);
 
-        // Temporarily register unprefixed declarations for intra-module resolution
+        // Temporarily register unprefixed declarations for intra-module resolution.
+        // `alias_owner_module` marks them as belonging to THIS module, so the
+        // constructor-candidate table treats them as the canonical prefixed
+        // entries rather than as a second, competing declaration.
         let snapshot = self.env.snapshot_keys();
+        let saved_alias_owner = self.env.alias_owner_module.replace(sym(module_name));
         crate::canonicalize::registration::register_decls(
             &mut self.env, &mut self.diagnostics, &prog.decls, None,
         );
+        self.env.alias_owner_module = saved_alias_owner;
 
         // Infer + solve + resolve
         let saved_prefix = std::mem::replace(
@@ -96,9 +101,11 @@ impl Checker {
         self.env.import_table = mod_table;
 
         let snapshot = self.env.snapshot_keys();
+        let saved_alias_owner = self.env.alias_owner_module.replace(sym(module_name));
         crate::canonicalize::registration::register_decls(
             &mut self.env, &mut Vec::new(), &prog.decls, None,
         );
+        self.env.alias_owner_module = saved_alias_owner;
         let saved_prefix = std::mem::replace(
             &mut self.current_module_prefix,
             Some(module_name.to_string()),

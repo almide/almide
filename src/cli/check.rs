@@ -45,7 +45,7 @@ fn report_check_errors_or_exit(
 fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Program, source_text: &str) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker) {
     let dep_paths = super::dep_paths_from_cwd_toml();
 
-    let resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
+    let mut resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 
     let canon = canonicalize::canonicalize_program(
@@ -60,6 +60,28 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     // readers see the registration seed — Unknown for non-literal inits).
     almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
     let diagnostics = checker.infer_program(program);
+
+    // #862: an imported module's OWN body was never inferred on the check
+    // path, so an E006 (or any other body-level error) inside it stayed
+    // invisible to every importer while `almide check` reported "No errors
+    // found". Infer each user module here — the same step the build drivers
+    // run — and report its errors against its own file before the entry's.
+    let sources = std::mem::take(&mut resolved.sources);
+    let mut module_diags = Vec::new();
+    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+        if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
+        let saved_self = checker.env.self_module_name;
+        if let Some(pid) = pkg_id.as_ref() {
+            checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+        }
+        crate::compile_driver::infer_module_capturing(
+            &mut checker, name, mod_prog, &sources, &mut module_diags,
+        );
+        checker.env.self_module_name = saved_self;
+    }
+    if crate::compile_driver::report_module_diagnostics(&module_diags).is_err() {
+        std::process::exit(1);
+    }
 
     (diagnostics, checker)
 }

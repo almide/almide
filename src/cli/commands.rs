@@ -301,7 +301,7 @@ fn typecheck_wasm_test_program(test_file: &str, source_text: &str, program: &mut
 /// used to be a byte-for-byte duplicate of it). link/optimize/monomorphize
 /// stay in the caller so the ALMIDE_PROFILE "lower_modules" mark lands at
 /// the same point as before. Extracted verbatim.
-fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> almide::ir::IrProgram {
+fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, ()> {
     for (name, _, pkg_id, _) in &resolved.modules {
         if let Some(pid) = pkg_id.as_ref() {
             let base = pid.mod_name();
@@ -310,10 +310,22 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
         }
     }
     let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
+    let mut module_diags = Vec::new();
+    let sources = std::mem::take(&mut resolved.sources);
     for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        super::build::lower_one_wasm_module(checker, name, mod_prog, pkg_id, &mut ir_program);
+        super::build::lower_one_wasm_module(
+            checker, name, mod_prog, pkg_id, &mut ir_program, &sources, &mut module_diags,
+        );
     }
-    ir_program
+    resolved.sources = sources;
+    // An imported module's own type errors are NOT reported here: like the
+    // entry program's, they route the file to the authoritative native
+    // fallback, which prints them (#862). Reporting twice would duplicate
+    // every diagnostic in `almide test`'s output.
+    if module_diags.iter().any(|(_, _, ds)| ds.iter().any(|d| d.level == diagnostic::Level::Error)) {
+        return Err(());
+    }
+    Ok(ir_program)
 }
 
 fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> WasmTestOutcome {
@@ -353,7 +365,10 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     };
     mark(prof, &mut marks, "check_user");
 
-    let mut ir_program = lower_wasm_test_modules(&program, &mut checker, &mut resolved);
+    let mut ir_program = match lower_wasm_test_modules(&program, &mut checker, &mut resolved) {
+        Ok(ir) => ir,
+        Err(()) => return skip("type errors in an imported module".to_string()),
+    };
     mark(prof, &mut marks, "lower_modules");
     almide::ir_link::ir_link(&mut ir_program);
     almide::optimize::optimize_program(&mut ir_program);
@@ -385,15 +400,6 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     .ok()
     .and_then(|wat_text| wat::parse_str(&wat_text).ok())
     .filter(|bytes| wasmparser::validate(bytes).is_ok());
-    let v0_bytes = |ir_program: &mut almide_ir::IrProgram| -> Result<Vec<u8>, ()> {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            match almide::codegen::codegen(ir_program, almide::codegen::pass::Target::Wasm) {
-                almide::codegen::CodegenOutput::Binary(b) => b,
-                almide::codegen::CodegenOutput::Source(_) => unreachable!(),
-            }
-        }))
-        .map_err(|_| ())
-    };
     // Write the module and run it under wasmtime. `-S inherit-env=y` mirrors
     // `cmd_run_wasm`: `env.get` in a test observes the same host variables native
     // does (the env cross-target contract).
@@ -435,19 +441,17 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         mark(prof, &mut marks, "codegen");
         print_wasm_test_profile(test_file, &marks);
     }
-    // v1 first, and where v1 RENDERS its verdict is FINAL: a v1 run failure routes
-    // to the authoritative NATIVE fallback, never to a v0 retry. The old v0 retry
-    // existed for the #790 vein (v1 runtime defects trapping where v0 ran) — that
-    // vein is closed, and the retry's real effect had inverted: v0 DCEs whole test
-    // bodies (#792 vacuous ok), so a GENUINELY failing test (v1 correctly aborting
-    // on `none!`) was overwritten by a hollow v0 "pass". v0 still carries the files
-    // v1 WALLS (no render) — the shrinking #782 remainder.
-    if let Some(b) = v1_bytes {
-        return run_module(&b);
-    }
-    match v0_bytes(&mut ir_program) {
-        Ok(b) => run_module(&b),
-        Err(()) => skip("WASM codegen panic".to_string()),
+    // v1 is the ONLY wasm path (#782), and where it renders its verdict is FINAL:
+    // a v1 run failure routes to the authoritative NATIVE fallback, never to a
+    // retry on unverified codegen. The old v0 retry existed for the #790 vein
+    // (v1 runtime defects trapping where v0 ran) — that vein is closed, and the
+    // retry's real effect had inverted: v0 DCEs whole test bodies (#792 vacuous
+    // ok), so a GENUINELY failing test (v1 correctly aborting on `none!`) was
+    // overwritten by a hollow v0 "pass". A v1 WALL is an honest skip that routes
+    // the file to native — the shrinking #813 remainder.
+    match v1_bytes {
+        Some(b) => run_module(&b),
+        None => skip("v1 wall — no verified wasm rendering".to_string()),
     }
 }
 

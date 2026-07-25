@@ -586,7 +586,10 @@ fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Optio
     if let Ty::Variant { name: vn, cases } = resolved {
         *vn = sym(name);
         // Push (not overwrite) so a constructor name declared in multiple variant types keeps ALL candidates — needed to detect ambiguity (#413) instead of silently letting the last-registered type win. #413: record each candidate's OWNING MODULE so a shared ctor name can be disambiguated by the current module (`lookup_ctor_in`). type_name stays BARE here — other consumers expect that; `lookup_ctor_in` qualifies on demand.
-        let owner_mod = prefix.map(sym);
+        // A `None` prefix during `infer_module`'s temporary unprefixed pass still
+        // belongs to the module being inferred — attribute it there so the dedupe
+        // guard below collapses it onto the canonical prefixed candidate.
+        let owner_mod = prefix.map(sym).or(env.alias_owner_module);
         for case in cases.iter() {
             let entry = env.constructors.entry(case.name).or_default();
             if !entry.iter().any(|(t, m, _)| *t == sym(name) && *m == owner_mod) {
@@ -597,6 +600,15 @@ fn register_type_decl_variant_ctors(env: &mut TypeEnv, name: &str, prefix: Optio
 }
 /// #433: a DIFFERENT structural type already holds this BARE name — two distinct types (a local type and a dependency's, or two sub-modules') sharing a name. Type identity is by bare name through link + codegen, so the second silently shadows the first and the function that used the shadowed type fails with a cryptic generated-Rust E0560/E0609. Until types are namespaced per package, surface the collision at the source so the user renames one. Structurally-identical re-registration (the diamond case: same package via two import paths) compares equal and is NOT flagged. #433: types are now namespaced per (user) package — `dep_a.Config` and `dep_b.Config` coexist as distinct qualified names. So a collision is only a real error when the SAME canonical key is re-declared with a different structure (a duplicate within one module/file), which we detect on the prefixed key. Structurally-identical re-registration (the diamond case) is equal and not flagged. Verbatim text move out of [`register_type_decl`].
 fn register_type_decl_check_duplicate(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, prefix: Option<&str>, resolved: &Ty) {
+    // `infer_module`'s temporary UNPREFIXED pass re-registers declarations the
+    // canonical prefixed registration already validated, purely so intra-module
+    // references resolve bare. Re-running the duplicate check there compares a
+    // module's own type against a SIBLING package's bare alias of the same name
+    // and reports a phantom E020 (`collqa.Config` vs `collqb.Config`, which #433
+    // made legal). The real check already ran; skip the alias pass.
+    if env.alias_owner_module.is_some() {
+        return;
+    }
     if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
         let canonical_key = prefixed_key(prefix, name);
         // A LOCAL type (main program, no prefix) is allowed to SHADOW a dependency's bare-name dual-registration rather than collide with it (#433): the existing bare `Persona` mirrors some `dep.Persona`, and a local `type Persona` should win for unqualified use (the dep stays reachable via `dep.Persona`). Only flag E020 for a genuine duplicate — another type registered under the SAME canonical key that is NOT just a dependency's bare alias being shadowed by a local.

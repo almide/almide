@@ -146,8 +146,17 @@ pub fn cmd_emit(args: EmitArgs) {
         // Same per-module type-check + lower steps as try_compile_with_ir's
         // module loop in main.rs — shared via lower_one_user_module so the
         // two drivers can't silently drift apart.
+        let mut module_diags = Vec::new();
+        let sources = std::mem::take(&mut resolved.sources);
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            crate::lower_one_user_module(checker, name, mod_prog, pkg_id, &mut module_irs, &mut ir_program);
+            crate::lower_one_user_module(
+                checker, name, mod_prog, pkg_id, &mut module_irs, &mut ir_program,
+                &sources, &mut module_diags,
+            );
+        }
+        resolved.sources = sources;
+        if crate::compile_driver::report_module_diagnostics(&module_diags).is_err() {
+            std::process::exit(1);
         }
     }
 

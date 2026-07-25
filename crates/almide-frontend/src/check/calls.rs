@@ -25,6 +25,15 @@ impl Checker {
     /// Report a bare constructor name declared in more than one variant type (e.g. a local type and a dependency's) — an ambiguous name (#413). The caller still resolves to the first candidate; this surfaces the conflict as a clear source-level error so the user qualifies/renames, instead of the silent wrong-type resolution that later fails as a cryptic generated-Rust E0769. Returns true if it was ambiguous.
     pub(crate) fn report_ambiguous_ctor(&mut self, name: &str) -> bool {
         let key = sym(name);
+        // A module's own bare `Active` means *its* `Active` — `lookup_ctor_in`
+        // resolves it deterministically to the candidate this module owns, so
+        // there is nothing ambiguous to report even when a sibling package
+        // declares the same constructor name (#413). Ambiguity only bites in a
+        // context that owns NO candidate, where the resolution falls back to
+        // "first registered".
+        if self.env.ctor_owned_by(&key, self.current_module_prefix.as_deref()) {
+            return false;
+        }
         if self.env.ctor_candidate_count(&key) > 1 {
             let types = self.env.ctor_candidate_types(&key).iter()
                 .map(|t| t.as_str().to_string())

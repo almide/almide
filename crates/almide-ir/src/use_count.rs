@@ -507,7 +507,16 @@ pub fn demote_unused_mut(program: &mut IrProgram) {
     }
 }
 
-fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
+/// Every variable that appears as the TARGET of an in-place mutation
+/// statement anywhere in `expr` (reassignment, index/field/map write, list
+/// swap/reverse/rotate/copy-slice).
+///
+/// These positions are NOT counted by `compute_use_counts` — a mutation is a
+/// write, not a read — but they still emit a reference to the binding in the
+/// generated code (`almide_index_set!(ys, …)`). Any consumer that decides a
+/// binding is dead from `use_count == 0` alone must consult this set too, or
+/// it strips a `let` the write-back still names (#857, E0425).
+pub fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
     use crate::visit::{IrVisitor, walk_expr, walk_stmt};
     struct AssignCollector<'a> { assigned: &'a mut HashSet<u32> }
     impl IrVisitor for AssignCollector<'_> {
@@ -538,10 +547,20 @@ fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
 pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<almide_base::Diagnostic> {
     // Collect all parameter VarIds to exclude them
     let mut param_ids: HashSet<u32> = HashSet::new();
+    // A variable written in place (`ys[i] = v`, `m[k] = v`, `r.f = v`, …) is
+    // NOT unused — the write names it. `use_count` misses those positions
+    // because a write is not a read, so consult the mutation targets too;
+    // otherwise the warning tells the author to rename to `_ys` for a binding
+    // the program genuinely writes (#857).
+    let mut mutated: HashSet<u32> = HashSet::new();
     for func in &program.functions {
         for p in &func.params {
             param_ids.insert(p.var.0);
         }
+        collect_assigned_vars(&func.body, &mut mutated);
+    }
+    for tl in &program.top_lets {
+        collect_assigned_vars(&tl.value, &mut mutated);
     }
 
     let mut warnings = Vec::new();
@@ -557,8 +576,9 @@ pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<almid
         // Skip variables without span (pattern bindings, loop vars, etc.)
         if info.span.is_none() { continue; }
 
-        // Skip if used
+        // Skip if used (read) or written in place
         if info.use_count > 0 { continue; }
+        if mutated.contains(&(i as u32)) { continue; }
 
         let span = match info.span { Some(s) => s, None => continue };
         let diag = almide_base::Diagnostic::warning(

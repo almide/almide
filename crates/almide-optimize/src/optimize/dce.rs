@@ -1,71 +1,116 @@
 /// Pass 2: Dead Code Elimination — remove unused bindings with pure values.
 
+use std::collections::HashSet;
+
 use almide_ir::*;
 
 pub(super) fn eliminate_dead_code(program: &mut IrProgram) {
     for f in &mut program.functions {
-        dce_expr(&mut f.body, &program.var_table);
+        let mutated = mutation_targets(&f.body);
+        dce_expr(&mut f.body, &program.var_table, &mutated);
     }
     for tl in &mut program.top_lets {
-        dce_expr(&mut tl.value, &program.var_table);
+        let mutated = mutation_targets(&tl.value);
+        dce_expr(&mut tl.value, &program.var_table, &mutated);
     }
     for m in &mut program.modules {
         for f in &mut m.functions {
-            dce_expr(&mut f.body, &m.var_table);
+            let mutated = mutation_targets(&f.body);
+            dce_expr(&mut f.body, &m.var_table, &mutated);
         }
         for tl in &mut m.top_lets {
-            dce_expr(&mut tl.value, &m.var_table);
+            let mutated = mutation_targets(&tl.value);
+            dce_expr(&mut tl.value, &m.var_table, &mutated);
         }
     }
 }
 
-fn dce_expr(expr: &mut IrExpr, var_table: &VarTable) {
+/// Variables written in place somewhere in this body. A write is not counted
+/// by `use_count` (it is not a read), but it still NAMES the binding in the
+/// emitted code, so such a binding is never dead (#857).
+fn mutation_targets(body: &IrExpr) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    collect_assigned_vars(body, &mut out);
+    out
+}
+
+fn dce_expr(expr: &mut IrExpr, var_table: &VarTable, mutated: &HashSet<u32>) {
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts.iter_mut() { dce_stmt(s, var_table); }
-            dce_stmts(stmts, var_table);
-            if let Some(t) = tail { dce_expr(t, var_table); }
+            for s in stmts.iter_mut() { dce_stmt(s, var_table, mutated); }
+            dce_stmts_keeping(stmts, var_table, mutated);
+            if let Some(t) = tail { dce_expr(t, var_table, mutated); }
         }
         IrExprKind::If { cond, then, else_ } => {
-            dce_expr(cond, var_table);
-            dce_expr(then, var_table);
-            dce_expr(else_, var_table);
+            dce_expr(cond, var_table, mutated);
+            dce_expr(then, var_table, mutated);
+            dce_expr(else_, var_table, mutated);
         }
         IrExprKind::Match { subject, arms } => {
-            dce_expr(subject, var_table);
-            for a in arms { dce_expr(&mut a.body, var_table); }
+            dce_expr(subject, var_table, mutated);
+            for a in arms { dce_expr(&mut a.body, var_table, mutated); }
         }
-        IrExprKind::Lambda { body, .. } => dce_expr(body, var_table),
+        IrExprKind::Lambda { body, .. } => dce_expr(body, var_table, mutated),
         IrExprKind::ForIn { body, .. } => {
-            for s in body.iter_mut() { dce_stmt(s, var_table); }
-            dce_stmts(body, var_table);
+            for s in body.iter_mut() { dce_stmt(s, var_table, mutated); }
+            dce_stmts_keeping(body, var_table, mutated);
         }
         IrExprKind::While { body, .. } => {
-            for s in body.iter_mut() { dce_stmt(s, var_table); }
-            dce_stmts(body, var_table);
+            for s in body.iter_mut() { dce_stmt(s, var_table, mutated); }
+            dce_stmts_keeping(body, var_table, mutated);
         }
         _ => {}
     }
 }
 
-fn dce_stmt(stmt: &mut IrStmt, var_table: &VarTable) {
+fn dce_stmt(stmt: &mut IrStmt, var_table: &VarTable, mutated: &HashSet<u32>) {
     match &mut stmt.kind {
-        IrStmtKind::Bind { value, .. } => dce_expr(value, var_table),
-        IrStmtKind::Expr { expr } => dce_expr(expr, var_table),
+        IrStmtKind::Bind { value, .. } => dce_expr(value, var_table, mutated),
+        IrStmtKind::Expr { expr } => dce_expr(expr, var_table, mutated),
         IrStmtKind::Guard { cond, else_ } => {
-            dce_expr(cond, var_table);
-            dce_expr(else_, var_table);
+            dce_expr(cond, var_table, mutated);
+            dce_expr(else_, var_table, mutated);
         }
         _ => {}
     }
 }
 
-/// Remove `let x = <pure>` statements where x has use_count == 0.
+/// Remove `let x = <pure>` statements where x has use_count == 0 and is never
+/// written in place. Callers with no mutation analysis of their own use
+/// [`dce_stmts`]; the enclosing-body variant is [`dce_stmts_keeping`].
 pub(crate) fn dce_stmts(stmts: &mut Vec<IrStmt>, var_table: &VarTable) {
+    let mut mutated = HashSet::new();
+    for stmt in stmts.iter() {
+        if let IrStmtKind::Bind { value, .. } = &stmt.kind {
+            collect_assigned_vars(value, &mut mutated);
+        }
+        if let IrStmtKind::Expr { expr } = &stmt.kind {
+            collect_assigned_vars(expr, &mut mutated);
+        }
+        match &stmt.kind {
+            IrStmtKind::Assign { var, .. }
+            | IrStmtKind::IndexAssign { target: var, .. }
+            | IrStmtKind::MapInsert { target: var, .. }
+            | IrStmtKind::FieldAssign { target: var, .. }
+            | IrStmtKind::ListSwap { target: var, .. }
+            | IrStmtKind::ListReverse { target: var, .. }
+            | IrStmtKind::ListRotateLeft { target: var, .. } => { mutated.insert(var.0); }
+            IrStmtKind::ListCopySlice { dst, .. } => { mutated.insert(dst.0); }
+            _ => {}
+        }
+    }
+    dce_stmts_keeping(stmts, var_table, &mutated);
+}
+
+fn dce_stmts_keeping(stmts: &mut Vec<IrStmt>, var_table: &VarTable, mutated: &HashSet<u32>) {
     stmts.retain(|stmt| {
         match &stmt.kind {
             IrStmtKind::Bind { var, value, .. } => {
-                if var_table.use_count(*var) == 0 && is_pure(value) && !contains_call(value) {
+                if var_table.use_count(*var) == 0
+                    && !mutated.contains(&var.0)
+                    && is_pure(value)
+                    && !contains_call(value)
+                {
                     return false; // remove
                 }
                 true

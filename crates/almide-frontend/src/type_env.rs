@@ -37,6 +37,14 @@ pub struct TypeEnv {
     /// ambiguous name. `lookup_ctor` returns the first; `ctor_candidate_count`
     /// detects ambiguity (#413).
     pub constructors: std::collections::HashMap<Sym, Vec<(Sym, Option<Sym>, VariantCase)>>,
+    /// Set while `infer_module` temporarily registers a module's declarations
+    /// UNPREFIXED for intra-module resolution: the real owning module of those
+    /// alias registrations. Constructor-candidate bookkeeping uses it so the
+    /// alias and the canonical prefixed entry collapse to ONE candidate —
+    /// otherwise a module's own bare `Wrap(n)` saw two candidates that both
+    /// answer `Wrapper` and reported a phantom E019 ("declared in Wrapper and
+    /// Wrapper", #862's surfacing of the module-diagnostics path).
+    pub alias_owner_module: Option<Sym>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<Sym>,
     /// The package's own module name (set when `register_module` is called with `is_self: true`).
@@ -173,6 +181,7 @@ impl TypeEnv {
             opaque_alias_targets: std::collections::HashMap::new(),
             opaque_alias_visibility: std::collections::HashMap::new(),
             opaque_alias_module: std::collections::HashMap::new(),
+            alias_owner_module: None,
         }
     }
 
@@ -387,6 +396,17 @@ impl TypeEnv {
             _ => *t,
         };
         Some((qual, c.clone()))
+    }
+
+    /// Does `cur_mod` itself declare this constructor? When it does,
+    /// `lookup_ctor_in` picks that candidate deterministically, so the bare
+    /// name is unambiguous inside that module however many sibling packages
+    /// reuse it (#413). `None` (the entry program) owns nothing.
+    pub fn ctor_owned_by(&self, name: &Sym, cur_mod: Option<&str>) -> bool {
+        let Some(m) = cur_mod else { return false };
+        self.constructors.get(name).is_some_and(|cands| {
+            cands.iter().any(|(_, owner, _)| owner.is_some_and(|o| o.as_str() == m))
+        })
     }
 
     /// How many variant types declare this constructor name (1 = unambiguous,
