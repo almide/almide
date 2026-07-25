@@ -81,6 +81,71 @@ impl<'a> Interpreter<'a> {
             "join" => Some(self.list_join(args)),
             "sort" => Some(self.list_sort(args)),
             "enumerate" => Some(self.list_enumerate(args)),
+            _ => self.eval_container_op_list_slice(func, args),
+        }
+    }
+
+    /// The SLICE / MODIFIER family — index-keyed structural ops that build a new
+    /// list. Added so the fixtures for C-034/C-155/C-163/C-164 evaluate on the
+    /// interp oracle instead of abstaining: an abstention is a hole in the
+    /// executable spec, and the ledger exists to make widening the glue the
+    /// preferred fix rather than recording the hole (see crates/almide-interp/CLAUDE.md).
+    ///
+    /// Every clamp below mirrors the C-034 rule the other two legs implement: an
+    /// UNSIGNED count saturates (a negative one is enormous as a `usize`, so
+    /// `take(-1)` is the whole list and `drop(-1)` is empty), and an INDEX is
+    /// unsigned too, so a negative or huge index takes the no-op path.
+    fn eval_container_op_list_slice(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        let items = args.first().and_then(|v| v.as_iter_items())?;
+        let n = items.len();
+        // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
+        let count = |i: i64| -> usize { if i < 0 { n } else { (i as usize).min(n) } };
+        // An unsigned index; `None` when out of range (the no-op / default path).
+        let index = |i: i64| -> Option<usize> {
+            if i < 0 { None } else { let u = i as usize; (u < n).then_some(u) }
+        };
+        let int_arg = |k: usize| -> Option<i64> {
+            match args.get(k) { Some(Value::Int(i)) => Some(*i), _ => None }
+        };
+        let out = |v: Vec<Value>| Some(Flow::val(Value::list(v)));
+        match func {
+            "take" => out(items[..count(int_arg(1)?)].to_vec()),
+            "drop" => out(items[count(int_arg(1)?)..].to_vec()),
+            "take_end" => { let k = count(int_arg(1)?); out(items[n - k..].to_vec()) }
+            "drop_end" => { let k = count(int_arg(1)?); out(items[..n - k].to_vec()) }
+            "tail" => out(if n == 0 { Vec::new() } else { items[1..].to_vec() }),
+            "slice" => {
+                let start = count(int_arg(1)?);
+                let end = count(int_arg(2)?).max(start);
+                out(items[start..end].to_vec())
+            }
+            "set" => {
+                let mut v = items.clone();
+                if let Some(i) = index(int_arg(1)?) { v[i] = args.get(2)?.clone(); }
+                out(v)
+            }
+            "remove_at" => {
+                let mut v = items.clone();
+                if let Some(i) = index(int_arg(1)?) { v.remove(i); }
+                out(v)
+            }
+            "insert" => {
+                // v0 clamps the position to [0, n]; a negative one appends.
+                let raw = int_arg(1)?;
+                let at = if raw < 0 { n } else { (raw as usize).min(n) };
+                let mut v = items.clone();
+                v.insert(at, args.get(2)?.clone());
+                out(v)
+            }
+            "swap" => {
+                let mut v = items.clone();
+                match (index(int_arg(1)?), index(int_arg(2)?)) {
+                    (Some(i), Some(j)) => v.swap(i, j),
+                    // An out-of-range index is a no-op, not an abort.
+                    _ => {}
+                }
+                out(v)
+            }
             _ => None,
         }
     }

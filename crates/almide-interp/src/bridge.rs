@@ -26,8 +26,75 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
         "string" => string_fn(func, args),
         "math" => math_fn(func, args),
         "bool" => bool_fn(func, args),
+        "path" => path_fn(func, args),
+        "bytes" => bytes_fn(func, args),
         _ => None,
     }
+}
+
+/// `path.*` — pure path-STRING manipulation, so the third oracle can evaluate it
+/// (nothing here touches the filesystem). Added to stop the bundled-module and
+/// docs fixtures abstaining: an abstention is a hole in the executable spec.
+fn path_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let s = as_str(args.first())?;
+    let f = match func {
+        "join" => {
+            let child = as_str(args.get(1))?;
+            let base = s.trim_end_matches('/');
+            Flow::val(Value::str(format!("{}/{}", base, child.trim_start_matches('/'))))
+        }
+        "dirname" => Flow::val(Value::str(match s.rfind('/') {
+            Some(0) => "/".to_string(),
+            Some(i) => s[..i].to_string(),
+            None => ".".to_string(),
+        })),
+        "basename" => Flow::val(Value::str(
+            s.rsplit('/').next().unwrap_or(s).to_string(),
+        )),
+        "is_absolute" => Flow::val(Value::Bool(s.starts_with('/'))),
+        "extension" => {
+            let base = s.rsplit('/').next().unwrap_or(s);
+            // A leading-dot name (`.gitignore`) has no extension.
+            let ext = base.rfind('.').filter(|i| *i > 0).map(|i| base[i + 1..].to_string());
+            Flow::val(Value::Option(ext.map(|e| Box::new(Value::str(e)))))
+        }
+        "stem" => {
+            let base = s.rsplit('/').next().unwrap_or(s);
+            let stem = match base.rfind('.').filter(|i| *i > 0) {
+                Some(i) => &base[..i],
+                None => base,
+            };
+            Flow::val(Value::str(stem.to_string()))
+        }
+        _ => return None,
+    };
+    Some(f)
+}
+
+/// `bytes.*` — the subset with a pure list-of-int model. A `Bytes` value is a
+/// `List[Int]` in the interp, so `from_list` is the identity and `to_string_lossy`
+/// decodes. The mutating and raw-pointer surface stays out of scope.
+fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
+        "from_list" => Flow::val(args.first()?.clone()),
+        "to_list" => Flow::val(args.first()?.clone()),
+        "len" => Flow::val(Value::Int(args.first()?.as_iter_items()?.len() as i64)),
+        "new" => Flow::val(Value::list(vec![Value::Int(0); as_int(args.first())?.max(0) as usize])),
+        "from_string" => Flow::val(Value::list(
+            as_str(args.first())?.bytes().map(|b| Value::Int(b as i64)).collect(),
+        )),
+        "to_string_lossy" => {
+            let raw: Vec<u8> = args
+                .first()?
+                .as_iter_items()?
+                .iter()
+                .map(|v| match v { Value::Int(i) => *i as u8, _ => 0 })
+                .collect();
+            Flow::val(Value::str(String::from_utf8_lossy(&raw).into_owned()))
+        }
+        _ => return None,
+    };
+    Some(f)
 }
 
 // ── helpers to pull typed args ──────────────────────────────────
@@ -267,6 +334,38 @@ fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
         "count" => Flow::val(Value::Int(
             as_str(args.first())?.matches(as_str(args.get(1))?).count() as i64,
         )),
+        // `drop`/`take_end`/`drop_end` are `take`'s unsigned-count siblings, and
+        // `slice` clamps its start/end SIGNED (the one C-034 exception: the native
+        // oracle is `(x.max(0) as usize).min(len)`), with a reversed range empty.
+        "drop" => Flow::val(Value::str(
+            as_str(args.first())?
+                .chars()
+                .skip(as_int(args.get(1))? as usize)
+                .collect::<String>(),
+        )),
+        "take_end" | "drop_end" => {
+            let cs: Vec<char> = as_str(args.first())?.chars().collect();
+            let raw = as_int(args.get(1))?;
+            // Unsigned: a negative count is enormous, so it saturates to all.
+            let k = if raw < 0 { cs.len() } else { (raw as usize).min(cs.len()) };
+            let kept: String = if func == "take_end" {
+                cs[cs.len() - k..].iter().collect()
+            } else {
+                cs[..cs.len() - k].iter().collect()
+            };
+            Flow::val(Value::str(kept))
+        }
+        "slice" => {
+            let cs: Vec<char> = as_str(args.first())?.chars().collect();
+            let clamp = |i: i64| -> usize { (i.max(0) as usize).min(cs.len()) };
+            let start = clamp(as_int(args.get(1))?);
+            let end = match args.get(2) {
+                Some(Value::Int(e)) => clamp(*e),
+                _ => cs.len(),
+            };
+            let out: String = if end > start { cs[start..end].iter().collect() } else { String::new() };
+            Flow::val(Value::str(out))
+        }
         // index_of returns Option[Int] of the CODEPOINT index (#419 unified
         // the unit; the old byte-offset comment predated that change).
         "index_of" => {
