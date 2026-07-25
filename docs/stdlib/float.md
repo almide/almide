@@ -137,3 +137,58 @@ Reinterpret a float as its IEEE 754 bit representation (i64).
 ```almd
 float.to_bits(1.0) // => 4607182418800017408
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (46 functions)
+
+```
+float.to_string(n: Float) -> String
+float.to_int(n: Float) -> Int
+float.from_int(n: Int) -> Float
+float.parse(s: String) -> Result[Float, String]
+float.to_fixed(n: Float, decimals: Int) -> String
+float.to_bits(f: Float) -> Int
+float.sqrt(n: Float) -> Float
+float.abs(n: Float) -> Float
+float.floor(n: Float) -> Float
+float.ceil(n: Float) -> Float
+float.round(n: Float) -> Float
+float.min(a: Float, b: Float) -> Float
+float.max(a: Float, b: Float) -> Float
+float.clamp(n: Float, lo: Float, hi: Float) -> Float
+float.sign(n: Float) -> Float
+float.is_nan(n: Float) -> Bool
+float.is_infinite(n: Float) -> Bool
+float.to_int8(n: Float) -> ?
+float.to_int16(n: Float) -> ?
+float.to_int32(n: Float) -> ?
+float.to_uint8(n: Float) -> ?
+float.to_uint16(n: Float) -> ?
+float.to_uint32(n: Float) -> ?
+float.to_uint64(n: Float) -> ?
+float.to_float32(n: Float) -> ?
+float.to_int64(n: Float) -> ?
+float.to_float64(n: Float) -> ?
+float.from_float32(n: ?) -> Float
+float.from_float64(n: ?) -> Float
+float.to_int8_checked(n: Float) -> Option[?]
+float.to_int16_checked(n: Float) -> Option[?]
+float.to_int32_checked(n: Float) -> Option[?]
+float.to_int64_checked(n: Float) -> Option[?]
+float.to_uint8_checked(n: Float) -> Option[?]
+float.to_uint16_checked(n: Float) -> Option[?]
+float.to_uint32_checked(n: Float) -> Option[?]
+float.to_uint64_checked(n: Float) -> Option[?]
+float.to_float32_checked(n: Float) -> Option[?]
+float.to_int8_saturating(n: Float) -> ?
+float.to_int16_saturating(n: Float) -> ?
+float.to_int32_saturating(n: Float) -> ?
+float.to_int64_saturating(n: Float) -> ?
+float.to_uint8_saturating(n: Float) -> ?
+float.to_uint16_saturating(n: Float) -> ?
+float.to_uint32_saturating(n: Float) -> ?
+float.to_uint64_saturating(n: Float) -> ?
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

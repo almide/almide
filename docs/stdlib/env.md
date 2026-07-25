@@ -73,3 +73,21 @@ Get the operating system name (linux, macos, windows).
 ```almd
 env.os() // => "macos"
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (9 functions)
+
+```
+effect env.unix_timestamp() -> Int
+effect env.args() -> List[String]
+effect env.get(name: String) -> Option[String]
+effect env.set(name: String, value: String) -> Unit
+effect env.cwd() -> String
+effect env.millis() -> Int
+effect env.sleep_ms(ms: Int) -> Unit
+effect env.temp_dir() -> String
+env.os() -> String
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

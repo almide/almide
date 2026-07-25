@@ -153,3 +153,31 @@ Check if all elements satisfy a predicate.
 ```almd
 set.all(s, fn(x) => x > 0)
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (19 functions)
+
+```
+set.new() -> Set[A]
+set.from_list(xs: List[A]) -> Set[A]
+set.insert(s: Set[A], value: A) -> Set[A]
+set.remove(s: Set[A], value: A) -> Set[A]
+set.contains(s: Set[A], value: A) -> Bool
+set.len(s: Set[A]) -> Int
+set.is_empty(s: Set[A]) -> Bool
+set.to_list(s: Set[A]) -> List[A]
+set.union(a: Set[A], b: Set[A]) -> Set[A]
+set.intersection(a: Set[A], b: Set[A]) -> Set[A]
+set.difference(a: Set[A], b: Set[A]) -> Set[A]
+set.symmetric_difference(a: Set[A], b: Set[A]) -> Set[A]
+set.is_subset(a: Set[A], b: Set[A]) -> Bool
+set.is_disjoint(a: Set[A], b: Set[A]) -> Bool
+set.filter(s: Set[A], f: (A) -> Bool) -> Set[A]
+set.map(s: Set[A], f: (A) -> B) -> Set[B]
+set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B
+set.any(s: Set[A], f: (A) -> Bool) -> Bool
+set.all(s: Set[A], f: (A) -> Bool) -> Bool
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

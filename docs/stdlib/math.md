@@ -169,3 +169,35 @@ Return the natural logarithm of the gamma function at x.
 ```almd
 math.log_gamma(5.0) // => 3.178...
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (23 functions)
+
+```
+math.abs(n: Int) -> Int
+math.atan(x: Float) -> Float
+math.choose(n: Int, k: Int) -> Int
+math.cos(x: Float) -> Float
+math.e() -> Float
+math.exp(x: Float) -> Float
+math.factorial(n: Int) -> Int
+math.fmax(a: Float, b: Float) -> Float
+math.fmin(a: Float, b: Float) -> Float
+math.fpow(base: Float, exp: Float) -> Float
+math.log(x: Float) -> Float
+math.log10(x: Float) -> Float
+math.log2(x: Float) -> Float
+math.log_gamma(x: Float) -> Float
+math.max(a: Int, b: Int) -> Int
+math.min(a: Int, b: Int) -> Int
+math.pi() -> Float
+math.pow(base: Int, exp: Int) -> Int
+math.sign(n: Int) -> Int
+math.sin(x: Float) -> Float
+math.sqrt(x: Float) -> Float
+math.tan(x: Float) -> Float
+math.tanh(x: Float) -> Float
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

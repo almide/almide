@@ -142,3 +142,160 @@ For zero-copy interop with native code (e.g. when calling Rust runtime directly)
 | `bytes.from_raw_ptr(ptr, len) -> Bytes` | Wrap a foreign buffer |
 | `bytes.copy_to_ptr(b, ptr, cap)` | Copy buffer into a foreign address |
 | `bytes.data_ptr(b)` | Address of the data (after the length prefix) |
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (148 functions)
+
+```
+bytes.append_f32_be(b: Bytes, val: Float) -> Unit
+bytes.append_f32_le(b: Bytes, val: Float) -> Unit
+bytes.append_f64_be(b: Bytes, val: Float) -> Unit
+bytes.append_f64_le(b: Bytes, val: Float) -> Unit
+bytes.append_i16_be(b: Bytes, val: Int) -> Unit
+bytes.append_i16_le(b: Bytes, val: Int) -> Unit
+bytes.append_i32_be(b: Bytes, val: Int) -> Unit
+bytes.append_i32_le(b: Bytes, val: Int) -> Unit
+bytes.append_i64_be(b: Bytes, val: Int) -> Unit
+bytes.append_i64_le(b: Bytes, val: Int) -> Unit
+bytes.append_u16_be(b: Bytes, val: Int) -> Unit
+bytes.append_u16_le(b: Bytes, val: Int) -> Unit
+bytes.append_u32_be(b: Bytes, val: Int) -> Unit
+bytes.append_u32_le(b: Bytes, val: Int) -> Unit
+bytes.append_u8(b: Bytes, val: Int) -> Unit
+bytes.as_mut_ptr(b: Bytes) -> ?
+bytes.as_ptr(b: Bytes) -> ?
+bytes.chunks(b: Bytes, size: Int) -> List[Bytes]
+bytes.clear(b: Bytes) -> Unit
+bytes.cmp(a: Bytes, b: Bytes) -> Int
+bytes.concat(a: Bytes, b: Bytes) -> Bytes
+bytes.contains(b: Bytes, pattern: Bytes) -> Bool
+bytes.copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit
+bytes.copy_to_ptr(b: Bytes, ptr: ?, cap: Int) -> Int
+bytes.data_ptr(b: Bytes) -> Int
+bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool
+bytes.eof(b: Bytes, pos: Int) -> Bool
+bytes.fill(b: Bytes, val: Int) -> Unit
+bytes.from_list(xs: List[Int]) -> Bytes
+bytes.from_raw_ptr(ptr: ?, len: Int) -> Bytes
+bytes.from_string(s: String) -> Bytes
+bytes.get(b: Bytes, i: Int) -> Option[Int]
+bytes.get_or(b: Bytes, i: Int, default: Int) -> Int
+bytes.index_of(b: Bytes, pattern: Bytes) -> Option[Int]
+bytes.insert(b: Bytes, pos: Int, val: Int) -> Bytes
+bytes.is_empty(b: Bytes) -> Bool
+bytes.is_valid_utf8(b: Bytes) -> Bool
+bytes.len(b: Bytes) -> Int
+bytes.lines(b: Bytes) -> List[Bytes]
+bytes.map_each(b: Bytes, f: (Int) -> Int) -> Bytes
+bytes.new(len: Int) -> Bytes
+bytes.pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes
+bytes.pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes
+bytes.push(b: Bytes, val: Int) -> Unit
+bytes.set_at(b: Bytes, i: Int, val: Int) -> Unit
+bytes.copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit
+bytes.read_bool(b: Bytes, pos: Int) -> Bool
+bytes.read_bool_at(b: Bytes, pos: Int) -> ()
+bytes.read_f16_le(b: Bytes, pos: Int) -> Float
+bytes.read_f16_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]
+bytes.read_f32_be(b: Bytes, pos: Int) -> Float
+bytes.read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]
+bytes.read_f32_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_f32_le(b: Bytes, pos: Int) -> Float
+bytes.read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]
+bytes.read_f32_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_f64_be(b: Bytes, pos: Int) -> Float
+bytes.read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]
+bytes.read_f64_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_f64_le(b: Bytes, pos: Int) -> Float
+bytes.read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]
+bytes.read_f64_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_i16_be(b: Bytes, pos: Int) -> Int
+bytes.read_i16_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_i16_le(b: Bytes, pos: Int) -> Int
+bytes.read_i16_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_i32_be(b: Bytes, pos: Int) -> Int
+bytes.read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_i32_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_i32_le(b: Bytes, pos: Int) -> Int
+bytes.read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_i32_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_i64_be(b: Bytes, pos: Int) -> Int
+bytes.read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_i64_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_i64_le(b: Bytes, pos: Int) -> Int
+bytes.read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_i64_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String]
+bytes.read_string_at(b: Bytes, pos: Int, len: Int) -> String
+bytes.read_string_be(b: Bytes, pos: Int) -> String
+bytes.read_string_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_u16_be(b: Bytes, pos: Int) -> Int
+bytes.read_u16_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_u16_le(b: Bytes, pos: Int) -> Int
+bytes.read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_u16_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_u32_be(b: Bytes, pos: Int) -> Int
+bytes.read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_u32_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_u32_le(b: Bytes, pos: Int) -> Int
+bytes.read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
+bytes.read_u32_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_u8(b: Bytes, pos: Int) -> Int
+bytes.read_u8_at(b: Bytes, pos: Int) -> ()
+bytes.remove_at(b: Bytes, pos: Int) -> Bytes
+bytes.repeat(b: Bytes, n: Int) -> Bytes
+bytes.reverse(b: Bytes) -> Bytes
+bytes.set(b: Bytes, i: Int, val: Int) -> Bytes
+bytes.set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit
+bytes.set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit
+bytes.set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit
+bytes.set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit
+bytes.set_i16_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i16_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i32_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i32_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i64_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i64_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u16_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u16_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u32_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u32_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u8(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.skip(b: Bytes, pos: Int, n: Int) -> Int
+bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int
+bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes
+bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]
+bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool
+bytes.take_at(b: Bytes, pos: Int, n: Int) -> ()
+bytes.to_list(b: Bytes) -> List[Int]
+bytes.to_string(b: Bytes) -> Result[String, String]
+bytes.to_string_lossy(b: Bytes) -> String
+bytes.write_bool(b: Bytes, val: Bool) -> Unit
+bytes.write_f64_be(b: Bytes, val: Float) -> Unit
+bytes.write_i64_be(b: Bytes, val: Int) -> Unit
+bytes.write_string_be(b: Bytes, s: String) -> Unit
+bytes.write_u32_be(b: Bytes, val: Int) -> Unit
+bytes.write_u8(b: Bytes, val: Int) -> Unit
+bytes.xor(a: Bytes, b: Bytes) -> Bytes
+bytes.heap_save() -> Int
+bytes.heap_restore(checkpoint: Int) -> Unit
+bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> ?
+bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> ?
+bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> ?
+bytes.read_float32(b: Bytes, offset: Int, endian: Endian) -> ?
+bytes.write_uint16(b: Bytes, value: ?, endian: Endian) -> Unit
+bytes.write_uint32(b: Bytes, value: ?, endian: Endian) -> Unit
+bytes.write_int32(b: Bytes, value: ?, endian: Endian) -> Unit
+bytes.write_float32(b: Bytes, value: ?, endian: Endian) -> Unit
+bytes.set_uint16(b: Bytes, offset: Int, value: ?, endian: Endian) -> Unit
+bytes.set_uint32(b: Bytes, offset: Int, value: ?, endian: Endian) -> Unit
+bytes.set_int32(b: Bytes, offset: Int, value: ?, endian: Endian) -> Unit
+bytes.set_float32(b: Bytes, offset: Int, value: ?, endian: Endian) -> Unit
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

@@ -353,3 +353,60 @@ Drop the last N characters.
 ```almd
 string.drop_end("hello", 2) // => "hel"
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (48 functions)
+
+```
+string.trim(s: String) -> String
+string.split(s: String, sep: String) -> List[String]
+string.join(list: List[String], sep: String) -> String
+string.len(s: String) -> Int
+string.length(s: String) -> Int
+string.contains(s: String, sub: String) -> Bool
+string.starts_with(s: String, prefix: String) -> Bool
+string.ends_with(s: String, suffix: String) -> Bool
+string.slice(s: String, start: Int, end: Int) -> String
+string.pad_start(s: String, n: Int, ch: String) -> String
+string.to_bytes(s: String) -> List[Int]
+string.capitalize(s: String) -> String
+string.to_upper(s: String) -> String
+string.to_lower(s: String) -> String
+string.replace(s: String, from: String, to: String) -> String
+string.get(s: String, i: Int) -> Option[String]
+string.lines(s: String) -> List[String]
+string.chars(s: String) -> List[String]
+string.index_of(s: String, needle: String) -> Option[Int]
+string.repeat(s: String, n: Int) -> String
+string.from_bytes(bytes: List[Int]) -> String
+string.is_digit(s: String) -> Bool
+string.is_alpha(s: String) -> Bool
+string.is_alphanumeric(s: String) -> Bool
+string.is_whitespace(s: String) -> Bool
+string.is_upper(s: String) -> Bool
+string.is_lower(s: String) -> Bool
+string.codepoint(s: String) -> Option[Int]
+string.from_codepoint(n: Int) -> String
+string.pad_end(s: String, n: Int, ch: String) -> String
+string.trim_start(s: String) -> String
+string.trim_end(s: String) -> String
+string.count(s: String, sub: String) -> Int
+string.is_empty(s: String) -> Bool
+string.reverse(s: String) -> String
+string.strip_prefix(s: String, prefix: String) -> Option[String]
+string.strip_suffix(s: String, suffix: String) -> Option[String]
+string.replace_first(s: String, from: String, to: String) -> String
+string.last_index_of(s: String, needle: String) -> Option[Int]
+string.first(s: String) -> Option[String]
+string.last(s: String) -> Option[String]
+string.take(s: String, n: Int) -> String
+string.take_end(s: String, n: Int) -> String
+string.drop(s: String, n: Int) -> String
+string.drop_end(s: String, n: Int) -> String
+string.run_length_encode(s: String) -> List[()]
+string.push(s: String, suffix: String) -> Unit
+string.clear(s: String) -> Unit
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

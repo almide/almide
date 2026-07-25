@@ -33,3 +33,16 @@ Return a randomly shuffled copy of a list.
 ```almd
 random.shuffle([1, 2, 3]) // => [3, 1, 2]
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (4 functions)
+
+```
+effect random.int(min: Int, max: Int) -> Int
+effect random.float() -> Float
+effect random.choice(xs: List[T]) -> Option[T]
+effect random.shuffle(xs: List[T]) -> List[T]
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

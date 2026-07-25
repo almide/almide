@@ -65,3 +65,20 @@ Extract capture groups from the first match.
 ```almd
 regex.captures("(\\w+)@(\\w+)", "user@host") // => some(["user@host", "user", "host"])
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (8 functions)
+
+```
+regex.is_match(pat: String, s: String) -> Bool
+regex.full_match(pat: String, s: String) -> Bool
+regex.find(pat: String, s: String) -> Option[String]
+regex.find_all(pat: String, s: String) -> List[String]
+regex.replace(pat: String, s: String, rep: String) -> String
+regex.replace_first(pat: String, s: String, rep: String) -> String
+regex.split(pat: String, s: String) -> List[String]
+regex.captures(pat: String, s: String) -> Option[List[String]]
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

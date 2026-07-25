@@ -177,3 +177,78 @@ Reinterpret an integer's bits as an IEEE 754 float (f64).
 ```almd
 int.bits_to_float(4607182418800017408) // => 1.0
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (66 functions)
+
+```
+int.to_string(n: Int) -> String
+int.to_hex(n: Int) -> String
+int.parse(s: String) -> Result[Int, String]
+int.from_hex(s: String) -> Result[Int, String]
+int.to_float(n: Int) -> Float
+int.bits_to_float(bits: Int) -> Float
+int.bits_to_f32(bits: Int) -> Float
+int.abs(n: Int) -> Int
+int.min(a: Int, b: Int) -> Int
+int.max(a: Int, b: Int) -> Int
+int.clamp(n: Int, lo: Int, hi: Int) -> Int
+int.band(a: Int, b: Int) -> Int
+int.bor(a: Int, b: Int) -> Int
+int.bxor(a: Int, b: Int) -> Int
+int.bnot(a: Int) -> Int
+int.bshl(a: Int, n: Int) -> Int
+int.bshr(a: Int, n: Int) -> Int
+int.count_leading_zeros(n: Int) -> Int
+int.count_trailing_zeros(n: Int) -> Int
+int.pop_count(n: Int) -> Int
+int.bit_reverse(n: Int) -> Int
+int.byte_swap(n: Int) -> Int
+int.bit_width(n: Int) -> Int
+int.log2_floor(n: Int) -> Int
+int.log2_ceil(n: Int) -> Int
+int.next_power_of_two(n: Int) -> Int
+int.prev_power_of_two(n: Int) -> Int
+int.wrap_add(a: Int, b: Int, bits: Int) -> Int
+int.wrap_mul(a: Int, b: Int, bits: Int) -> Int
+int.rotate_right(a: Int, n: Int, bits: Int) -> Int
+int.rotate_left(a: Int, n: Int, bits: Int) -> Int
+int.to_u32(a: Int) -> Int
+int.to_u8(a: Int) -> Int
+int.to_int8(n: Int) -> ?
+int.to_int16(n: Int) -> ?
+int.to_int32(n: Int) -> ?
+int.to_uint8(n: Int) -> ?
+int.to_uint16(n: Int) -> ?
+int.to_uint32(n: Int) -> ?
+int.to_uint64(n: Int) -> ?
+int.to_float32(n: Int) -> ?
+int.to_float64(n: Int) -> ?
+int.to_int64(n: Int) -> ?
+int.from_int8(n: ?) -> Int
+int.from_int16(n: ?) -> Int
+int.from_int32(n: ?) -> Int
+int.from_int64(n: ?) -> Int
+int.from_uint8(n: ?) -> Int
+int.from_uint16(n: ?) -> Int
+int.from_uint32(n: ?) -> Int
+int.from_uint64(n: ?) -> Int
+int.to_int8_checked(n: Int) -> Option[?]
+int.to_int16_checked(n: Int) -> Option[?]
+int.to_int32_checked(n: Int) -> Option[?]
+int.to_uint8_checked(n: Int) -> Option[?]
+int.to_uint16_checked(n: Int) -> Option[?]
+int.to_uint32_checked(n: Int) -> Option[?]
+int.to_uint64_checked(n: Int) -> Option[?]
+int.to_float32_checked(n: Int) -> Option[?]
+int.to_int8_saturating(n: Int) -> ?
+int.to_int16_saturating(n: Int) -> ?
+int.to_int32_saturating(n: Int) -> ?
+int.to_uint8_saturating(n: Int) -> ?
+int.to_uint16_saturating(n: Int) -> ?
+int.to_uint32_saturating(n: Int) -> ?
+int.to_uint64_saturating(n: Int) -> ?
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

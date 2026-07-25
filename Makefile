@@ -2,7 +2,7 @@ VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'
 INSTALL_DIR := $(HOME)/.local/almide
 BIN := target/release/almide
 
-.PHONY: build install test test-wasm check clean fmt release cross-target verify-trust receipt
+.PHONY: build install test test-wasm check clean fmt release cross-target verify-trust receipt stdlib-docs
 
 ## Build
 
@@ -41,6 +41,11 @@ test-all: test-rust test test-wasm
 cross-target: build
 	bash tools/cross-target-check.sh spec/lang
 	bash tools/cross-target-check.sh spec/stdlib
+
+## Docs
+
+stdlib-docs:
+	@python3 tools/gen-stdlib-doc-index.py
 
 ## Check
 

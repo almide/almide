@@ -193,3 +193,38 @@ Get file modification time as Unix timestamp (seconds)
 ```almd
 let ts = fs.modified_at("file.txt")
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (26 functions)
+
+```
+effect fs.read_text(path: String) -> String
+effect fs.read_bytes(path: String) -> List[Int]
+effect fs.write(path: String, content: String) -> Unit
+effect fs.write_bytes(path: String, bytes: List[Int]) -> Unit
+effect fs.write_bytes_raw(path: String, data: Bytes) -> Unit
+effect fs.append(path: String, content: String) -> Unit
+effect fs.mkdir_p(path: String) -> Unit
+effect fs.exists(path: String) -> Bool
+effect fs.read_lines(path: String) -> List[String]
+effect fs.remove(path: String) -> Unit
+effect fs.list_dir(path: String) -> List[String]
+effect fs.is_dir(path: String) -> Bool
+effect fs.is_file(path: String) -> Bool
+effect fs.copy(src: String, dst: String) -> Unit
+effect fs.rename(src: String, dst: String) -> Unit
+effect fs.walk(dir: String) -> List[String]
+effect fs.remove_all(path: String) -> Unit
+effect fs.file_size(path: String) -> Int
+fs.temp_dir() -> String
+effect fs.stat(path: String) -> FileStat
+effect fs.glob(pattern: String) -> List[String]
+effect fs.create_temp_file(prefix: String) -> String
+effect fs.create_temp_dir(prefix: String) -> String
+effect fs.is_symlink(path: String) -> Bool
+effect fs.modified_at(path: String) -> Int
+effect fs.read_bytes_raw(path: String) -> Bytes
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

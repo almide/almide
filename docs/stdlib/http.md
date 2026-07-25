@@ -190,3 +190,38 @@ Like `http.request` but returns the raw response body as `Bytes`.
 ```almd
 let blob = http.request_bytes("POST", url, body, headers)!
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (26 functions)
+
+```
+effect http.serve(port: Int, f: (HttpRequest) -> HttpResponse) -> Unit
+http.response(status: Int, body: String) -> HttpResponse
+http.json(status: Int, body: String) -> HttpResponse
+http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse
+http.redirect(url: String) -> HttpResponse
+http.status(resp: HttpResponse, code: Int) -> HttpResponse
+http.body(resp: HttpResponse) -> String
+http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse
+http.get_header(resp: HttpResponse, key: String) -> Option[String]
+http.req_method(req: HttpRequest) -> String
+http.req_path(req: HttpRequest) -> String
+http.req_body(req: HttpRequest) -> String
+http.req_header(req: HttpRequest, key: String) -> Option[String]
+http.query_params(req: HttpRequest) -> Map[String, String]
+http.url_decode(s: String) -> String
+effect http.get(url: String) -> String
+effect http.post(url: String, body: String) -> String
+effect http.put(url: String, body: String) -> String
+effect http.patch(url: String, body: String) -> String
+effect http.delete(url: String) -> String
+effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String
+effect http.get_bytes(url: String) -> Bytes
+effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes
+effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit
+effect http.openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
+effect http.anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

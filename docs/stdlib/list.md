@@ -473,3 +473,78 @@ Remove all elements in place. Requires var binding.
 ```almd
 list.clear(xs)
 ```
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (66 functions)
+
+```
+list.len(xs: List[A]) -> Int
+list.length(xs: List[A]) -> Int
+list.get(xs: List[A], i: Int) -> Option[A]
+list.get_or(xs: List[A], i: Int, default: A) -> A
+list.set(xs: List[A], i: Int, val: A) -> List[A]
+list.swap(xs: List[A], i: Int, j: Int) -> List[A]
+list.sort(xs: List[A]) -> List[A]
+list.reverse(xs: List[A]) -> List[A]
+list.contains(xs: List[A], x: A) -> Bool
+list.enumerate(xs: List[A]) -> List[()]
+list.zip(xs: List[A], ys: List[B]) -> List[()]
+list.flatten(xss: List[List[T]]) -> List[T]
+list.take(xs: List[A], n: Int) -> List[A]
+list.drop(xs: List[A], n: Int) -> List[A]
+list.tail(xs: List[A]) -> List[A]
+list.unique(xs: List[A]) -> List[A]
+list.index_of(xs: List[A], x: A) -> Option[Int]
+list.last(xs: List[A]) -> Option[A]
+list.chunk(xs: List[A], n: Int) -> List[List[A]]
+list.sum(xs: List[Int]) -> Int
+list.product(xs: List[Int]) -> Int
+list.first(xs: List[A]) -> Option[A]
+list.is_empty(xs: List[A]) -> Bool
+list.min(xs: List[A]) -> Option[A]
+list.max(xs: List[A]) -> Option[A]
+list.join(xs: List[String], sep: String) -> String
+list.map(xs: List[A], f: (A) -> B) -> List[B]
+list.filter(xs: List[A], f: (A) -> Bool) -> List[A]
+list.find(xs: List[A], f: (A) -> Bool) -> Option[A]
+list.any(xs: List[A], f: (A) -> Bool) -> Bool
+list.all(xs: List[A], f: (A) -> Bool) -> Bool
+list.count(xs: List[A], f: (A) -> Bool) -> Int
+list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]
+list.filter_map(xs: List[A], f: (A) -> Option[B]) -> List[B]
+list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B
+list.sort_by(xs: List[A], f: (A) -> B) -> List[A]
+list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]
+list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]
+list.partition(xs: List[A], f: (A) -> Bool) -> ()
+list.reduce(xs: List[A], f: (A, A) -> A) -> Option[A]
+list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]
+list.find_index(xs: List[A], f: (A) -> Bool) -> Option[Int]
+list.update(xs: List[A], i: Int, f: (A) -> A) -> List[A]
+list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]
+list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]
+list.unique_by(xs: List[A], f: (A) -> K) -> List[A]
+list.range(start: Int, end: Int) -> List[Int]
+list.slice(xs: List[A], start: Int, end: Int) -> List[A]
+list.insert(xs: List[A], i: Int, val: A) -> List[A]
+list.remove_at(xs: List[A], i: Int) -> List[A]
+list.repeat(val: A, n: Int) -> List[A]
+list.intersperse(xs: List[A], sep: A) -> List[A]
+list.windows(xs: List[A], n: Int) -> List[List[A]]
+list.dedup(xs: List[A]) -> List[A]
+list.take_end(xs: List[A], n: Int) -> List[A]
+list.drop_end(xs: List[A], n: Int) -> List[A]
+list.shuffle(xs: List[A]) -> List[A]
+list.window(xs: List[A], n: Int) -> List[List[A]]
+list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+list.push(xs: List[A], x: A) -> Unit
+list.with_capacity(cap: Int) -> List[A]
+list.pop(xs: List[A]) -> Option[A]
+list.clear(xs: List[A]) -> Unit
+list.bundled_probe(n: Int) -> Int
+list.split_at(xs: List[T], n: Int) -> ()
+list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->
