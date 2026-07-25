@@ -2078,3 +2078,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_flatten_borrow.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-169"
+spec      = "ALS-T6"
+title     = "list.repeat over the size ceiling aborts in the T6 form on both targets"
+statement = "A `list.repeat` whose RESULT would exceed the shared 2^31-byte ceiling ABORTS in the T6 form on both targets — one stderr line (`Error: repeat result too large`) and exit 1 — the same rule `string.repeat` already followed (C-161). Without it the two legs failed differently for a count native can satisfy but wasm cannot: `list.repeat(0.0, i32::MAX)` allocated 16 GiB natively and printed a length, while the wasm leg — capped at a 4 GiB address space — trapped out-of-bounds with exit 134 (differential fuzz). Neither is a permitted observable, and a machine-dependent success on one leg is not one the equivalence claim can carry. The ceiling counts SLOTS at the wasm element width (8 bytes), not `size_of::<T>()`, so the limit is the same NUMBER on both legs whatever the native element happens to be; the boundary itself succeeds and only counts ABOVE it abort. A negative count still clamps to the empty list (C-054) rather than tripping the guard. `ALMIDE_LIST_REPEAT_MAX_ELEMS` (runtime/rs/src/list.rs) and the `list_make.almd` guard are the two halves that must stay in sync."
+since     = "0.36.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_repeat_size_ceiling.almd", class = "fixture" },
+]

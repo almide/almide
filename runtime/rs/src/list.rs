@@ -100,7 +100,26 @@ pub fn almide_rt_list_update<A: Clone>(mut xs: Vec<A>, i: i64, f: std::rc::Rc<dy
 pub fn almide_rt_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> { let mut r = Vec::new(); for (i, x) in xs.into_iter().enumerate() { if i > 0 { r.push(sep.clone()); } r.push(x); } r }
 // Negative counts clamp to 0 (C-054 discipline — the wasm self-host
 // `list_repeat` already clamps; `n as usize` on a negative i64 panicked).
-pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> { vec![x; n.max(0) as usize] }
+//
+// A result over the shared 2^31-BYTE ceiling aborts in the T6 form on BOTH
+// targets, the same rule `string.repeat` follows (C-161). Without it the two
+// legs failed in different ways for a count native can satisfy but wasm cannot:
+// `list.repeat(0.0, i32::MAX)` allocated 16 GiB natively and printed a length,
+// while the wasm leg — capped at a 4 GiB address space — trapped out-of-bounds
+// (differential fuzz). A machine-dependent success on one leg is not an
+// observable the equivalence claim can carry.
+//
+// The ceiling counts SLOTS at the wasm element width (8 bytes), not
+// `size_of::<T>()`, so the limit is the same number on both legs whatever the
+// native element happens to be.
+pub const ALMIDE_LIST_REPEAT_MAX_ELEMS: i64 = (1 << 31) / 8;
+pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
+    if n > ALMIDE_LIST_REPEAT_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    vec![x; n.max(0) as usize]
+}
 pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> { (start..end).collect() }
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
