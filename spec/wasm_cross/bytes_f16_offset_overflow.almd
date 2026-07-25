@@ -1,0 +1,33 @@
+// @contract: C-171
+// A byte-offset bound check must not overflow. `bytes.read_f16_le(b, i64::MAX)`
+// returns the 0.0 out-of-range default on both targets.
+//
+// The guard was `pos + 2 > len`, and at `i64::MAX` that addition WRAPS to a
+// negative number: the comparison passed, the load read a wrapped address, and
+// wasm returned the value there while native's `pos as usize` was out of range
+// and gave 0.0 (differential fuzz). The bound is now `pos > len - 2`, which
+// cannot overflow — `len` is a non-negative i32-ranged length, so `len - 2` is
+// always representable. The same shape was fixed in `read_f16_le_array`'s
+// per-element guard and in the JSON parser's `\uXXXX` hex-quad bound.
+import json
+
+fn main() -> Unit = {
+  // The case that diverged.
+  println(float.to_string(bytes.read_f16_le(bytes.from_list([1, 124]), 9223372036854775807)))
+
+  // The negative end was already guarded; it stays guarded.
+  println(float.to_string(bytes.read_f16_le(bytes.from_list([255, 123]), -9223372036854775808)))
+
+  // In-range reads are unaffected, including the last valid offset and the
+  // first out-of-range one.
+  println(float.to_string(bytes.read_f16_le(bytes.from_list([255, 123]), 0)))
+  println(float.to_string(bytes.read_f16_le(bytes.from_list([255, 123]), 1)))
+
+  // The array form takes the same guard per element.
+  println(int.to_string(list.len(bytes.read_f16_le_array(bytes.from_list([255, 123, 0, 60]), 0, 2))))
+
+  // The JSON parser's hex-quad bound had the same additive shape; a truncated
+  // escape must stay an error rather than an out-of-range read.
+  println(match json.parse("{\"k\":\"\\u00e9\"}") { ok(v) => json.stringify(v), err(e) => "err" })
+  println(match json.parse("{\"k\":\"\\u00\"}") { ok(v) => json.stringify(v), err(e) => "err" })
+}
