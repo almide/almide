@@ -190,26 +190,7 @@ fn lower_call_target_record_field(ctx: &mut LowerCtx, callee: &ast::Expr, object
 
 /// Built-in generic types: `xs.len()` → `list.len(xs)` for List, Map, etc.
 fn lower_call_target_builtin_module(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sym, obj_ty: &Ty) -> Option<CallTarget> {
-    let builtin_module = match obj_ty {
-        Ty::Applied(TypeConstructorId::List, _) => Some("list"),
-        Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
-        Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
-        Ty::String => Some("string"),
-        Ty::Int => Some("int"),
-        Ty::Float => Some("float"),
-        // Sized numeric types (Stage 3 of the sized-numeric-types arc).
-        Ty::Int8 => Some("int8"),
-        Ty::Int16 => Some("int16"),
-        Ty::Int32 => Some("int32"),
-        Ty::UInt8 => Some("uint8"),
-        Ty::UInt16 => Some("uint16"),
-        Ty::UInt32 => Some("uint32"),
-        Ty::UInt64 => Some("uint64"),
-        Ty::Float32 => Some("float32"),
-        Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
-        Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
-        _ => None,
-    };
+    let builtin_module = builtin_module_for(obj_ty);
     if let Some(module) = builtin_module {
         let key = format!("{}.{}", module, field);
         if ctx.env.functions.contains_key(&sym(&key))
@@ -220,6 +201,54 @@ fn lower_call_target_builtin_module(ctx: &mut LowerCtx, object: &ast::Expr, fiel
         }
     }
     None
+}
+
+/// The stdlib module that owns UFCS methods for a receiver type.
+///
+/// `x.len()` resolves to `list.len` or `string.len` by this table alone — the
+/// receiver's type is the whole decision, so it is written as data rather than
+/// threaded through the call-target resolver.
+fn builtin_module_for(obj_ty: &Ty) -> Option<&'static str> {
+    builtin_module_core(obj_ty).or_else(|| builtin_module_sized(obj_ty))
+}
+
+/// The core container and scalar receivers.
+///
+/// One group of the receiver-type table, arms verbatim and in source order.
+/// `None` means "not my group"; `builtin_module_for` tries the groups in that
+/// order, so which module a receiver resolves to is unchanged.
+fn builtin_module_core(obj_ty: &Ty) -> Option<&'static str> {
+    match obj_ty {
+    Ty::Applied(TypeConstructorId::List, _) => Some("list"),
+    Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
+    Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
+    Ty::String => Some("string"),
+    Ty::Int => Some("int"),
+    Ty::Float => Some("float"),
+    // Sized numeric types (Stage 3 of the sized-numeric-types arc).
+    Ty::Int8 => Some("int8"),
+    Ty::Int16 => Some("int16"),
+        _ => None,
+    }
+}
+
+/// The sized numeric receivers and the `Result` / `Option` wrappers.
+///
+/// One group of the receiver-type table, arms verbatim and in source order.
+/// `None` means "not my group"; `builtin_module_for` tries the groups in that
+/// order, so which module a receiver resolves to is unchanged.
+fn builtin_module_sized(obj_ty: &Ty) -> Option<&'static str> {
+    match obj_ty {
+    Ty::Int32 => Some("int32"),
+    Ty::UInt8 => Some("uint8"),
+    Ty::UInt16 => Some("uint16"),
+    Ty::UInt32 => Some("uint32"),
+    Ty::UInt64 => Some("uint64"),
+    Ty::Float32 => Some("float32"),
+    Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
+    Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
+        _ => None,
+    }
 }
 
 /// Convention method: `dog.repr()` → `Dog.repr(dog)`.

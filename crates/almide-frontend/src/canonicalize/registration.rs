@@ -38,7 +38,18 @@ pub fn infer_top_let_seed(env: &TypeEnv, prefix: Option<&str>, value: &ast::Expr
     }
 }
 pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
-    match &expr.kind {
+    infer_literal_scalar(expr)
+        .or_else(|| infer_literal_composite(expr))
+        .unwrap_or(Ty::Unknown)
+}
+
+/// Scalars and the simple leaf literals.
+///
+/// One group of `infer_literal_type`'s arm table, arms verbatim and in source order.
+/// `None` means "not my group"; the router tries the groups in that order,
+/// so which type a literal seeds is unchanged.
+pub fn infer_literal_scalar(expr: &ast::Expr) -> Option<Ty> {
+    Some(match &expr.kind {
         ast::ExprKind::Int { .. } => Ty::Int,
         ast::ExprKind::Float { .. } => Ty::Float,
         ast::ExprKind::String { .. } => Ty::String,
@@ -58,6 +69,17 @@ pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
             fs.sort_by_key(|(n, _)| *n);
             Ty::Record { fields: fs }
         }
+        _ => return None,
+    })
+}
+
+/// Collections, records and the constructor forms.
+///
+/// One group of `infer_literal_type`'s arm table, arms verbatim and in source order.
+/// `None` means "not my group"; the router tries the groups in that order,
+/// so which type a literal seeds is unchanged.
+pub fn infer_literal_composite(expr: &ast::Expr) -> Option<Ty> {
+    Some(match &expr.kind {
         ast::ExprKind::List { elements } => {
             let elem = elements.first()
                 .map(|e| infer_literal_type(e))
@@ -85,8 +107,8 @@ pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
         ast::ExprKind::Err { expr } => {
             Ty::Applied(TypeConstructorId::Result, vec![Ty::Unknown, infer_literal_type(expr)])
         }
-        _ => Ty::Unknown,
-    }
+        _ => return None,
+    })
 }
 /// Build a prefixed key: "module.name" or just "name".
 pub fn prefixed_key(prefix: Option<&str>, name: &str) -> String {

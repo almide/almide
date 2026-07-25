@@ -200,6 +200,19 @@ fn collect_in_expr_keyed_literals(expr: &ast::Expr, out: &mut std::collections::
 
 /// Collect all Ident names referenced in an expression (shallow, for var capture check).
 fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
+    if collect_idents_operands(expr, out) { return; }
+    // An expression neither group claims — a literal, `none`, `unit` — references
+    // no identifier, so contributing nothing is the right answer, not a gap.
+    collect_idents_structural(expr, out);
+}
+
+/// Operators, calls and the operand-shaped forms.
+///
+/// One group of `collect_idents`'s arm table, arms verbatim and in source
+/// order. Returns whether it recognised the expression, so the router can try
+/// the next group — collecting from an expression twice would double every
+/// identifier under it.
+fn collect_idents_operands(expr: &ast::Expr, out: &mut Vec<String>) -> bool {
     match &expr.kind {
         ExprKind::Ident { name, .. } => out.push(name.to_string()),
         ExprKind::Call { callee, args, .. } => {
@@ -216,6 +229,19 @@ fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
         | ExprKind::Err { expr: operand, .. } | ExprKind::Try { expr: operand, .. } => {
             collect_idents(operand, out);
         }
+        _ => return false,
+    }
+    true
+}
+
+/// Blocks, collections, records and the branching forms.
+///
+/// One group of `collect_idents`'s arm table, arms verbatim and in source
+/// order. Returns whether it recognised the expression, so the router can try
+/// the next group — collecting from an expression twice would double every
+/// identifier under it.
+fn collect_idents_structural(expr: &ast::Expr, out: &mut Vec<String>) -> bool {
+    match &expr.kind {
         ExprKind::If { cond, then, else_, .. } => {
             collect_idents(cond, out); collect_idents(then, out); collect_idents(else_, out);
         }
@@ -227,8 +253,9 @@ fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
             for p in parts { if let ast::StringPart::Expr { expr } = p { collect_idents(expr, out); } }
         }
         ExprKind::Record { fields, .. } => { for f in fields { collect_idents(&f.value, out); } }
-        _ => {} // literals, none, unit, etc.
+        _ => return false,
     }
+    true
 }
 
 /// If an `if/else` arm is a statement-only block that assigns to a variable
