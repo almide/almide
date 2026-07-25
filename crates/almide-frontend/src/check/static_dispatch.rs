@@ -281,22 +281,7 @@ impl Checker {
             if self.env.types.contains_key(&sym(&qualified)) {
                 self.check_constructor_args(field, &case, arg_tys);
                 let generic_args = self.instantiate_type_generics(type_name.as_str());
-                if !generic_args.is_empty() {
-                    if let Some(ty_def) = self.env.types.get(&type_name).cloned() {
-                        let mut type_var_names = Vec::new();
-                        crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
-                        let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = type_var_names.iter()
-                            .zip(generic_args.iter())
-                            .map(|(tv, fresh)| (*tv, fresh.clone()))
-                            .collect();
-                        if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
-                            for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
-                                let substituted = super::calls::subst_ty(ety, &subst);
-                                self.unify_infer(aty, &substituted);
-                            }
-                        }
-                    }
-                }
+                self.unify_ctor_payload_generics(type_name, &case, arg_tys, &generic_args);
                 // #433: the binding/result takes the qualified `mod.Type`
                 // (just confirmed to exist) so it mangles to the namespaced
                 // enum, not the ambiguous bare name.
@@ -356,4 +341,37 @@ impl Checker {
             _ => false,
         }
     }
+
+    /// Unify a generic variant constructor's arguments against its payload types
+    /// with the call's fresh type variables substituted in.
+    ///
+    /// The payload types are written in terms of the declaration's own type vars
+    /// (`Box[T]`'s `T`), while the call site has fresh ones; unifying without the
+    /// substitution would bind the arguments to the declaration's vars and leak
+    /// them across call sites. A non-generic constructor has nothing to
+    /// substitute, and a record or unit payload has no positional arguments.
+    fn unify_ctor_payload_generics(
+        &mut self,
+        type_name: almide_base::intern::Sym,
+        case: &crate::types::VariantCase,
+        arg_tys: &[Ty],
+        generic_args: &[Ty],
+    ) {
+        if generic_args.is_empty() {
+            return;
+        }
+        let Some(ty_def) = self.env.types.get(&type_name).cloned() else { return };
+        let crate::types::VariantPayload::Tuple(expected) = &case.payload else { return };
+        let mut type_var_names = Vec::new();
+        crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
+        let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = type_var_names.iter()
+            .zip(generic_args.iter())
+            .map(|(tv, fresh)| (*tv, fresh.clone()))
+            .collect();
+        for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
+            let substituted = super::calls::subst_ty(ety, &subst);
+            self.unify_infer(aty, &substituted);
+        }
+    }
+
 }

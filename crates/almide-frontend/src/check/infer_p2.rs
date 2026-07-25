@@ -496,47 +496,59 @@ impl Checker {
                     }
                 }
                 else {
-                    // Only suggest `import` for modules that require explicit import
-                    // and whose names won't be confused with common variable names.
-                    // e.g. `value`, `error`, `string`, `list` are too common as
-                    // variable names — suggesting `import value` is misleading.
-                    let (hint, fix): (String, Option<String>) = if crate::stdlib::is_import_suggestable(name) {
-                        let desc = crate::stdlib::module_description(name);
-                        (format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc),
-                         Some(format!("import {}", name)))
-                    } else {
-                        let candidates = self.env.all_visible_names();
-                        if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                            (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()))
-                        } else {
-                            ("Check the variable name".to_string(), None)
-                        }
-                    };
-                    let mut diag = super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003");
-                    if let Some(fix) = fix {
-                        if let Some(stripped) = fix.strip_prefix("import ") {
-                            // Zero-width insert at the top of file — the
-                            // new `import <module>\n` line is prepended.
-                            // `apply_try_to` handles `end_col == col` as
-                            // an insertion point.
-                            diag = diag.with_try_replace(
-                                1, 1, 1,
-                                format!("import {}\n", stripped),
-                            );
-                        } else if let Some(span) = self.current_span {
-                            // Typo fuzzy suggestion: replace the
-                            // offending identifier with the suggested name.
-                            diag = diag.with_try_replace(
-                                span.line, span.col, span.end_col,
-                                fix,
-                            );
-                        } else {
-                            diag = diag.with_try(format!("// {}  →  {}\n{}", name, fix, fix));
-                        }
-                    }
-                    self.emit(diag);
-                    Ty::Unknown
+                    self.report_undefined_variable(name)
                 }
+    }
+
+
+    /// Emit the E003 for an identifier that resolves to nothing, and return the
+    /// recovery type.
+    ///
+    /// The hint is one of three, in order of how likely it is to be the actual
+    /// fix: a missing `import` for a module that needs one, a fuzzy match against
+    /// every visible name, or nothing better than "check the name". Only the
+    /// first two carry a `try_replace`, because only they name a concrete edit.
+    fn report_undefined_variable(&mut self, name: &str) -> Ty {
+                // Only suggest `import` for modules that require explicit import
+                // and whose names won't be confused with common variable names.
+                // e.g. `value`, `error`, `string`, `list` are too common as
+                // variable names — suggesting `import value` is misleading.
+                let (hint, fix): (String, Option<String>) = if crate::stdlib::is_import_suggestable(name) {
+                    let desc = crate::stdlib::module_description(name);
+                    (format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc),
+                     Some(format!("import {}", name)))
+                } else {
+                    let candidates = self.env.all_visible_names();
+                    if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
+                        (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()))
+                    } else {
+                        ("Check the variable name".to_string(), None)
+                    }
+                };
+                let mut diag = super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003");
+                if let Some(fix) = fix {
+                    if let Some(stripped) = fix.strip_prefix("import ") {
+                        // Zero-width insert at the top of file — the
+                        // new `import <module>\n` line is prepended.
+                        // `apply_try_to` handles `end_col == col` as
+                        // an insertion point.
+                        diag = diag.with_try_replace(
+                            1, 1, 1,
+                            format!("import {}\n", stripped),
+                        );
+                    } else if let Some(span) = self.current_span {
+                        // Typo fuzzy suggestion: replace the
+                        // offending identifier with the suggested name.
+                        diag = diag.with_try_replace(
+                            span.line, span.col, span.end_col,
+                            fix,
+                        );
+                    } else {
+                        diag = diag.with_try(format!("// {}  →  {}\n{}", name, fix, fix));
+                    }
+                }
+                self.emit(diag);
+                Ty::Unknown
     }
 
 }
