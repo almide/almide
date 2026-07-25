@@ -1985,3 +1985,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bundled_pure_modules.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-161"
+spec      = "ALS-T6"
+title     = "Matrix constructor dimensions clamp negatives and abort over a shared ceiling"
+statement = "A dimension-taking matrix constructor (`matrix.zeros`/`ones` and their `_f32` aliases) normalizes `(rows, cols)` identically on both targets. A NEGATIVE dimension clamps to 0 — the empty matrix — matching the C-034 signed-clamp rule the `repeat` family already follows; an element count above the shared 2^28 (2 GiB of f64, inside wasm32's address space so both targets accept exactly the same shapes) ABORTS in the T6 form: one `Error: matrix dimensions too large` line on stderr and exit 1. Before, a transformer-shaped program built with `seq = -2147483648` crashed on BOTH targets in DIFFERENT forms — native a raw-vec `capacity overflow` panic (exit 101), wasm an out-of-bounds memory fault in `__mx_rms_rows` (exit 134) — and neither is a permitted observable: the T6 convention forbids a native panic and a wasm `unreachable` alike. The guard fires before either allocator is asked for anything, so the ceiling costs no memory to enforce; `ALMIDE_MATRIX_MAX_ELEMS` (runtime/rs/src/matrix.rs) and `__mx_max_elems` (stdlib/matrix_core.almd) are the two halves that must stay in sync."
+since     = "0.35.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_dims_guard.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_dims_guard_overflow.almd", class = "fixture" },
+]

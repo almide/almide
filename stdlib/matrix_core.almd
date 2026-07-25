@@ -58,9 +58,35 @@ fn __mx_const_rows(ho: Int, n: Int, c: Int, bits: Int, i: Int) -> Int =
     __mx_const_rows(ho, n, c, bits, i + 1)
   }
 
+// Largest element count a dimension-taking constructor will allocate: 2^28 f64
+// = 2 GiB, comfortably inside wasm32's 4 GiB address space so BOTH targets
+// accept exactly the same dimensions. Keep in sync with
+// `ALMIDE_MATRIX_MAX_ELEMS` in runtime/rs/src/matrix.rs (#849).
+fn __mx_max_elems() -> Int = 268435456
+
+// Normalize a constructor's dimension: NEGATIVE clamps to 0 (the empty
+// matrix), matching the C-034 signed-clamp rule the `repeat` family follows.
+// Without it, `matrix.ones(-2147483648, 16)` allocated a bogus block here and
+// trapped out-of-bounds (exit 134) while native panicked with `capacity
+// overflow` (exit 101) — neither a T6 form.
+fn __mx_dim(n: Int) -> Int = if n < 0 then 0 else n
+
+// Abort in the unified T6 form when the requested allocation exceeds the shared
+// ceiling, so an absurd-but-positive shape fails identically on both targets
+// instead of native-OOM vs wasm memory fault.
+fn __mx_dims_guard(rows: Int, cols: Int) -> Int = {
+  if rows > 0 and cols > __mx_max_elems() / rows then
+    prim.die(prim.handle("Error: matrix dimensions too large\n"))
+  else ()
+  0
+}
+
 fn __mx_const(rows: Int, cols: Int, x: Float) -> List[List[Float]] = {
-  let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __mx_const_rows(prim.handle(out), rows, cols, prim.fbits(x), 0)
+  let r = __mx_dim(rows)
+  let c = __mx_dim(cols)
+  let _g = __mx_dims_guard(r, c)
+  let out: List[List[Float]] = prim.alloc_list_str(r)
+  let _x = __mx_const_rows(prim.handle(out), r, c, prim.fbits(x), 0)
   out
 }
 

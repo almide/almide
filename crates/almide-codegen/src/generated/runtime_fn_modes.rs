@@ -479,6 +479,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_matrix_cols" => &[false],
         "almide_rt_matrix_concat_cols_many" => &[false],
         "almide_rt_matrix_conv1d" => &[false, false, false, false, false, false],
+        "almide_rt_matrix_dims" => &[false, false],
         "almide_rt_matrix_div" => &[false, false],
         "almide_rt_matrix_fma" => &[false, false, false, false],
         "almide_rt_matrix_fma3" => &[false, false, false, false, false, false],
