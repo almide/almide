@@ -87,7 +87,7 @@ almide run hello.almd
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Standard library** — 834 functions across 39 modules (string, list, map, json, http, fs, etc.)
+- **Standard library** — 847 functions across 39 modules (string, list, map, json, http, fs, etc.)
 - **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
@@ -225,8 +225,8 @@ Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.m
 | Targets | Rust (native), WASM (direct emit) |
 | Verified codegen | The v1 PCC pipeline is the **default** wasm path since 0.29.0 — certificates re-verified on every build (`--no-verified` opts out) |
 | Codegen | Rust: Nanopass + TOML templates; wasm: certified MIR → direct emit (the sole wasm path — the unverified emitter is retired) |
-| Stdlib | 834 functions across 39 modules |
-| Tests | 288 test files pass (270 via WASM, 18 native) + 155-contract cross-target ledger |
+| Stdlib | 847 functions across 39 modules |
+| Tests | 311 test files pass (299 via WASM, 12 native) + 164-contract cross-target ledger |
 | MSR | 100% (30/30 tasks, Sonnet 4.6) — see the [scorecard](#msr-scorecard) above, measured by [almide-dojo](https://github.com/almide/almide-dojo) |
 | MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, same-model snapshot vs Gleam/MoonBit/Rust/TypeScript ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
@@ -258,7 +258,7 @@ Browser-based compiler and runner. The Almide compiler runs as WASM — no serve
 - [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1 proof-carrying compilation architecture
 - [docs/BENCHMARKS.md](./docs/BENCHMARKS.md) — Binary sizes, native performance, AI coding benchmark
 - [docs/contracts/](./docs/contracts/) — Behavior-contract ledger (cross-target equivalence)
-- [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (834 functions across 39 modules)
+- [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (847 functions across 39 modules)
 - [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans
 
 ## Contributing

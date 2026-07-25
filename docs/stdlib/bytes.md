@@ -284,18 +284,18 @@ bytes.write_u8(b: Bytes, val: Int) -> Unit
 bytes.xor(a: Bytes, b: Bytes) -> Bytes
 bytes.heap_save() -> Int
 bytes.heap_restore(checkpoint: Int) -> Unit
-bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> ?
-bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> ?
-bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> ?
-bytes.read_float32(b: Bytes, offset: Int, endian: Endian) -> ?
-bytes.write_uint16(b: Bytes, value: ?, endian: Endian) -> Unit
-bytes.write_uint32(b: Bytes, value: ?, endian: Endian) -> Unit
-bytes.write_int32(b: Bytes, value: ?, endian: Endian) -> Unit
-bytes.write_float32(b: Bytes, value: ?, endian: Endian) -> Unit
-bytes.set_uint16(b: Bytes, offset: Int, value: ?, endian: Endian) -> Unit
-bytes.set_uint32(b: Bytes, offset: Int, value: ?, endian: Endian) -> Unit
-bytes.set_int32(b: Bytes, offset: Int, value: ?, endian: Endian) -> Unit
-bytes.set_float32(b: Bytes, offset: Int, value: ?, endian: Endian) -> Unit
+bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16
+bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32
+bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32
+bytes.read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32
+bytes.write_uint16(b: Bytes, value: UInt16, endian: Endian) -> Unit
+bytes.write_uint32(b: Bytes, value: UInt32, endian: Endian) -> Unit
+bytes.write_int32(b: Bytes, value: Int32, endian: Endian) -> Unit
+bytes.write_float32(b: Bytes, value: Float32, endian: Endian) -> Unit
+bytes.set_uint16(b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit
+bytes.set_uint32(b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit
+bytes.set_int32(b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit
+bytes.set_float32(b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

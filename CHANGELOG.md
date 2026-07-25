@@ -115,10 +115,17 @@ fixtures pin the results.
 
 ### Added — documentation
 
-- **Eight new stdlib pages** with machine-owned signature indexes: `path`,
-  `args`, `html`, `mem`, `net`, `zlib`, `base64`, `hex`. Their worked examples
-  are executable (`spec/stdlib/bundled_module_docs_test.almd`), which is how
-  two of the defects above were found. (#863)
+- **Sixteen new stdlib pages** — every bundled module now has one (39/39, up
+  from 23): `path`, `args`, `html`, `mem`, `net`, `zlib`, `base64`, `hex`, and
+  the eight sized-numeric conversion modules. All carry the machine-owned
+  signature index, and their worked examples are executable
+  (`spec/stdlib/bundled_module_docs_test.almd`,
+  `spec/stdlib/sized_numeric_docs_test.almd`) — which is how three of the
+  defects in this release were found. (#863)
+- **The module interface can name the sized numerics**: `Int8`…`UInt64` and
+  `Float32`/`Float64` are their own `Ty` variants, not `Named`, so every
+  `almide compile <mod> --json` signature involving them serialized as
+  `unknown` — `int.to_int8` read `(n: Int) -> ?`.
 - **`docs/wasm/` design memos archived**: six 2026-04 notes that pre-date the
   v1 trust spine moved under `docs/wasm/archive/` with a banner naming why.
   `memory-model.md` described two linear memories and a bump allocator with no
