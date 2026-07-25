@@ -1,0 +1,45 @@
+// @contract: C-034
+// Negative offsets and widths are TOTAL on both targets — no native panic, no
+// wasm wrapped read. Three defects met here, all found by one differential-fuzz
+// campaign (seed 1784965210163815000):
+//
+//   1. `bytes.read_*` guards were `p + N > b.len()` on `pos as usize`, so a
+//      NEGATIVE pos became ~1.8e19, the addition WRAPPED back into range, and the
+//      slice index panicked (exit 101). Every guard in runtime/rs/src/bytes.rs is
+//      `checked_add` now.
+//   2. `bytes.read_f16_le`'s wasm self-host had no negative guard (its bytes_core
+//      siblings all did), so `i64::MIN` reached a wrapped address and returned the
+//      value at offset 0 (`inf`) where native returned the 0.0 default.
+//   3. `string.pad_start`/`pad_end` took `width as usize` natively, so a negative
+//      width asked for an astronomical pad and panicked with a capacity overflow,
+//      where the wasm self-host correctly returned the string unchanged.
+import bytes
+
+fn show(label: String, v: Float) -> Unit = println(label + ":" + float.to_string(v))
+
+effect fn main() -> Unit = {
+  let b = bytes.from_list([0, 124, 255, 123])
+
+  // Negative / absurd offsets take the documented default on both legs.
+  show("f16.min", bytes.read_f16_le(b, -9223372036854775808))
+  show("f16.neg", bytes.read_f16_le(b, -1))
+  show("f16.past", bytes.read_f16_le(b, 100))
+  show("f16.big", bytes.read_f16_le(b, 4294967296))
+  show("f16.ok", bytes.read_f16_le(b, 0))
+
+  println("u16.neg  = " + int.to_string(bytes.read_u16_le(b, -1)))
+  println("u32.neg  = " + int.to_string(bytes.read_u32_le(b, -1)))
+  println("i64.neg  = " + int.to_string(bytes.read_i64_le(b, -1)))
+  println("u16.ok   = " + int.to_string(bytes.read_u16_le(b, 0)))
+
+  // A negative pad width means no padding.
+  println("pad_s.neg = [" + string.pad_start("héllo", -128, "·") + "]")
+  println("pad_e.neg = [" + string.pad_end("日本語", -1, "·") + "]")
+  println("pad_s.ok  = [" + string.pad_start("ab", 5, "·") + "]")
+  println("pad_e.ok  = [" + string.pad_end("ab", 5, "·") + "]")
+
+  // An EMPTY needle matches at position 0 even in an empty haystack.
+  println("rf.empty  = [" + string.replace_first("", "", "X") + "]")
+  println("rf.head   = [" + string.replace_first("abc", "", "X") + "]")
+  println("rf.miss   = [" + string.replace_first("", "z", "X") + "]")
+}

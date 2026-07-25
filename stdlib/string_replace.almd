@@ -125,9 +125,13 @@ fn string_replace(s: String, from: String, to: String) -> String = {
   else __rep_do(s, from, to)
 }
 
-// Byte address of the first `from` match in [pos, send), or `send` if none.
+// Byte address of the first `from` match in [pos, send], or `send + 1` if none. The sentinel must
+// sit PAST `send`: an EMPTY needle legitimately matches AT `send` when the haystack
+// is itself empty (Rust's oracle: `"".replacen("", "X", 1)` == "X"), and the old
+// `send` sentinel collided with that match, so `replace_first("", "", to)` returned
+// the haystack unchanged on wasm while native produced `to` (differential-fuzz).
 fn __repf_find(pos: Int, send: Int, fbase: Int, flen: Int) -> Int =
-  if pos + flen > send then send
+  if pos + flen > send then send + 1
   else {
     let m = __rep_eq(pos, fbase, flen)
     if m then pos
@@ -161,6 +165,6 @@ fn string_replace_first(s: String, from: String, to: String) -> String = {
   let sbase = h + 12
   let send = sbase + slen
   let fpos = __repf_find(sbase, send, fh + 12, flen)
-  if fpos >= send then __rep_copy_str(s)
+  if fpos > send then __rep_copy_str(s)
   else __repf_do(s, from, to, fpos - sbase)
 }

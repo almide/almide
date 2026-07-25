@@ -33,7 +33,13 @@ fn __f16_decode(bits: Int) -> Float = {
 fn bytes_read_f16_le(b: Bytes, pos: Int) -> Float = {
   let h = prim.handle(b)
   let len = prim.load32(h + 4)
-  if pos + 2 > len then 0.0
+  // A NEGATIVE offset is out of range, like every other `bytes.read_*` guard in
+  // bytes_core.almd. Without it `pos + 2` stayed <= len for a very negative pos
+  // (i64::MIN + 2), the guard passed, and the load read a WRAPPED address —
+  // native returned 0.0 (its `pos as usize` is huge) while wasm returned the value
+  // at the wrapped offset (differential-fuzz, `read_f16_le(b, i64::MIN)` → inf).
+  if pos < 0 then 0.0
+  else if pos + 2 > len then 0.0
   else {
     let b0 = prim.load8(h + 12 + pos)
     let b1 = prim.load8(h + 12 + pos + 1)
@@ -46,7 +52,8 @@ fn bytes_read_f16_le(b: Bytes, pos: Int) -> Float = {
 // Decodes inline via the private __f16_decode (NOT a call to the registered bytes.read_f16_le
 // — a same-file registered cross-reference loops the auto-linker). Per-element OOB → 0.0.
 fn __arr_f16le_one(h: Int, p: Int, len: Int) -> Float =
-  if p + 2 > len then 0.0
+  if p < 0 then 0.0
+  else if p + 2 > len then 0.0
   else {
     let b0 = prim.load8(h + 12 + p)
     let b1 = prim.load8(h + 12 + p + 1)

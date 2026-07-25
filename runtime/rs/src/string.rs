@@ -64,15 +64,20 @@ pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> String {
     else { s.chars().skip(s_idx).take(e_idx - s_idx).collect() }
 }
 
+// A NEGATIVE width means "no padding needed" — the SAME answer the wasm self-host
+// gives (`if scount >= width then copy`), and the C-034 signed-clamp rule the
+// `repeat` family follows. The old `width as usize` turned -128 into ~1.8e19, so
+// `w - len` was astronomical and native panicked with a raw-vec capacity overflow
+// (exit 101) where wasm returned the string unchanged (differential-fuzz).
 pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
-    let w = width as usize; let len = s.chars().count();
+    let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
     format!("{}{}", std::iter::repeat(p).take(w - len).collect::<String>(), s)
 }
 
 pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> String {
-    let w = width as usize; let len = s.chars().count();
+    let w = width.max(0) as usize; let len = s.chars().count();
     if len >= w { return s.to_string(); }
     let p = pad.chars().next().unwrap_or(' ');
     format!("{}{}", s, std::iter::repeat(p).take(w - len).collect::<String>())

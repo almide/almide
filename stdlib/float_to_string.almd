@@ -564,7 +564,17 @@ fn __dgf_main(x: Float, nd: Int) -> String = {
   let raw_mant = prim.band(bits, 4503599627370495)
   let ff = if raw_exp == 0 then raw_mant else raw_mant + 4503599627370496
   let e = if raw_exp == 0 then 0 - 1074 else raw_exp - 1075
-  let blk = prim.alloc_list(468)
+  // Scratch layout: R @0 (528B), S @528 (1584B), TMP @2112 (528B), then the DIGIT
+  // buffer at @2640. `__dgf_gen` writes `n = k + nd` digits there, so the digit room
+  // must cover the WHOLE requested precision, not just an f64's exact expansion:
+  // k ≤ 309 (the largest finite decimal exponent) and nd ≤ 4096 (the domain bound
+  // float_to_fixed enforces), so n ≤ 4405, plus one byte for __dg_carry's overflow
+  // digit. The block was sized 468 slots = 3744B, leaving only 1104B — enough for
+  // the ~1074-digit exact expansion but NOT for a larger `nd`, so `to_fixed(1.5, 1200)`
+  // ran off the end and `__dgf_render` copied adjacent heap back out: native printed
+  // trailing zeros where wasm printed block headers (differential-fuzz, seed
+  // 1784965210163815000). 906 slots = 7248B leaves 4608B of digit room.
+  let blk = prim.alloc_list(906)
   let sb = prim.handle(blk) + 12
   let off_r = sb + 0
   let off_s = sb + 528
