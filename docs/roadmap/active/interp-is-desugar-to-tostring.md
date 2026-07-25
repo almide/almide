@@ -1,3 +1,4 @@
+<!-- description: Retiring StringInterp as special syntax by desugaring it to concat + to_string(part) -->
 # StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`
 
 The ideal end-state (set 2026-06-17). Supersedes the per-position interp-lowering approach.

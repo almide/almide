@@ -1,3 +1,4 @@
+<!-- description: Draining the reference-count frees backlog by making the ownership discipline mechanical -->
 # WASM Reference-Count Frees: the Ownership-Discipline Drain
 
 **Status:** in progress (2026-06-07). Branch `perceus-belt-hard-error`, worktree

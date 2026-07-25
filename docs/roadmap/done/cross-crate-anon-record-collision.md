@@ -1,4 +1,5 @@
 <!-- description: Anonymous record struct IDs collide across crates -->
+<!-- done: 2026-05-25 -->
 # Cross-crate anonymous record collision
 
 > **Priority: high** — blocks mc-bot-cli (deep dependency chain) from compiling.

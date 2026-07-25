@@ -1,3 +1,4 @@
+<!-- description: Custom ADTs (variants) as first-class values in the v1 value model -->
 # v1 ① — custom ADT (variant) as a first-class value
 
 The cross-repo wall lever #1 (~41 walls: recursive `to_string`/pretty-print over `type Expr = Lit(Int)

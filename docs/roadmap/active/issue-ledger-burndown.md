@@ -1,3 +1,4 @@
+<!-- description: The issue-ledger burn-down gauge: keeping the open-issue count an honest measure of remaining work -->
 # Issue Ledger Burn-down — 完全性キャンペーンの残量計
 
 > 2026-06-11 時点。台帳→tracker の単射は完成済み: **GitHub の open issue 数 =

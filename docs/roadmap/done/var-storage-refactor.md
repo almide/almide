@@ -1,3 +1,5 @@
+<!-- description: VarStorage refactor — unified variable classification -->
+<!-- done: 2026-05-15 -->
 # VarStorage Refactor — Unified Variable Classification
 
 ## Status: Complete

@@ -1,3 +1,4 @@
+<!-- description: Bringing Value reference counting inside the certified region -->
 # 柱C extension: bring Value rc into the certified region
 
 **Status: Brick 1+2 LANDED — carrier rc is CERTIFIED (verify_ownership + ownership_certificate, atomic, agree). 2026-06-24.**

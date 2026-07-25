@@ -1,3 +1,5 @@
+<!-- description: Unified cross-package symbol resolution as a dedicated name-resolution pass -->
+<!-- done: 2026-05-20 -->
 # Name Resolution Pass — Unified Cross-Package Symbol Resolution
 
 ## Status: Done (Phase 1-3 shipped in v0.18.1, Phase 4 cleanup deferred to cross-package builds)

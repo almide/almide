@@ -1,3 +1,4 @@
+<!-- description: Design note: borrowing Perceus / borrow-checker style mechanical completeness guarantees for Almide's own passes -->
 # Completeness by Construction
 
 > Perceus や Rust の borrow checker が持つ「機械的に完全性を担保する」性質を、

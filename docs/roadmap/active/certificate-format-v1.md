@@ -1,3 +1,4 @@
+<!-- description: The per-function ownership-certificate format — the i/a/d/m alphabet, call/branch/closure extensions, and which bricks have shipped -->
 # Certificate Format v1 — design
 
 > Status: **design accepted; bricks 1–2 and 5 shipped** (ownership alphabet

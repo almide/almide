@@ -1,3 +1,4 @@
+<!-- description: The self-hosted print floor, the observability keystone the rest of the self-host rests on -->
 # v1 self-host print floor — the ③ observability keystone
 
 **Status**: design (2026-06-14). Synthesized from a 5-agent design workflow

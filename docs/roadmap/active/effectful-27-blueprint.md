@@ -1,3 +1,4 @@
+<!-- description: Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause -->
 # Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1
 
 Design-only (the PLAN, not a build). Produced by a 6-agent design fan-out + adversarial
