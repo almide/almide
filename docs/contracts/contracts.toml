@@ -2045,3 +2045,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/map_fold_heap_acc_skv.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-166"
+spec      = "ALS-M10"
+title     = "Map interpolation renders every self-hosted key/value pairing on both targets"
+statement = "`${map}` produces the same `[\"k\": v, …]` text on both targets for every pairing that has a self-hosted display, and `[:]` when empty. Two of the most common pairings walled the whole program instead. The interp leaf table synthesizes an ALREADY-SUFFIXED display name — `map.to_string_ss` for an all-String map, `to_string_sb` for Bool values, `to_string_x` for a pairing with no variant — and the repr router then appended ANOTHER suffix to it, fabricating `map.to_string_ss_str_wall` and `map.to_string_x_skv_wall`: names nothing defines, so the render walled. Only the bare `to_string` and the one literal `to_string_sb` were spelled out as pass-through arms; every other member of the family fell through to the wall arm, which is why `${Map[String, String]}` — the single most common map interpolation an LLM writes — declined. The pass-through is now keyed on the whole `to_string*` family. Separately, `Map[String, Float]` had no variant at all and now has one, rendering values with the same shortest-round-trip `float.to_string` a bare `${float}` uses and quoting keys through the shared `__mts_fill_key` escaping path rather than re-deriving it."
+since     = "0.36.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/map_interp_string_value.almd", class = "fixture" },
+]

@@ -346,7 +346,17 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
     // `to_string` (the `${map}` interp display) links the BARE self-host
     // `map.to_string` — the pre-wall behavior this family's wall must not
     // mangle (map_interp_self_hosts_via_keys_values pins it).
-    (true, true) | (true, false) if key_is_string && func == "to_string" => Some(MapName::Suffix("")),
+    // Every `${map}` display name the interp leaf table synthesizes passes
+    // through VERBATIM. `to_string` is the bare self-host; the rest already
+    // carry the repr suffix that picked them (`to_string_ss` for the all-String
+    // map, `to_string_sb` for Bool values, `to_string_x` for a pairing with no
+    // variant). Re-suffixing them fabricated `to_string_ss_str_wall` and
+    // `to_string_x_skv_wall` — names nothing defines — so a `${Map[String,
+    // String]}` or `${Map[String, Float]}` interpolation walled the whole
+    // program even though the variant it names is self-hosted and correct.
+    // (The `to_string_hval` lesson, applied to the whole family.)
+    (true, true) | (true, false)
+        if key_is_string && func.starts_with("to_string") => Some(MapName::Suffix("")),
     (true, true) if key_is_string => Some(
         if matches!(
             func,
@@ -413,10 +423,6 @@ fn map_variant_other(r: MapRoute<'_>) -> Option<MapName> {
     {
         Some(MapName::Suffix("_skv_wall"))
     }
-    // An ALREADY-SUFFIXED skv-repr display (`map.to_string_sb` from the interp
-    // leaf — `${Map[String, Bool]}`) — pass through verbatim (re-suffixing
-    // would fabricate `to_string_sb_skv_wall`, the to_string_hval lesson).
-    (true, false) if func == "to_string_sb" => Some(MapName::Suffix("")),
     (true, false) if key_is_string => Some(
         if matches!(
             func,
