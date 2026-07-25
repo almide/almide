@@ -1,3 +1,24 @@
+/// The closure a defunctionalised list HOF applies.
+///
+/// Its parameters and body always travel together — a body lowered against a
+/// different parameter list binds the wrong variables — so they travel as one
+/// value.
+#[derive(Copy, Clone)]
+pub(crate) struct DefuncLambda<'a> {
+    pub params: &'a [(VarId, Ty)],
+    pub body: &'a IrExpr,
+}
+
+/// The loop-fusion state for a defunctionalised list HOF.
+///
+/// `index` is the induction variable a fused `enumerate` binds; `second` is the
+/// second source of a fused zip. Both are absent for an unfused HOF.
+#[derive(Copy, Clone)]
+pub(crate) struct DefuncFusion<'a> {
+    pub index: Option<VarId>,
+    pub second: Option<&'a (IrExpr, VarId, Ty)>,
+}
+
 impl LowerCtx {
     /// C1 DEFUNCTIONALIZATION — inline a `list.map`/`filter`/`fold` with an INLINE-LAMBDA
     /// closure argument as a SPECIALIZED loop at the call site: NO runtime closure, NO
@@ -299,12 +320,10 @@ impl LowerCtx {
             self.lower_defunc_list_hof_inner(
                 func,
                 xs,
-                params,
-                body,
+                DefuncLambda { params, body },
                 init_idx.map(|i| &args[i]),
                 result_elem,
-                fuse_index,
-                fuse_second.as_ref(),
+                DefuncFusion { index: fuse_index, second: fuse_second.as_ref() },
             )
         };
         if result.is_none() {
@@ -324,13 +343,13 @@ impl LowerCtx {
         &mut self,
         func: &str,
         xs: &IrExpr,
-        params: &[(VarId, Ty)],
-        body: &IrExpr,
+        lambda: DefuncLambda<'_>,
         init: Option<&IrExpr>,
         result_elem: Option<Ty>,
-        fuse_index: Option<VarId>,
-        fuse_second: Option<&(IrExpr, VarId, Ty)>,
+        fuse: DefuncFusion<'_>,
     ) -> Option<ValueId> {
+        let DefuncLambda { params, body } = lambda;
+        let DefuncFusion { index: fuse_index, second: fuse_second } = fuse;
         use crate::PrimKind;
         // A HEAP (String) fold accumulator: the inlined `acc = <body>` is a loop-carried slot
         // drop-old + SetLocal (vs a scalar SetLocal). `acc_ty` is the init's type.

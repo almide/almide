@@ -433,7 +433,7 @@ fn render_fn(
             // the rest are scalar user args, the result an i64. Heap args/results
             // are outside this slab (the wasm leg keeps them; native walls).
             Op::CallIndirect { dst, table_idx, args, result } => {
-                render_call_indirect(dst, table_idx, args, result, &mut tys, &mut out, indent)?
+                render_call_indirect(dst, table_idx, args, result, crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims })?
             }
             // A scalar-capture closure block is a plain `Vec<i64>` — its recursive
             // `$__drop_closure` erases to scope-end (the drop header is 0: no heap,
@@ -454,10 +454,10 @@ fn render_fn(
             // byte-identical "Error: index out of bounds" + exit 1 the wasm
             // `$elem_addr_chk` and v0 native emit.
             Op::ListGetScalar { dst, list, idx } => {
-                render_list_get_scalar(dst, list, idx, &mut tys, &mut out, indent, used_shims)?
+                render_list_get_scalar(dst, list, idx, crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims })?
             }
             Op::ListSetScalar { list, idx, val } => {
-                render_list_set_scalar(list, idx, val, &tys, &mut out, indent, used_shims)?
+                render_list_set_scalar(list, idx, val, crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims })?
             }
             // Drop is ERASED: Rust frees at scope end (or at reassignment for a
             // loop-carried handle). `verify_ownership` above certified balance.
@@ -494,7 +494,12 @@ fn render_fn(
                 line!("let mut {}: i64 = {};", var(*dst), rendered);
             }
             Op::CallFn { dst, name, args, result } => {
-                render_call_fn(dst, name, args, result, user_fns, sigs, &mut tys, &mut out, indent, used_shims)?
+                render_call_fn(
+                    crate::render_native::NativeCall { dst, name, args, result },
+                    crate::render_native::NativeSink {
+                        user_fns, sigs, tys: &mut tys, out: &mut out, indent, used_shims,
+                    },
+                )?
             }
             // Rung-5 float floor: MIR floats are i64 BITS; native computes in real
             // f64. Every op below is IEEE-754-exact on both targets (hardware ops,
@@ -518,7 +523,7 @@ fn render_fn(
             }
             // Witness-level runtime calls (`println` lowers through these).
             Op::Call { dst, func, args, .. } => {
-                render_call_witness(dst, func, args, &tys, &mut out, indent, used_shims)?
+                render_call_witness(dst, func, args, crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims })?
             }
             Op::IfThen { cond, dst } => render_if_then(cond, dst, &mut out, &mut indent, &mut if_stack),
             Op::Else { val } => render_else(val, &mut tys, &mut out, &mut indent, &if_stack)?,

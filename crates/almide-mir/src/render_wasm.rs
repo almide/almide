@@ -181,7 +181,14 @@ pub fn render_wasm(func: &MirFunction) -> String {
     let no_floats: BTreeSet<ValueId> = BTreeSet::new();
     let mut no_fuser = Fuser::new();
     for op in &func.ops {
-        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks, &reprs, &no_floats, &mut no_fuser));
+        body.push_str(&render_op(op, crate::render_wasm::OpTables {
+            label_off: &label_off,
+            func_slots: &no_slots,
+            param_counts: &no_param_counts,
+            masks: &func.heap_slot_masks,
+            reprs: &reprs,
+            floats: &no_floats,
+        }, &mut no_fuser));
     }
 
     format!(

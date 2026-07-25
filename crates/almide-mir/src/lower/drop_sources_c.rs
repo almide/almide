@@ -240,18 +240,29 @@ pub fn generate_record_drop_sources(
         out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
         out.push_str("  let h = prim.handle(e)\n");
         out.push_str("  if prim.load32(h + 0) == 1 then {\n");
+        let mut needs = DropNeeds {
+            map_ss: need_map_ss, list_str: need_list_str,
+            matrix: need_matrix, list_matrix: need_list_matrix,
+        };
         out.push_str(&record_drop_field_frees(
             &field_tys,
-            &rec_names,
-            &flat_variant_names,
-            &rec_variant_names,
-            &generic_decls,
+            DropShapes {
+                rec_names: &rec_names,
+                flat_variant_names: &flat_variant_names,
+                rec_variant_names: &rec_variant_names,
+                generic_decls: &generic_decls,
+            },
             &mut list_drops,
-            &mut need_map_ss,
-            &mut need_list_str,
-            &mut need_matrix,
-            &mut need_list_matrix,
+            &mut needs,
         ));
+        let DropNeeds {
+            map_ss: need_map_ss_new, list_str: need_list_str_new,
+            matrix: need_matrix_new, list_matrix: need_list_matrix_new,
+        } = needs;
+        need_map_ss = need_map_ss_new;
+        need_list_str = need_list_str_new;
+        need_matrix = need_matrix_new;
+        need_list_matrix = need_list_matrix_new;
         out.push_str("  } else ()\n");
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");
@@ -328,18 +339,25 @@ pub fn generate_record_drop_sources(
         out.push_str(&format!("fn __drop_{name}(e: {param_ty}) -> Unit = {{\n"));
         out.push_str("  let h = prim.handle(e)\n");
         out.push_str("  if prim.load32(h + 0) == 1 then {\n");
+        let mut needs = DropNeeds {
+            map_ss: need_map_ss, list_str: need_list_str,
+            matrix: need_matrix, list_matrix: need_list_matrix,
+        };
         out.push_str(&record_drop_field_frees(
             &field_tys,
-            &rec_names,
-            &flat_variant_names,
-            &rec_variant_names,
-            &generic_decls,
+            DropShapes {
+                rec_names: &rec_names,
+                flat_variant_names: &flat_variant_names,
+                rec_variant_names: &rec_variant_names,
+                generic_decls: &generic_decls,
+            },
             &mut list_drops,
-            &mut need_map_ss,
-            &mut need_list_str,
-            &mut need_matrix,
-            &mut need_list_matrix,
+            &mut needs,
         ));
+        need_map_ss = needs.map_ss;
+        need_list_str = needs.list_str;
+        need_matrix = needs.matrix;
+        need_list_matrix = needs.list_matrix;
         out.push_str("  } else ()\n");
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");

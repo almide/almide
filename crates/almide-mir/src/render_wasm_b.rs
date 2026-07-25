@@ -405,7 +405,14 @@ fn render_op_range(
                         st.fuser.order.push(dst);
                         continue 'op_loop;
                     }
-                    body.push_str(&render_op(op, ctx.label_off, ctx.func_slots, ctx.param_counts, &ctx.func.heap_slot_masks, ctx.reprs, ctx.floats, &mut st.fuser));
+                    body.push_str(&render_op(op, crate::render_wasm::OpTables {
+                        label_off: ctx.label_off,
+                        func_slots: ctx.func_slots,
+                        param_counts: ctx.param_counts,
+                        masks: &ctx.func.heap_slot_masks,
+                        reprs: ctx.reprs,
+                        floats: ctx.floats,
+                    }, &mut st.fuser));
                 } else {
                     // A non-splicing op reads through plain `local.get`: any
                     // pending it touches materializes first, as does any
@@ -417,7 +424,14 @@ fn render_op_range(
                     if elided {
                         body.push_str(&render_list_access_unchecked(op, ctx.floats));
                     } else {
-                        body.push_str(&render_op(op, ctx.label_off, ctx.func_slots, ctx.param_counts, &ctx.func.heap_slot_masks, ctx.reprs, ctx.floats, &mut st.fuser));
+                        body.push_str(&render_op(op, crate::render_wasm::OpTables {
+                        label_off: ctx.label_off,
+                        func_slots: ctx.func_slots,
+                        param_counts: ctx.param_counts,
+                        masks: &ctx.func.heap_slot_masks,
+                        reprs: ctx.reprs,
+                        floats: ctx.floats,
+                    }, &mut st.fuser));
                     }
                 }
             }
