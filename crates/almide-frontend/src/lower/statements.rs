@@ -290,6 +290,29 @@ pub(crate) fn declared_record_ty(env: &TypeEnv, name: almide_base::intern::Sym) 
 
 // ── Pattern lowering ────────────────────────────────────────────
 
+/// The type argument at `index` of `ty`, when `ty` is that applied constructor
+/// with at least `index + 1` arguments; `Ty::Unknown` otherwise.
+///
+/// The subject type reaching a pattern is not guaranteed to be the constructor
+/// the pattern names — a `Some(x)` pattern can be lowered against an `Unknown`
+/// subject after an inference failure upstream. `Unknown` is the recovery type
+/// codegen already handles, so mismatch is not an error here.
+fn applied_arg(ty: &Ty, ctor: TypeConstructorId, index: usize) -> Ty {
+    match ty {
+        Ty::Applied(id, args) if *id == ctor && args.len() > index => args[index].clone(),
+        _ => Ty::Unknown,
+    }
+}
+
+/// Strip a module qualifier from a constructor name: `command.Move` → `Move`.
+///
+/// A cross-module variant pattern that keeps its `mod.Ctor` name into the IR
+/// defeats field-type resolution and both backends fail to find the variant
+/// (#412), so this normalisation is load-bearing, not cosmetic.
+fn bare_ctor_name(name: &almide_base::intern::Sym) -> almide_base::intern::Sym {
+    name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name)
+}
+
 pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> IrPattern {
     match pat {
         ast::Pattern::Wildcard => IrPattern::Wildcard,
@@ -297,37 +320,9 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
             IrPattern::Bind { var, ty: ty.clone() }
         }
-        ast::Pattern::Literal { value } => {
-            // Pattern literals may not have expr_types entries (they're patterns,
-            // not expressions), so construct IR directly without calling lower_expr.
-            let (kind, ty) = match &value.kind {
-                ast::ExprKind::Int { raw, .. } => {
-                    let clean = raw.replace('_', "");
-                    let v = if clean.starts_with("0x") || clean.starts_with("0X") {
-                        i64::from_str_radix(&clean[2..], 16).unwrap_or(0)
-                    } else if clean.starts_with("0b") || clean.starts_with("0B") {
-                        i64::from_str_radix(&clean[2..], 2).unwrap_or(0)
-                    } else if clean.starts_with("0o") || clean.starts_with("0O") {
-                        i64::from_str_radix(&clean[2..], 8).unwrap_or(0)
-                    } else {
-                        clean.parse::<i64>().unwrap_or(0)
-                    };
-                    (IrExprKind::LitInt { value: v }, Ty::Int)
-                }
-                ast::ExprKind::Float { value: v, .. } => (IrExprKind::LitFloat { value: *v }, Ty::Float),
-                ast::ExprKind::String { value: v, .. } => (IrExprKind::LitStr { value: v.clone() }, Ty::String),
-                ast::ExprKind::Bool { value: v, .. } => (IrExprKind::LitBool { value: *v }, Ty::Bool),
-                _ => {
-                    let ir_expr = lower_expr(ctx, value);
-                    return IrPattern::Literal { expr: ir_expr };
-                }
-            };
-            let ir_expr = ctx.mk(kind, ty, value.span);
-            IrPattern::Literal { expr: ir_expr }
-        }
+        ast::Pattern::Literal { value } => lower_pattern_literal(ctx, value),
         ast::Pattern::Constructor { name, args } => {
-            // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
-            let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
+            let bare_name = bare_ctor_name(name);
             let payload_tys = get_constructor_payload_tys_from_subject(ctx, &bare_name, ty);
             let ir_args = args.iter().enumerate().map(|(i, a)| {
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
@@ -335,30 +330,8 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             }).collect();
             IrPattern::Constructor { name: bare_name.to_string(), args: ir_args }
         }
-        ast::Pattern::RecordPattern { name, fields, rest } => {
-            // Normalize module-qualified names: "command.Move" → "Move" (mirrors the
-            // Constructor arm above). Without this a cross-module record-variant
-            // pattern keeps its `mod.Ctor` name into the IR, so field-type resolution
-            // and both backends fail to find the variant (#412).
-            let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
-            let ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
-                let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
-                IrFieldPattern {
-                    name: f.name.to_string(),
-                    pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
-                }
-            }).collect();
-            // Bind shorthand fields as variables and attach Bind pattern
-            let mut ir_fields = ir_fields;
-            for (i, f) in fields.iter().enumerate() {
-                if f.pattern.is_none() {
-                    let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
-                    let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
-                    ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
-                }
-            }
-            IrPattern::RecordPattern { name: bare_name.to_string(), fields: ir_fields, rest: *rest }
-        }
+        ast::Pattern::RecordPattern { name, fields, rest } =>
+            lower_pattern_record(ctx, name, fields, *rest),
         ast::Pattern::Tuple { elements } => {
             let elem_tys = match ty {
                 Ty::Tuple(tys) => tys.clone(),
@@ -370,27 +343,72 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Tuple { elements: ir_elems }
         }
         ast::Pattern::Some { inner } => {
-            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown };
+            let inner_ty = applied_arg(ty, TypeConstructorId::Option, 0);
             IrPattern::Some { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
         ast::Pattern::None => IrPattern::None,
         ast::Pattern::Ok { inner } => {
-            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown };
+            let inner_ty = applied_arg(ty, TypeConstructorId::Result, 0);
             IrPattern::Ok { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
         ast::Pattern::Err { inner } => {
-            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown };
+            let inner_ty = applied_arg(ty, TypeConstructorId::Result, 1);
             IrPattern::Err { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
         ast::Pattern::List { elements } => {
-            let elem_ty = match ty {
-                Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => args[0].clone(),
-                _ => Ty::Unknown,
-            };
+            let elem_ty = applied_arg(ty, TypeConstructorId::List, 0);
             let ir_elems = elements.iter().map(|e| lower_pattern(ctx, e, &elem_ty)).collect();
             IrPattern::List { elements: ir_elems }
         }
     }
+}
+
+/// Lower a literal pattern.
+///
+/// Pattern literals may have no `expr_types` entry — they are patterns, not
+/// expressions — so the four scalar forms build their IR directly with a known
+/// type instead of asking the `TypeMap`. Anything else is an expression that
+/// happens to appear in pattern position and does go through `lower_expr`.
+fn lower_pattern_literal(ctx: &mut LowerCtx, value: &ast::Expr) -> IrPattern {
+    let (kind, ty) = match &value.kind {
+        ast::ExprKind::Int { raw, .. } =>
+            (IrExprKind::LitInt { value: crate::literals::int_value(raw) }, Ty::Int),
+        ast::ExprKind::Float { value: v, .. } => (IrExprKind::LitFloat { value: *v }, Ty::Float),
+        ast::ExprKind::String { value: v, .. } => (IrExprKind::LitStr { value: v.clone() }, Ty::String),
+        ast::ExprKind::Bool { value: v, .. } => (IrExprKind::LitBool { value: *v }, Ty::Bool),
+        _ => return IrPattern::Literal { expr: lower_expr(ctx, value) },
+    };
+    IrPattern::Literal { expr: ctx.mk(kind, ty, value.span) }
+}
+
+/// Lower a record-variant pattern.
+///
+/// A shorthand field (`Move { x }`, no sub-pattern) both matches and binds, so
+/// it needs a `Bind` pattern synthesised for it after the explicit sub-patterns
+/// are lowered — the two passes cannot merge, because defining the variable
+/// borrows `ctx` mutably while the first pass is still iterating.
+fn lower_pattern_record(
+    ctx: &mut LowerCtx,
+    name: &almide_base::intern::Sym,
+    fields: &[ast::FieldPattern],
+    rest: bool,
+) -> IrPattern {
+    let bare_name = bare_ctor_name(name);
+    let mut ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
+        let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
+        IrFieldPattern {
+            name: f.name.to_string(),
+            pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
+        }
+    }).collect();
+    for (i, f) in fields.iter().enumerate() {
+        if f.pattern.is_none() {
+            let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
+            let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
+            ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
+        }
+    }
+    IrPattern::RecordPattern { name: bare_name.to_string(), fields: ir_fields, rest }
 }
 
 /// Extract constructor payload types from the subject type first (instantiated types),

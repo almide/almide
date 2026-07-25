@@ -184,35 +184,6 @@ pub(crate) struct IntOverflowSite {
     pub span: Option<crate::ast::Span>,
 }
 
-/// True when a bare (non-negative) integer literal does not fit in `i64`.
-/// Mirrors the radix parsing in lowering so the check and the eventual value
-/// agree. A malformed token the lexer would not produce is treated as
-/// non-overflowing (not our error to report).
-pub(crate) fn int_literal_overflows_i64(raw: &str) -> bool {
-    let clean = raw.replace('_', "");
-    let (radix, digits) = if let Some(r) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) { (16, r) }
-        else if let Some(r) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) { (2, r) }
-        else if let Some(r) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) { (8, r) }
-        else { (10, clean.as_str()) };
-    match i64::from_str_radix(digits, radix) {
-        Ok(_) => false,
-        Err(e) => matches!(e.kind(), std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow),
-    }
-}
-
-/// True when `raw`'s magnitude fits the given type's range. For a SIGNED type
-/// the magnitude bound is `MAX` (or `MAX+1` when `negated`, reaching `MIN`); for
-/// an unsigned type it is the unsigned `MAX`. Non-integer types return false
-/// (the literal does not belong there — left for the normal type checker).
-// Strip an int literal's `0x`/`0b`/`0o` prefix (case-insensitive) and return
-// (radix, remaining digits); defaults to base 10 with no prefix.
-fn parse_int_literal_radix(clean: &str) -> (u32, &str) {
-    if let Some(r) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) { (16, r) }
-    else if let Some(r) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) { (2, r) }
-    else if let Some(r) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) { (8, r) }
-    else { (10, clean) }
-}
-
 // (signed, bit-width) for each sized integer type; None for non-integer types
 // (not our diagnostic).
 fn int_type_signed_bits(ty: &Ty) -> Option<(bool, u32)> {
@@ -225,9 +196,13 @@ fn int_type_signed_bits(ty: &Ty) -> Option<(bool, u32)> {
     }
 }
 
+/// True when `raw`'s magnitude fits the given type's range. For a SIGNED type
+/// the magnitude bound is `MAX` (or `MAX+1` when `negated`, reaching `MIN`); for
+/// an unsigned type it is the unsigned `MAX`. Non-integer types return true
+/// (the literal does not belong there — left for the normal type checker).
 pub(crate) fn int_literal_fits_type(raw: &str, ty: &Ty, negated: bool) -> bool {
     let clean = raw.replace('_', "");
-    let (radix, digits) = parse_int_literal_radix(&clean);
+    let (radix, digits) = crate::literals::radix_and_digits(&clean);
     let Ok(mag) = u128::from_str_radix(digits, radix) else { return true };
     match int_type_signed_bits(ty) {
         None => true, // not an integer context — not our diagnostic

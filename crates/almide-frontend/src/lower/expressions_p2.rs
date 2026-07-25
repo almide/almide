@@ -285,17 +285,7 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
             // overflows `i64` → `unwrap_or(0)`, and negating 0 yields 0.
             if op.as_str() == "-" {
                 if let ast::ExprKind::Int { raw, .. } = &operand.kind {
-                    let clean = raw.replace('_', "");
-                    let parsed = if let Some(h) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
-                        i64::from_str_radix(&format!("-{}", h), 16)
-                    } else if let Some(b) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) {
-                        i64::from_str_radix(&format!("-{}", b), 2)
-                    } else if let Some(o) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) {
-                        i64::from_str_radix(&format!("-{}", o), 8)
-                    } else {
-                        format!("-{}", clean).parse::<i64>()
-                    };
-                    if let Ok(value) = parsed {
+                    if let Some(value) = crate::literals::negated_int_value(raw) {
                         return ctx.mk(IrExprKind::LitInt { value }, ty.clone(), span);
                     }
                 }

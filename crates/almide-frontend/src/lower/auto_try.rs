@@ -305,7 +305,54 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
     let span = expr.span;
     let should_wrap = !in_match_subject && is_result_call(&expr);
 
-    let kind = match expr.kind {
+    let kind = insert_try_control(expr.kind, &ty, ctx)
+        .or_else(|k| insert_try_construct(k, &ty, ctx))
+        .or_else(|k| insert_try_iterate(k, &ty, ctx))
+        .or_else(|k| insert_try_wrapper(k, &ty, ctx))
+        .unwrap_or_else(|k| k);
+
+    // #717: an `if`/`match`/tail-`block` YIELDS its branch type. The checker
+    // lifts an effect-fn-call branch to `Result[T, String]`, so the whole node
+    // inherits that Result type — but `insert_try` above just auto-?'d those
+    // branches down to `T`. Recompute the node type from the (now-unwrapped)
+    // branches so a `let pick = if c then eff() else pure()` binding gets `T`,
+    // not the stale `Result[T]` (which then emitted `Result<T>` = `?`-branches,
+    // an E0308 type mismatch). Pure / genuinely-Result branches are unchanged:
+    // their branch types already equal the original node type.
+    let node_ty = match &kind {
+        IrExprKind::If { then, else_, .. } if then.ty == else_.ty => then.ty.clone(),
+        IrExprKind::Match { arms, .. }
+            if !arms.is_empty() && arms.iter().all(|a| a.body.ty == arms[0].body.ty)
+            => arms[0].body.ty.clone(),
+        IrExprKind::Block { expr: Some(tail), .. } => tail.ty.clone(),
+        _ => ty.clone(),
+    };
+    let mut result = IrExpr { kind, ty: node_ty, span, def_id: None };
+
+    if should_wrap {
+        let inner_ty = match &ty {
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+            _ => ty,
+        };
+        result = IrExpr {
+            kind: IrExprKind::Try { expr: Box::new(result) },
+            ty: inner_ty,
+            span, def_id: None,
+        };
+    }
+
+    result
+}
+
+/// Blocks, branches, operators, calls and lambdas — the forms that carry
+/// sub-expressions in evaluation position.
+///
+/// One group of `insert_try`'s arm table, arms verbatim and in source
+/// order. `kind` is moved in, so a group that does not own the variant
+/// hands it back as `Err` and the router tries the next group — the
+/// dispatch order is exactly the original table's.
+fn insert_try_control(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrExprKind, IrExprKind> {
+    Ok(match kind {
         IrExprKind::Block { stmts, expr: e } => IrExprKind::Block {
             stmts: stmts.into_iter().map(|s| insert_try_stmt(s, ctx)).collect(),
             expr: e.map(|e| Box::new(insert_try(*e, false, ctx))),
@@ -376,6 +423,20 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
         // `[step(), step()]: List[Result[..]]` and `Holder { r: step() }` lift
         // an effect call to Result and then auto-unwrap it, so native built
         // invalid Rust (E0308) while wasm ran and silently corrupted the value.
+        other => return Err(other),
+    })
+}
+
+/// Construction and member access. These positions are TARGET-DIRECTED: a
+/// Result-typed element or field keeps its Result, so they read `ty` to
+/// decide whether to strip the auto-`?` (see the #555 note inline).
+///
+/// One group of `insert_try`'s arm table, arms verbatim and in source
+/// order. `kind` is moved in, so a group that does not own the variant
+/// hands it back as `Err` and the router tries the next group — the
+/// dispatch order is exactly the original table's.
+fn insert_try_construct(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrExprKind, IrExprKind> {
+    Ok(match kind {
         IrExprKind::List { elements } => {
             let elem_is_result = match &ty {
                 Ty::Applied(c, args) if *c == TypeConstructorId::List && args.len() == 1 => args[0].is_result(),
@@ -425,6 +486,18 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
             expr: Box::new(insert_try(*expr, false, ctx)),
             field,
         },
+        other => return Err(other),
+    })
+}
+
+/// Loops, string interpolation, fan, and the indexing forms.
+///
+/// One group of `insert_try`'s arm table, arms verbatim and in source
+/// order. `kind` is moved in, so a group that does not own the variant
+/// hands it back as `Err` and the router tries the next group — the
+/// dispatch order is exactly the original table's.
+fn insert_try_iterate(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrExprKind, IrExprKind> {
+    Ok(match kind {
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
             iterable: Box::new(insert_try(*iterable, false, ctx)),
@@ -468,6 +541,18 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
             object: Box::new(insert_try(*object, false, ctx)),
             index,
         },
+        other => return Err(other),
+    })
+}
+
+/// Single-operand wrappers and the unwrap family.
+///
+/// One group of `insert_try`'s arm table, arms verbatim and in source
+/// order. `kind` is moved in, so a group that does not own the variant
+/// hands it back as `Err` and the router tries the next group — the
+/// dispatch order is exactly the original table's.
+fn insert_try_wrapper(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrExprKind, IrExprKind> {
+    Ok(match kind {
         IrExprKind::Clone { expr } => IrExprKind::Clone {
             expr: Box::new(insert_try(*expr, false, ctx)),
         },
@@ -499,44 +584,25 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
             expr: Box::new(insert_try(*inner, true, ctx)),
             fallback: Box::new(insert_try(*fallback, false, ctx)),
         },
-        other => other,
-    };
-
-    // #717: an `if`/`match`/tail-`block` YIELDS its branch type. The checker
-    // lifts an effect-fn-call branch to `Result[T, String]`, so the whole node
-    // inherits that Result type — but `insert_try` above just auto-?'d those
-    // branches down to `T`. Recompute the node type from the (now-unwrapped)
-    // branches so a `let pick = if c then eff() else pure()` binding gets `T`,
-    // not the stale `Result[T]` (which then emitted `Result<T>` = `?`-branches,
-    // an E0308 type mismatch). Pure / genuinely-Result branches are unchanged:
-    // their branch types already equal the original node type.
-    let node_ty = match &kind {
-        IrExprKind::If { then, else_, .. } if then.ty == else_.ty => then.ty.clone(),
-        IrExprKind::Match { arms, .. }
-            if !arms.is_empty() && arms.iter().all(|a| a.body.ty == arms[0].body.ty)
-            => arms[0].body.ty.clone(),
-        IrExprKind::Block { expr: Some(tail), .. } => tail.ty.clone(),
-        _ => ty.clone(),
-    };
-    let mut result = IrExpr { kind, ty: node_ty, span, def_id: None };
-
-    if should_wrap {
-        let inner_ty = match &ty {
-            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-            _ => ty,
-        };
-        result = IrExpr {
-            kind: IrExprKind::Try { expr: Box::new(result) },
-            ty: inner_ty,
-            span, def_id: None,
-        };
-    }
-
-    result
+        other => return Err(other),
+    })
 }
 
 fn insert_try_stmt(stmt: IrStmt, ctx: &mut TryCtx) -> IrStmt {
-    let kind = match stmt.kind {
+    let kind = insert_try_stmt_bind(stmt.kind, ctx)
+        .or_else(|k| insert_try_stmt_assign(k, ctx))
+        .unwrap_or_else(|k| k);
+    IrStmt { kind, span: stmt.span }
+}
+
+/// Binding forms. These are target-directed: a `let x: Result[..] = eff()`
+/// keeps its Result, so the auto-`?` is stripped from the value.
+///
+/// One group of `insert_try_stmt`'s arm table, arms verbatim and in source
+/// order. `kind` is moved in, so a group that does not own the variant
+/// hands it back as `Err` for the next group to try.
+fn insert_try_stmt_bind(kind: IrStmtKind, ctx: &mut TryCtx) -> Result<IrStmtKind, IrStmtKind> {
+    Ok(match kind {
         IrStmtKind::Bind { var, mutability, ty, value } => {
             // A binding consumed by `??` / `== ok(v)` / `match { ok/err }` is kept a
             // Result so that usage type-checks — BUT only when the binding's value
@@ -644,6 +710,17 @@ fn insert_try_stmt(stmt: IrStmt, ctx: &mut TryCtx) -> IrStmt {
                 value: coerce_to_target(insert_try(value, false, ctx), val_is_result),
             }
         }
+        other => return Err(other),
+    })
+}
+
+/// Assignment and the remaining statement forms.
+///
+/// One group of `insert_try_stmt`'s arm table, arms verbatim and in source
+/// order. `kind` is moved in, so a group that does not own the variant
+/// hands it back as `Err` for the next group to try.
+fn insert_try_stmt_assign(kind: IrStmtKind, ctx: &mut TryCtx) -> Result<IrStmtKind, IrStmtKind> {
+    Ok(match kind {
         IrStmtKind::FieldAssign { target, field, value } => {
             // `r.f = step(v)`: the value's target type is the declared field
             // type — structural Record directly, Named through the decl map.
@@ -666,9 +743,8 @@ fn insert_try_stmt(stmt: IrStmt, ctx: &mut TryCtx) -> IrStmt {
             cond: insert_try(cond, false, ctx),
             else_: insert_try(else_, false, ctx),
         },
-        other => other,
-    };
-    IrStmt { kind, span: stmt.span }
+        other => return Err(other),
+    })
 }
 
 fn is_result_call(expr: &IrExpr) -> bool {
