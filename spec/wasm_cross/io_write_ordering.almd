@@ -1,0 +1,25 @@
+// @contract: C-162
+// `io.write` / `io.write_bytes` interleave with `println` in PROGRAM order,
+// byte-identically on both targets.
+//
+// Two bugs met here. (1) The wasm leg had no self-host for either fn at all:
+// `io.write` walled as "effectful/impure stdlib Module call io.write needs a
+// declared capability", so any program streaming bytes to stdout was native-only.
+// (2) Once it linked, the ORDER diverged — native routed `io.write` through a
+// 64 KiB BufWriter flushed at exit while `println!` wrote through Rust's own
+// `Stdout` handle, so the byte writes all landed AFTER the line writes; the wasm
+// leg's direct `fd_write` kept program order. Native now flushes at the end of
+// each write, so both legs emit the same bytes in the same order.
+import io
+
+effect fn main() -> Unit = {
+  println("line-1")
+  io.write(bytes.from_list([66, 89, 84, 69, 83, 10]))
+  println("line-2")
+  io.write_bytes([82, 65, 87, 10])
+  println("line-3")
+  // A zero-length write must emit nothing at all and disturb no ordering.
+  io.write(bytes.new(0))
+  io.write_bytes([])
+  println("line-4")
+}

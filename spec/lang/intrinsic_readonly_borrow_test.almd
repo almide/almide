@@ -21,7 +21,7 @@ test "read-only Unit intrinsic borrows a let-bound Bytes immutably" {
 }
 
 test "read-only Unit intrinsic borrows a for-loop binding immutably" {
-  let chunks = [bytes.new(0), bytes.new(0)]
+  let chunks = list.map([0, 0], (n) => bytes.new(n))
   for chunk in chunks {
     io.write(chunk)
   }

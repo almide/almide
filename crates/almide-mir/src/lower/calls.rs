@@ -537,6 +537,11 @@ fn is_admitted_effectful_io(module: &str, func: &str) -> bool {
         // WASI fd-0 $read_n_bytes floor), so its prim is in the program map and the transitive
         // cap_witness counts Stdin. Returns a heap Bytes block (flat Drop, no nested handles).
         || (module == "io" && func == "read_n_bytes")
+        // `io.write` (Bytes) / `io.write_bytes` (List[Int]) WRITE standard output — the
+        // SAME Capability::Stdout as `io.print`, over the same single-iovec fd_write floor
+        // (io_write.almd → prim.fd_write), so their prims are in the program map and the
+        // transitive cap_witness counts Stdout. Both return Unit.
+        || (module == "io" && matches!(func, "write" | "write_bytes"))
 }
 
 include!("calls_b.rs");

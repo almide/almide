@@ -1997,3 +1997,14 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_overflow.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-162"
+spec      = "ALS-T5"
+title     = "io.write / io.write_bytes emit in program order, interleaved with println"
+statement = "`io.write(Bytes)` and `io.write_bytes(List[Int])` write their payload to stdout at the point of the call, so a program interleaving them with `println` produces the SAME byte stream in the SAME order on native and wasm. Two defects met here. (1) Neither fn had a wasm self-host: `io.write` was not in the admitted-effectful set, so it walled as `effectful/impure stdlib Module call io.write needs a declared capability` and any byte-streaming program was native-only; both are now self-hosted in stdlib/io_write.almd over the single-iovec `prim.fd_write` floor, carrying the SAME Capability::Stdout as `io.print` (a stdout write is a stdout write). (2) Once linked, the ORDER diverged: native routed the byte writers through a 64 KiB `BufWriter<Stdout>` flushed only at exit, while `println!` wrote through Rust's own `Stdout` handle — two independent buffers over one fd, so every `io.write` landed AFTER every line write (wrong even native-only), where the wasm leg's direct `fd_write` kept program order. Native now flushes at the end of each write; the buffer still batches WITHIN one call, which is where the byte-streaming benches spend their time. A zero-length write emits nothing and disturbs no ordering."
+since     = "0.35.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/io_write_ordering.almd", class = "fixture" },
+]
