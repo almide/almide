@@ -127,6 +127,7 @@ fn bundled_source_io(name: &str) -> Option<&'static str> {
         "process" => Some(include_str!("../../../stdlib/process.almd")),
         "fs" => Some(include_str!("../../../stdlib/fs.almd")),
         "http" => Some(include_str!("../../../stdlib/http.almd")),
+        "html" => Some(include_str!("../../../stdlib/html.almd")),
         "json" => Some(include_str!("../../../stdlib/json.almd")),
         "matrix" => Some(include_str!("../../../stdlib/matrix.almd")),
         "mem" => Some(include_str!("../../../stdlib/mem.almd")),
@@ -152,6 +153,24 @@ fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
         // primitive ops by module name; the @intrinsic symbols are v0 placeholders.
         "prim" => Some(include_str!("../../../stdlib/prim.almd")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod bundled_source_coverage {
+    /// Every declared bundled module must actually carry a source. `html` sat in
+    /// `BUNDLED_MODULES` with no `bundled_source` arm, so `almide compile html`
+    /// reported "no bundled source wired in stdlib_info" for a module the binary
+    /// was otherwise treating as bundled (#863). The two lists are hand-written
+    /// and in different functions, so nothing but this test keeps them in step.
+    #[test]
+    fn every_bundled_module_has_a_source() {
+        let missing: Vec<&str> = super::BUNDLED_MODULES
+            .iter()
+            .copied()
+            .filter(|m| super::bundled_source(m).is_none())
+            .collect();
+        assert!(missing.is_empty(), "BUNDLED_MODULES with no bundled_source arm: {missing:?}");
     }
 }
 

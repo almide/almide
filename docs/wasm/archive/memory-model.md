@@ -1,5 +1,12 @@
 # WASM Memory Model
 
+> **ARCHIVED DESIGN NOTE — not current architecture.**
+> Written 2026-04-07, before the v1 MIR trust spine became the sole wasm path
+> (#782 retired the v0 emitter). Kept for the design history; do NOT read it as a
+> description of what ships. For the current wasm architecture see
+> [docs/wasm/README.md](../README.md) and
+> [docs/roadmap/active/v1-mir-architecture.md](../../roadmap/active/v1-mir-architecture.md).
+
 Almide compiles to a standalone WASM binary targeting WASI preview1. The runtime uses two linear memories, a bump allocator with no free/GC, and a scratch buffer protocol for zero-intermediate-allocation string interpolation.
 
 This document describes the exact physical layout, allocation algorithm, data representation, and safety properties of the memory model.

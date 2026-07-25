@@ -1,5 +1,12 @@
 # WASM Agent Ecosystem
 
+> **ARCHIVED DESIGN NOTE — not current architecture.**
+> Written 2026-04-07, before the v1 MIR trust spine became the sole wasm path
+> (#782 retired the v0 emitter). Kept for the design history; do NOT read it as a
+> description of what ships. For the current wasm architecture see
+> [docs/wasm/README.md](../README.md) and
+> [docs/roadmap/active/v1-mir-architecture.md](../../roadmap/active/v1-mir-architecture.md).
+
 Where Almide sits in the 2026 agent infrastructure landscape.
 
 ---

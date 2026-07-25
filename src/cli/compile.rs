@@ -11,7 +11,12 @@ fn resolve_module_to_file(module: &str) -> (String, bool) {
     // Stdlib modules are self-hosted `.almd` bundled into the compiler:
     // serve the embedded source through the normal pipeline via a temp file
     // so `almide compile string --json` works like any module.
-    if almide::stdlib::is_stdlib_module(module) {
+    //
+    // Keyed on `is_any_stdlib`, NOT the hardcoded stdlib list: `path`, `args`,
+    // `html` and `mem` exist only as bundled modules, so the narrower gate let
+    // them fall through to on-disk resolution and report "module not found"
+    // for a module the binary is carrying the source of (#863).
+    if almide::stdlib::is_any_stdlib(module) {
         if let Some(src) = almide::stdlib::get_bundled_source(module) {
             let tmp = std::env::temp_dir().join(format!("almide-stdlib-iface-{}.almd", module));
             if let Err(e) = std::fs::write(&tmp, src) {

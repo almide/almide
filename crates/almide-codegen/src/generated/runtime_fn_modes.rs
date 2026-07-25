@@ -542,6 +542,8 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_matrix_transpose" => &[false],
         "almide_rt_matrix_zeros" => &[false, false],
         "almide_rt_matrix_zeros_f32" => &[false, false],
+        "almide_rt_mem_restore" => &[false],
+        "almide_rt_mem_save" => &[],
         "almide_rt_net_tcp_accept" => &[false],
         "almide_rt_net_tcp_available" => &[false],
         "almide_rt_net_tcp_close" => &[false],
