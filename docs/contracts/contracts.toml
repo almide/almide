@@ -454,7 +454,7 @@ evidence  = [
 id        = "C-032"
 spec      = "ALS-D4"
 title     = "Regex engine is byte-identical to the native engine over a fuzzed grammar"
-statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers, replace, split edges, full_match, find_all, empty alternation arms, and end-of-string empty-match replace. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus."
+statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers (incl. {n}/{n,}/{n,m} braces; malformed braces stay literal), replace, split edges, full_match, find_all, empty alternation arms, and end-of-string empty-match replace. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus."
 since     = "0.24.0"
 status    = "active"
 evidence  = [

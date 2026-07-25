@@ -8,7 +8,7 @@
 //! (`runtime/rs/src/regex.rs`). This test generates a deterministic battery of
 //! `(pattern, haystack)` cases from a grammar covering the supported feature set
 //! (alternation, classes incl. internal escapes, escape atoms incl. negated +
-//! escaped literals, quantifiers, anchors, captures, multibyte + emoji
+//! escaped literals, quantifiers (incl. {n}/{n,}/{n,m}), anchors, captures, multibyte + emoji
 //! haystacks), batches them into ONE `.almd` program per public op, and asserts
 //! the native-target (= oracle, runs `almide_rt`) and WASM-target outputs are
 //! byte-identical. Batching amortizes the per-program wasm build cost over
@@ -79,7 +79,7 @@ const CLASSES: &[&str] = &[
     "[abc]", "[a-z]", "[^a-z]", "[0-9]", "[^0-9]", "[\\d]", "[^\\d]", "[\\w]",
     "[a-z0-9]", "[本語]", "[.+*]",
 ];
-const QUANTS: &[&str] = &["", "", "", "*", "+", "?"];
+const QUANTS: &[&str] = &["", "", "", "*", "+", "?", "{2}", "{1,3}", "{0,2}", "{2,}"];
 
 fn gen_atom(rng: &mut Rng) -> String {
     match rng.below(5) {
