@@ -23,6 +23,53 @@ fn set_call_name_arg_membership(func: &str, arg_tys: &[Ty]) -> Option<String> {
     })
 }
 
+/// What a repr-table arm resolves a `map.*` call to.
+///
+/// Most arms pick a SUFFIX appended to the called name (`map.set` + `_skv`),
+/// but one names the whole function: `len` on the tuple-key repr has no `_srec`
+/// twin and shares the all-String variant's. Modelling the two as one type is
+/// what lets every arm sit in the same table.
+#[derive(Copy, Clone)]
+enum MapName {
+    /// Appended to `map.<func>`.
+    Suffix(&'static str),
+    /// Used verbatim, replacing `map.<func>`.
+    Full(&'static str),
+}
+
+/// Everything the map repr table reads about one `map.*` call.
+///
+/// Four of the fields are `bool` classifications of the same value type, so as
+/// positional parameters any two could be transposed — and each selects a
+/// different self-hosted variant file, so a transposition routes the call to a
+/// function that reads the block with the wrong layout.
+#[derive(Copy, Clone)]
+struct MapRoute<'a> {
+    func: &'a str,
+    arg_tys: &'a [Ty],
+    result_ty: &'a Ty,
+    /// Whether the KEY type is heap-represented.
+    key_heap: bool,
+    /// Whether the VALUE type is heap-represented.
+    val_heap: bool,
+    /// Whether the key is exactly `String`. Both the `_str` and `_skv` families
+    /// compare keys byte-wise, which misreads a non-String heap block's
+    /// slot-count `len` as a byte count — so they need an ACTUAL String key.
+    key_is_string: bool,
+    /// Whether the value is exactly `String` — the `_str` variant stores
+    /// interleaved all-String entries, so a heap-but-not-String value must not
+    /// route there.
+    val_is_string: bool,
+    /// Whether the value is the flat `List[scalar]` class `map_hval` implements.
+    val_is_flat_list: bool,
+    /// Whether the value is a closure (the `mclo` family).
+    val_is_fn: bool,
+    /// Whether the map's key type is a nullary variant (the `map_ivh` route).
+    key_nullary: bool,
+    /// Whether the key is a scalar-shaped record (the `map_core` rec route).
+    key_scalar_rec: bool,
+}
+
 /// Every `map.*` typed-variant route: the skv entries/from_list fast paths,
 /// then the (key, value) repr-family table (see the block comments).
 fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bool, map_key_scalar_rec: bool) -> Option<String> {
@@ -110,336 +157,383 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bo
             Some(Ty::Applied(TypeConstructorId::Map, a))
                 if a.len() == 2 && matches!(a[1], Ty::Fn { .. })
         );
-        let variant = match (key_heap, val_heap) {
-            // `Map[String, List[scalar]]` — the implemented subset of the heap-value
-            // family (new/set/eq/len/contains/get/get_or; other funcs keep the
-            // unregistered wall name). `get`/`get_or` SHARE the stored value (the
-            // hshare discipline).
-            (true, true)
-                if val_is_flat_list
-                    && matches!(
-                        func,
-                        "new" | "set" | "eq" | "len" | "contains" | "get" | "get_or" | "keys"
-                    ) =>
-            {
-                Some("_hval")
-            }
-            (true, true)
-                if val_is_fn
-                    && matches!(func, "new" | "set" | "len" | "contains" | "get" | "get_or") =>
-            {
-                Some("_hval")
-            }
-            // `Map[String, <Fn>]` from_list (keyed on the RESULT — the arg is the pairs
-            // List): the hval pair-walk is handle-level (each value rc-shared in via
-            // `map_set_hval`), so a closure block rides it unchanged; the RESULT's
-            // type-driven drop routing (`is_map_fn_ty` → map_mclo) frees the values via
-            // `__drop_closure`.
-            (true, true)
-                if func == "from_list"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && matches!(a[0], Ty::String)
-                            && matches!(a[1], Ty::Fn { .. })) =>
-            {
-                Some("_hval")
-            }
-            // `Map[String, List[Int]]` from_list / display (the map-of-lists literal):
-            // keyed on the RESULT/first-arg map; to_string_hval passes through
-            // verbatim (the B22 suffix guard).
-            // `Map[String, String]` from_list (the String-valued map literal): keyed on
-            // the RESULT type (from_list's first arg is the pairs List, not a Map).
-            (true, true)
-                if func == "from_list"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2
-                            && matches!(a[0], Ty::String)
-                            && matches!(a[1], Ty::String)) =>
-            {
-                Some("_str")
-            }
-            (true, true)
-                if !val_is_string
-                    && func == "from_list"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2
-                            && matches!(a[0], Ty::String)
-                            && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
-                                if b.len() == 1 && matches!(b[0], Ty::Int))) =>
-            {
-                Some("_hval")
-            }
-            // `Map[String, Map[String, String]]` get_or / from_list — the msv family
-            // (map_fold_heap_acc's nested-map literal + get_or default).
-            (true, true)
-                if func == "get_or"
-                    && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
-                        if a.len() == 2 && matches!(a[0], Ty::String)
-                            && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
-                                if b.len() == 2
-                                    && matches!(b[0], Ty::String)
-                                    && matches!(b[1], Ty::String))) =>
-            {
-                Some("_msv")
-            }
-            (true, true)
-                if func == "from_list"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && matches!(a[0], Ty::String)
-                            && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
-                                if b.len() == 2
-                                    && matches!(b[0], Ty::String)
-                                    && matches!(b[1], Ty::String))) =>
-            {
-                Some("_msv")
-            }
-            // `Map[String, List[Option[Int]]]` from_list — the mlo family
-            // (compound_repr_interp's `deep` inner-map literal).
-            (true, true)
-                if func == "from_list"
-                    && crate::lower::is_map_mlo_ty(result_ty) =>
-            {
-                Some("_mlo")
-            }
-            (true, true) if func == "to_string_hval" => Some(""),
-            // An ALREADY-SUFFIXED mlo display (`map.to_string_mlo` from the interp
-            // leaf) — pass through verbatim (re-suffixing would fabricate
-            // `to_string_mlo_hval_wall`).
-            (true, true) if func == "to_string_mlo" => Some(""),
-            // `map.from_list` over a NAMED-value map (`["o": Point{..}]` / `["a":
-            // Circle(3.0)]` — the desugared map literal): construction is handle-level
-            // (the `_str` family's pair copy + co-own rc_inc works for ANY heap value
-            // slot); the RESULT's type-driven drop routing (`map_named_value_drop`)
-            // decides the correct sweep, and an unadmitted value type walls THERE —
-            // never a leaky flat link here.
-            (true, true)
-                if func == "from_list"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && matches!(a[0], Ty::String)
-                            && matches!(a[1], Ty::Named(..))) =>
-            {
-                Some("_hobj")
-            }
-            // An ALL-SCALAR record key with a String value (`Map[Color, String]` —
-            // the hash_protocol deriving-Hash shape): the key normalizes to the
-            // comma-joined decimal string of its slots (map_vkey.almd's _srec
-            // family — content identity ⇔ string identity for Int/Bool fields).
-            (true, true)
-                if map_key_scalar_rec
-                    && matches!(func, "from_list" | "get")
-                    && {
-                        let str_val = |t: &Ty| {
-                            matches!(t, Ty::Applied(TypeConstructorId::Map, a)
-                                if a.len() == 2 && matches!(a[1], Ty::String))
-                        };
-                        arg_tys.first().is_some_and(str_val) || str_val(result_ty)
-                    } =>
-            {
-                Some("_srec")
-            }
-            // `map.entries` over the hval-TUPLE flavor (`Map[String, (Int, Int)]` —
-            // the C-039 tuple-valued map.map result): the typechange twin.
-            (true, true)
-                if func == "entries"
-                    && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
-                        if a.len() == 2 && matches!(a[0], Ty::String)
-                            && matches!(&a[1], Ty::Tuple(ts)
-                                if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))) =>
-            {
-                Some("_hvalt")
-            }
-            // TYPE-CHANGING `map.map` str → skv (`map.map(ms, (v) => string.len(v))`
-            // — C-039): the result value narrows to a scalar.
-            (true, true)
-                if key_is_string
-                    && func == "map"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1])) =>
-            {
-                Some("_str2skv")
-            }
-            (true, true) if !val_is_string => Some("_hval_wall"),
-            // A fn OUTSIDE the family's implemented list must fall to an UNREGISTERED
-            // wall suffix, NEVER to `None`: a `None` here returns the BARE `map.{func}`
-            // name, which links the scalar-key map_core generic against the string-key
-            // 16-byte-stride layout — raw i64 slot copies of STRING handles with no
-            // rc_inc, so the result map aliases its inputs' keys unowned and scope-end
-            // double-frees them (`map.merge` on `Map[String, Int]` trapped the rc_dec
-            // sentinel on the verified default — the #790 map-merge row).
-            // `to_string` (the `${map}` interp display) links the BARE self-host
-            // `map.to_string` — the pre-wall behavior this family's wall must not
-            // mangle (map_interp_self_hosts_via_keys_values pins it).
-            (true, true) | (true, false) if key_is_string && func == "to_string" => Some(""),
-            (true, true) if key_is_string => Some(
-                if matches!(
-                    func,
-                    "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
-                        | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count"
-                        | "fold" | "entries"
-                ) {
-                    "_str"
-                } else {
-                    "_str_wall"
-                },
-            ),
-            // TYPE-CHANGING `map.map` skv → str (`map.map(mi, (v) => int.to_string(v)
-            // + "!")` — C-039): String values in the result → the typechange twin.
-            (true, false)
-                if key_is_string
-                    && func == "map"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && matches!(a[0], Ty::String)
-                            && matches!(a[1], Ty::String)) =>
-            {
-                Some("_skv2str")
-            }
-            // TYPE-CHANGING `map.map` skv → hval-TUPLE (`map.map(mi, (v) => (v, v*v))`
-            // — C-039): all-scalar tuple values → the raw skv-split build twin.
-            (true, false)
-                if key_is_string
-                    && func == "map"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && matches!(a[0], Ty::String)
-                            && matches!(&a[1], Ty::Tuple(ts)
-                                if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))) =>
-            {
-                Some("_skv2hvalt")
-            }
-            // `map.map` transforms the VALUES — the skv impl is scalar-value in AND out, so
-            // it also needs the RESULT map's value scalar (a `(v) => int.to_string(v)` maps
-            // into the `_str` repr — no skv form; wall it rather than mislink).
-            (true, false)
-                if key_is_string
-                    && func == "map"
-                    && !matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && !is_heap_ty(&a[1])) =>
-            {
-                Some("_skv_wall")
-            }
-            // An ALREADY-SUFFIXED skv-repr display (`map.to_string_sb` from the interp
-            // leaf — `${Map[String, Bool]}`) — pass through verbatim (re-suffixing
-            // would fabricate `to_string_sb_skv_wall`, the to_string_hval lesson).
-            (true, false) if func == "to_string_sb" => Some(""),
-            (true, false) if key_is_string => Some(
-                if matches!(
-                    func,
-                    "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
-                        | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
-                        | "eq" | "find" | "update" | "merge" | "map"
-                ) {
-                    "_skv"
-                } else {
-                    "_skv_wall"
-                },
-            ),
-            // A NULLARY-ONLY variant key with a SCALAR value (`Map[Direction, Int]` —
-            // the hash_protocol deriving-Hash shape): the key's identity IS its tag,
-            // so normalize to a raw i64 key (map_vkey.almd's from_list/get). Other
-            // funcs and heap values keep the honest wall below.
-            (true, false)
-                if map_key_nullary
-                    && matches!(func, "from_list" | "get")
-                    && {
-                        // from_list's FIRST arg is the pairs List — probe the
-                        // RESULT type too (the is_ivh OR discipline).
-                        let scalar_val = |t: &Ty| {
-                            matches!(t, Ty::Applied(TypeConstructorId::Map, a)
-                                if a.len() == 2 && !is_heap_ty(&a[1]))
-                        };
-                        arg_tys.first().is_some_and(scalar_val) || scalar_val(result_ty)
-                    } =>
-            {
-                Some("_vtag")
-            }
-            // FLAT all-scalar TUPLE key with a String value (`Map[(Int, Int), String]`
-            // — C-015): the key normalizes through `__srec_key` (the tuple block IS the
-            // all-scalar record physically) into the backing `_str` map — content
-            // identity ⇔ string identity. `len` reads the backing str-flavor header
-            // directly; the lookup/build set routes `_srec`.
-            (true, true) | (true, false)
-                if {
-                    let tup_key_str_val = |t: &Ty| {
-                        matches!(t, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
-                            && matches!(&a[0], Ty::Tuple(ts)
-                                if !ts.is_empty()
-                                    && ts.iter().all(|c| matches!(c, Ty::Int | Ty::Bool)))
-                            && matches!(a[1], Ty::String))
-                    };
-                    (arg_tys.first().is_some_and(tup_key_str_val)
-                        || tup_key_str_val(result_ty))
-                        && matches!(func, "from_list" | "get" | "set" | "contains" | "len")
-                } =>
-            {
-                if func == "len" {
-                    return Some("map.len_str".to_string());
-                }
-                Some("_srec")
-            }
-            // A non-String heap KEY (tuple/record/nested list) reaching here has no correct
-            // variant — route to an explicit UNREGISTERED wall name rather than falling through
-            // to the bare `map.{func}` name, which links against the scalar-key map_core generic
-            // and produces INVALID WASM (an i32/i64 ABI-width mismatch, CONFIRMED by probe) —
-            // a crash, not the honest compile-time wall this repr gate exists to guarantee.
-            (true, true) | (true, false) => Some("_key_wall"),
-            // `Map[Int, String]` — the implemented scalar-key/heap-value variant
-            // (new/set/eq). Other funcs, and other heap value types, keep an
-            // UNREGISTERED wall name (never the plain Map[Int,Int] i64-slot link
-            // that emitted invalid wasm — map_set_eq's original failure).
-            // An ALREADY-SUFFIXED synthesized display call (`map.to_string_ivh` from
-            // the interp leaf table) — pass through verbatim (re-suffixing would
-            // fabricate `to_string_ivh_ivh_wall`).
-            (false, true) if func == "to_string_ivh" => Some(""),
-            (false, true)
-                if {
-                    // `from_list`'s FIRST arg is the pairs List, not the Map — key
-                    // its admission on the RESULT type instead (either probe works
-                    // for the Map-first fns).
-                    // A Bool key is the SAME raw i64 slot (0/1) — the ivh find's
-                    // i64 compare serves it verbatim, so admit it alongside Int.
-                    let is_ivh = |t: &Ty| {
-                        matches!(t, Ty::Applied(TypeConstructorId::Map, a)
-                            if a.len() == 2
-                                && matches!(a[0], Ty::Int | Ty::Bool)
-                                && matches!(a[1], Ty::String))
-                    };
-                    (arg_tys.first().is_some_and(is_ivh) || is_ivh(result_ty))
-                        && matches!(func, "new" | "set" | "eq" | "from_list" | "len" | "get")
-                } =>
-            {
-                Some("_ivh")
-            }
-            // TYPE-CHANGING `map.map` ivh → core (`map.map(mik, (v) => string.len(v))`
-            // — C-039): the String values narrow to scalars.
-            (false, true)
-                if func == "map"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2
-                            && matches!(a[0], Ty::Int | Ty::Bool)
-                            && !is_heap_ty(&a[1])) =>
-            {
-                Some("_ivh2core")
-            }
-            (false, true) => Some("_ivh_wall"),
-            // `Map[Int, Float]` from_list (the float_map literal): ONE scalar-KV impl
-            // (map_if.almd) — the paired i64 slots carry f64 bits verbatim. Display
-            // routes separately (the interp table's to_string_if). Other scalar-scalar
-            // maps keep the plain (unlinked) name — walls cleanly.
-            (false, false)
-                if func == "from_list"
-                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2
-                            && matches!(a[0], Ty::Int)
-                            && matches!(a[1], Ty::Float)) =>
-            {
-                Some("_if")
-            }
-            (false, false) if func == "to_string_if" => Some(""),
-            _ => None,
+        let route = MapRoute {
+            func, arg_tys, result_ty, key_heap, val_heap,
+            key_is_string, val_is_string, val_is_flat_list, val_is_fn,
+            key_nullary: map_key_nullary, key_scalar_rec: map_key_scalar_rec,
         };
-        if let Some(suffix) = variant {
-            return Some(format!("map.{func}{suffix}"));
-        }
+        let variant = map_variant_heap_key(route).or_else(|| map_variant_other(route));
+        return match variant {
+            Some(MapName::Suffix(s)) => Some(format!("map.{func}{s}")),
+            Some(MapName::Full(name)) => Some(name.to_string()),
+            None => None,
+        };
     }
     None
 }
 
 
+/// The heap-KEY, heap-VALUE routes: `_hval` for flat-list and closure values,
+/// `_str` for interleaved all-String entries, `_msv` / `_mlo` for nested maps
+/// and option-lists, and the wall names for classes with no variant yet.
+///
+/// One half of `map_call_name`'s repr table, arms verbatim and in source
+/// order. `None` means "no route here"; the caller tries the halves in the
+/// order the single table used, so which variant a call routes to is
+/// unchanged.
+fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let MapRoute {
+        func, arg_tys, result_ty, key_heap, val_heap,
+        key_is_string, val_is_string, val_is_flat_list, val_is_fn,
+        key_nullary: map_key_nullary, key_scalar_rec: map_key_scalar_rec,
+    } = r;
+    match (key_heap, val_heap) {
+    // `Map[String, List[scalar]]` — the implemented subset of the heap-value
+    // family (new/set/eq/len/contains/get/get_or; other funcs keep the
+    // unregistered wall name). `get`/`get_or` SHARE the stored value (the
+    // hshare discipline).
+    (true, true)
+        if val_is_flat_list
+            && matches!(
+                func,
+                "new" | "set" | "eq" | "len" | "contains" | "get" | "get_or" | "keys"
+            ) =>
+    {
+        Some(MapName::Suffix("_hval"))
+    }
+    (true, true)
+        if val_is_fn
+            && matches!(func, "new" | "set" | "len" | "contains" | "get" | "get_or") =>
+    {
+        Some(MapName::Suffix("_hval"))
+    }
+    // `Map[String, <Fn>]` from_list (keyed on the RESULT — the arg is the pairs
+    // List): the hval pair-walk is handle-level (each value rc-shared in via
+    // `map_set_hval`), so a closure block rides it unchanged; the RESULT's
+    // type-driven drop routing (`is_map_fn_ty` → map_mclo) frees the values via
+    // `__drop_closure`.
+    (true, true)
+        if func == "from_list"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String)
+                    && matches!(a[1], Ty::Fn { .. })) =>
+    {
+        Some(MapName::Suffix("_hval"))
+    }
+    // `Map[String, List[Int]]` from_list / display (the map-of-lists literal):
+    // keyed on the RESULT/first-arg map; to_string_hval passes through
+    // verbatim (the B22 suffix guard).
+    // `Map[String, String]` from_list (the String-valued map literal): keyed on
+    // the RESULT type (from_list's first arg is the pairs List, not a Map).
+    (true, true)
+        if func == "from_list"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2
+                    && matches!(a[0], Ty::String)
+                    && matches!(a[1], Ty::String)) =>
+    {
+        Some(MapName::Suffix("_str"))
+    }
+    (true, true)
+        if !val_is_string
+            && func == "from_list"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2
+                    && matches!(a[0], Ty::String)
+                    && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
+                        if b.len() == 1 && matches!(b[0], Ty::Int))) =>
+    {
+        Some(MapName::Suffix("_hval"))
+    }
+    // `Map[String, Map[String, String]]` get_or / from_list — the msv family
+    // (map_fold_heap_acc's nested-map literal + get_or default).
+    (true, true)
+        if func == "get_or"
+            && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
+                if a.len() == 2 && matches!(a[0], Ty::String)
+                    && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+                        if b.len() == 2
+                            && matches!(b[0], Ty::String)
+                            && matches!(b[1], Ty::String))) =>
+    {
+        Some(MapName::Suffix("_msv"))
+    }
+    (true, true)
+        if func == "from_list"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String)
+                    && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+                        if b.len() == 2
+                            && matches!(b[0], Ty::String)
+                            && matches!(b[1], Ty::String))) =>
+    {
+        Some(MapName::Suffix("_msv"))
+    }
+    // `Map[String, List[Option[Int]]]` from_list — the mlo family
+    // (compound_repr_interp's `deep` inner-map literal).
+    (true, true)
+        if func == "from_list"
+            && crate::lower::is_map_mlo_ty(result_ty) =>
+    {
+        Some(MapName::Suffix("_mlo"))
+    }
+    (true, true) if func == "to_string_hval" => Some(MapName::Suffix("")),
+    // An ALREADY-SUFFIXED mlo display (`map.to_string_mlo` from the interp
+    // leaf) — pass through verbatim (re-suffixing would fabricate
+    // `to_string_mlo_hval_wall`).
+    (true, true) if func == "to_string_mlo" => Some(MapName::Suffix("")),
+    // `map.from_list` over a NAMED-value map (`["o": Point{..}]` / `["a":
+    // Circle(3.0)]` — the desugared map literal): construction is handle-level
+    // (the `_str` family's pair copy + co-own rc_inc works for ANY heap value
+    // slot); the RESULT's type-driven drop routing (`map_named_value_drop`)
+    // decides the correct sweep, and an unadmitted value type walls THERE —
+    // never a leaky flat link here.
+    (true, true)
+        if func == "from_list"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String)
+                    && matches!(a[1], Ty::Named(..))) =>
+    {
+        Some(MapName::Suffix("_hobj"))
+    }
+    // An ALL-SCALAR record key with a String value (`Map[Color, String]` —
+    // the hash_protocol deriving-Hash shape): the key normalizes to the
+    // comma-joined decimal string of its slots (map_vkey.almd's _srec
+    // family — content identity ⇔ string identity for Int/Bool fields).
+    (true, true)
+        if map_key_scalar_rec
+            && matches!(func, "from_list" | "get")
+            && {
+                let str_val = |t: &Ty| {
+                    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                        if a.len() == 2 && matches!(a[1], Ty::String))
+                };
+                arg_tys.first().is_some_and(str_val) || str_val(result_ty)
+            } =>
+    {
+        Some(MapName::Suffix("_srec"))
+    }
+    // `map.entries` over the hval-TUPLE flavor (`Map[String, (Int, Int)]` —
+    // the C-039 tuple-valued map.map result): the typechange twin.
+    (true, true)
+        if func == "entries"
+            && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
+                if a.len() == 2 && matches!(a[0], Ty::String)
+                    && matches!(&a[1], Ty::Tuple(ts)
+                        if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))) =>
+    {
+        Some(MapName::Suffix("_hvalt"))
+    }
+    // TYPE-CHANGING `map.map` str → skv (`map.map(ms, (v) => string.len(v))`
+    // — C-039): the result value narrows to a scalar.
+    (true, true)
+        if key_is_string
+            && func == "map"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1])) =>
+    {
+        Some(MapName::Suffix("_str2skv"))
+    }
+    (true, true) if !val_is_string => Some(MapName::Suffix("_hval_wall")),
+    // A fn OUTSIDE the family's implemented list must fall to an UNREGISTERED
+    // wall suffix, NEVER to `None`: a `None` here returns the BARE `map.{func}`
+    // name, which links the scalar-key map_core generic against the string-key
+    // 16-byte-stride layout — raw i64 slot copies of STRING handles with no
+    // rc_inc, so the result map aliases its inputs' keys unowned and scope-end
+    // double-frees them (`map.merge` on `Map[String, Int]` trapped the rc_dec
+    // sentinel on the verified default — the #790 map-merge row).
+    // `to_string` (the `${map}` interp display) links the BARE self-host
+    // `map.to_string` — the pre-wall behavior this family's wall must not
+    // mangle (map_interp_self_hosts_via_keys_values pins it).
+    (true, true) | (true, false) if key_is_string && func == "to_string" => Some(MapName::Suffix("")),
+    (true, true) if key_is_string => Some(
+        if matches!(
+            func,
+            "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
+                | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count"
+                | "fold" | "entries"
+        ) {
+            MapName::Suffix("_str")
+        } else {
+            MapName::Suffix("_str_wall")
+        },
+    ),
+    // TYPE-CHANGING `map.map` skv → str (`map.map(mi, (v) => int.to_string(v)
+    // + "!")` — C-039): String values in the result → the typechange twin.
+        _ => None,
+    }
+}
+
+/// The `_skv` family (String key, i64 value), the routes a String key takes
+/// regardless of value heap-ness, and the scalar-KEY families (`_ivh` and the
+/// plain `map_core` name).
+///
+/// One half of `map_call_name`'s repr table, arms verbatim and in source
+/// order. `None` means "no route here"; the caller tries the halves in the
+/// order the single table used, so which variant a call routes to is
+/// unchanged.
+fn map_variant_other(r: MapRoute<'_>) -> Option<MapName> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let MapRoute {
+        func, arg_tys, result_ty, key_heap, val_heap,
+        key_is_string, val_is_string, val_is_flat_list, val_is_fn,
+        key_nullary: map_key_nullary, key_scalar_rec: map_key_scalar_rec,
+    } = r;
+    match (key_heap, val_heap) {
+    (true, false)
+        if key_is_string
+            && func == "map"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String)
+                    && matches!(a[1], Ty::String)) =>
+    {
+        Some(MapName::Suffix("_skv2str"))
+    }
+    // TYPE-CHANGING `map.map` skv → hval-TUPLE (`map.map(mi, (v) => (v, v*v))`
+    // — C-039): all-scalar tuple values → the raw skv-split build twin.
+    (true, false)
+        if key_is_string
+            && func == "map"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String)
+                    && matches!(&a[1], Ty::Tuple(ts)
+                        if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))) =>
+    {
+        Some(MapName::Suffix("_skv2hvalt"))
+    }
+    // `map.map` transforms the VALUES — the skv impl is scalar-value in AND out, so
+    // it also needs the RESULT map's value scalar (a `(v) => int.to_string(v)` maps
+    // into the `_str` repr — no skv form; wall it rather than mislink).
+    (true, false)
+        if key_is_string
+            && func == "map"
+            && !matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && !is_heap_ty(&a[1])) =>
+    {
+        Some(MapName::Suffix("_skv_wall"))
+    }
+    // An ALREADY-SUFFIXED skv-repr display (`map.to_string_sb` from the interp
+    // leaf — `${Map[String, Bool]}`) — pass through verbatim (re-suffixing
+    // would fabricate `to_string_sb_skv_wall`, the to_string_hval lesson).
+    (true, false) if func == "to_string_sb" => Some(MapName::Suffix("")),
+    (true, false) if key_is_string => Some(
+        if matches!(
+            func,
+            "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
+                | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
+                | "eq" | "find" | "update" | "merge" | "map"
+        ) {
+            MapName::Suffix("_skv")
+        } else {
+            MapName::Suffix("_skv_wall")
+        },
+    ),
+    // A NULLARY-ONLY variant key with a SCALAR value (`Map[Direction, Int]` —
+    // the hash_protocol deriving-Hash shape): the key's identity IS its tag,
+    // so normalize to a raw i64 key (map_vkey.almd's from_list/get). Other
+    // funcs and heap values keep the honest wall below.
+    (true, false)
+        if map_key_nullary
+            && matches!(func, "from_list" | "get")
+            && {
+                // from_list's FIRST arg is the pairs List — probe the
+                // RESULT type too (the is_ivh OR discipline).
+                let scalar_val = |t: &Ty| {
+                    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                        if a.len() == 2 && !is_heap_ty(&a[1]))
+                };
+                arg_tys.first().is_some_and(scalar_val) || scalar_val(result_ty)
+            } =>
+    {
+        Some(MapName::Suffix("_vtag"))
+    }
+    // FLAT all-scalar TUPLE key with a String value (`Map[(Int, Int), String]`
+    // — C-015): the key normalizes through `__srec_key` (the tuple block IS the
+    // all-scalar record physically) into the backing `_str` map — content
+    // identity ⇔ string identity. `len` reads the backing str-flavor header
+    // directly; the lookup/build set routes `_srec`.
+    (true, true) | (true, false)
+        if {
+            let tup_key_str_val = |t: &Ty| {
+                matches!(t, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+                    && matches!(&a[0], Ty::Tuple(ts)
+                        if !ts.is_empty()
+                            && ts.iter().all(|c| matches!(c, Ty::Int | Ty::Bool)))
+                    && matches!(a[1], Ty::String))
+            };
+            (arg_tys.first().is_some_and(tup_key_str_val)
+                || tup_key_str_val(result_ty))
+                && matches!(func, "from_list" | "get" | "set" | "contains" | "len")
+        } =>
+    {
+        if func == "len" {
+            // `len` on the tuple-key/String-value repr has no `_srec` twin; it
+            // shares the all-String variant's, so this arm names the whole
+            // function rather than a suffix.
+            return Some(MapName::Full("map.len_str"));
+        }
+        Some(MapName::Suffix("_srec"))
+    }
+    // A non-String heap KEY (tuple/record/nested list) reaching here has no correct
+    // variant — route to an explicit UNREGISTERED wall name rather than falling through
+    // to the bare `map.{func}` name, which links against the scalar-key map_core generic
+    // and produces INVALID WASM (an i32/i64 ABI-width mismatch, CONFIRMED by probe) —
+    // a crash, not the honest compile-time wall this repr gate exists to guarantee.
+    (true, true) | (true, false) => Some(MapName::Suffix("_key_wall")),
+    // `Map[Int, String]` — the implemented scalar-key/heap-value variant
+    // (new/set/eq). Other funcs, and other heap value types, keep an
+    // UNREGISTERED wall name (never the plain Map[Int,Int] i64-slot link
+    // that emitted invalid wasm — map_set_eq's original failure).
+    // An ALREADY-SUFFIXED synthesized display call (`map.to_string_ivh` from
+    // the interp leaf table) — pass through verbatim (re-suffixing would
+    // fabricate `to_string_ivh_ivh_wall`).
+    (false, true) if func == "to_string_ivh" => Some(MapName::Suffix("")),
+    (false, true)
+        if {
+            // `from_list`'s FIRST arg is the pairs List, not the Map — key
+            // its admission on the RESULT type instead (either probe works
+            // for the Map-first fns).
+            // A Bool key is the SAME raw i64 slot (0/1) — the ivh find's
+            // i64 compare serves it verbatim, so admit it alongside Int.
+            let is_ivh = |t: &Ty| {
+                matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                    if a.len() == 2
+                        && matches!(a[0], Ty::Int | Ty::Bool)
+                        && matches!(a[1], Ty::String))
+            };
+            (arg_tys.first().is_some_and(is_ivh) || is_ivh(result_ty))
+                && matches!(func, "new" | "set" | "eq" | "from_list" | "len" | "get")
+        } =>
+    {
+        Some(MapName::Suffix("_ivh"))
+    }
+    // TYPE-CHANGING `map.map` ivh → core (`map.map(mik, (v) => string.len(v))`
+    // — C-039): the String values narrow to scalars.
+    (false, true)
+        if func == "map"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2
+                    && matches!(a[0], Ty::Int | Ty::Bool)
+                    && !is_heap_ty(&a[1])) =>
+    {
+        Some(MapName::Suffix("_ivh2core"))
+    }
+    (false, true) => Some(MapName::Suffix("_ivh_wall")),
+    // `Map[Int, Float]` from_list (the float_map literal): ONE scalar-KV impl
+    // (map_if.almd) — the paired i64 slots carry f64 bits verbatim. Display
+    // routes separately (the interp table's to_string_if). Other scalar-scalar
+    // maps keep the plain (unlinked) name — walls cleanly.
+    (false, false)
+        if func == "from_list"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2
+                    && matches!(a[0], Ty::Int)
+                    && matches!(a[1], Ty::Float)) =>
+    {
+        Some(MapName::Suffix("_if"))
+    }
+    (false, false) if func == "to_string_if" => Some(MapName::Suffix("")),
+        _ => None,
+    }
+}
