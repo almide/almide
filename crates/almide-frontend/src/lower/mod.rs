@@ -354,7 +354,10 @@ fn lower_decls(
 
         match decl {
             ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } => {
-                let mut f = lower_fn(ctx, name, params, body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, module_prefix);
+                let mut f = lower_fn(ctx, &FnToLower {
+                    name, params, body: body, effect, r#async, span, generics,
+                    extern_attrs, export_attrs, attrs, visibility, module_prefix,
+                });
                 f.doc = doc;
                 f.blank_lines_before = blank_lines;
                 functions.push(f);
@@ -371,13 +374,18 @@ fn lower_decls(
                     || attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic")) =>
             {
                 let hole_body = ast::Expr::new(ast::ExprId(0), span.clone(), ast::ExprKind::Hole);
-                let mut f = lower_fn(ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, module_prefix);
+                let mut f = lower_fn(ctx, &FnToLower {
+                    name, params, body: &hole_body, effect, r#async, span, generics,
+                    extern_attrs, export_attrs, attrs, visibility, module_prefix,
+                });
                 f.doc = doc;
                 f.blank_lines_before = blank_lines;
                 functions.push(f);
             }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
-                let mut td = types::lower_type_decl(ctx, name, ty, deriving, visibility, generics.as_ref(), module_prefix);
+                let mut td = types::lower_type_decl(ctx, &types::TypeToLower {
+                    name, ty, deriving, visibility, generics: generics.as_ref(), module_prefix,
+                });
                 td.doc = doc;
                 td.blank_lines_before = blank_lines;
                 type_decls.push(td);

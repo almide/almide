@@ -21,6 +21,19 @@ pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
     }
 }
 
+/// Which call argument a check is looking at.
+///
+/// The callee name and the parameter name travelled as two adjacent `&str`-ish
+/// parameters through four functions in this file. Every diagnostic they emit
+/// needs both, and neither is meaningful without the other, so they travel as
+/// one value — and a call site can no longer supply a parameter name from a
+/// different callee.
+#[derive(Copy, Clone)]
+pub(crate) struct ArgSite<'a> {
+    pub fn_name: &'a str,
+    pub param_name: &'a Sym,
+}
+
 impl Checker {
     /// Report a bare constructor name declared in more than one variant type (e.g. a local type and a dependency's) — an ambiguous name (#413). The caller still resolves to the first candidate; this surfaces the conflict as a clear source-level error so the user qualifies/renames, instead of the silent wrong-type resolution that later fails as a cryptic generated-Rust E0769. Returns true if it was ambiguous.
     pub(crate) fn report_ambiguous_ctor(&mut self, name: &str) -> bool {
@@ -320,7 +333,8 @@ impl Checker {
             if let Some(sp) = self.arg_spans.get(i).copied().flatten() {
                 self.current_span = Some(sp);
             }
-            let fired = self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, bindings);
+            let site = ArgSite { fn_name: name, param_name: pname };
+            let fired = self.unify_call_arg(site, pty, aty, &sig.structural_bounds, bindings);
             if !fired { self.current_span = saved_span; }
             e005_fired.push(fired);
         }
@@ -635,15 +649,16 @@ impl Checker {
     }
     /// Unify a single call argument against its parameter type, updating bindings. Reports diagnostics for structural bound violations and type mismatches. Returns true if E005 was emitted (caller should skip redundant E001 constraint).
     fn unify_call_arg(
-        &mut self, fn_name: &str, param_name: &Sym,
+        &mut self, site: ArgSite<'_>,
         param_ty: &Ty, arg_ty: &Ty,
         structural_bounds: &HashMap<Sym, Ty>,
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
+        let ArgSite { fn_name, param_name } = site;
         if let Ty::TypeVar(tv) = param_ty {
-            self.unify_call_arg_typevar(fn_name, param_name, *tv, arg_ty, structural_bounds, bindings)
+            self.unify_call_arg_typevar(site, *tv, arg_ty, structural_bounds, bindings)
         } else {
-            self.unify_call_arg_concrete(fn_name, param_name, param_ty, arg_ty, bindings)
+            self.unify_call_arg_concrete(site, param_ty, arg_ty, bindings)
         }
     }
 
@@ -651,10 +666,11 @@ impl Checker {
     // (checked compatible) when one is declared, else fall through to plain
     // unification.
     fn unify_call_arg_typevar(
-        &mut self, fn_name: &str, param_name: &Sym, tv: Sym, arg_ty: &Ty,
+        &mut self, site: ArgSite<'_>, tv: Sym, arg_ty: &Ty,
         structural_bounds: &HashMap<Sym, Ty>,
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
+        let ArgSite { fn_name, param_name } = site;
         if let Some(bound) = structural_bounds.get(&tv) {
             let resolved = self.env.resolve_named(arg_ty);
             if bound.compatible(&resolved) || bound.compatible(arg_ty) {
@@ -677,7 +693,7 @@ impl Checker {
     // report a type-mismatch diagnostic with a fix-it hint when the resolved
     // types differ.
     fn unify_call_arg_concrete(
-        &mut self, fn_name: &str, param_name: &Sym, param_ty: &Ty, arg_ty: &Ty,
+        &mut self, site: ArgSite<'_>, param_ty: &Ty, arg_ty: &Ty,
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
         crate::types::unify(param_ty, arg_ty, bindings);
@@ -687,7 +703,7 @@ impl Checker {
         if !types_mismatch(&expected_resolved, &arg_resolved) {
             return false;
         }
-        self.emit_call_arg_mismatch(fn_name, param_name, &expected, arg_ty, &expected_resolved, &arg_resolved);
+        self.emit_call_arg_mismatch(site, &expected, arg_ty, &expected_resolved, &arg_resolved);
         true
     }
 
@@ -722,9 +738,10 @@ impl Checker {
     // likely-typevar / generic conversion hint) and, where possible, a
     // `// Try:` fix code snippet.
     fn emit_call_arg_mismatch(
-        &mut self, fn_name: &str, param_name: &Sym, expected: &Ty, arg_ty: &Ty,
+        &mut self, site: ArgSite<'_>, expected: &Ty, arg_ty: &Ty,
         expected_resolved: &Ty, arg_resolved: &Ty,
     ) {
+        let ArgSite { fn_name, param_name } = site;
         // #740: an Int-only math builtin given a Float — point at the Float-preserving sibling, not the truncating `float.to_int`.
         let float_sibling = if matches!(arg_resolved, Ty::Float)
             && matches!(expected_resolved, Ty::Int)

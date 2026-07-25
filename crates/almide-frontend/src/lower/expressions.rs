@@ -173,7 +173,9 @@ fn lower_expr_call(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<as
     Some(match &expr.kind {
         // ── Calls ──
         ast::ExprKind::Call { callee, args, named_args, type_args, .. } => {
-            lower_call(ctx, callee, args, named_args, type_args.as_ref(), ty, span)
+            lower_call(ctx, callee, super::calls::CallArgs {
+                args, named_args, type_args: type_args.as_ref(),
+            }, ty, span)
         }
         // ── Pipe: desugar `a |> f(b)` → `f(a, b)` ──
         ast::ExprKind::Pipe { left, right, .. } => {

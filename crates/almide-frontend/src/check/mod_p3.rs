@@ -231,15 +231,8 @@ impl Checker {
         self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
     }
 
-    fn check_fn_decl(
-        &mut self,
-        name: &str,
-        params: &mut [ast::Param],
-        return_type: &ast::TypeExpr,
-        body: &mut ast::Expr,
-        effect: &Option<bool>,
-        generics: &mut Option<Vec<ast::GenericParam>>,
-    ) {
+    fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
+        let FnToCheck { params, return_type, body, effect, generics } = decl;
         self.env.push_scope();
         self.enter_generics(generics);
         // A bare `self` first param is sugar for `self: Self` (see
@@ -293,7 +286,9 @@ impl Checker {
     fn check_decl(&mut self, decl: &mut ast::Decl) {
         match decl {
             ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
-                self.check_fn_decl(name, params, return_type, body, effect, generics);
+                self.check_fn_decl(name, FnToCheck {
+                    params, return_type, body, effect, generics,
+                });
             }
             ast::Decl::Test { body, where_clauses, .. } => {
                 self.check_decl_test(body, where_clauses);

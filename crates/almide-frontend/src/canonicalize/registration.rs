@@ -173,13 +173,28 @@ pub fn collect_protocol_bounds(generics: &Option<Vec<ast::GenericParam>>) -> Has
     }
     pb
 }
-pub fn register_fn_sig(
-    env: &mut TypeEnv,
-    name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
-    effect: &Option<bool>, r#async: &Option<bool>, generics: &Option<Vec<ast::GenericParam>>,
-    prefix: Option<&str>, span: Option<&ast::Span>,
-    visibility: ast::Visibility,
-) {
+/// A borrowed view of the `fn` signature being registered.
+///
+/// `effect` and `r#async` are both `&Option<bool>` and were adjacent
+/// positional parameters, so transposing them type-checked. Named fields make
+/// that a compile error instead of a signature registered with the wrong
+/// effect-ness.
+pub struct FnSigToRegister<'a> {
+    pub name: &'a str,
+    pub params: &'a [ast::Param],
+    pub return_type: &'a ast::TypeExpr,
+    pub effect: &'a Option<bool>,
+    pub r#async: &'a Option<bool>,
+    pub generics: &'a Option<Vec<ast::GenericParam>>,
+    pub prefix: Option<&'a str>,
+    pub span: Option<&'a ast::Span>,
+    pub visibility: ast::Visibility,
+}
+
+pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
+    let FnSigToRegister {
+        name, params, return_type, effect, r#async, generics, prefix, span, visibility,
+    } = *decl;
     let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
     let sb = collect_structural_bounds(env, generics);
     let pb = collect_protocol_bounds(generics);
@@ -395,17 +410,33 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
             let p = proto.as_str();
             if !FIELD_RECURSIVE_PROTOCOLS.contains(&p) { continue; }
             for (field_name, field_ty) in &slots {
-                validate_derive_field(env, diagnostics, &mut reported, *type_name, *proto, p, field_name, field_ty);
+                let site = DeriveSite { type_name: *type_name, proto: *proto };
+                validate_derive_field(env, diagnostics, &mut reported, site, field_name, field_ty);
             }
         }
     }
 }
 /// Per-field derive-support check for a single (type, protocol, field) triple: the Codec-unsupported-container check, plus recursively requiring every leaf nominal in the field's type to derive the same protocol. `reported` dedupes diagnostics across (type, protocol, leaf) triples seen by earlier fields/protocols/types in the caller's loop nest. Verbatim text move out of [`validate_derive_field_support`].
+/// The (type, protocol) pair a field-recursive derive check is running for.
+///
+/// Both are `Sym`, so as adjacent positional parameters they could be
+/// transposed silently — the check would then report the type as the protocol.
+#[derive(Copy, Clone)]
+struct DeriveSite {
+    type_name: Sym,
+    proto: Sym,
+}
+
 fn validate_derive_field(
     env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
     reported: &mut std::collections::HashSet<(Sym, Sym, Sym)>,
-    type_name: Sym, proto: Sym, p: &str, field_name: &str, field_ty: &Ty,
+    site: DeriveSite, field_name: &str, field_ty: &Ty,
 ) {
+    let DeriveSite { type_name, proto } = site;
+    // The protocol arrived twice — as a `Sym` and as its own `&str` — so the
+    // two could be passed from different protocols at the call site. One name,
+    // derived here.
+    let p = proto.as_str();
     // #655: the Codec derive has no Map/Set arm — reject such a field here rather than emitting invalid Rust / silent-wrong wasm. Same E023 family (a field that cannot satisfy Codec).
     if p == "Codec" {
         if let Some(container) = codec_unsupported_container(field_ty) {
@@ -453,17 +484,30 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
             };
 
             for method_sig in &proto_def.methods {
-                validate_protocol_method_impl(env, diagnostics, *type_name, *proto_name, is_generic, &type_ty, method_sig);
+                let target = ImplTarget { name: *type_name, is_generic, ty: &type_ty };
+                validate_protocol_method_impl(env, diagnostics, &target, *proto_name, method_sig);
             }
         }
     }
 }
 /// Validate a single protocol method's implementation on `type_name`: presence (missing-method E023 unless it's a builtin-derived protocol), then — for non-generic types — arity, parameter types, and return type against the protocol's declared signature (`Self` substituted for `type_ty`). Verbatim text move out of [`validate_protocol_impls`].
+/// The type a protocol implementation is being validated on.
+///
+/// `is_generic` gates the signature comparison: a generic type's method
+/// signature carries unsubstituted type vars, so comparing it against the
+/// protocol's declaration would report spurious mismatches.
+struct ImplTarget<'a> {
+    name: Sym,
+    is_generic: bool,
+    ty: &'a Ty,
+}
+
 fn validate_protocol_method_impl(
     env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
-    type_name: Sym, proto_name: Sym, is_generic: bool, type_ty: &Ty,
+    target: &ImplTarget<'_>, proto_name: Sym,
     method_sig: &crate::types::ProtocolMethodSig,
 ) {
+    let ImplTarget { name: type_name, is_generic, ty: type_ty } = *target;
     let fn_key = format!("{}.{}", type_name, method_sig.name);
     let Some(sig) = env.functions.get(&sym(&fn_key)) else {
         let is_builtin = matches!(proto_name.as_str(),
@@ -544,8 +588,18 @@ fn validate_protocol_method_impl(
         ));
     }
 }
-pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>,
-                       generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>, visibility: ast::Visibility) {
+/// A borrowed view of the `type` declaration being registered.
+pub struct TypeDeclToRegister<'a> {
+    pub name: &'a str,
+    pub ty: &'a ast::TypeExpr,
+    pub deriving: &'a Option<Vec<Sym>>,
+    pub generics: &'a Option<Vec<ast::GenericParam>>,
+    pub prefix: Option<&'a str>,
+    pub visibility: ast::Visibility,
+}
+
+pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl: &TypeDeclToRegister<'_>) {
+    let TypeDeclToRegister { name, ty, deriving, generics, prefix, visibility } = *decl;
     if let Some(derives) = deriving {
         validate_protocols(env, diagnostics, derives, name);
     }
@@ -710,7 +764,10 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
         }
         seen_fn.insert(key, span.clone());
     }
-    register_fn_sig(env, name, params, return_type, effect, r#async, generics, prefix, span.as_ref(), *visibility);
+    register_fn_sig(env, &FnSigToRegister {
+        name, params, return_type, effect, r#async, generics,
+        prefix, span: span.as_ref(), visibility: *visibility,
+    });
     // Register in DefTable
     let fn_key = prefixed_key(prefix, name);
     let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
@@ -748,7 +805,9 @@ fn register_decl_test(diagnostics: &mut Vec<Diagnostic>, seen_test: &mut HashMap
 /// `ast::Decl::Type` arm of [`register_decls`] — type registration plus DefTable and `type_protocols` bookkeeping. Verbatim text move out of [`register_decls`].
 fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl: &ast::Decl, prefix: Option<&str>) {
     let ast::Decl::Type { name, ty, deriving, generics, visibility, .. } = decl else { unreachable!() };
-    register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix, *visibility);
+    register_type_decl(env, diagnostics, &TypeDeclToRegister {
+        name, ty, deriving, generics, prefix, visibility: *visibility,
+    });
     // Register in DefTable
     let type_key = prefixed_key(prefix, name);
     let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");

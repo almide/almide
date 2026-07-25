@@ -8,7 +8,20 @@ use super::LowerCtx;
 use super::expressions::lower_expr;
 use super::types::resolve_type_expr;
 
-pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr], named_args: &[(almide_base::intern::Sym, ast::Expr)], type_args: Option<&Vec<ast::TypeExpr>>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
+/// The argument list of the call being lowered.
+///
+/// Positional args, named args and explicit type args are three slices that
+/// always travel together and are meaningless apart, so they travel as one
+/// value. That also stops `args` and `named_args` — adjacent slices whose
+/// element types differ only in the tuple wrapper — from being transposed.
+pub(super) struct CallArgs<'a> {
+    pub args: &'a [ast::Expr],
+    pub named_args: &'a [(almide_base::intern::Sym, ast::Expr)],
+    pub type_args: Option<&'a Vec<ast::TypeExpr>>,
+}
+
+pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<'_>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    let CallArgs { args, named_args, type_args } = call;
     if let Some(converted) = lower_call_json_convenience(ctx, callee, args, type_args, ty.clone(), span) {
         return converted;
     }

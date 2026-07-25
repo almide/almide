@@ -206,7 +206,10 @@ pub fn register_bundled_types(module: &str, env: &mut crate::types::TypeEnv) {
     for decl in &program.decls {
         if let ast::Decl::Type { name, ty, deriving, visibility, generics, .. } = decl {
             crate::canonicalize::registration::register_type_decl(
-                env, &mut diags, name, ty, deriving, generics, Some(module), *visibility,
+                env, &mut diags,
+                &crate::canonicalize::registration::TypeDeclToRegister {
+                    name, ty, deriving, generics, prefix: Some(module), visibility: *visibility,
+                },
             );
         }
     }

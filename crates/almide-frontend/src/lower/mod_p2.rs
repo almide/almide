@@ -371,15 +371,34 @@ pub fn lower_module(
 
 // ── Function lowering ───────────────────────────────────────────
 
-fn lower_fn(
-    ctx: &mut LowerCtx,
-    name: &str, params: &[ast::Param], body: &ast::Expr,
-    effect: &Option<bool>, r#async: &Option<bool>, span: &Option<ast::Span>,
-    generics: &Option<Vec<ast::GenericParam>>, extern_attrs: &[ast::ExternAttr],
-    export_attrs: &[ast::ExportAttr],
-    attrs: &[ast::Attribute],
-    visibility: &ast::Visibility, module_prefix: Option<&str>,
-) -> IrFunction {
+/// A borrowed view of the `fn` declaration being lowered.
+///
+/// The fields used to be thirteen positional parameters, three adjacent pairs of
+/// which shared a type: `effect` and `r#async` are both `&Option<bool>`, and
+/// `extern_attrs` / `export_attrs` / `attrs` are all attribute slices. Swapping
+/// any pair type-checks, so the positional form made a silent
+/// `effect`/`async` transposition a live possibility at every call site. Named
+/// fields make the same mistake a compile error.
+pub(super) struct FnToLower<'a> {
+    pub name: &'a str,
+    pub params: &'a [ast::Param],
+    pub body: &'a ast::Expr,
+    pub effect: &'a Option<bool>,
+    pub r#async: &'a Option<bool>,
+    pub span: &'a Option<ast::Span>,
+    pub generics: &'a Option<Vec<ast::GenericParam>>,
+    pub extern_attrs: &'a [ast::ExternAttr],
+    pub export_attrs: &'a [ast::ExportAttr],
+    pub attrs: &'a [ast::Attribute],
+    pub visibility: &'a ast::Visibility,
+    pub module_prefix: Option<&'a str>,
+}
+
+fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
+    let FnToLower {
+        name, params, body, effect, r#async, span, generics,
+        extern_attrs, export_attrs, attrs, visibility, module_prefix,
+    } = *decl;
     ctx.push_scope();
 
     // Set up protocol bounds and const params for this function's generics

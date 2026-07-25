@@ -143,7 +143,12 @@ pub fn build_import_table(
     let mut canonical_to_alias: HashMap<String, String> = HashMap::new();
 
     for imp in &prog.imports {
-        build_import_table_process_import(imp, module_name, user_modules, &mut table, &mut diagnostics, &mut alias_to_canonical, &mut canonical_to_alias);
+        build_import_table_process_import(imp, module_name, user_modules, &mut ImportBuild {
+            table: &mut table,
+            diagnostics: &mut diagnostics,
+            alias_to_canonical: &mut alias_to_canonical,
+            canonical_to_alias: &mut canonical_to_alias,
+        });
     }
 
     // Also register Tier 1 auto-imports from bundled modules
@@ -161,15 +166,26 @@ pub fn build_import_table(
 /// [`build_import_table`]; a `continue` in the original loop becomes an
 /// early `return` here (both simply skip the rest of this import and move
 /// on to the next one).
+/// The import table under construction.
+///
+/// The table and the two alias maps are one piece of state: a name is only
+/// registered after both maps agree it does not collide, and every registration
+/// writes all three. Passing them separately let a caller update the table
+/// without the maps, which is exactly the shape of a missed collision.
+struct ImportBuild<'a> {
+    table: &'a mut ImportTable,
+    diagnostics: &'a mut Vec<Diagnostic>,
+    alias_to_canonical: &'a mut HashMap<String, String>,
+    canonical_to_alias: &'a mut HashMap<String, String>,
+}
+
 fn build_import_table_process_import(
     imp: &ast::Decl,
     module_name: Option<&str>,
     user_modules: &HashSet<Sym>,
-    table: &mut ImportTable,
-    diagnostics: &mut Vec<Diagnostic>,
-    alias_to_canonical: &mut HashMap<String, String>,
-    canonical_to_alias: &mut HashMap<String, String>,
+    build: &mut ImportBuild<'_>,
 ) {
+    let ImportBuild { table, diagnostics, alias_to_canonical, canonical_to_alias } = build;
     let (path, alias, names, span) = match imp {
         ast::Decl::Import { path, alias, names, span } => (path, alias, names, span),
         _ => return,

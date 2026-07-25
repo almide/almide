@@ -51,6 +51,20 @@ pub(crate) fn debug_trace(channel: &str, line: impl FnOnce() -> String) {
     }
 }
 
+/// The mutable parts of a `fn` declaration that checking walks.
+///
+/// Checking mutates the AST in place (inference writes resolved types back onto
+/// params, body and generics), so this is a `&mut` view rather than a copy.
+/// Grouping them keeps `check_fn_decl`'s own name parameter — the only piece the
+/// checker reads without walking — visible at the call site.
+pub(crate) struct FnToCheck<'a> {
+    pub params: &'a mut [ast::Param],
+    pub return_type: &'a ast::TypeExpr,
+    pub body: &'a mut ast::Expr,
+    pub effect: &'a Option<bool>,
+    pub generics: &'a mut Option<Vec<ast::GenericParam>>,
+}
+
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
     Diagnostic::error(msg, hint, ctx)
 }
