@@ -2056,3 +2056,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/map_interp_string_value.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-167"
+spec      = "ALS-M8"
+title     = "float.clamp returns its input unchanged when in range, sign bit included"
+statement = "`float.clamp(n, lo, hi)` returns `n` itself — sign bit included — whenever `lo <= n <= hi`, so `float.clamp(-0.0, 0.0, hi)` is `-0.0` on both targets. The self-hosted implementation was `fmin(fmax(n, lo), hi)`, which is NOT what `f64::clamp` does: wasm's `f64.max` is specified to prefer the POSITIVE zero when both operands are zero, so the wasm leg returned `+0.0` where native returned `-0.0`. A sign flip is an observable divergence under the equivalence claim, and it was reachable from ordinary arithmetic (differential fuzz). The implementation is now the comparison chain `f64::clamp` actually is — `if n < lo then lo else if hi < n then hi else n` — so the sign rides through untouched. NaN behaviour is unchanged: a NaN fails both comparisons and lands on the `hi` arm, exactly as `fmin(fmax(NaN, lo), hi)` did. `float.min` / `float.max` keep their own wasm-spec zero behaviour; this contract is about `clamp` alone."
+since     = "0.36.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_clamp_negative_zero.almd", class = "fixture" },
+]

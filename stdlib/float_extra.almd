@@ -6,10 +6,19 @@
 // aborting with one stderr line + exit 1 (native f64::clamp panics on both
 // conditions; `!(lo <= hi)` covers both in one IEEE comparison, since a NaN
 // operand makes `<=` false).
+// Rust's `f64::clamp` is a COMPARISON chain, not min/max: it returns `self`
+// whenever `lo <= self <= hi`, so `clamp(-0.0, 0.0, hi)` yields `-0.0`. Built
+// from `fmax`/`fmin` it yielded `+0.0` instead, because wasm's `f64.max` is
+// specified to prefer the POSITIVE zero when both operands are zero — a sign
+// flip on a value the two targets must agree on byte-for-byte (differential
+// fuzz). Written as the comparison chain, the sign rides through untouched and
+// the NaN behaviour is unchanged: a NaN input fails both comparisons and falls
+// to the `hi` arm exactly as `fmin(fmax(NaN, lo), hi)` did.
 fn float_clamp(n: Float, lo: Float, hi: Float) -> Float = {
   if prim.fle(lo, hi) then () else prim.die(prim.handle("Error: clamp requires min <= max\n"))
-  let m = prim.fmax(n, lo)
-  prim.fmin(m, hi)
+  if prim.flt(n, lo) then lo
+  else if prim.flt(hi, n) then hi
+  else n
 }
 
 fn float_is_nan(n: Float) -> Bool = prim.fne(n, n)

@@ -12,8 +12,12 @@ effect fn main() -> Unit = {
   // All-String: quoted keys AND values.
   println("${["a": "x", "b": "y"]}")
 
-  // Float values: shortest-round-trip, the same rendering a bare `${float}` gives.
+  // Float values render in the `${float}` convention BOTH targets use: shortest
+  // round-trip with a trailing `.0` stripped. Rendering them as plain
+  // `float.to_string` disagreed with native on every whole-number value.
   println("${["a": 1.5, "b": -0.25]}")
+  println("${["k0": 1.0, "k1": 3.0, "k2": -0.0]}")
+  println("${["big": 1.0e308, "small": 1.0e-308, "third": 0.3]}")
 
   // A key needing escaping goes through the shared quoting path, so every
   // variant escapes identically rather than re-deriving it.
