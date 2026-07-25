@@ -46,6 +46,18 @@ impl Checker {
     /// Try to resolve a call to a builtin function.
     /// Returns Some(Ty) if the name is a builtin, None otherwise.
     pub(super) fn check_builtin_call(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        if let Some(ty) = self.check_builtin_output(name, arg_tys) { return Some(ty); }
+        if let Some(ty) = self.check_builtin_ctor(name, arg_tys) { return Some(ty); }
+        None
+    }
+
+    /// The output and abort builtins: `println`, `eprintln`, `panic` and the
+    /// assert family.
+    ///
+    /// One group of `check_builtin_call`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group" — the router tries the groups in that
+    /// order, so which rule a call gets is unchanged.
+    pub(super) fn check_builtin_output(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
         match name {
             "println" | "eprintln" => {
                 // println/eprintln require String argument
@@ -67,6 +79,17 @@ impl Checker {
                 }
                 Some(Ty::Unit)
             }
+            _ => return None,
+        }
+    }
+
+    /// The `Result` / `Option` constructors and `unwrap_or`.
+    ///
+    /// One group of `check_builtin_call`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group" — the router tries the groups in that
+    /// order, so which rule a call gets is unchanged.
+    pub(super) fn check_builtin_ctor(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        match name {
             "ok" => {
                 let ok_ty = arg_tys.first().cloned().unwrap_or(Ty::Unit);
                 let err_ty = match &self.env.current_ret {
@@ -92,7 +115,7 @@ impl Checker {
                     _ => arg_tys[1].clone(),
                 })
             }
-            _ => None,
+            _ => return None,
         }
     }
 }

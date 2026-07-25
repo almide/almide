@@ -371,84 +371,121 @@ fn fmt_arm_template(pat: &Pat, subject_ty: &Ty, env: &TypeEnv) -> String {
 
 fn fmt_arm_head(pat: &Pat, ty: &Ty, env: &TypeEnv, counter: &mut usize) -> String {
     match pat {
-        Pat::Wild => {
-            let n = *counter;
-            *counter += 1;
-            format!("arg{}", n)
+        Pat::Wild => next_arg_name(counter),
+        Pat::Ctor(ctor, args) => fmt_ctor_arm_head(ctor, args, ty, env, counter),
+    }
+}
+
+/// `argN`, bumping the shared counter.
+///
+/// Names only have to be unique within one emitted arm — a wildcard binding
+/// cannot shadow anything at lint time, and the arm is paste fodder — so the
+/// counter is not reset between rows.
+fn next_arg_name(counter: &mut usize) -> String {
+    let n = *counter;
+    *counter += 1;
+    format!("arg{n}")
+}
+
+/// How a constructor is written in an arm head: its name, and whether it takes
+/// tuple or prefix-call syntax.
+struct CtorSyntax {
+    name: String,
+    is_tuple: bool,
+    is_prefix_call: bool,
+}
+
+fn ctor_syntax(ctor: &CtorId) -> CtorSyntax {
+    let (name, is_tuple, is_prefix_call) = match ctor {
+        CtorId::Variant(s) => (s.to_string(), false, true),
+        CtorId::Some => ("some".into(), false, true),
+        CtorId::None => ("none".into(), false, false),
+        CtorId::Ok => ("ok".into(), false, true),
+        CtorId::Err => ("err".into(), false, true),
+        CtorId::True => ("true".into(), false, false),
+        CtorId::False => ("false".into(), false, false),
+        CtorId::Tuple => (String::new(), true, false),
+        CtorId::Lit(v) => (v.clone(), false, false),
+    };
+    CtorSyntax { name, is_tuple, is_prefix_call }
+}
+
+/// The field names of a record-payload variant case, in declaration order.
+///
+/// `None` for anything else — a tuple payload, a unit case, or a constructor
+/// that is not a variant at all — because those bind positionally and have no
+/// names to offer.
+fn record_payload_field_names(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Option<Vec<String>> {
+    let CtorId::Variant(vname) = ctor else { return Option::None };
+    if !is_record_payload(vname, ty, env) {
+        return Option::None;
+    }
+    let Ty::Variant { cases, .. } = env.resolve_named(ty) else { return Option::None };
+    cases.iter().find(|c| c.name == *vname).and_then(|c| match &c.payload {
+        VariantPayload::Record(fields) => Some(fields.iter().map(|(n, _)| n.to_string()).collect()),
+        _ => Option::None,
+    })
+}
+
+/// The binding name for one wildcard sub-pattern of a constructor.
+///
+/// Single-field `Option`/`Result` payloads get the conventional `x` / `e` so the
+/// paste-ready arm reads like the idiom (`some(x)`, `err(e)`) rather than a
+/// generic `arg1`. A record payload uses the field's own name. Everything else
+/// falls back to the counter.
+fn wildcard_binding_name(
+    ctor: &CtorId,
+    arity: usize,
+    index: usize,
+    record_fields: &Option<Vec<String>>,
+    counter: &mut usize,
+) -> String {
+    if arity == 1 {
+        if matches!(ctor, CtorId::Some | CtorId::Ok) {
+            return "x".to_string();
         }
-        Pat::Ctor(ctor, args) => {
-            // Wildcard bindings cannot shadow anything at lint time, so
-            // positional names don't need to be unique across rows — the
-            // emitted arm is purely paste fodder.
-            let (name, is_tuple, is_prefix_call) = match ctor {
-                CtorId::Variant(s) => (s.to_string(), false, true),
-                CtorId::Some => ("some".into(), false, true),
-                CtorId::None => ("none".into(), false, false),
-                CtorId::Ok => ("ok".into(), false, true),
-                CtorId::Err => ("err".into(), false, true),
-                CtorId::True => ("true".into(), false, false),
-                CtorId::False => ("false".into(), false, false),
-                CtorId::Tuple => (String::new(), true, false),
-                CtorId::Lit(v) => (v.clone(), false, false),
-            };
-            if args.is_empty() {
-                return name;
-            }
-            let sub_types = field_types(ctor, ty, env);
-            let record_fields: Option<Vec<String>> = match ctor {
-                CtorId::Variant(vname) if is_record_payload(vname, ty, env) => {
-                    let resolved = env.resolve_named(ty);
-                    if let Ty::Variant { cases, .. } = &resolved {
-                        cases.iter().find(|c| c.name == *vname)
-                            .and_then(|c| match &c.payload {
-                                VariantPayload::Record(fields) =>
-                                    Some(fields.iter().map(|(n, _)| n.to_string()).collect()),
-                                _ => Option::None,
-                            })
-                    } else { Option::None }
-                }
-                _ => Option::None,
-            };
-            let parts: Vec<String> = args.iter().enumerate().map(|(i, arg)| {
-                let sub_ty = sub_types.get(i).cloned().unwrap_or(Ty::Unknown);
-                match arg {
-                    Pat::Wild => {
-                        // Conventional single-field bindings on
-                        // Option/Result so the paste-ready arm reads
-                        // like the idiom (`some(x)`, `err(e)`) instead
-                        // of a generic `arg1`.
-                        if matches!(ctor, CtorId::Some | CtorId::Ok) && args.len() == 1 {
-                            return "x".to_string();
-                        }
-                        if matches!(ctor, CtorId::Err) && args.len() == 1 {
-                            return "e".to_string();
-                        }
-                        if let Some(fnames) = &record_fields {
-                            if let Some(fname) = fnames.get(i) {
-                                return fname.clone();
-                            }
-                        }
-                        let n = *counter;
-                        *counter += 1;
-                        format!("arg{}", n)
-                    }
-                    Pat::Ctor(_, _) => fmt_arm_head(arg, &sub_ty, env, counter),
-                }
-            }).collect();
-            if is_tuple {
-                format!("({})", parts.join(", "))
-            } else if is_prefix_call {
-                if let CtorId::Variant(vname) = ctor {
-                    if is_record_payload(vname, ty, env) {
-                        return format!("{} {{ {} }}", name, parts.join(", "));
-                    }
-                }
-                format!("{}({})", name, parts.join(", "))
-            } else {
-                name
-            }
+        if matches!(ctor, CtorId::Err) {
+            return "e".to_string();
         }
     }
+    if let Some(fname) = record_fields.as_ref().and_then(|fs| fs.get(index)) {
+        return fname.clone();
+    }
+    next_arg_name(counter)
+}
+
+fn fmt_ctor_arm_head(
+    ctor: &CtorId,
+    args: &[Pat],
+    ty: &Ty,
+    env: &TypeEnv,
+    counter: &mut usize,
+) -> String {
+    let CtorSyntax { name, is_tuple, is_prefix_call } = ctor_syntax(ctor);
+    if args.is_empty() {
+        return name;
+    }
+    let sub_types = field_types(ctor, ty, env);
+    let record_fields = record_payload_field_names(ctor, ty, env);
+    let parts: Vec<String> = args.iter().enumerate().map(|(i, arg)| {
+        match arg {
+            Pat::Wild => wildcard_binding_name(ctor, args.len(), i, &record_fields, counter),
+            Pat::Ctor(_, _) => {
+                let sub_ty = sub_types.get(i).cloned().unwrap_or(Ty::Unknown);
+                fmt_arm_head(arg, &sub_ty, env, counter)
+            }
+        }
+    }).collect();
+    if is_tuple {
+        return format!("({})", parts.join(", "));
+    }
+    if !is_prefix_call {
+        return name;
+    }
+    if record_fields.is_some() {
+        return format!("{} {{ {} }}", name, parts.join(", "));
+    }
+    format!("{}({})", name, parts.join(", "))
 }
 
 fn is_record_payload(vname: &Sym, ty: &Ty, env: &TypeEnv) -> bool {
