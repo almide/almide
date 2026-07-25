@@ -10,8 +10,9 @@
 // program calling them emitted invalid Rust (E0425).
 //
 // `net`/`zlib` are excluded: both are native-only host boundaries whose own
-// suites already carry `// wasm:skip`. `mem` lives in its own file — its example
-// runs on BOTH legs from `main` but walls inside a promoted test fn.
+// suites already carry `// wasm:skip`. `mem` has no test at all: its example runs
+// on both legs from `main` but walls inside a promoted test fn, and the
+// walled-real ratchet treats a walled function as a regression (see docs/stdlib/mem.md).
 //
 // This file itself still runs on the NATIVE leg: `path`/`html` link per-function
 // on wasm now, which surfaces a `list.fold_hacc` (heap-accumulator fold) inside

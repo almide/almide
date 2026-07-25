@@ -100,8 +100,15 @@ fixtures pin the results.
 - **Name-keyed stdlib decisions strip the monomorphization suffix**:
   `option.collect__Int` missed the materialized-variant read-shape test, so a
   `match` over its result was untracked and walled. (#812)
-- Native fallbacks in `spec/` went from 32 to 12, of which 8 are genuinely
+- Native fallbacks in `spec/` went from 32 to 11, of which 8 are genuinely
   host-dependent `// wasm:skip` files.
+- **The walled-real ratchet is back at 0** — the Trust Spine gate has been red
+  since the bundled-stdlib linking work. Two causes: `classify_corpus` gated its
+  import resolution on the HARDCODED stdlib list, so `import args` never reached
+  it and `args.flag` walled as an unverified-caps stdlib call; and it carried its
+  own COPY of the linkable-module rule, which did not know about per-function
+  linking. Both now go through `pipeline::linkable_module_fns`, so the wall report
+  describes the program the real pipeline actually compiles. (#848)
 
 ### Added — tooling
 

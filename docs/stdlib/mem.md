@@ -33,6 +33,12 @@ mem.restore(mark)
 On the native leg both calls are no-ops: reference counting already reclaims the
 same allocations, so a program using `mem` behaves identically on both targets.
 
+The example above runs on both targets from `main`, but it is not covered by a
+spec test: `mem.save` walls inside a promoted test fn ("scalar binding outside the
+value subset"), and the walled-real ratchet treats a walled function as a
+regression. What IS pinned is that the native symbols exist at all — they used to
+be declared and never defined, so any program calling them emitted invalid Rust.
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
 ## Signature index (2 functions)

@@ -91,7 +91,7 @@ fn registry_served_names() -> &'static std::collections::HashSet<&'static str> {
 /// real Almide bodies and no registry entry, so before this they resolved to
 /// nothing and walled as "unlinked stdlib call" even though their source ships
 /// in the binary. Its intrinsic-backed fns keep registry-backed dispatch.
-pub(crate) fn linkable_module_fns(m: &almide_ir::IrModule) -> std::collections::HashSet<String> {
+pub fn linkable_module_fns(m: &almide_ir::IrModule) -> std::collections::HashSet<String> {
     let all = |m: &almide_ir::IrModule| {
         m.functions.iter().map(|f| f.name.as_str().to_string()).collect()
     };
