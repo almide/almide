@@ -47,8 +47,12 @@ fn enumerate[A](xs: List[A]) -> List[(Int, A)] = _
 @consume(xs, ys)
 fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 
+// Borrows: the runtime takes a slice and clones each element out, so `flatten`
+// can appear alongside another borrow of the same binding in one expression.
+// Consuming it made `list.get_or(xs, 0, list.flatten(xs))` move `xs` into
+// `flatten` while `get_or` borrowed it — `check` accepted, rustc rejected with
+// E0505 (differential fuzz).
 @intrinsic("almide_rt_list_flatten")
-@consume(xss)
 fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
 @intrinsic("almide_rt_list_take")

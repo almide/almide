@@ -67,7 +67,14 @@ pub fn almide_rt_list_count<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool
 pub fn almide_rt_list_enumerate<T: Clone>(xs: Vec<T>) -> Vec<(i64, T)> { xs.into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect() }
 pub fn almide_rt_list_zip<T: Clone, U: Clone>(a: Vec<T>, b: Vec<U>) -> Vec<(T, U)> { a.into_iter().zip(b.into_iter()).collect() }
 pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: std::rc::Rc<dyn Fn(A, B) -> C>) -> Vec<C> { let f = move |a, b| f(a, b); a.into_iter().zip(b.into_iter()).map(|(x, y)| f(x, y)).collect() }
-pub fn almide_rt_list_flatten<T: Clone>(xs: Vec<Vec<T>>) -> Vec<T> { xs.into_iter().flatten().collect() }
+// Takes a SLICE, not an owned `Vec`. The element type is already `Clone`, so
+// consuming the outer list bought nothing — and it made `flatten` unusable
+// alongside a borrow of the same binding in one expression:
+// `list.get_or(xs, 0, list.flatten(xs))` moved `xs` into `flatten` while
+// `get_or` borrowed it, so `check` accepted and rustc rejected with E0505
+// (differential fuzz). A slice parameter takes a borrow like every other
+// read-only list fn, and an owned `Vec` still deref-coerces into it.
+pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
 pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().flat_map(f).collect() }
 pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }

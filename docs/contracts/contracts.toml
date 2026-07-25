@@ -2067,3 +2067,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_clamp_negative_zero.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-168"
+spec      = "ALS-M12"
+title     = "list.flatten borrows its argument, so it composes with another borrow of the same binding"
+statement = "`list.flatten` reads its argument without consuming it: `list.get_or(xs, 0, list.flatten(xs))` compiles and runs on both targets, and `xs` is fully readable afterwards. It was declared `@consume(xss)` over a runtime taking an owned `Vec`, so that expression moved `xs` into `flatten` while `get_or` borrowed it — `check` accepted and native rustc rejected with E0505, the acceptance gap the differential fuzz hunts. Consuming bought nothing: the element type is already `Clone`, so the runtime cloned out of the moved `Vec` anyway. It now takes a slice like every other read-only list fn, and an owned `Vec` still deref-coerces into it. Flatten stays non-destructive on both legs, empty outer and empty inner lists contribute nothing, and String elements take the same path."
+since     = "0.36.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_flatten_borrow.almd", class = "fixture" },
+]
