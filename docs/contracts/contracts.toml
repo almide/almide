@@ -916,6 +916,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/index_bounds.almd", class = "fixture" },
   { path = "spec/wasm_cross/index_bounds_write_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/index_bounds_i64.almd", class = "fixture" },
 ]
 
 [[contract]]

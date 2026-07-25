@@ -79,6 +79,7 @@ list_slice_oob  out-of-interp-scope capability: list.slice
 list_swap_oob  out-of-interp-scope capability: list.swap
 list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements
 list_update_heap  out-of-interp-scope capability: value.int
+list_window_zero  out-of-interp-scope capability: list.window
 list_windows_zero  out-of-interp-scope capability: list.windows
 list_with_capacity  out-of-interp-scope capability: list.with_capacity
 loop_buffer_churn  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)

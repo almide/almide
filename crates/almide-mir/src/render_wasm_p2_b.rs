@@ -356,11 +356,18 @@ fn render_op_prim_mem_io_a(kind: &PrimKind, args: &[ValueId]) -> Option<String> 
                 PrimKind::Store { width: 1 } => format!("(i32.store8 {} {})", w(0), w(1)),
                 PrimKind::Store { width: 4 } => format!("(i32.store {} {})", w(0), w(1)),
                 PrimKind::Store { .. } => format!("(i64.store {} (local.get {}))", w(0), local(args[1])),
-                // Bounds-checked element ADDRESS via the preamble `$elem_addr` (idx<0 || idx>=cap
-                // TRAPs — v0's `a[i]` likewise halts on OOB). Both args wrap to i32 (list ptr,
-                // index); the returned i32 address zero-extends back to the i64-uniform dst.
+                // Bounds-checked element ADDRESS via the preamble `$elem_addr_chk` (len-checked,
+                // native-identical abort). The checker takes an i32 index, so an index outside
+                // [0, 2^32) is squashed to -1 BEFORE the wrap (C-067's full-i64 clause: a raw
+                // wrap let `xs[2^32+1]` truncate into range); -1 and any wrapped-negative
+                // (>= 2^31 — len < 2^31) abort inside the checker.
                 PrimKind::ElemAddr => {
-                    format!("(i64.extend_i32_u (call $elem_addr_chk {} {}))", w(0), w(1))
+                    format!(
+                        "(i64.extend_i32_u (call $elem_addr_chk {} (select {} (i32.const -1) (i64.lt_u (local.get {i}) (i64.const 4294967296)))))",
+                        w(0),
+                        w(1),
+                        i = local(args[1])
+                    )
                 }
                 // Compact-region block ops (region_compact.rs): the base arg is a
                 // Ptr local (raw i32 handle) and handle fields are raw 4-byte
