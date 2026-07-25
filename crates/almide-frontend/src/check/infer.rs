@@ -439,6 +439,34 @@ impl Checker {
                         ])),
                         _ => None,
                     };
+                    // #847: a MISSING field on a closed record used to sail
+                    // through as Unknown (no diagnostic at all — the failure
+                    // surfaced as a codegen postcondition ICE, or leaked
+                    // rustc's E0609). Report it here with the field roster.
+                    let record_shape = self.env.resolve_named(&concrete);
+                    if let Ty::Record { fields } = &record_shape {
+                        let available = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+                        let suggestion = almide_base::diagnostic::suggest(
+                            field, fields.iter().map(|(n, _)| n.as_str()));
+                        let hint = match &suggestion {
+                            Some(close) => format!("Did you mean `{}`? Available fields: {}", close, available),
+                            None => format!("Available fields: {}", available),
+                        };
+                        let mut diag = super::err(
+                            format!("no field '{}' on {}", field, concrete.display()),
+                            hint,
+                            format!("field access .{}", field),
+                        ).with_code("E013");
+                        if let (Some(close), Some(span)) = (&suggestion, member_span) {
+                            if let Some(obj_src) = object.span.and_then(|s| self.source_slice(s)) {
+                                diag = diag.with_try_replace(
+                                    span.line, span.col, span.end_col,
+                                    format!("{}.{}", obj_src, close),
+                                );
+                            }
+                        }
+                        self.emit(diag);
+                    }
                     if let Some((module, subs)) = module_and_subs {
                         let matched = subs.iter().find(|(n, _, _, _)| n == field).cloned();
                         let hint = if matched.is_some() {

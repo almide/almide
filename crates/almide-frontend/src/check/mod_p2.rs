@@ -167,6 +167,7 @@ impl Checker {
                         ty.clone(),
                         almide_base::intern::sym(field),
                         result.clone(),
+                        self.current_span,
                     ));
                     self.unify_infer(&result, &field_ty);
                     field_ty
@@ -180,6 +181,7 @@ impl Checker {
                             ty.clone(),
                             almide_base::intern::sym(field),
                             result.clone(),
+                            self.current_span,
                         ));
                         return result;
                     }
@@ -198,6 +200,7 @@ impl Checker {
                         ty.clone(),
                         almide_base::intern::sym(field),
                         result.clone(),
+                        self.current_span,
                     ));
                     return result;
                 }
