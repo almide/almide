@@ -28,115 +28,176 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
 
     let mut ir_args: Vec<IrExpr> = Vec::new();
     let ta_raw: Vec<Ty> = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
+    let ta = split_const_value_type_args(ctx, &ta_raw, &mut ir_args, span);
 
-    // Extract const value type args and prepend them as positional arguments.
-    // E.g., `make_list[3]("hello")` → `make_list(3, "hello")` at IR level.
+    ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
+    let mut target = lower_call_target(ctx, callee);
+    rewrite_crossmodule_ufcs(ctx, &mut target, &mut ir_args);
+
+    if named_args.is_empty() {
+        // Default args for a plain positional call.
+        lower_call_fill_defaults(ctx, &mut ir_args, args, &target);
+    } else {
+        fill_named_args(ctx, &mut ir_args, named_args, &target);
+    }
+    fill_ufcs_defaults(ctx, &mut ir_args, &target);
+
+    // Stage 1b: retype Int/Float literal args that flow into sized
+    // numeric params (`Int32`, `UInt8`, `Float32`, ...).
+    lower_call_coerce_args(ctx, &mut ir_args, &target);
+
+    if let Some(desugared) = desugar_assert_outside_test(ctx, &target, &ir_args, span) {
+        return desugared;
+    }
+
+    let ty = call_result_ty(&target, ty);
+    ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
+}
+
+/// Split resolved type arguments into the generic ones and the const VALUES.
+///
+/// A const value type arg is a positional argument in disguise:
+/// `make_list[3]("hello")` becomes `make_list(3, "hello")` at IR level, so the
+/// value is pushed onto `ir_args` and only the remaining type args are returned.
+/// Values are pushed BEFORE the call's own arguments, matching the declaration
+/// order the callee's signature was registered with.
+fn split_const_value_type_args(
+    ctx: &mut LowerCtx,
+    ta_raw: &[Ty],
+    ir_args: &mut Vec<IrExpr>,
+    span: Option<ast::Span>,
+) -> Vec<Ty> {
     let mut ta = Vec::new();
-    for t in &ta_raw {
+    for t in ta_raw {
         if let Ty::ConstValue { value, ty: vty } = t {
             ir_args.push(ctx.mk(IrExprKind::LitInt { value: *value }, *vty.clone(), span));
         } else {
             ta.push(t.clone());
         }
     }
+    ta
+}
 
-    ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
-    let mut target = lower_call_target(ctx, callee);
-
-    // Cross-module UFCS: Method { object, "module.func" } → Module { module, func }
-    // with object prepended to args. This lets module-level mono discover and rename.
-    if let CallTarget::Method { ref object, ref method } = target {
-        if let Some(dot) = method.as_str().find('.') {
-            let mod_str = &method.as_str()[..dot];
-            let func_str = &method.as_str()[dot+1..];
-            // Only convert if it's a user module (not Convention like Dog.repr)
-            if mod_str.chars().next().map_or(false, |c| c.is_lowercase()) {
-                let obj_expr = (**object).clone();
-                ir_args.insert(0, obj_expr);
-                target = CallTarget::Module { module: sym(mod_str), func: sym(func_str), def_id: ctx.def_map.get(&sym(&format!("{}.{}", mod_str, func_str))).copied() };
-            }
-        }
+/// Rewrite a cross-module UFCS call: `Method { object, "module.func" }` becomes
+/// `Module { module, func }` with the object prepended to the arguments.
+///
+/// The rewrite is what lets module-level monomorphization discover and rename
+/// the callee. A capitalised prefix is a convention method (`Dog.repr`), not a
+/// module, and is left alone.
+fn rewrite_crossmodule_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &mut Vec<IrExpr>) {
+    let CallTarget::Method { object, method } = &*target else { return };
+    let Some((mod_str, func_str)) = method.as_str().split_once('.') else { return };
+    if !mod_str.chars().next().is_some_and(|c| c.is_lowercase()) {
+        return;
     }
-
-    // Named args: resolve to positional order using function signature
-    if let (false, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
-        let param_names: Vec<String> = ctx.env.functions.get(name)
-            .map(|sig| sig.params.iter().map(|(n, _)| n.to_string()).collect())
-            .unwrap_or_default();
-        let defaults = ctx.fn_defaults.get(name).cloned();
-        let positional_count = ir_args.len();
-        ir_args.extend(param_names[positional_count..].iter().filter_map(|param_name| {
-            named_args.iter()
-                .find(|(n, _)| n == param_name)
-                .map(|(_, expr)| lower_expr(ctx, expr))
-                .or_else(|| defaults.as_ref()
-                    .and_then(|defs| defs.get(positional_count + param_names[positional_count..].iter().position(|p| p == param_name).unwrap_or(0)))
-                    .and_then(|d| d.as_ref())
-                    .map(|default_expr| lower_expr(ctx, default_expr)))
-        }));
-    }
-
-    // Default args: fill in remaining defaults (for calls without named args).
-    if named_args.is_empty() {
-        lower_call_fill_defaults(ctx, &mut ir_args, args, &target);
-    }
-
-    // #558: UFCS default-arg fill. A bare `x.foo()` lowers to a `Method`
-    // target whose object the EMITTER prepends as arg 0 — but the Named
-    // branches above never fire, so a free fn with defaults (`fn foo(a, b=10)`
-    // called `x.foo()`) reached codegen one arg short (invalid Rust / wasm
-    // stack underflow). When the method names a known free fn with defaults,
-    // fill them here, counting the (not-yet-prepended) object as arg 0.
-    if let CallTarget::Method { method, .. } = &target {
-        if !method.as_str().contains('.') {
-            if let Some(defaults) = ctx.fn_defaults.get(method).cloned() {
-                // provided = object (1) + explicit positional args
-                let provided = 1 + ir_args.len();
-                ir_args.extend(
-                    defaults.iter().skip(provided)
-                        .filter_map(|d| d.as_ref().map(|expr| lower_expr(ctx, expr)))
-                );
-            }
-        }
-    }
-
-    // Stage 1b: retype Int/Float literal args that flow into sized
-    // numeric params (`Int32`, `UInt8`, `Float32`, ...).
-    lower_call_coerce_args(ctx, &mut ir_args, &target);
-
-    // ALS-T18: the assert family OUTSIDE a test block desugars ONCE into
-    // the normalized abort form, so every consumer (the native walker, the v0
-    // wasm emit, the v1 MIR leg, the interp oracle) inherits identical
-    // observables: ONE stderr line + exit 1 — never a raw Rust panic (exit
-    // 101) or a bare wasm trap (exit 134). Fuzz seed-20260718 index 10:
-    // `assert_eq` in main leaked the native panic banner with exit 101 while
-    // wasm printed a value-less line with exit 1. Test blocks keep the harness
-    // assertion forms (cargo / the wasm test runner report those).
-    if !ctx.in_test {
-        if let CallTarget::Named { name } = &target {
-            let n = name.as_str();
-            if (matches!(n, "assert_eq" | "assert_ne") && ir_args.len() == 2)
-                || (n == "assert" && !ir_args.is_empty())
-            {
-                return desugar_assert_abort(ctx, n, ir_args, span);
-            }
-        }
-    }
-
-    // A call to a closure VALUE (Computed target) has, by definition, the
-    // callee's RETURN type — even when the inferred `ty` came back as the whole
-    // `Fn` type (which happens for a HOF lambda parameter whose concrete type is
-    // only fixed by the enclosing call's unification, after the body was checked).
-    // Leaving the node typed `fn(..) -> T` makes a later `acc + f(x)` trip the IR
-    // verifier (AddInt on a function value).
-    let ty = match &target {
-        CallTarget::Computed { callee } => match &callee.ty {
-            Ty::Fn { ret, .. } if !ret.has_unresolved_deep() => (**ret).clone(),
-            _ => ty,
-        },
-        _ => ty,
+    ir_args.insert(0, (**object).clone());
+    *target = CallTarget::Module {
+        module: sym(mod_str),
+        func: sym(func_str),
+        def_id: ctx.def_map.get(&sym(&format!("{}.{}", mod_str, func_str))).copied(),
     };
-    ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
+}
+
+/// Place named arguments into their positional slots, filling any gap from the
+/// callee's defaults.
+///
+/// Named args arrive in SOURCE order, which need not be parameter order, so each
+/// remaining parameter is matched by name. A parameter with neither a named
+/// argument nor a default contributes nothing — the arity error is the checker's
+/// to report, and inventing a placeholder here would hide it.
+fn fill_named_args(
+    ctx: &mut LowerCtx,
+    ir_args: &mut Vec<IrExpr>,
+    named_args: &[(almide_base::intern::Sym, ast::Expr)],
+    target: &CallTarget,
+) {
+    let CallTarget::Named { name } = target else { return };
+    let param_names: Vec<String> = ctx.env.functions.get(name)
+        .map(|sig| sig.params.iter().map(|(n, _)| n.to_string()).collect())
+        .unwrap_or_default();
+    let defaults = ctx.fn_defaults.get(name).cloned();
+    let positional_count = ir_args.len();
+    if positional_count > param_names.len() {
+        return;
+    }
+    let remaining = &param_names[positional_count..];
+    ir_args.extend(remaining.iter().filter_map(|param_name| {
+        named_args.iter()
+            .find(|(n, _)| n == param_name)
+            .map(|(_, expr)| lower_expr(ctx, expr))
+            .or_else(|| defaults.as_ref()
+                .and_then(|defs| defs.get(
+                    positional_count + remaining.iter().position(|p| p == param_name).unwrap_or(0)))
+                .and_then(|d| d.as_ref())
+                .map(|default_expr| lower_expr(ctx, default_expr)))
+    }));
+}
+
+/// #558: fill a UFCS call's missing default arguments.
+///
+/// A bare `x.foo()` lowers to a `Method` target whose object the EMITTER
+/// prepends as argument 0, so the `Named` paths above never fire and a free fn
+/// with defaults (`fn foo(a, b = 10)` called as `x.foo()`) reached codegen one
+/// argument short — invalid Rust natively, a wasm stack underflow on the other
+/// leg. The object counts as argument 0 here even though it is not in `ir_args`
+/// yet.
+fn fill_ufcs_defaults(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, target: &CallTarget) {
+    let CallTarget::Method { method, .. } = target else { return };
+    if method.as_str().contains('.') {
+        return;
+    }
+    let Some(defaults) = ctx.fn_defaults.get(method).cloned() else { return };
+    let provided = 1 + ir_args.len();
+    ir_args.extend(
+        defaults.iter().skip(provided)
+            .filter_map(|d| d.as_ref().map(|expr| lower_expr(ctx, expr)))
+    );
+}
+
+/// ALS-T18: desugar the assert family OUTSIDE a test block into the normalized
+/// abort form.
+///
+/// Desugaring ONCE here means every consumer (the native walker, the v1 MIR leg,
+/// the interp oracle) inherits identical observables: one stderr line and exit
+/// 1 — never a raw Rust panic (exit 101) or a bare wasm trap (exit 134). Fuzz
+/// seed-20260718 index 10: `assert_eq` in `main` leaked the native panic banner
+/// with exit 101 while wasm printed a value-less line with exit 1.
+///
+/// Test blocks keep the harness assertion forms, because cargo and the wasm test
+/// runner are what report those.
+fn desugar_assert_outside_test(
+    ctx: &mut LowerCtx,
+    target: &CallTarget,
+    ir_args: &[IrExpr],
+    span: Option<ast::Span>,
+) -> Option<IrExpr> {
+    if ctx.in_test {
+        return None;
+    }
+    let CallTarget::Named { name } = target else { return None };
+    let n = name.as_str();
+    let is_assert = (matches!(n, "assert_eq" | "assert_ne") && ir_args.len() == 2)
+        || (n == "assert" && !ir_args.is_empty());
+    if !is_assert {
+        return None;
+    }
+    Some(desugar_assert_abort(ctx, n, ir_args.to_vec(), span))
+}
+
+/// The type of the call node.
+///
+/// A call to a closure VALUE (a `Computed` target) has, by definition, the
+/// callee's RETURN type — even when the inferred `ty` came back as the whole
+/// `Fn` type, which happens for a HOF lambda parameter whose concrete type is
+/// only fixed by the enclosing call's unification, after the body was checked.
+/// Leaving the node typed `fn(..) -> T` makes a later `acc + f(x)` trip the IR
+/// verifier with an `AddInt` over a function value.
+fn call_result_ty(target: &CallTarget, ty: Ty) -> Ty {
+    let CallTarget::Computed { callee } = target else { return ty };
+    match &callee.ty {
+        Ty::Fn { ret, .. } if !ret.has_unresolved_deep() => (**ret).clone(),
+        _ => ty,
+    }
 }
 
 /// The json Codec convenience prefix of [`lower_call`]: `json.encode(expr)` →

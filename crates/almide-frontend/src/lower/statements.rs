@@ -19,44 +19,10 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     };
 
     let kind = match stmt {
-        ast::Stmt::Let { name, ty, value, .. } => {
-            let mut ir_val = lower_expr(ctx, value);
-            // If the user wrote `let x: T = ...`, honor that annotation over the
-            // structurally-inferred type of the value. Otherwise two nominal
-            // record types with identical fields (e.g. `Dog` and `Cat`) collide
-            // at codegen time because the value keeps its structural type.
-            let val_ty = if let Some(te) = ty {
-                let declared = crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()));
-                override_record_literal_ty(&mut ir_val, &declared, ctx.env);
-                declared
-            } else {
-                ir_val.ty.clone()
-            };
-            let var = ctx.define_var(name, val_ty.clone(), Mutability::Let, span);
-            // #485: an EXPLICIT `Result[..]` annotation is the only signal
-            // that this binding keeps the Result (auto_try must not insert
-            // `?`). Un-annotated binds share the same Bind.ty shape when the
-            // callee itself declares `-> Result[..]`, so record the VarId.
-            if ty.is_some() && val_ty.is_result() {
-                ctx.annotated_result_vars.insert(var);
-            }
-            IrStmtKind::Bind { var, mutability: Mutability::Let, ty: val_ty, value: ir_val }
-        }
-        ast::Stmt::Var { name, ty, value, .. } => {
-            let mut ir_val = lower_expr(ctx, value);
-            let val_ty = if let Some(te) = ty {
-                let declared = crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()));
-                override_record_literal_ty(&mut ir_val, &declared, ctx.env);
-                declared
-            } else {
-                ir_val.ty.clone()
-            };
-            let var = ctx.define_var(name, val_ty.clone(), Mutability::Var, span);
-            if ty.is_some() && val_ty.is_result() {
-                ctx.annotated_result_vars.insert(var);
-            }
-            IrStmtKind::Bind { var, mutability: Mutability::Var, ty: val_ty, value: ir_val }
-        }
+        ast::Stmt::Let { name, ty, value, .. } =>
+            lower_bind(ctx, name, ty.as_ref(), value, Mutability::Let, span),
+        ast::Stmt::Var { name, ty, value, .. } =>
+            lower_bind(ctx, name, ty.as_ref(), value, Mutability::Var, span),
         ast::Stmt::LetDestructure { pattern, value, .. } => {
             let ir_val = lower_expr(ctx, value);
             let ir_pat = lower_pattern(ctx, pattern, &ir_val.ty);
@@ -118,6 +84,45 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     };
 
     IrStmt { kind, span }
+}
+
+/// Lower a `let` or `var` binding.
+///
+/// The two differ only in mutability, and the difference was previously two
+/// copies of this body — one of which had lost the explanatory comments. One
+/// body, `mutability` as the parameter.
+fn lower_bind(
+    ctx: &mut LowerCtx,
+    name: &str,
+    ty: Option<&ast::TypeExpr>,
+    value: &ast::Expr,
+    mutability: Mutability,
+    span: Option<ast::Span>,
+) -> IrStmtKind {
+    let mut ir_val = lower_expr(ctx, value);
+    // An explicit `let x: T = ...` annotation wins over the structurally
+    // inferred type of the value. Otherwise two nominal record types with
+    // identical fields (`Dog` and `Cat`, both `{ name: String }`) collide at
+    // codegen, because the value keeps its structural type and
+    // `collect_named_records` keys by sorted field names.
+    let val_ty = match ty {
+        Some(te) => {
+            let declared = crate::canonicalize::resolve::resolve_type_expr_in(
+                te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()));
+            override_record_literal_ty(&mut ir_val, &declared, ctx.env);
+            declared
+        }
+        None => ir_val.ty.clone(),
+    };
+    let var = ctx.define_var(name, val_ty.clone(), mutability, span);
+    // #485: an EXPLICIT `Result[..]` annotation is the only signal that this
+    // binding keeps the Result (auto_try must not insert `?`). Un-annotated
+    // binds share the same `Bind.ty` shape when the callee itself declares
+    // `-> Result[..]`, so the distinction has to be recorded per VarId.
+    if ty.is_some() && val_ty.is_result() {
+        ctx.annotated_result_vars.insert(var);
+    }
+    IrStmtKind::Bind { var, mutability, ty: val_ty, value: ir_val }
 }
 
 /// Retag an anonymous record literal's IR type with the declared nominal type.
@@ -208,23 +213,11 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
     // Tuple arms are unaffected.
     let resolved = env.resolve_named(declared);
     let declared = &resolved;
+    if is_sized_numeric(declared) {
+        retype_scalar_literal(ir_val, declared);
+        return;
+    }
     match declared {
-        // Scalar sized numeric slot: retype a bare default-typed literal.
-        _ if is_sized_numeric(declared) => match &mut ir_val.kind {
-            IrExprKind::LitInt { .. } if ir_val.ty == Ty::Int => {
-                ir_val.ty = declared.clone();
-            }
-            IrExprKind::LitFloat { .. } if ir_val.ty == Ty::Float => {
-                ir_val.ty = declared.clone();
-            }
-            IrExprKind::UnOp { op: almide_ir::UnOp::NegInt, operand } => {
-                if matches!(&operand.kind, IrExprKind::LitInt { .. }) && operand.ty == Ty::Int {
-                    operand.ty = declared.clone();
-                    ir_val.ty = declared.clone();
-                }
-            }
-            _ => {}
-        },
         // List[T]: every element literal is coerced against T.
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
             if let IrExprKind::List { elements } = &mut ir_val.kind {
@@ -234,27 +227,66 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
             }
         }
         // Tuple([t0, t1, ...]): element i is coerced against t_i.
-        Ty::Tuple(elem_tys) => {
-            if let IrExprKind::Tuple { elements } = &mut ir_val.kind {
-                if elements.len() == elem_tys.len() {
-                    for (e, t) in elements.iter_mut().zip(elem_tys.iter()) {
-                        coerce_literal_to_sized(e, t, env);
-                    }
-                }
-            }
-        }
+        Ty::Tuple(elem_tys) => coerce_tuple_elements(ir_val, elem_tys, env),
         // Structural record annotation `{ b: Int8, n: Int }`: coerce each
         // field value against its declared field type, matched by name.
-        Ty::Record { fields: decl_fields } | Ty::OpenRecord { fields: decl_fields } => {
-            if let IrExprKind::Record { fields, .. } = &mut ir_val.kind {
-                for (fname, fvalue) in fields.iter_mut() {
-                    if let Some((_, fty)) = decl_fields.iter().find(|(n, _)| n == fname) {
-                        coerce_literal_to_sized(fvalue, fty, env);
-                    }
-                }
+        Ty::Record { fields: decl_fields } | Ty::OpenRecord { fields: decl_fields } =>
+            coerce_record_fields(ir_val, decl_fields, env),
+        _ => {}
+    }
+}
+
+/// Retype a bare default-typed literal to a sized numeric slot.
+///
+/// Only a literal is retyped. A non-literal expression already has whatever
+/// width its own operands gave it, and silently widening or narrowing that would
+/// change the arithmetic rather than just record the annotation.
+///
+/// The `NegInt` arm reaches through the negation because the parser produces
+/// `-(1)`, not a signed literal: both the operand and the negation node have to
+/// carry the sized type or codegen emits a width mismatch between them.
+fn retype_scalar_literal(ir_val: &mut IrExpr, declared: &Ty) {
+    match &mut ir_val.kind {
+        IrExprKind::LitInt { .. } if ir_val.ty == Ty::Int => {
+            ir_val.ty = declared.clone();
+        }
+        IrExprKind::LitFloat { .. } if ir_val.ty == Ty::Float => {
+            ir_val.ty = declared.clone();
+        }
+        IrExprKind::UnOp { op: almide_ir::UnOp::NegInt, operand } => {
+            if matches!(&operand.kind, IrExprKind::LitInt { .. }) && operand.ty == Ty::Int {
+                operand.ty = declared.clone();
+                ir_val.ty = declared.clone();
             }
         }
         _ => {}
+    }
+}
+
+/// Coerce a tuple literal's elements positionally.
+///
+/// A length mismatch is left alone: the checker reports it, and coercing a
+/// prefix would leave the value half-retyped behind that diagnostic.
+fn coerce_tuple_elements(ir_val: &mut IrExpr, elem_tys: &[Ty], env: &TypeEnv) {
+    let IrExprKind::Tuple { elements } = &mut ir_val.kind else { return };
+    if elements.len() != elem_tys.len() {
+        return;
+    }
+    for (e, t) in elements.iter_mut().zip(elem_tys.iter()) {
+        coerce_literal_to_sized(e, t, env);
+    }
+}
+
+/// Coerce a record literal's field values, matched by field name.
+///
+/// Matching by name rather than position is required: a record literal's fields
+/// are in source order while the declared fields are in declaration order.
+fn coerce_record_fields(ir_val: &mut IrExpr, decl_fields: &[(almide_base::intern::Sym, Ty)], env: &TypeEnv) {
+    let IrExprKind::Record { fields, .. } = &mut ir_val.kind else { return };
+    for (fname, fvalue) in fields.iter_mut() {
+        if let Some((_, fty)) = decl_fields.iter().find(|(n, _)| n == fname) {
+            coerce_literal_to_sized(fvalue, fty, env);
+        }
     }
 }
 
