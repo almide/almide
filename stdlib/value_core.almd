@@ -1187,3 +1187,42 @@ fn json_stringify_pretty_at(v: Value, d: Int) -> String = {
 }
 
 fn json_stringify_pretty(v: Value) -> String = json_stringify_pretty_at(v, 0)
+
+// ── `??` over ANY heap payload — the type-ERASED variants ──
+//
+// `option.unwrap_or_hx` / `result.unwrap_or_hx` were UNREGISTERED names, so a
+// payload with no shape-specific variant walled: `Option[Map[String, Int]]`,
+// `Option[(String, Int)]`, `Option[Option[String]]` and their Result twins were
+// the top remaining subset debt in the fuzz wall histogram (#812).
+//
+// A heap payload is ONE i32 handle whatever block it points at, and neither the
+// tag read nor the handle load inspects it — so one implementation per CONTAINER
+// (Option's len-as-tag @4, Result's cap-as-tag @16) covers every payload shape.
+// The shape-specific variants above stay: they exist for the DROP discipline of
+// their particular payload, and are tried first.
+//
+// OWNERSHIP: the kept payload handle is loaded and returned as a bare-Var tail,
+// which auto-acquires (Dup); the container keeps its own reference for the rest
+// of the call, so the count cannot reach 0 in between. The fallback is returned
+// as given. This is `option_listint_unwrap_or`'s discipline with the payload
+// type erased — `Value` is the opaque handle type the self-hosts use for
+// exactly this.
+fn option_unwrap_or_hx(o: Option[Value], d: Value) -> Value = {
+  let h = prim.handle(o)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then d
+  else {
+    let v: Value = prim.load_handle(h + 12)
+    v
+  }
+}
+
+fn result_unwrap_or_hx(r: Result[Value, String], d: Value) -> Value = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag != 0 then d
+  else {
+    let v: Value = prim.load_handle(h + 12)
+    v
+  }
+}

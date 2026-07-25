@@ -2111,3 +2111,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_f16_offset_overflow.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-172"
+spec      = "ALS-M12"
+title     = "unwrap_or over any heap payload yields the same value on both targets"
+statement = "`??` / `unwrap_or` over an `Option[T]` or `Result[T, E]` whose payload is heap-backed produces the same value on both targets, for the carried value and for the fallback alike, and leaves the source readable. The catch-all names `option.unwrap_or_hx` / `result.unwrap_or_hx` were UNREGISTERED, so every payload with no shape-specific variant WALLED — `Option[Map[String, Int]]`, `Option[(String, Int)]`, `Option[Option[String]]` and their Result twins, the top remaining subset debt in the fuzz wall histogram (#812). The restriction was not one the layout requires: a heap payload is ONE i32 handle whatever block it points at, and neither the tag read nor the handle load inspects it, so exactly one type-erased implementation per CONTAINER covers all of them — Option reads its len-as-tag at @4, Result its cap-as-tag at @16, and both load the payload handle at @12. The shape-specific variants above them stay and are still tried first: they exist for the DROP discipline of their particular payload, not for the unwrap itself. Ownership is `option_listint_unwrap_or`'s: the kept handle is returned as a bare-Var tail, which auto-acquires, while the container holds its own reference for the rest of the call, so the count cannot reach 0 in between."
+since     = "0.36.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_or_heap_payload.almd", class = "fixture" },
+]
