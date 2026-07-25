@@ -11,7 +11,8 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn compile_source_to_wasm(source: &str) -> Result<Vec<u8>, String> {
-    let wat_text = almide_mir::pipeline::try_render_wasm_source(source, &[], false)
+    let bundled = almide_mir::pipeline::bundled_self_modules(source);
+    let wat_text = almide_mir::pipeline::try_render_wasm_source(source, &bundled, false)
         .map_err(|e| format!("wall: {e:?}"))?;
     wat::parse_str(&wat_text).map_err(|e| format!("wat: {e}"))
 }

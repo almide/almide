@@ -530,6 +530,57 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
 /// Returns `Ok(wat)` when the WHOLE program lowers (every function in-subset, `main` present, no
 /// unlinked call), else `Err(LowerError::Unsupported(..))` — a clean WALL the caller can fall back
 /// from (v0 codegen). NEVER a wrong module: honest-wall.
+/// Resolve the BUNDLED stdlib modules a single-file program needs — the
+/// standalone-harness subset of the CLI resolver (`src/resolve.rs`): every
+/// auto-import bundled module, plus every explicitly imported bundled module,
+/// each with its bundled dependencies, depth-first in import order (the same
+/// visit order `load_bundled_module` produces — deterministic, deduped).
+/// Callers with a real resolver (the CLI) never need this; the wasmgen
+/// harnesses do, so a fixture with `import path` renders instead of walling.
+pub fn bundled_self_modules(source: &str) -> Vec<(String, almide_lang::ast::Program, bool)> {
+    use std::collections::HashSet;
+    fn add(
+        name: &str,
+        out: &mut Vec<(String, almide_lang::ast::Program, bool)>,
+        seen: &mut HashSet<String>,
+    ) {
+        if seen.contains(name) {
+            return;
+        }
+        let Some(src) = almide_lang::stdlib_info::bundled_source(name) else { return };
+        let Some(prog) = almide_lang::parse_cached(src) else { return };
+        let prog = prog.clone();
+        seen.insert(name.to_string());
+        for imp in &prog.imports {
+            if let almide_lang::ast::Decl::Import { path, .. } = imp {
+                if let Some(dep) = path.first() {
+                    add(dep.as_str(), out, seen);
+                }
+            }
+        }
+        out.push((name.to_string(), prog, false));
+    }
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    // The top source is caller-owned (not 'static) — parse directly instead
+    // of through the 'static-keyed AST cache.
+    let tokens = almide_lang::lexer::Lexer::tokenize(source);
+    let mut parser = almide_lang::parser::Parser::new(tokens);
+    if let Ok(prog) = parser.parse() {
+        for imp in &prog.imports {
+            if let almide_lang::ast::Decl::Import { path, .. } = imp {
+                if let Some(root) = path.first() {
+                    add(root.as_str(), &mut out, &mut seen);
+                }
+            }
+        }
+    }
+    for name in almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED {
+        add(name, &mut out, &mut seen);
+    }
+    out
+}
+
 pub fn try_render_wasm_source(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
