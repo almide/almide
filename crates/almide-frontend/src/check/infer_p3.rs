@@ -666,6 +666,19 @@ impl Checker {
         }
     }
 
+    /// The ELEMENT type of an annotated homogeneous collection, when the element
+    /// is a concrete SIZED integer — the only case where an element literal's
+    /// range differs from the default `Int` context.
+    fn annotated_element_ty(declared: &Ty) -> Option<Ty> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let Ty::Applied(TC::List | TC::Set, args) = declared else { return None };
+        let [elem] = args.as_slice() else { return None };
+        matches!(elem,
+            Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+        ).then(|| elem.clone())
+    }
+
     /// Identify the underlying `Int` literal site (id, raw text, negated) of
     /// `value` — either a bare literal, a `-<literal>` unary, or a
     /// parenthesized literal. Verbatim text move out of
@@ -688,6 +701,27 @@ impl Checker {
     }
 
     pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
+        // A COLLECTION literal against an annotated element type pins each
+        // ELEMENT: `let bs: List[Int8] = [1, 256]` narrows every element to i8 in
+        // codegen, so `256` must face the Int8 range check here — it did not, and
+        // rustc rejected `256i8` after `check` accepted (differential-fuzz, seed
+        // 1784965680755102000; the same check-vs-build gap #626/index 92 closed for
+        // scalar bindings). Recurses so a nested annotation reaches through.
+        if let Some(elem_ty) = Self::annotated_element_ty(declared) {
+            match &value.kind {
+                ExprKind::List { elements, .. } => {
+                    for e in elements {
+                        self.record_int_literal_context(e, &elem_ty);
+                    }
+                    return;
+                }
+                ExprKind::Paren { expr } => {
+                    self.record_int_literal_context(expr, declared);
+                    return;
+                }
+                _ => {}
+            }
+        }
         let (lit_id, raw, negated) = Self::int_literal_context_site(value);
         if let Some(id) = lit_id {
             if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {

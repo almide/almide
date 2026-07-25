@@ -118,8 +118,15 @@ fn matrix_swiglu_gate(x: List[List[Float]], w_gate: List[List[Float]], w_up: Lis
   // d_in = columns = length of x's first row (0 for an empty matrix).
   let d_in = if r == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
   let d_out = prim.load32(prim.handle(w_gate) + 4)
-  let out: List[List[Float]] = prim.alloc_list_str(r)
-  let _x = __sg_rows(prim.handle(out), x, w_gate, w_up, r, d_out, d_in, 0)
+  let up_rows = prim.load32(prim.handle(w_up) + 4)
+  // An EMPTY operand yields the EMPTY matrix, matching the native oracle's
+  // `if x.is_empty() || w_gate.is_empty() || w_up.is_empty() { return vec![] }`.
+  // Without the weight half of that guard this built `r` rows of width 0, so a
+  // clamped-away weight matrix (C-161) gave 4x0 here and 0x0 natively
+  // (differential-fuzz, seed 1784965680755102000).
+  let rows = if r == 0 or d_out == 0 or up_rows == 0 then 0 else r
+  let out: List[List[Float]] = prim.alloc_list_str(rows)
+  let _x = __sg_rows(prim.handle(out), x, w_gate, w_up, rows, d_out, d_in, 0)
   out
 }
 

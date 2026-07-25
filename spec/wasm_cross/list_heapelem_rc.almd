@@ -19,6 +19,9 @@ effect fn main() -> Unit = {
   println("tup.drop_end  = " + list.join(list.map(list.drop_end(tup, 1), cell), ","))
   println("tup.tail      = " + list.join(list.map(list.tail(tup), cell), ","))
   println("tup.src       = " + list.join(list.map(tup, cell), ","))
+  // `update` takes a FUNCTION, not a replacement value — a distinct twin from `set`.
+  println("tup.update    = " + list.join(list.map(list.update(tup, 1, (p) => (8.0, true)), cell), ","))
+  println("tup.update_oob= " + list.join(list.map(list.update(tup, 99, (p) => (8.0, true)), cell), ","))
 
   let recs: List[Pt] = [Pt { x: 1, tag: "a" }, Pt { x: 2, tag: "b" }, Pt { x: 3, tag: "c" }]
   println("rec.remove_at = " + list.join(list.map(list.remove_at(recs, 1), pshow), ","))
@@ -31,4 +34,5 @@ effect fn main() -> Unit = {
   println("nest.take_end = " + list.join(list.map(list.take_end(nested, 2), ints), "|"))
   println("nest.swap     = " + list.join(list.map(list.swap(nested, 0, 2), ints), "|"))
   println("nest.src      = " + list.join(list.map(nested, ints), "|"))
+  println("nest.update   = " + list.join(list.map(list.update(nested, 1, (v) => [7, 7]), ints), "|"))
 }

@@ -42,6 +42,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     // from the element's static type (`__drop_list_<R>` / DropListStrStr / …).
     "__lsh_copy",         // list.{set,insert,remove_at,swap,take_end,drop_end,tail}_heapelem
     "__lsh_insert_fill",  // list.insert_heapelem — rc_inc the inserted element
+    "__lshu_val",         // list.update_heapelem — rc_inc each shared (non-updated) element
     "__ls_insert_fill",   // list.insert_str — rc_inc the inserted String
     "__lsuv_val",         // list.update_value — rc_inc each shared (non-updated) Value element
     "__lsu_val_str",      // list.update_str — rc_inc each shared (non-updated) String element

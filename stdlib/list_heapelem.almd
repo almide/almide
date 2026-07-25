@@ -60,10 +60,44 @@ fn list_set_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   buf
 }
 
-// `update` is `set` with the new element already computed by the caller — the
-// defunctionalizer applies the closure at the call site, so the twin is `set`.
-fn list_update_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] =
-  list_set_heapelem(xs, i, x)
+// `list.update(xs, i, f)` takes a FUNCTION, not a replacement value — the closure
+// is invoked per element, so this is NOT `set` with a precomputed value (an early
+// draft made that mistake and stored the closure handle into the element slot, which
+// rc_dec'd as an element and trapped). Single-pass fill, mirroring `__lsuv_val`:
+// each slot acquires its own reference, and the hit slot acquires one for the
+// closure's OWNED return so the lowering's scope-end auto-release consumes the +1.
+// Nothing is dropped here, so there is no recursive-drop dependency.
+fn __lshu_val(hit: Bool, addr: Int, old: Value, f: (Value) -> Value) -> Int =
+  if hit then {
+    let nv = f(old)
+    let nh = prim.handle(nv)
+    prim.rc_inc(nh)
+    prim.store64(addr, nh)
+    0
+  }
+  else {
+    let h = prim.handle(old)
+    prim.rc_inc(h)
+    prim.store64(addr, h)
+    0
+  }
+
+fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old: Value = prim.load_handle(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lshu_val(hit, bh + 12 + j * 8, old, f)
+    __lshu_fill(sh, bh, n, i, f, j + 1)
+  }
+
+fn list_update_heapelem(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf: List[Value] = prim.alloc_list_str(n)
+  let _c = __lshu_fill(h, prim.handle(buf), n, i, f, 0)
+  buf
+}
 
 fn __lsh_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: Value) -> Int = {
   let _a = __lsh_copy(srcbase, dstbase, idx, 0)
