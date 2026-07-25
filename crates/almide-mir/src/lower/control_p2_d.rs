@@ -1,3 +1,15 @@
+/// One arm of a variant match: which constructor it selects, and what it
+/// evaluates to.
+///
+/// The pattern kind decides how the payload is bound, so lowering a body
+/// against a different arm's kind reads the wrong fields — the two are one
+/// value.
+#[derive(Copy, Clone)]
+pub(crate) struct VariantArm<'a> {
+    pub kind: &'a VariantArmKind,
+    pub body: &'a IrExpr,
+}
+
 impl LowerCtx {
 
     fn tuple_refinement_chain(
@@ -246,7 +258,7 @@ impl LowerCtx {
         };
         let emitted = if sole_ctor_heap {
             let (kind, body) = &plans[0];
-            self.emit_single_ctor_heap_arm(h, tag, kind, body, result_ty, subj)
+            self.emit_single_ctor_heap_arm(h, tag, VariantArm { kind, body }, result_ty, subj)
         } else {
             self.emit_variant_arm_chain(h, tag, &plans, result_ty, subj)
         };
@@ -270,11 +282,11 @@ impl LowerCtx {
         &mut self,
         h: ValueId,
         tag: ValueId,
-        kind: &VariantArmKind,
-        body: &IrExpr,
+        arm: VariantArm<'_>,
         result_ty: &Ty,
         subj: ValueId,
     ) -> Option<ValueId> {
+        let VariantArm { kind, body } = arm;
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
             VariantArmKind::Wildcard | VariantArmKind::BindAll { .. } => return None,
@@ -285,7 +297,7 @@ impl LowerCtx {
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: Some(dst) });
-        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, true, subj)?;
+        let then_v = self.lower_variant_arm_value(VariantArm { kind, body }, h, result_ty, true, subj)?;
         self.ops.push(Op::Else { val: Some(then_v) });
         // The dead `else`: a fresh owned empty-string block (a heap i32 handle, repr-compatible with
         // any heap result). `Consume` moves it into `dst` exactly as a real arm value would.
@@ -597,7 +609,7 @@ impl LowerCtx {
         let ((kind, body), rest) = plans.split_first()?;
         // The last arm, or any Wildcard, is the unconditional else (no tag test).
         if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard | VariantArmKind::BindAll { .. }) {
-            return self.lower_variant_arm_value(kind, body, h, result_ty, heap, subj);
+            return self.lower_variant_arm_value(VariantArm { kind, body }, h, result_ty, heap, subj);
         }
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
@@ -616,7 +628,7 @@ impl LowerCtx {
         // versa — otherwise the accounting is path-dependent (the branch-grouped
         // cert `{m|}` rejects it; this keeps the lowering ahead of the checker).
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
-        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, heap, subj)?;
+        let then_v = self.lower_variant_arm_value(VariantArm { kind, body }, h, result_ty, heap, subj)?;
         let consumed_by_then: Vec<ValueId> =
             outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
         let else_marker_at = self.ops.len();
@@ -653,13 +665,13 @@ impl LowerCtx {
     /// nothing to the frame, so this is a no-op for the brick-2/3 paths.
     fn lower_variant_arm_value(
         &mut self,
-        kind: &VariantArmKind,
-        body: &IrExpr,
+        arm: VariantArm<'_>,
         h: ValueId,
         result_ty: &Ty,
         heap: bool,
         subj: ValueId,
     ) -> Option<ValueId> {
+        let VariantArm { kind, body } = arm;
         let mark = self.live_heap_handles.len();
         self.bind_variant_arm(kind, h, subj);
         let v = if heap {

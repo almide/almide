@@ -53,12 +53,12 @@ impl LowerCtx {
     fn try_lower_defunc_scalar_tuple_fold(
         &mut self,
         xs: &IrExpr,
-        params: &[(VarId, Ty)],
-        body: &IrExpr,
+        lambda: DefuncLambda<'_>,
         init: &IrExpr,
         fuse_index: Option<VarId>,
         result_ty: &Ty,
     ) -> Option<ValueId> {
+        let DefuncLambda { params, body } = lambda;
         use crate::{IntOp, PrimKind};
         use almide_ir::{IrPattern, IrStmtKind};
         // Accumulator type: a 2-tuple of scalars; the result is the same tuple.

@@ -1,23 +1,42 @@
 
 /// Rewrite tail leaves: a self-call → a Block assigning each CARRIED param to its new arg; a base
 /// → `result_kind = <its 1-based kind>` (kinds assigned in `tco_collect`'s left-to-right order).
-fn tco_rewrite(
-    body: &IrExpr,
-    fn_name: &str,
-    params: &[almide_ir::IrParam],
-    carried: &[bool],
-    rk: VarId,
-    next_kind: &mut i64,
-    idx: Option<VarId>,
-    next_var: &mut u32,
-    result: Option<VarId>,
-) -> IrExpr {
+/// The fixed shape of the function a TCO rewrite is threading through.
+///
+/// Everything here is decided once, before the walk starts, and read at every
+/// node — as opposed to the two counters, which the walk advances.
+#[derive(Copy, Clone)]
+pub(crate) struct TcoShape<'a> {
+    pub fn_name: &'a str,
+    pub params: &'a [almide_ir::IrParam],
+    /// Which parameters are loop-carried.
+    pub carried: &'a [bool],
+    /// The variable holding the rewritten call's dispatch kind.
+    pub rk: VarId,
+    /// The induction variable, when the rewrite introduced one.
+    pub idx: Option<VarId>,
+    /// The variable the loop's result lands in.
+    pub result: Option<VarId>,
+}
+
+/// The counters a TCO rewrite advances as it walks.
+///
+/// Both are `&mut` and were adjacent parameters of different integer widths, so
+/// they could not be transposed — but they belong together, and passing them as
+/// one makes every recursive call site one argument instead of two.
+pub(crate) struct TcoCounters<'a> {
+    pub next_kind: &'a mut i64,
+    pub next_var: &'a mut u32,
+}
+
+fn tco_rewrite(body: &IrExpr, shape: TcoShape<'_>, counters: &mut TcoCounters<'_>) -> IrExpr {
+    let TcoShape { fn_name, params, carried, rk, idx, result } = shape;
     match &body.kind {
         IrExprKind::If { cond, then, else_ } => tco_ir(
             IrExprKind::If {
                 cond: cond.clone(),
-                then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind, idx, next_var, result)),
-                else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind, idx, next_var, result)),
+                then: Box::new(tco_rewrite(then, shape, counters)),
+                else_: Box::new(tco_rewrite(else_, shape, counters)),
             },
             Ty::Unit,
         ),
@@ -31,7 +50,7 @@ fn tco_rewrite(
                     .map(|a| almide_ir::IrMatchArm {
                         pattern: a.pattern.clone(),
                         guard: a.guard.clone(),
-                        body: tco_rewrite(&a.body, fn_name, params, carried, rk, next_kind, idx, next_var, result),
+                        body: tco_rewrite(&a.body, shape, counters),
                     })
                     .collect(),
             },
@@ -40,7 +59,7 @@ fn tco_rewrite(
         IrExprKind::Block { stmts, expr: Some(tail) } => tco_ir(
             IrExprKind::Block {
                 stmts: stmts.clone(),
-                expr: Some(Box::new(tco_rewrite(tail, fn_name, params, carried, rk, next_kind, idx, next_var, result))),
+                expr: Some(Box::new(tco_rewrite(tail, shape, counters))),
             },
             Ty::Unit,
         ),
@@ -56,7 +75,7 @@ fn tco_rewrite(
                 IrExprKind::Call { target: CallTarget::Named { name }, .. }
                     if name.as_str() == fn_name) =>
         {
-            tco_rewrite(expr, fn_name, params, carried, rk, next_kind, idx, next_var, result)
+            tco_rewrite(expr, shape, counters)
         }
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == fn_name =>
@@ -75,8 +94,8 @@ fn tco_rewrite(
             // Phase 1: stage carried SCALAR args in temps (read OLD params).
             for i in 0..params.len() {
                 if changed(i) && !is_heap_ty(&params[i].ty) {
-                    let t = VarId(*next_var);
-                    *next_var += 1;
+                    let t = VarId(*counters.next_var);
+                    *counters.next_var += 1;
                     stmts.push(IrStmt {
                         kind: IrStmtKind::Bind {
                             var: t,
@@ -146,8 +165,8 @@ fn tco_rewrite(
             //     loop-body-local (those are dead in the post-loop dispatch — the parse_rows_rec bug).
             //   • post-loop dispatch (`result = None`): just record WHICH base via `rk = k`; the value
             //     is recomputed after the loop. Sound ONLY when the base closes over carried params.
-            let k = *next_kind;
-            *next_kind += 1;
+            let k = *counters.next_kind;
+            *counters.next_kind += 1;
             let mut stmts: Vec<IrStmt> = Vec::new();
             if let Some(rv) = result {
                 stmts.push(IrStmt {
@@ -524,7 +543,12 @@ pub(crate) fn try_tco_rewrite(
     // `slot_next` is the next free VarId (after rk / list-iter idx / append slots / result) — tco_rewrite
     // draws its simultaneous-update temps from here.
     let loop_body = tco_rewrite(
-        work_ref, fn_name, params2, &carried, rk, &mut next_kind, idx_var, &mut slot_next, result_var,
+        work_ref,
+        TcoShape {
+            fn_name, params: params2, carried: &carried, rk,
+            idx: idx_var, result: result_var,
+        },
+        &mut TcoCounters { next_kind: &mut next_kind, next_var: &mut slot_next },
     );
 
     // `rk == k` (the loop guard uses `rk == 0`; the post-loop dispatch uses `rk == <base kind>`).

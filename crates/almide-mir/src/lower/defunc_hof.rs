@@ -1,3 +1,14 @@
+/// The accumulator of a defunctionalised list HOF.
+///
+/// `init` is the fold seed (absent for map/filter); `result_elem` is the
+/// element type of the produced list (absent for a fold, which produces a
+/// scalar). Exactly one of the two shapes applies per HOF, so carrying them
+/// together keeps that pairing in one place.
+pub(crate) struct DefuncAcc<'a> {
+    pub init: Option<&'a IrExpr>,
+    pub result_elem: Option<Ty>,
+}
+
 /// The closure a defunctionalised list HOF applies.
 ///
 /// Its parameters and body always travel together — a body lowered against a
@@ -290,14 +301,14 @@ impl LowerCtx {
                     && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]))
                 {
                     if let Some(dst) = self.try_lower_defunc_scalar_tuple_fold(
-                        xs, params, body, init_e, fuse_index, result_ty,
+                        xs, DefuncLambda { params, body }, init_e, fuse_index, result_ty,
                     ) {
                         return Some(dst);
                     }
                 }
                 // (scalar, Option[scalar]) accumulator — the find_chunk scanner.
                 if let Some(dst) = self.try_lower_defunc_opt_tuple_fold(
-                    xs, params, body, init_e, fuse_index, result_ty,
+                    xs, DefuncLambda { params, body }, init_e, fuse_index, result_ty,
                 ) {
                     return Some(dst);
                 }
@@ -321,8 +332,7 @@ impl LowerCtx {
                 func,
                 xs,
                 DefuncLambda { params, body },
-                init_idx.map(|i| &args[i]),
-                result_elem,
+                DefuncAcc { init: init_idx.map(|i| &args[i]), result_elem },
                 DefuncFusion { index: fuse_index, second: fuse_second.as_ref() },
             )
         };
@@ -344,10 +354,10 @@ impl LowerCtx {
         func: &str,
         xs: &IrExpr,
         lambda: DefuncLambda<'_>,
-        init: Option<&IrExpr>,
-        result_elem: Option<Ty>,
+        acc: DefuncAcc<'_>,
         fuse: DefuncFusion<'_>,
     ) -> Option<ValueId> {
+        let DefuncAcc { init, result_elem } = acc;
         let DefuncLambda { params, body } = lambda;
         let DefuncFusion { index: fuse_index, second: fuse_second } = fuse;
         use crate::PrimKind;
