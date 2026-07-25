@@ -9,6 +9,124 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.35.0] — 2026-07-25
+
+A correctness release, driven by the differential fuzzer and the issue ledger:
+ten cross-target divergences fixed, three v1 subset walls closed, and two
+acceptance gaps where `almide check` passed but the generated code did not
+build. Four new behaviour contracts (C-161…C-164) and eight new cross-target
+fixtures pin the results.
+
+### Fixed — cross-target equivalence
+
+- **Matrix constructor dimensions** (C-161): a negative dimension clamps to 0
+  (the empty matrix), and an element count over a shared 2^28 ceiling aborts
+  with `Error: matrix dimensions too large` + exit 1 on both targets. A
+  transformer-shaped program built with `seq = -2147483648` used to crash on
+  both legs in DIFFERENT forms — native a raw-vec capacity-overflow panic
+  (exit 101), wasm an out-of-bounds trap (exit 134) — and the T6 convention
+  permits neither. (#849)
+- **`io.write` / `io.write_bytes`** (C-162): both are now self-hosted on wasm
+  over the single-iovec `prim.fd_write` floor, carrying the same
+  `Capability::Stdout` as `io.print`. They also emit in PROGRAM order: native
+  routed them through a 64 KiB `BufWriter` flushed only at exit while
+  `println!` wrote through Rust's own `Stdout`, so interleaved output came out
+  reordered — wrong even native-only. (#805)
+- **A heap-result `if`/`match` bound to a let/var** (C-163) executes the taken
+  arm on both legs. The missing case was a String LITERAL payload under
+  `some(...)`, which is exactly the archived café fuzz finding. (#860)
+- **List modifiers and suffix copies over tuple / record / nested-list
+  elements** (C-164): `set`/`update`/`insert`/`remove_at`/`swap` and
+  `take_end`/`tail`/`drop_end` now have rc-correct twins, so the result
+  co-owns each copied element and the source stays readable. They previously
+  routed to an unregistered name and walled. (#850, #808)
+- **Negative offsets and widths are total** (C-034): every `bytes.read_*`
+  offset guard is `checked_add` (a negative `pos` became a huge `usize` and the
+  addition wrapped back into range, panicking in the slice index);
+  `bytes.read_f16_le`'s wasm self-host gained the negative guard its siblings
+  had; `string.pad_start`/`pad_end` clamp the width signed; `bytes.copy_to_ptr`
+  clamps its capacity unsigned; and a `repeat` past a shared 2^31-byte ceiling
+  aborts identically on both legs.
+- **`float.to_fixed` at wide precision** (C-155): the digit scratch was sized
+  for an f64's ~1074-digit exact expansion but `nd` reaches 4096, so anything
+  past the boundary read adjacent heap on wasm. The pre-existing fixture could
+  not catch it — it truncated the expansion to six characters.
+- **`string.replace_first` with an empty needle**: the not-found sentinel was
+  `send`, which collides with an empty needle's legitimate match AT `send`, so
+  `replace_first("", "", to)` returned the haystack unchanged on wasm.
+- **`matrix.swiglu_gate` with an empty weight matrix** now yields the empty
+  matrix on both legs, matching the native oracle's empty-operand guard.
+
+### Fixed — check-accepted-must-build
+
+- **Intrinsic borrow modes come from the runtime's own signature**: `build.rs`
+  extracts the per-parameter `&mut`-ness of every `pub fn almide_rt_*` from
+  `runtime/rs/src/`, so a read-only helper is never handed `&mut`. The old
+  heuristic ("returns Unit ⇒ mutates arg 0") emitted
+  `almide_rt_io_write(&mut chunk)` against a `&Vec<u8>` parameter — E0596 on
+  the mandelbrot bench, and latent for `io.write_bytes` and
+  `testing.assert_contains` too. (#803)
+- **A write-only `var` survives dead-binding elimination**: an index-assign is
+  a write, so `use_count` never counted it and DCE stripped the `let` while the
+  write-back still named it (E0425). DCE and the unused-variable warning both
+  consult the mutation targets now. (#857)
+- **Sized-int collection literals are range-checked**: `let bs: List[Int8] =
+  [1, 256]` compiled and then rustc rejected `256i8`; element literals now pin
+  the annotated element type so the existing E024 check fires.
+- **`mem.save` / `mem.restore` have native bodies**: they declared
+  `almide_rt_mem_*` symbols the runtime never defined, so any program calling
+  them emitted invalid Rust.
+
+### Fixed — diagnostics
+
+- **An imported module's type errors reach the importer** (#862): module bodies
+  were never inferred on the check path, and the build drivers appended
+  `infer_module`'s diagnostics to a list nobody read. `almide check`, `build`
+  and `test` now all fail, citing the module's own file. A `base64` E006 lived
+  for weeks behind this. Surfacing it also fixed two latent false positives it
+  had been hiding: a phantom E019 ("ambiguous constructor 'Wrap': declared in
+  Wrapper and Wrapper") and a phantom E020 for a legal same-name type across
+  packages.
+
+### Changed — wasm subset coverage
+
+- **`almide test` runs test blocks on the wasm leg for files that also declare
+  `main`**, mirroring native test mode (which compiles `main` but never calls
+  it). That alone moved 17 spec files off the native fallback. (#813)
+- **Bundled stdlib modules link per FUNCTION**: an intrinsic-bearing module now
+  contributes its pure-Almide extensions (`list.split_at`, `iterate`,
+  `bundled_probe`) as ordinary linked siblings while its intrinsic-backed fns
+  keep registry dispatch. (#812)
+- **Name-keyed stdlib decisions strip the monomorphization suffix**:
+  `option.collect__Int` missed the materialized-variant read-shape test, so a
+  `match` over its result was untracked and walled. (#812)
+- Native fallbacks in `spec/` went from 32 to 12, of which 8 are genuinely
+  host-dependent `// wasm:skip` files.
+
+### Added — tooling
+
+- **`ALMIDE_WALL_REASON=1`** names which stage declined a wasm render (render /
+  wat assemble / validate) and threads the per-function reason through, so a
+  fallback file no longer needs hand-derivation through `render_program`.
+- **`almide compile <module> --json` serves bundled-only modules**: `path`,
+  `args`, `html` and `mem` reported "module not found" for modules the binary
+  carries the source of. `html` had no `bundled_source` arm at all; a unit test
+  now keeps the two lists in step. (#863)
+
+### Added — documentation
+
+- **Eight new stdlib pages** with machine-owned signature indexes: `path`,
+  `args`, `html`, `mem`, `net`, `zlib`, `base64`, `hex`. Their worked examples
+  are executable (`spec/stdlib/bundled_module_docs_test.almd`), which is how
+  two of the defects above were found. (#863)
+- **`docs/wasm/` design memos archived**: six 2026-04 notes that pre-date the
+  v1 trust spine moved under `docs/wasm/archive/` with a banner naming why.
+  `memory-model.md` described two linear memories and a bump allocator with no
+  free, which the shipped compiler does not implement. (#863)
+- **Roadmap index complete**: 34 missing `<!-- description: -->` and 21 missing
+  `<!-- done: -->` tags filled — descriptions authored from each file's own
+  title, dates derived from git history. (#858)
+
 ## [0.29.0] — 2026-07-15
 
 ### Changed — compilation
