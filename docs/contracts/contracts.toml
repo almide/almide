@@ -2034,3 +2034,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_heapelem_rc.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-165"
+spec      = "ALS-M10"
+title     = "fold over a String-keyed map, a String list or a String set threads a heap accumulator on both targets"
+statement = "`map.fold` / `list.fold` / `set.fold` with a HEAP accumulator — a String, List or Map built up across the fold — computes the same value on both targets for every String-keyed subject layout. The v1 leg walled most of them: the heap-accumulator variants were self-hosted only for the all-String map layout with a String accumulator, so `map.fold([\"a\": 1], \"\", …)` over the skv layout (String keys, i64 values), the keys-collect shape `map.fold(m, [], (acc, k, v) => acc + [k])`, and every `set.fold` routed to the unregistered `map.fold_hacc` / `set.fold_hacc` and declined the whole program. The restriction was not one the layouts require: a heap accumulator is ONE i32 handle whatever block it points at, and the fold loop never inspects it — the accumulator MOVES into `f` each iteration and the result comes back — so exactly one variant per SUBJECT layout serves String, List and Map accumulators alike. Two walks now cover all of it: the interleaved 16-byte pair walk (`Map[String, String]`) and the split keys-then-values 8-byte walk (`Map[String, <scalar>]`), plus one type-erased `List[String]` walk that `Set[String]` shares because a Set[String] IS a DynListStr block of unique, insertion-ordered Strings. Keys and elements stay BORROWED (the subject keeps ownership and is readable after the fold); the final accumulator is the owned result."
+since     = "0.36.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/map_fold_heap_acc_skv.almd", class = "fixture" },
+]
