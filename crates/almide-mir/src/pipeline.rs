@@ -43,13 +43,34 @@ fn user_module_fn_name(module: &str, func: &str) -> String {
 /// dotted stdlib call (`is_known_free`). A self-pkg call to an EFFECTFUL user fn therefore
 /// surfaces its capability transitively, exactly like any direct user call. A STDLIB module
 /// (`string`, bundled `json`, …) is NOT rewritten. No-op when there are no linked user modules.
+/// A module whose functions should link like ordinary user siblings.
+/// User modules always; a BUNDLED stdlib module qualifies too when ALL its
+/// fns are pure Almide (no @intrinsic / @inline_rust / @wasm_intrinsic /
+/// @extern, no hole bodies) — `import path` / `import args` then lower as
+/// real linked modules instead of walling as "unlinked stdlib call".
+/// Intrinsic-bearing bundled modules (json, …) keep registry-backed dispatch.
+pub(crate) fn is_linkable_module(m: &almide_ir::IrModule) -> bool {
+    let n = m.name.as_str();
+    if !almide_lang::stdlib_info::is_any_stdlib(n) {
+        return true;
+    }
+    almide_lang::stdlib_info::is_bundled_module(n)
+        && m.functions.iter().all(|f| {
+            f.extern_attrs.is_empty()
+                && !f.attrs.iter().any(|a| {
+                    matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic")
+                })
+                && !matches!(f.body.kind, almide_ir::IrExprKind::Hole)
+        })
+}
+
 fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     use almide_ir::{walk_expr_mut, CallTarget, IrExprKind, IrMutVisitor};
     use almide_lang::intern::sym;
     let user_mods: std::collections::HashMap<String, std::collections::HashSet<String>> = ir
         .modules
         .iter()
-        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
+        .filter(|m| is_linkable_module(m))
         .map(|m| {
             (
                 m.name.as_str().to_string(),

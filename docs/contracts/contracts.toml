@@ -1972,3 +1972,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/binary_search_duplicate_keys.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-160"
+spec      = "ALS-D4"
+title     = "Pure-Almide bundled stdlib modules link and run byte-identically on wasm"
+statement = "A BUNDLED stdlib module whose functions are all pure Almide (no @intrinsic / @inline_rust / @wasm_intrinsic / @extern, no hole bodies — today `path` and `args`) links on the wasm target exactly like a user sibling module and produces byte-identical observable output to native. Previously every stdlib-named module was excluded from call resolution, so `import path` walled as an unlinked stdlib call; additionally env.args's WASI out-pointers came from the tightly-packing bump allocator unaligned, trapping (`Pointer not aligned to 4`) on the second args_sizes_get call. Intrinsic-bearing bundled modules (json, ...) keep registry-backed dispatch."
+since     = "0.34.4"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bundled_pure_modules.almd", class = "fixture" },
+]

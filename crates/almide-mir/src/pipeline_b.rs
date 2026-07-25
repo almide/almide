@@ -177,7 +177,7 @@ fn inline_and_classify_cross_module_fns(
     let mut module_fn_sibs: Vec<almide_ir::IrFunction> = ir
         .modules
         .iter()
-        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
+        .filter(|m| crate::pipeline::is_linkable_module(m))
         .flat_map(|m| {
             let mname = m.name.as_str().to_string();
             // INTRA-MODULE bare sibling calls resolve MODULE-LOCALLY (the #692 rule:
@@ -316,7 +316,7 @@ fn bridge_cross_module_derived_methods(
         ir.type_decls.iter().map(|td| td.name.as_str()).collect();
     let mut owners: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
     for m in &ir.modules {
-        if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+        if !crate::pipeline::is_linkable_module(m) {
             continue;
         }
         for td in &m.type_decls {
