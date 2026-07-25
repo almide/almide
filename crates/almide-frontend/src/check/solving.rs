@@ -16,54 +16,43 @@ impl Checker {
         // Emit diagnostics for unresolvable mismatches
         for c in &constraints {
             if !self.unify_infer(&c.expected, &c.actual) {
-                let exp = resolve_ty(&c.expected, &self.uf);
-                let act = resolve_ty(&c.actual, &self.uf);
-                if exp != Ty::Unknown && act != Ty::Unknown {
-                    let base = match c.context.as_str() {
-                        "match arm" => "All match arms must share the same type. Change the mismatched arm to return the same type as the others, or change the first arm",
-                        "if branches" | "if arm" => "Both branches of `if/then/else` must have the same type",
-                        _ => "Fix the expression type or change the expected type",
-                    };
-                    let base = if c.context == "fan.map callback" {
-                        "Return ok(value) / err(reason) from the mapper"
-                    } else { base };
-                    let hint = Self::hint_with_conversion(base, &exp, &act);
-                    // Context-specific try: snippet for the "Unit leak" failure
-                    // mode — a statement (assignment / lone `let`) slips into a
-                    // position expected to produce a value. dojo data shows this
-                    // is the top E001 pattern for both 70b and 8b.
-                    let try_snippet = unit_leak_snippet(&c.context, &exp, &act, c.fix_hint.as_ref());
-                    // Temporarily swap in the constraint's own span so the
-                    // error is reported at the call site where the constraint
-                    // was introduced, not at wherever checking happened to
-                    // end up.
-                    let saved_span = self.current_span;
-                    if c.span.is_some() {
-                        self.current_span = c.span;
-                    }
-                    // #547: post-unify rendering is CONTAMINATED for rule-
-                    // bearing constraints (pass 1 partially binds vars even on
-                    // failure, so both sides print with each other's pieces —
-                    // the fan.map case showed `expected fn(Result[..]) -> ..`
-                    // where the param is Int). A constraint that ENCODES a
-                    // language rule states the rule instead of the pair.
-                    let msg = if c.context == "fan.map callback" {
-                        "fan.map callback must return Result[T, String] — \
-                         wrap the value: `(x) => ok(x * 10)`. (race/any/settle \
-                         thunks auto-wrap pure values; map mappers are \
-                         effectful by contract and do not.)".to_string()
-                    } else {
-                        format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display())
-                    };
-                    let mut diag = err(msg, hint, c.context.clone()).with_code("E001");
-                    if let Some(snippet) = try_snippet {
-                        diag = diag.with_try(snippet);
-                    }
-                    self.emit(diag);
-                    self.current_span = saved_span;
-                }
+                self.report_constraint_mismatch(c);
             }
         }
+    }
+
+    /// Emit the E001 for one constraint that could not be satisfied.
+    ///
+    /// A side that resolves to `Unknown` is suppressed: `Unknown` is the
+    /// checker's own error-recovery type, so the real diagnostic was already
+    /// emitted where inference failed and reporting the derived mismatch would
+    /// be a cascade.
+    fn report_constraint_mismatch(&mut self, c: &super::types::Constraint) {
+        let exp = resolve_ty(&c.expected, &self.uf);
+        let act = resolve_ty(&c.actual, &self.uf);
+        if exp == Ty::Unknown || act == Ty::Unknown {
+            return;
+        }
+        let hint = Self::hint_with_conversion(mismatch_hint(&c.context), &exp, &act);
+        // Context-specific try: snippet for the "Unit leak" failure mode — a
+        // statement (assignment / lone `let`) slips into a position expected to
+        // produce a value. dojo data shows this is the top E001 pattern for both
+        // 70b and 8b.
+        let try_snippet = unit_leak_snippet(&c.context, &exp, &act, c.fix_hint.as_ref());
+        // Temporarily swap in the constraint's own span so the error is reported
+        // at the call site where the constraint was introduced, not at wherever
+        // checking happened to end up.
+        let saved_span = self.current_span;
+        if c.span.is_some() {
+            self.current_span = c.span;
+        }
+        let mut diag = err(mismatch_message(&c.context, &exp, &act), hint, c.context.clone())
+            .with_code("E001");
+        if let Some(snippet) = try_snippet {
+            diag = diag.with_try(snippet);
+        }
+        self.emit(diag);
+        self.current_span = saved_span;
     }
 
     pub(crate) fn unify_infer(&mut self, a: &Ty, b: &Ty) -> bool {
@@ -102,9 +91,28 @@ impl Checker {
         }
     }
 
+    /// Unify two types that are both already resolved to concrete shapes.
+    ///
+    /// The four groups are tried in the order the single table used, so
+    /// dispatch is unchanged. Each returns `None` for "this pair is not mine",
+    /// which is distinct from `Some(false)` — "mine, and they do not unify".
+    /// Collapsing those two would make the first group that recognised a shape
+    /// swallow the pair and report a spurious mismatch.
     fn unify_structural(&mut self, a: &Ty, b: &Ty) -> bool {
+        // `Unknown` is the checker's error-recovery type. It unifies with
+        // everything so one upstream failure does not cascade.
         if *a == Ty::Unknown || *b == Ty::Unknown { return true; }
-        match (a, b) {
+        if let Some(out) = self.unify_composite(a, b) { return out; }
+        if let Some(out) = self.unify_record_like(a, b) { return out; }
+        if let Some(out) = self.unify_nominal(a, b) { return out; }
+        if let Some(out) = self.unify_const_carrier(a, b) { return out; }
+        a.compatible(b)
+    }
+
+    /// Applied constructors, tuples and function types: same shape, same arity,
+    /// unify positionally.
+    fn unify_composite(&mut self, a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
             (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
                 args1.iter().zip(args2.iter()).all(|(x, y)| self.unify_infer(x, y))
             }
@@ -112,6 +120,14 @@ impl Checker {
                 a.iter().zip(b.iter()).all(|(x, y)| self.unify_infer(x, y)),
             (Ty::Fn { params: ap, ret: ar }, Ty::Fn { params: bp, ret: br }) if ap.len() == bp.len() =>
                 ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) && self.unify_infer(ar, br),
+            _ => return None,
+        })
+    }
+
+    /// Records and open records. A closed pair must agree on every field; an
+    /// open row only requires its own fields to be present and to unify.
+    fn unify_record_like(&mut self, a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
             (Ty::Record { fields: fa }, Ty::Record { fields: fb }) => {
                 fa.len() == fb.len() && fa.iter().all(|(n, t)| fb.iter().any(|(n2, t2)| n == n2 && self.unify_infer(t, t2)))
             }
@@ -119,6 +135,13 @@ impl Checker {
             | (Ty::OpenRecord { fields: req, .. }, Ty::OpenRecord { fields: actual, .. }) => {
                 req.iter().all(|(n, t)| actual.iter().any(|(n2, t2)| n == n2 && self.unify_infer(t, t2)))
             }
+            _ => return None,
+        })
+    }
+
+    /// Nominal types, on either or both sides.
+    fn unify_nominal(&mut self, a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
             (Ty::Named(na, args_a), Ty::Named(nb, args_b)) if na == nb => {
                 args_a.len() == args_b.len()
                     && args_a.iter().zip(args_b.iter()).all(|(ta, tb)| self.unify_infer(ta, tb))
@@ -134,7 +157,7 @@ impl Checker {
             (Ty::Named(na, _), Ty::Named(nb, _)) => {
                 let key = if na.as_str() <= nb.as_str() { (*na, *nb) } else { (*nb, *na) };
                 if !self.unify_named_in_progress.insert(key) {
-                    return true;
+                    return Some(true);
                 }
                 let ra = self.env.resolve_named(a);
                 let rb = self.env.resolve_named(b);
@@ -154,17 +177,50 @@ impl Checker {
                 let resolved = self.env.resolve_named(b);
                 if resolved != *b { self.unify_infer(a, &resolved) } else { a.compatible(b) }
             }
-            // ConstParam unifies with its underlying type
+            _ => return None,
+        })
+    }
+
+    /// `ConstParam` / `ConstValue` unify with their underlying type on either
+    /// side.
+    fn unify_const_carrier(&mut self, a: &Ty, b: &Ty) -> Option<bool> {
+        Some(match (a, b) {
             (Ty::ConstParam { ty, .. }, other) | (other, Ty::ConstParam { ty, .. }) => {
                 self.unify_infer(ty, other)
             }
-            // ConstValue unifies with its underlying type
             (Ty::ConstValue { ty, .. }, other) | (other, Ty::ConstValue { ty, .. }) => {
                 self.unify_infer(ty, other)
             }
-            _ => a.compatible(b),
-        }
+            _ => return None,
+        })
     }
+}
+
+/// The actionable half of an E001 hint, chosen by the constraint's context.
+fn mismatch_hint(context: &str) -> &'static str {
+    match context {
+        "fan.map callback" => "Return ok(value) / err(reason) from the mapper",
+        "match arm" => "All match arms must share the same type. Change the mismatched arm to return the same type as the others, or change the first arm",
+        "if branches" | "if arm" => "Both branches of `if/then/else` must have the same type",
+        _ => "Fix the expression type or change the expected type",
+    }
+}
+
+/// The E001 headline.
+///
+/// #547: post-unify rendering is CONTAMINATED for rule-bearing constraints
+/// (pass 1 partially binds vars even on failure, so both sides print with each
+/// other's pieces — the `fan.map` case showed `expected fn(Result[..]) -> ..`
+/// where the param is Int). A constraint that ENCODES a language rule states
+/// the rule instead of the resolved pair.
+fn mismatch_message(context: &str, exp: &Ty, act: &Ty) -> String {
+    if context == "fan.map callback" {
+        return "fan.map callback must return Result[T, String] — \
+                wrap the value: `(x) => ok(x * 10)`. (race/any/settle \
+                thunks auto-wrap pure values; map mappers are \
+                effectful by contract and do not.)".to_string();
+    }
+    format!("type mismatch in {}: expected {} but got {}", context, exp.display(), act.display())
 }
 
 /// Produce a `try:` snippet for the "Unit leak" E001 pattern — the top

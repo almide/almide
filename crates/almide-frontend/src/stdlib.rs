@@ -17,34 +17,62 @@ pub fn is_import_suggestable(name: &str) -> bool {
     matches!(name, "json" | "http" | "fs" | "process" | "regex" | "datetime" | "io" | "random" | "testing" | "bytes" | "matrix" | "env")
 }
 
+/// One-line description of each stdlib module, for error hints.
+///
+/// Covers every entry in `BUNDLED_MODULES` — `stdlib_module_descriptions_are_complete`
+/// in this file's tests fails if a module is added without one, because the
+/// fallback ("standard library module") makes the hint say nothing and a silent
+/// fallback is indistinguishable from a deliberate omission.
+const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
+    ("string", "string manipulation"),
+    ("list", "list operations"),
+    ("int", "integer utilities"),
+    ("float", "floating-point utilities"),
+    ("bytes", "byte buffer operations"),
+    ("matrix", "matrix operations"),
+    ("fs", "file system operations"),
+    ("env", "environment variables"),
+    ("map", "hash map operations"),
+    ("json", "JSON parsing and querying"),
+    ("http", "HTTP client"),
+    ("process", "process execution"),
+    ("math", "mathematical functions"),
+    ("random", "random number generation"),
+    ("regex", "regular expressions"),
+    ("io", "input/output"),
+    ("result", "Result type utilities"),
+    ("option", "Option type utilities"),
+    ("error", "error handling"),
+    ("datetime", "date and time operations"),
+    ("testing", "test assertion utilities"),
+    ("value", "dynamic value operations"),
+    ("set", "hash set operations"),
+    ("args", "command-line arguments"),
+    ("path", "file path manipulation"),
+    ("base64", "Base64 encoding and decoding"),
+    ("hex", "hexadecimal encoding and decoding"),
+    ("html", "HTML escaping and construction"),
+    ("mem", "raw memory checkpoints"),
+    ("net", "TCP sockets"),
+    ("zlib", "zlib compression and decompression"),
+    ("prim", "primitive memory and file-descriptor operations"),
+    ("int8", "8-bit signed integer conversions"),
+    ("int16", "16-bit signed integer conversions"),
+    ("int32", "32-bit signed integer conversions"),
+    ("uint8", "8-bit unsigned integer conversions"),
+    ("uint16", "16-bit unsigned integer conversions"),
+    ("uint32", "32-bit unsigned integer conversions"),
+    ("uint64", "64-bit unsigned integer conversions"),
+    ("float32", "32-bit floating-point conversions"),
+];
+
 /// Short description of a stdlib module (for error hints).
 pub fn module_description(name: &str) -> &'static str {
-    match name {
-        "string" => "string manipulation",
-        "list" => "list operations",
-        "int" => "integer utilities",
-        "float" => "floating-point utilities",
-        "bytes" => "byte buffer operations",
-        "matrix" => "matrix operations",
-        "fs" => "file system operations",
-        "env" => "environment variables",
-        "map" => "hash map operations",
-        "json" => "JSON parsing and querying",
-        "http" => "HTTP client",
-        "process" => "process execution",
-        "math" => "mathematical functions",
-        "random" => "random number generation",
-        "regex" => "regular expressions",
-        "io" => "input/output",
-        "result" => "Result type utilities",
-        "option" => "Option type utilities",
-        "error" => "error handling",
-        "datetime" => "date and time operations",
-        "testing" => "test assertion utilities",
-        "value" => "dynamic value operations",
-        "set" => "hash set operations",
-        _ => "standard library module",
-    }
+    MODULE_DESCRIPTIONS
+        .iter()
+        .find(|(m, _)| *m == name)
+        .map(|(_, d)| *d)
+        .unwrap_or("standard library module")
 }
 
 
@@ -82,71 +110,112 @@ pub fn min_params(module: &str, func: &str) -> Option<usize> {
     }
 }
 
+/// Every known hallucinated `(module, function)` and what to write instead.
+///
+/// This is a lookup table, so it is written as data rather than as branches.
+/// The previous `match` form encoded the same rows as ~40 arms, several of which
+/// had to re-`match module` inside the arm to pick which module's `len` to name
+/// — a shape that grows a branch per row and hid the fact that the whole thing
+/// is one map. Rows are the unit of maintenance here: this table's job is to
+/// cover what LLMs actually write, so it is appended to often, and appending a
+/// row must not mean reasoning about control flow.
+///
+/// Suggestions are not always bare `module.fn` names: where no single function
+/// is the answer, the value is the shape to write (`"[] (empty list literal)"`).
+const ALIASES: &[(&str, &str, &str)] = &[
+    // size / count / length → len
+    ("set", "size", "set.len"),
+    ("list", "size", "list.len"),
+    ("map", "size", "map.len"),
+    ("string", "size", "string.len"),
+    ("set", "count", "set.len"),
+    ("list", "count", "list.len"),
+    ("map", "count", "map.len"),
+    ("string", "length", "string.len"),
+    ("list", "length", "list.len"),
+    ("map", "length", "map.len"),
+    ("set", "length", "set.len"),
+    // skip → drop
+    ("list", "skip", "list.drop"),
+    // parsing lives on the target type's module, not on `string`
+    ("string", "to_int", "int.parse"),
+    ("string", "to_integer", "int.parse"),
+    ("string", "parse_int", "int.parse"),
+    ("string", "to_float", "float.parse"),
+    ("string", "parse_float", "float.parse"),
+    ("int", "from_string", "int.parse"),
+    ("int", "from_str", "int.parse"),
+    ("float", "from_string", "float.parse"),
+    ("float", "from_str", "float.parse"),
+    // char code
+    ("string", "char_code", "string.codepoint"),
+    ("string", "char_code_at", "string.codepoint"),
+    ("string", "code_at", "string.codepoint"),
+    ("string", "char_at_code", "string.codepoint"),
+    ("string", "ord", "string.codepoint"),
+    // case conversion
+    ("string", "to_lowercase", "string.to_lower"),
+    ("string", "lowercase", "string.to_lower"),
+    ("string", "lower", "string.to_lower"),
+    ("string", "to_uppercase", "string.to_upper"),
+    ("string", "uppercase", "string.to_upper"),
+    ("string", "upper", "string.to_upper"),
+    // substring
+    ("string", "substring", "string.slice"),
+    ("string", "substr", "string.slice"),
+    // list operations
+    ("list", "push", "list.concat (use [xs, [x]] or xs + [x])"),
+    ("list", "append", "list.concat (use [xs, [x]] or xs + [x])"),
+    ("list", "has", "list.contains"),
+    ("list", "includes", "list.contains"),
+    ("list", "find_index", "list.index_of"),
+    // string membership
+    ("string", "includes", "string.contains"),
+    ("string", "has", "string.contains"),
+    ("string", "index", "string.index_of"),
+    ("string", "all", "string.chars + list.all"),
+    // Common LLM hallucinations from MSR testing
+    ("string", "get_char", "string.char_at"),
+    ("string", "charAt", "string.char_at"),
+    ("string", "get", "string.char_at"),
+    ("string", "from_char", "string.from_codepoint"),
+    ("string", "from_char_code", "string.from_codepoint"),
+    ("string", "chr", "string.from_codepoint"),
+    ("list", "foldLeft", "list.fold"),
+    ("list", "foldRight", "list.fold"),
+    ("list", "reduce", "list.fold"),
+    ("list", "foldl", "list.fold"),
+    ("list", "foldr", "list.fold"),
+    ("list", "empty", "[] (empty list literal)"),
+    ("list", "new", "[] (empty list literal)"),
+    ("list", "head", "list.first"),
+    ("list", "tail", "list.drop(xs, 1)"),
+    ("map", "new", "[:] (empty map literal)"),
+    ("map", "empty", "[:] (empty map literal)"),
+    ("map", "has_key", "map.contains"),
+    ("map", "has", "map.contains"),
+    ("map", "includes", "map.contains"),
+    // Almide has only `float.sqrt`. Most LLMs reach for `int.sqrt(n)` in
+    // is-prime / perfect-square style tasks.
+    ("int", "sqrt", "float.sqrt(int.to_float(n))"),
+];
+
 /// Suggest the correct stdlib function for a commonly hallucinated name.
 /// Returns `Some("module.function")` if a known alias exists.
 pub fn suggest_alias(module: &str, func: &str) -> Option<&'static str> {
-    match (module, func) {
-        // size → len
-        ("set", "size") | ("list", "size") | ("map", "size") | ("string", "size") => {
-            Some(match module { "set" => "set.len", "list" => "list.len", "map" => "map.len", _ => "string.len" })
-        }
-        ("set", "count") | ("list", "count") | ("map", "count") => {
-            Some(match module { "set" => "set.len", "list" => "list.len", _ => "map.len" })
-        }
-        // skip → drop
-        ("list", "skip") => Some("list.drop"),
-        // string parse functions → int/float module
-        ("string", "to_int") | ("string", "to_integer") | ("string", "parse_int") => Some("int.parse"),
-        ("string", "to_float") | ("string", "parse_float") => Some("float.parse"),
-        // int.from_string → int.parse
-        ("int", "from_string") | ("int", "from_str") => Some("int.parse"),
-        ("float", "from_string") | ("float", "from_str") => Some("float.parse"),
-        // char code
-        ("string", "char_code") | ("string", "char_code_at") | ("string", "code_at")
-        | ("string", "char_at_code") | ("string", "ord") => Some("string.codepoint"),
-        // case conversion
-        ("string", "to_lowercase") | ("string", "lowercase") | ("string", "lower") => Some("string.to_lower"),
-        ("string", "to_uppercase") | ("string", "uppercase") | ("string", "upper") => Some("string.to_upper"),
-        // substring
-        ("string", "substring") | ("string", "substr") => Some("string.slice"),
-        // length
-        ("string", "length") | ("list", "length") | ("map", "length") | ("set", "length") => {
-            Some(match module { "string" => "string.len", "list" => "list.len", "map" => "map.len", _ => "set.len" })
-        }
-        // list operations
-        ("list", "push") | ("list", "append") => Some("list.concat (use [xs, [x]] or xs + [x])"),
-        ("list", "has") | ("list", "includes") => Some("list.contains"),
-        ("list", "find_index") => Some("list.index_of"),
-        // string
-        ("string", "includes") | ("string", "has") => Some("string.contains"),
-        ("string", "index") => Some("string.index_of"),
-        ("string", "all") => Some("string.chars + list.all"),
-        // Common LLM hallucinations from MSR testing
-        ("string", "get_char") | ("string", "charAt") | ("string", "get") => Some("string.char_at"),
-        ("string", "from_char") | ("string", "from_char_code") | ("string", "chr") => Some("string.from_codepoint"),
-        ("list", "foldLeft") | ("list", "foldRight") | ("list", "reduce") | ("list", "foldl") | ("list", "foldr") => Some("list.fold"),
-        ("list", "empty") | ("list", "new") => Some("[] (empty list literal)"),
-        ("list", "head") => Some("list.first"),
-        ("list", "tail") => Some("list.drop(xs, 1)"),
-        ("map", "new") | ("map", "empty") => Some("[:] (empty map literal)"),
-        ("map", "has_key") | ("map", "has") | ("map", "includes") => Some("map.contains"),
-        // sqrt: Almide only has float.sqrt, not int.sqrt. Most LLMs reach
-        // for int.sqrt(n) in is-prime / perfect-square style tasks.
-        ("int", "sqrt") => Some("float.sqrt(int.to_float(n))"),
-        // comparison functions delegate to the single canonical table
-        // below so `suggest_alias`, `try_snippet_for_alias`, and
-        // downstream `almide fix` rules all agree on the shape.
-        _ if comparison_operator_of(module, func).is_some() => {
-            match comparison_operator_of(module, func)? {
-                ">" => Some("a > b (operator)"),
-                "<" => Some("a < b (operator)"),
-                ">=" => Some("a >= b (operator)"),
-                "<=" => Some("a <= b (operator)"),
-                "==" => Some("a == b (operator)"),
-                "!=" => Some("a != b (operator)"),
-                _ => None,
-            }
-        }
+    if let Some((_, _, fix)) = ALIASES.iter().find(|(m, f, _)| *m == module && *f == func) {
+        return Some(fix);
+    }
+    // Comparison functions derive from the single canonical operator table so
+    // `suggest_alias`, `try_snippet_for_alias`, and `almide fix`'s
+    // Call-to-Binary rewrite all agree on the shape.
+    match comparison_operator_of(module, func)? {
+        ">" => Some("a > b (operator)"),
+        "<" => Some("a < b (operator)"),
+        ">=" => Some("a >= b (operator)"),
+        "<=" => Some("a <= b (operator)"),
+        "==" => Some("a == b (operator)"),
+        "!=" => Some("a != b (operator)"),
         _ => None,
     }
 }
@@ -245,4 +314,57 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
 /// informed without any TOML bridge.
 fn lookup_bundled_sig(module: &str, func: &str) -> Option<FnSig> {
     crate::bundled_sigs::lookup(module, func)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A duplicate key in `ALIASES` makes the later row unreachable. The `match`
+    /// this table replaced would not have caught it either — Rust does not warn
+    /// on duplicate string-literal tuple patterns — so the check is explicit.
+    #[test]
+    fn alias_table_has_no_duplicate_keys() {
+        let mut seen = std::collections::HashSet::new();
+        for (module, func, fix) in ALIASES {
+            assert!(
+                seen.insert((*module, *func)),
+                "duplicate alias key {module}.{func} (second row suggests {fix})"
+            );
+        }
+    }
+
+    /// Every alias must point somewhere a reader can act on: either a real
+    /// `module.fn`, or prose that names the shape to write instead.
+    #[test]
+    fn alias_suggestions_are_non_empty() {
+        for (module, func, fix) in ALIASES {
+            assert!(!fix.is_empty(), "empty suggestion for {module}.{func}");
+        }
+    }
+
+    /// A module with no description falls back to "standard library module",
+    /// which tells the reader nothing. Adding a bundled module must therefore
+    /// mean adding its description in the same change.
+    #[test]
+    fn stdlib_module_descriptions_are_complete() {
+        let missing: Vec<&str> = BUNDLED_MODULES
+            .iter()
+            .copied()
+            .filter(|m| module_description(m) == "standard library module")
+            .collect();
+        assert!(missing.is_empty(), "modules without a description: {missing:?}");
+    }
+
+    /// The description table must not carry rows for modules that no longer
+    /// exist — a stale row is a description nothing can ever show.
+    #[test]
+    fn stdlib_module_descriptions_have_no_stale_rows() {
+        let stale: Vec<&str> = MODULE_DESCRIPTIONS
+            .iter()
+            .map(|(m, _)| *m)
+            .filter(|m| !BUNDLED_MODULES.contains(m) && !STDLIB_MODULES.contains(m))
+            .collect();
+        assert!(stale.is_empty(), "descriptions for unknown modules: {stale:?}");
+    }
 }
