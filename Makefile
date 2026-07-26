@@ -31,7 +31,7 @@ test: build
 	$(BIN) test
 
 test-rust:
-	cargo test
+	cargo test --workspace
 
 test-wasm: build
 	$(BIN) test --target wasm

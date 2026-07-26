@@ -53,7 +53,8 @@ jobs:
         # Parallel-safe on Unix: the shared build scratch dir is serialized
         # across processes by an advisory flock (src/cli/run.rs BuildDirLock).
         # This runner is ubuntu, so the lock applies. Matches ci.yml.
-        run: cargo test
+        # --workspace: a bare `cargo test` tests only the root package (see ci.yml).
+        run: cargo test --workspace
 
       - name: Run exercises (Rust target)
         continue-on-error: true  # TODO: re-enable after stdlib reconnection

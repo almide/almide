@@ -122,7 +122,11 @@ jobs:
         # almide_bin() falls back to PATH and the tests skip).
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
-        run: cargo test
+        # --workspace: a bare `cargo test` at the root tests only the ROOT
+        # package — the member crates' suites (almide-interp's abstain-ledger
+        # gate, frontend/codegen/tools unit tests) silently never ran in CI.
+        # Trust Spine covers almide-mir; this covers everything.
+        run: cargo test --workspace
 
       - name: Generated runtime registry matches committed sources (regenerate and diff)
         # crates/almide-codegen/src/generated/{rust_runtime,runtime_fn_modes}.rs
