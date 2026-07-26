@@ -15,6 +15,7 @@ alias_cow  out-of-interp-scope capability: in-place container mutation `list.pop
 base64_encode  out-of-interp-scope capability: string.to_bytes
 bundled_pure_modules  out-of-interp-scope capability: args.flag
 bytes_f16  out-of-interp-scope capability: bytes.read_f16_le
+bytes_f16_offset_overflow  out-of-interp-scope capability: bytes.read_f16_le
 bytes_push_inplace  out-of-interp-scope capability: in-place container mutation `bytes.push` (mut receiver; interp args are by-value so the binding cannot be written back)
 bytes_rawptr  out-of-interp-scope capability: bytes.as_ptr
 bytes_set_value_semantics  out-of-interp-scope capability: bytes.set
@@ -65,8 +66,10 @@ list_chunk_windows  out-of-interp-scope capability: list.chunk
 list_chunk_zero  out-of-interp-scope capability: list.chunk
 list_comprehensive  out-of-interp-scope capability: list.repeat
 list_count_index_truncation  out-of-interp-scope capability: HOF list.update
+list_flatten_borrow  out-of-interp-scope capability: list.flatten
 list_heapelem_rc  out-of-interp-scope capability: HOF list.update
 list_modify_heap  out-of-interp-scope capability: value.int
+list_repeat_size_ceiling  out-of-interp-scope capability: list.repeat
 list_set_value  out-of-interp-scope capability: value.int
 list_slice_oob  out-of-interp-scope capability: list.intersperse
 list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements
@@ -80,6 +83,7 @@ loop_push_trailing_increment  out-of-interp-scope capability: in-place container
 map_filter  out-of-interp-scope capability: map.new
 map_fold  out-of-interp-scope capability: map.new
 map_fold_heap_acc  out-of-interp-scope capability: HOF map.fold
+map_fold_heap_acc_skv  out-of-interp-scope capability: HOF map.fold
 map_insertion_order  out-of-interp-scope capability: map.entries
 map_set_eq  out-of-interp-scope capability: map.new
 map_set_ops  out-of-interp-scope capability: map.from_list
@@ -126,7 +130,9 @@ string_predicates  out-of-interp-scope capability: string.is_alpha
 string_rle  out-of-interp-scope capability: string.run_length_encode
 string_split_rle_codepoint  out-of-interp-scope capability: string.run_length_encode
 string_whitespace  out-of-interp-scope capability: string.from_codepoint
+tco_map_acc_seed  out-of-interp-scope capability: map.from_list
 trig_libm  out-of-interp-scope capability: transcendental `math.sin` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+unsigned_literal_domain  out-of-interp-scope capability: uint8.to_string
 unwrap_or_operand  out-of-interp-scope capability: string.codepoint
 value_array_leak_loop  out-of-interp-scope capability: value.int
 value_array_tuple_tco  out-of-interp-scope capability: value.str
