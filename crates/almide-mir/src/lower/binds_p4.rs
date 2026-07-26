@@ -80,7 +80,15 @@ impl LowerCtx {
             // initializer as a fresh owned cached copy (dropped at scope end); the Dup here
             // gives the aggregate its own distinct reference either way.
             IrExprKind::Var { id } => {
-                let src = self.value_or_global(*id).ok()?;
+                let src = match self.value_or_global(*id) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                            format!("[heap-field] Var {id:?} value_or_global declined: {e:?}")
+                        });
+                        return None;
+                    }
+                };
                 let dup = self.fresh_value();
                 self.ops.push(Op::Dup { dst: dup, src });
                 self.live_heap_handles.push(dup);
@@ -425,6 +433,56 @@ impl LowerCtx {
                 if !self.live_heap_handles.contains(&obj) {
                     self.live_heap_handles.push(obj);
                 }
+                Some(obj)
+            }
+            // A CLOSURE-CALL field (`{ ...c, _val: f(c._val) }` — cell.update's
+            // spread override, `f` a Fn param): dispatch through the tracked
+            // closure block exactly like the bind-position Computed arm
+            // (`lower_bind_heap_call_computed`) — the funcref returns a FRESH
+            // owned heap value (the same cert `i` a Named CallFn result
+            // carries), tracked so the enclosing aggregate's `Consume` (`m`)
+            // moves it into the slot. An unresolvable callee container defers
+            // (`None`) → the aggregate walls (never wrong bytes).
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } => {
+                let blk = self.closure_block_of_mut(callee)?;
+                let repr = repr_of(&expr.ty).ok()?;
+                let lowered = self.lower_call_args(args).ok()?;
+                let obj = self.fresh_value();
+                self.emit_closure_call(blk, Some(obj), lowered, Some(repr));
+                self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            // A BLOCK field — the heap-if-argument ANF (and its desugar
+            // siblings) wraps a field value in a Block carrying its `let`s
+            // (`{ ...c, _val: { let t = c._val; f(t) } }` — cell.update's
+            // hoisted spread override, #881). Lower the statements as effects
+            // in a field-local frame, then the TAIL as the field value itself
+            // — the same frame discipline as the list Block element
+            // (`lower_record_list_element`); the produced object's tracking
+            // is restored so the enclosing aggregate's Consume still sees it.
+            IrExprKind::Block { stmts, expr: tail } => {
+                let tail = tail.as_deref()?;
+                let mark = self.live_heap_handles.len();
+                for s in stmts {
+                    if let Err(e) = self.lower_stmt(s) {
+                        crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                            format!("[field-block] stmt declined: {e:?}")
+                        });
+                        return Some(None);
+                    }
+                }
+                let Some(obj) = self.lower_owned_heap_field(tail) else {
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!(
+                            "[field-block] tail declined: {}",
+                            crate::lower::kind_name(&tail.kind)
+                        )
+                    });
+                    return Some(None);
+                };
+                self.live_heap_handles.retain(|h| *h != obj);
+                self.drop_arm_locals(mark);
+                self.live_heap_handles.push(obj);
                 Some(obj)
             }
             _ => return None,

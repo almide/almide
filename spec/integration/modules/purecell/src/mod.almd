@@ -1,0 +1,11 @@
+// The MUTABLE-free half of cellstate (#881): test mode walls a module with
+// mutable top-lets (the per-test region bridge), so the spread-with-closure
+// -override brick (`{ ...c, _val: f(c._val) }` — Computed-callee field +
+// ANF Block field) gets its VERIFIED-wasm test-leg coverage here.
+type Cell[T] = { _val: T, _id: Int }
+
+fn cell[T](initial: T) -> Cell[T] = { _val: initial, _id: 0 }
+
+fn get[T](c: Cell[T]) -> T = c._val
+
+fn update[T](c: Cell[T], f: (T) -> T) -> Cell[T] = { ...c, _val: f(c._val) }

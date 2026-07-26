@@ -1,0 +1,29 @@
+// A reactive-cell module (ceangal's cell.almd shape, #881): a generic record
+// wrapper whose `update` returns a SPREAD record with a CLOSURE-CALL
+// override (`{ ...c, _val: f(c._val) }`) — the wasm renderer lowers the
+// override through the Computed-callee closure dispatch, and the ANF hoist
+// may wrap it in a Block carrying its `let`s.
+type Cell[T] = { _val: T, _id: Int }
+
+var _dirty = false
+var _next_id = 0
+
+fn cell[T](initial: T) -> Cell[T] = {
+  let id = _next_id
+  _next_id = _next_id + 1
+  { _val: initial, _id: id }
+}
+
+fn get[T](c: Cell[T]) -> T = c._val
+
+fn set[T](c: Cell[T], value: T) -> Cell[T] = {
+  _dirty = true
+  { ...c, _val: value }
+}
+
+fn update[T](c: Cell[T], f: (T) -> T) -> Cell[T] = {
+  _dirty = true
+  { ...c, _val: f(c._val) }
+}
+
+fn is_dirty() -> Bool = _dirty
