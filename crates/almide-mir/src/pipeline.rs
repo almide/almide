@@ -645,7 +645,22 @@ pub fn try_render_wasm_source(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
 ) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, false)
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Run)
+}
+
+/// LIBRARY-mode variant for `almide build --target wasm` (#881): a module with
+/// `pub fn` exports and NO `main` renders with a SYNTHESIZED empty `main`, so
+/// `_start` runs the global-init chain and nothing else — the v0 export ABI
+/// (`_start` + `memory` + one named export per public fn) that web hosts like
+/// ceangal's runtime call. `almide run` keeps the wall: running a main-less
+/// module natively is a compile error (rustc E0601), and the wasm leg must
+/// fail the same way rather than silently succeeding at nothing.
+pub fn try_render_wasm_source_library(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+    verbose: bool,
+) -> Result<String, LowerError> {
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Library)
 }
 
 /// TEST-mode variant for the `almide test` wasm harness: when the file has NO `main`,
@@ -662,17 +677,76 @@ pub fn try_render_wasm_source_tests(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
 ) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, true)
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Tests)
+}
+
+/// How the caller intends to use the rendered module — decides main synthesis.
+#[derive(Clone, Copy, PartialEq)]
+enum RenderMode {
+    /// `almide run` / the cross-target gates: the program must carry `main`.
+    Run,
+    /// `almide test`: test fns promoted, a runner `main` synthesized.
+    Tests,
+    /// `almide build`: a main-less module with `pub fn` exports gets an empty
+    /// synthesized `main` (the v0 library ABI — #881).
+    Library,
 }
 
 fn try_render_wasm_source_impl(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
-    test_mode: bool,
+    mode: RenderMode,
 ) -> Result<String, LowerError> {
-    let mut ir = build_ir_with_drops(source, self_modules, test_mode)?;
+    let mut ir = build_ir_with_drops(source, self_modules, mode == RenderMode::Tests)?;
+    if mode == RenderMode::Library {
+        synthesize_library_main(&mut ir);
+    }
     try_render_wasm_source_impl_rest(&mut ir, verbose)
+}
+
+/// LIBRARY mode (#881): a module with `pub fn` exports and no `main` gets an
+/// EMPTY `fn main() -> Unit` so `_start` exists and runs only the global-init
+/// chain — the v0 export-module ABI web hosts call (`_start`, `memory`, one
+/// named export per public fn). A module with NEITHER a main NOR any public
+/// fn is left alone: the honest "no main in the IR" wall downstream is the
+/// right answer for a program with nothing to run and nothing to export.
+fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
+    if ir.functions.iter().any(|f| f.name.as_str() == "main") {
+        return;
+    }
+    let has_exports = ir.functions.iter().any(|f| {
+        !f.is_test
+            && !f.generics.as_ref().map_or(false, |g| !g.is_empty())
+            && matches!(f.visibility, almide_ir::IrVisibility::Public)
+    });
+    if !has_exports {
+        return;
+    }
+    ir.functions.push(almide_ir::IrFunction {
+        name: almide_lang::intern::sym("main"),
+        params: vec![],
+        ret_ty: almide_lang::types::Ty::Unit,
+        body: almide_ir::IrExpr {
+            kind: almide_ir::IrExprKind::Unit,
+            ty: almide_lang::types::Ty::Unit,
+            span: Default::default(),
+            def_id: None,
+        },
+        is_effect: false,
+        is_async: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: almide_ir::IrVisibility::Private,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        module_origin: None,
+        mutated_params: vec![],
+    });
 }
 
 /// Phase 1: synthesize the recursive-drop / repr source text this program's linked
@@ -842,6 +916,9 @@ fn build_ir_with_drops(
     if test_mode {
         synthesize_test_runner_main(&mut ir)?;
     }
+    // #881: mutable module-level var ids are per-region — make them globally
+    // unique BEFORE any layout/slot phase keys a map by the raw id.
+    disambiguate_mutable_global_regions(&mut ir);
     Ok(ir)
 }
 
