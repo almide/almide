@@ -409,9 +409,40 @@ impl LowerCtx {
     /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
     /// the terminal `Alloc{Opaque}`-or-real-list fallback, verbatim.
     fn lower_bind_heap_fresh_opaque(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        // An ERROR-OPERATOR heap bind that SURVIVED to this terminal — a
+        // `let x = f()!` / auto-`?` `Try` / `??` / `?.` whose position
+        // `desugar_effect_unwrap` could not reach (it walks only the fn body's
+        // top-level statements; a bind nested in a loop/if arm is outside the
+        // continuation transform's expressible subset, because its Err arm would
+        // need a mid-loop early return the MIR has no Op for). Deferring it binds
+        // an EMPTY block in place of the unwrapped payload, and the program then
+        // READS it: minesweeper's `let mines = place_mines(…)` (auto-`?` inside
+        // `while { if { if is_first { … } } }`) bound an empty List[Bool] where
+        // the 81-cell minefield should be — the #810 census's one non-accumulator
+        // producer, and a silent wrong value on the verified default. WALL: the
+        // rationale that error operators are "total value maps" is true of their
+        // CONTROL FLOW, not of a deferred value somebody reads.
+        if crate::lower::strict_values()
+            && matches!(
+                value.kind,
+                IrExprKind::Try { .. }
+                    | IrExprKind::Unwrap { .. }
+                    | IrExprKind::UnwrapOr { .. }
+                    | IrExprKind::ToOption { .. }
+                    | IrExprKind::OptionalChain { .. }
+            )
+        {
+            return Err(LowerError::Unsupported(format!(
+                "{} heap bind outside the effect-unwrap desugar's reach (nested in \
+                 a loop/if arm) cannot be faithfully materialized in this brick — \
+                 deferring it would bind an empty value in place of the unwrapped \
+                 payload",
+                kind_name(&value.kind)
+            )));
+        }
+        let init = alloc_init(value);
         let dst = self.fresh_value();
         let repr = repr_of(ty)?;
-        let init = alloc_init(value);
         // A NON-EMPTY SCALAR-element List literal that did NOT fold to a real
         // `Init::IntList` (a computed element the builders above declined — e.g. a
         // nested inadmissible-HOF chain, fuzz B-198/659): the flat Opaque reads as
@@ -431,26 +462,39 @@ impl LowerCtx {
                 ));
             }
         }
-        // #810 note — why this is still not `Opaque => wall`.
+        // NO THIRD STATE (#810, the bind terminal). The producer census over the
+        // 983-file corpus found `Init::Opaque` carrying three meanings here:
         //
-        // A corpus census (983 files) measured what actually reaches here, and
-        // `Init::Opaque` turned out to carry THREE meanings, not the two the
-        // `Init::Empty` split above separates:
+        //   1. genuinely empty      — `[:]`. Now `Init::Empty`; REAL final content.
+        //   2. allocate-then-fill   — the TCO accumulator copy (`acc + []` at a
+        //                             Map/Set type). Now a REAL `Op::Dup` share,
+        //                             intercepted in the quick wins above.
+        //   3. could not build      — the accept-but-wrong reservoir. The error
+        //                             operators (the census's one other producer)
+        //                             wall above; everything else walls HERE.
         //
-        //   1. genuinely empty      — `[:]`. Now `Init::Empty`; final content.
-        //   2. allocate-then-fill   — an empty block the FOLLOWING ops populate.
-        //                             `map.from_list`'s accumulator arrives here
-        //                             as a Map-typed `BinOp`, and the program
-        //                             reads the populated map correctly.
-        //   3. could not build      — the accept-but-wrong reservoir.
-        //
-        // (1) is now told apart by the sentinel. (2) and (3) are NOT separable
-        // at this bind, because which one it is depends on what comes after —
-        // and walling both breaks 8 corpus programs that are correct today.
-        // `DynStr` / `DynList` are what (2) looks like once it is expressed
-        // honestly; the map accumulator has no such variant yet. That is the
-        // remaining work, and it is a value-model change, not a guard.
-        //
+        // What remains admitted as Opaque under STRICT mode is exactly the
+        // capturing-closure/range family — a value the model deliberately has no
+        // representation for, whose every observation already walls (invocation
+        // at the HOF, a custom-variant match via `deferred_opaque_binds`). Any
+        // OTHER kind arriving with Opaque walls by default, so a future unhandled
+        // shape is a named wall, never a silently-empty bind. This default-deny
+        // cost zero corpus wall rate — the census is the evidence.
+        if crate::lower::strict_values()
+            && matches!(init, Init::Opaque)
+            && !matches!(
+                value.kind,
+                IrExprKind::ClosureCreate { .. }
+                    | IrExprKind::Lambda { .. }
+                    | IrExprKind::Range { .. }
+            )
+        {
+            return Err(LowerError::Unsupported(format!(
+                "{} heap bind cannot be faithfully materialized in this brick \
+                 (walled, not deferred to an empty block the program could read)",
+                kind_name(&value.kind)
+            )));
+        }
         // An all-literal `Init::IntList` is a REAL, POPULATED block (every slot a constant) —
         // admit a direct `xs[i]` bounds-checked load over it. An `Init::Opaque` (a deferred /
         // unsupported value) is NOT tracked: indexing it would trap on cap 0.

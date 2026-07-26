@@ -362,14 +362,17 @@ impl LowerCtx {
             // `Alloc` (value-semantics — the payload is copied, not consumed), the
             // proven-sound convention the corpus already verifies for List/Record.
             // An ERROR OPERATOR (`e!`/`e?`/`e ?? d`/`e?.f`) likewise yields a FRESH
-            // value (the unwrapped/defaulted/mapped result, deferred like every
-            // Opaque); its operand's calls are captured by `record_elided_calls`.
-            // (Almide has NO try/catch: `e?` is `Result → Option`, `e ?? d` is
-            // unwrap-or-default, `e?.f` is optional chaining — all TOTAL value maps, no
-            // control flow. Only `e!` (`Unwrap`, effect-fn) PROPAGATES an error — an
-            // early return that is DEFERRED here: the always-continue path is self-
-            // consistent (each handle still drops exactly once, so memory-safe); error
-            // propagation is functional, not a safety property.)
+            // value. The reachable positions are TRANSFORMED before this bind ever
+            // sees them (`desugar_effect_unwrap` pushes the continuation into the
+            // Ok arm); one that SURVIVES here is outside that transform's reach —
+            // a bind nested in a loop/if arm, whose Err propagation would need a
+            // mid-loop early return the MIR has no Op for — and under STRICT value
+            // mode the fresh-path terminal WALLS it instead of deferring: the old
+            // rationale ("total value maps, no control flow") was true of the
+            // operators' CONTROL FLOW but not of the deferred VALUE, which the
+            // program goes on to read as empty (minesweeper's 81-cell minefield
+            // read as `[]` — the #810 census). The permissive caps-counting path
+            // still defers, calls captured by `record_elided_calls`.
             // A `let f = (params) => body` lambda. A NON-CAPTURING one LIFTS to a fresh
             // top-level function bound via `Op::FuncRef` (a scalar table slot) — so a later
             // `f(args)` lowers to `Op::CallIndirect` and the closure EXECUTES. A CAPTURING
