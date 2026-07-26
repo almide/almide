@@ -787,14 +787,24 @@ fn lower_main_and_sibling_fns(
         if already.contains(func.name.as_str()) {
             continue;
         }
-        if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
+        match crate::lower::lower_function_all_with_globals(
             func,
             &layouts.globals,
             &layouts.global_inits,
             &layouts.record_layouts,
             &layouts.variant_layouts,
         ) {
-            functions.extend(mirs);
+            Ok(mirs) => functions.extend(mirs),
+            // A walled module sibling is NOT fatal here — an unreferenced one
+            // simply isn't rendered; a referenced one is caught by the
+            // unlinked-call gate. But it must not wall SILENTLY: the gate's
+            // "no wasm definition" message is undiagnosable without the
+            // sibling's own reason (#881 — eight aliased-signature fns walled
+            // invisibly while their callers rendered).
+            Err(e) if verbose => {
+                eprintln!("[v1-wall] module sibling {}: {e:?}", func.name.as_str());
+            }
+            Err(_) => {}
         }
     }
     functions
