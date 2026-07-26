@@ -15,6 +15,77 @@ struct PipelineLayouts {
     variant_layouts: crate::lower::VariantLayouts,
 }
 
+/// Rewrite every occurrence of the mapped VarIds in one region's exprs/stmts.
+/// A mutable module-level var is never REBOUND inside its region's fns (VarIds
+/// are unique within a region), so every occurrence of a mapped id IS the
+/// global — use sites only (`Var`, assign/insert targets); `Bind` binds fresh
+/// locals and is deliberately not remapped.
+struct MutGlobalIdRw<'a> {
+    map: &'a std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+}
+
+impl almide_ir::IrMutVisitor for MutGlobalIdRw<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
+        if let almide_ir::IrExprKind::Var { id } = &mut expr.kind {
+            if let Some(n) = self.map.get(id) {
+                *id = *n;
+            }
+        }
+        almide_ir::visit_mut::walk_expr_mut(self, expr);
+    }
+    fn visit_stmt_mut(&mut self, stmt: &mut almide_ir::IrStmt) {
+        use almide_ir::IrStmtKind as K;
+        let target = match &mut stmt.kind {
+            K::Assign { var, .. } => Some(var),
+            K::IndexAssign { target, .. }
+            | K::MapInsert { target, .. }
+            | K::FieldAssign { target, .. } => Some(target),
+            _ => None,
+        };
+        if let Some(t) = target {
+            if let Some(n) = self.map.get(t) {
+                *t = *n;
+            }
+        }
+        almide_ir::visit_mut::walk_stmt_mut(self, stmt);
+    }
+}
+
+/// Make MUTABLE module-level var ids unique ACROSS regions (#881). Every unit
+/// numbers its VarIds from 0 — the main program and each module are PRIVATE
+/// numbering regions — but the mutable-global slot map is keyed by the RAW id,
+/// so `var cached_scene` (main, VarId 0) and `var _dirty` (a module, VarId 0)
+/// collided and the program walled. Remap each MODULE's mutable top-let ids
+/// into a reserved high band (0xFF00_0000+, far above any real region's count,
+/// so no walk-and-max pass whose missed site would silently collide), rewriting
+/// the declaration and every use inside that module's own fns and top-let
+/// inits. Cross-module references resolve BY NAME afterwards
+/// (`bridge_cross_module_toplets`), so they see the remapped ids automatically.
+pub(crate) fn disambiguate_mutable_global_regions(ir: &mut almide_ir::IrProgram) {
+    let mut next: u32 = 0xFF00_0000;
+    for m in &mut ir.modules {
+        let mut map: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
+            std::collections::HashMap::new();
+        for tl in &mut m.top_lets {
+            if tl.mutable {
+                map.insert(tl.var, almide_ir::VarId(next));
+                tl.var = almide_ir::VarId(next);
+                next += 1;
+            }
+        }
+        if map.is_empty() {
+            continue;
+        }
+        let mut rw = MutGlobalIdRw { map: &map };
+        for f in &mut m.functions {
+            almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut f.body);
+        }
+        for tl in &mut m.top_lets {
+            almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut tl.value);
+        }
+    }
+}
+
 /// Phase 2: collect top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs
 /// (union of program + modules), bridge the MAIN-region view across cross-module
 /// references, and build the record/variant layout registries (aliasing each
