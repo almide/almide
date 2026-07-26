@@ -3,7 +3,7 @@
 // ForIn/IfLet/MatchArm/Unary/Binary/Record/TypeName/Ident). Split out to keep
 // expressions.rs under the 800-line codopsy max-lines threshold; pure text
 // move, same file scope via `include!` (inherits expressions.rs's `use`
-// imports — mirrors the mod_p2.rs/mod_p3.rs pattern already used elsewhere
+// imports — mirrors the include!-continuation pattern already used elsewhere
 // in this crate).
 
 

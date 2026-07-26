@@ -1,7 +1,7 @@
 // Continuation of `impl Checker` — module-level type inference, declaration
 // checking, and test where-clause evaluation. Split out of mod.rs to keep it
 // under the 800-line codopsy max-lines threshold; pure text move, same
-// module scope via `include!` (no privacy boundary since mod_p2.rs/mod_p3.rs
+// module scope via `include!` (no privacy boundary since these continuations
 // are spliced directly into check/mod.rs's module, not separate submodules).
 
 impl Checker {

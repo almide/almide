@@ -798,5 +798,5 @@ impl Checker {
 
 }
 
-include!("mod_p2.rs");
-include!("mod_p3.rs");
+include!("post_solve_validation.rs");
+include!("module_inference.rs");

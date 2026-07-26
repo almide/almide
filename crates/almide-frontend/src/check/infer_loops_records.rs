@@ -1,5 +1,5 @@
 // `infer_expr_inner` group 3, part 2 — the loop / pipe / record-validation
-// helpers and the literal-context machinery. Split out of `infer_p3.rs` at a
+// helpers and the literal-context machinery. Split out of `infer_calls_closures.rs` at a
 // method boundary; both halves are `impl Checker` blocks `include!`d into
 // `infer.rs`, so imports come from there.
 

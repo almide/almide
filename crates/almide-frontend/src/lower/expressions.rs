@@ -594,4 +594,4 @@ pub(super) fn module_top_let_var(
     Some((var_id, def_id))
 }
 
-include!("expressions_p2.rs");
+include!("expressions_access.rs");

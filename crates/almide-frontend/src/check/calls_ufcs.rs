@@ -2,7 +2,7 @@
 // resolution (`object.field(...)`) and TypeName constructor-call resolution
 // (`Ctor(...)`). Split out to keep calls.rs under the 800-line codopsy
 // max-lines threshold; pure text move, same module scope via `include!`
-// (no privacy boundary — mirrors the mod_p2.rs/mod_p3.rs pattern already
+// (no privacy boundary — mirrors the include!-continuation pattern already
 // used elsewhere in this crate).
 
 impl Checker {

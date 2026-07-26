@@ -493,5 +493,5 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
     program.used_stdlib_modules = collect_stdlib_modules(program);
 }
 
-include!("mod_p2.rs");
-include!("mod_p3.rs");
+include!("module_lowering.rs");
+include!("test_lowering.rs");

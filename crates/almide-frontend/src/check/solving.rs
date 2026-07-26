@@ -219,7 +219,7 @@ impl Checker {
 /// The numeric scalar widths whose `compatible` rules are directional
 /// (#867) — the set the symmetric peer-join fallback in `unify_structural`
 /// applies to, and no other types. Also used by
-/// `validate_numeric_narrowing` (mod_p2) to scope the annotation-site check.
+/// `validate_numeric_narrowing` (post_solve_validation.rs) to scope the annotation-site check.
 pub(crate) fn is_numeric_scalar(t: &Ty) -> bool {
     matches!(
         t,

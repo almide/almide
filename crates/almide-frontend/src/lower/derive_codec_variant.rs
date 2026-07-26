@@ -2,7 +2,7 @@
 // generic container Codec helper functions. Split out to keep derive_codec.rs
 // under the 800-line codopsy max-lines threshold; pure text move, same file
 // scope via `include!` (inherits derive_codec.rs's `use` imports — mirrors
-// the mod_p2.rs/mod_p3.rs pattern already used elsewhere in this crate).
+// the include!-continuation pattern already used elsewhere in this crate).
 
 /// Auto-derive Variant Codec encode: Tagged format
 /// Circle(3.0) → Object([("Circle", Object([("radius", Float(3.0))]))])

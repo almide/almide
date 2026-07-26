@@ -92,7 +92,7 @@ pub fn ir_link_flatten(program: &mut IrProgram) {
 /// independent subset of `IrExprKind` and returns whether it matched — `used`
 /// is a write-only accumulator (no arm ever reads back what an earlier arm
 /// wrote), so grouping is behavior-preserving. Mirrors the split used for
-/// `scan_expr` in `lower/mod_p2.rs`.
+/// `scan_expr` in `lower/module_lowering.rs`.
 fn scan_expr_stdlib(expr: &IrExpr, used: &mut HashSet<String>) {
     if scan_expr_stdlib_calls(expr, used) { return; }
     if scan_expr_stdlib_control(expr, used) { return; }

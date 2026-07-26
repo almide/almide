@@ -317,4 +317,4 @@ fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> 
     }
 }
 
-include!("derive_codec_p2.rs");
+include!("derive_codec_variant.rs");

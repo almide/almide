@@ -675,6 +675,6 @@ fn is_clean_fn_name(s: &str) -> bool {
         && !s.ends_with('.')
 }
 
-include!("calls_p2.rs");
+include!("calls_ufcs.rs");
 
 include!("calls_arg.rs");
