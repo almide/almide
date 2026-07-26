@@ -605,5 +605,5 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
     }
 }
 
-include!("lsp_p2.rs");
-include!("lsp_p3.rs");
+include!("lsp_hover_definition.rs");
+include!("lsp_code_actions.rs");

@@ -299,5 +299,5 @@ impl std::fmt::Display for LowerError {
 
 impl std::error::Error for LowerError {}
 
-include!("bridge_p2.rs");
-include!("bridge_p3.rs");
+include!("bridge_lowering.rs");
+include!("bridge_matrix_analysis.rs");

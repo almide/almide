@@ -486,4 +486,4 @@ fn ty_matches(actual: &Ty, expected: &Ty) -> bool {
     std::mem::discriminant(actual) == std::mem::discriminant(expected)
 }
 
-include!("verify_p2.rs");
+include!("verify_tests.rs");

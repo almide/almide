@@ -434,7 +434,7 @@ fn diagnostics_md_candidates(code: &str) -> Vec<std::path::PathBuf> {
 /// `match` (cyclomatic complexity counts one branch per arm, regardless of
 /// how trivial) to a flat data table + linear scan — same code→text
 /// mapping, genuinely lower complexity since dispatch is now data, not
-/// branches (same technique as `lookup_keyword_info` in lsp_p2.rs).
+/// branches (same technique as `lookup_keyword_info` in lsp_hover_definition.rs).
 fn builtin_error_explanation(code: &str) -> Option<&'static str> {
     const TABLE: &[(&str, &str)] = &[
         ("E001", "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse()."),
