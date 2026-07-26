@@ -542,6 +542,11 @@ fn is_admitted_effectful_io(module: &str, func: &str) -> bool {
         // (io_write.almd → prim.fd_write), so their prims are in the program map and the
         // transitive cap_witness counts Stdout. Both return Unit.
         || (module == "io" && matches!(func, "write" | "write_bytes"))
+        // `io.read_all` READS standard input to EOF — REUSES Capability::Stdin. Self-hosted
+        // as a chunked `io.read_n_bytes` loop (io_read_all.almd, #876), so its transitive
+        // cap_witness reaches the same prim.read_n_bytes floor and counts Stdin. Returns an
+        // owned String (flat Drop).
+        || (module == "io" && func == "read_all")
 }
 
 include!("calls_b.rs");
