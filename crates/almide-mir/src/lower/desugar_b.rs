@@ -802,44 +802,173 @@ pub(crate) fn desugar_mutable_global_projection_args(body: &IrExpr) -> Option<Ir
         IrExpr { kind: IrExprKind::Var { id: tmp }, ty: e.ty.clone(), span: e.span.clone(), def_id: None }
     }
 
-    struct Rw {
-        changed: bool,
-        next: u32,
+    /// Hoist the DEEPEST qualifying projection prefix inside `a`: the whole
+    /// arg when it qualifies, else the heap-typed mg-rooted OBJECT under a
+    /// scalar-tail projection (`float.to_string(items[0].elapsed)` — the arg
+    /// is Float, but `items[0]` is the heap read that must bind first; the
+    /// wasm_cross_pkg println concat, the ratchet regression).
+    fn hoist_qualifying(a: &mut IrExpr, next: &mut u32, binds: &mut Vec<IrStmt>) -> bool {
+        if qualifies(a) {
+            let bound = bind_chain(a, next, binds);
+            *a = bound;
+            return true;
+        }
+        match &mut a.kind {
+            IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. } => {
+                hoist_qualifying(object, next, binds)
+            }
+            _ => false,
+        }
     }
-    impl almide_ir::IrMutVisitor for Rw {
-        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
-            almide_ir::visit_mut::walk_expr_mut(self, expr);
-            let IrExprKind::Call { args, .. } = &mut expr.kind else { return };
+
+    /// Statement-position hoist (the `desugar_heap_if_call_args` discipline —
+    /// an IN-PLACE Block around the call turns the enclosing operand into a
+    /// Block the arg/concat machinery declines, which re-walled the
+    /// wasm_cross_pkg println): binds collect into the enclosing statement
+    /// list; lambda bodies are their own hoist roots.
+    fn hoist(e: &mut IrExpr, binds: &mut Vec<IrStmt>, next: &mut u32, changed: &mut bool) {
+        if let IrExprKind::Lambda { body, .. } = &mut e.kind {
+            if let Some(new_body) = desugar_mutable_global_projection_args(body) {
+                **body = new_body;
+                *changed = true;
+            }
+            return;
+        }
+        // A LOOP is a hoist BOUNDARY: `bump(items[i], d)` inside a for body
+        // is LOOP-VARIANT (i changes, and `items` itself may be reassigned
+        // mid-loop) — hoisting its reads before the loop froze one stale
+        // handle for every iteration (p2's tick reading pre-reassign values:
+        // a silent wrong value). The loop body's statements hoist WITHIN the
+        // body instead.
+        if let IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } = &mut e.kind {
+            hoist_stmt_list(body, next, changed);
+            // The While COND re-evaluates per iteration and has no
+            // per-iteration statement slot — leave it untouched (the
+            // pre-existing arg machinery lowers or walls it honestly).
+            return;
+        }
+        almide_ir::visit_mut::walk_expr_mut(&mut HoistWalk { binds, next, changed }, e);
+        let IrExprKind::Call { args, .. } = &mut e.kind else { return };
+        for a in args.iter_mut() {
+            if hoist_qualifying(a, next, binds) {
+                *changed = true;
+            }
+        }
+    }
+    /// Hoist within a loop body's OWN statement list (binds land before their
+    /// carrying statement, inside the loop).
+    fn hoist_stmt_list(stmts: &mut Vec<IrStmt>, next: &mut u32, changed: &mut bool) {
+        let mut out: Vec<IrStmt> = Vec::with_capacity(stmts.len());
+        for mut s in stmts.drain(..) {
             let mut binds = Vec::new();
-            for a in args.iter_mut() {
-                if qualifies(a) {
-                    let bound = bind_chain(a, &mut self.next, &mut binds);
-                    *a = bound;
+            match &mut s.kind {
+                IrStmtKind::Bind { value, .. }
+                | IrStmtKind::Assign { value, .. }
+                | IrStmtKind::Expr { expr: value }
+                | IrStmtKind::BindDestructure { value, .. } => {
+                    hoist(value, &mut binds, next, changed)
                 }
+                IrStmtKind::IndexAssign { index, value, .. } => {
+                    hoist(index, &mut binds, next, changed);
+                    hoist(value, &mut binds, next, changed);
+                }
+                IrStmtKind::MapInsert { key, value, .. } => {
+                    hoist(key, &mut binds, next, changed);
+                    hoist(value, &mut binds, next, changed);
+                }
+                IrStmtKind::FieldAssign { value, .. } => hoist(value, &mut binds, next, changed),
+                _ => {}
             }
-            if binds.is_empty() {
-                return;
+            out.extend(binds);
+            out.push(s);
+        }
+        *stmts = out;
+    }
+    struct HoistWalk<'a> {
+        binds: &'a mut Vec<IrStmt>,
+        next: &'a mut u32,
+        changed: &'a mut bool,
+    }
+    impl almide_ir::IrMutVisitor for HoistWalk<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            hoist(e, self.binds, self.next, self.changed);
+        }
+    }
+    fn rewrite_block(
+        stmts: &mut Vec<IrStmt>,
+        tail: &mut Option<Box<IrExpr>>,
+        next: &mut u32,
+        changed: &mut bool,
+    ) {
+        let mut out: Vec<IrStmt> = Vec::with_capacity(stmts.len());
+        for mut s in stmts.drain(..) {
+            let mut binds = Vec::new();
+            match &mut s.kind {
+                IrStmtKind::Bind { value, .. }
+                | IrStmtKind::Assign { value, .. }
+                | IrStmtKind::Expr { expr: value }
+                | IrStmtKind::BindDestructure { value, .. } => {
+                    hoist(value, &mut binds, next, changed)
+                }
+                IrStmtKind::IndexAssign { index, value, .. } => {
+                    hoist(index, &mut binds, next, changed);
+                    hoist(value, &mut binds, next, changed);
+                }
+                IrStmtKind::MapInsert { key, value, .. } => {
+                    hoist(key, &mut binds, next, changed);
+                    hoist(value, &mut binds, next, changed);
+                }
+                IrStmtKind::FieldAssign { value, .. } => hoist(value, &mut binds, next, changed),
+                _ => {}
             }
-            self.changed = true;
-            let ty = expr.ty.clone();
-            let span = expr.span.clone();
-            let call = std::mem::replace(
-                expr,
-                IrExpr { kind: IrExprKind::Unit, ty: ty.clone(), span: span.clone(), def_id: None },
-            );
-            *expr = IrExpr {
-                kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(call)) },
+            out.extend(binds);
+            out.push(s);
+        }
+        *stmts = out;
+        if let Some(t) = tail {
+            let mut binds = Vec::new();
+            hoist(t, &mut binds, next, changed);
+            if !binds.is_empty() {
+                stmts.extend(binds);
+            }
+        }
+    }
+    struct BlockWalk<'a> {
+        next: &'a mut u32,
+        changed: &'a mut bool,
+    }
+    impl almide_ir::IrMutVisitor for BlockWalk<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            almide_ir::visit_mut::walk_expr_mut(self, e);
+            if let IrExprKind::Block { stmts, expr } = &mut e.kind {
+                rewrite_block(stmts, expr, self.next, self.changed);
+            }
+        }
+    }
+
+    let mut changed = false;
+    let mut next = crate::lower::max_var_id(body) + 1;
+    let mut out = body.clone();
+    almide_ir::IrMutVisitor::visit_expr_mut(
+        &mut BlockWalk { next: &mut next, changed: &mut changed },
+        &mut out,
+    );
+    // A non-Block body whose tail needs hoists: wrap it in a Block carrying them.
+    if !matches!(out.kind, IrExprKind::Block { .. }) {
+        let mut binds = Vec::new();
+        hoist(&mut out, &mut binds, &mut next, &mut changed);
+        if !binds.is_empty() {
+            let ty = out.ty.clone();
+            let span = out.span.clone();
+            out = IrExpr {
+                kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(out)) },
                 ty,
                 span,
                 def_id: None,
             };
         }
     }
-
-    let mut rw = Rw { changed: false, next: crate::lower::max_var_id(body) + 1 };
-    let mut out = body.clone();
-    almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut out);
-    rw.changed.then_some(out)
+    changed.then_some(out)
 }
 
 /// `v.color(if item.done then gray else white)` — a call argument that IS a
@@ -884,6 +1013,14 @@ pub(crate) fn desugar_heap_if_call_args(body: &IrExpr) -> Option<IrExpr> {
                 **body = new_body;
                 *changed = true;
             }
+            return;
+        }
+        // A LOOP is a hoist BOUNDARY (the projection-hoist sibling's p2
+        // lesson): an arg `if` inside a loop body is loop-variant — hoisting
+        // it before the loop would freeze one arm choice (or one read) for
+        // every iteration. The body's statements hoist WITHIN the body.
+        if let IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } = &mut e.kind {
+            hoist_stmt_list_heap_if(body, next, changed);
             return;
         }
         // Children first, so an inner call's hoists land before the outer's.
@@ -933,6 +1070,33 @@ pub(crate) fn desugar_heap_if_call_args(body: &IrExpr) -> Option<IrExpr> {
         }
     }
 
+    fn hoist_stmt_list_heap_if(stmts: &mut Vec<IrStmt>, next: &mut u32, changed: &mut bool) {
+        let mut out: Vec<IrStmt> = Vec::with_capacity(stmts.len());
+        for mut s in stmts.drain(..) {
+            let mut binds = Vec::new();
+            match &mut s.kind {
+                IrStmtKind::Bind { value, .. }
+                | IrStmtKind::Assign { value, .. }
+                | IrStmtKind::Expr { expr: value }
+                | IrStmtKind::BindDestructure { value, .. } => {
+                    hoist(value, &mut binds, next, changed)
+                }
+                IrStmtKind::IndexAssign { index, value, .. } => {
+                    hoist(index, &mut binds, next, changed);
+                    hoist(value, &mut binds, next, changed);
+                }
+                IrStmtKind::MapInsert { key, value, .. } => {
+                    hoist(key, &mut binds, next, changed);
+                    hoist(value, &mut binds, next, changed);
+                }
+                IrStmtKind::FieldAssign { value, .. } => hoist(value, &mut binds, next, changed),
+                _ => {}
+            }
+            out.extend(binds);
+            out.push(s);
+        }
+        *stmts = out;
+    }
     fn rewrite_block(stmts: &mut Vec<IrStmt>, tail: &mut Option<Box<IrExpr>>, next: &mut u32, changed: &mut bool) {
         let mut out: Vec<IrStmt> = Vec::with_capacity(stmts.len());
         for mut s in stmts.drain(..) {

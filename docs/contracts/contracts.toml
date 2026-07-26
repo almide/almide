@@ -2172,3 +2172,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/opt_ctor_over_call_payload.almd", class = "fixture" },
 ]
+
+# ── MUTABLE-GLOBAL PROJECTION ARGS: LOOPS ARE HOIST BOUNDARIES ─
+[[contract]]
+id        = "C-177"
+spec      = "ALS-M6"
+title     = "A mutable-global projection read in a loop-body call argument reads the CURRENT slot every iteration"
+statement = "A call argument that projects out of a heap-typed MUTABLE global (`bump(items[i], d)` inside a `for` body; `float.to_string(items[0].elapsed)` — a SCALAR tail over a heap mg projection) evaluates against the slot's CURRENT contents at that iteration on both targets. The projection-arg ANF (#881's `desugar_mutable_global_projection_args`) hoists such reads to let-binds at STATEMENT position — and a LOOP is a hoist BOUNDARY: the walker previously descended through `ForIn`/`While` bodies and emitted the binds BEFORE the loop, freezing one stale handle (and one index) for every iteration — the wasm_cross_pkg two-phase tick then read pre-reassign values (native `110.0 4.0`, wasm `100.0` + a garbage denormal: the silent-wrong-value class). Loop bodies now hoist WITHIN their own statement list, the While cond is never touched (no per-iteration slot exists before it), and the same boundary is applied to the heap-if call-arg hoist (the committed sibling with the identical latent walker). The hoist also decomposes the DEEPEST qualifying prefix under a scalar tail (the `.elapsed` read above), and binds land in the enclosing STATEMENT list — an earlier in-place Block wrapper turned concat operands into Blocks the arg machinery declined (the wall that masked this class). The wasm_cross_pkg fixture is the package-form consumer; this fixture is the single-file distillation."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mg_rebuild_two_phase.almd", class = "fixture" },
+]
