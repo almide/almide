@@ -252,16 +252,72 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
     let mut missing = BTreeSet::new();
     for f in &prog.functions {
         for op in &f.ops {
-            if let Op::CallFn { name, .. } = op {
-                if !resolvable.contains(name) {
-                    crate::trace::trace("ALMIDE_DBG_UNLINKED", || format!(
-                        "[unlinked] {} references {}", f.name, name));
-                    missing.insert(name.clone());
-                }
+            let name = match op {
+                Op::CallFn { name, .. } => name.clone(),
+                // Generated-drop targets render as literal `(call $__drop_…)`
+                // text, not `CallFn` ops — an unresolved one used to sail past
+                // this gate and produce an INVALID module instead of a wall
+                // (the #881 bare-vs-qualified record-drop mismatch).
+                Op::DropVariant { ty, .. } => drop_target_name(ty),
+                Op::DropWrapperRec { drop_fn, .. } => drop_target_name(drop_fn),
+                _ => continue,
+            };
+            if !resolvable.contains(&name) {
+                crate::trace::trace("ALMIDE_DBG_UNLINKED", || format!(
+                    "[unlinked] {} references {}", f.name, name));
+                missing.insert(name);
             }
         }
     }
     missing
+}
+
+/// The `$__drop_<…>` symbol a drop op's type/fn string renders as (the same
+/// dot-sanitization the WAT arms apply).
+fn drop_target_name(ty: &str) -> String {
+    format!("__drop_{}", ty.replace('.', "_"))
+}
+
+/// Resolve an unresolvable generated-drop target to its UNIQUE
+/// module-qualified twin. Intra-module code reaches a record type by its BARE
+/// name (`View`) while the drop generator keys the QUALIFIED one
+/// (`palette.View` → `__drop_palette_View`); without this remap the render
+/// emitted a dangling `(call $__drop_View)` — an invalid module, not a wall
+/// (#881). An ambiguous bare name (two modules declaring `View`) stays
+/// unresolved and walls through `unlinked_call_names` instead of guessing.
+fn resolve_drop_alias(target: &str, resolvable: &BTreeSet<String>) -> Option<String> {
+    // A candidate twin must keep the SAME family chain (`list_`, `opt_`, …)
+    // as the target and differ only by a module qualifier before the type's
+    // final segment: `__drop_View` → `__drop_palette_View`,
+    // `__drop_list_View` → `__drop_list_palette_View`. A family-crossing
+    // match would free a DIFFERENT layout, so the qualifier segment must not
+    // itself look like a family marker.
+    const FAMILY_MARKERS: &[&str] =
+        &["list_", "opt_", "tup_", "map_", "res", "closure", "value"];
+    let t = target.strip_prefix("__drop_")?;
+    let bare = t.rsplit('_').next()?;
+    if bare.is_empty() {
+        return None;
+    }
+    let fam = &t[..t.len() - bare.len()];
+    let suffix = format!("_{bare}");
+    let mut hit: Option<&String> = None;
+    for cand in resolvable {
+        let Some(c) = cand.strip_prefix("__drop_") else { continue };
+        if c == t {
+            continue;
+        }
+        let Some(rest) = c.strip_prefix(fam) else { continue };
+        let Some(middle) = rest.strip_suffix(suffix.as_str()) else { continue };
+        if middle.is_empty() || FAMILY_MARKERS.iter().any(|m| middle.starts_with(m)) {
+            continue;
+        }
+        if hit.is_some() {
+            return None;
+        }
+        hit = Some(cand);
+    }
+    hit.and_then(|c| c.strip_prefix("__drop_")).map(str::to_string)
 }
 
 /// Render a whole MIR program to a WAT module, WALLING any unlinked stdlib/runtime call.
@@ -428,23 +484,52 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
     // Remap aliasable burned names BEFORE the unlinked check (clone only when an
     // alias actually applies — the common path stays zero-copy).
     let resolvable = resolvable_call_names(prog);
-    let needs_alias = prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| {
-        matches!(op, Op::CallFn { name, .. }
-            if !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some())
+    let needs_alias = prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| match op {
+        Op::CallFn { name, .. } => {
+            !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some()
+        }
+        Op::DropVariant { ty, .. } => {
+            !resolvable.contains(&drop_target_name(ty))
+                && resolve_drop_alias(&drop_target_name(ty), &resolvable).is_some()
+        }
+        Op::DropWrapperRec { drop_fn, .. } => {
+            !resolvable.contains(&drop_target_name(drop_fn))
+                && resolve_drop_alias(&drop_target_name(drop_fn), &resolvable).is_some()
+        }
+        _ => false,
     });
     let remapped;
     let prog = if needs_alias {
         let mut p = prog.clone();
         for f in &mut p.functions {
             for op in &mut f.ops {
-                let Op::CallFn { name, .. } = op else {
-                    continue;
-                };
-                if resolvable.contains(name) {
-                    continue;
-                }
-                if let Some(alias) = resolve_rt_alias(name, &resolvable) {
-                    *name = alias;
+                match op {
+                    Op::CallFn { name, .. } => {
+                        if !resolvable.contains(name) {
+                            if let Some(alias) = resolve_rt_alias(name, &resolvable) {
+                                *name = alias;
+                            }
+                        }
+                    }
+                    Op::DropVariant { ty, .. } => {
+                        if !resolvable.contains(&drop_target_name(ty)) {
+                            if let Some(alias) =
+                                resolve_drop_alias(&drop_target_name(ty), &resolvable)
+                            {
+                                *ty = alias;
+                            }
+                        }
+                    }
+                    Op::DropWrapperRec { drop_fn, .. } => {
+                        if !resolvable.contains(&drop_target_name(drop_fn)) {
+                            if let Some(alias) =
+                                resolve_drop_alias(&drop_target_name(drop_fn), &resolvable)
+                            {
+                                *drop_fn = alias;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
