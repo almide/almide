@@ -174,7 +174,15 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
         "string.repeat" => Some((
             &[NTy::Str, NTy::I64],
             Some(NTy::Str),
-            "fn rt_string_repeat(s: &str, n: i64) -> String { s.repeat(n as usize) }",
+            // The SAME clamp + ceiling as the v0 runtime and the wasm self-host
+            // (stdlib/string_repeat.almd): a negative count is the empty string
+            // (C-054), and a result past the shared 2^31 ceiling aborts in the
+            // T6 form. The bare `s.repeat(n as usize)` turned `repeat(s, -1)`
+            // into a capacity-overflow PANIC (exit 101) on this leg while the
+            // wasm leg printed normally — a crash-form divergence the C-161
+            // rule forbids (differential fuzz, seed 1785015406589852000 index
+            // 1012). Keep in sync with ALMIDE_REPEAT_MAX_BYTES.
+            "fn rt_string_repeat(s: &str, n: i64) -> String {\n    let n = n.max(0);\n    if (s.len() as i64).saturating_mul(n) > (1i64 << 31) {\n        eprintln!(\"Error: repeat result too large\");\n        std::process::exit(1);\n    }\n    s.repeat(n as usize)\n}",
         )),
         "string.cmp" => Some((
             // Byte-wise lexicographic, -1/0/1 (C-019: rt_string_extra cmp = native oracle).
