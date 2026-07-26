@@ -581,6 +581,47 @@ pub fn bridge_cross_module_toplets(
     bridge_cross_module_toplets_apply(ir, &by_name, &by_bare, globals, global_inits, mutable_aliases);
 }
 
+/// MODULE→MODULE top-let references (#881): a theme fn reading `v.white`
+/// (another module's top-let) carries a THEME-region synthesized ref entry —
+/// the MAIN-table walk in [`bridge_cross_module_toplets`] never sees it, so
+/// the reference stayed an unbound var. Register the referent's `(ty, init)`
+/// for such refs in the SHARED globals union, under two safety fences:
+/// only ids the union does NOT already key (region ids collide across
+/// modules, and overwriting an existing entry could rebind an unrelated
+/// region's var — an absent id is a strict improvement, a colliding one
+/// keeps today's behavior), and only IMMUTABLE referents (`mutable_aliases`
+/// is keyed by the raw ref id, so a cross-region key collision there would
+/// route WRITES to the wrong slot — that case keeps its honest wall until
+/// the alias map is region-qualified).
+pub fn bridge_module_to_module_toplets(
+    ir: &almide_ir::IrProgram,
+    globals: &mut std::collections::HashMap<almide_ir::VarId, Ty>,
+    global_inits: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) {
+    let (by_name, by_bare) = bridge_cross_module_toplets_build_lookup(ir);
+    for m in &ir.modules {
+        for (i, info) in m.var_table.entries.iter().enumerate() {
+            let id = almide_ir::VarId(i as u32);
+            let Some(mo) = &info.module_origin else { continue };
+            if mo == m.name.as_str() {
+                continue;
+            }
+            if globals.contains_key(&id) || global_inits.contains_key(&id) {
+                continue;
+            }
+            let looked_up = by_name
+                .get(&(mo.clone(), info.name.as_str().to_uppercase()))
+                .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
+            if let Some(Some((ty, init, mutable, _))) = looked_up {
+                if !mutable && bridged_ref_ty_agrees(ty, &info.ty) {
+                    globals.insert(id, ty.clone());
+                    global_inits.insert(id, (*init).clone());
+                }
+            }
+        }
+    }
+}
+
 /// Extracted from `bridge_cross_module_toplets` (codopsy8 complexity sweep, phase 1 of
 /// 2): the by-name/by-bare lookup maps of every module top-let. Verbatim.
 ///

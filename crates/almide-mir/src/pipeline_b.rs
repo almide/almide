@@ -114,7 +114,10 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
     // ONE independent table (globals, then main-region globals — reads phase 1's finished
     // tables, then record layouts, then variant layouts) — a pure text-move of the
     // original top-to-bottom structure, no logic change.
-    let (globals, global_inits) = collect_pipeline_globals(ir);
+    let (mut globals, mut global_inits) = collect_pipeline_globals(ir);
+    // Module→module top-let refs register into the SHARED union (#881) —
+    // module fns lower against `globals`, not the main-region view.
+    crate::lower::bridge_module_to_module_toplets(ir, &mut globals, &mut global_inits);
     let (main_globals, main_global_inits, mutable_toplet_aliases) =
         collect_pipeline_main_globals(ir, &globals, &global_inits);
     let record_layouts = collect_pipeline_record_layouts(ir);
