@@ -2160,3 +2160,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_cross_module_variant.almd", class = "fixture" },
 ]
+
+# ── OPTION/RESULT CTOR OVER AN INLINE CALL PAYLOAD ─
+[[contract]]
+id        = "C-176"
+spec      = "ALS-M5"
+title     = "some/ok around an inline tuple-returning call materializes the real payload on both targets"
+statement = "An Option/Result constructor whose payload is an INLINE call — `some(option.unwrap_or(some((2, 3)), (2, 4)))`, `ok(<same>)` — wraps the call's REAL result on the wasm target exactly as native does (#871). The payload reaches the bind as a desugared MATCH (`option.unwrap_or` inlines before lowering), which the ctor's ANF safety net previously missed (its guard admitted Call/Tuple/If only), so the ctor fell to the #810 terminal: before that terminal existed the bind deferred to an EMPTY Opaque block that READ `none` (native printed `some((2, 3))` — the silent-wrong-value class, differential-fuzz seed 1785015406589852000), and one level out an `ok(...)` misread as an empty block made the downstream unwrap trap out of bounds where native returned `(2, 3)`. Two changes close it: the net's guard admits MATCH payloads (the ANF bind then routes them through the proven heap-result branch machinery, C-106), and the ctor's heap-general strategy gains a scalar-slot-TUPLE Module-call arm (the callee's fresh owned flat block moves into the ctor slot; an all-scalar tuple's rc_dec is its full free, the same drop class as a scalar list). A payload neither path claims still WALLS — never an empty block the program can observe."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/opt_ctor_over_call_payload.almd", class = "fixture" },
+]

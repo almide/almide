@@ -267,6 +267,20 @@ impl LowerCtx {
             IrExprKind::Call { target: CallTarget::Module { .. }, .. } if matches!(expr.ty, Ty::String) => {
                 self.piece_from_module_string_call(expr)?
             }
+            // `some(option.unwrap_or(some((2, 3)), (2, 4)))` — a PURE Module
+            // call yielding a fresh owned SCALAR-slot TUPLE payload (#871, the
+            // inline ctor-over-call): before this arm the tuple call fell to
+            // `_ => None` and the ctor deferred to an EMPTY Opaque block that
+            // READ `none` (native printed `some((2, 3))` — the silent-wrong-
+            // value class; the #810 bind terminal now walls it instead, and
+            // this arm materializes it). The flat all-scalar tuple block's
+            // rc_dec is its full free — the same drop class as a scalar list.
+            IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                if matches!(&expr.ty, Ty::Tuple(ts)
+                    if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t))) =>
+            {
+                self.piece_from_computed_scalar_list(expr)?
+            }
             IrExprKind::If { .. } | IrExprKind::Match { .. } if matches!(expr.ty, Ty::String) => {
                 self.piece_from_heap_result_if_match(expr)?
             }

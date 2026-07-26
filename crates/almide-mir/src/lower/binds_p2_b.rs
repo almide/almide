@@ -185,9 +185,25 @@ impl LowerCtx {
             // took the fallback while native returned the real payload — the ANF
             // bind routes them through the proven heap-result-if bind machinery
             // (C-106) instead.
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!(
+                    "[ctor-net] {} payload kind {} (ty {:?})",
+                    crate::lower::kind_name(&value.kind),
+                    crate::lower::kind_name(&expr.kind),
+                    expr.ty
+                )
+            });
+            // MATCH payloads too (#871: `some(option.unwrap_or(some((2, 3)),
+            // (2, 4)))` — by bind time the unwrap_or is a desugared Match, so
+            // the Call|Tuple|If guard missed it and the ctor fell to the #810
+            // terminal wall; the ANF bind routes it through the same proven
+            // heap-result branch machinery the If class uses).
             if matches!(
                 expr.kind,
-                IrExprKind::Call { .. } | IrExprKind::Tuple { .. } | IrExprKind::If { .. }
+                IrExprKind::Call { .. }
+                    | IrExprKind::Tuple { .. }
+                    | IrExprKind::If { .. }
+                    | IrExprKind::Match { .. }
             ) {
                 let payload_ty = expr.ty.clone();
                 let payload = (**expr).clone();
