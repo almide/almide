@@ -734,17 +734,23 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
                 let looked_up = by_name
                     .get(&(mo.clone(), info.name.as_str().to_uppercase()))
                     .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
-                let Some(Some((ty, init, mutable, _))) = looked_up else { continue };
+                let Some(Some((rty, init, mutable, _))) = looked_up else { continue };
+                // EVERY immutable, Var-free, pure referent substitutes —
+                // scalar consts included. The alternative (registering the
+                // referent in the SHARED globals union under the reader's
+                // region-local ref id) was tried and is UNSOUND: region ids
+                // collide, so a reader's id could pick up an UNRELATED
+                // module's init — observed as scroll's `FRICTION = 0.035`
+                // standing in for a `view.Color` reference; a same-typed
+                // collision would have been a silently wrong VALUE.
+                // Substitution is region-scoped by construction.
                 if *mutable || expr_contains_var(init) {
                     continue;
                 }
-                // Scalar CONST globals resolve through the const-init
-                // machinery already; substitute the shapes it cannot carry —
-                // any call-bearing init, and HEAP literals (a record literal
-                // like view's `_white = { r: 1.0, … }` is not in the const
-                // set, so its cross-module readers walled with "no CONST
-                // initializer").
-                if !crate::lower::expr_contains_call(init) && !crate::lower::is_heap_ty(ty) {
+                // by_bare has no module qualifier — a same-bare-name toplet in
+                // an unrelated module could match; refuse a concrete ty
+                // mismatch (same fence as the main-region bridge).
+                if !crate::lower::bridged_ref_ty_agrees(rty, &info.ty) {
                     continue;
                 }
                 let mut visiting = HashSet::new();

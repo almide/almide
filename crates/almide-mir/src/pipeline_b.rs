@@ -51,20 +51,26 @@ impl almide_ir::IrMutVisitor for MutGlobalIdRw<'_> {
     }
 }
 
-/// Make MUTABLE module-level var ids unique ACROSS regions (#881). Every unit
+/// Make ALL module-level top-let ids unique ACROSS regions (#881). Every unit
 /// numbers its VarIds from 0 — the main program and each module are PRIVATE
-/// numbering regions — but the mutable-global slot map is keyed by the RAW id,
-/// so `var cached_scene` (main, VarId 0) and `var _dirty` (a module, VarId 0)
-/// collided and the program walled. Remap each MODULE's mutable top-let ids to
-/// fresh ids ABOVE every region's var-table length (disjoint from every real
-/// id by construction), rewriting the declaration and every use inside that
-/// module's own fns and top-let inits — and EXTEND the module's var table so
-/// the new id still indexes the var's info (the cross-module NAME bridge looks
-/// the top-let's name/mutability up BY INDEX; without the extension the bridge
-/// went blind and every cross-module mutable reference became an unbound var).
-/// Cross-module references resolve BY NAME afterwards
-/// (`bridge_cross_module_toplets`), so they see the remapped ids automatically.
-pub(crate) fn disambiguate_mutable_global_regions(ir: &mut almide_ir::IrProgram) {
+/// numbering regions — but both the mutable-global slot map AND the shared
+/// globals/global-inits union ([`collect_pipeline_globals`]) are keyed by the
+/// RAW id, so `var cached_scene` (main, VarId 0) and `var _dirty` (a module,
+/// VarId 0) collided and the program walled — and an IMMUTABLE collision was
+/// worse: `let FRICTION = 0.035` (scroll) silently WON another module's
+/// same-numbered toplet in the union ("later module wins"), so that module's
+/// reader materialized 0.035 where a `view.Color` lived (a silent wrong value
+/// whenever the types happened to agree). Remap EVERY module top-let id
+/// (mutable and immutable alike) to fresh ids ABOVE every region's var-table
+/// length (disjoint from every real id by construction), rewriting the
+/// declaration and every use inside that module's own fns and top-let inits —
+/// and EXTEND the module's var table so the new id still indexes the var's
+/// info (the cross-module NAME bridge looks the top-let's name/mutability up
+/// BY INDEX; without the extension the bridge went blind and every
+/// cross-module mutable reference became an unbound var). Cross-module
+/// references resolve BY NAME afterwards (`bridge_cross_module_toplets`), so
+/// they see the remapped ids automatically.
+pub(crate) fn disambiguate_module_global_regions(ir: &mut almide_ir::IrProgram) {
     let mut next: u32 = std::iter::once(ir.var_table.entries.len())
         .chain(ir.modules.iter().map(|m| m.var_table.entries.len()))
         .max()
@@ -73,9 +79,6 @@ pub(crate) fn disambiguate_mutable_global_regions(ir: &mut almide_ir::IrProgram)
         let mut map: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
             std::collections::HashMap::new();
         for tl in &mut m.top_lets {
-            if !tl.mutable {
-                continue;
-            }
             let old = tl.var;
             let fresh = almide_ir::VarId(next);
             next += 1;
@@ -114,10 +117,7 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
     // ONE independent table (globals, then main-region globals — reads phase 1's finished
     // tables, then record layouts, then variant layouts) — a pure text-move of the
     // original top-to-bottom structure, no logic change.
-    let (mut globals, mut global_inits) = collect_pipeline_globals(ir);
-    // Module→module top-let refs register into the SHARED union (#881) —
-    // module fns lower against `globals`, not the main-region view.
-    crate::lower::bridge_module_to_module_toplets(ir, &mut globals, &mut global_inits);
+    let (globals, global_inits) = collect_pipeline_globals(ir);
     let (main_globals, main_global_inits, mutable_toplet_aliases) =
         collect_pipeline_main_globals(ir, &globals, &global_inits);
     let record_layouts = collect_pipeline_record_layouts(ir);

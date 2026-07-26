@@ -916,9 +916,10 @@ fn build_ir_with_drops(
     if test_mode {
         synthesize_test_runner_main(&mut ir)?;
     }
-    // #881: mutable module-level var ids are per-region — make them globally
-    // unique BEFORE any layout/slot phase keys a map by the raw id.
-    disambiguate_mutable_global_regions(&mut ir);
+    // #881: module-level top-let ids are per-region — make them globally
+    // unique BEFORE any layout/slot phase keys a map by the raw id (the
+    // globals union and the mutable-slot map both key raw ids).
+    disambiguate_module_global_regions(&mut ir);
     Ok(ir)
 }
 
