@@ -340,6 +340,7 @@ fn classify_f64_op(
                     poison.insert(*payload);
                 }
                 Init::Opaque
+                | Init::Empty
                 | Init::OptNone
                 | Init::IntList(_)
                 | Init::Bytes(_)

@@ -2136,3 +2136,15 @@ evidence  = [
   { path = "tests/diagnostics/e024-unsigned-negative-literal/broken.almd", class = "fixture" },
   { path = "tests/diagnostics/e024-carrier-overflow/broken.almd", class = "fixture" },
 ]
+
+# ── TCO HEAP-ACCUMULATOR SEED: THE UPFRONT COPY IS A REAL SHARE ───────
+[[contract]]
+id        = "C-174"
+spec      = "ALS-M6"
+title     = "A tail-recursive Map/Set accumulator keeps its seed on both targets, non-empty seeds included"
+statement = "A tail-recursive accumulator of Map/Set type produces the same value on both targets whatever the INITIAL accumulator holds — the loop the TCO rewrites it into starts from the seed, not from empty. The TCO synthesizes an upfront copy of the borrowed accumulator param (`let slot = acc + []`, span-less); a List executes that copy via __list_concat, but a Map/Set is not a list, so the bind fell to the terminal deferred Alloc{Opaque} — an EMPTY block standing in for a copy of the seed. Every in-tree caller seeded the accumulator with an empty map (map.from_list allocates `map.new()` and folds into it), so the empty block COINCIDED with the correct value and the whole map/set self-host suite ran on top of the misshape without a visible defect; a program seeding `[(99, 7)]` then watched wasm insert into an empty map (`len=2 seed99=-1`) while native kept the seed (`len=3 seed99=7`) — a silent cross-target miscompile of exactly the F2 accept-but-wrong class #810 predicted, found by its producer census (41/41 terminal-Opaque producers were this one synthesized shape, plus one Try). The copy now lowers as an Op::Dup SHARE of the seed's block, the same CowSafety discipline a closure capture uses: sound because map/set growth is functional (map.set/set.insert allocate fresh — nothing mutates a block in place) and every in-place elision in the compiler is rc==1-gated (MakeUnique), which a Dup'd rc>=2 block defeats by construction. The zero-iteration case is the share discipline itself: the result aliases the seed (rc=2) and both handles drop independently — no double-free, no leak, and both read the same correct value. Covered per repr family: the Int-KV core map, the String-element set, and the interleaved _str String-KV map whose nested handles ride the rc-gated recursive drop."
+since     = "0.36.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/tco_map_acc_seed.almd", class = "fixture" },
+]

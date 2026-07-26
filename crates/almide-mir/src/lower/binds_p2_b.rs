@@ -27,6 +27,32 @@ impl LowerCtx {
             self.materialized_lists.insert(dst);
             return Ok(true);
         }
+        // The TCO's upfront accumulator copy (`let slot = acc + []` — mod_p5_b
+        // synthesizes it, span-less) at a MAP/SET type. `try_lower_concat_list`
+        // above executes it for a real list; a map/set is not a list, so it used
+        // to fall through to the terminal deferred Opaque — an EMPTY block in
+        // place of a COPY of `acc`. Every in-tree caller happened to seed the
+        // accumulator with an empty map, so the empty block coincided with the
+        // right answer and this ran silently wrong-shaped for months; a NON-empty
+        // seed made the loop insert into an empty map while native kept the seed
+        // (`len=2 seed99=-1` vs `len=3 seed99=7` — the F2 accept-but-wrong class,
+        // found by the #810 producer census, pinned by tco_map_acc_seed.almd).
+        //
+        // The honest lowering is a SHARE, not a copy: `Op::Dup` rc-increments the
+        // seed's block and hands the slot a co-owning handle. Value semantics
+        // hold because no map/set op mutates a block in place — growth is
+        // functional (`map.set` allocates fresh), and every in-place elision in
+        // this compiler is rc==1-gated (MakeUnique), which a Dup'd rc>=2 block
+        // defeats by construction. The loop's first reassignment then drops the
+        // share (rc back to 1, caller still owns) and stores the fresh result —
+        // the proven drop-old/store-new slot discipline, unchanged.
+        if let Some(dst) = self.try_lower_tco_heap_acc_copy(value) {
+            self.value_of.insert(var, dst);
+            self.live_heap_handles.push(dst);
+            self.seed_call_named_heap_drop_route(dst, ty);
+            self.seed_call_named_heap_read_shape(dst, ty);
+            return Ok(true);
+        }
         // `let s = "x=${n} y=${t}"` — a STRING INTERPOLATION over the executable
         // subset (Lit / String Var/LitStr / Int Var/LitInt parts) EXECUTES to a
         // fresh owned String via the same __str_concat chain, byte-matching v0;
@@ -71,6 +97,38 @@ impl LowerCtx {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    /// The TCO accumulator-copy shape at a MAP/SET type: `Var(acc) + <empty>`,
+    /// where `<empty>` is the span-less `[]` / `[:]` mod_p5_b synthesizes. Lowers
+    /// to an [`Op::Dup`] share of the accumulator's block — the same CowSafety
+    /// discipline a closure capture uses (binds.rs): sound because every
+    /// in-place elision is rc==1-gated, and a Dup makes rc>=2. Returns `None`
+    /// for any other shape, including a USER-written `+` — the checker types `+`
+    /// only for strings and lists, so a Map/Set-typed `ConcatList` can only be
+    /// the TCO synthesis; the Var-left + literal-empty-right gate makes the
+    /// match structural rather than trusting that provenance.
+    fn try_lower_tco_heap_acc_copy(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::Map, _) | Ty::Applied(TypeConstructorId::Set, _))
+        {
+            return None;
+        }
+        let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } = &value.kind
+        else {
+            return None;
+        };
+        let empty_right = matches!(&right.kind, IrExprKind::EmptyMap)
+            || matches!(&right.kind, IrExprKind::List { elements } if elements.is_empty());
+        if !empty_right {
+            return None;
+        }
+        let IrExprKind::Var { id } = &left.kind else { return None };
+        let src = *self.value_of.get(id)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::Dup { dst, src });
+        Some(dst)
     }
 
     /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
@@ -373,6 +431,26 @@ impl LowerCtx {
                 ));
             }
         }
+        // #810 note — why this is still not `Opaque => wall`.
+        //
+        // A corpus census (983 files) measured what actually reaches here, and
+        // `Init::Opaque` turned out to carry THREE meanings, not the two the
+        // `Init::Empty` split above separates:
+        //
+        //   1. genuinely empty      — `[:]`. Now `Init::Empty`; final content.
+        //   2. allocate-then-fill   — an empty block the FOLLOWING ops populate.
+        //                             `map.from_list`'s accumulator arrives here
+        //                             as a Map-typed `BinOp`, and the program
+        //                             reads the populated map correctly.
+        //   3. could not build      — the accept-but-wrong reservoir.
+        //
+        // (1) is now told apart by the sentinel. (2) and (3) are NOT separable
+        // at this bind, because which one it is depends on what comes after —
+        // and walling both breaks 8 corpus programs that are correct today.
+        // `DynStr` / `DynList` are what (2) looks like once it is expressed
+        // honestly; the map accumulator has no such variant yet. That is the
+        // remaining work, and it is a value-model change, not a guard.
+        //
         // An all-literal `Init::IntList` is a REAL, POPULATED block (every slot a constant) —
         // admit a direct `xs[i]` bounds-checked load over it. An `Init::Opaque` (a deferred /
         // unsupported value) is NOT tracked: indexing it would trap on cap 0.

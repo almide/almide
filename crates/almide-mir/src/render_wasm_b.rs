@@ -471,6 +471,7 @@ pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
                 }
                 Init::OptSome { payload } => out.push(*payload),
                 Init::Opaque
+                | Init::Empty
                 | Init::OptNone
                 | Init::IntList(_)
                 | Init::Bytes(_)

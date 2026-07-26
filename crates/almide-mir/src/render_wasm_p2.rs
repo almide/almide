@@ -264,6 +264,7 @@ fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
             let elems: &[i64] = match init {
                 Init::IntList(e) => e,
                 Init::Opaque
+                | Init::Empty
                 | Init::Str(_)
                 | Init::Bytes(_)
                 | Init::DynStr { .. }

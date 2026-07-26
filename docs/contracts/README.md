@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-173 contracts
+174 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -201,4 +201,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-171 | Byte-offset bound checks do not overflow at the i64 boundary | 0.36.0 | active | fixture | 1 |
 | C-172 | unwrap_or over any heap payload yields the same value on both targets | 0.36.0 | active | fixture | 1 |
 | C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 1 |
+| C-174 | A tail-recursive Map/Set accumulator keeps its seed on both targets, non-empty seeds included | 0.36.0 | active | fixture | 1 |
 
