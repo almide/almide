@@ -11,10 +11,15 @@ pub(crate) struct OpTables<'a> {
     pub masks: &'a BTreeMap<ValueId, Vec<usize>>,
     pub reprs: &'a BTreeMap<ValueId, Repr>,
     pub floats: &'a BTreeSet<ValueId>,
+    /// This op is a FUNCTION-TAIL `CallFn` (`tail_call_indexes`): its result
+    /// flows unmodified through only Else/EndIf merges (+ its own Consume) to
+    /// the fn return, with no drops or effects after — render `return_call`
+    /// so a mutual-tail-recursion chain runs in constant stack (#864).
+    pub tail_call: bool,
 }
 
 fn render_op(op: &Op, t: OpTables<'_>, fuser: &mut Fuser) -> String {
-    let OpTables { label_off, func_slots, param_counts, masks, reprs, floats } = t;
+    let OpTables { label_off, func_slots, param_counts, masks, reprs, floats, tail_call } = t;
     // Router split out for codopsy cognitive-complexity (pure text-move, no behavior
     // change): the original single ~1100-line exhaustive match over every `Op` variant
     // is now 4 group helpers by variant family (alloc/list-literal, call/binop, the
@@ -33,7 +38,9 @@ fn render_op(op: &Op, t: OpTables<'_>, fuser: &mut Fuser) -> String {
         | Op::IntBinOp { .. }
         | Op::CallIndirect { .. }
         | Op::CallFn { .. }
-        | Op::CallImport { .. } => render_op_call(op, label_off, param_counts, reprs, floats, fuser),
+        | Op::CallImport { .. } => {
+            render_op_call(op, label_off, param_counts, reprs, floats, tail_call, fuser)
+        }
         Op::Drop { .. }
         | Op::DropListStr { .. }
         | Op::DropListListStr { .. }
@@ -303,6 +310,7 @@ fn render_op_call(
     param_counts: &BTreeMap<String, usize>,
     reprs: &BTreeMap<ValueId, Repr>,
     floats: &BTreeSet<ValueId>,
+    tail_call: bool,
     fuser: &mut Fuser,
 ) -> String {
     match op {
@@ -310,7 +318,9 @@ fn render_op_call(
         | Op::Call { .. }
         | Op::CallIndirect { .. }
         | Op::CallFn { .. }
-        | Op::CallImport { .. } => render_op_call_light(op, label_off, param_counts, reprs, floats),
+        | Op::CallImport { .. } => {
+            render_op_call_light(op, label_off, param_counts, reprs, floats, tail_call)
+        }
         Op::IntBinOp { .. } => render_op_call_intbinop(op, fuser),
         _ => unreachable!("render_op_call: {op:?} is not in this group"),
     }
@@ -322,6 +332,7 @@ fn render_op_call_light(
     param_counts: &BTreeMap<String, usize>,
     reprs: &BTreeMap<ValueId, Repr>,
     floats: &BTreeSet<ValueId>,
+    tail_call: bool,
 ) -> String {
     match op {
         // An alias SHARES the object and bumps its refcount (A1.3-render): dst and
@@ -401,6 +412,15 @@ fn render_op_call_light(
                 .map(|a| render_arg_wasm(a, reprs, floats))
                 .collect::<Vec<_>>()
                 .join(" ");
+            // A FUNCTION-TAIL call (`tail_call_indexes`): `return_call`
+            // transfers the frame — the merges after it are unreachable on
+            // this path (their `local.get` of the never-set dst is dead but
+            // valid wasm), so a mutual-tail-recursion chain runs in constant
+            // stack (#864). Self tail-recursion still takes the TCO loop
+            // rewrite upstream and never reaches here.
+            if tail_call && dst.is_some() {
+                return format!("    (return_call ${name} {argstr})\n");
+            }
             match dst {
                 Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
                 None => format!("    (call ${name} {argstr})\n"),

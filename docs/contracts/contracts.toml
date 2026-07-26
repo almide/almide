@@ -2184,3 +2184,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mg_rebuild_two_phase.almd", class = "fixture" },
 ]
+
+# ── MUTUAL TAIL RECURSION: CONSTANT-STACK VIA return_call ─
+[[contract]]
+id        = "C-178"
+spec      = "ALS-M5"
+title     = "A mutual tail-recursion chain runs at unbounded depth on the wasm target"
+statement = "A cross-function tail-recursion chain (`is_even`/`is_odd`, an accumulator `ping`/`pong`) computes the same value on both targets at a depth (1,000,000) that overflows a plain-call chain on wasm (#864 — the legacy almide-codegen emitted return_call, but the port was missed when almide-mir became the default renderer: the chain compiled to plain `call`s and trapped `call stack exhausted`). The renderer now classifies a FUNCTION-TAIL `CallFn` — one whose result flows UNMODIFIED through only Else/EndIf value merges (plus its own Consume move-out marker) to the function's `ret`, with nothing else (no drops, no stores) on the path from the call to the exit — and emits `return_call`, transferring the frame; the dead merge plumbing after it is unreachable-but-valid wasm. The classification is render-side only (MIR ops, certificate, and caps counts are unchanged — the call op is the same op, differently encoded), and anything breaking the pattern keeps today's plain `call`. SELF tail recursion still takes the upstream TCO loop rewrite and is not affected. Native Rust emit is byte-identical (emit-diffs 0 across the 1001-file corpus); the wasm re-encode was suite-verified (all three spec legs plus flagship outputs byte-identical)."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mutual_tail_recursion.almd", class = "fixture" },
+]

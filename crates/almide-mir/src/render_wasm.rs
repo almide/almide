@@ -188,6 +188,7 @@ pub fn render_wasm(func: &MirFunction) -> String {
             masks: &func.heap_slot_masks,
             reprs: &reprs,
             floats: &no_floats,
+            tail_call: false,
         }, &mut no_fuser));
     }
 
