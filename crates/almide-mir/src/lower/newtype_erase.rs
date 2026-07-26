@@ -710,4 +710,78 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
         run_region(&mut m.top_lets, &mut m.functions, &fns_snapshot, &effects_snapshot);
     }
     program.modules = modules;
+
+    // CROSS-REGION step (#881): a module fn reading ANOTHER module's
+    // pure-call-init top-let (`theme`'s `v.color(v.white)` where `white =
+    // rgb(1.0, …)` lives in the view module) references it through its OWN
+    // region's synthesized ref id — the per-region loops above cannot see the
+    // pairing, and the const-init machinery later declines the call-bearing
+    // init ("would inject an uncounted call"). Resolve each such ref BY NAME
+    // and substitute the referent's init at the use sites — the same
+    // lazy-static value semantics as the per-region inline. Fenced to
+    // IMMUTABLE referents whose init is VAR-FREE (an init referencing its
+    // region's locals would capture unrelated ids in the reader's region) and
+    // pure by the same registry the per-region pass uses.
+    let mut plan: Vec<(usize, almide_ir::VarId, IrExpr)> = Vec::new();
+    {
+        let (by_name, by_bare) = crate::lower::bridge_cross_module_toplets_build_lookup(program);
+        for (mi, m) in program.modules.iter().enumerate() {
+            for (i, info) in m.var_table.entries.iter().enumerate() {
+                let Some(mo) = &info.module_origin else { continue };
+                if mo == m.name.as_str() {
+                    continue;
+                }
+                let looked_up = by_name
+                    .get(&(mo.clone(), info.name.as_str().to_uppercase()))
+                    .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
+                let Some(Some((ty, init, mutable, _))) = looked_up else { continue };
+                if *mutable || expr_contains_var(init) {
+                    continue;
+                }
+                // Scalar CONST globals resolve through the const-init
+                // machinery already; substitute the shapes it cannot carry —
+                // any call-bearing init, and HEAP literals (a record literal
+                // like view's `_white = { r: 1.0, … }` is not in the const
+                // set, so its cross-module readers walled with "no CONST
+                // initializer").
+                if !crate::lower::expr_contains_call(init) && !crate::lower::is_heap_ty(ty) {
+                    continue;
+                }
+                let mut visiting = HashSet::new();
+                if !expr_is_pure(init, &fns_snapshot, &effects_snapshot, &mut visiting) {
+                    continue;
+                }
+                plan.push((mi, almide_ir::VarId(i as u32), (*init).clone()));
+            }
+        }
+    }
+    for (mi, id, init) in plan {
+        let m = &mut program.modules[mi];
+        for f in &mut m.functions {
+            f.body = almide_ir::substitute_var_in_expr(&f.body, id, &init);
+        }
+    }
+}
+
+/// True when the expression tree contains ANY `Var` node — the cross-region
+/// substitution fence: a region-local id spliced into another region would
+/// resolve to an unrelated variable.
+fn expr_contains_var(e: &almide_ir::IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct V(bool);
+    impl IrVisitor for V {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if self.0 {
+                return;
+            }
+            if matches!(e.kind, almide_ir::IrExprKind::Var { .. }) {
+                self.0 = true;
+                return;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut v = V(false);
+    v.visit_expr(e);
+    v.0
 }

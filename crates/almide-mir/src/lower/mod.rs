@@ -643,7 +643,7 @@ pub fn bridge_module_to_module_toplets(
 /// dropping as ambiguous. A bare-name fallback map keeps the pre-existing
 /// behavior for refs whose module_origin the frontend left unset.
 #[allow(clippy::type_complexity)]
-fn bridge_cross_module_toplets_build_lookup(
+pub(crate) fn bridge_cross_module_toplets_build_lookup(
     ir: &almide_ir::IrProgram,
 ) -> (
     std::collections::HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>>,
