@@ -41,6 +41,12 @@
 - [x] 2.1 URL hash 共有 — CompressionStream deflate-raw + base64url、タブ一式、ラウンドトリップ E2E 確認
 - [x] 2.2/2.3 TS 方式ギャラリー — 6 本(pattern-matching / pipes-and-lists / error-handling / modules / mini-markdown / csv-report)、カテゴリ付きメニュー、`?example=<id>` deep link、`tests/run.mjs` に examples セクション追加(native/wasm byte-parity、wall は即 fail)
 
+**2026-07-26: Tier 3 実装完了**(同日、E2E + ハーネス検証済み)
+
+- [x] 3.1 Visual 出力 — 設計を「stdout に SVG / PPM P3 を印字したらプレイグラウンドが画像レンダリング」に確定。コンパイラ変更ゼロ、native では同じプログラムが正規の .svg/.ppm を吐くので byte-parity CI がそのまま適用される。Graphics カテゴリ(Mandelbrot PPM / 生成 SVG)追加、8/8 examples green。almide-web バインディング統合(インタラクティブ Canvas)は別 arc
+- [x] 3.2 embed モード — `?embed=1`(ヘッダ/AI バー非表示 + スリム Run バー + Open in Playground)、`&hide=` で hidden setup(タブ非表示・コンパイルには含む)、embed 時は localStorage 不使用
+- [x] 3.3 stdin + zip — `stdin.txt` タブが fd0 になる(io.read_line 動作確認、io.read_all は wasm registry 未登録で wall — 小ギャップ)。Export ボタンで `almide run src/main.almd` 可能なプロジェクト zip(依存ゼロの store 方式 zip writer)
+
 発見した課題(別対応):
 - `almide run --target wasm` が guest cwd を `$PWD` から導出しており、`getcwd` と食い違うと相対 fs read が wasm でだけ ENOENT(execFileSync 等 PWD を更新しない親から顕在化)。ハーネス側は PWD を明示して回避済み。**almide 本体で current_dir 参照に直すべき**
 - cross-module ADT(module 定義の variant 型を entry で使う形)は v1 wasm レンダラの wall(`main is outside the MIR-lowering subset`)。modules サンプルは関数モジュール(stats)に設計変更で回避
