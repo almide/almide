@@ -23,13 +23,15 @@ pub(crate) fn radix_and_digits(clean: &str) -> (u32, &str) {
     }
 }
 
-/// Decode an int literal token to its `i64` value.
+/// Decode an int literal token to the `i64` the IR carries.
 ///
 /// Returns 0 for a token that does not parse. That is not error recovery here:
-/// the lexer cannot produce such a token, and a literal too large for `i64` is
-/// already reported by the checker's `int_literal_overflows_i64` guard, so by
-/// the time lowering runs the only reachable failures have a diagnostic
-/// attached and the value is never observed.
+/// the lexer cannot produce such a token, and a literal too large for the `i64`
+/// carrier is rejected by E024 in EVERY context — including the unsigned ones,
+/// whose declared domain runs past the carrier (#872) — so by the time lowering
+/// runs the only reachable failures have a diagnostic attached and the value is
+/// never observed. That is a real invariant, not a hopeful one: the fallback
+/// context E024 uses when no type is recorded is `Int`, the strictest of them.
 pub(crate) fn int_value(raw: &str) -> i64 {
     let clean = raw.replace('_', "");
     let (radix, digits) = radix_and_digits(&clean);

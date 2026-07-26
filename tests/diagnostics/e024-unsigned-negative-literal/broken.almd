@@ -1,0 +1,12 @@
+// An UNSIGNED type has no negative values at all, so a negated literal never
+// fits — but the range check ignored the `negated` flag on the unsigned
+// branch and only bounded the magnitude. `-5` fits `0..=u64::MAX`
+// as a magnitude, so `check` accepted it and native rustc then rejected the
+// emitted `-5u64` with `error[E0600]: cannot apply unary operator `-` to type
+// `u64`` (differential fuzz — the same check-vs-build gap #626 closed for
+// out-of-range magnitudes, reopened for the sign).
+fn main() -> Unit = {
+  let k: UInt64 = -5
+  let b: UInt8 = -1
+  println("${uint64.to_string(k)}:${uint8.to_string(b)}")
+}

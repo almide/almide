@@ -418,15 +418,45 @@ impl Checker {
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => eff,
                 _ => Ty::Int, // fall back to the default Int context
             };
-            if int_literal_fits_type(&site.raw, &eff, site.negated) { continue; }
-            let mut diag = err(
-                format!("integer literal '{}' is out of range for {}", site.raw, eff.display()),
-                format!(
-                    "{} would silently fold to 0 here; use a literal within the type's range, \
-                     or model larger magnitudes as Float (lossy) or a parsed string",
+            let hint = match classify_int_literal(&site.raw, &eff, site.negated) {
+                LiteralFit::Fits => continue,
+                // Not a magnitude overflow: no negative value is representable
+                // at all, so "use a smaller literal" is the wrong advice.
+                LiteralFit::Sign => format!(
+                    "{} is unsigned — it has no negative values at all; drop the '-', \
+                     or use the signed {} if the value can go below zero",
+                    eff.display(),
+                    signed_counterpart(&eff).unwrap_or("Int"),
+                ),
+                // In range for the DECLARED domain, out of range for the
+                // compiler. "Use a wider type" is the wrong advice here because
+                // there is no wider type — say so instead of implying one.
+                LiteralFit::Carrier => format!(
+                    "this magnitude is inside {}'s declared range but above the i64 the \
+                     compiler carries every integer in, so it would be signed past \
+                     9223372036854775807 on both targets (#872); keep it at or below \
+                     9223372036854775807, or carry it as a string / Float (lossy)",
                     eff.display(),
                 ),
-                format!("integer literal {}", site.raw),
+                // State the range rather than referring to it. Rust puts it in
+                // a note on the same error, and it is the difference between a
+                // hint that can be acted on and one that sends the reader to go
+                // look up a constant.
+                LiteralFit::Magnitude => format!(
+                    "{} would silently fold to 0 here; its range is {}, so use a literal \
+                     within it, or model larger magnitudes as Float (lossy) or a parsed string",
+                    eff.display(),
+                    int_type_range(&eff).unwrap_or_else(|| "the type's".to_string()),
+                ),
+            };
+            // Show the literal as WRITTEN — a bare `-` is part of what is out of
+            // range, and "literal '5' is out of range for UInt64" reads as a
+            // compiler bug when the source says `-5`.
+            let shown = if site.negated { format!("-{}", site.raw) } else { site.raw.clone() };
+            let mut diag = err(
+                format!("integer literal '{}' is out of range for {}", shown, eff.display()),
+                hint,
+                format!("integer literal {}", shown),
             ).with_code("E024");
             if let Some(s) = site.span {
                 diag.file = self.source_file.clone();

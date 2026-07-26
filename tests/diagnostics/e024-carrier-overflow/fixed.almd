@@ -1,0 +1,7 @@
+// The fix: stay at or below the carrier, where `UInt64` is exact and both
+// targets agree. A magnitude that genuinely needs the upper half has to be
+// carried as a string (exact) or a Float (lossy) until #872 lands.
+fn main() -> Unit = {
+  let big: UInt64 = 9223372036854775807
+  println(uint64.to_string(big / 2))
+}
