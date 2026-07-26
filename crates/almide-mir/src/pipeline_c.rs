@@ -193,6 +193,13 @@ fn try_render_wasm_source_impl_rest(
     bridge_cross_module_derived_methods(ir, &mut inlined_fns, &mut module_fn_sibs);
 
     let mutable_tls = assign_mutable_global_slots(ir, &layouts.mutable_toplet_aliases)?;
+    crate::trace::trace("ALMIDE_MG_DEBUG", || {
+        format!(
+            "[mg] mutable_tls={:?} aliases={:?}",
+            mutable_tls.iter().map(|tl| tl.var).collect::<Vec<_>>(),
+            layouts.mutable_toplet_aliases,
+        )
+    });
     let mutable_global_count = mutable_tls.len() as u32;
 
     repair_and_substitute_globals(ir, &mut inlined_fns, &mut module_fn_sibs, &layouts, &all_fns);

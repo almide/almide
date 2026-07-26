@@ -725,6 +725,20 @@ fn bridge_cross_module_toplets_apply(
         if info.module_origin.is_none() {
             continue;
         }
+        crate::trace::trace("ALMIDE_MG_DEBUG", || {
+            format!(
+                "[bridge] id={:?} name={:?} origin={:?} ty={:?} by_name_hit={} by_bare_hit={}",
+                id,
+                info.name.as_str(),
+                info.module_origin,
+                info.ty,
+                by_name.contains_key(&(
+                    info.module_origin.clone().unwrap_or_default(),
+                    info.name.as_str().to_uppercase()
+                )),
+                by_bare.contains_key(&info.name.as_str().to_uppercase()),
+            )
+        });
         bridge_cross_module_toplets_apply_one(id, info, by_name, by_bare, &mut targets);
     }
 }

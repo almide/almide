@@ -55,23 +55,42 @@ impl almide_ir::IrMutVisitor for MutGlobalIdRw<'_> {
 /// numbers its VarIds from 0 — the main program and each module are PRIVATE
 /// numbering regions — but the mutable-global slot map is keyed by the RAW id,
 /// so `var cached_scene` (main, VarId 0) and `var _dirty` (a module, VarId 0)
-/// collided and the program walled. Remap each MODULE's mutable top-let ids
-/// into a reserved high band (0xFF00_0000+, far above any real region's count,
-/// so no walk-and-max pass whose missed site would silently collide), rewriting
-/// the declaration and every use inside that module's own fns and top-let
-/// inits. Cross-module references resolve BY NAME afterwards
+/// collided and the program walled. Remap each MODULE's mutable top-let ids to
+/// fresh ids ABOVE every region's var-table length (disjoint from every real
+/// id by construction), rewriting the declaration and every use inside that
+/// module's own fns and top-let inits — and EXTEND the module's var table so
+/// the new id still indexes the var's info (the cross-module NAME bridge looks
+/// the top-let's name/mutability up BY INDEX; without the extension the bridge
+/// went blind and every cross-module mutable reference became an unbound var).
+/// Cross-module references resolve BY NAME afterwards
 /// (`bridge_cross_module_toplets`), so they see the remapped ids automatically.
 pub(crate) fn disambiguate_mutable_global_regions(ir: &mut almide_ir::IrProgram) {
-    let mut next: u32 = 0xFF00_0000;
+    let mut next: u32 = std::iter::once(ir.var_table.entries.len())
+        .chain(ir.modules.iter().map(|m| m.var_table.entries.len()))
+        .max()
+        .unwrap_or(0) as u32;
     for m in &mut ir.modules {
         let mut map: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
             std::collections::HashMap::new();
         for tl in &mut m.top_lets {
-            if tl.mutable {
-                map.insert(tl.var, almide_ir::VarId(next));
-                tl.var = almide_ir::VarId(next);
-                next += 1;
+            if !tl.mutable {
+                continue;
             }
+            let old = tl.var;
+            let fresh = almide_ir::VarId(next);
+            next += 1;
+            // Keep the by-index var-table lookup alive for the fresh id: pad
+            // with clones up to the new index (the pad entries are never
+            // indexed — only the fresh id is) and place the var's own info
+            // there. A top-let whose old id had no entry keeps having none.
+            if let Some(info) = m.var_table.entries.get(old.0 as usize).cloned() {
+                while m.var_table.entries.len() < fresh.0 as usize {
+                    m.var_table.entries.push(info.clone());
+                }
+                m.var_table.entries.push(info);
+            }
+            map.insert(old, fresh);
+            tl.var = fresh;
         }
         if map.is_empty() {
             continue;
