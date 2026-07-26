@@ -398,14 +398,41 @@ impl Checker {
             Some(v) => *v,
             None => return,
         };
-        // Intra-module access (same package) is always allowed, regardless of
-        // whether it's `mod fn` or `local fn`. This matches the spec for
-        // `mod fn`; for `local fn` it is a deliberate relaxation, because
-        // strict same-file enforcement needs per-fn file tracking the checker
-        // does not carry (issue #870).
-        if let Some(self_mod) = self.env.self_module_name {
-            if self_mod.as_str() == callee_module {
-                return;
+        // The CALLER's identity is the module currently being inferred
+        // (`current_module_prefix`; `None` = the entry program). Every file
+        // loads as its own namespace module, so module identity IS file
+        // identity — `local fn` allows exactly caller == callee (#870; the
+        // old `self_module_name` bypass let the ENTRY program reach any
+        // module's `local fn`). `mod fn` allows the same PROJECT: the
+        // caller's and callee's PACKAGE agree — a dotted module belongs to
+        // its first segment's package, a bare module is a dep package iff
+        // it is a known dep ROOT (`env.dep_root_modules`), else the SELF
+        // package (self submodules load bare, dep submodules dotted). The
+        // old module-equality rule wrongly rejected a same-project
+        // cross-file `mod fn` call.
+        let caller = self.current_module_prefix.clone();
+        let pkg_of = |m: Option<&str>| -> String {
+            let Some(m) = m else { return String::new() };
+            if let Some((root, _)) = m.split_once('.') {
+                return root.to_string();
+            }
+            if self.env.dep_root_modules.contains(&sym(m)) {
+                m.to_string()
+            } else {
+                String::new()
+            }
+        };
+        match vis {
+            ast::Visibility::Public => return,
+            ast::Visibility::Local => {
+                if caller.as_deref() == Some(callee_module) {
+                    return;
+                }
+            }
+            ast::Visibility::Mod => {
+                if pkg_of(caller.as_deref()) == pkg_of(Some(callee_module)) {
+                    return;
+                }
             }
         }
         let (kind, scope_hint) = match vis {
