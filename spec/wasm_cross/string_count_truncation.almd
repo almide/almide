@@ -54,6 +54,21 @@ fn main() -> Unit = {
   // ── repeat: small count works; saturation removes the wrap-to-wrong ──
   println("repeat 2: [" + string.repeat("xy", 2) + "]")
   println("repeat 0: [" + string.repeat("xy", 0) + "]")
+  // A NEGATIVE count is the statement's central repeat claim — empty on both
+  // targets — and it was the one case this fixture did not exercise. The MIR
+  // native runner's repeat shim (render_native.rs) drifted to a bare
+  // `s.repeat(n as usize)`, so `repeat(s, -1)` was a capacity-overflow PANIC
+  // (exit 101) on that leg while wasm printed normally — a crash-form
+  // divergence that lived exactly in the untested cell (differential fuzz,
+  // seed 1785015406589852000 index 1012). The i64::MIN boundary rides along:
+  // the clamp must act on the full i64, not on a narrowed copy.
+  println("repeat -1: [" + string.repeat("xy", -1) + "]")
+  println("repeat MIN: [" + string.repeat("xy", -9223372036854775808) + "]")
+  // The LET-BOUND shape is the one that routes through the native runner's
+  // repeat SHIM (a concat-position call links the self-host instead), so this
+  // line — not the ones above — is what pins the previously-panicking cell.
+  let neg = string.repeat("ab", -1)
+  println("repeat let -1 len: " + int.to_string(string.len(neg)))
 
   // ── pad_start / pad_end: small WIDTHS stay EXACT after the unsigned clamp.
   //    (Huge/`2^32+k` widths now both-FAIL — native abort / wasm memory.grow —

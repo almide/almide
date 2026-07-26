@@ -1,8 +1,11 @@
-// The fix: use a literal within the type's range, or a wider/unsigned type for
-// a larger magnitude. `UInt64` reaches 18446744073709551615; the negated
-// `i64::MIN` magnitude is valid as a signed value.
+// The fix: use a literal within the type's range. `UInt64` widens the range
+// past `Int`'s, but only up to the `i64` the compiler carries every integer in
+// — `9223372036854775808` is one past that and is E024 there too (#872), so a
+// magnitude that genuinely needs the upper half is carried as a string. The
+// negated `i64::MIN` magnitude is valid as a signed value.
 fn main() -> Unit = {
-  let big: UInt64 = 9223372036854775808
+  let big: UInt64 = 9223372036854775807
   let lo: Int = -9223372036854775808
-  println("${uint64.to_string(big)} ${int.to_string(lo)}")
+  let past_carrier: String = "9223372036854775808"
+  println("${uint64.to_string(big)} ${int.to_string(lo)} ${past_carrier}")
 }

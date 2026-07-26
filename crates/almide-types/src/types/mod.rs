@@ -682,4 +682,20 @@ impl Ty {
             _ => None,
         }
     }
+    /// Extract the Err type E from Result[T, E]. Returns None if not a Result,
+    /// or if the Result is missing its second argument — which happens on a
+    /// partially-inferred type, where `Unknown` recovery is the caller's job.
+    pub fn result_err_ty(&self) -> Option<Ty> {
+        match self {
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() >= 2 => Some(args[1].clone()),
+            _ => None,
+        }
+    }
+    /// Extract the element type T from List[T]. Returns None if not a List.
+    pub fn list_elem_ty(&self) -> Option<Ty> {
+        match self {
+            Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => Some(args[0].clone()),
+            _ => None,
+        }
+    }
 }

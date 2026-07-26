@@ -181,7 +181,14 @@ pub fn render_wasm(func: &MirFunction) -> String {
     let no_floats: BTreeSet<ValueId> = BTreeSet::new();
     let mut no_fuser = Fuser::new();
     for op in &func.ops {
-        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks, &reprs, &no_floats, &mut no_fuser));
+        body.push_str(&render_op(op, crate::render_wasm::OpTables {
+            label_off: &label_off,
+            func_slots: &no_slots,
+            param_counts: &no_param_counts,
+            masks: &func.heap_slot_masks,
+            reprs: &reprs,
+            floats: &no_floats,
+        }, &mut no_fuser));
     }
 
     format!(
@@ -247,9 +254,8 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
         for op in &f.ops {
             if let Op::CallFn { name, .. } = op {
                 if !resolvable.contains(name) {
-                    if std::env::var("ALMIDE_DBG_UNLINKED").is_ok() {
-                        eprintln!("[unlinked] {} references {}", f.name, name);
-                    }
+                    crate::trace::trace("ALMIDE_DBG_UNLINKED", || format!(
+                        "[unlinked] {} references {}", f.name, name));
                     missing.insert(name.clone());
                 }
             }

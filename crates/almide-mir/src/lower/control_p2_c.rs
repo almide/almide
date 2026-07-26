@@ -485,9 +485,8 @@ impl LowerCtx {
         match self.nested_refinement_chain(subj, arms, &type_name) {
             Some(dst) => Some(dst),
             None => {
-                if std::env::var("ALMIDE_DBG_NESTED_MATCH").is_ok() {
-                    eprintln!("[nested-match] chain declined for {}", self.fn_name);
-                }
+                crate::trace::trace("ALMIDE_DBG_NESTED_MATCH", || format!(
+                    "[nested-match] chain declined for {}", self.fn_name));
                 self.ops.truncate(ops_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 None
@@ -510,17 +509,17 @@ impl LowerCtx {
         arms: &[IrMatchArm],
         result_ty: &Ty,
     ) -> Option<ValueId> {
-        let dbg = std::env::var("ALMIDE_DBG_NESTED_MATCH").is_ok();
-        if dbg {
-            eprintln!("[tuple-match] entry: subj={:?} arms={}", std::mem::discriminant(&subject.kind), arms.len());
-        }
+        let dbg = crate::trace::enabled("ALMIDE_DBG_NESTED_MATCH");
+        crate::trace::trace("ALMIDE_DBG_NESTED_MATCH", || format!(
+            "[tuple-match] entry: subj={:?} arms={}",
+            std::mem::discriminant(&subject.kind), arms.len()));
         if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
             return None;
         }
         let IrExprKind::Tuple { elements } = &subject.kind else { return None };
         if !matches!(arms.last()?.pattern, IrPattern::Wildcard) {
             if dbg {
-                eprintln!("[tuple-match] last arm not wildcard");
+                crate::trace::trace("ALMIDE_DBG_NESTED_MATCH", || "[tuple-match] last arm not wildcard".to_string());
             }
             return None;
         }

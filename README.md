@@ -100,7 +100,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 164 contracts — 164 active, 0 flagged-for-revision.**
+> **Ledger: 174 contracts — 174 active, 0 flagged-for-revision.**
 >
 > **Exceptions: none.** Every contract in the ledger is `active`, carrying
 > executable evidence of class ≥ `fixture`.
@@ -180,11 +180,21 @@ Almide source (`.almd`) is compiled by a pure-Rust compiler through a three-laye
 
 ```mermaid
 flowchart TB
-    SRC[".almd → Lexer → Parser → AST → Type Checker → Lowering → IR"]
-    NANO["Nanopass Pipeline (semantic rewrites)"]
-    TMPL["Template Renderer (TOML-driven)"]
-    OUT[".rs / .wasm"]
-    SRC --> NANO --> TMPL --> OUT
+    SRC([".almd"])
+
+    subgraph FE["Frontend"]
+        direction LR
+        LEX["Lexer"] --> PAR["Parser"] --> AST(["AST"]) --> CHK["Type Checker"] --> LOW["Lowering"]
+    end
+
+    subgraph CG["Codegen"]
+        direction LR
+        NANO["Nanopass Pipeline<br/>semantic rewrites"] --> TMPL["Template Renderer<br/>TOML-driven"]
+    end
+
+    SRC --> LEX
+    LOW --> IR(["IR"]) --> NANO
+    TMPL --> OUT([".rs / .wasm"])
 ```
 
 The Nanopass pipeline applies target-specific transformations: `ResultPropagation` (Rust `?`), `CloneInsertion` (Rust borrow analysis), `LICM` (loop-invariant code motion). The Template Renderer is purely syntactic — all semantic decisions are already encoded in the IR.

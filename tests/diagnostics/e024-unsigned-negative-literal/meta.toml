@@ -1,0 +1,3 @@
+expects_code = "E024"
+expects_error = "'-5' is out of range for UInt64"
+hint_substring = "has no negative values"

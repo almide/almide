@@ -371,8 +371,31 @@ fn build_variant_lookup(program: &IrProgram) -> VariantLookup {
     map
 }
 
+/// Serialize a `Ty` into the interface's `TypeRef`.
+///
+/// Split by TYPE FAMILY rather than kept as one 51-arm match: the scalar and
+/// sized-numeric arms are a flat lookup table, the applied/aggregate arms are
+/// structural recursion, and the structural record/variant arms need the
+/// `records`/`variants` name lookups. Each helper returns `None` for "not my
+/// family" so the dispatch order here is the only place that matters, and it is
+/// exhaustive-by-fallthrough exactly as the original chain was.
 fn resolve_ty(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> TypeRef {
-    match ty {
+    resolve_ty_scalar(ty)
+        .or_else(|| resolve_ty_applied(ty, records, variants))
+        .or_else(|| resolve_ty_aggregate(ty, records, variants))
+        .or_else(|| resolve_ty_structural(ty, records, variants))
+        .unwrap_or(TypeRef::Unknown)
+}
+
+/// The nullary families: the canonical scalars, and the SIZED numerics.
+///
+/// The sized numerics are their own `Ty` variants, not `Named`, so without these
+/// arms every `int8`/`uint32`/`float32` signature serialized as `unknown` — the
+/// module interface could not name the very types those modules exist to convert
+/// between, and the machine-owned signature index in docs/stdlib rendered `x: ?`.
+fn resolve_ty_scalar(ty: &Ty) -> Option<TypeRef> {
+    let named = |n: &str| TypeRef::Named { name: n.into(), args: Vec::new() };
+    Some(match ty {
         Ty::Int => TypeRef::Int,
         Ty::Float => TypeRef::Float,
         Ty::String => TypeRef::String,
@@ -380,106 +403,95 @@ fn resolve_ty(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Type
         Ty::Unit => TypeRef::Unit,
         Ty::Bytes => TypeRef::Bytes,
         Ty::Matrix => TypeRef::Matrix,
-        // The SIZED numerics are their own `Ty` variants, not `Named`, so without
-        // these arms every `int8`/`uint32`/`float32` signature serialized as
-        // `unknown` — the module interface could not name the very types those
-        // modules exist to convert between, and the machine-owned signature index
-        // in docs/stdlib rendered `x: ?`.
-        Ty::Int8 => TypeRef::Named { name: "Int8".into(), args: Vec::new() },
-        Ty::Int16 => TypeRef::Named { name: "Int16".into(), args: Vec::new() },
-        Ty::Int32 => TypeRef::Named { name: "Int32".into(), args: Vec::new() },
-        Ty::Int64 => TypeRef::Named { name: "Int64".into(), args: Vec::new() },
-        Ty::UInt8 => TypeRef::Named { name: "UInt8".into(), args: Vec::new() },
-        Ty::UInt16 => TypeRef::Named { name: "UInt16".into(), args: Vec::new() },
-        Ty::UInt32 => TypeRef::Named { name: "UInt32".into(), args: Vec::new() },
-        Ty::UInt64 => TypeRef::Named { name: "UInt64".into(), args: Vec::new() },
-        Ty::Float32 => TypeRef::Named { name: "Float32".into(), args: Vec::new() },
-        Ty::Float64 => TypeRef::Named { name: "Float64".into(), args: Vec::new() },
-        Ty::Applied(id, args) => match id {
-            TypeConstructorId::List if args.len() == 1 =>
-                TypeRef::List { inner: Box::new(resolve_ty(&args[0], records, variants)) },
-            TypeConstructorId::Option if args.len() == 1 =>
-                TypeRef::Option { inner: Box::new(resolve_ty(&args[0], records, variants)) },
-            TypeConstructorId::Result if args.len() == 2 =>
-                TypeRef::Result {
-                    ok: Box::new(resolve_ty(&args[0], records, variants)),
-                    err: Box::new(resolve_ty(&args[1], records, variants)),
-                },
-            TypeConstructorId::Map if args.len() == 2 =>
-                TypeRef::Map {
-                    key: Box::new(resolve_ty(&args[0], records, variants)),
-                    value: Box::new(resolve_ty(&args[1], records, variants)),
-                },
-            TypeConstructorId::Set if args.len() == 1 =>
-                TypeRef::Set { inner: Box::new(resolve_ty(&args[0], records, variants)) },
-            TypeConstructorId::Tuple =>
-                TypeRef::Tuple { elements: args.iter().map(|t| resolve_ty(t, records, variants)).collect() },
-            TypeConstructorId::UserDefined(name) =>
-                TypeRef::Named {
-                    name: name.clone(),
-                    args: args.iter().map(|t| resolve_ty(t, records, variants)).collect(),
-                },
-            _ => TypeRef::Unknown,
-        },
-        Ty::Tuple(elements) => TypeRef::Tuple {
-            elements: elements.iter().map(|t| resolve_ty(t, records, variants)).collect(),
-        },
-        Ty::Named(name, args) => TypeRef::Named {
-            name: name.to_string(),
-            args: args.iter().map(|t| resolve_ty(t, records, variants)).collect(),
-        },
+        Ty::Int8 => named("Int8"),
+        Ty::Int16 => named("Int16"),
+        Ty::Int32 => named("Int32"),
+        Ty::Int64 => named("Int64"),
+        Ty::UInt8 => named("UInt8"),
+        Ty::UInt16 => named("UInt16"),
+        Ty::UInt32 => named("UInt32"),
+        Ty::UInt64 => named("UInt64"),
+        Ty::Float32 => named("Float32"),
+        Ty::Float64 => named("Float64"),
+        _ => return None,
+    })
+}
+
+/// `Ty::Applied` — the built-in constructors, keyed by arity as before. An arity
+/// that does not match its constructor falls through to `Unknown`, unchanged.
+fn resolve_ty_applied(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Option<TypeRef> {
+    let Ty::Applied(id, args) = ty else { return None };
+    let each = |ts: &[Ty]| -> Vec<TypeRef> {
+        ts.iter().map(|t| resolve_ty(t, records, variants)).collect()
+    };
+    let one = |t: &Ty| Box::new(resolve_ty(t, records, variants));
+    Some(match id {
+        TypeConstructorId::List if args.len() == 1 => TypeRef::List { inner: one(&args[0]) },
+        TypeConstructorId::Option if args.len() == 1 => TypeRef::Option { inner: one(&args[0]) },
+        TypeConstructorId::Set if args.len() == 1 => TypeRef::Set { inner: one(&args[0]) },
+        TypeConstructorId::Result if args.len() == 2 => {
+            TypeRef::Result { ok: one(&args[0]), err: one(&args[1]) }
+        }
+        TypeConstructorId::Map if args.len() == 2 => {
+            TypeRef::Map { key: one(&args[0]), value: one(&args[1]) }
+        }
+        TypeConstructorId::Tuple => TypeRef::Tuple { elements: each(args) },
+        TypeConstructorId::UserDefined(name) => {
+            TypeRef::Named { name: name.clone(), args: each(args) }
+        }
+        _ => TypeRef::Unknown,
+    })
+}
+
+/// The families that recurse structurally over named children: tuples, named
+/// types, function types, type variables, and a union (a 1-member union is its
+/// member; wider ones serialize as a tuple of alternatives and the binding
+/// generators decide how to render them).
+fn resolve_ty_aggregate(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Option<TypeRef> {
+    let each = |ts: &[Ty]| -> Vec<TypeRef> {
+        ts.iter().map(|t| resolve_ty(t, records, variants)).collect()
+    };
+    Some(match ty {
+        Ty::Tuple(elements) => TypeRef::Tuple { elements: each(elements) },
+        Ty::Named(name, args) => TypeRef::Named { name: name.to_string(), args: each(args) },
         Ty::Fn { params, ret } => TypeRef::Fn {
-            params: params.iter().map(|t| resolve_ty(t, records, variants)).collect(),
+            params: each(params),
             ret: Box::new(resolve_ty(ret, records, variants)),
         },
         Ty::TypeVar(name) => TypeRef::TypeVar { name: name.to_string() },
-        Ty::Record { fields } => {
-            let mut field_names: Vec<std::string::String> = fields.iter().map(|(n, _)| n.to_string()).collect();
-            field_names.sort();
-            if let Some(name) = records.get(&field_names) {
-                TypeRef::Named { name: name.clone(), args: vec![] }
-            } else {
-                TypeRef::Named {
-                    name: format!("{{{}}}", fields.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>().join(", ")),
-                    args: vec![],
-                }
-            }
+        Ty::Union(members) if members.len() == 1 => resolve_ty(&members[0], records, variants),
+        Ty::Union(members) => TypeRef::Tuple { elements: each(members) },
+        _ => return None,
+    })
+}
+
+/// STRUCTURAL records and variants — matched back to a declared type name by
+/// their sorted field/case names. An unmatched record keeps its structural shape
+/// as the name (`{a, b}`); an unmatched variant has no printable form, so it is
+/// `Unknown`. `OpenRecord` resolves exactly like `Record`.
+fn resolve_ty_structural(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Option<TypeRef> {
+    let by_fields = |fields: &[(almide_base::intern::Sym, Ty)]| -> TypeRef {
+        let mut sorted: Vec<std::string::String> = fields.iter().map(|(n, _)| n.to_string()).collect();
+        sorted.sort();
+        if let Some(name) = records.get(&sorted) {
+            return TypeRef::Named { name: name.clone(), args: vec![] };
         }
+        let shape = fields.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>().join(", ");
+        TypeRef::Named { name: format!("{{{}}}", shape), args: vec![] }
+    };
+    Some(match ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => by_fields(fields),
         Ty::Variant { cases, .. } => {
-            let mut case_names: Vec<std::string::String> = cases.iter().map(|c| c.name.to_string()).collect();
+            let mut case_names: Vec<std::string::String> =
+                cases.iter().map(|c| c.name.to_string()).collect();
             case_names.sort();
-            if let Some(name) = variants.get(&case_names) {
-                TypeRef::Named { name: name.clone(), args: vec![] }
-            } else {
-                TypeRef::Unknown
+            match variants.get(&case_names) {
+                Some(name) => TypeRef::Named { name: name.clone(), args: vec![] },
+                None => TypeRef::Unknown,
             }
         }
-        // OpenRecord: same resolution as Record (match fields against known type decls)
-        Ty::OpenRecord { fields } => {
-            let mut field_names: Vec<std::string::String> = fields.iter().map(|(n, _)| n.to_string()).collect();
-            field_names.sort();
-            if let Some(name) = records.get(&field_names) {
-                TypeRef::Named { name: name.clone(), args: vec![] }
-            } else {
-                TypeRef::Named {
-                    name: format!("{{{}}}", fields.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>().join(", ")),
-                    args: vec![],
-                }
-            }
-        }
-        // Union: serialize each member
-        Ty::Union(members) => {
-            if members.len() == 1 {
-                resolve_ty(&members[0], records, variants)
-            } else {
-                // Represent as a tuple of alternatives (binding generators decide how to render)
-                TypeRef::Tuple {
-                    elements: members.iter().map(|t| resolve_ty(t, records, variants)).collect(),
-                }
-            }
-        }
-        _ => TypeRef::Unknown,
-    }
+        _ => return None,
+    })
 }
 
 // ── ABI layout computation ──

@@ -1,6 +1,38 @@
 
 /// The NAMED-RECORD half of [`generate_variant_repr_sources`]: `__repr_rec_<R>` +
 /// the `__repr_list_rec_<R>` element loops, appended to `out`. Verbatim text move.
+/// The record type a field names directly, when it is one of `rec_names`.
+fn record_field_of(ty: &Ty, rec_names: &std::collections::HashSet<String>) -> Option<String> {
+    match ty {
+        Ty::Named(n, _) if rec_names.contains(n.as_str()) => Some(n.as_str().to_string()),
+        _ => None,
+    }
+}
+
+/// The record type a `List[R]` field names, when `R` is one of `rec_names`.
+fn list_record_field_of(ty: &Ty, rec_names: &std::collections::HashSet<String>) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => match &a[0] {
+            Ty::Named(n, _) if rec_names.contains(n.as_str()) => Some(n.as_str().to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The names of every declared record type.
+fn declared_record_names(type_decls: &[almide_ir::IrTypeDecl]) -> std::collections::HashSet<String> {
+    use almide_ir::IrTypeDeclKind;
+    type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { .. } => Some(d.name.as_str().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn generate_record_repr_sources_into(
     out: &mut String,
     type_decls: &[almide_ir::IrTypeDecl],
@@ -9,13 +41,27 @@ fn generate_record_repr_sources_into(
     names: &std::collections::HashSet<String>,
     emittable: &std::collections::HashSet<String>,
 ) {
+    let rec_emittable = emittable_record_names(type_decls, names, emittable);
+    generate_named_record_reprs(out, type_decls, interp_anon_recs, interp_containers, names, emittable, &rec_emittable);
+    generate_container_interp_reprs(out, type_decls, interp_anon_recs, interp_containers, names, emittable, &rec_emittable);
+    generate_anon_record_reprs(out, type_decls, interp_anon_recs, interp_containers, names, emittable, &rec_emittable);
+    generate_tuple_container_reprs(out, type_decls, interp_anon_recs, interp_containers, names, emittable, &rec_emittable);
+}
+
+/// The records whose repr can actually be emitted, by fixpoint.
+///
+/// A record is emittable when EVERY field is: a scalar or `String`, a `Value`
+/// (rendered by value_core's JSON serializer, the same routine native's
+/// `almide_rt_value_stringify` mirrors), an emittable variant, or an emittable
+/// record — directly or as `List[R]`. The last two are recursive, which is why
+/// this is a fixpoint rather than one pass: a record is assumed emittable and
+/// removed when a field disproves it, until nothing more is removed.
+fn emittable_record_names(
+    type_decls: &[almide_ir::IrTypeDecl],
+    names: &std::collections::HashSet<String>,
+    emittable: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<String> {
     use almide_ir::IrTypeDeclKind;
-    // ── NAMED-RECORD reprs (`__repr_rec_<R>` + the `__repr_list_rec_<R>` element loop) ──
-    // The record sibling: `Node {{ val: 1, kids: [Node {{ … }}] }}` (v0's brace Display,
-    // declared field order). The record fixpoint admits Int/Bool/String fields, an emittable
-    // nested variant/record, and `List[<emittable record>]` (the recursion that makes the
-    // compound_repr recursive/mutually-recursive shapes renderable). Fields at slot_offset(i)
-    // (records carry NO tag). Anonymous records stay unhandled (compound.to_string wall).
     let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
         .iter()
         .filter_map(|d| match &d.kind {
@@ -82,6 +128,41 @@ fn generate_record_repr_sources_into(
             break;
         }
     }
+    rec_emittable
+}
+
+/// Named-record reprs: `__repr_rec_<R>` plus the `__repr_list_rec_<R>` element
+/// loops.
+///
+/// The record sibling of the variant repr: `Node {{ val: 1, kids: [Node {{ … }}] }}`
+/// — v0's brace Display, in declared field order. Fields sit at `slot_offset(i)`;
+/// records carry no tag.
+fn generate_named_record_reprs(
+    out: &mut String,
+    type_decls: &[almide_ir::IrTypeDecl],
+    interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    interp_containers: &InterpReprContainers,
+    names: &std::collections::HashSet<String>,
+    emittable: &std::collections::HashSet<String>,
+    rec_emittable: &std::collections::HashSet<String>,
+) {
+    use almide_ir::IrTypeDeclKind;
+    let _ = (type_decls, interp_anon_recs, interp_containers, names, emittable, rec_emittable);
+    let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields } => Some((
+                d.name.as_str(),
+                fields
+                    .iter()
+                    .map(|f| (f.name.as_str().to_string(), f.ty.clone()))
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let rec_names = declared_record_names(type_decls);
+    let _ = (&record_decls, &rec_names);
     let mut rec_sorted: Vec<&(&str, Vec<(String, Ty)>)> = record_decls
         .iter()
         .filter(|(n, _)| rec_emittable.contains(*n))
@@ -94,7 +175,7 @@ fn generate_record_repr_sources_into(
             continue;
         }
         for (_, ty) in fields {
-            if let Some(r) = list_record_field_of(ty) {
+            if let Some(r) = list_record_field_of(ty, &rec_names) {
                 if rec_emittable.contains(&r) {
                     need_list.insert(r);
                 }
@@ -148,7 +229,7 @@ fn generate_record_repr_sources_into(
   let f{i} = __repr_{fv_fn}(v{i})
 "
                         ));
-                    } else if let Some(r) = record_field_of(ty) {
+                    } else if let Some(r) = record_field_of(ty, &rec_names) {
                         let r_fn = drop_fn_ident(&r);
                         out.push_str(&format!(
                             "  let v{i}: {r} = prim.load_handle(h + {off})
@@ -156,7 +237,7 @@ fn generate_record_repr_sources_into(
 "
                         ));
                     } else {
-                        let r = list_record_field_of(ty).expect("fixpoint-admitted");
+                        let r = list_record_field_of(ty, &rec_names).expect("fixpoint-admitted");
                         let r_fn = drop_fn_ident(&r);
                         out.push_str(&format!(
                             "  let v{i}: List[{r}] = prim.load_handle(h + {off})
@@ -192,6 +273,41 @@ fn generate_record_repr_sources_into(
 "
         ));
     }
+}
+
+/// The container interp parts: `${Option[R]}`, `${Option[V]}`, `${List[V]}` and
+/// `${Map[String, R|V]}`.
+///
+/// The map form renders the interleaved `[k, v, …]` paired-slot layout (map_str:
+/// `@4` = 2n slots, key at `12 + i*8`, value in the next slot). Keys render QUOTED
+/// — the `map_to_string_ss` form — and values through the element repr. Empty
+/// renders `[:]`.
+fn generate_container_interp_reprs(
+    out: &mut String,
+    type_decls: &[almide_ir::IrTypeDecl],
+    interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    interp_containers: &InterpReprContainers,
+    names: &std::collections::HashSet<String>,
+    emittable: &std::collections::HashSet<String>,
+    rec_emittable: &std::collections::HashSet<String>,
+) {
+    use almide_ir::IrTypeDeclKind;
+    let _ = (type_decls, interp_anon_recs, interp_containers, names, emittable, rec_emittable);
+    let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields } => Some((
+                d.name.as_str(),
+                fields
+                    .iter()
+                    .map(|f| (f.name.as_str().to_string(), f.ty.clone()))
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let rec_names = declared_record_names(type_decls);
+    let _ = (&record_decls, &rec_names);
     // ── `${Option[<record>]}` interp parts (`opt_rec=${op}`) — `some(<repr>)` / `none` ──
     for r in &interp_containers.rec_opts {
         if !rec_emittable.contains(r) {
@@ -286,6 +402,47 @@ fn generate_record_repr_sources_into(
             map_repr(v, &format!("__repr_{}", drop_fn_ident(v)));
         }
     }
+}
+
+/// Anonymous-record reprs (`__repr_anonrec_<hash>`).
+///
+/// v0 renders `{ apple: 2, mango: 3, zebra: 1 }` with fields SORTED BY NAME while
+/// the v1 block lays them in SOURCE order, so each body reads slots at the source
+/// index and concatenates in sorted-name order. Scalar and String fields only — a
+/// nested payload keeps the `compound.to_string` wall.
+///
+/// NOMINAL resolution (#627 / C-072): an INFERRED record literal keeps its
+/// STRUCTURAL type, but native reprs it NOMINALLY when its sorted field-NAME set
+/// matches exactly ONE declared record, printing in DECLARATION order. Mirrored
+/// here: the body still reads each field at its source slot; only the prefix and
+/// the print order switch. No match, or an ambiguous one, keeps the sorted
+/// anonymous render.
+fn generate_anon_record_reprs(
+    out: &mut String,
+    type_decls: &[almide_ir::IrTypeDecl],
+    interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    interp_containers: &InterpReprContainers,
+    names: &std::collections::HashSet<String>,
+    emittable: &std::collections::HashSet<String>,
+    rec_emittable: &std::collections::HashSet<String>,
+) {
+    use almide_ir::IrTypeDeclKind;
+    let _ = (type_decls, interp_anon_recs, interp_containers, names, emittable, rec_emittable);
+    let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields } => Some((
+                d.name.as_str(),
+                fields
+                    .iter()
+                    .map(|f| (f.name.as_str().to_string(), f.ty.clone()))
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let rec_names = declared_record_names(type_decls);
+    let _ = (&record_decls, &rec_names);
     // ── ANONYMOUS-record reprs (`__repr_anonrec_<hash>`) ──
     // v0 renders an anon record `{ apple: 2, mango: 3, zebra: 1 }` with fields SORTED BY
     // NAME while the v1 BLOCK lays fields in SOURCE order — so each generated body reads
@@ -403,7 +560,46 @@ fn generate_record_repr_sources_into(
                \"[\" + __repr_list_{name}_go(hh, prim.load32(hh + 4), 0, \"\") + \"]\"\n}}\n"
         ));
     }
+}
 
+/// Scalar-component tuple CONTAINER reprs (`__repr_tup_<key>` and its walkers),
+/// and the bare-`Value` repr.
+///
+/// `${list.sort(tups)}` over `List[(Int, String)]` and `${list.min(tups)}` over
+/// `Option[(Bool, Bool)]` — the `list_total_order` C-053 class. The tuple block is
+/// uniform i64 slots (component i at `12 + 8i`); components render Int, Bool and
+/// String only, per the collector's `tuple_repr_ident` gate. The bare element repr
+/// is shared; the list walker borrows element handles; the option walker reads the
+/// len-tag (`none` at 0) and the borrowed payload handle at slot 0.
+///
+/// `${obj}` over a bare `Value` (C-060) routes to `__repr_Value`, which is
+/// value_core's JSON serializer verbatim.
+fn generate_tuple_container_reprs(
+    out: &mut String,
+    type_decls: &[almide_ir::IrTypeDecl],
+    interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    interp_containers: &InterpReprContainers,
+    names: &std::collections::HashSet<String>,
+    emittable: &std::collections::HashSet<String>,
+    rec_emittable: &std::collections::HashSet<String>,
+) {
+    use almide_ir::IrTypeDeclKind;
+    let _ = (type_decls, interp_anon_recs, interp_containers, names, emittable, rec_emittable);
+    let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields } => Some((
+                d.name.as_str(),
+                fields
+                    .iter()
+                    .map(|f| (f.name.as_str().to_string(), f.ty.clone()))
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let rec_names = declared_record_names(type_decls);
+    let _ = (&record_decls, &rec_names);
     // ── SCALAR-component tuple CONTAINER reprs (`__repr_tup_<key>` + walkers) ──
     // `${list.sort(tups)}` over `List[(Int, String)]` / `${list.min(tups)}` over
     // `Option[(Bool, Bool)]` (the list_total_order C-053 class). The tuple block is

@@ -125,6 +125,16 @@ fn fusable_expr(
 }
 
 pub(crate) fn defined_value(op: &Op) -> Option<ValueId> {
+    // EXHAUSTIVE on purpose (#777): the old `_ => None` catch-all meant a new
+    // defining Op variant silently reported "defines nothing", which is the
+    // kind of registry drift F3 is about — every consumer of this fn (DCE,
+    // region passes, the def-before-use gate) would quietly treat the value as
+    // never-defined. A new variant is now a compile error here.
+    //
+    // `SetLocal` is deliberately NOT a definition: it REASSIGNS an existing
+    // slot (MIR is not single-assignment across loop iterations), and the
+    // passes keyed on "the op that created this value" must not match it. The
+    // def-before-use gate accounts for it separately as a redefinition.
     match op {
         Op::Alloc { dst, .. }
         | Op::Dup { dst, .. }
@@ -140,7 +150,34 @@ pub(crate) fn defined_value(op: &Op) -> Option<ValueId> {
         Op::CallIndirect { dst, .. } => *dst,
         Op::Prim { dst, .. } => *dst,
         Op::IfThen { dst, .. } => *dst,
-        _ => None,
+        Op::Drop { .. }
+        | Op::DropListStr { .. }
+        | Op::DropValue { .. }
+        | Op::DropListValue { .. }
+        | Op::DropListStrValue { .. }
+        | Op::DropListStrStr { .. }
+        | Op::DropListIntStr { .. }
+        | Op::DropListStrInt { .. }
+        | Op::DropResultListValue { .. }
+        | Op::DropResultValue { .. }
+        | Op::DropResultStrInt { .. }
+        | Op::DropResultValueInt { .. }
+        | Op::DropResultListValueInt { .. }
+        | Op::DropResultListStrInt { .. }
+        | Op::DropResultListStr { .. }
+        | Op::DropListListStr { .. }
+        | Op::DropVariant { .. }
+        | Op::DropWrapperRec { .. }
+        | Op::Consume { .. }
+        | Op::Borrow { .. }
+        | Op::MakeUnique { .. }
+        | Op::ListSetScalar { .. }
+        | Op::Else { .. }
+        | Op::EndIf { .. }
+        | Op::LoopStart
+        | Op::LoopBreakUnless { .. }
+        | Op::LoopEnd
+        | Op::SetLocal { .. } => None,
     }
 }
 
@@ -340,6 +377,7 @@ fn classify_f64_op(
                     poison.insert(*payload);
                 }
                 Init::Opaque
+                | Init::Empty
                 | Init::OptNone
                 | Init::IntList(_)
                 | Init::Bytes(_)

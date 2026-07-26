@@ -80,15 +80,9 @@ impl LowerCtx {
         // `list.map(xs, (x) => x + 1)`, `(p) => p.x` over `List[Point]`) is
         // UNTOUCHED, so the in-scope HOF byte-matches stay materialized.
         if crate::lower::is_higher_order(args) && !faithful {
-            if std::env::var("ALMIDE_DBG_ANF").is_ok() {
-                eprintln!(
-                    "[hof-guard] {}.{} unlifted={} data_arg_has_fn={}",
-                    module,
-                    func,
-                    self.last_call_had_unlifted_closure,
-                    data_arg_has_fn
-                );
-            }
+            crate::trace::trace("ALMIDE_DBG_ANF", || format!(
+                "[hof-guard] {}.{} unlifted={} data_arg_has_fn={}",
+                module, func, self.last_call_had_unlifted_closure, data_arg_has_fn));
             return Err(LowerError::Unsupported(format!(
                 "{module}.{func} with an unliftable/closure-list higher-order argument \
                  cannot execute faithfully in this brick (walled, not mis-valued)"

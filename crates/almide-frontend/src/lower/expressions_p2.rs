@@ -71,70 +71,101 @@ fn lower_expr_index_access(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: O
 
 fn lower_expr_member(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
     let ast::ExprKind::Member { object, field, .. } = &expr.kind else { unreachable!("lower_expr_member called on the wrong ExprKind") };
-            // Module function used as first-class value: `string.len` →
-            // lowered to a wrapper lambda `(x) => string.len(x)`. This lets
-            // user code write `list.map(xs, string.len)` without a manual
-            // eta expansion.
-            if let ast::ExprKind::Ident { name: mod_name, .. } = &object.kind {
-                if let Ty::Fn { params, ret } = &ty {
-                    let resolved_mod_for_fn = ctx.env.import_table.resolve(mod_name)
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| mod_name.to_string());
-                    let is_module_fn = crate::stdlib::lookup_sig(mod_name, field).is_some()
-                        || ctx.env.functions.contains_key(&sym(&format!("{}.{}", resolved_mod_for_fn, field)))
-                        || ctx.env.user_modules.contains(&sym(mod_name))
-                        || ctx.env.import_table.aliases.contains_key(&sym(mod_name));
-                    if is_module_fn {
-                        return eta_expand_module_fn(ctx, *mod_name, *field, params.clone(), (**ret).clone(), span);
-                    }
-                }
-                // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
-                if let Some((var_id, def_id)) = module_top_let_var(ctx, *mod_name, *field, &ty) {
-                    if let Some(def_id) = def_id {
-                        return ctx.mk_def(IrExprKind::Var { id: var_id }, ty, span, def_id);
-                    }
-                    return ctx.mk(IrExprKind::Var { id: var_id }, ty, span);
-                }
+    if let ast::ExprKind::Ident { name: mod_name, .. } = &object.kind {
+        if let Some(e) = lower_module_member(ctx, *mod_name, field, &ty, span) {
+            return e;
+        }
+    }
+    let obj = lower_expr(ctx, object);
+    ctx.mk(IrExprKind::Member { object: Box::new(obj), field: *field }, ty, span)
+}
 
-                // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
-                if let Some((type_name, case)) = ctx.env.lookup_ctor(field) {
-                    let resolved = ctx.env.import_table.aliases.get(mod_name).copied()
-                        .unwrap_or(*mod_name);
-                    let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
-                    if ctx.env.types.contains_key(&sym(&qualified)) {
-                        // Constructor with payload as function value → generate lambda
-                        if let crate::types::VariantPayload::Tuple(ref param_tys) = case.payload {
-                            if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
-                                let params: Vec<(VarId, Ty)> = param_tys.iter().enumerate().map(|(i, pt)| {
-                                    let vid = ctx.var_table.alloc(sym(&format!("_ctor_arg{}", i)), pt.clone(), Mutability::Let, None);
-                                    (vid, pt.clone())
-                                }).collect();
-                                let ctor_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {
-                                    ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span)
-                                }).collect();
-                                let ret_ty = match &ty {
-                                    Ty::Fn { ret, .. } => ret.as_ref().clone(),
-                                    _ => ty.clone(),
-                                };
-                                let body = ctx.mk(IrExprKind::Call {
-                                    target: CallTarget::Named { name: *field },
-                                    args: ctor_args, type_args: vec![],
-                                }, ret_ty, span);
-                                return ctx.mk(IrExprKind::Lambda {
-                                    params, body: Box::new(body), lambda_id: None,
-                                }, ty, span);
-                            }
-                        }
-                        // No-payload constructor: emit as Call
-                        return ctx.mk(IrExprKind::Call {
-                            target: CallTarget::Named { name: *field },
-                            args: vec![], type_args: vec![],
-                        }, ty, span);
-                    }
-                }
-            }
-            let obj = lower_expr(ctx, object);
-            ctx.mk(IrExprKind::Member { object: Box::new(obj), field: *field }, ty, span)
+/// Lower `mod.name` where `mod` names a module rather than a value.
+///
+/// Three forms, in resolution order: a module fn used as a first-class value, a
+/// cross-module top-level `let`, and a cross-module variant constructor.
+/// `None` means the object was an ordinary identifier after all and the caller
+/// should lower it as a value.
+fn lower_module_member(
+    ctx: &mut LowerCtx,
+    mod_name: almide_base::intern::Sym,
+    field: &almide_base::intern::Sym,
+    ty: &Ty,
+    span: Option<crate::ast::Span>,
+) -> Option<IrExpr> {
+    // A module fn used as a first-class value (`list.map(xs, string.len)`)
+    // lowers to a wrapper lambda `(x) => string.len(x)`, so user code needs no
+    // manual eta expansion.
+    if let Ty::Fn { params, ret } = ty {
+        let resolved_mod_for_fn = ctx.env.import_table.resolve(&mod_name)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| mod_name.to_string());
+        let is_module_fn = crate::stdlib::lookup_sig(&mod_name, field).is_some()
+            || ctx.env.functions.contains_key(&sym(&format!("{}.{}", resolved_mod_for_fn, field)))
+            || ctx.env.user_modules.contains(&sym(&mod_name))
+            || ctx.env.import_table.aliases.contains_key(&sym(&mod_name));
+        if is_module_fn {
+            return Some(eta_expand_module_fn(
+                ctx, mod_name, *field, params.clone(), (**ret).clone(), span));
+        }
+    }
+    // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
+    if let Some((var_id, def_id)) = module_top_let_var(ctx, mod_name, *field, ty) {
+        return Some(match def_id {
+            Some(def_id) => ctx.mk_def(IrExprKind::Var { id: var_id }, ty.clone(), span, def_id),
+            None => ctx.mk(IrExprKind::Var { id: var_id }, ty.clone(), span),
+        });
+    }
+    lower_module_ctor_value(ctx, mod_name, field, ty, span)
+}
+
+/// Lower a cross-module variant constructor used as a VALUE
+/// (`dispatch.Never`, `binary.ImportFunc`).
+///
+/// A constructor with a payload becomes a lambda that applies it, so it can be
+/// passed where a function is expected; a payload-less one is just the call. The
+/// qualified `mod.Type` must actually exist — otherwise `field` names something
+/// else that merely shares a constructor name elsewhere in the program.
+fn lower_module_ctor_value(
+    ctx: &mut LowerCtx,
+    mod_name: almide_base::intern::Sym,
+    field: &almide_base::intern::Sym,
+    ty: &Ty,
+    span: Option<crate::ast::Span>,
+) -> Option<IrExpr> {
+    let (type_name, case) = ctx.env.lookup_ctor(field)?;
+    let resolved = ctx.env.import_table.aliases.get(&mod_name).copied().unwrap_or(mod_name);
+    let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
+    if !ctx.env.types.contains_key(&sym(&qualified)) {
+        return None;
+    }
+    let payload_tys = match &case.payload {
+        crate::types::VariantPayload::Tuple(param_tys)
+            if !param_tys.is_empty() && matches!(ty, Ty::Fn { .. }) => param_tys.clone(),
+        // No payload to apply: the constructor IS the value.
+        _ => return Some(ctx.mk(IrExprKind::Call {
+            target: CallTarget::Named { name: *field },
+            args: vec![], type_args: vec![],
+        }, ty.clone(), span)),
+    };
+    let params: Vec<(VarId, Ty)> = payload_tys.iter().enumerate().map(|(i, pt)| {
+        let vid = ctx.var_table.alloc(sym(&format!("_ctor_arg{}", i)), pt.clone(), Mutability::Let, None);
+        (vid, pt.clone())
+    }).collect();
+    let ctor_args: Vec<IrExpr> = params.iter()
+        .map(|(vid, pt)| ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span))
+        .collect();
+    let ret_ty = match ty {
+        Ty::Fn { ret, .. } => ret.as_ref().clone(),
+        _ => ty.clone(),
+    };
+    let body = ctx.mk(IrExprKind::Call {
+        target: CallTarget::Named { name: *field },
+        args: ctor_args, type_args: vec![],
+    }, ret_ty, span);
+    Some(ctx.mk(IrExprKind::Lambda {
+        params, body: Box::new(body), lambda_id: None,
+    }, ty.clone(), span))
 }
 
 fn lower_expr_compose(ctx: &mut LowerCtx, expr: &ast::Expr, _ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
@@ -285,17 +316,7 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
             // overflows `i64` → `unwrap_or(0)`, and negating 0 yields 0.
             if op.as_str() == "-" {
                 if let ast::ExprKind::Int { raw, .. } = &operand.kind {
-                    let clean = raw.replace('_', "");
-                    let parsed = if let Some(h) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
-                        i64::from_str_radix(&format!("-{}", h), 16)
-                    } else if let Some(b) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) {
-                        i64::from_str_radix(&format!("-{}", b), 2)
-                    } else if let Some(o) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) {
-                        i64::from_str_radix(&format!("-{}", o), 8)
-                    } else {
-                        format!("-{}", clean).parse::<i64>()
-                    };
-                    if let Ok(value) = parsed {
+                    if let Some(value) = crate::literals::negated_int_value(raw) {
                         return ctx.mk(IrExprKind::LitInt { value }, ty.clone(), span);
                     }
                 }
@@ -343,47 +364,83 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                 if let IrExprKind::Var { id } = &r.kind { ctx.var_table.get(*id).ty.clone() } else { r.ty.clone() }
             } else { r.ty.clone() };
             let right_ty = &right_ty;
-            let bin_op = match (op.as_str(), left_ty, right_ty) {
-                ("+", Ty::String, _) | ("+", _, Ty::String) => BinOp::ConcatStr,
-                ("+", Ty::Applied(TypeConstructorId::List, _), _) | ("+", _, Ty::Applied(TypeConstructorId::List, _)) => BinOp::ConcatList,
-                // Matrix operators
-                ("+", Ty::Matrix, Ty::Matrix) => BinOp::AddMatrix,
-                ("-", Ty::Matrix, Ty::Matrix) => BinOp::SubMatrix,
-                ("*", Ty::Matrix, Ty::Matrix) => BinOp::MulMatrix,
-                ("*", Ty::Matrix, Ty::Float) | ("*", Ty::Float, Ty::Matrix) => BinOp::ScaleMatrix,
-                ("*", Ty::Matrix, Ty::Int) | ("*", Ty::Int, Ty::Matrix) => BinOp::ScaleMatrix,
-                // Float dispatch covers canonical `Float` plus the sized
-                // `Float32`. Any other numeric type (Int / Int8 ... /
-                // UInt64) takes the Int path. The *width* of the
-                // arithmetic op (i32_add vs i64_add vs f32_add vs
-                // f64_add) is resolved at WASM emit time from the
-                // operand's valtype; Rust codegen emits plain `a + b`
-                // and lets rustc pick.
-                ("+", Ty::Float, _) | ("+", _, Ty::Float)
-                | ("+", Ty::Float32, _) | ("+", _, Ty::Float32) => BinOp::AddFloat,
-                ("+", _, _) => BinOp::AddInt,
-                ("-", Ty::Float, _) | ("-", _, Ty::Float)
-                | ("-", Ty::Float32, _) | ("-", _, Ty::Float32) => BinOp::SubFloat,
-                ("-", _, _) => BinOp::SubInt,
-                ("*", Ty::Float, _) | ("*", _, Ty::Float)
-                | ("*", Ty::Float32, _) | ("*", _, Ty::Float32) => BinOp::MulFloat,
-                ("*", _, _) => BinOp::MulInt,
-                ("/", Ty::Float, _) | ("/", _, Ty::Float)
-                | ("/", Ty::Float32, _) | ("/", _, Ty::Float32) => BinOp::DivFloat,
-                ("/", _, _) => BinOp::DivInt,
-                ("%", Ty::Float, _) | ("%", _, Ty::Float)
-                | ("%", Ty::Float32, _) | ("%", _, Ty::Float32) => BinOp::ModFloat,
-                ("%", _, _) => BinOp::ModInt,
-                ("^", Ty::Float, _) | ("^", _, Ty::Float)
-                | ("^", Ty::Float32, _) | ("^", _, Ty::Float32) => BinOp::PowFloat,
-                ("^", _, _) => BinOp::PowInt,
-                ("==", _, _) => BinOp::Eq, ("!=", _, _) => BinOp::Neq,
-                ("<", _, _) => BinOp::Lt, (">", _, _) => BinOp::Gt,
-                ("<=", _, _) => BinOp::Lte, (">=", _, _) => BinOp::Gte,
-                ("and", _, _) => BinOp::And, ("or", _, _) => BinOp::Or,
-                _ => BinOp::AddInt,
-            };
+            let bin_op = binop_for(op.as_str(), left_ty, right_ty);
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
+}
+
+/// The `BinOp` an operator and its operand types lower to.
+///
+/// Falls back to `AddInt` for a pairing no arm claims. That is not a guess: an
+/// unclaimed pairing means the checker already rejected the expression (or
+/// resolved an operand to `Unknown` after an earlier error), so the lowered
+/// operator is never executed — it only has to exist for lowering to finish and
+/// let the real diagnostic be the one the user sees.
+pub(super) fn binop_for(op: &str, left_ty: &Ty, right_ty: &Ty) -> BinOp {
+    binop_arith(op, left_ty, right_ty)
+        .or_else(|| binop_other(op, left_ty, right_ty))
+        .unwrap_or(BinOp::AddInt)
+}
+
+/// Addition, subtraction and multiplication.
+///
+/// `+` is overloaded: on strings and lists it concatenates, so the operand types
+/// decide the operation and not just its width.
+///
+/// One group of the operand-typed operator table, arms verbatim and in source
+/// order. `None` means "not my group"; `binop_for` tries the groups in that
+/// order, so the operator an expression lowers to is unchanged.
+fn binop_arith(op: &str, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
+    Some(match (op, left_ty, right_ty) {
+        ("+", Ty::String, _) | ("+", _, Ty::String) => BinOp::ConcatStr,
+        ("+", Ty::Applied(TypeConstructorId::List, _), _) | ("+", _, Ty::Applied(TypeConstructorId::List, _)) => BinOp::ConcatList,
+        // Matrix operators
+        ("+", Ty::Matrix, Ty::Matrix) => BinOp::AddMatrix,
+        ("-", Ty::Matrix, Ty::Matrix) => BinOp::SubMatrix,
+        ("*", Ty::Matrix, Ty::Matrix) => BinOp::MulMatrix,
+        ("*", Ty::Matrix, Ty::Float) | ("*", Ty::Float, Ty::Matrix) => BinOp::ScaleMatrix,
+        ("*", Ty::Matrix, Ty::Int) | ("*", Ty::Int, Ty::Matrix) => BinOp::ScaleMatrix,
+        // Float dispatch covers canonical `Float` plus the sized
+        // `Float32`. Any other numeric type (Int / Int8 ... /
+        // UInt64) takes the Int path. The *width* of the
+        // arithmetic op (i32_add vs i64_add vs f32_add vs
+        // f64_add) is resolved at WASM emit time from the
+        // operand's valtype; Rust codegen emits plain `a + b`
+        // and lets rustc pick.
+        ("+", Ty::Float, _) | ("+", _, Ty::Float)
+        | ("+", Ty::Float32, _) | ("+", _, Ty::Float32) => BinOp::AddFloat,
+        ("+", _, _) => BinOp::AddInt,
+        ("-", Ty::Float, _) | ("-", _, Ty::Float)
+        | ("-", Ty::Float32, _) | ("-", _, Ty::Float32) => BinOp::SubFloat,
+        ("-", _, _) => BinOp::SubInt,
+        ("*", Ty::Float, _) | ("*", _, Ty::Float)
+        | ("*", Ty::Float32, _) | ("*", _, Ty::Float32) => BinOp::MulFloat,
+        _ => return None,
+    })
+}
+
+/// Division, remainder, exponentiation, comparison and the boolean connectives.
+///
+/// One group of the operand-typed operator table, arms verbatim and in source
+/// order. `None` means "not my group"; `binop_for` tries the groups in that
+/// order, so the operator an expression lowers to is unchanged.
+fn binop_other(op: &str, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
+    Some(match (op, left_ty, right_ty) {
+        ("*", _, _) => BinOp::MulInt,
+        ("/", Ty::Float, _) | ("/", _, Ty::Float)
+        | ("/", Ty::Float32, _) | ("/", _, Ty::Float32) => BinOp::DivFloat,
+        ("/", _, _) => BinOp::DivInt,
+        ("%", Ty::Float, _) | ("%", _, Ty::Float)
+        | ("%", Ty::Float32, _) | ("%", _, Ty::Float32) => BinOp::ModFloat,
+        ("%", _, _) => BinOp::ModInt,
+        ("^", Ty::Float, _) | ("^", _, Ty::Float)
+        | ("^", Ty::Float32, _) | ("^", _, Ty::Float32) => BinOp::PowFloat,
+        ("^", _, _) => BinOp::PowInt,
+        ("==", _, _) => BinOp::Eq, ("!=", _, _) => BinOp::Neq,
+        ("<", _, _) => BinOp::Lt, (">", _, _) => BinOp::Gt,
+        ("<=", _, _) => BinOp::Lte, (">=", _, _) => BinOp::Gte,
+        ("and", _, _) => BinOp::And, ("or", _, _) => BinOp::Or,
+        _ => return None,
+    })
 }
 
 fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {

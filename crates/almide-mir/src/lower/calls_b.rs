@@ -391,12 +391,8 @@ impl LowerCtx {
                         match self.lower_stmt(&stmt) {
                             Ok(()) => return Ok(()),
                             Err(e) => {
-                                if std::env::var("ALMIDE_DBG_ANF").is_ok() {
-                                    eprintln!(
-                                        "[c1-stmt-inline] body failed in {}: {e:?}",
-                                        self.fn_name
-                                    );
-                                }
+                                crate::trace::trace("ALMIDE_DBG_ANF", || format!(
+                                    "[c1-stmt-inline] body failed in {}: {e:?}", self.fn_name));
                             }
                         }
                         self.ops.truncate(ops_mark);

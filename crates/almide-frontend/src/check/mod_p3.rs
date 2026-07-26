@@ -167,12 +167,17 @@ impl Checker {
         use crate::canonicalize::registration::SCALAR_TYPE_NAMES;
         let gs = match generics { Some(gs) => gs, None => return };
         for g in gs.iter() {
-            // Check if this is a const param (single scalar type bound)
-            let is_const = g.bounds.as_ref().map_or(false, |bs| {
-                bs.len() == 1 && SCALAR_TYPE_NAMES.contains(&bs[0].as_str())
+            // A const param is a generic with a single scalar type bound. The
+            // bound is carried out of the same expression that tests for it —
+            // the previous form tested `bounds` here and re-read `bounds[0]`
+            // below, so the test and the read could drift.
+            let const_bound = g.bounds.as_ref().and_then(|bs| match bs.as_slice() {
+                [only] if SCALAR_TYPE_NAMES.contains(&only.as_str()) => Some(only.clone()),
+                _ => None,
             });
-            if is_const {
-                let ty = self.resolve_type_expr(&ast::TypeExpr::Simple { name: sym(&g.bounds.as_ref().unwrap()[0]) });
+            let is_const = const_bound.is_some();
+            if let Some(bound) = const_bound {
+                let ty = self.resolve_type_expr(&ast::TypeExpr::Simple { name: sym(&bound) });
                 self.env.types.insert(sym(&g.name), Ty::ConstParam { name: sym(&g.name), ty: Box::new(ty) });
             } else {
                 self.env.types.insert(sym(&g.name), Ty::TypeVar(sym(&g.name)));
@@ -226,15 +231,8 @@ impl Checker {
         self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
     }
 
-    fn check_fn_decl(
-        &mut self,
-        name: &str,
-        params: &mut [ast::Param],
-        return_type: &ast::TypeExpr,
-        body: &mut ast::Expr,
-        effect: &Option<bool>,
-        generics: &mut Option<Vec<ast::GenericParam>>,
-    ) {
+    fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
+        let FnToCheck { params, return_type, body, effect, generics } = decl;
         self.env.push_scope();
         self.enter_generics(generics);
         // A bare `self` first param is sugar for `self: Self` (see
@@ -288,7 +286,9 @@ impl Checker {
     fn check_decl(&mut self, decl: &mut ast::Decl) {
         match decl {
             ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
-                self.check_fn_decl(name, params, return_type, body, effect, generics);
+                self.check_fn_decl(name, FnToCheck {
+                    params, return_type, body, effect, generics,
+                });
             }
             ast::Decl::Test { body, where_clauses, .. } => {
                 self.check_decl_test(body, where_clauses);
@@ -348,12 +348,10 @@ impl Checker {
         // reads the prefixed key and gets `Ty::Unknown`.
         let prefixed_key = self.current_module_prefix.as_ref()
             .map(|p| sym(&format!("{}.{}", p, name)));
-        if std::env::var_os("ALMIDE_TOPLET_DEBUG").is_some() {
-            eprintln!("[toplet-debug] refresh: name={} prefix={:?} resolved={:?} existing_prefixed={:?}",
-                name, self.current_module_prefix,
-                resolved,
-                prefixed_key.as_ref().map(|k| self.env.top_lets.get(k)));
-        }
+        debug_trace("TOPLET", || format!(
+            "refresh: name={} prefix={:?} resolved={:?} existing_prefixed={:?}",
+            name, self.current_module_prefix, resolved,
+            prefixed_key.as_ref().map(|k| self.env.top_lets.get(k))));
         if let Some(k) = prefixed_key {
             if matches!(self.env.top_lets.get(&k), Some(Ty::Unknown) | None) {
                 self.env.top_lets.insert(k, resolved.clone());
@@ -416,8 +414,10 @@ impl Checker {
             }
             ast::TestWhere::CallResponse { target, params, response } => {
                 // Resolve param types from original function signature
-                let target_name = if target.len() == 1 { *target.first().unwrap() }
-                    else { sym(&target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")) };
+                let target_name = match target.as_slice() {
+                    [only] => *only,
+                    _ => sym(&target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")),
+                };
                 let sig_params: Vec<Ty> = self.env.functions.get(&target_name)
                     .map(|sig| sig.params.iter().map(|(_, t)| t.clone()).collect())
                     .unwrap_or_default();

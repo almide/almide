@@ -46,18 +46,40 @@ pub(crate) fn anon_record_needs_recursive_drop(fields: &[(almide_lang::intern::S
 /// scalar → skip. Records the needed shared-helper flags into the caller's accumulators so they are
 /// emitted once at the end.
 #[allow(clippy::too_many_arguments)]
+/// The declared shapes a field type can name, for drop-source generation.
+///
+/// Three of these are `HashSet<String>` and were adjacent parameters, so a
+/// transposition type-checks and then classifies a record as a variant.
+#[derive(Copy, Clone)]
+pub(crate) struct DropShapes<'a> {
+    pub rec_names: &'a std::collections::HashSet<String>,
+    pub flat_variant_names: &'a std::collections::HashSet<String>,
+    pub rec_variant_names: &'a std::collections::HashSet<String>,
+    pub generic_decls: &'a GenericRecordDecls,
+}
+
+/// Which shared drop helpers the emitted sources will need.
+///
+/// Accumulated across every field of every record, so it is threaded as one
+/// `&mut` rather than four `&mut bool`s that a caller could pass in the wrong
+/// order — the flags are all `bool`, so the compiler cannot tell them apart.
+#[derive(Default)]
+pub(crate) struct DropNeeds {
+    pub map_ss: bool,
+    pub list_str: bool,
+    pub matrix: bool,
+    pub list_matrix: bool,
+}
+
 fn record_drop_field_frees(
     field_tys: &[Ty],
-    rec_names: &std::collections::HashSet<String>,
-    flat_variant_names: &std::collections::HashSet<String>,
-    rec_variant_names: &std::collections::HashSet<String>,
-    generic_decls: &GenericRecordDecls,
+    shapes: DropShapes<'_>,
     list_drops: &mut std::collections::BTreeSet<String>,
-    need_map_ss: &mut bool,
-    need_list_str: &mut bool,
-    need_matrix: &mut bool,
-    need_list_matrix: &mut bool,
+    needs: &mut DropNeeds,
 ) -> String {
+    let DropShapes { rec_names, flat_variant_names, rec_variant_names, generic_decls } = shapes;
+    let (need_map_ss, need_list_str, need_matrix, need_list_matrix) = (
+        &mut needs.map_ss, &mut needs.list_str, &mut needs.matrix, &mut needs.list_matrix);
     use almide_lang::types::constructor::TypeConstructorId;
     let mut frees = String::new();
     for (i, ty) in field_tys.iter().enumerate() {

@@ -7,7 +7,18 @@ use crate::intern::{Sym, sym};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 
-pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>, visibility: &ast::Visibility, generics: Option<&Vec<ast::GenericParam>>, module_prefix: Option<&str>) -> IrTypeDecl {
+/// A borrowed view of the `type` declaration being lowered.
+pub(super) struct TypeToLower<'a> {
+    pub name: &'a str,
+    pub ty: &'a ast::TypeExpr,
+    pub deriving: &'a Option<Vec<Sym>>,
+    pub visibility: &'a ast::Visibility,
+    pub generics: Option<&'a Vec<ast::GenericParam>>,
+    pub module_prefix: Option<&'a str>,
+}
+
+pub(super) fn lower_type_decl(ctx: &mut LowerCtx, decl: &TypeToLower<'_>) -> IrTypeDecl {
+    let TypeToLower { name, ty, deriving, visibility, generics, module_prefix } = *decl;
     // #433: a user (non-stdlib) module's type is declared under its qualified
     // canonical name `mod.Type`, matching how references resolve, so two packages'
     // same-name types stay distinct through link + codegen.

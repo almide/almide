@@ -143,7 +143,12 @@ pub fn build_import_table(
     let mut canonical_to_alias: HashMap<String, String> = HashMap::new();
 
     for imp in &prog.imports {
-        build_import_table_process_import(imp, module_name, user_modules, &mut table, &mut diagnostics, &mut alias_to_canonical, &mut canonical_to_alias);
+        build_import_table_process_import(imp, module_name, user_modules, &mut ImportBuild {
+            table: &mut table,
+            diagnostics: &mut diagnostics,
+            alias_to_canonical: &mut alias_to_canonical,
+            canonical_to_alias: &mut canonical_to_alias,
+        });
     }
 
     // Also register Tier 1 auto-imports from bundled modules
@@ -161,15 +166,26 @@ pub fn build_import_table(
 /// [`build_import_table`]; a `continue` in the original loop becomes an
 /// early `return` here (both simply skip the rest of this import and move
 /// on to the next one).
+/// The import table under construction.
+///
+/// The table and the two alias maps are one piece of state: a name is only
+/// registered after both maps agree it does not collide, and every registration
+/// writes all three. Passing them separately let a caller update the table
+/// without the maps, which is exactly the shape of a missed collision.
+struct ImportBuild<'a> {
+    table: &'a mut ImportTable,
+    diagnostics: &'a mut Vec<Diagnostic>,
+    alias_to_canonical: &'a mut HashMap<String, String>,
+    canonical_to_alias: &'a mut HashMap<String, String>,
+}
+
 fn build_import_table_process_import(
     imp: &ast::Decl,
     module_name: Option<&str>,
     user_modules: &HashSet<Sym>,
-    table: &mut ImportTable,
-    diagnostics: &mut Vec<Diagnostic>,
-    alias_to_canonical: &mut HashMap<String, String>,
-    canonical_to_alias: &mut HashMap<String, String>,
+    build: &mut ImportBuild<'_>,
 ) {
+    let ImportBuild { table, diagnostics, alias_to_canonical, canonical_to_alias } = build;
     let (path, alias, names, span) = match imp {
         ast::Decl::Import { path, alias, names, span } => (path, alias, names, span),
         _ => return,
@@ -185,6 +201,17 @@ fn build_import_table_process_import(
     register_import(&used_name, &canonical, alias_to_canonical, canonical_to_alias, table);
     register_import_stdlib(&used_name, path, is_self, table);
     register_import_selective(names, &canonical, table);
+}
+
+/// The last segment of an import path — the name the path introduces into
+/// scope.
+///
+/// An empty path yields an empty name rather than panicking. The parser does
+/// not produce one, but error recovery can, and an empty used-name is already a
+/// value the table handles: the unused-import lint skips it, so recovery stays
+/// quiet instead of aborting the whole check.
+fn import_leaf_name(path: &[Sym]) -> String {
+    path.last().map(|s| s.to_string()).unwrap_or_default()
 }
 
 /// Steps 1-2 of [`build_import_table_process_import`]: build the canonical
@@ -204,7 +231,7 @@ fn resolve_import_canonical(path: &[Sym], module_name: Option<&str>, user_module
             }
         } else {
             // import self.a.b → prefer "<module>.a.b" if registered, else "b"
-            let leaf = path.last().unwrap().to_string();
+            let leaf = import_leaf_name(path);
             let fqn = if let Some(mod_name) = module_name {
                 let suffix = path[1..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
                 format!("{}.{}", mod_name, suffix)
@@ -228,12 +255,12 @@ fn resolve_import_used_name(path: &[Sym], alias: &Option<Sym>, is_self: bool, ca
         a.to_string()
     } else if path.len() > 1 {
         // Go-style: last segment is the namespace
-        path.last().unwrap().to_string()
+        import_leaf_name(path)
     } else if is_self {
         // import self → use the resolved package name
         canonical.split('.').last().unwrap_or(canonical).to_string()
     } else {
-        path.last().unwrap().to_string()
+        import_leaf_name(path)
     }
 }
 

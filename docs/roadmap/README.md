@@ -6,7 +6,7 @@
 
 ## Active
 
-65 items
+67 items
 
 | Item | Description |
 |------|-------------|
@@ -33,12 +33,14 @@
 | [Almide Flight Profile — 規範仕様(Normative Subset)](active/flight-subset-spec.md) | The normative Almide Flight Profile — the SPARK/Ravenscar-class language subset for flight-grade code, machine-enforced by the per-build certificate (by proof, not review). Feature IN/OUT/RESTRICTED classification, the resolved keystone open questions (Dup-in-loop IN, break/continue OUT, recursion=acyclicity-reject, nested loops IN), the @flight enforcement architecture, the MISRA/Ravenscar mapping, and honest language residuals. |
 | [Flight Keystone (あ) — Counted Loops + Bounded Allocation(WCET-by-construction)](active/flight-wcet-loops.md) | Concrete implementation design for flight keystone (あ) — G-F1/G-F2: counted-loop flight subset + lifting loops into Coq to prove bounded allocation (WCET-by-construction). The counted loop is a SEPARATE structural witness (preserving the flat-fold RC invariant), two Subset.v-shaped properties prove it, and try_lower_scalar_for_range already knows the trip count. |
 | [Fuzz Findings Triage: Re-green the Nightly Differential Gate](active/fuzz-findings-triage.md) | Fuzz (nightly) is red — triage the differential findings to zero and re-green the workflow |
+| [Integer literal domain — cross-language survey and Almide's target](active/integer-literal-domain.md) | How other languages range-check integer literals, and where Almide should land |
 | [StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`](active/interp-is-desugar-to-tostring.md) | Retiring StringInterp as special syntax by desugaring it to concat + to_string(part) |
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) | The issue-ledger burn-down gauge: keeping the open-issue count an honest measure of remaining work |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) | Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field |
 | [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) | Routing almide build --target rust through the same v1 Perceus MIR as wasm, so one memory model serves both legs |
+| [Playground UI Revamp](active/playground-revamp.md) | Playground UI revamp: file tabs, share URLs, TS-style example gallery |
 | [Post-0.29 Improvement Sweep](active/post-0.29-improvement-sweep.md) | Post-0.29.0 improvement sweep — every open gap issue-ized and ordered, from face-fixes to the v0 wasm retirement |
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
 | [Receipt Logic — 受領書の論理](active/receipt-logic.md) | Formal foundation for the trust layer — receipt logic: claim types, threat model, trust bases, falsification procedures, completeness relative to use-case |

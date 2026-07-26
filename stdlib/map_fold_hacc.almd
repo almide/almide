@@ -114,3 +114,38 @@ fn list_fold_str_msi(
   let n = prim.load32(h + 4)
   __fold_smsi_loop(h, f, n, 0, init)
 }
+
+// ── map.fold over a HEAP accumulator, `Map[String, Int]` (skv) subject ── the
+// `map.fold(counts, "", (acc, k, v) => acc + k)` shape. The skv layout splits
+// keys and values into two runs of 8-byte slots (keys at `12 + i*8`, values at
+// `12 + (entries + i)*8`), so this walks the same way `fold_skv_msi` does; only
+// the accumulator's repr differs, and every heap accumulator is one i32 handle,
+// so ONE type-erased loop serves String, List and Map accumulators alike.
+//
+// The acc MOVES into f each iteration (f consumes it and returns the next — this
+// fn never frees it); keys are borrowed String loads and values are scalar i64
+// loads, both owned by the map. The final acc is the owned result.
+fn __mfh_skv_hacc_loop(
+  sh: Int,
+  f: (String, String, Int) -> String,
+  entries: Int,
+  i: Int,
+  acc: String,
+) -> String =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let nacc = f(acc, k, v)
+    __mfh_skv_hacc_loop(sh, f, entries, i + 1, nacc)
+  }
+
+fn map_fold_skv_hacc(
+  m: Map[String, Int],
+  init: String,
+  f: (String, String, Int) -> String,
+) -> String = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  __mfh_skv_hacc_loop(sh, f, entries, 0, init)
+}

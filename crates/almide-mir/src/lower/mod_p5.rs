@@ -184,6 +184,13 @@ pub(crate) fn alloc_init(value: &IrExpr) -> Init {
             return Init::IntList(ints);
         }
     }
+    // `[:]` is not a value the lowering FAILED to build — an empty block is
+    // exactly what an empty map is, and `map.from_list` goes on to insert into
+    // it. Saying so distinguishes it from the deferral below, which a consumer
+    // must wall (#810).
+    if matches!(value.kind, IrExprKind::EmptyMap) {
+        return Init::Empty;
+    }
     Init::Opaque
 }
 

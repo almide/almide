@@ -1,14 +1,27 @@
 
+/// Where a rendered op writes, and the running state it updates.
+///
+/// `tys` is the value→type map the whole function accumulates, `out` the source
+/// being built, and `used_shims` the set of runtime helpers the render has
+/// pulled in. All three are per-function state that every op handler both reads
+/// and extends, so they travel as one value instead of three `&mut`s that a
+/// caller could pair with a different function's buffer.
+pub(crate) struct OpSink<'a> {
+    pub tys: &'a mut BTreeMap<ValueId, NTy>,
+    pub out: &'a mut String,
+    pub indent: usize,
+    pub used_shims: &'a mut Vec<&'static str>,
+}
+
 /// `Op::CallIndirect` — dispatch through the arity's `__almd_ci_*` table.
 fn render_call_indirect(
     dst: &Option<ValueId>,
     table_idx: &ValueId,
     args: &Vec<CallArg>,
     result: &Option<Repr>,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
+    sink: OpSink<'_>,
 ) -> Result<(), LowerError> {
+    let OpSink { tys, out, indent, used_shims: _ } = sink;
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }
@@ -56,11 +69,9 @@ fn render_list_get_scalar(
     dst: &ValueId,
     list: &ValueId,
     idx: &ValueId,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-    used_shims: &mut Vec<&'static str>,
+    sink: OpSink<'_>,
 ) -> Result<(), LowerError> {
+    let OpSink { tys, out, indent, used_shims } = sink;
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }
@@ -88,11 +99,10 @@ fn render_list_set_scalar(
     list: &ValueId,
     idx: &ValueId,
     val: &ValueId,
-    tys: &BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-    used_shims: &mut Vec<&'static str>,
+    sink: OpSink<'_>,
 ) -> Result<(), LowerError> {
+    let OpSink { tys, out, indent, used_shims } = sink;
+    let tys: &BTreeMap<ValueId, NTy> = tys;
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }
@@ -153,18 +163,32 @@ fn render_set_local(
 /// `Op::CallFn` — a user fn call (by declared sig table) or a CLOSED runtime
 /// shim call; the single largest op arm (native call-mode resolution).
 #[allow(clippy::too_many_arguments)]
-fn render_call_fn(
-    dst: &Option<ValueId>,
-    name: &String,
-    args: &Vec<CallArg>,
-    result: &Option<Repr>,
-    user_fns: &BTreeMap<&str, &MirFunction>,
-    sigs: &NativeSigs,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-    used_shims: &mut Vec<&'static str>,
-) -> Result<(), LowerError> {
+/// The call being rendered.
+#[derive(Copy, Clone)]
+pub(crate) struct NativeCall<'a> {
+    pub dst: &'a Option<ValueId>,
+    pub name: &'a String,
+    pub args: &'a Vec<CallArg>,
+    pub result: &'a Option<Repr>,
+}
+
+/// Where a native render writes, and what it may look up while writing.
+///
+/// The output buffer, the running value-type map and the shim list are all
+/// accumulated across the whole function, so they travel together rather than
+/// as three separate `&mut`s a caller could pair with the wrong `out`.
+pub(crate) struct NativeSink<'a, 'f> {
+    pub user_fns: &'a BTreeMap<&'a str, &'a MirFunction>,
+    pub sigs: &'a NativeSigs,
+    pub tys: &'a mut BTreeMap<ValueId, NTy>,
+    pub out: &'f mut String,
+    pub indent: usize,
+    pub used_shims: &'a mut Vec<&'static str>,
+}
+
+fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), LowerError> {
+    let NativeCall { dst, name, args, result } = call;
+    let NativeSink { user_fns, sigs, tys, out, indent, used_shims } = sink;
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }
@@ -398,11 +422,10 @@ fn render_call_witness(
     dst: &Option<ValueId>,
     func: &crate::RtFn,
     args: &Vec<CallArg>,
-    tys: &BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-    used_shims: &mut Vec<&'static str>,
+    sink: OpSink<'_>,
 ) -> Result<(), LowerError> {
+    let OpSink { tys, out, indent, used_shims } = sink;
+    let tys: &BTreeMap<ValueId, NTy> = tys;
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }

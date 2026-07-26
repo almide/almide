@@ -53,10 +53,21 @@ pub enum DialectType {
 }
 
 /// Convert from almide-lang Ty to dialect type.
+/// Map a checker `Ty` onto the dialect's type lattice.
+///
+/// Split into a flat SCALAR table and a structural recursion, so the 27-arm match
+/// becomes two short ones. `None` from the scalar table means "not a scalar", and
+/// the trailing `Unknown` fallback is unchanged.
 pub fn from_ty(ty: &almide_lang::types::Ty) -> DialectType {
-    use almide_lang::types::{Ty, TypeConstructorId as TCI};
+    from_ty_scalar(ty)
+        .or_else(|| from_ty_structural(ty))
+        .unwrap_or(DialectType::Unknown)
+}
 
-    match ty {
+/// The nullary types: canonical scalars plus the sized numerics.
+fn from_ty_scalar(ty: &almide_lang::types::Ty) -> Option<DialectType> {
+    use almide_lang::types::Ty;
+    Some(match ty {
         Ty::Int => DialectType::I64,
         Ty::Float => DialectType::F64,
         Ty::Bool => DialectType::Bool,
@@ -65,7 +76,6 @@ pub fn from_ty(ty: &almide_lang::types::Ty) -> DialectType {
         Ty::Bytes => DialectType::Bytes,
         Ty::Matrix => DialectType::Matrix,
         Ty::RawPtr => DialectType::RawPtr,
-
         Ty::Int8 => DialectType::I8,
         Ty::Int16 => DialectType::I16,
         Ty::Int32 => DialectType::I32,
@@ -74,39 +84,65 @@ pub fn from_ty(ty: &almide_lang::types::Ty) -> DialectType {
         Ty::UInt32 => DialectType::U32,
         Ty::UInt64 => DialectType::U64,
         Ty::Float32 => DialectType::F32,
+        _ => return None,
+    })
+}
 
-        Ty::Applied(TCI::List, args) => {
-            let inner = args.first().map(from_ty).unwrap_or(DialectType::Unknown);
-            DialectType::List(Box::new(inner))
-        }
+/// The forms that recurse into child types. A missing type argument maps to
+/// `Unknown` rather than panicking, exactly as before.
+fn from_ty_structural(ty: &almide_lang::types::Ty) -> Option<DialectType> {
+    use almide_lang::types::{Ty, TypeConstructorId as TCI};
+    let arg = |args: &[Ty], i: usize| {
+        args.get(i).map(from_ty).unwrap_or(DialectType::Unknown)
+    };
+    Some(match ty {
+        Ty::Applied(TCI::List, args) => DialectType::List(Box::new(arg(args, 0))),
+        Ty::Applied(TCI::Option, args) => DialectType::Option(Box::new(arg(args, 0))),
         Ty::Applied(TCI::Map, args) => {
-            let k = args.first().map(from_ty).unwrap_or(DialectType::Unknown);
-            let v = args.get(1).map(from_ty).unwrap_or(DialectType::Unknown);
-            DialectType::Map(Box::new(k), Box::new(v))
-        }
-        Ty::Applied(TCI::Option, args) => {
-            let inner = args.first().map(from_ty).unwrap_or(DialectType::Unknown);
-            DialectType::Option(Box::new(inner))
+            DialectType::Map(Box::new(arg(args, 0)), Box::new(arg(args, 1)))
         }
         Ty::Applied(TCI::Result, args) => {
-            let ok = args.first().map(from_ty).unwrap_or(DialectType::Unknown);
-            let err = args.get(1).map(from_ty).unwrap_or(DialectType::Unknown);
-            DialectType::Result(Box::new(ok), Box::new(err))
+            DialectType::Result(Box::new(arg(args, 0)), Box::new(arg(args, 1)))
         }
-
         Ty::Tuple(elems) => DialectType::Tuple(elems.iter().map(from_ty).collect()),
-
         Ty::Named(name, _) => DialectType::Named(*name),
-
         Ty::Fn { params, ret, .. } => DialectType::Fn {
             params: params.iter().map(from_ty).collect(),
             ret: Box::new(from_ty(ret)),
         },
-
         Ty::Record { fields, .. } => {
             DialectType::Record(fields.iter().map(|(n, t)| (*n, from_ty(t))).collect())
         }
+        _ => return None,
+    })
+}
 
-        _ => DialectType::Unknown,
-    }
+
+/// The printed name of a NULLARY dialect type, for either surface.
+///
+/// `dump.rs` and `emit_rust.rs` each formatted the same 17 scalar variants in
+/// their own 28-arm match; the tables differ only in the spelling of a handful of
+/// entries, so they share one function and keep only their structural recursion.
+/// A non-scalar returns `None`.
+pub fn scalar_name(ty: &DialectType, rust: bool) -> Option<&'static str> {
+    Some(match ty {
+        DialectType::I64 => "i64",
+        DialectType::F64 => "f64",
+        DialectType::Bool => "bool",
+        DialectType::I8 => "i8",
+        DialectType::I16 => "i16",
+        DialectType::I32 => "i32",
+        DialectType::U8 => "u8",
+        DialectType::U16 => "u16",
+        DialectType::U32 => "u32",
+        DialectType::U64 => "u64",
+        DialectType::F32 => "f32",
+        DialectType::Unit => if rust { "()" } else { "unit" },
+        DialectType::String => if rust { "String" } else { "string" },
+        DialectType::Bytes => if rust { "Vec<u8>" } else { "bytes" },
+        DialectType::Matrix => if rust { "Matrix" } else { "matrix" },
+        DialectType::RawPtr => if rust { "*mut u8" } else { "rawptr" },
+        DialectType::Unknown => if rust { "()" } else { "unknown" },
+        _ => return None,
+    })
 }

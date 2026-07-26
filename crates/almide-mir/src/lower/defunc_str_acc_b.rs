@@ -1,3 +1,17 @@
+/// The list an append-accumulator loop is writing into.
+///
+/// `handle` and `cursor` are both `ValueId` and were adjacent parameters, so a
+/// transposition writes the element through the list handle — a memory write to
+/// the wrong address that still type-checks.
+#[derive(Copy, Clone)]
+pub(crate) struct ResultList<'a> {
+    pub handle: ValueId,
+    pub cursor: ValueId,
+    pub elem: &'a Ty,
+    /// The element stride in bytes, materialised once by the caller.
+    pub elem_size: ValueId,
+}
+
 impl LowerCtx {
 
     /// A flat_map closure body that is a VARIANT `match subj { some(pl) => …, none => … }` over a
@@ -242,11 +256,9 @@ impl LowerCtx {
         &mut self,
         subject: &IrExpr,
         arms: &[IrMatchArm],
-        rh: ValueId,
-        cursor: ValueId,
-        result_elem: &Ty,
-        eight: ValueId,
+        out: ResultList<'_>,
     ) -> Option<()> {
+        let ResultList { handle: rh, cursor, elem: result_elem, elem_size: eight } = out;
         use crate::PrimKind;
         // Gate: a 2-arm guard-free match over a heap (variant) subject. The subject must materialize to
         // a self-host Option/Result(-str) CALL or a USER `Named` call returning Option/Result (NOT a

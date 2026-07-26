@@ -1,13 +1,20 @@
-fn render_op(
-    op: &Op,
-    label_off: &BTreeMap<String, (u32, u32)>,
-    func_slots: &BTreeMap<String, u32>,
-    param_counts: &BTreeMap<String, usize>,
-    masks: &BTreeMap<ValueId, Vec<usize>>,
-    reprs: &BTreeMap<ValueId, Repr>,
-    floats: &BTreeSet<ValueId>,
-    fuser: &mut Fuser,
-) -> String {
+/// The read-only tables one wasm op is rendered against.
+///
+/// Three are `BTreeMap<String, _>` and were adjacent parameters, so the label,
+/// slot and arity tables could be transposed silently — and a wrong slot table
+/// emits a call to the wrong function index, which the module still validates.
+#[derive(Copy, Clone)]
+pub(crate) struct OpTables<'a> {
+    pub label_off: &'a BTreeMap<String, (u32, u32)>,
+    pub func_slots: &'a BTreeMap<String, u32>,
+    pub param_counts: &'a BTreeMap<String, usize>,
+    pub masks: &'a BTreeMap<ValueId, Vec<usize>>,
+    pub reprs: &'a BTreeMap<ValueId, Repr>,
+    pub floats: &'a BTreeSet<ValueId>,
+}
+
+fn render_op(op: &Op, t: OpTables<'_>, fuser: &mut Fuser) -> String {
+    let OpTables { label_off, func_slots, param_counts, masks, reprs, floats } = t;
     // Router split out for codopsy cognitive-complexity (pure text-move, no behavior
     // change): the original single ~1100-line exhaustive match over every `Op` variant
     // is now 4 group helpers by variant family (alloc/list-literal, call/binop, the
@@ -257,6 +264,7 @@ fn render_op_alloc_lit(op: &Op, floats: &BTreeSet<ValueId>) -> String {
             let elems: &[i64] = match init {
                 Init::IntList(e) => e,
                 Init::Opaque
+                | Init::Empty
                 | Init::Str(_)
                 | Init::Bytes(_)
                 | Init::DynStr { .. }

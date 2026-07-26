@@ -242,8 +242,13 @@ fn __jp_hex_digit(b: Int) -> Int =
   else if b >= 65 and b <= 70 then b - 55
   else 0 - 1
 
+// The bound is `p > len - 4`, not `p + 4 > len`: the additive form WRAPS at a
+// near-`i64::MAX` position and admits an out-of-range read. `len` is a
+// non-negative i32-ranged length, so `len - 4` cannot overflow. A negative `p`
+// is impossible here (the scanner only advances), but the subtractive form is
+// correct for it too.
 fn __jp_hex4(base: Int, len: Int, p: Int) -> Int =
-  if p + 4 > len then 0 - 1
+  if p > len - 4 then 0 - 1
   else {
     let a = __jp_hex_digit(prim.load8(base + p))
     let b = __jp_hex_digit(prim.load8(base + p + 1))

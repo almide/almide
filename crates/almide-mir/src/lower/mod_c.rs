@@ -638,6 +638,17 @@ fn lower_function_all_impl(
     // The synthesized recursive-eq helpers ride the same rail as lifted lambdas
     // (extra cluster functions; per-parent names, so no cross-fn collision).
     all.extend(std::mem::take(&mut ctx.synth_eq_fns));
+    // MIR well-formedness (#777 F3 item 2): every read is preceded by a
+    // definition and the defines/reads split partitions op_values, checked on
+    // every function this lowering emits — main, lifted lambdas, and synth-eq
+    // helpers alike. A violation is a compiler bug surfaced as a NAMED wall
+    // (the T6 owes the user a refusal, not a crash), and the fuzz ladder
+    // classifies it loudly instead of the drift rendering as wrong bytes.
+    for f in &all {
+        if let Err(reason) = crate::mir_wellformed::check_def_before_use(f) {
+            return Err(LowerError::Unsupported(reason));
+        }
+    }
     Ok(all)
 }
 

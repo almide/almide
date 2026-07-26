@@ -49,62 +49,17 @@ impl Checker {
     /// Resolve a member call statically (module.func, alias, TypeName.method, codec).
     /// Returns Some(Ty) if resolved, None to fall through to UFCS/convention dispatch.
     pub(super) fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
-        // Detect dot-chain submodule access and emit helpful error
-        if let Some(dotted) = self.resolve_dotted_module(&object.kind) {
-            let key = format!("{}.{}", dotted, field);
-            if self.env.functions.contains_key(&sym(&key)) {
-                // Extract the last segment of the dotted path for the import suggestion
-                let last_seg = dotted.rsplit('.').next().unwrap_or(&dotted);
-                self.emit(super::err(
-                    format!("dot-chain submodule access is no longer supported"),
-                    format!("Add `import {}` and call `{}.{}()` instead", dotted, last_seg, field),
-                    format!("call to {}.{}", dotted, field),
-                ));
-                // Still resolve so codegen doesn't break
-                return Some(self.check_named_call(&key, arg_tys));
+        if let Some(ty) = self.resolve_dot_chain_submodule(object, field, arg_tys) {
+            return Some(ty);
+        }
+        if let Some(ty) = self.resolve_cross_module_convention(object, field, arg_tys) {
+            return Some(ty);
+        }
+        if let ExprKind::Ident { name, .. } = &object.kind {
+            if let Some(ty) = self.resolve_module_call_member(name.as_str(), field, arg_tys) {
+                return Some(ty);
             }
         }
-
-        // `module.Type.method(...)` — a convention/Codec method on a cross-module
-        // type, e.g. `shapes.Dot.encode(d)`. The object is `Member(Ident(mod), Type)`;
-        // the method is registered (by the Codec derive / an impl) under the bare key
-        // `Type.method`. Resolve it before UFCS infers `module` as a variable (E003).
-        if let ExprKind::Member { object: inner, field: type_name } = &object.kind {
-            if let ExprKind::Ident { name: module, .. } = &inner.kind {
-                if self.env.import_table.resolve(module).is_some() {
-                    let key = format!("{}.{}", type_name, field);
-                    if self.env.functions.contains_key(&sym(&key)) {
-                        self.env.import_table.mark_used(module);
-                        return Some(self.check_named_call(&key, arg_tys));
-                    }
-                }
-            }
-        }
-
-        let module_name = match &object.kind {
-            ExprKind::Ident { name, .. } => Some(name.as_str()),
-            _ => None,
-        };
-
-        if let Some(module) = module_name {
-            // fan.map / fan.race — compiler-known concurrency primitives
-            if module == "fan" {
-                return self.resolve_fan_call(field, arg_tys);
-            }
-
-            // Codec convenience: json.encode(t) -> String when t has T.encode
-            if field == "encode" && arg_tys.len() == 1 {
-                let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
-                if self.has_codec_encode(&arg_concrete) {
-                    return Some(Ty::String);
-                }
-            }
-
-            if let Some(result) = self.resolve_module_member(module, field, arg_tys) {
-                return Some(result);
-            }
-        }
-
         // TypeName.method() — direct convention call
         if let ExprKind::TypeName { name: type_name, .. } = &object.kind {
             let key = format!("{}.{}", type_name, field);
@@ -112,8 +67,63 @@ impl Checker {
                 return Some(self.check_named_call(&key, arg_tys));
             }
         }
-
         None
+    }
+
+    /// Dot-chain submodule access (`a.b.fn(...)`), which the module system no
+    /// longer supports.
+    ///
+    /// The call still RESOLVES after the diagnostic is emitted, so lowering and
+    /// codegen see a well-formed call and the user gets the one real error rather
+    /// than a cascade behind it.
+    fn resolve_dot_chain_submodule(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        let dotted = self.resolve_dotted_module(&object.kind)?;
+        let key = format!("{}.{}", dotted, field);
+        if !self.env.functions.contains_key(&sym(&key)) {
+            return None;
+        }
+        let last_seg = dotted.rsplit('.').next().unwrap_or(&dotted);
+        self.emit(super::err(
+            "dot-chain submodule access is no longer supported".to_string(),
+            format!("Add `import {}` and call `{}.{}()` instead", dotted, last_seg, field),
+            format!("call to {}.{}", dotted, field),
+        ));
+        Some(self.check_named_call(&key, arg_tys))
+    }
+
+    /// `module.Type.method(...)` — a convention or Codec method on a cross-module
+    /// type, e.g. `shapes.Dot.encode(d)`.
+    ///
+    /// The object parses as `Member(Ident(mod), Type)` while the method is
+    /// registered under the BARE key `Type.method` (by the Codec derive or an
+    /// impl). Resolving here, before UFCS runs, is what stops `module` being
+    /// inferred as a variable and reported as E003.
+    fn resolve_cross_module_convention(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        let ExprKind::Member { object: inner, field: type_name } = &object.kind else { return None };
+        let ExprKind::Ident { name: module, .. } = &inner.kind else { return None };
+        self.env.import_table.resolve(module)?;
+        let key = format!("{}.{}", type_name, field);
+        if !self.env.functions.contains_key(&sym(&key)) {
+            return None;
+        }
+        self.env.import_table.mark_used(module);
+        Some(self.check_named_call(&key, arg_tys))
+    }
+
+    /// `module.fn(...)` where the object is a plain module name.
+    fn resolve_module_call_member(&mut self, module: &str, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        // fan.map / fan.race — compiler-known concurrency primitives.
+        if module == "fan" {
+            return self.resolve_fan_call(field, arg_tys);
+        }
+        // Codec convenience: `json.encode(t)` is String when `t` has `T.encode`.
+        if field == "encode" && arg_tys.len() == 1 {
+            let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
+            if self.has_codec_encode(&arg_concrete) {
+                return Some(Ty::String);
+            }
+        }
+        self.resolve_module_member(module, field, arg_tys)
     }
 
     /// `fan.*` dispatch of [`Self::resolve_static_member`] — compiler-known
@@ -128,6 +138,24 @@ impl Checker {
                 "Mark the enclosing function as `effect fn`",
                 format!("call to fan.{}()", field)));
         }
+        if let Some(ty) = self.resolve_fan_mapping(field, arg_tys) { return Some(ty); }
+        if let Some(ty) = self.resolve_fan_collecting(field, arg_tys) { return Some(ty); }
+        // Every known fan fn is handled above, so reaching here means the name is
+        // not one — and `fan.*` always RESOLVES rather than falling through to
+        // UFCS, so the diagnostic is emitted and `Unknown` recovers.
+        self.emit(super::err(
+            format!("unknown function 'fan.{}'", field),
+            "Available: fan.map, fan.race, fan.any, fan.settle",
+            format!("call to fan.{}()", field)));
+        Some(Ty::Unknown)
+    }
+
+    /// `fan.map` and `fan.race` — the fan primitives that consume a mapper.
+    ///
+    /// One group of `resolve_fan_call`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group"; the router tries the groups in that
+    /// order and only then reports the unknown-fan-fn diagnostic.
+    fn resolve_fan_mapping(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         match field {
             "map" => {
                 // fan.map(xs, f) -> Result[List[B], String] where xs: List[A],
@@ -209,6 +237,17 @@ impl Checker {
                 let list_ty = resolve_ty(&arg_tys[0], &self.uf);
                 Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String))
             }
+            _ => return None,
+        }
+    }
+
+    /// `fan.any`, `fan.settle`, and the removed `fan.timeout` tombstone.
+    ///
+    /// One group of `resolve_fan_call`'s arm table, arms verbatim and in source
+    /// order. `None` means "not my group"; the router tries the groups in that
+    /// order and only then reports the unknown-fan-fn diagnostic.
+    fn resolve_fan_collecting(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        match field {
             "any" => {
                 // fan.any(thunks) -> Result[T, String] — try thunks in LIST
                 // ORDER, return the FIRST Ok (deterministic); if ALL fail,
@@ -254,13 +293,7 @@ impl Checker {
                     "call to fan.timeout()".to_string()).with_code("E027"));
                 Some(Ty::Unknown)
             }
-            _ => {
-                self.emit(super::err(
-                    format!("unknown function 'fan.{}'", field),
-                    "Available: fan.map, fan.race, fan.any, fan.settle",
-                    format!("call to fan.{}()", field)));
-                Some(Ty::Unknown)
-            }
+            _ => return None,
         }
     }
 
@@ -281,22 +314,7 @@ impl Checker {
             if self.env.types.contains_key(&sym(&qualified)) {
                 self.check_constructor_args(field, &case, arg_tys);
                 let generic_args = self.instantiate_type_generics(type_name.as_str());
-                if !generic_args.is_empty() {
-                    if let Some(ty_def) = self.env.types.get(&type_name).cloned() {
-                        let mut type_var_names = Vec::new();
-                        crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
-                        let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = type_var_names.iter()
-                            .zip(generic_args.iter())
-                            .map(|(tv, fresh)| (*tv, fresh.clone()))
-                            .collect();
-                        if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
-                            for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
-                                let substituted = super::calls::subst_ty(ety, &subst);
-                                self.unify_infer(aty, &substituted);
-                            }
-                        }
-                    }
-                }
+                self.unify_ctor_payload_generics(type_name, &case, arg_tys, &generic_args);
                 // #433: the binding/result takes the qualified `mod.Type`
                 // (just confirmed to exist) so it mangles to the namespaced
                 // enum, not the ambiguous bare name.
@@ -356,4 +374,37 @@ impl Checker {
             _ => false,
         }
     }
+
+    /// Unify a generic variant constructor's arguments against its payload types
+    /// with the call's fresh type variables substituted in.
+    ///
+    /// The payload types are written in terms of the declaration's own type vars
+    /// (`Box[T]`'s `T`), while the call site has fresh ones; unifying without the
+    /// substitution would bind the arguments to the declaration's vars and leak
+    /// them across call sites. A non-generic constructor has nothing to
+    /// substitute, and a record or unit payload has no positional arguments.
+    fn unify_ctor_payload_generics(
+        &mut self,
+        type_name: almide_base::intern::Sym,
+        case: &crate::types::VariantCase,
+        arg_tys: &[Ty],
+        generic_args: &[Ty],
+    ) {
+        if generic_args.is_empty() {
+            return;
+        }
+        let Some(ty_def) = self.env.types.get(&type_name).cloned() else { return };
+        let crate::types::VariantPayload::Tuple(expected) = &case.payload else { return };
+        let mut type_var_names = Vec::new();
+        crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
+        let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = type_var_names.iter()
+            .zip(generic_args.iter())
+            .map(|(tv, fresh)| (*tv, fresh.clone()))
+            .collect();
+        for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
+            let substituted = super::calls::subst_ty(ety, &subst);
+            self.unify_infer(aty, &substituted);
+        }
+    }
+
 }

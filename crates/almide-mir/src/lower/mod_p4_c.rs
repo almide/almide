@@ -240,6 +240,21 @@ fn heap_fold_call_name_ols(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> Opti
     if module == "list" && is_ols_acc && src_is_list_str {
         return Some("list.fold_ols".to_string());
     }
+    // Any OTHER heap accumulator over String elements takes the type-ERASED
+    // sibling: the loop moves the accumulator handle into `f` and takes the
+    // result back without inspecting it, so one variant serves every heap acc.
+    // `Set[String]` shares it — a Set[String] IS a DynListStr block of unique,
+    // insertion-ordered Strings, the same layout `List[String]` has.
+    let src_is_set_str = matches!(arg_tys.first(),
+        Some(Ty::Applied(TypeConstructorId::Set, e)) if e.len() == 1 && matches!(e[0], Ty::String));
+    if is_heap_ty(result_ty) {
+        if module == "list" && src_is_list_str {
+            return Some("list.fold_str_hacc".to_string());
+        }
+        if module == "set" && src_is_set_str {
+            return Some("set.fold_str_hacc".to_string());
+        }
+    }
     None
 }
 
@@ -284,12 +299,26 @@ fn heap_fold_call_name_msi(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> Opti
 /// a String acc. Verbatim.
 fn heap_fold_call_name_map_str_acc(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
-    if !(module == "map" && matches!(result_ty, Ty::String)) {
+    // ANY heap accumulator, not just String: a heap accumulator is one i32
+    // handle whatever block it points at, and the walk below never inspects it —
+    // it only moves it into `f` and takes the result back. Restricting this to
+    // `Ty::String` walled the `map.fold(m, [], (acc, k, v) => acc + [k])`
+    // keys-collect shape for no reason the layout requires.
+    if !(module == "map" && is_heap_ty(result_ty)) {
         return None;
     }
     if let Some(Ty::Applied(TypeConstructorId::Map, s)) = arg_tys.first() {
-        if s.len() == 2 && matches!(s[0], Ty::String) && matches!(s[1], Ty::String) {
-            return Some("map.fold_str_sacc".to_string());
+        if s.len() == 2 && matches!(s[0], Ty::String) {
+            // The two String-keyed subject layouts need different walks: the
+            // all-String map interleaves 16-byte pairs, the skv map splits keys
+            // and values into two runs of 8-byte slots. A heap accumulator is
+            // one i32 handle either way, so each layout needs exactly one
+            // variant regardless of what the accumulator holds.
+            return match s[1] {
+                Ty::String => Some("map.fold_str_sacc".to_string()),
+                _ if !is_heap_ty(&s[1]) => Some("map.fold_skv_hacc".to_string()),
+                _ => None,
+            };
         }
     }
     None

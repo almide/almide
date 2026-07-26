@@ -67,7 +67,14 @@ pub fn almide_rt_list_count<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool
 pub fn almide_rt_list_enumerate<T: Clone>(xs: Vec<T>) -> Vec<(i64, T)> { xs.into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect() }
 pub fn almide_rt_list_zip<T: Clone, U: Clone>(a: Vec<T>, b: Vec<U>) -> Vec<(T, U)> { a.into_iter().zip(b.into_iter()).collect() }
 pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: std::rc::Rc<dyn Fn(A, B) -> C>) -> Vec<C> { let f = move |a, b| f(a, b); a.into_iter().zip(b.into_iter()).map(|(x, y)| f(x, y)).collect() }
-pub fn almide_rt_list_flatten<T: Clone>(xs: Vec<Vec<T>>) -> Vec<T> { xs.into_iter().flatten().collect() }
+// Takes a SLICE, not an owned `Vec`. The element type is already `Clone`, so
+// consuming the outer list bought nothing — and it made `flatten` unusable
+// alongside a borrow of the same binding in one expression:
+// `list.get_or(xs, 0, list.flatten(xs))` moved `xs` into `flatten` while
+// `get_or` borrowed it, so `check` accepted and rustc rejected with E0505
+// (differential fuzz). A slice parameter takes a borrow like every other
+// read-only list fn, and an owned `Vec` still deref-coerces into it.
+pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
 pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().flat_map(f).collect() }
 pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
@@ -93,7 +100,26 @@ pub fn almide_rt_list_update<A: Clone>(mut xs: Vec<A>, i: i64, f: std::rc::Rc<dy
 pub fn almide_rt_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> { let mut r = Vec::new(); for (i, x) in xs.into_iter().enumerate() { if i > 0 { r.push(sep.clone()); } r.push(x); } r }
 // Negative counts clamp to 0 (C-054 discipline — the wasm self-host
 // `list_repeat` already clamps; `n as usize` on a negative i64 panicked).
-pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> { vec![x; n.max(0) as usize] }
+//
+// A result over the shared 2^31-BYTE ceiling aborts in the T6 form on BOTH
+// targets, the same rule `string.repeat` follows (C-161). Without it the two
+// legs failed in different ways for a count native can satisfy but wasm cannot:
+// `list.repeat(0.0, i32::MAX)` allocated 16 GiB natively and printed a length,
+// while the wasm leg — capped at a 4 GiB address space — trapped out-of-bounds
+// (differential fuzz). A machine-dependent success on one leg is not an
+// observable the equivalence claim can carry.
+//
+// The ceiling counts SLOTS at the wasm element width (8 bytes), not
+// `size_of::<T>()`, so the limit is the same number on both legs whatever the
+// native element happens to be.
+pub const ALMIDE_LIST_REPEAT_MAX_ELEMS: i64 = (1 << 31) / 8;
+pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
+    if n > ALMIDE_LIST_REPEAT_MAX_ELEMS {
+        eprintln!("Error: repeat result too large");
+        std::process::exit(1);
+    }
+    vec![x; n.max(0) as usize]
+}
 pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> { (start..end).collect() }
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }

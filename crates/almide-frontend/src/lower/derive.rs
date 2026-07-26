@@ -29,50 +29,93 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
         for conv in derives {
             let fn_name = format!("{}.{}", td.name, conv.to_lowercase());
             if fn_names.contains(fn_name.as_str()) { continue; }
-
-            match &**conv {
-                "Repr" => {
-                    if let Some(ref fields) = fields {
-                        auto.push(auto_derive_repr(&mut ctx.var_table, &td.name, &type_ty, fields));
-                    }
-                }
-                "Eq" => {
-                    if let Some(ref fields) = fields {
-                        auto.push(auto_derive_eq(&mut ctx.var_table, &td.name, &type_ty, fields));
-                    } else if matches!(&td.kind, IrTypeDeclKind::Variant { .. }) {
-                        auto.push(auto_derive_variant_eq(&mut ctx.var_table, &td.name, &type_ty));
-                    }
-                }
-                "Codec" => {
-                    let encode_name = format!("{}.encode", td.name);
-                    let decode_name = format!("{}.decode", td.name);
-                    if let Some(ref fields) = fields {
-                        if !fn_names.contains(encode_name.as_str()) {
-                            auto.push(auto_derive_encode(&mut ctx.var_table, &td.name, &type_ty, fields));
-                        }
-                        if !fn_names.contains(decode_name.as_str()) {
-                            auto.push(auto_derive_decode(&mut ctx.var_table, &td.name, &type_ty, fields));
-                        }
-                    } else if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                        if !fn_names.contains(encode_name.as_str()) {
-                            auto.push(auto_derive_variant_encode(&mut ctx.var_table, &td.name, &type_ty, cases));
-                        }
-                        if !fn_names.contains(decode_name.as_str()) {
-                            auto.push(auto_derive_variant_decode(&mut ctx.var_table, &td.name, &type_ty, cases));
-                        }
-                    }
-                    // The four container helpers (`__{en,de}code_{list,option}_T`, #790
-                    // piece 1) every Codec type provides — real bodies the v1 leg links;
-                    // on v0 the BuiltinLowering call-rewrite keeps them unused (DCE'd).
-                    if !fn_names.contains(format!("__encode_list_{}", td.name).as_str()) {
-                        auto.extend(derive_container_helpers(&mut ctx.var_table, &td.name, &type_ty));
-                    }
-                }
-                _ => {} // Ord, Hash — Rust #[derive] handles these for now
-            }
+            auto.extend(derive_one(ctx, td, &type_ty, fields.as_deref(), conv, &fn_names));
         }
     }
     auto
+}
+
+/// Generate the IR functions one `deriving` entry asks for.
+///
+/// `fields` is `Some` only for a record declaration; a variant reaches the
+/// variant-shaped derive instead, and a type that is neither derives nothing.
+/// An unknown convention name derives nothing rather than erroring: `Ord` and
+/// `Hash` are real conventions that Rust's own `#[derive]` still covers, so the
+/// empty result is the correct answer, not a gap.
+fn derive_one(
+    ctx: &mut LowerCtx,
+    td: &IrTypeDecl,
+    type_ty: &Ty,
+    fields: Option<&[IrFieldDecl]>,
+    conv: &str,
+    fn_names: &std::collections::HashSet<&str>,
+) -> Vec<IrFunction> {
+    match conv {
+        "Repr" => fields
+            .map(|f| vec![auto_derive_repr(&mut ctx.var_table, &td.name, type_ty, f)])
+            .unwrap_or_default(),
+        "Eq" => derive_eq(ctx, td, type_ty, fields),
+        "Codec" => derive_codec(ctx, td, type_ty, fields, fn_names),
+        _ => Vec::new(),
+    }
+}
+
+/// Structural equality: field-by-field for a record, tag-and-payload for a
+/// variant.
+fn derive_eq(
+    ctx: &mut LowerCtx,
+    td: &IrTypeDecl,
+    type_ty: &Ty,
+    fields: Option<&[IrFieldDecl]>,
+) -> Vec<IrFunction> {
+    if let Some(fields) = fields {
+        return vec![auto_derive_eq(&mut ctx.var_table, &td.name, type_ty, fields)];
+    }
+    if matches!(&td.kind, IrTypeDeclKind::Variant { .. }) {
+        return vec![auto_derive_variant_eq(&mut ctx.var_table, &td.name, type_ty)];
+    }
+    Vec::new()
+}
+
+/// `encode` / `decode`, plus the container helpers every Codec type provides.
+///
+/// `encode` and `decode` are checked for individually rather than as a pair: a
+/// type may hand-write one and derive the other.
+fn derive_codec(
+    ctx: &mut LowerCtx,
+    td: &IrTypeDecl,
+    type_ty: &Ty,
+    fields: Option<&[IrFieldDecl]>,
+    fn_names: &std::collections::HashSet<&str>,
+) -> Vec<IrFunction> {
+    let mut out = Vec::new();
+    let wants = |suffix: &str| !fn_names.contains(format!("{}.{}", td.name, suffix).as_str());
+    match (fields, &td.kind) {
+        (Some(fields), _) => {
+            if wants("encode") {
+                out.push(auto_derive_encode(&mut ctx.var_table, &td.name, type_ty, fields));
+            }
+            if wants("decode") {
+                out.push(auto_derive_decode(&mut ctx.var_table, &td.name, type_ty, fields));
+            }
+        }
+        (None, IrTypeDeclKind::Variant { cases, .. }) => {
+            if wants("encode") {
+                out.push(auto_derive_variant_encode(&mut ctx.var_table, &td.name, type_ty, cases));
+            }
+            if wants("decode") {
+                out.push(auto_derive_variant_decode(&mut ctx.var_table, &td.name, type_ty, cases));
+            }
+        }
+        (None, _) => {}
+    }
+    // The four container helpers (`__{en,de}code_{list,option}_T`, #790 piece 1)
+    // every Codec type provides — real bodies the v1 leg links; on v0 the
+    // BuiltinLowering call-rewrite keeps them unused (DCE'd).
+    if !fn_names.contains(format!("__encode_list_{}", td.name).as_str()) {
+        out.extend(derive_container_helpers(&mut ctx.var_table, &td.name, type_ty));
+    }
+    out
 }
 
 /// Auto-derive Repr: `fn Dog.repr(d: Dog) -> String = "Dog { name: ..., breed: ... }"`

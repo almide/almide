@@ -6,6 +6,9 @@ pub mod import_table;
 pub mod stdlib;
 mod bundled_sigs;
 
+/// The one implementation of integer-literal decoding.
+mod literals;
+
 /// TypeEnv — the mutable type-checking environment.
 mod type_env;
 

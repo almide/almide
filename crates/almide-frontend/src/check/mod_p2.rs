@@ -123,71 +123,7 @@ impl Checker {
         let resolved = self.env.resolve_named(ty);
         match &resolved {
             Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().find(|(n, _)| n == field).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown),
-            Ty::TypeVar(tv) => {
-                // First check existing structural bounds
-                if let Some(bound) = self.env.structural_bounds.get(tv).cloned() {
-                    let result = self.resolve_field_type(&bound, field);
-                    if !matches!(result, Ty::Unknown) {
-                        return result;
-                    }
-                }
-                // Search env.types for record types with this field.
-                // Only unify if exactly one candidate exists (unambiguous).
-                let field_sym = almide_base::intern::sym(field);
-                let mut candidates: Vec<(almide_base::intern::Sym, Ty)> = Vec::new();
-                for (_name, reg_ty) in &self.env.types {
-                    match reg_ty {
-                        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                            if let Some((_, fty)) = fields.iter().find(|(n, _)| *n == field_sym) {
-                                candidates.push((*_name, fty.clone()));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                // Deduplicate: prefixed (`mod.Todo`) and unprefixed (`Todo`)
-                // aliases resolve to the same record definition; keep one.
-                // Sort first so dedup_by can catch non-adjacent duplicates.
-                candidates.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-                candidates.dedup_by(|a, b| {
-                    self.env.types.get(&a.0) == self.env.types.get(&b.0)
-                });
-                if candidates.len() == 1 {
-                    let (type_name, field_ty) = candidates.pop().unwrap();
-                    let named = Ty::Named(type_name, vec![]);
-                    self.unify_infer(ty, &named);
-                    field_ty
-                } else if !candidates.is_empty() && candidates.iter().all(|(_, t)| *t == candidates[0].1) {
-                    // Multiple types share the same field name+type: safe to return
-                    // the type but don't unify the object (ambiguous which type it is).
-                    // Deferred field access will resolve once the parent chain is concrete.
-                    let field_ty = candidates[0].1.clone();
-                    let result = self.fresh_var();
-                    self.deferred_field_accesses.push((
-                        ty.clone(),
-                        almide_base::intern::sym(field),
-                        result.clone(),
-                        self.current_span,
-                    ));
-                    self.unify_infer(&result, &field_ty);
-                    field_ty
-                } else {
-                    // Ambiguous candidates (e.g. Cubic.a: Vec2, Color.a: Float).
-                    // If this is an inference var, defer — once the type resolves
-                    // the field lookup will succeed unambiguously.
-                    if tv.as_str().starts_with('?') {
-                        let result = self.fresh_var();
-                        self.deferred_field_accesses.push((
-                            ty.clone(),
-                            almide_base::intern::sym(field),
-                            result.clone(),
-                            self.current_span,
-                        ));
-                        return result;
-                    }
-                    Ty::Unknown
-                }
-            }
+            Ty::TypeVar(tv) => self.resolve_field_on_typevar(ty, tv, field),
             _ => {
                 // The type might be an inference variable that hasn't been
                 // resolved yet (e.g. lambda param `t` whose type `?x` will
@@ -206,6 +142,87 @@ impl Checker {
                 }
                 Ty::Unknown
             },
+        }
+    }
+
+    /// Resolve `field` on a type that is still a type VARIABLE.
+    ///
+    /// Four outcomes, in order: an existing structural bound answers directly;
+    /// exactly one registered record has the field, so the variable can be
+    /// unified with it; several records share the field AND its type, so the type
+    /// is known but the object is not, and the access is deferred; or the
+    /// candidates genuinely disagree (`Cubic.a: Vec2` vs `Color.a: Float`), where
+    /// an inference var defers and anything else recovers as `Unknown`.
+    fn resolve_field_on_typevar(
+        &mut self,
+        ty: &Ty,
+        tv: &almide_base::intern::Sym,
+        field: &str,
+    ) -> Ty {
+        // First check existing structural bounds
+        if let Some(bound) = self.env.structural_bounds.get(tv).cloned() {
+            let result = self.resolve_field_type(&bound, field);
+            if !matches!(result, Ty::Unknown) {
+                return result;
+            }
+        }
+        // Search env.types for record types with this field.
+        // Only unify if exactly one candidate exists (unambiguous).
+        let field_sym = almide_base::intern::sym(field);
+        let mut candidates: Vec<(almide_base::intern::Sym, Ty)> = Vec::new();
+        for (_name, reg_ty) in &self.env.types {
+            match reg_ty {
+                Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                    if let Some((_, fty)) = fields.iter().find(|(n, _)| *n == field_sym) {
+                        candidates.push((*_name, fty.clone()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Deduplicate: prefixed (`mod.Todo`) and unprefixed (`Todo`)
+        // aliases resolve to the same record definition; keep one.
+        // Sort first so dedup_by can catch non-adjacent duplicates.
+        candidates.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        candidates.dedup_by(|a, b| {
+            self.env.types.get(&a.0) == self.env.types.get(&b.0)
+        });
+        // A slice pattern carries the "exactly one candidate" check and
+        // the binding together, so the two cannot drift apart.
+        if let [(type_name, field_ty)] = candidates.as_slice() {
+            let (type_name, field_ty) = (*type_name, field_ty.clone());
+            let named = Ty::Named(type_name, vec![]);
+            self.unify_infer(ty, &named);
+            field_ty
+        } else if !candidates.is_empty() && candidates.iter().all(|(_, t)| *t == candidates[0].1) {
+            // Multiple types share the same field name+type: safe to return
+            // the type but don't unify the object (ambiguous which type it is).
+            // Deferred field access will resolve once the parent chain is concrete.
+            let field_ty = candidates[0].1.clone();
+            let result = self.fresh_var();
+            self.deferred_field_accesses.push((
+                ty.clone(),
+                almide_base::intern::sym(field),
+                result.clone(),
+                self.current_span,
+            ));
+            self.unify_infer(&result, &field_ty);
+            field_ty
+        } else {
+            // Ambiguous candidates (e.g. Cubic.a: Vec2, Color.a: Float).
+            // If this is an inference var, defer — once the type resolves
+            // the field lookup will succeed unambiguously.
+            if tv.as_str().starts_with('?') {
+                let result = self.fresh_var();
+                self.deferred_field_accesses.push((
+                    ty.clone(),
+                    almide_base::intern::sym(field),
+                    result.clone(),
+                    self.current_span,
+                ));
+                return result;
+            }
+            Ty::Unknown
         }
     }
 }
@@ -401,15 +418,45 @@ impl Checker {
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => eff,
                 _ => Ty::Int, // fall back to the default Int context
             };
-            if int_literal_fits_type(&site.raw, &eff, site.negated) { continue; }
-            let mut diag = err(
-                format!("integer literal '{}' is out of range for {}", site.raw, eff.display()),
-                format!(
-                    "{} would silently fold to 0 here; use a literal within the type's range, \
-                     or model larger magnitudes as Float (lossy) or a parsed string",
+            let hint = match classify_int_literal(&site.raw, &eff, site.negated) {
+                LiteralFit::Fits => continue,
+                // Not a magnitude overflow: no negative value is representable
+                // at all, so "use a smaller literal" is the wrong advice.
+                LiteralFit::Sign => format!(
+                    "{} is unsigned — it has no negative values at all; drop the '-', \
+                     or use the signed {} if the value can go below zero",
+                    eff.display(),
+                    signed_counterpart(&eff).unwrap_or("Int"),
+                ),
+                // In range for the DECLARED domain, out of range for the
+                // compiler. "Use a wider type" is the wrong advice here because
+                // there is no wider type — say so instead of implying one.
+                LiteralFit::Carrier => format!(
+                    "this magnitude is inside {}'s declared range but above the i64 the \
+                     compiler carries every integer in, so it would be signed past \
+                     9223372036854775807 on both targets (#872); keep it at or below \
+                     9223372036854775807, or carry it as a string / Float (lossy)",
                     eff.display(),
                 ),
-                format!("integer literal {}", site.raw),
+                // State the range rather than referring to it. Rust puts it in
+                // a note on the same error, and it is the difference between a
+                // hint that can be acted on and one that sends the reader to go
+                // look up a constant.
+                LiteralFit::Magnitude => format!(
+                    "{} would silently fold to 0 here; its range is {}, so use a literal \
+                     within it, or model larger magnitudes as Float (lossy) or a parsed string",
+                    eff.display(),
+                    int_type_range(&eff).unwrap_or_else(|| "the type's".to_string()),
+                ),
+            };
+            // Show the literal as WRITTEN — a bare `-` is part of what is out of
+            // range, and "literal '5' is out of range for UInt64" reads as a
+            // compiler bug when the source says `-5`.
+            let shown = if site.negated { format!("-{}", site.raw) } else { site.raw.clone() };
+            let mut diag = err(
+                format!("integer literal '{}' is out of range for {}", shown, eff.display()),
+                hint,
+                format!("integer literal {}", shown),
             ).with_code("E024");
             if let Some(s) = site.span {
                 diag.file = self.source_file.clone();
@@ -426,35 +473,7 @@ impl Checker {
         for site in checks {
             let resolved = resolve_ty(&site.ty, &self.uf);
             if !Self::has_unconstrained_element(&resolved) { continue; }
-            // `what` names the construct; `fix` is a CONCRETE, parseable
-            // annotation that resolves it. The let-binding form is the primary
-            // fix (it always works); the inline `[]: List[Int]` call-arg form is
-            // offered only for the bare list literal, where it is verified to
-            // parse and infer.
-            let (what, fix) = match site.kind {
-                EmptyCollectionKind::ListLiteral => (
-                    "empty list `[]`",
-                    "bind it with an explicit element type, e.g. `let xs: List[Int] = []`, \
-                     or annotate the literal inline: `list.len([]: List[Int])`",
-                ),
-                EmptyCollectionKind::MapLiteral => (
-                    "empty map `[:]`",
-                    "bind it with explicit key/value types, e.g. `let m: Map[String, Int] = [:]`",
-                ),
-                EmptyCollectionKind::SetNew => (
-                    "`set.new()`",
-                    "bind it with an explicit element type, e.g. `let s: Set[Int] = set.new()`",
-                ),
-                EmptyCollectionKind::ListWithCapacity => (
-                    "`list.with_capacity(n)`",
-                    "bind it with an explicit element type, e.g. `let xs: List[Int] = list.with_capacity(n)`",
-                ),
-                EmptyCollectionKind::ForInEmpty => (
-                    "the empty list iterated by `for`",
-                    "bind the list to an explicitly-typed variable first, e.g. \
-                     `let xs: List[Int] = []` then `for _ in xs { ... }`",
-                ),
-            };
+            let EmptyCollectionAdvice { what, fix, try_fix } = empty_collection_advice(site.kind);
             let hint = format!(
                 "{}'s element type cannot be inferred here. An empty collection \
                  carries no element to infer from — {}. (Almide follows Rust/Swift: \
@@ -462,13 +481,6 @@ impl Checker {
                  never read; it is never silently defaulted.)",
                 what, fix,
             );
-            let try_fix = match site.kind {
-                EmptyCollectionKind::ListLiteral => "let xs: List[Int] = []",
-                EmptyCollectionKind::MapLiteral => "let m: Map[String, Int] = [:]",
-                EmptyCollectionKind::SetNew => "let s: Set[Int] = set.new()",
-                EmptyCollectionKind::ListWithCapacity => "let xs: List[Int] = list.with_capacity(n)",
-                EmptyCollectionKind::ForInEmpty => "let xs: List[Int] = []\nfor _ in xs { ... }",
-            };
             let mut diag = err(
                 format!("cannot infer the element type of {}", what),
                 hint,
@@ -520,10 +532,21 @@ impl Checker {
             if !undecidable { continue; }
             let key = (site.span.map(|s| s.line as u32), site.span.map(|s| s.col as u32));
             if !reported.insert(key) { continue; }
-            let what = match &site.name {
-                Some(n) => format!("binding '{}'", n),
-                None => "this expression".to_string(),
-            };
+            self.emit_unresolved_binding_diagnostic(&site, &resolved);
+        }
+    }
+
+    /// Emit the E025 for a binding whose type keeps an undecidable slot.
+    ///
+    /// The wording splits on whether the site has a NAME: a named binding can be
+    /// annotated in place and gets a `try` line naming it, while a bare
+    /// expression has to be bound first before there is anywhere to put the
+    /// annotation.
+    fn emit_unresolved_binding_diagnostic(&mut self, site: &UnresolvedBindingSite, resolved: &Ty) {
+        let what = match &site.name {
+            Some(n) => format!("binding '{}'", n),
+            None => "this expression".to_string(),
+        };
             let fix = match &site.name {
                 Some(n) => format!(
                     "Annotate the binding with the full type, e.g. `let {}: Result[Int, String] = ...`. \
@@ -552,7 +575,6 @@ impl Checker {
                 if s.end_col > s.col { diag.end_col = Some(s.end_col); }
             }
             self.diagnostics.push(diag);
-        }
     }
 
     /// True when `ty` (already resolved against the union-find) is a collection
@@ -678,3 +700,52 @@ fn ty_reimpl_eq(stdlib_ty: &Ty, user_ty: &Ty) -> bool {
         _ => stdlib_ty == user_ty,
     }
 }
+
+/// What the E018 diagnostic says about one kind of empty collection.
+///
+/// `what` names the construct, `fix` is prose describing the annotation that
+/// resolves it, and `try_fix` is a concrete parseable line the user can paste.
+/// The three used to be two separate `match`es over the same enum, so a new kind
+/// could get a `fix` and no `try_fix`; one table makes that impossible.
+struct EmptyCollectionAdvice {
+    what: &'static str,
+    fix: &'static str,
+    try_fix: &'static str,
+}
+
+/// The let-binding form is the primary fix because it always works. The inline
+/// `[]: List[Int]` call-argument form is offered only for the bare list literal,
+/// where it is verified to parse and infer.
+fn empty_collection_advice(kind: EmptyCollectionKind) -> EmptyCollectionAdvice {
+    let (what, fix, try_fix) = match kind {
+        EmptyCollectionKind::ListLiteral => (
+            "empty list `[]`",
+            "bind it with an explicit element type, e.g. `let xs: List[Int] = []`, \
+             or annotate the literal inline: `list.len([]: List[Int])`",
+            "let xs: List[Int] = []",
+        ),
+        EmptyCollectionKind::MapLiteral => (
+            "empty map `[:]`",
+            "bind it with explicit key/value types, e.g. `let m: Map[String, Int] = [:]`",
+            "let m: Map[String, Int] = [:]",
+        ),
+        EmptyCollectionKind::SetNew => (
+            "`set.new()`",
+            "bind it with an explicit element type, e.g. `let s: Set[Int] = set.new()`",
+            "let s: Set[Int] = set.new()",
+        ),
+        EmptyCollectionKind::ListWithCapacity => (
+            "`list.with_capacity(n)`",
+            "bind it with an explicit element type, e.g. `let xs: List[Int] = list.with_capacity(n)`",
+            "let xs: List[Int] = list.with_capacity(n)",
+        ),
+        EmptyCollectionKind::ForInEmpty => (
+            "the empty list iterated by `for`",
+            "bind the list to an explicitly-typed variable first, e.g. \
+             `let xs: List[Int] = []` then `for _ in xs { ... }`",
+            "let xs: List[Int] = []\nfor _ in xs { ... }",
+        ),
+    };
+    EmptyCollectionAdvice { what, fix, try_fix }
+}
+

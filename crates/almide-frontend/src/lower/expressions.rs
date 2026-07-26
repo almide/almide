@@ -14,29 +14,52 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     let ty = ctx.expr_ty(expr);
     let span = expr.span;
 
-    match &expr.kind {
+    if let Some(e) = lower_expr_literal(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_collection(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_operator(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_control(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_call(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_lambda(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_access(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_variant(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_misc(ctx, expr, ty.clone(), span) { return e; }
+    unreachable!("lower_expr: no lowering for {:?}", std::mem::discriminant(&expr.kind))
+}
+
+/// Literals and variable references.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_literal(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Literals ──
         ast::ExprKind::Int { raw, .. } => {
-            let value = if raw.starts_with("0x") || raw.starts_with("0X") {
-                i64::from_str_radix(&raw[2..].replace('_', ""), 16).unwrap_or(0)
-            } else if raw.starts_with("0b") || raw.starts_with("0B") {
-                i64::from_str_radix(&raw[2..].replace('_', ""), 2).unwrap_or(0)
-            } else if raw.starts_with("0o") || raw.starts_with("0O") {
-                i64::from_str_radix(&raw[2..].replace('_', ""), 8).unwrap_or(0)
-            } else {
-                raw.replace('_', "").parse::<i64>().unwrap_or(0)
-            };
+            let value = crate::literals::int_value(raw);
             ctx.mk(IrExprKind::LitInt { value }, ty, span)
         }
         ast::ExprKind::Float { value, .. } => ctx.mk(IrExprKind::LitFloat { value: *value }, ty, span),
         ast::ExprKind::String { value, .. } => ctx.mk(IrExprKind::LitStr { value: value.clone() }, ty, span),
         ast::ExprKind::Bool { value, .. } => ctx.mk(IrExprKind::LitBool { value: *value }, ty, span),
         ast::ExprKind::Unit => ctx.mk(IrExprKind::Unit, Ty::Unit, span),
-
         // ── Variables ──
         ast::ExprKind::Ident { name, .. } => lower_expr_ident(ctx, expr, ty, span),
         ast::ExprKind::TypeName { name, .. } => lower_expr_type_name(ctx, expr, ty, span),
+        _ => return None,
+    })
+}
 
+/// Collection and record construction.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_collection(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Collections ──
         ast::ExprKind::List { elements, .. } => {
             let elems = elements.iter().map(|e| lower_expr(ctx, e)).collect();
@@ -63,7 +86,6 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             } else { ty };
             ctx.mk(IrExprKind::Tuple { elements: elems }, resolved_ty, span)
         }
-
         // ── Records ──
         ast::ExprKind::Record { name, fields, .. } => lower_expr_record(ctx, expr, ty, span),
         ast::ExprKind::SpreadRecord { base, fields, .. } => {
@@ -71,11 +93,35 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
             ctx.mk(IrExprKind::SpreadRecord { base: Box::new(ir_base), fields: fs }, ty, span)
         }
+        _ => return None,
+    })
+}
 
+/// Operators.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_operator(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Operators ──
         ast::ExprKind::Binary { op, left, right, .. } => lower_expr_binary(ctx, expr, ty, span),
         ast::ExprKind::Unary { op, operand, .. } => lower_expr_unary(ctx, expr, ty, span),
+        _ => return None,
+    })
+}
 
+/// Control flow and loops.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Control flow ──
         ast::ExprKind::If { cond, then, else_, .. } => {
             let c = lower_expr(ctx, cond);
@@ -96,7 +142,6 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let ir_exprs: Vec<IrExpr> = exprs.iter().map(|e| lower_expr(ctx, e)).collect();
             ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
         }
-
         // ── Loops ──
         ast::ExprKind::ForIn { var, var_tuple, iterable, body, .. } => lower_expr_for_in(ctx, expr, ty, span),
         ast::ExprKind::While { cond, body, .. } => {
@@ -113,20 +158,44 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let e = lower_expr(ctx, end);
             ctx.mk(IrExprKind::Range { start: Box::new(s), end: Box::new(e), inclusive: *inclusive }, ty, span)
         }
+        _ => return None,
+    })
+}
 
+/// Calls, and the pipe/compose desugars.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_call(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Calls ──
         ast::ExprKind::Call { callee, args, named_args, type_args, .. } => {
-            lower_call(ctx, callee, args, named_args, type_args.as_ref(), ty, span)
+            lower_call(ctx, callee, super::calls::CallArgs {
+                args, named_args, type_args: type_args.as_ref(),
+            }, ty, span)
         }
-
         // ── Pipe: desugar `a |> f(b)` → `f(a, b)` ──
         ast::ExprKind::Pipe { left, right, .. } => {
             lower_pipe(ctx, left, right, ty, span)
         }
-
         // ── Compose: desugar `f >> g` → `(x) => g(f(x))` ──
         ast::ExprKind::Compose { .. } => lower_expr_compose(ctx, expr, ty, span),
+        _ => return None,
+    })
+}
 
+/// Lambdas.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Lambda ──
         ast::ExprKind::Lambda { params, body, .. } => {
             ctx.push_scope();
@@ -147,7 +216,19 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let lambda_id = Some(ctx.next_lambda_id());
             ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body), lambda_id }, ty, span)
         }
+        _ => return None,
+    })
+}
 
+/// Member/index access and string interpolation.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_access(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Access ──
         ast::ExprKind::Member { .. } => lower_expr_member(ctx, expr, ty, span),
         ast::ExprKind::TupleIndex { object, index, .. } => {
@@ -155,10 +236,21 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.mk(IrExprKind::TupleIndex { object: Box::new(obj), index: *index }, ty, span)
         }
         ast::ExprKind::IndexAccess { .. } => lower_expr_index_access(ctx, expr, ty, span),
-
         // ── String interpolation ──
         ast::ExprKind::InterpolatedString { .. } => lower_expr_interp_string(ctx, expr, ty, span),
+        _ => return None,
+    })
+}
 
+/// `Result`/`Option` construction and the unwrap family.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Result / Option ──
         ast::ExprKind::Some { expr, .. } => {
             let inner = lower_expr(ctx, expr);
@@ -204,7 +296,19 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let inner = lower_expr(ctx, inner_expr);
             ctx.mk(IrExprKind::OptionalChain { expr: Box::new(inner), field: *field }, ty, span)
         }
+        _ => return None,
+    })
+}
 
+/// Everything else, including the forms that lower to a diagnostic.
+///
+/// Extracted from `lower_expr` (name-router split): `None` means "not my group".
+/// The groups are the comment sections the function already carried. Lowering
+/// reads types from the checker's `TypeMap` and never re-infers, so a split here
+/// cannot change inference — but a DROPPED arm would silently lower an expression
+/// to nothing, which is why the router aborts loudly instead of falling through.
+fn lower_expr_misc(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    Some(match &expr.kind {
         // ── Misc ──
         ast::ExprKind::Paren { expr, .. } => lower_expr(ctx, expr),
         ast::ExprKind::TypeAscription { expr, ty: ascribed_te } => {
@@ -232,7 +336,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::ExprKind::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
         ast::ExprKind::Error => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
         ast::ExprKind::Placeholder => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
-    }
+        _ => return None,
+    })
 }
 
 /// Lower a block body (stmts + optional tail), desugaring `guard let`. A `guard let

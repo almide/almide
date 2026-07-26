@@ -31,7 +31,9 @@
 #   (f) a coverage gap (C-001..C-NNN must be contiguous) or the flagged-contract
 #       ratchet ceiling is exceeded;
 #   (g) the README claims block (equivalence-claim numbers + exceptions clause)
-#       is stale relative to the ledger (scripts/gen-claims.sh --check, #766).
+#       is stale relative to the ledger (scripts/gen-claims.sh --check, #766);
+#   (h) docs/contracts/README.md — the generated index — is stale relative to
+#       the ledger (the same diff CI's "Emit & Format" job runs).
 set -uo pipefail
 cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 
@@ -315,6 +317,27 @@ fi
 # block is a public claim drifting from what the gates verify — red.
 bash scripts/gen-claims.sh --check || fail=1
 
+# ── (i) ALS CONFORMANCE REPORT freshness (F1, #811) ──────────────────────────
+# docs/contracts/conformance.md joins section → contracts → executable fixtures
+# so an auditor reads the F1 claim on one page. Derived from the ledger; a stale
+# copy silently misstates what is exercised — the same failure mode as (h).
+if ! bash docs/contracts/generate-conformance.sh 2>/dev/null | diff -q - docs/contracts/conformance.md >/dev/null; then
+  err "docs/contracts/conformance.md is stale — run: bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md"
+fi
+
+# ── (h) contract INDEX freshness ─────────────────────────────────────────────
+# docs/contracts/README.md is generated from this ledger too, and CI's
+# "Emit & Format" job regenerates and diffs it. It was NOT checked here, so a
+# ledger commit that skipped the regen passed every local gate and the
+# pre-commit hook, then went red on CI — eight contracts drifted that way. The
+# local gate now covers exactly what CI covers, so the hook catches it first.
+# The generator writes to STDOUT (`… > docs/contracts/README.md`), which is the
+# other half of how the drift happened: redirecting it to /dev/null "runs" it
+# while updating nothing.
+if ! bash docs/contracts/generate-readme.sh 2>/dev/null | diff -q - docs/contracts/README.md >/dev/null; then
+  err "docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "::error::contract-ledger gate FAILED — see messages above."
   exit 1
@@ -330,3 +353,5 @@ echo "  fixtures: $n_with_header/$n_fixtures carry a // @contract: header; bidir
 #   (5) flag any contract                                  -> (f) ratchet.
 #   (6) renumber a contract to leave a gap                 -> (f) coverage.
 #   (7) hand-edit a number inside README's claims markers  -> (g) stale-claims.
+#   (8) add a contract without regenerating the index      -> (h) stale-index.
+#   (9) cite a new section without regenerating conformance -> (i) stale-report.

@@ -288,6 +288,8 @@ differential fuzz, an emit-time Σ-probe, or a Lean theorem. The index is
   `// @contract: C-NNN` header line (the reverse link is mandatory and symmetric).
 - Removing a divergence = flip `status` to `active`, drop the flag, lower the
   ratchet — same PR. The `flagged-for-revision` count may only go DOWN.
+- **What is proven vs what is trusted**: [docs/contracts/proven-vs-trusted.md](./docs/contracts/proven-vs-trusted.md)
+  — the boundary map, and what each gate does and does not claim.
 - `scripts/check-contracts.sh` (CI `checks` job + a lefthook pre-commit hook)
   enforces that every contract has evidence of class ≥ fixture, every fixture
   names its contract(s), and the link is bidirectional. The evidence-class

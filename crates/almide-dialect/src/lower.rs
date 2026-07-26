@@ -103,18 +103,41 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Lower an IR expression, appending operations to `ops`. Returns the result ValueId.
+    /// Lower an expression into `ops`, returning the value it produces.
+    ///
+    /// Dispatches through six per-group helpers rather than one 45-arm match. The
+    /// groups are the comment sections this function already carried, so the
+    /// partition is the one a reader was already using; each helper returns
+    /// `Option` and the trailing fallback is unchanged.
     fn lower_expr_into(&mut self, expr: &IrExpr, ops: &mut Vec<Operation>) -> ValueId {
         let result_ty = types::from_ty(&expr.ty);
+        self.lower_expr_literal(expr, result_ty.clone(), ops)
+            .or_else(|| self.lower_expr_operator(expr, result_ty.clone(), ops))
+            .or_else(|| self.lower_expr_control(expr, result_ty.clone(), ops))
+            .or_else(|| self.lower_expr_collection(expr, result_ty.clone(), ops))
+            .or_else(|| self.lower_expr_variant(expr, result_ty.clone(), ops))
+            .or_else(|| self.lower_expr_misc(expr, result_ty.clone(), ops))
+            // Fallback for nodes not yet handled
+            .unwrap_or_else(|| self.emit(ops, result_ty, OpKind::ConstUnit))
+    }
 
-        match &expr.kind {
-            // ── Literals ──
+    /// Literals, variable reads, and function references — no sub-expressions
+    /// except through the mutable-slot lookup.
+    ///
+    /// Extracted from `lower_expr_into` (name-router split): `None` means "not my
+    /// group", so the dispatch order in the router is the only ordering that
+    /// matters and no arm can be silently dropped — a new `IrExprKind` that
+    /// belongs here but is not added falls through to the router's `ConstUnit`
+    /// fallback exactly as before.
+    fn lower_expr_literal(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> Option<ValueId> {
+        Some(match &expr.kind {
+// ── Literals ──
             IrExprKind::LitInt { value } => self.emit(ops, result_ty, OpKind::ConstInt(*value)),
             IrExprKind::LitFloat { value } => self.emit(ops, result_ty, OpKind::ConstFloat(*value)),
             IrExprKind::LitStr { value } => self.emit(ops, result_ty, OpKind::ConstString(value.clone())),
             IrExprKind::LitBool { value } => self.emit(ops, result_ty, OpKind::ConstBool(*value)),
             IrExprKind::Unit => self.emit(ops, result_ty, OpKind::ConstUnit),
-
-            // ── Variables ──
+// ── Variables ──
             IrExprKind::Var { id } => {
                 if let Some(slot) = self.mutable_slots.get(id).copied() {
                     // Mutable variable: emit LoadVar
@@ -127,8 +150,20 @@ impl<'a> LowerCtx<'a> {
                 // Function references become a callable constant
                 self.emit(ops, result_ty, OpKind::ConstString(name.as_str().to_string()))
             }
+            _ => return None,
+        })
+    }
 
-            // ── Operators ──
+    /// Unary and binary operators.
+    ///
+    /// Extracted from `lower_expr_into` (name-router split): `None` means "not my
+    /// group", so the dispatch order in the router is the only ordering that
+    /// matters and no arm can be silently dropped — a new `IrExprKind` that
+    /// belongs here but is not added falls through to the router's `ConstUnit`
+    /// fallback exactly as before.
+    fn lower_expr_operator(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> Option<ValueId> {
+        Some(match &expr.kind {
+// ── Operators ──
             IrExprKind::BinOp { op, left, right } => {
                 let lhs = self.lower_expr_into(left, ops);
                 let rhs = self.lower_expr_into(right, ops);
@@ -138,8 +173,20 @@ impl<'a> LowerCtx<'a> {
                 let val = self.lower_expr_into(operand, ops);
                 self.emit(ops, result_ty, OpKind::UnOp { op: *op, operand: val })
             }
+            _ => return None,
+        })
+    }
 
-            // ── Control flow ──
+    /// Control flow and calls — the forms that build regions or argument lists.
+    ///
+    /// Extracted from `lower_expr_into` (name-router split): `None` means "not my
+    /// group", so the dispatch order in the router is the only ordering that
+    /// matters and no arm can be silently dropped — a new `IrExprKind` that
+    /// belongs here but is not added falls through to the router's `ConstUnit`
+    /// fallback exactly as before.
+    fn lower_expr_control(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> Option<ValueId> {
+        Some(match &expr.kind {
+// ── Control flow ──
             IrExprKind::If { cond, then, else_ } => {
                 let cond_val = self.lower_expr_into(cond, ops);
                 let then_block = self.lower_to_block(then);
@@ -161,8 +208,7 @@ impl<'a> LowerCtx<'a> {
                     self.emit(ops, DialectType::Unit, OpKind::ConstUnit)
                 }
             }
-
-            // ── Calls ──
+// ── Calls ──
             IrExprKind::Call { .. } => self.lower_call_expr(expr, result_ty, ops),
             IrExprKind::RuntimeCall { symbol, args } => {
                 let arg_vals: Vec<ValueId> = args.iter()
@@ -170,8 +216,20 @@ impl<'a> LowerCtx<'a> {
                     .collect();
                 self.emit(ops, result_ty, OpKind::IntrinsicCallOp { symbol: *symbol, args: arg_vals })
             }
+            _ => return None,
+        })
+    }
 
-            // ── Collections ──
+    /// Collection construction and element/field access.
+    ///
+    /// Extracted from `lower_expr_into` (name-router split): `None` means "not my
+    /// group", so the dispatch order in the router is the only ordering that
+    /// matters and no arm can be silently dropped — a new `IrExprKind` that
+    /// belongs here but is not added falls through to the router's `ConstUnit`
+    /// fallback exactly as before.
+    fn lower_expr_collection(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> Option<ValueId> {
+        Some(match &expr.kind {
+// ── Collections ──
             IrExprKind::List { elements } => {
                 let vals: Vec<ValueId> = elements.iter()
                     .map(|e| self.lower_expr_into(e, ops))
@@ -201,8 +259,7 @@ impl<'a> LowerCtx<'a> {
                     .collect();
                 self.emit(ops, result_ty, OpKind::TupleOp { elements: vals })
             }
-
-            // ── Access ──
+// ── Access ──
             IrExprKind::Member { object, field } => {
                 let obj = self.lower_expr_into(object, ops);
                 self.emit(ops, result_ty, OpKind::MemberOp { object: obj, field: *field })
@@ -221,8 +278,20 @@ impl<'a> LowerCtx<'a> {
                 let k = self.lower_expr_into(key, ops);
                 self.emit(ops, result_ty, OpKind::MapAccessOp { object: obj, key: k })
             }
+            _ => return None,
+        })
+    }
 
-            // ── Result / Option ──
+    /// `Result`/`Option` construction and the unwrap forms.
+    ///
+    /// Extracted from `lower_expr_into` (name-router split): `None` means "not my
+    /// group", so the dispatch order in the router is the only ordering that
+    /// matters and no arm can be silently dropped — a new `IrExprKind` that
+    /// belongs here but is not added falls through to the router's `ConstUnit`
+    /// fallback exactly as before.
+    fn lower_expr_variant(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> Option<ValueId> {
+        Some(match &expr.kind {
+// ── Result / Option ──
             IrExprKind::ResultOk { expr } => {
                 let v = self.lower_expr_into(expr, ops);
                 self.emit(ops, result_ty, OpKind::ResultOkOp { value: v })
@@ -245,8 +314,21 @@ impl<'a> LowerCtx<'a> {
                 let fb = self.lower_expr_into(fallback, ops);
                 self.emit(ops, result_ty, OpKind::UnwrapOrOp { value: v, fallback: fb })
             }
+            _ => return None,
+        })
+    }
 
-            // ── Lambda ──
+    /// Lambdas, `fan`, loops, and the Rust-target codegen artifacts that are
+    /// stripped rather than lowered.
+    ///
+    /// Extracted from `lower_expr_into` (name-router split): `None` means "not my
+    /// group", so the dispatch order in the router is the only ordering that
+    /// matters and no arm can be silently dropped — a new `IrExprKind` that
+    /// belongs here but is not added falls through to the router's `ConstUnit`
+    /// fallback exactly as before.
+    fn lower_expr_misc(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> Option<ValueId> {
+        Some(match &expr.kind {
+// ── Lambda ──
             IrExprKind::Lambda { params, body, .. } => {
                 let mut lambda_params = Vec::new();
                 for (var_id, ty) in params {
@@ -261,16 +343,14 @@ impl<'a> LowerCtx<'a> {
                     body: vec![body_block],
                 })
             }
-
-            // ── Fan ──
+// ── Fan ──
             IrExprKind::Fan { exprs } => {
                 let regions: Vec<Vec<Block>> = exprs.iter()
                     .map(|e| vec![self.lower_to_block(e)])
                     .collect();
                 self.emit(ops, result_ty, OpKind::FanOp { regions })
             }
-
-            // ── Loops ──
+// ── Loops ──
             IrExprKind::ForIn { var, iterable, body, .. } => {
                 let iter_val = self.lower_expr_into(iterable, ops);
                 let loop_var = self.ids.fresh_value();
@@ -290,8 +370,7 @@ impl<'a> LowerCtx<'a> {
                     body: vec![body_block],
                 })
             }
-
-            // ── Codegen-specific nodes: pass through or ignore ──
+// ── Codegen-specific nodes: pass through or ignore ──
             IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
             | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
             | IrExprKind::RcWrap { expr, .. } | IrExprKind::ToVec { expr }
@@ -299,10 +378,8 @@ impl<'a> LowerCtx<'a> {
                 // These are Rust-target codegen artifacts — strip them.
                 self.lower_expr_into(expr, ops)
             }
-
-            // Fallback for nodes not yet handled
-            _ => self.emit(ops, result_ty, OpKind::ConstUnit),
-        }
+            _ => return None,
+        })
     }
 
     fn lower_match_expr(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> ValueId {

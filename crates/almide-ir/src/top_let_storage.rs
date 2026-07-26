@@ -83,18 +83,25 @@ pub fn rccow_copyish(ty: &Ty) -> bool {
 }
 
 /// Capture clone-wrap projection (pass_capture_clone): heap values captured
-/// by a lambda get a `__cap` clone. Differs from `clone_free` in ONE cell —
-/// tuples are NOT clone-wrapped here regardless of their elements (the
-/// capture path moves tuples whole); widening that cell is a reviewed
-/// future delta.
+/// by a lambda get a `__cap` clone. The tuple cell now agrees with
+/// `clone_free`'s: a tuple whose every element is clone-free is Copy in Rust
+/// too, so the move costs nothing and no wrap is needed — but a tuple with a
+/// heap element is NOT Copy, and "the capture path moves tuples whole" meant
+/// the `move` closure CONSUMED the binding: a later use of the var was rustc
+/// E0382 while `almide check` passed (differential fuzz, seed
+/// 1785015406589852000 index 746 — `list.fold(…, (x, s) => r4)` followed by
+/// `println("${r4}")` over a `(Bool, String)`). This was the "reviewed future
+/// delta" the previous comment promised; the fuzzer delivered the review.
 pub fn capture_clone_wrap(ty: &Ty) -> bool {
-    matches!(ty,
+    match ty {
         Ty::String | Ty::Applied(_, _)
         | Ty::Record { .. } | Ty::OpenRecord { .. }
         | Ty::Named(_, _) | Ty::Matrix | Ty::Bytes
         | Ty::Variant { .. } | Ty::Fn { .. }
-        | Ty::TypeVar(_)
-    )
+        | Ty::TypeVar(_) => true,
+        Ty::Tuple(elements) => !elements.iter().all(clone_free),
+        _ => false,
+    }
 }
 
 /// Capture-cell projection: a `var` local of one of these types captured by

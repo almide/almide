@@ -276,240 +276,295 @@ fn expr_has_value_exit(e: &IrExpr, vx: Option<(VarId, VarId, &Ty)>) -> bool {
     s.found
 }
 
+/// The invariant inputs of one `loop_uw_rewrite` pass — the flag/error slots,
+/// the error type, and the optional VALUE-exit pair, threaded unchanged through
+/// every recursion (only the var counter advances separately).
+#[derive(Copy, Clone)]
+struct UwEnv<'a> {
+    ef: VarId,
+    ev: VarId,
+    err_ty: &'a Ty,
+    /// `(vf, vres, ret_ty)`: the VALUE-exit pair, when enabled.
+    vx: Option<(VarId, VarId, &'a Ty)>,
+}
+
+/// The outcome of one specialized rewrite attempt inside `loop_uw_rewrite`:
+/// `Rewritten` maps to the former inline `return Some(..)`, `Decline` to
+/// `return None` (the whole desugar declines and the `!` WALLs), and `NotHere`
+/// to falling through to the next shape.
+enum UwStep {
+    Rewritten(IrExpr),
+    Decline,
+    NotHere,
+}
+
 /// Rewrite a UNIT-typed loop-body remainder `e`, replacing each effect-`!` with a flag-setting
 /// `match`. Returns `None` (the whole desugar declines, leaving the `!` to WALL) if any `!` sits
 /// in a position where a clean continuation cannot be captured.
-fn loop_uw_rewrite(
-    e: &IrExpr,
-    ef: VarId,
-    ev: VarId,
-    err_ty: &Ty,
-    vx: Option<(VarId, VarId, &Ty)>, // (vf, vres, ret_ty): the VALUE-exit pair, when enabled
-    nv: &mut u32,
-) -> Option<IrExpr> {
-    if !expr_has_unwrap(e) && !expr_has_value_exit(e, vx) {
+fn loop_uw_rewrite(e: &IrExpr, env: UwEnv<'_>, nv: &mut u32) -> Option<IrExpr> {
+    if !expr_has_unwrap(e) && !expr_has_value_exit(e, env.vx) {
         return Some(e.clone());
     }
     match &e.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            // RAW `guard c else <value>` VALUE-EXIT (vx enabled): this pass runs from the
-            // PRE-TCO `desugar_heap_branches` call — BEFORE `desugar_guard` has restructured
-            // loop-body guards — so the value exit is still a Guard STATEMENT here. Rewrite
-            // it directly to the flag form (`if c then <rest> else { __vres = n; __vf =
-            // true }`) — fusing desugar_guard's continuation-into-then restructuring with
-            // the vx delivery. WITHOUT this the Block fast-path above returns the body
-            // UNCHANGED (a Guard is invisible to `expr_has_value_exit`'s If-only scan), the
-            // machinery still gets emitted, and the later-desugared heterogeneous `else
-            // ok(n)` reaches lowering where the Unit-arm tail dispatch ELIDES it — the
-            // silent empty-else infinite spin the first probe hit.
-            if let Some((vf, vres, ret_ty)) = vx {
-                for (i, s) in stmts.iter().enumerate() {
-                    let IrStmtKind::Guard { cond, else_ } = &s.kind else { continue };
-                    if else_.ty != *ret_ty {
-                        continue;
-                    }
-                    if expr_has_unwrap(cond) || expr_has_unwrap(else_) {
-                        return None;
-                    }
-                    // SCALAR Ok payload only (the `__vn` slot is an i64 local); anything
-                    // else declines → the loop keeps its honest wall.
-                    let payload = match &else_.kind {
-                        IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => (**expr).clone(),
-                        _ => return None,
-                    };
-                    if stmts[..i].iter().any(stmt_has_unwrap) {
-                        return None;
-                    }
-                    let rest = loop_uw_node(
-                        IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
-                        Ty::Unit,
-                    );
-                    let then_b = loop_uw_rewrite(&rest, ef, ev, err_ty, vx, nv)?;
-                    let set_res = IrStmt {
-                        kind: IrStmtKind::Assign { var: vres, value: payload },
-                        span: None,
-                    };
-                    let set_flag = IrStmt {
-                        kind: IrStmtKind::Assign {
-                            var: vf,
-                            value: loop_uw_node(IrExprKind::LitBool { value: true }, Ty::Bool),
-                        },
-                        span: None,
-                    };
-                    let ne = loop_uw_node(
-                        IrExprKind::Block { stmts: vec![set_res, set_flag], expr: None },
-                        Ty::Unit,
-                    );
-                    let g = loop_uw_node(
-                        IrExprKind::If {
-                            cond: Box::new(cond.clone()),
-                            then: Box::new(then_b),
-                            else_: Box::new(ne),
-                        },
-                        Ty::Unit,
-                    );
-                    return Some(loop_uw_node(
-                        IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(g)) },
-                        Ty::Unit,
-                    ));
-                }
-            }
-            // First DIRECT `let v=e!` / `Expr(e!)`: push the rest of the block into its ok-arm.
-            for (i, s) in stmts.iter().enumerate() {
-                if let Some((ok_pat, inner)) = loop_uw_unwrap_stmt(s, err_ty) {
-                    // Everything BEFORE the `!` must be `!`-free (else its continuation is wrong).
-                    if stmts[..i].iter().any(stmt_has_unwrap) {
-                        return None;
-                    }
-                    let rest = loop_uw_node(
-                        IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
-                        Ty::Unit,
-                    );
-                    let rest2 = loop_uw_rewrite(&rest, ef, ev, err_ty, vx, nv)?;
-                    let ok_arm = almide_ir::IrMatchArm {
-                        pattern: almide_ir::IrPattern::Ok { inner: Box::new(ok_pat) },
-                        guard: None,
-                        body: rest2,
-                    };
-                    let err_arm = loop_uw_err_arm(ef, ev, err_ty, nv);
-                    let m = loop_uw_node(
-                        IrExprKind::Match { subject: Box::new(inner), arms: vec![ok_arm, err_arm] },
-                        Ty::Unit,
-                    );
-                    return Some(loop_uw_node(
-                        IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
-                        Ty::Unit,
-                    ));
-                }
-            }
-            // No direct `!` stmt: the `!` is nested in a TERMINAL `if`/`match` (the tail, or the
-            // last stmt) — recurse into it. Everything else must be `!`-free.
-            if let Some(t) = tail {
-                if stmts.iter().all(|s| !stmt_has_unwrap(s)) {
-                    let nt = loop_uw_rewrite(t, ef, ev, err_ty, vx, nv)?;
-                    return Some(loop_uw_node(
-                        IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
-                        Ty::Unit,
-                    ));
-                }
-                return None;
-            }
-            // No tail: the unwrap must be in the LAST stmt (an `Expr(if/match)`), rest `!`-free.
-            let last = stmts.len().checked_sub(1)?;
-            if stmts[..last].iter().any(stmt_has_unwrap) {
-                return None;
-            }
-            if let IrStmtKind::Expr { expr } = &stmts[last].kind {
-                let ne = loop_uw_rewrite(expr, ef, ev, err_ty, vx, nv)?;
-                let mut ns = stmts[..last].to_vec();
-                ns.push(IrStmt { kind: IrStmtKind::Expr { expr: ne }, span: stmts[last].span.clone() });
-                return Some(loop_uw_node(
-                    IrExprKind::Block { stmts: ns, expr: None },
-                    Ty::Unit,
-                ));
-            }
-            None
-        }
+        IrExprKind::Block { stmts, expr: tail } => loop_uw_rewrite_block(stmts, tail, env, nv),
         IrExprKind::If { cond, then, else_ } => {
             if expr_has_unwrap(cond) {
                 return None;
             }
-            // VALUE EARLY-EXIT (`guard n % 2 != 0 else ok(n)` — desugar_guard's loop-body
-            // form leaves the RESULT-typed else verbatim inside the Unit body): rewrite the
-            // heterogeneous else-arm to `{ __vres = <value>; __vf = true }` — the once-assigned
-            // result-slot delivery the TCO base-case accumulator proves (`i(id)m` + a single
-            // in-exit-iteration assign; the post-loop dispatch reads the slot exactly once).
-            // Gated `!`-free (an `!` inside the exit value declines → the honest wall).
-            if let Some((vf, vres, ret_ty)) = vx {
-                if else_.ty == *ret_ty && e.ty == Ty::Unit && !expr_has_unwrap(else_) {
-                    // Capture the SCALAR Ok payload only (`ok(n)` → `__vn = n`); the Result is
-                    // constructed POST-LOOP in a dispatch arm — symmetric to the err path's
-                    // `err(__ev)`, and crucially NO heap allocation feeds a slot inside a
-                    // branch-in-loop frame (a shape whose certificate grouping mis-renders —
-                    // the unbacked-`+1` corpus-wall breach this replaces). A non-`ok(<scalar>)`
-                    // exit value declines → the loop keeps its honest wall.
-                    let payload = match &else_.kind {
-                        IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => (**expr).clone(),
-                        _ => return None,
-                    };
-                    let nt = loop_uw_rewrite(then, ef, ev, err_ty, vx, nv)?;
-                    let set_res = IrStmt {
-                        kind: IrStmtKind::Assign { var: vres, value: payload },
-                        span: None,
-                    };
-                    let set_flag = IrStmt {
-                        kind: IrStmtKind::Assign {
-                            var: vf,
-                            value: loop_uw_node(IrExprKind::LitBool { value: true }, Ty::Bool),
-                        },
-                        span: None,
-                    };
-                    let ne = loop_uw_node(
-                        IrExprKind::Block { stmts: vec![set_res, set_flag], expr: None },
-                        Ty::Unit,
-                    );
-                    return Some(loop_uw_node(
-                        IrExprKind::If {
-                            cond: cond.clone(),
-                            then: Box::new(nt),
-                            else_: Box::new(ne),
-                        },
-                        Ty::Unit,
-                    ));
-                }
+            match loop_uw_if_value_exit(e, (cond.as_ref(), then.as_ref(), else_.as_ref()), env, nv) {
+                UwStep::Rewritten(out) => return Some(out),
+                UwStep::Decline => return None,
+                UwStep::NotHere => {}
             }
-            let nt = loop_uw_rewrite(then, ef, ev, err_ty, vx, nv)?;
-            let ne = loop_uw_rewrite(else_, ef, ev, err_ty, vx, nv)?;
+            let nt = loop_uw_rewrite(then, env, nv)?;
+            let ne = loop_uw_rewrite(else_, env, nv)?;
             Some(loop_uw_node(
                 IrExprKind::If { cond: cond.clone(), then: Box::new(nt), else_: Box::new(ne) },
                 e.ty.clone(),
             ))
         }
         IrExprKind::Match { subject, arms } => {
-            if expr_has_unwrap(subject) {
-                return None;
-            }
-            let mut new_arms = Vec::with_capacity(arms.len());
-            for a in arms {
-                if a.guard.as_ref().is_some_and(expr_has_unwrap) {
-                    return None;
-                }
-                let nb = loop_uw_rewrite(&a.body, ef, ev, err_ty, vx, nv)?;
-                new_arms.push(almide_ir::IrMatchArm {
-                    pattern: a.pattern.clone(),
-                    guard: a.guard.clone(),
-                    body: nb,
-                });
-            }
-            Some(loop_uw_node(
-                IrExprKind::Match { subject: subject.clone(), arms: new_arms },
-                e.ty.clone(),
-            ))
+            loop_uw_rewrite_match(subject, arms, e.ty.clone(), env, nv)
         }
-        // A bare trailing `e!` (Unit-typed): `match e { ok(_) => (), err($x) => { flag } }`.
-        IrExprKind::Unwrap { expr } => {
-            use almide_lang::types::constructor::TypeConstructorId;
-            if expr_has_unwrap(expr) {
-                return None;
-            }
-            match &expr.ty {
-                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && &a[1] == err_ty => {}
-                _ => return None,
-            }
-            let ok_arm = almide_ir::IrMatchArm {
-                pattern: almide_ir::IrPattern::Ok {
-                    inner: Box::new(almide_ir::IrPattern::Wildcard),
-                },
-                guard: None,
-                body: loop_uw_node(IrExprKind::Unit, Ty::Unit),
-            };
-            let err_arm = loop_uw_err_arm(ef, ev, err_ty, nv);
-            Some(loop_uw_node(
-                IrExprKind::Match { subject: expr.clone(), arms: vec![ok_arm, err_arm] },
-                Ty::Unit,
-            ))
-        }
+        IrExprKind::Unwrap { expr } => loop_uw_trailing_unwrap(expr, env, nv),
         // An `!` in a kind we do not rewrite — decline (fail-safe wall).
         _ => None,
     }
+}
+
+/// The `Match` arm of [`loop_uw_rewrite`]: rewrite every arm body, declining on
+/// an `!` in the subject or a guard (their continuation cannot be captured).
+fn loop_uw_rewrite_match(
+    subject: &IrExpr,
+    arms: &[almide_ir::IrMatchArm],
+    ty: Ty,
+    env: UwEnv<'_>,
+    nv: &mut u32,
+) -> Option<IrExpr> {
+    if expr_has_unwrap(subject) {
+        return None;
+    }
+    let mut new_arms = Vec::with_capacity(arms.len());
+    for a in arms {
+        if a.guard.as_ref().is_some_and(expr_has_unwrap) {
+            return None;
+        }
+        let nb = loop_uw_rewrite(&a.body, env, nv)?;
+        new_arms.push(almide_ir::IrMatchArm {
+            pattern: a.pattern.clone(),
+            guard: a.guard.clone(),
+            body: nb,
+        });
+    }
+    Some(loop_uw_node(
+        IrExprKind::Match { subject: Box::new(subject.clone()), arms: new_arms },
+        ty,
+    ))
+}
+
+/// The `Block` arm of [`loop_uw_rewrite`]: the raw-guard value exit first, then
+/// the first direct `!` statement, then the terminal-`if`/`match` recursion.
+fn loop_uw_rewrite_block(
+    stmts: &[IrStmt],
+    tail: &Option<Box<IrExpr>>,
+    env: UwEnv<'_>,
+    nv: &mut u32,
+) -> Option<IrExpr> {
+    match loop_uw_guard_value_exit(stmts, tail, env, nv) {
+        UwStep::Rewritten(out) => return Some(out),
+        UwStep::Decline => return None,
+        UwStep::NotHere => {}
+    }
+    match loop_uw_direct_unwrap(stmts, tail, env, nv) {
+        UwStep::Rewritten(out) => return Some(out),
+        UwStep::Decline => return None,
+        UwStep::NotHere => {}
+    }
+    // No direct `!` stmt: the `!` is nested in a TERMINAL `if`/`match` (the tail, or the
+    // last stmt) — recurse into it. Everything else must be `!`-free.
+    if let Some(t) = tail {
+        if stmts.iter().all(|s| !stmt_has_unwrap(s)) {
+            let nt = loop_uw_rewrite(t, env, nv)?;
+            return Some(loop_uw_node(
+                IrExprKind::Block { stmts: stmts.to_vec(), expr: Some(Box::new(nt)) },
+                Ty::Unit,
+            ));
+        }
+        return None;
+    }
+    // No tail: the unwrap must be in the LAST stmt (an `Expr(if/match)`), rest `!`-free.
+    let last = stmts.len().checked_sub(1)?;
+    if stmts[..last].iter().any(stmt_has_unwrap) {
+        return None;
+    }
+    if let IrStmtKind::Expr { expr } = &stmts[last].kind {
+        let ne = loop_uw_rewrite(expr, env, nv)?;
+        let mut ns = stmts[..last].to_vec();
+        ns.push(IrStmt { kind: IrStmtKind::Expr { expr: ne }, span: stmts[last].span.clone() });
+        return Some(loop_uw_node(IrExprKind::Block { stmts: ns, expr: None }, Ty::Unit));
+    }
+    None
+}
+
+/// The `{ __vres = <payload>; __vf = true }` VALUE-exit delivery block.
+fn loop_uw_value_exit_block(vf: VarId, vres: VarId, payload: IrExpr) -> IrExpr {
+    let set_res = IrStmt { kind: IrStmtKind::Assign { var: vres, value: payload }, span: None };
+    let set_flag = IrStmt {
+        kind: IrStmtKind::Assign {
+            var: vf,
+            value: loop_uw_node(IrExprKind::LitBool { value: true }, Ty::Bool),
+        },
+        span: None,
+    };
+    loop_uw_node(IrExprKind::Block { stmts: vec![set_res, set_flag], expr: None }, Ty::Unit)
+}
+
+/// RAW `guard c else <value>` VALUE-EXIT (vx enabled): this pass runs from the
+/// PRE-TCO `desugar_heap_branches` call — BEFORE `desugar_guard` has restructured
+/// loop-body guards — so the value exit is still a Guard STATEMENT here. Rewrite
+/// it directly to the flag form (`if c then <rest> else { __vres = n; __vf =
+/// true }`) — fusing desugar_guard's continuation-into-then restructuring with
+/// the vx delivery. WITHOUT this the Block fast-path returns the body
+/// UNCHANGED (a Guard is invisible to `expr_has_value_exit`'s If-only scan), the
+/// machinery still gets emitted, and the later-desugared heterogeneous `else
+/// ok(n)` reaches lowering where the Unit-arm tail dispatch ELIDES it — the
+/// silent empty-else infinite spin the first probe hit.
+fn loop_uw_guard_value_exit(
+    stmts: &[IrStmt],
+    tail: &Option<Box<IrExpr>>,
+    env: UwEnv<'_>,
+    nv: &mut u32,
+) -> UwStep {
+    let Some((vf, vres, ret_ty)) = env.vx else { return UwStep::NotHere };
+    for (i, s) in stmts.iter().enumerate() {
+        let IrStmtKind::Guard { cond, else_ } = &s.kind else { continue };
+        if else_.ty != *ret_ty {
+            continue;
+        }
+        if expr_has_unwrap(cond) || expr_has_unwrap(else_) {
+            return UwStep::Decline;
+        }
+        // SCALAR Ok payload only (the `__vn` slot is an i64 local); anything
+        // else declines → the loop keeps its honest wall.
+        let payload = match &else_.kind {
+            IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => (**expr).clone(),
+            _ => return UwStep::Decline,
+        };
+        if stmts[..i].iter().any(stmt_has_unwrap) {
+            return UwStep::Decline;
+        }
+        let rest = loop_uw_node(
+            IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+            Ty::Unit,
+        );
+        let Some(then_b) = loop_uw_rewrite(&rest, env, nv) else { return UwStep::Decline };
+        let ne = loop_uw_value_exit_block(vf, vres, payload);
+        let g = loop_uw_node(
+            IrExprKind::If {
+                cond: Box::new(cond.clone()),
+                then: Box::new(then_b),
+                else_: Box::new(ne),
+            },
+            Ty::Unit,
+        );
+        return UwStep::Rewritten(loop_uw_node(
+            IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(g)) },
+            Ty::Unit,
+        ));
+    }
+    UwStep::NotHere
+}
+
+/// First DIRECT `let v=e!` / `Expr(e!)`: push the rest of the block into its
+/// ok-arm; the err-arm sets the flag pair. Everything BEFORE the `!` must be
+/// `!`-free (else its continuation is wrong).
+fn loop_uw_direct_unwrap(
+    stmts: &[IrStmt],
+    tail: &Option<Box<IrExpr>>,
+    env: UwEnv<'_>,
+    nv: &mut u32,
+) -> UwStep {
+    for (i, s) in stmts.iter().enumerate() {
+        let Some((ok_pat, inner)) = loop_uw_unwrap_stmt(s, env.err_ty) else { continue };
+        if stmts[..i].iter().any(stmt_has_unwrap) {
+            return UwStep::Decline;
+        }
+        let rest = loop_uw_node(
+            IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+            Ty::Unit,
+        );
+        let Some(rest2) = loop_uw_rewrite(&rest, env, nv) else { return UwStep::Decline };
+        let ok_arm = almide_ir::IrMatchArm {
+            pattern: almide_ir::IrPattern::Ok { inner: Box::new(ok_pat) },
+            guard: None,
+            body: rest2,
+        };
+        let err_arm = loop_uw_err_arm(env.ef, env.ev, env.err_ty, nv);
+        let m = loop_uw_node(
+            IrExprKind::Match { subject: Box::new(inner), arms: vec![ok_arm, err_arm] },
+            Ty::Unit,
+        );
+        return UwStep::Rewritten(loop_uw_node(
+            IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
+            Ty::Unit,
+        ));
+    }
+    UwStep::NotHere
+}
+
+/// VALUE EARLY-EXIT (`guard n % 2 != 0 else ok(n)` — desugar_guard's loop-body
+/// form leaves the RESULT-typed else verbatim inside the Unit body): rewrite the
+/// heterogeneous else-arm to `{ __vres = <value>; __vf = true }` — the once-assigned
+/// result-slot delivery the TCO base-case accumulator proves (`i(id)m` + a single
+/// in-exit-iteration assign; the post-loop dispatch reads the slot exactly once).
+/// Gated `!`-free (an `!` inside the exit value declines → the honest wall).
+/// Captures the SCALAR Ok payload only (`ok(n)` → `__vn = n`); the Result is
+/// constructed POST-LOOP in a dispatch arm — symmetric to the err path's
+/// `err(__ev)`, and crucially NO heap allocation feeds a slot inside a
+/// branch-in-loop frame (a shape whose certificate grouping mis-renders —
+/// the unbacked-`+1` corpus-wall breach this replaces). A non-`ok(<scalar>)`
+/// exit value declines → the loop keeps its honest wall.
+fn loop_uw_if_value_exit(
+    e: &IrExpr,
+    parts: (&IrExpr, &IrExpr, &IrExpr),
+    env: UwEnv<'_>,
+    nv: &mut u32,
+) -> UwStep {
+    let (cond, then, else_) = parts;
+    let Some((vf, vres, ret_ty)) = env.vx else { return UwStep::NotHere };
+    if else_.ty != *ret_ty || e.ty != Ty::Unit || expr_has_unwrap(else_) {
+        return UwStep::NotHere;
+    }
+    let payload = match &else_.kind {
+        IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => (**expr).clone(),
+        _ => return UwStep::Decline,
+    };
+    let Some(nt) = loop_uw_rewrite(then, env, nv) else { return UwStep::Decline };
+    let ne = loop_uw_value_exit_block(vf, vres, payload);
+    UwStep::Rewritten(loop_uw_node(
+        IrExprKind::If { cond: Box::new(cond.clone()), then: Box::new(nt), else_: Box::new(ne) },
+        Ty::Unit,
+    ))
+}
+
+/// A bare trailing `e!` (Unit-typed): `match e { ok(_) => (), err($x) => { flag } }`.
+fn loop_uw_trailing_unwrap(expr: &IrExpr, env: UwEnv<'_>, nv: &mut u32) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    if expr_has_unwrap(expr) {
+        return None;
+    }
+    match &expr.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && &a[1] == env.err_ty => {}
+        _ => return None,
+    }
+    let ok_arm = almide_ir::IrMatchArm {
+        pattern: almide_ir::IrPattern::Ok { inner: Box::new(almide_ir::IrPattern::Wildcard) },
+        guard: None,
+        body: loop_uw_node(IrExprKind::Unit, Ty::Unit),
+    };
+    let err_arm = loop_uw_err_arm(env.ef, env.ev, env.err_ty, nv);
+    Some(loop_uw_node(
+        IrExprKind::Match { subject: Box::new(expr.clone()), arms: vec![ok_arm, err_arm] },
+        Ty::Unit,
+    ))
 }

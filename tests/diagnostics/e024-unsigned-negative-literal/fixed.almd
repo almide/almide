@@ -1,0 +1,9 @@
+// The fix: drop the `-` when the value is genuinely non-negative, or move to
+// the signed type of the same width when it can go below zero. `-0` stays legal
+// in an unsigned context — it is `0`, which every unsigned type represents.
+fn main() -> Unit = {
+  let k: UInt64 = 5
+  let b: Int8 = -1
+  let z: UInt32 = -0
+  println("${uint64.to_string(k)}:${int.to_string(int.from_int8(b))}:${uint32.to_string(z)}")
+}

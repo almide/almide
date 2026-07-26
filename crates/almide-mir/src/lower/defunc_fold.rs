@@ -1,3 +1,155 @@
+/// The TYPE/INIT gates of [`LowerCtx::try_lower_defunc_tuple_acc_fold`] — fold
+/// has exactly TWO params (state, element); the accumulator/result type is a
+/// 2-tuple `(List[T], Int)`; the INIT is `(<empty-list-literal>, <int-literal>)`.
+/// Returns `(state_param, elem_param, list_elem_str, int_init)`.
+///
+/// A SCALAR list element (`(List[Int], Int)` — `wasm_record_offsets`) OR a `String` element
+/// (`(List[String], Int)`). Both are admitted: the scalar slot is a FLAT `__list_concat` + flat
+/// `Drop`; the String slot is `__list_concat_rc` + the recursive `DropListStr` (marked
+/// `heap_elem_lists`), and the SOURCE element of a heap (`List[String]`) source is read as the
+/// slot's i32 HANDLE (`LoadHandle`) — reading it as an i64 scalar was the
+/// `expected i32, found i64` invalid-wasm bug. A heap-FIELD aggregate element (a tuple/record
+/// list) still defers (its masked recursive drop is out of this slice).
+fn parse_tuple_acc_fold_tys(
+    params: &[(VarId, Ty)],
+    result_ty: &Ty,
+    init: &IrExpr,
+) -> Option<(VarId, VarId, bool, i64)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    if params.len() != 2 {
+        return None;
+    }
+    let state_param = params[0].0;
+    let elem_param = params[1].0;
+    let tup_tys = match result_ty {
+        Ty::Tuple(tys) if tys.len() == 2 => tys,
+        _ => return None,
+    };
+    let list_elem_ty = match &tup_tys[0] {
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+        _ => return None,
+    };
+    if !matches!(tup_tys[1], Ty::Int) {
+        return None;
+    }
+    let list_elem_scalar = !is_heap_ty(&list_elem_ty);
+    let list_elem_str = matches!(list_elem_ty, Ty::String);
+    if !list_elem_scalar && !list_elem_str {
+        return None;
+    }
+    let int_init_v = parse_tuple_acc_init(init)?;
+    Some((state_param, elem_param, list_elem_str, int_init_v))
+}
+
+/// The INIT gate: `(<empty-list-literal>, <int-literal>)` — returns the int seed.
+fn parse_tuple_acc_init(init: &IrExpr) -> Option<i64> {
+    let init_elems = match &init.kind {
+        IrExprKind::Tuple { elements } if elements.len() == 2 => elements,
+        _ => return None,
+    };
+    match &init_elems[0].kind {
+        IrExprKind::List { elements } if elements.is_empty() => {}
+        _ => return None,
+    }
+    match &init_elems[1].kind {
+        IrExprKind::LitInt { value } => Some(*value),
+        _ => None,
+    }
+}
+
+/// The BODY gate of [`LowerCtx::try_lower_defunc_tuple_acc_fold`]: the body is
+/// `{ let (acc, n) = state; <interior pure lets…>; (c0, c1) }` — the FIRST
+/// statement destructures the state param's two components, then ZERO OR MORE pure value-binding
+/// statements (the element destructure `let (i,f)=fe`, a scalar `let off_s = int.to_string(off)`,
+/// a heap `let store = match get_kind(f) {…}` — the wasm-bindgen `field_stores` shape), then a
+/// 2-tuple tail whose component0 is a `acc + […]` ConcatList reading the destructured list var,
+/// and component1 a scalar Int. (The component0 shape is re-checked by `try_lower_concat_list`
+/// at the lowering site; here we just require the tuple shape + a ConcatList whose left reads
+/// `acc_var`, so a non-append body — e.g. `(other_list, …)` — defers.) Returns
+/// `(acc_var, n_var, stmts, tail_elems)`.
+fn parse_tuple_acc_fold_body(
+    state_param: VarId,
+    body: &IrExpr,
+) -> Option<(VarId, VarId, &[IrStmt], &[IrExpr])> {
+    let (stmts, tail) = match &body.kind {
+        IrExprKind::Block { stmts, expr: Some(tail) } if !stmts.is_empty() => (stmts, tail.as_ref()),
+        _ => return None,
+    };
+    let (acc_var, n_var) = parse_state_destructure(state_param, &stmts[0])?;
+    let tail_elems = parse_acc_append_tail(acc_var, tail)?;
+    Some((acc_var, n_var, stmts, tail_elems))
+}
+
+/// The `let (acc, n) = state` FIRST statement: a 2-element tuple destructure of
+/// the STATE param (the destructure reads the two slots, not a fresh tuple) —
+/// component0 a `List[_]`-typed bind, component1 an `Int` bind.
+fn parse_state_destructure(state_param: VarId, stmt: &IrStmt) -> Option<(VarId, VarId)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_ir::IrStmtKind;
+    let IrStmtKind::BindDestructure { pattern, value } = &stmt.kind else {
+        return None;
+    };
+    match &value.kind {
+        IrExprKind::Var { id } if *id == state_param => {}
+        _ => return None,
+    }
+    match pattern {
+        IrPattern::Tuple { elements } if elements.len() == 2 => {
+            let a = match &elements[0] {
+                IrPattern::Bind { var, ty }
+                    if matches!(ty,
+                        Ty::Applied(TypeConstructorId::List, l) if l.len() == 1) =>
+                {
+                    *var
+                }
+                _ => return None,
+            };
+            let b = match &elements[1] {
+                IrPattern::Bind { var, ty } if matches!(ty, Ty::Int) => *var,
+                _ => return None,
+            };
+            Some((a, b))
+        }
+        _ => None,
+    }
+}
+
+/// The `(acc + […], <scalar-int>)` TAIL: a 2-tuple whose component0 is a
+/// ConcatList reading the destructured list var and component1 a scalar Int.
+fn parse_acc_append_tail(acc_var: VarId, tail: &IrExpr) -> Option<&[IrExpr]> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let tail_elems = match &tail.kind {
+        IrExprKind::Tuple { elements } if elements.len() == 2 => elements,
+        _ => return None,
+    };
+    match &tail_elems[0].kind {
+        IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, .. } => {
+            match &left.kind {
+                IrExprKind::Var { id } if *id == acc_var => {}
+                _ => return None,
+            }
+        }
+        _ => return None,
+    }
+    if !matches!(tail_elems[0].ty,
+        Ty::Applied(TypeConstructorId::List, ref a) if a.len() == 1)
+        || !matches!(tail_elems[1].ty, Ty::Int)
+    {
+        return None;
+    }
+    Some(tail_elems)
+}
+
+/// Unwrap a single-expression Block (the post-fusion `tail` is `{ <expr> }`) —
+/// any other shape (statements, no tail) passes through unchanged and fails the
+/// caller's own shape gate.
+fn unwrap_single_expr_block(body: &IrExpr) -> &IrExpr {
+    match &body.kind {
+        almide_ir::IrExprKind::Block { stmts, expr: Some(e) } if stmts.is_empty() => e.as_ref(),
+        _ => body,
+    }
+}
+
 impl LowerCtx {
     /// A HEAP (String) `list.fold` body that CONDITIONALLY replaces the accumulator —
     /// `if cond then <new-string> else acc` (the `find_flag` shape). Updates the loop-carried
@@ -21,13 +173,7 @@ impl LowerCtx {
     ) -> bool {
         use almide_ir::IrExprKind;
         // Unwrap a single-expression Block (the post-fusion `tail` is `{ <if> }`).
-        let inner = match &body.kind {
-            IrExprKind::Block { stmts, expr } if stmts.is_empty() => match expr {
-                Some(e) => e.as_ref(),
-                None => return false,
-            },
-            _ => body,
-        };
+        let inner = unwrap_single_expr_block(body);
         let (cond, then, else_) = match &inner.kind {
             IrExprKind::If { cond, then, else_ } => (cond.as_ref(), then.as_ref(), else_.as_ref()),
             _ => return false,
@@ -297,118 +443,11 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<ValueId> {
         use almide_lang::types::constructor::TypeConstructorId;
-        use almide_ir::IrStmtKind;
         use crate::PrimKind;
 
-        // GATE — fold has exactly TWO params (state, element).
-        if params.len() != 2 {
-            return None;
-        }
-        let state_param = params[0].0;
-        let elem_param = params[1].0;
-
-        // GATE — the accumulator/result type is a 2-tuple `(List[T], Int)`.
-        let tup_tys = match result_ty {
-            Ty::Tuple(tys) if tys.len() == 2 => tys,
-            _ => return None,
-        };
-        let list_elem_ty = match &tup_tys[0] {
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
-            _ => return None,
-        };
-        if !matches!(tup_tys[1], Ty::Int) {
-            return None;
-        }
-        // A SCALAR list element (`(List[Int], Int)` — `wasm_record_offsets`) OR a `String` element
-        // (`(List[String], Int)`). Both are admitted: the scalar slot is a FLAT `__list_concat` + flat
-        // `Drop`; the String slot is `__list_concat_rc` + the recursive `DropListStr` (marked
-        // `heap_elem_lists`), and the SOURCE element of a heap (`List[String]`) source is read as the
-        // slot's i32 HANDLE (`LoadHandle`, below) — reading it as an i64 scalar was the
-        // `expected i32, found i64` invalid-wasm bug. A heap-FIELD aggregate element (a tuple/record
-        // list) still defers (its masked recursive drop is out of this slice).
-        let list_elem_scalar = !is_heap_ty(&list_elem_ty);
-        let list_elem_str = matches!(list_elem_ty, Ty::String);
-        if !list_elem_scalar && !list_elem_str {
-            return None;
-        }
-
-        // GATE — the INIT is `(<empty-list-literal>, <int-literal>)`.
-        let init_elems = match &init.kind {
-            IrExprKind::Tuple { elements } if elements.len() == 2 => elements,
-            _ => return None,
-        };
-        match &init_elems[0].kind {
-            IrExprKind::List { elements } if elements.is_empty() => {}
-            _ => return None,
-        }
-        let int_init_v = match &init_elems[1].kind {
-            IrExprKind::LitInt { value } => *value,
-            _ => return None,
-        };
-
-        // GATE — the BODY is `{ let (acc, n) = state; <interior pure lets…>; (c0, c1) }`: the FIRST
-        // statement destructures the state param's two components, then ZERO OR MORE pure value-binding
-        // statements (the element destructure `let (i,f)=fe`, a scalar `let off_s = int.to_string(off)`,
-        // a heap `let store = match get_kind(f) {…}` — the wasm-bindgen `field_stores` shape), then a
-        // 2-tuple tail. The interior statements are lowered as per-iteration EFFECTS (their heap temps
-        // freed within the iteration frame); a statement the body subset cannot lower → None → walls.
-        let (stmts, tail) = match &body.kind {
-            IrExprKind::Block { stmts, expr: Some(tail) } if !stmts.is_empty() => (stmts, tail.as_ref()),
-            _ => return None,
-        };
-        let (acc_var, n_var) = match &stmts[0].kind {
-            IrStmtKind::BindDestructure { pattern, value } => {
-                // The destructured value must be the STATE param (the destructure reads the two slots,
-                // not a fresh tuple).
-                match &value.kind {
-                    IrExprKind::Var { id } if *id == state_param => {}
-                    _ => return None,
-                }
-                match pattern {
-                    IrPattern::Tuple { elements } if elements.len() == 2 => {
-                        let a = match &elements[0] {
-                            IrPattern::Bind { var, ty }
-                                if matches!(ty,
-                                    Ty::Applied(TypeConstructorId::List, l) if l.len() == 1) =>
-                            {
-                                *var
-                            }
-                            _ => return None,
-                        };
-                        let b = match &elements[1] {
-                            IrPattern::Bind { var, ty } if matches!(ty, Ty::Int) => *var,
-                            _ => return None,
-                        };
-                        (a, b)
-                    }
-                    _ => return None,
-                }
-            }
-            _ => return None,
-        };
-        // The tail must be a 2-tuple `(c0, c1)` whose component0 is a `acc + […]` ConcatList reading
-        // the destructured list var, and component1 a scalar Int. (The component0 shape is re-checked
-        // by `try_lower_concat_list` below; here we just require the tuple shape + a ConcatList whose
-        // left reads `acc_var`, so a non-append body — e.g. `(other_list, …)` — defers.)
-        let tail_elems = match &tail.kind {
-            IrExprKind::Tuple { elements } if elements.len() == 2 => elements,
-            _ => return None,
-        };
-        match &tail_elems[0].kind {
-            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, .. } => {
-                match &left.kind {
-                    IrExprKind::Var { id } if *id == acc_var => {}
-                    _ => return None,
-                }
-            }
-            _ => return None,
-        }
-        if !matches!(tail_elems[0].ty,
-            Ty::Applied(TypeConstructorId::List, ref a) if a.len() == 1)
-            || !matches!(tail_elems[1].ty, Ty::Int)
-        {
-            return None;
-        }
+        let (state_param, elem_param, list_elem_str, int_init_v) =
+            parse_tuple_acc_fold_tys(params, result_ty, init)?;
+        let (acc_var, n_var, stmts, tail_elems) = parse_tuple_acc_fold_body(state_param, body)?;
 
         // ----- Lowering -----
         // Borrow the source list (evaluated once). A Var is borrowed; a fresh literal is materialized
@@ -505,52 +544,7 @@ impl LowerCtx {
         self.in_frame += 1;
         self.in_defunc_body += 1;
         self.scalar_loop_depth += 1;
-        let mut stmts_ok = true;
-        for s in &stmts[1..] {
-            // A `let store = if/match {…}` interior stmt binds a HEAP-result branch. `lower_stmt` →
-            // `lower_bind` WALLS that (the function-scope `im·im·d` it cannot prove). HERE it is sound:
-            // materialize the merged owned `dst` (per-arm `"im"`), bind `store`, and push it to
-            // `live_heap_handles` so the PER-ITERATION `drop_arm_locals(body_mark)` frees it once —
-            // the proven `i…d` per-iteration frame (NOT a function-scope drop). The concat `acc + [store]`
-            // copies/rc-incs it into the new list before that drop. Other stmts use the normal `lower_stmt`.
-            if let IrStmtKind::Bind { var, ty: bty, value, .. } = &s.kind {
-                if is_heap_ty(bty)
-                    && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
-                {
-                    let merged = match &value.kind {
-                        IrExprKind::If { cond, then, else_ } => {
-                            self.try_lower_heap_result_if(cond, then, else_, bty)
-                        }
-                        IrExprKind::Match { subject, arms } => self
-                            .desugar_match_to_if(subject, arms, bty)
-                            .and_then(|if_e| match &if_e.kind {
-                                IrExprKind::If { cond, then, else_ } => {
-                                    self.try_lower_heap_result_if(cond, then, else_, bty)
-                                }
-                                _ => None,
-                            }),
-                        _ => None,
-                    };
-                    match merged {
-                        Some(dst) => {
-                            self.value_of.insert(*var, dst);
-                            if !self.live_heap_handles.contains(&dst) {
-                                self.live_heap_handles.push(dst);
-                            }
-                            continue;
-                        }
-                        None => {
-                            stmts_ok = false;
-                            break;
-                        }
-                    }
-                }
-            }
-            if self.lower_stmt(s).is_err() {
-                stmts_ok = false;
-                break;
-            }
-        }
+        let stmts_ok = stmts[1..].iter().all(|s| self.lower_tuple_fold_interior_stmt(s));
         // component0: `acc + [elem]` → a FRESH owned list (reads the List slot). try_lower_concat_list
         // returns a bare ValueId (registered in the right recursive-drop set, NOT in live_heap_handles).
         let new_list = if stmts_ok { self.try_lower_concat_list(&tail_elems[0]) } else { None };
@@ -600,5 +594,49 @@ impl LowerCtx {
         }
         let tup = self.build_tuple_acc_result(list_slot, int_slot)?;
         Some(tup)
+    }
+
+    /// One INTERIOR statement of the tuple-acc fold body, lowered as a
+    /// per-iteration effect. A `let store = if/match {…}` interior stmt binds a
+    /// HEAP-result branch. `lower_stmt` → `lower_bind` WALLS that (the
+    /// function-scope `im·im·d` it cannot prove). HERE it is sound:
+    /// materialize the merged owned `dst` (per-arm `"im"`), bind `store`, and push it to
+    /// `live_heap_handles` so the PER-ITERATION `drop_arm_locals(body_mark)` frees it once —
+    /// the proven `i…d` per-iteration frame (NOT a function-scope drop). The concat `acc + [store]`
+    /// copies/rc-incs it into the new list before that drop. Other stmts use the normal `lower_stmt`.
+    /// `false` ⇒ out of subset (the caller declines and the whole HOF walls).
+    fn lower_tuple_fold_interior_stmt(&mut self, s: &IrStmt) -> bool {
+        use almide_ir::IrStmtKind;
+        if let IrStmtKind::Bind { var, ty: bty, value, .. } = &s.kind {
+            if is_heap_ty(bty)
+                && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+            {
+                let merged = match &value.kind {
+                    IrExprKind::If { cond, then, else_ } => {
+                        self.try_lower_heap_result_if(cond, then, else_, bty)
+                    }
+                    IrExprKind::Match { subject, arms } => self
+                        .desugar_match_to_if(subject, arms, bty)
+                        .and_then(|if_e| match &if_e.kind {
+                            IrExprKind::If { cond, then, else_ } => {
+                                self.try_lower_heap_result_if(cond, then, else_, bty)
+                            }
+                            _ => None,
+                        }),
+                    _ => None,
+                };
+                return match merged {
+                    Some(dst) => {
+                        self.value_of.insert(*var, dst);
+                        if !self.live_heap_handles.contains(&dst) {
+                            self.live_heap_handles.push(dst);
+                        }
+                        true
+                    }
+                    None => false,
+                };
+            }
+        }
+        self.lower_stmt(s).is_ok()
     }
 }

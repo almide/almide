@@ -612,6 +612,9 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                 // `${Map[String, Bool]}` — quoted keys, `true`/`false` values
                 // (option_unwrap_or_else_heap's some(Map) probes).
                 (Ty::String, Ty::Bool) => ("map", "to_string_sb"),
+                // `${Map[String, Float]}` — quoted keys, shortest-round-trip
+                // float values (stdlib/map_to_string.almd).
+                (Ty::String, Ty::Float) => ("map", "to_string_sf"),
                 // `${Map[String, List[Option[Int]]]}` — the mlo family display
                 // (stdlib/map_mlo.almd; values via the list.to_string_lo composition).
                 (Ty::String, Ty::Applied(TypeConstructorId::List, b))

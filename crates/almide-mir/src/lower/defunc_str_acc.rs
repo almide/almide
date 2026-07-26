@@ -268,7 +268,9 @@ impl LowerCtx {
         }
         let ok = lead_ok
             && self
-                .append_variant_match_to_result_list(subject, arms, rh, cursor, result_elem, eight)
+                .append_variant_match_to_result_list(subject, arms, ResultList {
+                    handle: rh, cursor, elem: result_elem, elem_size: eight,
+                })
                 .is_some();
         self.in_defunc_body -= 1;
         self.in_frame -= 1;

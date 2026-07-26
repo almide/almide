@@ -27,6 +27,32 @@ impl LowerCtx {
             self.materialized_lists.insert(dst);
             return Ok(true);
         }
+        // The TCO's upfront accumulator copy (`let slot = acc + []` — mod_p5_b
+        // synthesizes it, span-less) at a MAP/SET type. `try_lower_concat_list`
+        // above executes it for a real list; a map/set is not a list, so it used
+        // to fall through to the terminal deferred Opaque — an EMPTY block in
+        // place of a COPY of `acc`. Every in-tree caller happened to seed the
+        // accumulator with an empty map, so the empty block coincided with the
+        // right answer and this ran silently wrong-shaped for months; a NON-empty
+        // seed made the loop insert into an empty map while native kept the seed
+        // (`len=2 seed99=-1` vs `len=3 seed99=7` — the F2 accept-but-wrong class,
+        // found by the #810 producer census, pinned by tco_map_acc_seed.almd).
+        //
+        // The honest lowering is a SHARE, not a copy: `Op::Dup` rc-increments the
+        // seed's block and hands the slot a co-owning handle. Value semantics
+        // hold because no map/set op mutates a block in place — growth is
+        // functional (`map.set` allocates fresh), and every in-place elision in
+        // this compiler is rc==1-gated (MakeUnique), which a Dup'd rc>=2 block
+        // defeats by construction. The loop's first reassignment then drops the
+        // share (rc back to 1, caller still owns) and stores the fresh result —
+        // the proven drop-old/store-new slot discipline, unchanged.
+        if let Some(dst) = self.try_lower_tco_heap_acc_copy(value) {
+            self.value_of.insert(var, dst);
+            self.live_heap_handles.push(dst);
+            self.seed_call_named_heap_drop_route(dst, ty);
+            self.seed_call_named_heap_read_shape(dst, ty);
+            return Ok(true);
+        }
         // `let s = "x=${n} y=${t}"` — a STRING INTERPOLATION over the executable
         // subset (Lit / String Var/LitStr / Int Var/LitInt parts) EXECUTES to a
         // fresh owned String via the same __str_concat chain, byte-matching v0;
@@ -71,6 +97,38 @@ impl LowerCtx {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    /// The TCO accumulator-copy shape at a MAP/SET type: `Var(acc) + <empty>`,
+    /// where `<empty>` is the span-less `[]` / `[:]` mod_p5_b synthesizes. Lowers
+    /// to an [`Op::Dup`] share of the accumulator's block — the same CowSafety
+    /// discipline a closure capture uses (binds.rs): sound because every
+    /// in-place elision is rc==1-gated, and a Dup makes rc>=2. Returns `None`
+    /// for any other shape, including a USER-written `+` — the checker types `+`
+    /// only for strings and lists, so a Map/Set-typed `ConcatList` can only be
+    /// the TCO synthesis; the Var-left + literal-empty-right gate makes the
+    /// match structural rather than trusting that provenance.
+    fn try_lower_tco_heap_acc_copy(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::Map, _) | Ty::Applied(TypeConstructorId::Set, _))
+        {
+            return None;
+        }
+        let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } = &value.kind
+        else {
+            return None;
+        };
+        let empty_right = matches!(&right.kind, IrExprKind::EmptyMap)
+            || matches!(&right.kind, IrExprKind::List { elements } if elements.is_empty());
+        if !empty_right {
+            return None;
+        }
+        let IrExprKind::Var { id } = &left.kind else { return None };
+        let src = *self.value_of.get(id)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::Dup { dst, src });
+        Some(dst)
     }
 
     /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
@@ -351,9 +409,40 @@ impl LowerCtx {
     /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
     /// the terminal `Alloc{Opaque}`-or-real-list fallback, verbatim.
     fn lower_bind_heap_fresh_opaque(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        // An ERROR-OPERATOR heap bind that SURVIVED to this terminal — a
+        // `let x = f()!` / auto-`?` `Try` / `??` / `?.` whose position
+        // `desugar_effect_unwrap` could not reach (it walks only the fn body's
+        // top-level statements; a bind nested in a loop/if arm is outside the
+        // continuation transform's expressible subset, because its Err arm would
+        // need a mid-loop early return the MIR has no Op for). Deferring it binds
+        // an EMPTY block in place of the unwrapped payload, and the program then
+        // READS it: minesweeper's `let mines = place_mines(…)` (auto-`?` inside
+        // `while { if { if is_first { … } } }`) bound an empty List[Bool] where
+        // the 81-cell minefield should be — the #810 census's one non-accumulator
+        // producer, and a silent wrong value on the verified default. WALL: the
+        // rationale that error operators are "total value maps" is true of their
+        // CONTROL FLOW, not of a deferred value somebody reads.
+        if crate::lower::strict_values()
+            && matches!(
+                value.kind,
+                IrExprKind::Try { .. }
+                    | IrExprKind::Unwrap { .. }
+                    | IrExprKind::UnwrapOr { .. }
+                    | IrExprKind::ToOption { .. }
+                    | IrExprKind::OptionalChain { .. }
+            )
+        {
+            return Err(LowerError::Unsupported(format!(
+                "{} heap bind outside the effect-unwrap desugar's reach (nested in \
+                 a loop/if arm) cannot be faithfully materialized in this brick — \
+                 deferring it would bind an empty value in place of the unwrapped \
+                 payload",
+                kind_name(&value.kind)
+            )));
+        }
+        let init = alloc_init(value);
         let dst = self.fresh_value();
         let repr = repr_of(ty)?;
-        let init = alloc_init(value);
         // A NON-EMPTY SCALAR-element List literal that did NOT fold to a real
         // `Init::IntList` (a computed element the builders above declined — e.g. a
         // nested inadmissible-HOF chain, fuzz B-198/659): the flat Opaque reads as
@@ -372,6 +461,39 @@ impl LowerCtx {
                         .into(),
                 ));
             }
+        }
+        // NO THIRD STATE (#810, the bind terminal). The producer census over the
+        // 983-file corpus found `Init::Opaque` carrying three meanings here:
+        //
+        //   1. genuinely empty      — `[:]`. Now `Init::Empty`; REAL final content.
+        //   2. allocate-then-fill   — the TCO accumulator copy (`acc + []` at a
+        //                             Map/Set type). Now a REAL `Op::Dup` share,
+        //                             intercepted in the quick wins above.
+        //   3. could not build      — the accept-but-wrong reservoir. The error
+        //                             operators (the census's one other producer)
+        //                             wall above; everything else walls HERE.
+        //
+        // What remains admitted as Opaque under STRICT mode is exactly the
+        // capturing-closure/range family — a value the model deliberately has no
+        // representation for, whose every observation already walls (invocation
+        // at the HOF, a custom-variant match via `deferred_opaque_binds`). Any
+        // OTHER kind arriving with Opaque walls by default, so a future unhandled
+        // shape is a named wall, never a silently-empty bind. This default-deny
+        // cost zero corpus wall rate — the census is the evidence.
+        if crate::lower::strict_values()
+            && matches!(init, Init::Opaque)
+            && !matches!(
+                value.kind,
+                IrExprKind::ClosureCreate { .. }
+                    | IrExprKind::Lambda { .. }
+                    | IrExprKind::Range { .. }
+            )
+        {
+            return Err(LowerError::Unsupported(format!(
+                "{} heap bind cannot be faithfully materialized in this brick \
+                 (walled, not deferred to an empty block the program could read)",
+                kind_name(&value.kind)
+            )));
         }
         // An all-literal `Init::IntList` is a REAL, POPULATED block (every slot a constant) —
         // admit a direct `xs[i]` bounds-checked load over it. An `Init::Opaque` (a deferred /

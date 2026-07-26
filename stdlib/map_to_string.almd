@@ -261,3 +261,91 @@ fn map_to_string_sb(m: Map[String, Bool]) -> String = {
     buf
   }
 }
+
+// ── `${Map[String, Float]}` ── `["a": 1.5]`: quoted keys, shortest-round-trip
+// float values (the same `float.to_string` a bare `${float}` renders, so the
+// pairing is byte-identical to native by construction).
+//
+// The value slots hold the float's i64 BITS — `map.values` yields a `List[Float]`
+// whose block is the raw i64 run — so each is reinterpreted with
+// `int.bits_to_float`, the way the Bool leg reinterprets its 0/1. Keys go through
+// the same `__mts_key_width` / `__mts_fill_key` pair every quoted-key variant
+// uses, so escaping is shared rather than re-derived.
+// A rendered float, in the `${float}` convention BOTH targets already use for a
+// bare interpolation and for `${List[Float]}`: `float.to_string` with a trailing
+// `.0` stripped, so `1.0` renders `1` and `-0.0` renders `-0`. Rendering it as
+// plain `float.to_string` made the map display disagree with native on every
+// whole-number value (differential fuzz, 13 findings in one campaign).
+fn __mts_ends_dot0(src: Int, n: Int) -> Bool =
+  if n < 2 then false
+  else if prim.load8(src + n - 2) != 46 then false
+  else prim.load8(src + n - 1) == 48
+
+fn __mts_float_width(bits: Int) -> Int = {
+  let s = float.to_string(prim.ffrombits(bits))
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  if __mts_ends_dot0(sh + 12, n) then n - 2 else n
+}
+
+fn __mts_fill_float(bits: Int, pos: Int) -> Int = {
+  let s = float.to_string(prim.ffrombits(bits))
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let w = if __mts_ends_dot0(sh + 12, n) then n - 2 else n
+  __mts_fill_bytes(sh + 12, w, 0, pos)
+}
+
+fn __mts_body_len_sf(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let velem = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __mts_key_width(kelem) + 2 + __mts_float_width(velem)
+    __mts_body_len_sf(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
+
+fn __mts_fill_bytes(src: Int, n: Int, i: Int, pos: Int) -> Int =
+  if i >= n then pos
+  else {
+    prim.store8(pos, prim.load8(src + i))
+    __mts_fill_bytes(src, n, i + 1, pos + 1)
+  }
+
+fn __mts_fill_body_sf(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __mts_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
+    prim.store8(pos2 + 1, 32)
+    let velem = prim.load64(vaddr + i * 8)
+    let pos3 = __mts_fill_float(velem, pos2 + 2)
+    __mts_fill_body_sf(kaddr, vaddr, count, i + 1, pos3)
+  }
+
+fn map_to_string_sf(m: Map[String, Float]) -> String = {
+  let ks = map.keys(m)
+  let vs = map.values(m)
+  let hk = prim.handle(ks)
+  let hv = prim.handle(vs)
+  let count = prim.load32(hk + 4)
+  if count == 0 then "[:]"
+  else {
+    let kaddr = hk + 12
+    let vaddr = hv + 12
+    let body = __mts_body_len_sf(kaddr, vaddr, count, 0, 0)
+    let buf = prim.alloc_str(body + 2)
+    let base = prim.handle(buf) + 12
+    prim.store8(base, 91)
+    let after = __mts_fill_body_sf(kaddr, vaddr, count, 0, base + 1)
+    prim.store8(after, 93)
+    buf
+  }
+}

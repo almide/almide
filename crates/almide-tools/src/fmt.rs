@@ -255,50 +255,65 @@ fn collect_module_refs_variant_case(c: &VariantCase, used: &mut std::collections
     }
 }
 
+/// Collect the module names an expression references, for `auto_imports`.
+///
+/// Split into a CHILD-LIST arm set and a SCOPED arm set. The first group's arms
+/// only name their sub-expressions, so they return `Vec<&Expr>` and the single
+/// driver below does the recursion — the arms carry no bodies at all, which is
+/// where the complexity was. The second group needs more than recursion (a
+/// module name to record, statement bodies, match arms with guards) and keeps
+/// its own helpers.
+///
+/// The `_ => {}` fallthrough is deliberate and pre-existing: an expression form
+/// with no sub-expressions references no module. But note what a MISSING arm
+/// costs here — a dropped import, i.e. code that no longer compiles after
+/// `almide fmt`. Any new `ExprKind` with children must be added to one group.
 fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<String>) {
+    if collect_module_refs_scoped(expr, used) {
+        return;
+    }
+    for child in module_ref_children(expr) {
+        collect_module_refs_expr(child, used);
+    }
+}
+
+/// Every sub-expression of a form whose only contribution is its children.
+fn module_ref_children(expr: &Expr) -> Vec<&Expr> {
+    match &expr.kind {
+        ExprKind::Call { callee, args, .. } => {
+            let mut v: Vec<&Expr> = vec![callee];
+            v.extend(args.iter());
+            v
+        }
+        ExprKind::Binary { left, right, .. }
+        | ExprKind::Pipe { left, right, .. } => vec![left, right],
+        ExprKind::If { cond, then, else_, .. } => vec![cond, then, else_],
+        ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
+            elements.iter().collect()
+        }
+        ExprKind::Record { fields, .. } => fields.iter().map(|f| &f.value).collect(),
+        ExprKind::IndexAccess { object, index, .. } => vec![object, index],
+        ExprKind::Unary { operand, .. } => vec![operand],
+        ExprKind::Unwrap { expr, .. }
+        | ExprKind::Try { expr, .. }
+        | ExprKind::ToOption { expr, .. }
+        | ExprKind::Await { expr, .. } => vec![expr],
+        ExprKind::UnwrapOr { expr, fallback, .. } => vec![expr, fallback],
+        _ => Vec::new(),
+    }
+}
+
+/// The forms that contribute more than their child expressions: a module name to
+/// record, a statement body, or match arms with guards. Returns `true` when it
+/// handled the expression (so the child-list driver must not also walk it).
+fn collect_module_refs_scoped(expr: &Expr, used: &mut std::collections::HashSet<String>) -> bool {
     match &expr.kind {
         ExprKind::Member { .. } => collect_module_refs_member(expr, used),
-        ExprKind::Call { callee, args, .. } => {
-            collect_module_refs_expr(callee, used);
-            for a in args { collect_module_refs_expr(a, used); }
-        }
-        ExprKind::Binary { left, right, .. } => {
-            collect_module_refs_expr(left, used);
-            collect_module_refs_expr(right, used);
-        }
-        ExprKind::If { cond, then, else_, .. } => {
-            collect_module_refs_expr(cond, used);
-            collect_module_refs_expr(then, used);
-            collect_module_refs_expr(else_, used);
-        }
+        ExprKind::Match { .. } => collect_module_refs_match(expr, used),
+        ExprKind::InterpolatedString { .. } => collect_module_refs_istring(expr, used),
+        ExprKind::Lambda { body, .. } => collect_module_refs_expr(body, used),
         ExprKind::Block { stmts, .. } => {
             for s in stmts { collect_module_refs_stmt(s, used); }
-        }
-        ExprKind::Match { .. } => collect_module_refs_match(expr, used),
-        ExprKind::Lambda { body, .. } => collect_module_refs_expr(body, used),
-        ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
-            for e in elements { collect_module_refs_expr(e, used); }
-        }
-        ExprKind::Pipe { left, right, .. } => {
-            collect_module_refs_expr(left, used);
-            collect_module_refs_expr(right, used);
-        }
-        ExprKind::InterpolatedString { .. } => collect_module_refs_istring(expr, used),
-        ExprKind::Record { fields, .. } => {
-            for f in fields { collect_module_refs_expr(&f.value, used); }
-        }
-        ExprKind::IndexAccess { object, index, .. } => {
-            collect_module_refs_expr(object, used);
-            collect_module_refs_expr(index, used);
-        }
-        ExprKind::Unary { operand, .. } => collect_module_refs_expr(operand, used),
-        ExprKind::Unwrap { expr, .. } | ExprKind::Try { expr, .. } | ExprKind::ToOption { expr, .. }
-        | ExprKind::Await { expr, .. } => {
-            collect_module_refs_expr(expr, used);
-        }
-        ExprKind::UnwrapOr { expr, fallback, .. } => {
-            collect_module_refs_expr(expr, used);
-            collect_module_refs_expr(fallback, used);
         }
         ExprKind::ForIn { iterable, body, .. } => {
             collect_module_refs_expr(iterable, used);
@@ -308,8 +323,9 @@ fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<St
             collect_module_refs_expr(cond, used);
             for s in body { collect_module_refs_stmt(s, used); }
         }
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
 fn collect_module_refs_member(expr: &Expr, used: &mut std::collections::HashSet<String>) {
@@ -405,28 +421,34 @@ fn format_attribute(attr: &Attribute) -> String {
             out.push_str(n);
             out.push('=');
         }
-        match &arg.value {
-            AttrValue::String { value } => {
-                out.push('"');
-                for ch in value.chars() {
-                    match ch {
-                        '\\' => out.push_str("\\\\"),
-                        '"' => out.push_str("\\\""),
-                        '\n' => out.push_str("\\n"),
-                        '\r' => out.push_str("\\r"),
-                        '\t' => out.push_str("\\t"),
-                        c => out.push(c),
-                    }
-                }
-                out.push('"');
-            }
-            AttrValue::Int { value } => out.push_str(&value.to_string()),
-            AttrValue::Bool { value } => out.push_str(if *value { "true" } else { "false" }),
-            AttrValue::Ident { name } => out.push_str(name),
-        }
+        push_attr_value(&mut out, &arg.value);
     }
     out.push(')');
     out
+}
+
+/// One attribute argument value. Extracted from `format_attribute` — the string
+/// case's escape table nested inside the argument loop was the whole cost.
+fn push_attr_value(out: &mut String, value: &AttrValue) {
+    match value {
+        AttrValue::String { value } => {
+            out.push('"');
+            for ch in value.chars() {
+                match ch {
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
+                    '\t' => out.push_str("\\t"),
+                    c => out.push(c),
+                }
+            }
+            out.push('"');
+        }
+        AttrValue::Int { value } => out.push_str(&value.to_string()),
+        AttrValue::Bool { value } => out.push_str(if *value { "true" } else { "false" }),
+        AttrValue::Ident { name } => out.push_str(name),
+    }
 }
 
 fn fmt_vis(out: &mut String, vis: &Visibility) {
@@ -582,11 +604,13 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
             out.push(']');
         }
         TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
-            let open = matches!(ty, TypeExpr::OpenRecord { .. });
             out.push_str("{ ");
             comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
-            if open { if !fields.is_empty() { out.push_str(", "); } out.push_str(".. "); }
-            else { out.push(' '); }
+            match (matches!(ty, TypeExpr::OpenRecord { .. }), fields.is_empty()) {
+                (true, false) => out.push_str(", .. "),
+                (true, true) => out.push_str(".. "),
+                (false, _) => out.push(' '),
+            }
             out.push('}');
         }
         TypeExpr::Fn { params, ret } => {
@@ -608,21 +632,31 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         }
         TypeExpr::Variant { cases } => {
             for (i, case) in cases.iter().enumerate() {
-                if i > 0 { out.push_str(" | "); } else { out.push_str("| "); }
-                match case {
-                    VariantCase::Unit { name } => out.push_str(name),
-                    VariantCase::Tuple { name, fields } => {
-                        out.push_str(name); out.push('(');
-                        comma_sep(out, fields, |out, f| fmt_type(out, f, depth));
-                        out.push(')');
-                    }
-                    VariantCase::Record { name, fields } => {
-                        w!(out, "{name} {{ ");
-                        comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
-                        out.push_str(" }");
-                    }
-                }
+                // A leading `|` on the first case too — the declaration style
+                // `type T =\n  | A\n  | B` round-trips only if it is emitted.
+                out.push_str(if i > 0 { " | " } else { "| " });
+                fmt_variant_case(out, case, depth);
             }
+        }
+    }
+}
+
+/// One variant case: `Unit`, `Tuple(Ty, …)`, or `Record { f: Ty, … }`.
+/// Extracted from `fmt_type` — the case shapes are a peer set, and nesting them
+/// inside the enumerate loop is what pushed that function over the threshold.
+fn fmt_variant_case(out: &mut String, case: &VariantCase, depth: usize) {
+    match case {
+        VariantCase::Unit { name } => out.push_str(name),
+        VariantCase::Tuple { name, fields } => {
+            out.push_str(name);
+            out.push('(');
+            comma_sep(out, fields, |out, f| fmt_type(out, f, depth));
+            out.push(')');
+        }
+        VariantCase::Record { name, fields } => {
+            w!(out, "{name} {{ ");
+            comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
+            out.push_str(" }");
         }
     }
 }

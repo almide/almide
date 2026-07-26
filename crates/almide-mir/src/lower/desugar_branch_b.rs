@@ -498,7 +498,9 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
                     &if_branch, bind_var, &bind_ty, &rest_stmts, &rest_tail, result_ty,
                 ),
                 None => LowerCtx::wrap_match_arms(
-                    subject, arms, bind_var, &bind_ty, &rest_stmts, &rest_tail, result_ty,
+                    subject, arms, bind_var, &bind_ty,
+                    crate::lower::control::MatchRest { stmts: &rest_stmts, tail: &rest_tail },
+                    result_ty,
                 ),
             }
         }

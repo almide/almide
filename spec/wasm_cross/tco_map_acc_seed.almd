@@ -1,0 +1,58 @@
+// @contract: C-174
+// A tail-recursive Map/Set accumulator seeded with a NON-EMPTY value. The TCO
+// rewrites the recursion into a loop and synthesizes an upfront copy of the
+// accumulator param (`let slot = acc + []`); for a List that copy executes via
+// __list_concat, but a Map/Set is not a list, so the bind fell to the terminal
+// deferred Opaque — an EMPTY block in place of a copy of the seed. Every
+// in-tree caller seeded with an empty map, so the empty block coincided with
+// the right answer; this program seeds with `[(99, 7)]` and the loop then
+// inserted into an EMPTY map: wasm printed `len=2 seed99=-1` while native kept
+// the seed (`len=3 seed99=7`) — a silent cross-target miscompile (the F2
+// accept-but-wrong class, found by the #810 producer census).
+//
+// The copy now lowers as an `Op::Dup` share of the seed's block — sound because
+// map/set growth is functional (`map.set` allocates fresh) and every in-place
+// elision is rc==1-gated, which a Dup'd rc>=2 block defeats by construction.
+// The zero-iteration case pins the share discipline itself: the result aliases
+// the seed and both are dropped independently.
+
+fn go(xs: List[Int], i: Int, acc: Map[Int, Int]) -> Map[Int, Int] =
+  if i >= list.len(xs) then acc
+  else go(xs, i + 1, map.set(acc, list.get_or(xs, i, 0), 1))
+
+fn gs(xs: List[String], i: Int, acc: Set[String]) -> Set[String] =
+  if i >= list.len(xs) then acc
+  else gs(xs, i + 1, set.insert(acc, list.get_or(xs, i, "")))
+
+fn gm(xs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
+  if i >= list.len(xs) then acc
+  else {
+    let k = list.get_or(xs, i, "")
+    gm(xs, i + 1, map.set(acc, k, k + "!"))
+  }
+
+fn main() -> Unit = {
+  // The original counterexample: the seed entry must survive the loop.
+  let seed = map.from_list([(99, 7)])
+  let m = go([1, 2], 0, seed)
+  println("len=${int.to_string(map.len(m))} seed99=${int.to_string(map.get_or(m, 99, -1))} orig=${int.to_string(map.len(seed))}")
+
+  // Zero iterations: the result SHARES the seed's block (rc=2); both handles
+  // are then dropped independently — the share must not double-free or leak.
+  let seed0 = map.from_list([(5, 50)])
+  let z = go([], 0, seed0)
+  println("zero=${int.to_string(map.len(z))}:${int.to_string(map.len(seed0))}")
+
+  // Set accumulator, non-empty seed.
+  let ss = set.from_list(["keep"])
+  let s2 = gs(["a", "b"], 0, ss)
+  let kept = if set.contains(s2, "keep") then "y" else "n"
+  println("set=${int.to_string(set.len(s2))} keep=${kept} orig=${int.to_string(set.len(ss))}")
+
+  // String-KV map (interleaved _str repr — nested string handles under the
+  // rc-gated recursive drop), non-empty seed.
+  let ms = map.set(map.new(), "seed", "v0")
+  let m2 = gm(["x", "y"], 0, ms)
+  let has = if map.contains(m2, "seed") then "y" else "n"
+  println("mstr=${int.to_string(map.len(m2))} seed=${has} orig=${int.to_string(map.len(ms))}")
+}

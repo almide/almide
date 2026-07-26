@@ -1,3 +1,19 @@
+/// What the elements of a string-list literal are, for drop classification.
+///
+/// Six of these were adjacent `bool` parameters, so any two could be transposed
+/// without the compiler noticing — and each one selects a DIFFERENT drop
+/// routine, so a transposition frees the wrong shape rather than failing.
+pub(crate) struct StrListElemShape<'a> {
+    pub value: bool,
+    pub str_value: bool,
+    pub int_str: bool,
+    pub str_int: bool,
+    pub list_str: bool,
+    pub list_flat: bool,
+    pub rich_variant: &'a Option<String>,
+    pub recdrop: &'a Option<String>,
+}
+
 impl LowerCtx {
 
     /// The element-shape → drop-route classification for
@@ -5,18 +21,12 @@ impl LowerCtx {
     /// (guard-clause flattening) of the former inline else-if chain, no behavior change — see
     /// docs/roadmap/active/code-health-codopsy.md.
     #[allow(clippy::too_many_arguments)]
-    fn classify_str_list_literal_drop(
-        &mut self,
-        list: ValueId,
-        elem_value: bool,
-        elem_str_value: bool,
-        elem_int_str: bool,
-        elem_str_int: bool,
-        elem_list_str: bool,
-        elem_list_flat: bool,
-        elem_rich_variant: &Option<String>,
-        elem_recdrop: &Option<String>,
-    ) {
+    fn classify_str_list_literal_drop(&mut self, list: ValueId, elem: &StrListElemShape<'_>) {
+        let &StrListElemShape {
+            value: elem_value, str_value: elem_str_value, int_str: elem_int_str,
+            str_int: elem_str_int, list_str: elem_list_str, list_flat: elem_list_flat,
+            rich_variant: elem_rich_variant, recdrop: elem_recdrop,
+        } = elem;
         if elem_value {
             self.value_elem_lists.insert(list);
             return;
@@ -246,17 +256,16 @@ impl LowerCtx {
         // A `List[Value]` drops via `Op::DropListValue` (recursive `$__drop_value` per element); a
         // String/aggregate list via the flat-element `Op::DropListStr`. Marking the right set is what
         // makes the scope-end drop reclaim each element's nested payload (no leak).
-        self.classify_str_list_literal_drop(
-            list,
-            elem_value,
-            elem_str_value,
-            elem_int_str,
-            elem_str_int,
-            elem_list_str,
-            elem_list_flat,
-            &elem_rich_variant,
-            &elem_recdrop,
-        );
+        self.classify_str_list_literal_drop(list, &StrListElemShape {
+            value: elem_value,
+            str_value: elem_str_value,
+            int_str: elem_int_str,
+            str_int: elem_str_int,
+            list_str: elem_list_str,
+            list_flat: elem_list_flat,
+            rich_variant: &elem_rich_variant,
+            recdrop: &elem_recdrop,
+        });
         self.materialized_lists.insert(list);
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });

@@ -9,6 +9,103 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.36.0] — 2026-07-26
+
+Ten new behaviour contracts (C-165…C-174), the retirement of the wasm
+renderer's silent-deferral machinery, a conformance report generated from the
+contract ledger, and two flagship examples that byte-compare across targets on
+every `cargo test`.
+
+### Fixed — cross-target equivalence
+
+- **TCO Map/Set accumulator seeds** (C-174): `acc + []` in a tail-recursive
+  accumulator previously bound an EMPTY deferred block, so a non-empty seed
+  silently vanished on wasm — a live miscompile found by the #810 census. The
+  seed is now SHARED into the accumulator with a real `Op::Dup`; the
+  zero-iteration case, Set accumulators and the `_str` map layout are pinned
+  by fixture. (#810)
+- **Integer literals** (C-173): range-checked against the SIGN and the i64
+  CARRIER, not only the magnitude — `let x: UInt32 = -5` and a
+  past-the-carrier hex literal each get their own E024 hint stating the
+  type's range, shown as written (`-5`, not `5`). The check recurses through
+  aggregate collection elements and record-field / tuple positions (the
+  check-versus-build gap the fuzzer found). #872 tracks the UInt64 lane above
+  `i64::MAX`.
+- **Type-erased `unwrap_or`** (C-172): self-hosted for every heap payload,
+  clearing the last unlinked-call wall bucket.
+- **Byte-offset bounds** (C-171): written subtractively so a near-`i64::MAX`
+  position cannot wrap past them.
+- **Integer arithmetic emits wrapping ops** (C-170): the overflow law holds in
+  a module-level `let` and under `overflow-checks = true`.
+- **`list.repeat`** (C-169): the same size ceiling `string.repeat` has — an
+  oversized count aborts identically on both targets. The native runner's
+  `string.repeat` shim also clamps negative counts and aborts past the shared
+  2^31-byte ceiling instead of panicking.
+- **`list.flatten`** (C-168): borrows its argument, so it composes with
+  another borrow in one expression.
+- **`float.clamp`** (C-167): the comparison chain `f64::clamp` is, so an
+  in-range negative zero keeps its sign on both targets.
+- **The `map` `to_string` family** (C-166): routed through the repr router
+  unsuffixed, with the Float-value display self-hosted.
+- **Heap-accumulator folds** (C-165): self-hosted for the skv map layout,
+  String lists and String sets.
+- **A heap-typed call under `some(...)`** can no longer be stored as a
+  scalar — the Some-payload gate reads the payload type, so #871's
+  wrong-value form is a wall while the fix is designed.
+- **Heap-element tuple captures** are clone-wrapped, so a closure capturing a
+  `(String, …)` tuple and a later use of the original are both valid — the
+  second live nightly-fuzz finding.
+
+### Hardened — the deferred-bind terminal (#810, #777)
+
+- `Init::Opaque` was three meanings in one type: genuinely-empty is now its
+  own `Init::Empty`, the TCO accumulator share is a real `Op::Dup`, and
+  could-not-build DECLINES — the bind terminal is default-deny behind a
+  three-shape whitelist (ClosureCreate / Lambda / Range), so the C-174 class
+  cannot recur silently.
+- Error operators nested beyond the effect-unwrap desugar's reach wall by
+  name instead of risking a deferred Const; a direction-proof test forces any
+  future desugar extension to byte-match native.
+- Every lowered function passes a def-before-use wellformedness gate over an
+  exhaustive defines/reads split of its ops — a new Op variant is a compile
+  error until classified. (#777)
+
+### Added — evidence & conformance
+
+- The ALS conformance report is GENERATED from the contract ledger
+  (`docs/contracts/conformance.md`, every ledger section fixture-backed),
+  with a CI freshness gate; the contracts index gained the same gate. (#811)
+- A proven-versus-trusted boundary map under `docs/contracts/`.
+- The two v0-era wasm test skips are gone; a ledger gate keeps every
+  remaining skip a declared platform limit.
+- A `main` that walls reports the REASON, not only that it is outside the
+  subset.
+
+### Added — examples
+
+- `examples/raytracer.almd`: a ray tracer that renders straight into the
+  terminal as ANSI 24-bit half-block art — three mirrored spheres, a
+  checkerboard floor, hard shadows, specular glints, three mirror bounces —
+  byte-identical across targets.
+- `examples/lisp.almd`: a mini-Scheme with closures, lexical scope and
+  late-bound top-level definitions; `fact`, `fib`, `map` and quicksort run IN
+  the interpreted Lisp — byte-identical across targets.
+- `tests/examples_parity_test.rs`: every example is either PARITY
+  (byte-compared native vs wasm on every `cargo test`) or LEDGERED with the
+  reason it cannot compare — an example in neither list fails the suite.
+
+### Internal — code health (codopsy round 2)
+
+- almide-frontend, almide-tools, almide-interp and almide-dialect lifted to
+  grade A by name-router extraction and table-driven lookups with
+  completeness tests; E015 reimpl-lint suggestions are now deterministic
+  (edit distance over a sorted fn list).
+- The four worst almide-mir functions (cyclomatic 103–116) split into phase
+  helpers, byte-verified over the 986-file corpus on BOTH renderers (emit
+  and wasm hashes unchanged). #852 continues.
+- The MIR debug channels route through one documented trace module with a
+  roster test that keeps every channel listed.
+
 ## [0.35.0] — 2026-07-25
 
 A correctness release, driven by the differential fuzzer and the issue ledger:

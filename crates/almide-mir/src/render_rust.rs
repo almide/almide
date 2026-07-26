@@ -144,7 +144,7 @@ fn render_op(op: &Op) -> Option<String> {
                 }
                 // A runtime-sized String is wasm-only (native uses v0 codegen); an empty
                 // placeholder keeps the type a Vec<i64>.
-                Init::Opaque | Init::DynStr { .. } => "Vec::new()".to_string(),
+                Init::Opaque | Init::Empty | Init::DynStr { .. } => "Vec::new()".to_string(),
                 // A materialized `Some(payload)` / runtime List are wasm-only (native uses
                 // v0 codegen).
                 Init::OptSome { .. } | Init::OptNone | Init::DynList { .. } | Init::DynListStr { .. } => {

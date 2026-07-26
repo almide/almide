@@ -38,8 +38,15 @@ fn bytes_read_f16_le(b: Bytes, pos: Int) -> Float = {
   // (i64::MIN + 2), the guard passed, and the load read a WRAPPED address —
   // native returned 0.0 (its `pos as usize` is huge) while wasm returned the value
   // at the wrapped offset (differential-fuzz, `read_f16_le(b, i64::MIN)` → inf).
+  // The bound is compared as `pos > len - 2`, NOT `pos + 2 > len`: at
+  // `i64::MAX` the addition WRAPS to a negative number, the comparison passed,
+  // and the load read a wrapped address — wasm returned the value there while
+  // native's `pos as usize` was out of range and gave 0.0 (differential fuzz).
+  // Subtracting from `len` cannot overflow: `len` is a non-negative i32-ranged
+  // length, so `len - 2` is representable for every value it can hold. This is
+  // the self-host twin of the native runtime's `checked_add` guards.
   if pos < 0 then 0.0
-  else if pos + 2 > len then 0.0
+  else if pos > len - 2 then 0.0
   else {
     let b0 = prim.load8(h + 12 + pos)
     let b1 = prim.load8(h + 12 + pos + 1)
@@ -52,8 +59,9 @@ fn bytes_read_f16_le(b: Bytes, pos: Int) -> Float = {
 // Decodes inline via the private __f16_decode (NOT a call to the registered bytes.read_f16_le
 // — a same-file registered cross-reference loops the auto-linker). Per-element OOB → 0.0.
 fn __arr_f16le_one(h: Int, p: Int, len: Int) -> Float =
+  // Subtractive bound, for the same overflow reason as `bytes_read_f16_le`.
   if p < 0 then 0.0
-  else if p + 2 > len then 0.0
+  else if p > len - 2 then 0.0
   else {
     let b0 = prim.load8(h + 12 + p)
     let b1 = prim.load8(h + 12 + p + 1)

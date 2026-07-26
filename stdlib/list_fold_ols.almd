@@ -30,3 +30,42 @@ fn list_fold_ols(
   let n = prim.load32(h + 4)
   __fold_ols_loop(h, f, n, 0, init)
 }
+
+// ── String elements, ANY heap accumulator ── the type-ERASED sibling of
+// `list_fold_ols`. A heap accumulator is one i32 handle whatever block it points
+// at, and this loop never inspects it: the acc MOVES into f each iteration (f
+// consumes it and returns the next — this fn never frees it) and the final acc
+// is the owned result. Elements are borrowed String loads; the source keeps
+// ownership.
+//
+// `Set[String]` shares it: a `Set[String]` IS a DynListStr block of unique,
+// insertion-ordered Strings (set_str.almd), the same layout `List[String]` has,
+// so one walk serves both subjects.
+fn __fold_str_hacc_loop(
+  h: Int,
+  f: (Value, String) -> Value,
+  n: Int,
+  i: Int,
+  acc: Value,
+) -> Value =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_str_hacc_loop(h, f, n, i + 1, nacc)
+  }
+
+fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value) -> Value = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __fold_str_hacc_loop(h, f, n, 0, init)
+}
+
+// `Set[String]` shares the walk above under its own name: the registry maps one
+// impl fn to one call name, so the alias needs a definition rather than a second
+// row over `list_fold_str_hacc`.
+fn set_fold_str_hacc(xs: Set[String], init: Value, f: (Value, String) -> Value) -> Value = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __fold_str_hacc_loop(h, f, n, 0, init)
+}

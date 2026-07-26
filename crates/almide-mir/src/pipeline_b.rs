@@ -646,6 +646,7 @@ fn lower_main_and_sibling_fns(
     layouts: &PipelineLayouts,
     total_ir_fn_count: usize,
     verbose: bool,
+    main_wall: &mut Option<String>,
 ) -> Vec<crate::MirFunction> {
     let mut functions = Vec::new();
     let mut walled = Vec::new();
@@ -663,7 +664,17 @@ fn lower_main_and_sibling_fns(
             &layouts.variant_layouts,
         ) {
             Ok(mirs) => functions.extend(mirs),
-            Err(e) => walled.push(format!("{}: {e:?}", func.name.as_str())),
+            Err(e) => {
+                // `main`'s own reason is the one worth reporting: when it walls
+                // there is no `$main`, and the whole module declines. Reporting
+                // only the absence turned every distinct cause into one
+                // unattributable bucket — a third of the fuzzer's wall
+                // histogram (#812).
+                if func.name.as_str() == "main" {
+                    *main_wall = Some(format!("{e:?}"));
+                }
+                walled.push(format!("{}: {e:?}", func.name.as_str()));
+            }
         }
     }
     if !walled.is_empty() && verbose {

@@ -19,7 +19,7 @@ fn to_roman_step(n: Int, values: List[(Int, String)]) -> String =
     let v = pair.0
     let s = pair.1
     if n >= v then s + to_roman_step(n - v, values)
-    else to_roman_step(n, list.drop(values, 1))
+    else to_roman_step(n, list.tail(values))
   }
 
 fn to_roman(n: Int) -> String =

@@ -1,3 +1,13 @@
+/// The statements that follow a `guard let` in its block, and the block's tail.
+///
+/// They are what the synthesised match arms wrap, and they are only meaningful
+/// as a pair — the tail is the value of the same block the statements belong to.
+#[derive(Copy, Clone)]
+pub(crate) struct MatchRest<'a> {
+    pub stmts: &'a [IrStmt],
+    pub tail: &'a Option<Box<IrExpr>>,
+}
+
 impl LowerCtx {
 
     fn build_match_chain(
@@ -263,10 +273,10 @@ impl LowerCtx {
         arms: &[IrMatchArm],
         bind_var: VarId,
         bind_ty: &Ty,
-        rest_stmts: &[IrStmt],
-        rest_tail: &Option<Box<IrExpr>>,
+        rest: MatchRest<'_>,
         result_ty: &Ty,
     ) -> IrExpr {
+        let MatchRest { stmts: rest_stmts, tail: rest_tail } = rest;
         let new_arms: Vec<IrMatchArm> = arms
             .iter()
             .map(|a| IrMatchArm {

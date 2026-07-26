@@ -436,9 +436,18 @@ impl LowerCtx {
     fn try_lower_opt_fallback_and_none(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
         match &value.kind {
             IrExprKind::OptionSome { expr } => {
-                // SCALAR payload only — `lower_scalar_value` returns `None` for a heap
-                // payload, which IS the gate (a heap `Some` aliases its element, a later
-                // refinement; it falls through to the deferred `Opaque` path, untracked).
+                // SCALAR payload only. `lower_scalar_value` returning `None` was
+                // treated as the gate, but it does not hold for every heap
+                // payload: a TUPLE-typed call is `is_heap_ty`, yet
+                // `lower_scalar_value` lowers the call and hands back its i32
+                // HANDLE, which then got stored as if it were the scalar value
+                // — `some(option.unwrap_or(some((2, 3)), (2, 4)))` read back as
+                // `none` on wasm while native printed `some((2, 3))`
+                // (differential fuzz). Gate on the TYPE, which is what the
+                // `Init::OptSome` slot actually requires.
+                if is_heap_ty(&expr.ty) {
+                    return None;
+                }
                 let payload = self.lower_scalar_value(expr)?;
                 let dst = self.fresh_value();
                 let repr = repr_of(ty).ok()?;

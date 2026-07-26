@@ -195,9 +195,8 @@ impl LowerCtx {
                     Some(CellClass::FlatHeap) => nested_heap_caps.push((v, ty)),
                     Some(CellClass::MapSkv) => cellmap_caps.push((v, ty)),
                     None => {
-                        if std::env::var("ALMIDE_DBG_ANF").is_ok() {
-                            eprintln!("[lift] {}: cell capture {v:?} class unadmitted ({ty:?})", self.fn_name);
-                        }
+                        crate::trace::trace("ALMIDE_DBG_ANF", || format!(
+                            "[lift] {}: cell capture {v:?} class unadmitted ({ty:?})", self.fn_name));
                         return None;
                     }
                 }
@@ -219,9 +218,8 @@ impl LowerCtx {
                 scalar_caps.push((v, ty));
                 continue;
             }
-            if std::env::var("ALMIDE_DBG_ANF").is_ok() {
-                eprintln!("[lift] {}: capture {v:?} outside the class slice ({ty:?})", self.fn_name);
-            }
+            crate::trace::trace("ALMIDE_DBG_ANF", || format!(
+                "[lift] {}: capture {v:?} outside the class slice ({ty:?})", self.fn_name));
             return None;
         }
         let n_closure = closure_caps.len();
@@ -375,9 +373,7 @@ impl LowerCtx {
         let ret = match sub.lower_body_into(body) {
             Ok(r) => r,
             Err(e) => {
-                if std::env::var("ALMIDE_DBG_ANF").is_ok() {
-                    eprintln!("[lift] body lower failed for {name}: {e:?}");
-                }
+                crate::trace::trace("ALMIDE_DBG_ANF", || format!("[lift] body lower failed for {name}: {e:?}"));
                 return None;
             }
         };

@@ -297,8 +297,21 @@ struct RegionWindow {
 pub fn apply_region_specialization(prog: &mut MirProgram) {
     let mg_lo = crate::MG_SLOT_BASE as i64;
     let mg_hi = mg_lo + 8 * prog.mutable_global_count as i64;
+    let mut windows = collect_region_windows(prog, mg_lo, mg_hi);
+    if windows.is_empty() {
+        return;
+    }
+    consolidate_singleton_shapes(&mut windows);
+    let clones_needed = rewrite_region_windows(prog, &windows);
+    append_region_clones(prog, &clones_needed);
+    compact_region_families(prog, &windows);
+}
 
-    // Pass A: collect qualifying windows (no mutation yet).
+/// Pass A: collect the windows that qualify for region specialization.
+///
+/// Read-only: nothing is mutated until every window is known, because a
+/// rewrite shifts the op indices the later windows recorded.
+fn collect_region_windows(prog: &MirProgram, mg_lo: i64, mg_hi: i64) -> Vec<RegionWindow> {
     let mut windows: Vec<RegionWindow> = Vec::new();
     let mut qualified_cache: BTreeMap<(String, String), Option<(BTreeSet<String>, Vec<Vec<i64>>)>> =
         BTreeMap::new();
@@ -364,18 +377,18 @@ pub fn apply_region_specialization(prog: &mut MirProgram) {
             }
         }
     }
-    if windows.is_empty() {
-        return;
-    }
+    windows
+}
 
-    // Consolidate: a clone is generated ONCE per name, so every closure that
-    // shares a member must agree on the singleton shape vector (it changes
-    // the clone's arity). Disagreement disables singletons everywhere —
-    // conservative and rare.
-    {
+/// Consolidate the singleton shapes across windows that share a closure.
+///
+/// A clone is generated ONCE per name, so every closure sharing a member must
+/// agree on the singleton shape vector — it changes the clone's arity.
+/// Disagreement disables singletons everywhere: conservative, and rare.
+fn consolidate_singleton_shapes(windows: &mut Vec<RegionWindow>) {
         let mut by_name: BTreeMap<&str, &Vec<Vec<i64>>> = BTreeMap::new();
         let mut conflict = false;
-        for w in &windows {
+        for w in &*windows {
             for n in &w.closure {
                 match by_name.get(n.as_str()) {
                     Some(existing) if *existing != &w.shapes => {
@@ -388,14 +401,20 @@ pub fn apply_region_specialization(prog: &mut MirProgram) {
             }
         }
         if conflict {
-            for w in &mut windows {
+            for w in &mut *windows {
                 w.shapes.clear();
             }
         }
-    }
+}
 
-    // Pass B1: rewrite the windows, per function (descending op index so the
-    // recorded positions stay valid).
+/// Pass B1: rewrite the windows, per function.
+///
+/// Descending op index, so the positions the windows recorded stay valid as
+/// earlier ops are spliced out.
+fn rewrite_region_windows(
+    prog: &mut MirProgram,
+    windows: &[RegionWindow],
+) -> BTreeMap<String, Vec<Vec<i64>>> {
     let mut clones_needed: BTreeMap<String, Vec<Vec<i64>>> = BTreeMap::new();
     for w in windows.iter().rev() {
         for n in &w.closure {
@@ -454,13 +473,18 @@ pub fn apply_region_specialization(prog: &mut MirProgram) {
         }
         func.ops.splice(w.start..=w.drop_at, seq);
     }
+    clones_needed
+}
 
-    // Pass B2: append the clones — drops removed (the frontier reset IS the
-    // teardown), callee names remapped into the clone set, singleton params
-    // appended and threaded through every internal closure call. `Dup` keeps
-    // its normal render (alias + rc_inc): the count is dead weight inside a
-    // region (nothing frees), and a stray increment is a harmless store.
-    for (name, shapes) in &clones_needed {
+/// Pass B2: append the clones.
+///
+/// Drops are removed — the frontier reset IS the teardown — callee names are
+/// remapped into the clone set, and singleton params are appended and threaded
+/// through every internal closure call. `Dup` keeps its normal render (alias +
+/// rc_inc): the count is dead weight inside a region, where nothing frees, and
+/// a stray increment is a harmless store.
+fn append_region_clones(prog: &mut MirProgram, clones_needed: &BTreeMap<String, Vec<Vec<i64>>>) {
+    for (name, shapes) in clones_needed {
         let Some(orig) = prog.functions.iter().find(|f| &f.name == name) else { continue };
         let mut clone = orig.clone();
         clone.name = rgn_name(name);
@@ -517,14 +541,17 @@ pub fn apply_region_specialization(prog: &mut MirProgram) {
             .collect();
         prog.functions.push(clone);
     }
+}
 
-    // Pass B3 (issue #838 stage 2): compact headerless block layout inside
-    // qualified clone FAMILIES (connected components of the window closures —
-    // a shared clone body forces one joint decision). Consolidation above
-    // already guarantees every member of a component carries the same
-    // singleton shape vector.
+/// Pass B3 (issue #838 stage 2): compact headerless block layout inside
+/// qualified clone FAMILIES.
+///
+/// A family is a connected component of the window closures — a shared clone
+/// body forces one joint decision. `consolidate_singleton_shapes` already
+/// guarantees every member of a component carries the same shape vector.
+fn compact_region_families(prog: &mut MirProgram, windows: &[RegionWindow]) {
     let mut comps: Vec<(BTreeSet<String>, Vec<Vec<i64>>, BTreeSet<usize>)> = Vec::new();
-    for w in &windows {
+    for w in windows {
         let mut names = w.closure.clone();
         let shapes = w.shapes.clone();
         let mut hosts = BTreeSet::from([w.fi]);

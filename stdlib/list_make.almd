@@ -26,6 +26,14 @@ fn __repeat_fill(lh: Int, x: Int, n: Int, i: Int) -> Int =
   }
 
 fn list_repeat(x: Int, n: Int) -> List[Int] = {
+  // A result over the shared 2^31-BYTE ceiling aborts in the T6 form on both
+  // targets, matching `string.repeat` (C-161). Without it a count native can
+  // satisfy but wasm cannot failed in two different forms: native allocated and
+  // printed a length, wasm trapped out-of-bounds against its 4 GiB address
+  // space. Keep in sync with ALMIDE_LIST_REPEAT_MAX_ELEMS in runtime/rs/src/list.rs.
+  if n > 268435456 then
+    prim.die(prim.handle("Error: repeat result too large\n"))
+  else ()
   let count = if n > 0 then n else 0
   let buf = prim.alloc_list(count)
   let _x = __repeat_fill(prim.handle(buf), x, count, 0)
@@ -51,6 +59,9 @@ fn __repeat_fill_rc(lh: Int, hx: Int, n: Int, i: Int) -> Int =
   }
 
 fn list_repeat_rc(x: List[Int], n: Int) -> List[List[Int]] = {
+  if n > 268435456 then
+    prim.die(prim.handle("Error: repeat result too large\n"))
+  else ()
   let count = if n > 0 then n else 0
   let buf: List[List[Int]] = prim.alloc_list_str(count)
   let _x = __repeat_fill_rc(prim.handle(buf), prim.handle(x), count, 0)

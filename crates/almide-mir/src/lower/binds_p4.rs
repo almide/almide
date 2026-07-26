@@ -10,8 +10,23 @@ impl LowerCtx {
     /// defers — `None`. The returned handle is in `live_heap_handles`; the caller MUST
     /// `Consume` it (the move-in) and remove it from the live set.
     pub(crate) fn lower_owned_heap_field(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        if let Some(v) = self.lower_owned_heap_field_leaf(expr) { return v; }
+        if let Some(v) = self.lower_owned_heap_field_aggregate(expr) { return v; }
+        if let Some(v) = self.lower_owned_heap_field_call(expr) { return v; }
+        None
+    }
+
+    /// Variables, literals and the direct constructors.
+    ///
+    /// One group of `lower_owned_heap_field`'s arm table, arms verbatim and in
+    /// source order. The two negatives are DISTINCT and must stay so: `None`
+    /// means "not my group", so the router tries the next one, while
+    /// `Some(None)` is an arm DECLINING the field — what the single table's
+    /// `_ => None` meant. Collapsing them makes a declined field fall through to
+    /// a later group and lower by the wrong rule.
+    fn lower_owned_heap_field_leaf(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
         use almide_ir::BinOp;
-        match &expr.kind {
+        Some(match &expr.kind {
             IrExprKind::LitStr { value: s } => {
                 let obj = self.fresh_value();
                 self.ops.push(Op::Alloc {
@@ -95,6 +110,21 @@ impl LowerCtx {
             // then owns it (its masked recursive DropListStr frees it). Same `i`/`m` balance as the
             // Var element's Dup. A pure Module-call (`value.array(items)`) returns a fresh Value the
             // same way; an impure/HO callee errors → None → the tuple defers (sound Opaque).
+            _ => return None,
+        })
+    }
+
+    /// Records, tuples, lists and the branching forms.
+    ///
+    /// One group of `lower_owned_heap_field`'s arm table, arms verbatim and in
+    /// source order. The two negatives are DISTINCT and must stay so: `None`
+    /// means "not my group", so the router tries the next one, while
+    /// `Some(None)` is an arm DECLINING the field — what the single table's
+    /// `_ => None` meant. Collapsing them makes a declined field fall through to
+    /// a later group and lower by the wrong rule.
+    fn lower_owned_heap_field_aggregate(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
+        use almide_ir::BinOp;
+        Some(match &expr.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 // A variant CONSTRUCTOR element (`(IntV(p), p + 4)` — the gguf read_one
                 // tuple-return shape): `IntV` is a registered ctor, NOT a user fn — a plain
@@ -106,7 +136,7 @@ impl LowerCtx {
                     if !self.live_heap_handles.contains(&obj) {
                         self.live_heap_handles.push(obj);
                     }
-                    return Some(obj);
+                    return Some(Some(obj));
                 }
                 let lowered = self.lower_call_args(args).ok()?;
                 let repr = repr_of(&expr.ty).ok()?;
@@ -152,7 +182,7 @@ impl LowerCtx {
                     // already tracks it in `live_heap_handles` + routes its drop (`$__drop_list_<R>`
                     // / `DropListStrStr`), so return it directly (do NOT re-push).
                     if let Some(obj) = self.try_lower_record_list_literal(expr) {
-                        return Some(obj);
+                        return Some(Some(obj));
                     }
                     // A `List[String]` (and the other heap-element list shapes the str-list builder
                     // admits) field — materialize the real nested-ownership block. The builder
@@ -160,10 +190,10 @@ impl LowerCtx {
                     // `live_heap_handles`, so push it here for the caller's move-in to balance.
                     if let Some(obj) = self.try_lower_str_list_literal(expr) {
                         self.live_heap_handles.push(obj);
-                        return Some(obj);
+                        return Some(Some(obj));
                     }
                     // Any other non-record heap-element list field is the recursive frontier → defer.
-                    return None;
+                    return Some(None);
                 }
                 let obj = self.try_lower_scalar_list_slots(elements)?;
                 self.live_heap_handles.push(obj);
@@ -261,6 +291,21 @@ impl LowerCtx {
             // An empty Map field — `attrs: [:]` (the svg `el` record). A v1 Map is a List block of
             // paired slots; an EMPTY one is the same layout-agnostic 0-length block as an empty list.
             // (A non-empty Map literal as a record field is a later brick.)
+            _ => return None,
+        })
+    }
+
+    /// Calls, member access and the operator forms.
+    ///
+    /// One group of `lower_owned_heap_field`'s arm table, arms verbatim and in
+    /// source order. The two negatives are DISTINCT and must stay so: `None`
+    /// means "not my group", so the router tries the next one, while
+    /// `Some(None)` is an arm DECLINING the field — what the single table's
+    /// `_ => None` meant. Collapsing them makes a declined field fall through to
+    /// a later group and lower by the wrong rule.
+    fn lower_owned_heap_field_call(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
+        use almide_ir::BinOp;
+        Some(match &expr.kind {
             IrExprKind::EmptyMap => {
                 let obj = self.try_lower_scalar_list_slots(&[])?;
                 self.live_heap_handles.push(obj);
@@ -311,7 +356,7 @@ impl LowerCtx {
                     .aggregate_field_tys(&expr.ty)
                     .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t)));
                 if !scalar_only {
-                    return None;
+                    return Some(None);
                 }
                 let obj = match &expr.kind {
                     IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(expr)?,
@@ -357,7 +402,7 @@ impl LowerCtx {
             IrExprKind::Match { subject, arms } => {
                 let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
                 let IrExprKind::If { cond, then, else_ } = &if_expr.kind else {
-                    return None;
+                    return Some(None);
                 };
                 let obj = self.try_lower_heap_result_if(cond, then, else_, &expr.ty)?;
                 if !self.live_heap_handles.contains(&obj) {
@@ -382,8 +427,8 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
-            _ => None,
-        }
+            _ => return None,
+        })
     }
 
     /// BORROW the heap handle at `container_handle + offset` (`LoadHandle` — the container keeps its
@@ -674,8 +719,9 @@ impl LowerCtx {
                 // layout-aware per-slot loader `let (a, b) = t` uses, when the subject is a tracked
                 // materialized aggregate (its slots are real). Falls back to the container-grain
                 // recursion below only when there is no per-slot subject (an untracked/None subject).
-                if let Some(subj) = subject {
-                    if self.materialized_aggregates.contains(&subj) || self.param_values.contains(&subj)
+                if let Some(subj) = subject
+                    .filter(|s| self.materialized_aggregates.contains(s) || self.param_values.contains(s))
+                {
                     {
                         if self.try_lower_tuple_destructure(elements, subj, None) {
                             return Ok(());
@@ -736,5 +782,29 @@ impl LowerCtx {
             .or_else(|| self.try_lower_result_small_arms(value, ty))
             .or_else(|| self.try_lower_result_err_heap_ok_result(value, ty))
             .or_else(|| self.try_lower_result_err_heap_fallback(value, ty))
+    }
+
+    /// Does `value` construct an `Option`/`Result` around a HEAP payload that
+    /// no strategy above could materialize?
+    ///
+    /// Such a value falls through to the deferred `Alloc { Init::Opaque }` bind
+    /// — an EMPTY block — and then reads back as `none` / an all-zero payload.
+    /// That is a WRONG VALUE, not a memory-safety problem, so the certificate
+    /// accepts it and the program runs: `some(option.unwrap_or(some((2, 3)),
+    /// (2, 4)))` printed `some((2, 3))` natively and `none` on wasm
+    /// (differential fuzz). The caller uses this to WALL instead, which is the
+    /// v1 discipline — a wall is never a miscompile.
+    pub(crate) fn opt_ctor_payload_is_deferred(&mut self, payload: &IrExpr) -> bool {
+        // The question is whether ANY construction strategy claims the payload.
+        // Asking is the only reliable test — the strategies key on expression
+        // SHAPE and payload type together, and enumerating the admitted pairs
+        // here would be a second copy that drifts. The probe is speculative, so
+        // it runs against a snapshot of the op stream and rolls back.
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let claimed = self.opt_heap_general_piece(payload).is_some();
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+        !claimed
     }
 }

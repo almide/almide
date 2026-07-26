@@ -62,13 +62,21 @@ pub fn lookup(module: &str, func: &str) -> Option<FnSig> {
 /// bundled source. Names are interned `&'static str` so downstream
 /// callers that expect the TOML contract (static lifetime) keep
 /// working; the source string itself is `&'static` via `include_str!`.
+///
+/// Sorted by name. The backing store is a `HashMap`, so the raw key
+/// order varies run to run; every consumer here feeds a user-visible
+/// surface (diagnostics, outline, docs-gen), and an unstable order made
+/// them differ between two runs on the same input. Sorting is the
+/// cheapest way to make those outputs a function of the source alone.
 pub fn module_fn_names(module: &str) -> Vec<&'static str> {
-    with_module(module, |sigs| {
+    let mut names = with_module(module, |sigs| {
         sigs.keys()
             .map(|k| intern_static(k.as_str()))
             .collect::<Vec<_>>()
     })
-    .unwrap_or_default()
+    .unwrap_or_default();
+    names.sort_unstable();
+    names
 }
 
 /// Lazily populate the per-module cache and apply a read-only
@@ -198,7 +206,10 @@ pub fn register_bundled_types(module: &str, env: &mut crate::types::TypeEnv) {
     for decl in &program.decls {
         if let ast::Decl::Type { name, ty, deriving, visibility, generics, .. } = decl {
             crate::canonicalize::registration::register_type_decl(
-                env, &mut diags, name, ty, deriving, generics, Some(module), *visibility,
+                env, &mut diags,
+                &crate::canonicalize::registration::TypeDeclToRegister {
+                    name, ty, deriving, generics, prefix: Some(module), visibility: *visibility,
+                },
             );
         }
     }

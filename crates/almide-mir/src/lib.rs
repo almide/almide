@@ -25,6 +25,9 @@
 
 #![forbid(unsafe_code)]
 
+/// The compiler's debug-trace channels.
+pub(crate) mod trace;
+
 pub mod alias_safety;
 pub mod certificate;
 pub mod concat_to_append;
@@ -35,6 +38,7 @@ pub mod scalar_call_inline;
 pub mod lower;
 pub mod pipeline;
 pub mod purity;
+pub(crate) mod mir_wellformed;
 pub mod render_native;
 pub mod render_rust;
 pub mod render_wasm;
@@ -130,7 +134,27 @@ pub struct ValueId(pub u32);
 pub enum Init {
     /// No concrete initializer — an ownership-only skeleton (not renderable to a
     /// running program; used by the ownership-shape tests).
+    ///
+    /// On a VALUE path this means "the lowering could not build this content",
+    /// and admitting it is the accept-but-wrong reservoir F2 (#810) is about: an
+    /// empty block the program then reads as `0` / `None` / `[]`. It must WALL.
+    /// It used to also mean "a genuinely empty container", which is the opposite
+    /// — that meaning is now [`Init::Empty`], so the two can be told apart by
+    /// the type instead of by each consumer re-deriving it from the expression
+    /// shape (the `!elements.is_empty()` guards that used to approximate it).
     Opaque,
+    /// A genuinely EMPTY heap block — the `[:]` / empty-container case, where the
+    /// empty block IS the correct content and the program goes on to fill it
+    /// (`map.from_list` allocates empty, then inserts).
+    ///
+    /// Physically identical to [`Init::Opaque`]: both render as an empty block,
+    /// and the ownership cert is the same init-agnostic one `i`. The distinction
+    /// is entirely about INTENT, and it exists so that "correct and empty" and
+    /// "unbuildable" stop sharing a spelling. A corpus census (#810) found this
+    /// is the ONLY shape that reached the terminal deferred bind — all 18
+    /// corpus programs that a blanket wall broke were this case, 10 directly and
+    /// 8 through `map.from_list`'s own empty-then-insert body.
+    Empty,
     /// A `List[Int]` literal.
     IntList(Vec<i64>),
     /// A `Bytes` CONSTANT — the raw bytes the EXECUTION render reproduces as a `[rc][len][cap]

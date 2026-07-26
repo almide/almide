@@ -35,6 +35,36 @@ use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeEnv};
 use types::{TyVarId, Constraint, FixHint, UnionFind, resolve_ty};
 
+/// Print a compiler trace line when the named debug channel is switched on.
+///
+/// Cross-module top-let types are written in one pass and read in another, and
+/// the failure mode (a `Ty::Unknown` reaching lowering, which then emits
+/// `LazyLock<_>`) is invisible in the compiler's normal output — so the write
+/// and the read each announce themselves under `ALMIDE_<CHANNEL>_DEBUG`.
+///
+/// Traces go to stderr because stdout is the compiler's data channel: `almide
+/// compile --json` and `--target rust` write their real output there, and a
+/// trace line mixed into it would corrupt a machine-read result.
+pub(crate) fn debug_trace(channel: &str, line: impl FnOnce() -> String) {
+    if std::env::var_os(format!("ALMIDE_{channel}_DEBUG")).is_some() {
+        eprintln!("[{}-debug] {}", channel.to_lowercase(), line());
+    }
+}
+
+/// The mutable parts of a `fn` declaration that checking walks.
+///
+/// Checking mutates the AST in place (inference writes resolved types back onto
+/// params, body and generics), so this is a `&mut` view rather than a copy.
+/// Grouping them keeps `check_fn_decl`'s own name parameter — the only piece the
+/// checker reads without walking — visible at the call site.
+pub(crate) struct FnToCheck<'a> {
+    pub params: &'a mut [ast::Param],
+    pub return_type: &'a ast::TypeExpr,
+    pub body: &'a mut ast::Expr,
+    pub effect: &'a Option<bool>,
+    pub generics: &'a mut Option<Vec<ast::GenericParam>>,
+}
+
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
     Diagnostic::error(msg, hint, ctx)
 }
@@ -184,35 +214,6 @@ pub(crate) struct IntOverflowSite {
     pub span: Option<crate::ast::Span>,
 }
 
-/// True when a bare (non-negative) integer literal does not fit in `i64`.
-/// Mirrors the radix parsing in lowering so the check and the eventual value
-/// agree. A malformed token the lexer would not produce is treated as
-/// non-overflowing (not our error to report).
-pub(crate) fn int_literal_overflows_i64(raw: &str) -> bool {
-    let clean = raw.replace('_', "");
-    let (radix, digits) = if let Some(r) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) { (16, r) }
-        else if let Some(r) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) { (2, r) }
-        else if let Some(r) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) { (8, r) }
-        else { (10, clean.as_str()) };
-    match i64::from_str_radix(digits, radix) {
-        Ok(_) => false,
-        Err(e) => matches!(e.kind(), std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow),
-    }
-}
-
-/// True when `raw`'s magnitude fits the given type's range. For a SIGNED type
-/// the magnitude bound is `MAX` (or `MAX+1` when `negated`, reaching `MIN`); for
-/// an unsigned type it is the unsigned `MAX`. Non-integer types return false
-/// (the literal does not belong there — left for the normal type checker).
-// Strip an int literal's `0x`/`0b`/`0o` prefix (case-insensitive) and return
-// (radix, remaining digits); defaults to base 10 with no prefix.
-fn parse_int_literal_radix(clean: &str) -> (u32, &str) {
-    if let Some(r) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) { (16, r) }
-    else if let Some(r) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) { (2, r) }
-    else if let Some(r) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) { (8, r) }
-    else { (10, clean) }
-}
-
 // (signed, bit-width) for each sized integer type; None for non-integer types
 // (not our diagnostic).
 fn int_type_signed_bits(ty: &Ty) -> Option<(bool, u32)> {
@@ -225,21 +226,104 @@ fn int_type_signed_bits(ty: &Ty) -> Option<(bool, u32)> {
     }
 }
 
-pub(crate) fn int_literal_fits_type(raw: &str, ty: &Ty, negated: bool) -> bool {
-    let clean = raw.replace('_', "");
-    let (radix, digits) = parse_int_literal_radix(&clean);
-    let Ok(mag) = u128::from_str_radix(digits, radix) else { return true };
-    match int_type_signed_bits(ty) {
-        None => true, // not an integer context — not our diagnostic
-        Some((signed, bits)) => {
-            let max: u128 = if signed {
-                if negated { 1u128 << (bits - 1) } else { (1u128 << (bits - 1)) - 1 }
-            } else {
-                (1u128 << bits) - 1
-            };
-            mag <= max
-        }
+/// The signed type of the same width, for an unsigned integer type. Used to
+/// name the concrete alternative in the "unsigned has no negative values"
+/// diagnostic, so the hint points at a type instead of at a concept.
+pub(crate) fn signed_counterpart(ty: &Ty) -> Option<&'static str> {
+    match ty {
+        Ty::UInt8 => Some("Int8"), Ty::UInt16 => Some("Int16"),
+        Ty::UInt32 => Some("Int32"), Ty::UInt64 => Some("Int64"),
+        _ => None,
     }
+}
+
+/// Why an int literal does not fit its context. Three deviations exist and they
+/// take three different fixes, so the E024 hint has to know WHICH one it is —
+/// telling a reader to shrink a literal that no magnitude could rescue, or to
+/// widen to a type that does not exist, sends them somewhere there is nothing.
+///
+/// Deciding it once, here, is deliberate. This file used to answer "does it
+/// fit" and the diagnostic used to answer "why not" separately, which is the
+/// same hand-synced-copies shape `literals.rs` was extracted to end: two
+/// derivations of one fact drift, and the drift shows up as a diagnostic that
+/// contradicts the check that produced it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LiteralFit {
+    /// Representable in this context.
+    Fits,
+    /// Too large for the type's own domain — would silently fold to 0.
+    Magnitude,
+    /// Negated in an UNSIGNED context. Not a magnitude question: an unsigned
+    /// type has no negative values at ANY magnitude. `-0` is not this — it is
+    /// `0`, which every unsigned type represents.
+    Sign,
+    /// Inside the type's DECLARED domain but above the `i64` the IR carries
+    /// every integer in (#872) — so only ever `UInt64`, whose declared domain
+    /// is the one that runs past the carrier.
+    Carrier,
+}
+
+/// Classify `raw` against the range `ty` can represent in this position.
+///
+/// For a SIGNED type the magnitude bound is `MAX` (or `MAX+1` when `negated`,
+/// reaching `MIN`). For an unsigned type it is the unsigned `MAX`, capped at
+/// the `i64` carrier: MIR — the default path for both targets — knows only
+/// `NTy::I64`, so above the carrier `/` is a signed divide and `to_string`
+/// prints signed, identically wrong on both legs. Capping turns that silent
+/// wrong answer into an E024 and lifts cleanly once the lane exists. Narrower
+/// unsigned widths are untouched: `u32::MAX` < `i64::MAX`.
+///
+/// A non-integer type `Fits` — the literal does not belong there, and saying so
+/// is the normal type checker's job, not this diagnostic's.
+pub(crate) fn classify_int_literal(raw: &str, ty: &Ty, negated: bool) -> LiteralFit {
+    let Some((signed, bits)) = int_type_signed_bits(ty) else { return LiteralFit::Fits };
+    let clean = raw.replace('_', "");
+    let (radix, digits) = crate::literals::radix_and_digits(&clean);
+    let Ok(mag) = u128::from_str_radix(digits, radix) else {
+        // The digits do not fit even the `u128` this comparison is done in, so
+        // no integer width could hold them. This used to return "fits", and
+        // `int_value` then folded the literal to 0 — a 44-digit literal printed
+        // `0` with no diagnostic, past the end of the very check that exists to
+        // stop that. The magnitude is the failure whatever the sign is, unless
+        // the sign is independently wrong.
+        return if negated && !signed { LiteralFit::Sign } else { LiteralFit::Magnitude };
+    };
+    let declared: u128 = if signed {
+        if negated { 1u128 << (bits - 1) } else { (1u128 << (bits - 1)) - 1 }
+    } else {
+        (1u128 << bits) - 1
+    };
+    match () {
+        _ if !signed && negated && mag != 0 => LiteralFit::Sign,
+        _ if mag > declared => LiteralFit::Magnitude,
+        // Carrier is an UNSIGNED-only deviation. A signed type's own domain
+        // already stops at the carrier in the positive direction, and in the
+        // negative direction `i64::MIN`'s magnitude is 2^63 — one PAST
+        // `i64::MAX` and perfectly representable, since the `-` is what makes
+        // it so. Testing the magnitude without that guard rejects `let lo: Int
+        // = -9223372036854775808`, which is the very literal E024 was taught to
+        // accept in #626.
+        _ if !signed && mag > i64::MAX as u128 => LiteralFit::Carrier,
+        _ => LiteralFit::Fits,
+    }
+}
+
+/// The inclusive range `ty` accepts, as written in a diagnostic — `0..=255`.
+///
+/// Rust states this range in a note on its out-of-range literal error, and it
+/// is the difference between a hint a reader can act on and one they have to go
+/// look something up for. Few readers, human or model, hold `u32::MAX` in mind.
+/// `None` for a non-integer type, which has no range to state.
+pub(crate) fn int_type_range(ty: &Ty) -> Option<String> {
+    let (signed, bits) = int_type_signed_bits(ty)?;
+    Some(if signed {
+        format!("-{}..={}", 1u128 << (bits - 1), (1u128 << (bits - 1)) - 1)
+    } else {
+        // The stated ceiling is the one actually enforced, carrier cap and all
+        // (#872) — a range in a diagnostic that the compiler does not honour is
+        // worse than no range.
+        format!("0..={}", ((1u128 << bits) - 1).min(i64::MAX as u128))
+    })
 }
 
 /// The construct that produced an empty collection whose element type the
@@ -644,6 +728,14 @@ impl Checker {
         user_ret: &Ty,
     ) -> Option<(&'static str, &'static str)> {
         let user_lc = user_name.to_ascii_lowercase();
+        // Best match, not first match. `atan` passes the gates against
+        // both `math.atan` (distance 0) and `math.tan` (distance 1), so
+        // taking the first candidate named whichever of the two the
+        // module's fn list happened to yield first. Ranking by distance
+        // makes the suggestion the closest name, and `module_fn_names`
+        // is sorted, so the enumeration order breaks ties the same way
+        // on every run.
+        let mut best: Option<(usize, &'static str, &'static str)> = Option::None;
         for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
             for fn_name in crate::stdlib::module_functions_all(module) {
                 // Name-similarity filter: coarse `≤ 2` Levenshtein
@@ -656,7 +748,11 @@ impl Checker {
                 // (`my_binary_search` ⊃ `binary_search`), and exact
                 // matches, while excluding short stdlib names with
                 // unrelated user fns.
-                if almide_base::diagnostic::levenshtein(user_name, fn_name) > 2 {
+                let dist = almide_base::diagnostic::levenshtein(user_name, fn_name);
+                if dist > 2 {
+                    continue;
+                }
+                if best.as_ref().is_some_and(|(d, _, _)| *d <= dist) {
                     continue;
                 }
                 let fn_lc = fn_name.to_ascii_lowercase();
@@ -668,10 +764,13 @@ impl Checker {
                 if !sigs_match_structurally(&sig.params, &sig.ret, user_param_tys, user_ret) {
                     continue;
                 }
-                return Some((module, fn_name));
+                if dist == 0 {
+                    return Some((module, fn_name));
+                }
+                best = Some((dist, module, fn_name));
             }
         }
-        Option::None
+        best.map(|(_, module, fn_name)| (module, fn_name))
     }
 
 }

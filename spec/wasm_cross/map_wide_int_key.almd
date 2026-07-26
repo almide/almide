@@ -12,7 +12,11 @@ fn main() -> Unit = {
   let m = map.from_list([(a, 10), (b, 20)])
   println("len=${int.to_string(map.len(m))}")
   println("a=${int.to_string(map.get_or(m, a, -1))} b=${int.to_string(map.get_or(m, b, -1))}")
-  let u: UInt64 = 18000000000000000000
+  // A wide UInt64 key, at the top of the band the i64 carrier reaches. It used
+  // to read 18000000000000000000 — above the carrier, so the key was silently a
+  // different value than written (#872, C-173). Nothing here observed it, which
+  // is exactly why it went unnoticed: a map key is opaque.
+  let u: UInt64 = 9000000000000000000
   let mu = map.set(map.new(), u, 7)
   println("u=${int.to_string(map.get_or(mu, u, -1))}")
 }

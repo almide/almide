@@ -21,6 +21,35 @@ pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
     }
 }
 
+/// The per-argument state of a call that has just been checked.
+///
+/// The three are parallel views of the same argument list and are only correct
+/// together: `aligned_raw` re-indexes `arg_tys` for a named call, and
+/// `e005_fired` is indexed the same way. Passing them separately allowed an
+/// unaligned pair, which reports the wrong parameter.
+#[derive(Copy, Clone)]
+pub(crate) struct CheckedArgs<'a> {
+    pub arg_tys: &'a [Ty],
+    /// Realigned inference types for a named call; a `None` slot was filled from
+    /// a default and gets no constraint.
+    pub aligned_raw: &'a Option<Vec<Option<Ty>>>,
+    /// Which parameters already reported E005, so E001 is not also emitted.
+    pub e005_fired: &'a [bool],
+}
+
+/// Which call argument a check is looking at.
+///
+/// The callee name and the parameter name travelled as two adjacent `&str`-ish
+/// parameters through four functions in this file. Every diagnostic they emit
+/// needs both, and neither is meaningful without the other, so they travel as
+/// one value — and a call site can no longer supply a parameter name from a
+/// different callee.
+#[derive(Copy, Clone)]
+pub(crate) struct ArgSite<'a> {
+    pub fn_name: &'a str,
+    pub param_name: &'a Sym,
+}
+
 impl Checker {
     /// Report a bare constructor name declared in more than one variant type (e.g. a local type and a dependency's) — an ambiguous name (#413). The caller still resolves to the first candidate; this surfaces the conflict as a clear source-level error so the user qualifies/renames, instead of the silent wrong-type resolution that later fails as a cryptic generated-Rust E0769. Returns true if it was ambiguous.
     pub(crate) fn report_ambiguous_ctor(&mut self, name: &str) -> bool {
@@ -240,7 +269,9 @@ impl Checker {
         }
 
         self.check_protocol_bounds(name, &sig, &bindings);
-        self.propagate_call_arg_types(name, &sig, arg_tys, &aligned_raw, &e005_fired, &bindings);
+        self.propagate_call_arg_types(name, &sig, CheckedArgs {
+            arg_tys, aligned_raw: &aligned_raw, e005_fired: &e005_fired,
+        }, &bindings);
 
         self.finalize_call_return_ty(name, &sig, bindings)
     }
@@ -320,7 +351,8 @@ impl Checker {
             if let Some(sp) = self.arg_spans.get(i).copied().flatten() {
                 self.current_span = Some(sp);
             }
-            let fired = self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, bindings);
+            let site = ArgSite { fn_name: name, param_name: pname };
+            let fired = self.unify_call_arg(site, pty, aty, &sig.structural_bounds, bindings);
             if !fired { self.current_span = saved_span; }
             e005_fired.push(fired);
         }
@@ -350,9 +382,10 @@ impl Checker {
     }
     /// Propagate resolved types back to inference variables, skipping params where E005 already fired (avoids a duplicate E001). Verbatim text move out of [`Self::check_named_call_with_type_args`].
     fn propagate_call_arg_types(
-        &mut self, name: &str, sig: &crate::types::FnSig, arg_tys: &[Ty],
-        aligned_raw: &Option<Vec<Option<Ty>>>, e005_fired: &[bool], bindings: &HashMap<Sym, Ty>,
+        &mut self, name: &str, sig: &crate::types::FnSig,
+        args: CheckedArgs<'_>, bindings: &HashMap<Sym, Ty>,
     ) {
+        let CheckedArgs { arg_tys, aligned_raw, e005_fired } = args;
         for (i, (_, pty)) in sig.params.iter().enumerate() {
             if e005_fired.get(i).copied().unwrap_or(false) { continue; }
             // The arg inference ty for param i — realigned for named calls; a None slot (default-filled) gets no constraint.
@@ -535,8 +568,9 @@ impl Checker {
             diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));
         }
         self.emit(diag);
-        return Ty::Unknown;
+        Ty::Unknown
     }
+
     /// Validate that arguments passed to `mut` parameters are mutable (`var`) bindings. Called after `check_named_call_with_type_args` which populates `self.last_mut_params`.
     pub(crate) fn validate_mut_args(&mut self, fn_name: &str, arg_exprs: &[&ast::Expr]) {
         let mut_params = std::mem::take(&mut self.last_mut_params);
@@ -632,134 +666,6 @@ impl Checker {
             }
         }
     }
-    /// Unify a single call argument against its parameter type, updating bindings. Reports diagnostics for structural bound violations and type mismatches. Returns true if E005 was emitted (caller should skip redundant E001 constraint).
-    fn unify_call_arg(
-        &mut self, fn_name: &str, param_name: &Sym,
-        param_ty: &Ty, arg_ty: &Ty,
-        structural_bounds: &HashMap<Sym, Ty>,
-        bindings: &mut HashMap<Sym, Ty>,
-    ) -> bool {
-        if let Ty::TypeVar(tv) = param_ty {
-            self.unify_call_arg_typevar(fn_name, param_name, *tv, arg_ty, structural_bounds, bindings)
-        } else {
-            self.unify_call_arg_concrete(fn_name, param_name, param_ty, arg_ty, bindings)
-        }
-    }
-
-    // TypeVar-param path of `unify_call_arg`: bind to a structural bound
-    // (checked compatible) when one is declared, else fall through to plain
-    // unification.
-    fn unify_call_arg_typevar(
-        &mut self, fn_name: &str, param_name: &Sym, tv: Sym, arg_ty: &Ty,
-        structural_bounds: &HashMap<Sym, Ty>,
-        bindings: &mut HashMap<Sym, Ty>,
-    ) -> bool {
-        if let Some(bound) = structural_bounds.get(&tv) {
-            let resolved = self.env.resolve_named(arg_ty);
-            if bound.compatible(&resolved) || bound.compatible(arg_ty) {
-                bindings.insert(tv, arg_ty.clone());
-                false
-            } else {
-                self.emit(super::err(
-                    format!("argument '{}' does not satisfy bound {}: got {}", param_name, bound.display(), arg_ty.display()),
-                    "The argument must have the required fields",
-                    format!("call to {}()", fn_name)));
-                true
-            }
-        } else {
-            crate::types::unify(&Ty::TypeVar(tv), arg_ty, bindings);
-            false
-        }
-    }
-
-    // Concrete (non-TypeVar) param path of `unify_call_arg`: unify, then
-    // report a type-mismatch diagnostic with a fix-it hint when the resolved
-    // types differ.
-    fn unify_call_arg_concrete(
-        &mut self, fn_name: &str, param_name: &Sym, param_ty: &Ty, arg_ty: &Ty,
-        bindings: &mut HashMap<Sym, Ty>,
-    ) -> bool {
-        crate::types::unify(param_ty, arg_ty, bindings);
-        let expected = if bindings.is_empty() { param_ty.clone() } else { crate::types::substitute(param_ty, bindings) };
-        let expected_resolved = self.env.resolve_named(&expected);
-        let arg_resolved = self.env.resolve_named(arg_ty);
-        if !types_mismatch(&expected_resolved, &arg_resolved) {
-            return false;
-        }
-        self.emit_call_arg_mismatch(fn_name, param_name, &expected, arg_ty, &expected_resolved, &arg_resolved);
-        true
-    }
-
-    // Fix-it hint for `emit_call_arg_mismatch`: Float-sibling hint when
-    // `float_sibling` is set (an Int-only math builtin given a Float, #740),
-    // else a likely-typevar hint (an undeclared capitalized bare name), else
-    // a generic conversion hint.
-    fn call_arg_mismatch_hint(&self, fn_name: &str, expected: &Ty, arg_ty: &Ty, float_sibling: Option<&'static str>) -> String {
-        if let Some(sib) = float_sibling {
-            return format!(
-                "`{}` is Int-only. For Floats use `{}(x)`, which preserves the Float — \
-                 not `float.to_int`, which truncates",
-                fn_name, sib
-            );
-        }
-        if let Ty::Named(name, args) = expected {
-            let n = name.as_str();
-            let is_likely_typevar = args.is_empty()
-                && !n.is_empty()
-                && n.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
-                && !self.env.types.contains_key(name)
-                && !self.env.constructors.contains_key(name);
-            if is_likely_typevar {
-                return format!("'{}' is not a known type. To use it as a type parameter, declare it: fn {}[{}](...)", n, fn_name, n);
-            }
-        }
-        Self::hint_with_conversion("Fix the argument type", expected, arg_ty)
-    }
-
-    // Emits the E005 argument-type-mismatch diagnostic for
-    // `unify_call_arg_concrete`: derives a fix-it hint (Float-sibling /
-    // likely-typevar / generic conversion hint) and, where possible, a
-    // `// Try:` fix code snippet.
-    fn emit_call_arg_mismatch(
-        &mut self, fn_name: &str, param_name: &Sym, expected: &Ty, arg_ty: &Ty,
-        expected_resolved: &Ty, arg_resolved: &Ty,
-    ) {
-        // #740: an Int-only math builtin given a Float — point at the Float-preserving sibling, not the truncating `float.to_int`.
-        let float_sibling = if matches!(arg_resolved, Ty::Float)
-            && matches!(expected_resolved, Ty::Int)
-        {
-            Self::math_float_sibling(fn_name)
-        } else {
-            None
-        };
-        let hint = self.call_arg_mismatch_hint(fn_name, expected, arg_ty, float_sibling);
-        let mut diag = super::err(
-            format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
-            hint,
-            format!("call to {}()", fn_name)).with_code("E005");
-        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
-            diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
-        }
-        // Show fix code: replace argument with conversion expression. Suppressed for the math-Float-sibling case (#740): the fix is to change the function, not to wrap the arg in a truncating cast.
-        if float_sibling.is_none() {
-            if let Some(span) = self.current_span {
-                if let Some((_, template)) = Self::conversion_template(expected, arg_ty) {
-                    if let Some(src) = self.source_slice(span) {
-                        let fixed = template.replace("{}", &src);
-                        diag = diag.with_try(format!("// Try:\n{}", fixed));
-                    }
-                }
-            }
-        }
-        self.emit(diag);
-    }
-    /// Substitute Ty::TypeVar("Self") with a concrete type in a protocol method return type.
-    fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
-        match ty {
-            Ty::TypeVar(name) if name == "Self" => replacement.clone(),
-            _ => ty.map_children(&|child| self.substitute_self_in_ty(child, replacement)),
-        }
-    }
 }
 /// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases that are free-text hints (e.g. `"xs + [x]"`, `"string.chars + list.all"`).
 fn is_clean_fn_name(s: &str) -> bool {
@@ -770,3 +676,5 @@ fn is_clean_fn_name(s: &str) -> bool {
 }
 
 include!("calls_p2.rs");
+
+include!("calls_arg.rs");

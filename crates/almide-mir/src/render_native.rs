@@ -174,7 +174,15 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
         "string.repeat" => Some((
             &[NTy::Str, NTy::I64],
             Some(NTy::Str),
-            "fn rt_string_repeat(s: &str, n: i64) -> String { s.repeat(n as usize) }",
+            // The SAME clamp + ceiling as the v0 runtime and the wasm self-host
+            // (stdlib/string_repeat.almd): a negative count is the empty string
+            // (C-054), and a result past the shared 2^31 ceiling aborts in the
+            // T6 form. The bare `s.repeat(n as usize)` turned `repeat(s, -1)`
+            // into a capacity-overflow PANIC (exit 101) on this leg while the
+            // wasm leg printed normally — a crash-form divergence the C-161
+            // rule forbids (differential fuzz, seed 1785015406589852000 index
+            // 1012). Keep in sync with ALMIDE_REPEAT_MAX_BYTES.
+            "fn rt_string_repeat(s: &str, n: i64) -> String {\n    let n = n.max(0);\n    if (s.len() as i64).saturating_mul(n) > (1i64 << 31) {\n        eprintln!(\"Error: repeat result too large\");\n        std::process::exit(1);\n    }\n    s.repeat(n as usize)\n}",
         )),
         "string.cmp" => Some((
             // Byte-wise lexicographic, -1/0/1 (C-019: rt_string_extra cmp = native oracle).
@@ -301,17 +309,16 @@ fn repr_nty(repr: &Repr, borrowed: bool) -> Result<NTy, LowerError> {
     }
 }
 
-fn render_fn(
+/// Seed the value-type map with the function's PARAM NTys. The MIR call mode
+/// BORROWS heap args. The DECLARED kind (from the sig table) disambiguates a
+/// heap `Repr::Ptr` param: `&str` vs `&[i64]`.
+fn seed_param_ntys(
     func: &MirFunction,
-    user_fns: &BTreeMap<&str, &MirFunction>,
     sigs: &NativeSigs,
-    used_shims: &mut Vec<&'static str>,
-) -> Result<(String, Option<NTy>), LowerError> {
+) -> Result<BTreeMap<ValueId, NTy>, LowerError> {
     let own_sig = sigs.get(func.name.as_str());
     let mut tys: BTreeMap<ValueId, NTy> = BTreeMap::new();
     for (i, p) in func.params.iter().enumerate() {
-        // The MIR call mode BORROWS heap args. The DECLARED kind (from the sig
-        // table) disambiguates a heap `Repr::Ptr` param: `&str` vs `&[i64]`.
         let nty = match own_sig.and_then(|(ps, _)| ps.get(i)) {
             Some(NativeSigKind::ListI64) => NTy::VecRef,
             Some(NativeSigKind::Str) => NTy::StrRef,
@@ -321,7 +328,16 @@ fn render_fn(
         };
         tys.insert(p.value, nty);
     }
+    Ok(tys)
+}
 
+fn render_fn(
+    func: &MirFunction,
+    user_fns: &BTreeMap<&str, &MirFunction>,
+    sigs: &NativeSigs,
+    used_shims: &mut Vec<&'static str>,
+) -> Result<(String, Option<NTy>), LowerError> {
+    let mut tys = seed_param_ntys(func, sigs)?;
     let is_main = func.name == "main";
     let mut out = String::new();
     let mut indent = 1usize;
@@ -341,83 +357,11 @@ fn render_fn(
     // handle dead. Handle is PURE (address materialization, no ownership, no
     // side effect), so skipping an unused one is sound — and it keeps the
     // subset honest: a USED Handle still walls below.
-    let used: std::collections::BTreeSet<ValueId> = {
-        let mut u = std::collections::BTreeSet::new();
-        for op in &func.ops {
-            match op {
-                Op::IntBinOp { a, b, .. } => {
-                    u.insert(*a);
-                    u.insert(*b);
-                }
-                Op::Prim { args, .. } => {
-                    u.extend(args.iter().copied());
-                }
-                Op::Call { args, .. } | Op::CallFn { args, .. } => {
-                    for a in args {
-                        if let CallArg::Handle(v) | CallArg::Scalar(v) = a {
-                            u.insert(*v);
-                        }
-                    }
-                }
-                Op::ListGetScalar { list, idx, .. } => {
-                    u.insert(*list);
-                    u.insert(*idx);
-                }
-                Op::ListSetScalar { list, idx, val } => {
-                    u.insert(*list);
-                    u.insert(*idx);
-                    u.insert(*val);
-                }
-                Op::SetLocal { src, .. } => {
-                    u.insert(*src);
-                }
-                Op::Dup { src, .. } => {
-                    u.insert(*src);
-                }
-                Op::IfThen { cond, .. } => {
-                    u.insert(*cond);
-                }
-                Op::Else { val } | Op::EndIf { val } => {
-                    if let Some(v) = val {
-                        u.insert(*v);
-                    }
-                }
-                _ => {}
-            }
-        }
-        if let Some(r) = func.ret {
-            u.insert(r);
-        }
-        u
-    };
+    let used = native_used_values(func);
     for op in &func.ops {
         match op {
             Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), .. } if !used.contains(d) => {
                 line!("// dead handle elided");
-            }
-            Op::ConstInt { dst, value } => {
-                tys.insert(*dst, NTy::I64);
-                line!("let mut {}: i64 = {}i64;", var(*dst), value);
-            }
-            Op::Alloc { dst, init, .. } => match init {
-                Init::Str(s) => {
-                    tys.insert(*dst, NTy::Str);
-                    line!("let mut {}: String = String::from({s:?});", var(*dst));
-                }
-                other => return Err(wall(format!("native: Alloc {other:?} — outside the rung subset"))),
-            },
-            Op::Dup { dst, src } => render_dup(dst, src, &mut tys, &mut out, indent)?,
-            // Rung-4 scalar-list literal: the natural Vec spelling. Elements are raw
-            // i64 slot values (the wasm leg stores the same bits).
-            Op::ListLit { dst, elems } => {
-                for e in elems {
-                    if tys.get(e) != Some(&NTy::I64) {
-                        return Err(wall("native: ListLit with a non-scalar element"));
-                    }
-                }
-                tys.insert(*dst, NTy::Vec);
-                let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
-                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
             }
             // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
             // (the name-sorted position shared with the `__almd_ci_*` tables).
@@ -428,117 +372,28 @@ fn render_fn(
                 tys.insert(*dst, NTy::I64);
                 line!("let mut {}: i64 = {idx}; // fn table: {name}", var(*dst));
             }
-            // A CallIndirect dispatches through the arity's `__almd_ci_*` table:
-            // the leading Handle arg is the closure block (BORROWED env — `&[i64]`),
-            // the rest are scalar user args, the result an i64. Heap args/results
-            // are outside this slab (the wasm leg keeps them; native walls).
-            Op::CallIndirect { dst, table_idx, args, result } => {
-                render_call_indirect(dst, table_idx, args, result, &mut tys, &mut out, indent)?
-            }
-            // A scalar-capture closure block is a plain `Vec<i64>` — its recursive
-            // `$__drop_closure` erases to scope-end (the drop header is 0: no heap,
-            // no nested, no closure slots to free). A non-Vec value here would be a
-            // heap-capturing block (prim-built) — its OWNING fn walls on the prims
-            // long before this drop renders.
-            Op::DropVariant { v, ty } if ty.as_str() == "closure" => {
-                match tys.get(v) {
-                    Some(NTy::Vec) => line!("// drop(closure block): scope-end"),
-                    other => {
-                        return Err(wall(format!(
-                            "native: DropVariant(closure) of a non-Vec value ({other:?})"
-                        )))
-                    }
-                }
-            }
-            // Rung-4 bounds-checked element load/store — the shims abort with the
-            // byte-identical "Error: index out of bounds" + exit 1 the wasm
-            // `$elem_addr_chk` and v0 native emit.
-            Op::ListGetScalar { dst, list, idx } => {
-                render_list_get_scalar(dst, list, idx, &mut tys, &mut out, indent, used_shims)?
-            }
-            Op::ListSetScalar { list, idx, val } => {
-                render_list_set_scalar(list, idx, val, &tys, &mut out, indent, used_shims)?
-            }
-            // Drop is ERASED: Rust frees at scope end (or at reassignment for a
-            // loop-carried handle). `verify_ownership` above certified balance.
-            Op::Drop { v } => {
-                if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) {
-                    return Err(wall("native: Drop of a borrowed param — MIR call-mode violation"));
-                }
-                line!("// drop: scope-end");
-            }
-            // A RECORD result's drop routes as the mask-driven `DropListStr` (the
-            // record block IS a list block; the mask lists its heap slots). The
-            // native rung-5 subset admits ALL-SCALAR records only — the mask is
-            // empty, the free is the block itself → scope-end, same as `Drop`.
-            // Anything non-Vec here would carry heap slots → wall.
-            Op::DropListStr { v } => {
-                match tys.get(v) {
-                    Some(NTy::Vec) => line!("// drop(record/list block): scope-end"),
-                    Some(NTy::VecRef) => {
-                        return Err(wall("native: DropListStr of a borrowed param — MIR call-mode violation"))
-                    }
-                    other => {
-                        return Err(wall(format!(
-                            "native: DropListStr of a non-list value ({other:?}) — outside the rung subset"
-                        )))
-                    }
-                }
-            }
-            // Pure ownership bookkeeping — no native code.
-            Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => {}
-            Op::SetLocal { local, src } => render_set_local(local, src, &mut tys, &mut out, indent)?,
-            Op::IntBinOp { dst, op, a, b } => {
-                tys.insert(*dst, NTy::I64);
-                let rendered = render_int_binop(op, *a, *b, used_shims)?;
-                line!("let mut {}: i64 = {};", var(*dst), rendered);
-            }
             Op::CallFn { dst, name, args, result } => {
-                render_call_fn(dst, name, args, result, user_fns, sigs, &mut tys, &mut out, indent, used_shims)?
-            }
-            // Rung-5 float floor: MIR floats are i64 BITS; native computes in real
-            // f64. Every op below is IEEE-754-exact on both targets (hardware ops,
-            // identical bit results), so byte-identity holds through
-            // `float.to_string`. Min/Max/CopySign are excluded: Rust's `f64::min`
-            // NaN semantics differ from wasm `f64.min` (they only occur inside
-            // self-host bodies, which never render natively).
-            Op::Prim { kind: crate::PrimKind::FloatBin(op), dst: Some(d), args } if args.len() == 2 => {
-                render_float_bin(op, d, args, &mut tys, &mut out, indent)?
-            }
-            // `float.from_int` — int (i64) to f64, carried per the float floor.
-            Op::Prim { kind: crate::PrimKind::F64FromInt, dst: Some(d), args } if args.len() == 1 => {
-                tys.insert(*d, NTy::F64);
-                line!("let mut {}: f64 = ({} as f64);", var(*d), var(args[0]));
-            }
-            Op::Prim { kind: crate::PrimKind::FloatUn(op), dst: Some(d), args } if args.len() == 1 => {
-                render_float_un(op, d, args, &mut tys, &mut out, indent)?
-            }
-            Op::Prim { kind: crate::PrimKind::FloatCmp(op), dst: Some(d), args } if args.len() == 2 => {
-                render_float_cmp(op, d, args, &mut tys, &mut out, indent)?
-            }
-            // Witness-level runtime calls (`println` lowers through these).
-            Op::Call { dst, func, args, .. } => {
-                render_call_witness(dst, func, args, &tys, &mut out, indent, used_shims)?
-            }
-            Op::IfThen { cond, dst } => render_if_then(cond, dst, &mut out, &mut indent, &mut if_stack),
-            Op::Else { val } => render_else(val, &mut tys, &mut out, &mut indent, &if_stack)?,
-            Op::EndIf { val } => render_end_if(val, &tys, &mut out, &mut indent, &mut if_stack)?,
-            Op::LoopStart => {
-                line!("loop {{");
-                indent += 1;
-            }
-            Op::LoopBreakUnless { cond } => {
-                line!("if {} == 0 {{ break; }}", var(*cond));
-            }
-            Op::LoopEnd => {
-                indent -= 1;
-                line!("}}");
+                render_call_fn(
+                    crate::render_native::NativeCall { dst, name, args, result },
+                    crate::render_native::NativeSink {
+                        user_fns, sigs, tys: &mut tys, out: &mut out, indent, used_shims,
+                    },
+                )?
             }
             other => {
-                return Err(wall(format!(
-                    "native: op {:?} — outside the rung subset",
-                    op_name(other)
-                )))
+                let handled = render_native_call_op(
+                    other,
+                    crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
+                )? || render_native_scalar_op(
+                    other,
+                    crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
+                )? || render_native_flow_op(other, &mut tys, &mut out, &mut indent, &mut if_stack)?;
+                if !handled {
+                    return Err(wall(format!(
+                        "native: op {:?} — outside the rung subset",
+                        op_name(other)
+                    )));
+                }
             }
         }
     }
@@ -548,59 +403,319 @@ fn render_fn(
     }
 
     // Signature: the return type is known only after the body typed `func.ret`.
-    let mut sig = if is_main {
-        if func.ret.is_some() {
-            return Err(wall("native: main with a return value"));
-        }
-        String::from("fn main()")
-    } else {
-        let params: Vec<String> = func
-            .params
-            .iter()
-            .map(|p| {
-                // The param's NTy was seeded from the SIG table above — read it back
-                // so a list param renders `&[i64]` (repr alone cannot tell).
-                let t = tys.get(&p.value).copied().unwrap_or(NTy::I64);
-                let spelled = match t {
-                    NTy::StrRef | NTy::Str => "&str",
-                    NTy::VecRef | NTy::Vec => "&[i64]",
-                    NTy::I64 => "i64",
-                    NTy::F64 => "f64",
-                };
-                format!("{}: {}", var(p.value), spelled)
-            })
-            .collect();
-        let ret = match func.ret {
-            None => String::new(),
-            Some(v) => match tys.get(&v) {
-                Some(NTy::I64) => " -> i64".to_string(),
-                Some(NTy::Str) => " -> String".to_string(),
-                Some(NTy::StrRef) => " -> String".to_string(),
-                Some(NTy::Vec) => " -> Vec<i64>".to_string(),
-                Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
-                Some(NTy::F64) => " -> f64".to_string(),
-                None => return Err(wall("native: return value untyped")),
-            },
-        };
-        format!("fn {}({}){}", mangle(&func.name), params.join(", "), ret)
-    };
+    let mut sig = render_native_fn_sig(func, &tys, is_main)?;
     sig.push_str(" {\n");
 
     // The trailing return expression (moved out — fresh owned for heap).
     if let Some(v) = func.ret {
-        let t = tys[&v];
-        let expr = match t {
-            NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec => var(v),
-            NTy::StrRef => format!("{}.to_string()", var(v)),
-            NTy::VecRef => format!("{}.to_vec()", var(v)),
-        };
         out.push_str("    ");
-        out.push_str(&expr);
+        out.push_str(&native_ret_expr(v, tys[&v]));
         out.push('\n');
     }
     out.push_str("}\n");
     let ret_nty = func.ret.map(|v| tys[&v]);
     Ok((format!("{sig}{out}"), ret_nty))
+}
+
+/// The trailing return expression: a borrowed param is moved out as a fresh
+/// owned value; everything else returns the local directly.
+fn native_ret_expr(v: ValueId, t: NTy) -> String {
+    match t {
+        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec => var(v),
+        NTy::StrRef => format!("{}.to_string()", var(v)),
+        NTy::VecRef => format!("{}.to_vec()", var(v)),
+    }
+}
+
+/// The rendered `fn` signature. The return type is known only after the body
+/// typed `func.ret`, so this reads the accumulated NTy map — a param's NTy was
+/// seeded from the SIG table, so a list param renders `&[i64]` (repr alone
+/// cannot tell).
+fn render_native_fn_sig(
+    func: &MirFunction,
+    tys: &BTreeMap<ValueId, NTy>,
+    is_main: bool,
+) -> Result<String, LowerError> {
+    if is_main {
+        if func.ret.is_some() {
+            return Err(wall("native: main with a return value"));
+        }
+        return Ok(String::from("fn main()"));
+    }
+    let params: Vec<String> = func
+        .params
+        .iter()
+        .map(|p| {
+            let t = tys.get(&p.value).copied().unwrap_or(NTy::I64);
+            let spelled = match t {
+                NTy::StrRef | NTy::Str => "&str",
+                NTy::VecRef | NTy::Vec => "&[i64]",
+                NTy::I64 => "i64",
+                NTy::F64 => "f64",
+            };
+            format!("{}: {}", var(p.value), spelled)
+        })
+        .collect();
+    let ret = match func.ret {
+        None => String::new(),
+        Some(v) => match tys.get(&v) {
+            Some(NTy::I64) => " -> i64".to_string(),
+            Some(NTy::Str) => " -> String".to_string(),
+            Some(NTy::StrRef) => " -> String".to_string(),
+            Some(NTy::Vec) => " -> Vec<i64>".to_string(),
+            Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
+            Some(NTy::F64) => " -> f64".to_string(),
+            None => return Err(wall("native: return value untyped")),
+        },
+    };
+    Ok(format!("fn {}({}){}", mangle(&func.name), params.join(", "), ret))
+}
+
+/// The values a function's ops (or its return) actually READ — the read-set the
+/// dead pure-Handle elision in [`render_fn`] consults. A `Prim{Handle}` whose
+/// dst never appears here is address materialization feeding nothing.
+fn native_used_values(func: &MirFunction) -> std::collections::BTreeSet<ValueId> {
+    let mut u = std::collections::BTreeSet::new();
+    for op in &func.ops {
+        u.extend(native_op_reads(op));
+    }
+    if let Some(r) = func.ret {
+        u.insert(r);
+    }
+    u
+}
+
+/// The values ONE op reads, for [`native_used_values`]. Deliberately partial —
+/// ops absent here (Drop*, Alloc, markers) keep their operands OUT of the
+/// read-set, which is what lets a drop-only Handle count as dead.
+fn native_op_reads(op: &Op) -> Vec<ValueId> {
+    match op {
+        Op::IntBinOp { a, b, .. } => vec![*a, *b],
+        Op::Prim { args, .. } => args.clone(),
+        Op::Call { args, .. } | Op::CallFn { args, .. } => args
+            .iter()
+            .filter_map(|a| match a {
+                CallArg::Handle(v) | CallArg::Scalar(v) => Some(*v),
+                _ => None,
+            })
+            .collect(),
+        Op::ListGetScalar { list, idx, .. } => vec![*list, *idx],
+        Op::ListSetScalar { list, idx, val } => vec![*list, *idx, *val],
+        Op::SetLocal { src, .. } => vec![*src],
+        Op::Dup { src, .. } => vec![*src],
+        Op::IfThen { cond, .. } => vec![*cond],
+        Op::Else { val } | Op::EndIf { val } => val.iter().copied().collect(),
+        _ => vec![],
+    }
+}
+
+/// The CALL-shaped ops that render through an [`OpSink`]: indirect dispatch,
+/// the rung-4 bounds-checked element accessors, and witness-level runtime
+/// calls (`println` lowers through these). A CallIndirect dispatches through
+/// the arity's `__almd_ci_*` table: the leading Handle arg is the closure
+/// block (BORROWED env — `&[i64]`), the rest are scalar user args, the result
+/// an i64; heap args/results are outside this slab (the wasm leg keeps them;
+/// native walls). The element accessors' shims abort with the byte-identical
+/// "Error: index out of bounds" + exit 1 the wasm `$elem_addr_chk` and v0
+/// native emit. `Ok(false)` = not this tier's op.
+fn render_native_call_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    match op {
+        Op::CallIndirect { dst, table_idx, args, result } => {
+            render_call_indirect(dst, table_idx, args, result, s)?
+        }
+        Op::ListGetScalar { dst, list, idx } => render_list_get_scalar(dst, list, idx, s)?,
+        Op::ListSetScalar { list, idx, val } => render_list_set_scalar(list, idx, val, s)?,
+        Op::Call { dst, func, args, .. } => render_call_witness(dst, func, args, s)?,
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// One VALUE-PRODUCING op (const, alloc, dup, list literal, int/float
+/// arithmetic, local rebind) rendered into the sink. `Ok(false)` = not this
+/// tier's op — the caller tries the flow tier, then walls. Arm bodies are
+/// verbatim from the former inline [`render_fn`] op match.
+fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let OpSink { tys, out, indent, used_shims } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
+        Op::ConstInt { dst, value } => {
+            tys.insert(*dst, NTy::I64);
+            line!("let mut {}: i64 = {}i64;", var(*dst), value);
+        }
+        Op::Alloc { dst, init, .. } => match init {
+            Init::Str(s) => {
+                tys.insert(*dst, NTy::Str);
+                line!("let mut {}: String = String::from({s:?});", var(*dst));
+            }
+            other => return Err(wall(format!("native: Alloc {other:?} — outside the rung subset"))),
+        },
+        Op::Dup { dst, src } => render_dup(dst, src, tys, out, indent)?,
+        // Rung-4 scalar-list literal: the natural Vec spelling. Elements are raw
+        // i64 slot values (the wasm leg stores the same bits).
+        Op::ListLit { dst, elems } => {
+            for e in elems {
+                if tys.get(e) != Some(&NTy::I64) {
+                    return Err(wall("native: ListLit with a non-scalar element"));
+                }
+            }
+            tys.insert(*dst, NTy::Vec);
+            let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
+            line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+        }
+        Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
+        Op::IntBinOp { dst, op, a, b } => {
+            tys.insert(*dst, NTy::I64);
+            let rendered = render_int_binop(op, *a, *b, used_shims)?;
+            line!("let mut {}: i64 = {};", var(*dst), rendered);
+        }
+        _ => return render_native_float_op(op, OpSink { tys, out, indent, used_shims }),
+    }
+    Ok(true)
+}
+
+/// Rung-5 float floor: MIR floats are i64 BITS; native computes in real
+/// f64. Every op below is IEEE-754-exact on both targets (hardware ops,
+/// identical bit results), so byte-identity holds through
+/// `float.to_string`. Min/Max/CopySign are excluded: Rust's `f64::min`
+/// NaN semantics differ from wasm `f64.min` (they only occur inside
+/// self-host bodies, which never render natively).
+fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let OpSink { tys, out, indent, .. } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
+        Op::Prim { kind: crate::PrimKind::FloatBin(op), dst: Some(d), args } if args.len() == 2 => {
+            render_float_bin(op, d, args, tys, out, indent)?
+        }
+        // `float.from_int` — int (i64) to f64, carried per the float floor.
+        Op::Prim { kind: crate::PrimKind::F64FromInt, dst: Some(d), args } if args.len() == 1 => {
+            tys.insert(*d, NTy::F64);
+            line!("let mut {}: f64 = ({} as f64);", var(*d), var(args[0]));
+        }
+        Op::Prim { kind: crate::PrimKind::FloatUn(op), dst: Some(d), args } if args.len() == 1 => {
+            render_float_un(op, d, args, tys, out, indent)?
+        }
+        Op::Prim { kind: crate::PrimKind::FloatCmp(op), dst: Some(d), args } if args.len() == 2 => {
+            render_float_cmp(op, d, args, tys, out, indent)?
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// One CONTROL-FLOW / ownership op (if-as-value markers, loops, drops, the
+/// bookkeeping no-ops) rendered into the buffer. `Ok(false)` = not this tier's
+/// op — the caller walls. Arm bodies are verbatim from the former inline
+/// [`render_fn`] op match.
+fn render_native_flow_op(
+    op: &Op,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: &mut usize,
+    if_stack: &mut Vec<Option<(String, ValueId)>>,
+) -> Result<bool, LowerError> {
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..*indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
+        Op::DropVariant { .. } | Op::Drop { .. } | Op::DropListStr { .. } => {
+            return render_native_drop_op(op, tys, out, *indent)
+        }
+        // Pure ownership bookkeeping — no native code.
+        Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => {}
+        Op::IfThen { cond, dst } => render_if_then(cond, dst, out, indent, if_stack),
+        Op::Else { val } => render_else(val, tys, out, indent, if_stack)?,
+        Op::EndIf { val } => render_end_if(val, tys, out, indent, if_stack)?,
+        Op::LoopStart => {
+            line!("loop {{");
+            *indent += 1;
+        }
+        Op::LoopBreakUnless { cond } => {
+            line!("if {} == 0 {{ break; }}", var(*cond));
+        }
+        Op::LoopEnd => {
+            *indent -= 1;
+            line!("}}");
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The drop-family ops. All three erase to a scope-end comment when the value
+/// shape is admitted; a shape violation is a wall. `Ok(false)` = a
+/// NON-closure `DropVariant` — the caller walls with the generic
+/// outside-the-rung-subset message, exactly as the former inline match did.
+fn render_native_drop_op(
+    op: &Op,
+    tys: &BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+) -> Result<bool, LowerError> {
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
+        // A scalar-capture closure block is a plain `Vec<i64>` — its recursive
+        // `$__drop_closure` erases to scope-end (the drop header is 0: no heap,
+        // no nested, no closure slots to free). A non-Vec value here would be a
+        // heap-capturing block (prim-built) — its OWNING fn walls on the prims
+        // long before this drop renders.
+        Op::DropVariant { v, ty } if ty.as_str() == "closure" => {
+            match tys.get(v) {
+                Some(NTy::Vec) => line!("// drop(closure block): scope-end"),
+                other => {
+                    return Err(wall(format!(
+                        "native: DropVariant(closure) of a non-Vec value ({other:?})"
+                    )))
+                }
+            }
+        }
+        // Drop is ERASED: Rust frees at scope end (or at reassignment for a
+        // loop-carried handle). `verify_ownership` above certified balance.
+        Op::Drop { v } => {
+            if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) {
+                return Err(wall("native: Drop of a borrowed param — MIR call-mode violation"));
+            }
+            line!("// drop: scope-end");
+        }
+        // A RECORD result's drop routes as the mask-driven `DropListStr` (the
+        // record block IS a list block; the mask lists its heap slots). The
+        // native rung-5 subset admits ALL-SCALAR records only — the mask is
+        // empty, the free is the block itself → scope-end, same as `Drop`.
+        // Anything non-Vec here would carry heap slots → wall.
+        Op::DropListStr { v } => {
+            match tys.get(v) {
+                Some(NTy::Vec) => line!("// drop(record/list block): scope-end"),
+                Some(NTy::VecRef) => {
+                    return Err(wall("native: DropListStr of a borrowed param — MIR call-mode violation"))
+                }
+                other => {
+                    return Err(wall(format!(
+                        "native: DropListStr of a non-list value ({other:?}) — outside the rung subset"
+                    )))
+                }
+            }
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
 }
 
 /// `Op::Dup` — mint a fresh handle from `src` per its NTy (verbatim arm body
