@@ -328,6 +328,46 @@ fn render_expr_empty_map(ctx: &RenderContext, ty: &Ty) -> String {
         .unwrap_or_else(|| format!("AlmideMap::<{}, {}>::new()", key_ty, value_ty))
 }
 
+/// `map.new()` / `set.new()` reaching Rust as a bare generic runtime call can
+/// leave rustc with an uninferrable type parameter when nothing downstream
+/// pins it: const-folding `if true then map.new() else <typed literal>`
+/// collapses the typing context away, and `map.contains` leaves `V` free —
+/// E0282 after `check` accepted (nightly-fuzz seed 1785045556318379299,
+/// index 867). The checker resolved the full container type on the node, so
+/// pin it with a turbofish — the same recipe as the `[:]` EmptyMap literal.
+/// Only a fully concrete type is pinned; anything unresolved falls back to
+/// plain rendering (inference handles it exactly as before).
+fn render_runtime_ctor_turbofish(
+    ctx: &RenderContext,
+    symbol: &str,
+    args: &[IrExpr],
+    ty: &Ty,
+) -> Option<String> {
+    if !args.is_empty() {
+        return None;
+    }
+    match (symbol, ty) {
+        ("almide_rt_map_new", Ty::Applied(TypeConstructorId::Map, targs))
+            if targs.len() == 2 && targs.iter().all(|t| !t.is_unresolved()) =>
+        {
+            Some(format!(
+                "almide_rt_map_new::<{}, {}>()",
+                render_map_type_arg(ctx, &targs[0]),
+                render_map_type_arg(ctx, &targs[1])
+            ))
+        }
+        ("almide_rt_set_new", Ty::Applied(TypeConstructorId::Set, targs))
+            if targs.len() == 1 && !targs[0].is_unresolved() =>
+        {
+            Some(format!(
+                "almide_rt_set_new::<{}>()",
+                render_map_type_arg(ctx, &targs[0])
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// `Try { expr: inner }` case of `render_expr`.
 fn render_expr_try(ctx: &RenderContext, inner: &IrExpr) -> String {
     let s = render_expr(ctx, inner);
@@ -495,11 +535,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // normalized into the same RuntimeCall spelling already returns the
         // mapped types — no glue (double-wrap otherwise).
         IrExprKind::RuntimeCall { symbol, args } => {
-            let call = render_runtime_call(ctx, symbol, args);
-            if rc_cow_symbol_is_native_runtime(symbol.as_str()) {
-                rc_cow_result_glue(call, &expr.ty)
+            if let Some(pinned) = render_runtime_ctor_turbofish(ctx, symbol.as_str(), args, &expr.ty) {
+                pinned
             } else {
-                call
+                let call = render_runtime_call(ctx, symbol, args);
+                if rc_cow_symbol_is_native_runtime(symbol.as_str()) {
+                    rc_cow_result_glue(call, &expr.ty)
+                } else {
+                    call
+                }
             }
         }
 
