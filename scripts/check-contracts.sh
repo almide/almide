@@ -317,6 +317,14 @@ fi
 # block is a public claim drifting from what the gates verify — red.
 bash scripts/gen-claims.sh --check || fail=1
 
+# ── (i) ALS CONFORMANCE REPORT freshness (F1, #811) ──────────────────────────
+# docs/contracts/conformance.md joins section → contracts → executable fixtures
+# so an auditor reads the F1 claim on one page. Derived from the ledger; a stale
+# copy silently misstates what is exercised — the same failure mode as (h).
+if ! bash docs/contracts/generate-conformance.sh 2>/dev/null | diff -q - docs/contracts/conformance.md >/dev/null; then
+  err "docs/contracts/conformance.md is stale — run: bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md"
+fi
+
 # ── (h) contract INDEX freshness ─────────────────────────────────────────────
 # docs/contracts/README.md is generated from this ledger too, and CI's
 # "Emit & Format" job regenerates and diffs it. It was NOT checked here, so a
@@ -346,3 +354,4 @@ echo "  fixtures: $n_with_header/$n_fixtures carry a // @contract: header; bidir
 #   (6) renumber a contract to leave a gap                 -> (f) coverage.
 #   (7) hand-edit a number inside README's claims markers  -> (g) stale-claims.
 #   (8) add a contract without regenerating the index      -> (h) stale-index.
+#   (9) cite a new section without regenerating conformance -> (i) stale-report.
