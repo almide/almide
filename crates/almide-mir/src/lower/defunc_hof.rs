@@ -124,6 +124,9 @@ impl LowerCtx {
             },
         );
         if result.is_none() {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!("[defunc] {func} route declined (rolled back)")
+            });
             self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
         } else {
             // The closure was FAITHFULLY inlined (the body executes per element through real
