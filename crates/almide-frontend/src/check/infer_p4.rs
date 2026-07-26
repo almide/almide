@@ -42,6 +42,12 @@ impl Checker {
                 declared.clone(), *span, format!("let '{}'", name),
             ));
             self.record_int_literal_context(value, &declared);
+            // #867: the numeric-width direction of this annotation is
+            // re-checked post-solve (the solver joins widths symmetrically).
+            self.deferred_numeric_narrowing_checks.push(super::NumericNarrowingSite {
+                expected: declared.clone(), actual: val_ty.clone(),
+                context: format!("let '{}'", name), span: value.span,
+            });
             self.constrain(declared.clone(), val_ty, format!("let {}", name));
             declared
         } else {
@@ -77,6 +83,11 @@ impl Checker {
                 declared.clone(), *span, format!("var '{}'", name),
             ));
             self.record_int_literal_context(value, &declared);
+            // #867: same directional annotation re-check as Let.
+            self.deferred_numeric_narrowing_checks.push(super::NumericNarrowingSite {
+                expected: declared.clone(), actual: val_ty.clone(),
+                context: format!("var '{}'", name), span: value.span,
+            });
             self.constrain(declared.clone(), val_ty, format!("let {}", name));
             declared
         } else {

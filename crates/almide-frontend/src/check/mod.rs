@@ -182,6 +182,14 @@ pub struct Checker {
     /// defaulted. Without it the value passed `check` and then tripped the
     /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
     pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
+    /// Annotated `let`/`var` bindings, re-checked post-solve for the numeric
+    /// narrowing direction (#867). The solver joins numeric widths
+    /// symmetrically — peer sites like list elements and `assert_eq` args
+    /// must not depend on visit order — so the one-way rule (a sized value
+    /// does not flow into an `Int`/`Float` slot; write `.to_int64()`) is
+    /// enforced at the sites where expected/actual is real: call arguments
+    /// (`types_mismatch`) and these annotation sites.
+    pub(crate) deferred_numeric_narrowing_checks: Vec<NumericNarrowingSite>,
     /// Top-let `env.top_lets` writes awaiting the post-solve upgrade. The
     /// `TopLet` branch resolves its initializer type BEFORE `solve_constraints`
     /// runs, so a generic-ctor initializer (`let MAYBE = some(Cfg {…})`) stores
@@ -211,6 +219,19 @@ pub(crate) struct IntOverflowSite {
     /// value of `let x: T = …` / `var x: T = …`. `None` ⇒ a default `Int` (i64)
     /// context. A wider `T` (e.g. `UInt64`) makes a >i64 literal valid.
     pub context_ty: Option<Ty>,
+    pub span: Option<crate::ast::Span>,
+}
+
+/// An annotated `let`/`var` binding, pending the post-solve numeric-narrowing
+/// direction check (#867). See `deferred_numeric_narrowing_checks`.
+#[derive(Debug, Clone)]
+pub(crate) struct NumericNarrowingSite {
+    /// The declared annotation type.
+    pub expected: Ty,
+    /// The initializer's inferred type, inference vars intact.
+    pub actual: Ty,
+    /// The binding, for the diagnostic ("let 'x'").
+    pub context: String,
     pub span: Option<crate::ast::Span>,
 }
 
@@ -397,6 +418,7 @@ impl Checker {
             deferred_ord_elem_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
+            deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_unknown_type_checks: Vec::new(),
             pending_toplet_tys: Vec::new(),
@@ -635,6 +657,7 @@ impl Checker {
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
+        self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
         // Unused import warnings
         for imp in &program.imports {

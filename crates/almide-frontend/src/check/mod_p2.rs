@@ -468,6 +468,41 @@ impl Checker {
         }
     }
 
+    /// Post-solve directional check for annotated bindings (#867): a narrow
+    /// sized numeric VALUE does not flow into an `Int`/`Float` annotation —
+    /// the emitted Rust would be an E0308 (i32 where i64 expected), so the
+    /// checker rejects it and names the explicit `.to_int64()` idiom. The
+    /// solver itself joins numeric widths symmetrically (peer sites must not
+    /// depend on visit order), which is why annotation sites re-check here
+    /// with the direction the source actually states.
+    fn validate_numeric_narrowing(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_numeric_narrowing_checks);
+        for site in checks {
+            let expected = resolve_ty(&site.expected, &self.uf);
+            let actual = resolve_ty(&site.actual, &self.uf);
+            if !crate::check::solving::is_numeric_scalar(&expected)
+                || !crate::check::solving::is_numeric_scalar(&actual)
+                || !crate::check::builtin_calls::types_mismatch(&expected, &actual)
+            {
+                continue;
+            }
+            let mut diag = err(
+                format!(
+                    "type mismatch in {}: expected {} but got {}",
+                    site.context, expected.display(), actual.display()
+                ),
+                Self::hint_with_conversion("Fix the expression type or change the annotation", &expected, &actual),
+                site.context.clone(),
+            ).with_code("E001");
+            if let Some(s) = site.span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
     fn validate_empty_collection_elements(&mut self) {
         let checks = std::mem::take(&mut self.deferred_empty_collection_checks);
         for site in checks {

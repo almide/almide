@@ -39,6 +39,15 @@ impl Checker {
             (Ty::Bool, Ty::String) => Some("use `to_string(x)` to convert Bool to String".to_string()),
             (Ty::String, Ty::Int) => Some("use `int.parse(s)` to convert String to Int (returns Result[Int, String])".to_string()),
             (Ty::String, Ty::Float) => Some("use `float.parse(s)` to convert String to Float (returns Result[Float, String])".to_string()),
+            // A narrow sized-int value where Int is expected (#867): Almide
+            // has no implicit numeric widening — the explicit idiom is the
+            // lossless `.to_int64()` (Int and Int64 interop freely).
+            (Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64,
+             Ty::Int | Ty::Int64) => Some(
+                "use `x.to_int64()` to widen it — Almide has no implicit numeric widening".to_string()),
+            (Ty::Float32, Ty::Float | Ty::Float64) => Some(
+                "use `x.to_float64()` to widen it — Almide has no implicit numeric widening".to_string()),
             (Ty::Float, Ty::Int) => Some("use `float.to_int(x)` to convert Float to Int (truncates)".to_string()),
             (Ty::Int, Ty::Float) => Some("use `int.to_float(x)` to convert Int to Float".to_string()),
             // Unit where a List was expected: three common causes.
