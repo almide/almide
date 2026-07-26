@@ -340,6 +340,19 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A NESTED heap-result `if` arm: the branch desugar stacks one
+            // hoisted `if`-bind per level, so a two-`if` element chain
+            // arrives as `if c { … tail: if c' {…} else {…} } else …` (the
+            // ceangal todo_item). Recurse through the same if-lowering —
+            // level-by-level release parity is exactly the invariant
+            // `lower_heap_result_if_inner` maintains — and move the merged
+            // result out (`Consume`, the same `im` balance the Call arm
+            // carries).
+            IrExprKind::If { cond, then, else_ } => {
+                let dst = self.try_lower_heap_result_if(cond, then, else_, result_ty)?;
+                self.ops.push(crate::Op::Consume { v: dst });
+                Some(dst)
+            }
             // A `List` LITERAL arm over HEAP elements (`if n <= 0 then []
             // else [leaf(n)]` — ceangal's kids_of, the #875 class in arm
             // position): the BIND-position record-list builder already
