@@ -54,6 +54,18 @@ fn almide() -> &'static str {
     env!("CARGO_BIN_EXE_almide")
 }
 
+/// The wasm leg shells out to the `wasmtime` CLI (src/cli/commands.rs). CI
+/// installs it on the Linux jobs — where this gate ENFORCES — but not on the
+/// windows/macos matrix builds, and a byte-parity check cannot run without the
+/// wasm executor. Skip LOUDLY there rather than fail on a missing tool: the
+/// cross-OS wasm story is owned by the dedicated host-arch determinism job.
+fn wasmtime_available() -> bool {
+    Command::new("wasmtime")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -110,6 +122,13 @@ fn every_example_is_rostered() {
 
 #[test]
 fn parity_examples_are_byte_identical_across_targets() {
+    if !wasmtime_available() {
+        eprintln!(
+            "SKIP examples_parity: no `wasmtime` on PATH — the wasm leg cannot run. \
+             The parity gate enforces on the Linux CI jobs, which install it."
+        );
+        return;
+    }
     let mut failures = Vec::new();
     for f in PARITY {
         let path = repo_root().join("examples").join(f);
