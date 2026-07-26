@@ -43,8 +43,14 @@ They share a shape, quoted from the trusted-base ledger:
 A certificate cannot catch that, because drift produces *valid* MIR. What
 catches it is a post-pass over the lowering's own output, checking invariants
 the lowering is supposed to maintain — the same shape as
-`assert_names_resolvable` and the `ConcretizeTypes` gate. That is work item 2 of
-#777, and it is open.
+`assert_names_resolvable` and the `ConcretizeTypes` gate. That gate exists now
+(`crates/almide-mir/src/mir_wellformed.rs`, #777 item 2): every function the
+lowering emits is checked for def-before-use over its op stream, the
+defines/reads split is asserted to partition `op_values` on every real op (so
+the three occurrence functions cannot drift), and a violation surfaces as a
+named wall rather than rendering. It runs inside `lower_function_all`, so every
+CI leg that lowers — Test WASM, Cross-Target, Trust Spine — exercises it on
+every build.
 
 The per-class regression pins for all five are in
 [`proofs/TRUSTED_BASE.md`](../../proofs/TRUSTED_BASE.md#the-five-2026-07-03-trusted-zone-bug-classes-and-their-regression-pins).

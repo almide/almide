@@ -449,6 +449,101 @@ fn wasm_ty(repr: Repr) -> &'static str {
     }
 }
 
+/// Every [`ValueId`] an op READS (operands only — never the defined dst),
+/// exhaustively and with multiplicity (`IntBinOp { a: v, b: v }` pushes `v`
+/// twice). The read half of the `op_values` split (#777 F3 item 2): together
+/// with [`defined_value`] and the `SetLocal` redefinition case it partitions
+/// every value an op touches, and `mir_wellformed::check_def_before_use`
+/// asserts that partition against `op_values` on every real op in every
+/// lowered function — corpus-wide, not on hand-built samples.
+///
+/// A `SetLocal`'s `local` is counted as a READ here: the op stores INTO an
+/// existing slot, and def-before-use demands the slot already exist. Its `src`
+/// is an ordinary read. An `IfThen`'s `dst` is the definition, not a read; the
+/// `Else`/`EndIf` `val`s are reads (they feed the enclosing if-result).
+pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
+    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
+        for a in args {
+            match a {
+                CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
+                CallArg::Imm(_) | CallArg::Label(_) => {}
+            }
+        }
+    };
+    match op {
+        Op::Alloc { init, .. } => match init {
+            Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
+                out.push(*len)
+            }
+            Init::OptSome { payload } => out.push(*payload),
+            Init::Opaque
+            | Init::Empty
+            | Init::OptNone
+            | Init::IntList(_)
+            | Init::Bytes(_)
+            | Init::Str(_) => {}
+        },
+        Op::Const { .. } | Op::ConstInt { .. } | Op::FuncRef { .. } => {}
+        Op::Dup { src, .. } => out.push(*src),
+        Op::Drop { v }
+        | Op::DropListStr { v }
+        | Op::DropValue { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropListStrStr { v }
+        | Op::DropListIntStr { v }
+        | Op::DropListStrInt { v }
+        | Op::DropResultListValue { v }
+        | Op::DropResultValue { v }
+        | Op::DropResultStrInt { v }
+        | Op::DropResultValueInt { v }
+        | Op::DropResultListValueInt { v }
+        | Op::DropResultListStrInt { v }
+        | Op::DropResultListStr { v }
+        | Op::DropListListStr { v }
+        | Op::DropVariant { v, .. }
+        | Op::DropWrapperRec { v, .. }
+        | Op::Consume { v }
+        | Op::Borrow { v }
+        | Op::MakeUnique { v } => out.push(*v),
+        Op::Pure { uses, .. } => out.extend(uses.iter().copied()),
+        Op::Call { args, .. } | Op::CallFn { args, .. } | Op::CallImport { args, .. } => {
+            args_vals(args, out);
+        }
+        Op::CallIndirect { table_idx, args, .. } => {
+            out.push(*table_idx);
+            args_vals(args, out);
+        }
+        Op::ListLit { elems, .. } => out.extend(elems.iter().copied()),
+        Op::ListGetScalar { list, idx, .. } => {
+            out.push(*list);
+            out.push(*idx);
+        }
+        Op::ListSetScalar { list, idx, val } => {
+            out.push(*list);
+            out.push(*idx);
+            out.push(*val);
+        }
+        Op::IntBinOp { a, b, .. } => {
+            out.push(*a);
+            out.push(*b);
+        }
+        Op::Prim { args, .. } => out.extend(args.iter().copied()),
+        Op::IfThen { cond, .. } => out.push(*cond),
+        Op::Else { val } | Op::EndIf { val } => {
+            if let Some(v) = val {
+                out.push(*v);
+            }
+        }
+        Op::LoopBreakUnless { cond } => out.push(*cond),
+        Op::LoopStart | Op::LoopEnd => {}
+        Op::SetLocal { local, src } => {
+            out.push(*local);
+            out.push(*src);
+        }
+    }
+}
+
 /// The value an op defines (binds), if any.
 /// Every [`ValueId`] an op touches (dst + all operands), exhaustively — the
 /// generic occurrence walk the render-level peepholes (#806 step 3b) use to
