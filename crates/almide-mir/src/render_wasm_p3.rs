@@ -480,7 +480,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
         (local.set $cnt (i32.load (local.get $cnt_ptr)))
         (local.set $bufsz (i32.load (local.get $sz_ptr)))
         (local.set $envp (i32.and (i32.add (call $alloc (i32.add (i32.mul (local.get $cnt) (i32.const 4)) (i32.const 8))) (i32.const 3)) (i32.const -4)))
-        (local.set $envbuf (call $alloc (i32.add (local.get $bufsz) (i32.const 4))))
+        (local.set $envbuf (call $alloc (i32.add (local.get $bufsz) (i32.const 16))))
         (drop (call $environ_get (local.get $envp) (local.get $envbuf)))
         (global.set $env_envp (local.get $envp))
         (global.set $env_cnt (local.get $cnt))))
@@ -574,16 +574,40 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
         (local.set $cnt (i32.load (local.get $cnt_ptr)))
         (local.set $bufsz (i32.load (local.get $sz_ptr)))
         (local.set $envp (i32.and (i32.add (call $alloc (i32.add (i32.mul (local.get $cnt) (i32.const 4)) (i32.const 8))) (i32.const 3)) (i32.const -4)))
-        (local.set $envbuf (call $alloc (i32.add (local.get $bufsz) (i32.const 4))))
+        (local.set $envbuf (call $alloc (i32.add (local.get $bufsz) (i32.const 16))))
         (drop (call $environ_get (local.get $envp) (local.get $envbuf)))
         (global.set $env_envp (local.get $envp))
         (global.set $env_cnt (local.get $cnt))))
     (local.set $envp (global.get $env_envp))
     (local.set $cnt (global.get $env_cnt))
-    ;; scan for the "PWD=" entry
+    ;; scan for "ALMIDE_CWD=" first — the launcher's REAL cwd (#874): the
+    ;; inherited PWD is STALE when a parent set the child cwd without updating
+    ;; it (Node execFileSync cwd option, IDE run configs). `almide run/test` pins it
+    ;; via `wasmtime --env`; without the pin the fallback PWD scan below keeps
+    ;; the old behavior. The 11-byte key match is two overlapping loads:
+    ;; bytes 0..8 "ALMIDE_C" (LE i64) and bytes 7..11 "CWD=" (LE i32).
     (local.set $pwd (i32.const 0))
     (local.set $i (i32.const 0))
+    (block $adone (loop $aloop
+      (br_if $adone (i32.ge_u (local.get $i) (local.get $cnt)))
+      (local.set $entry (i32.load (i32.add (local.get $envp) (i32.mul (local.get $i) (i32.const 4)))))
+      (if (i32.and
+            (i64.eq (i64.load (local.get $entry)) (i64.const 0x435F4544494D4C41))
+            (i32.eq (i32.load (i32.add (local.get $entry) (i32.const 7))) (i32.const 0x3D445743)))
+        (then
+          (local.set $pwd (i32.add (local.get $entry) (i32.const 11)))
+          (local.set $pwdlen (i32.const 0))
+          (block $a_sdone (loop $a_sloop
+            (br_if $a_sdone (i32.eqz (i32.load8_u (i32.add (local.get $pwd) (local.get $pwdlen)))))
+            (local.set $pwdlen (i32.add (local.get $pwdlen) (i32.const 1)))
+            (br $a_sloop)))))
+      (br_if $adone (i32.ne (local.get $pwd) (i32.const 0)))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $aloop)))
+    ;; fall back to the "PWD=" entry
+    (local.set $i (i32.const 0))
     (block $done (loop $loop
+      (br_if $done (i32.ne (local.get $pwd) (i32.const 0)))
       (br_if $done (i32.ge_u (local.get $i) (local.get $cnt)))
       (local.set $entry (i32.load (i32.add (local.get $envp) (i32.mul (local.get $i) (i32.const 4)))))
       (if (i32.and

@@ -417,10 +417,14 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         if let Err(e) = std::fs::write(&wasm_path, bytes) {
             return skip(format!("write: {}", e));
         }
-        let output = std::process::Command::new("wasmtime")
-            .arg("--dir=/")
-            .arg("-S")
-            .arg("inherit-env=y")
+        let mut cmd = std::process::Command::new("wasmtime");
+        cmd.arg("--dir=/").arg("-S").arg("inherit-env=y");
+        // Same ALMIDE_CWD pin as `cmd_run_wasm` (#874): relative fs paths in a
+        // test resolve against the real launcher cwd, not a stale PWD.
+        if let Some(cwd) = super::run::almide_cwd() {
+            cmd.arg(format!("--env=ALMIDE_CWD={}", cwd));
+        }
+        let output = cmd
             .arg(wasm_path.to_str().unwrap())
             .output();
         match output {

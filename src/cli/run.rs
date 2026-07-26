@@ -186,6 +186,18 @@ pub(crate) fn build_native_cached(
     }
 }
 
+/// The launcher's own working directory, exported to the child as
+/// `ALMIDE_CWD` on BOTH targets. The wasm guest resolves relative fs paths
+/// against it (the `PWD` env var can be STALE when a parent process sets the
+/// child cwd without updating it — Node `execFileSync(..., {cwd})`, IDE run
+/// configs — #874); the native child gets the same variable so `env.get`
+/// observes an identical environment across targets.
+pub fn almide_cwd() -> Option<String> {
+    std::env::current_dir()
+        .ok()
+        .and_then(|d| d.to_str().map(|s| s.to_string()))
+}
+
 /// Run a compiled binary with the given args, returning exit code.
 pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
     // Belt for the parallel-test ETXTBSY race (the staging rename above is the
@@ -193,8 +205,12 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
     // back off briefly and retry instead of failing the whole suite.
     let mut delay = std::time::Duration::from_millis(20);
     for _ in 0..6 {
-        match Command::new(bin)
-            .env("RUST_MIN_STACK", "8388608")
+        let mut cmd = Command::new(bin);
+        cmd.env("RUST_MIN_STACK", "8388608");
+        if let Some(cwd) = almide_cwd() {
+            cmd.env("ALMIDE_CWD", cwd);
+        }
+        match cmd
             .args(program_args)
             .status()
         {
@@ -291,10 +307,15 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     // variables native `std::env::var` does (without it every guest lookup is
     // none — a silent cross-target divergence). Program args go after the module
     // path; wasmtime forwards them to the guest as argv.
-    let status = Command::new("wasmtime")
-        .arg("--dir=/")
-        .arg("-S")
-        .arg("inherit-env=y")
+    let mut cmd = Command::new("wasmtime");
+    cmd.arg("--dir=/").arg("-S").arg("inherit-env=y");
+    // The guest resolves relative fs paths against ALMIDE_CWD (in preference
+    // to a possibly-stale inherited PWD — #874); `--env` overrides win over
+    // `inherit-env`, so this pins the real launcher cwd either way.
+    if let Some(cwd) = almide_cwd() {
+        cmd.arg(format!("--env=ALMIDE_CWD={}", cwd));
+    }
+    let status = cmd
         .arg(&wasm_path)
         .args(program_args)
         .status();
