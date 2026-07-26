@@ -465,9 +465,24 @@ fn strip_heredoc_indent(raw: &str) -> String {
 // ── Number lexing ───────────────────────────────────────────────
 
 fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
-    // Hex: 0x...
-    if chars[start] == '0' && start + 1 < chars.len() && (chars[start + 1] == 'x' || chars[start + 1] == 'X') {
-        return lex_hex_number(chars, start, line, col);
+    // Radix prefixes: 0x hex, 0b binary, 0o octal (case-insensitive). The
+    // prefix is claimed only when at least one digit of that radix follows —
+    // a bare `0x` would otherwise reach `literals::int_value` as an empty
+    // digit string and silently fold to 0 (#873). Without a digit the `0`
+    // lexes alone and the letter starts an identifier, so the typo fails to
+    // resolve instead of computing with the wrong value.
+    if chars[start] == '0' && start + 1 < chars.len() {
+        let radix = match chars[start + 1] {
+            'x' | 'X' => Some(16),
+            'b' | 'B' => Some(2),
+            'o' | 'O' => Some(8),
+            _ => None,
+        };
+        if let Some(radix) = radix {
+            if let Some(lexed) = lex_radix_number(chars, start, line, col, radix) {
+                return lexed;
+            }
+        }
     }
 
     let mut pos = start;
@@ -494,14 +509,32 @@ fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
     (Token { token_type: tt, value: raw, line, col, end_col }, pos)
 }
 
-/// Lexes a `0x`/`0X`-prefixed hex integer literal, starting at `chars[start]
-/// == '0'`. Reached from `lex_number` once the hex prefix is confirmed.
-fn lex_hex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+/// Lexes a radix-prefixed integer literal (`0x…`/`0b…`/`0o…`), starting at
+/// `chars[start] == '0'` with the prefix letter already identified. Returns
+/// `None` when no digit of the radix follows the prefix (`0x`, `0b_`), so the
+/// caller falls through to plain-decimal lexing and the bare prefix never
+/// becomes a token. `literals::radix_and_digits` decodes all three prefixes.
+fn lex_radix_number(
+    chars: &[char],
+    start: usize,
+    line: usize,
+    col: usize,
+    radix: u32,
+) -> Option<(Token, usize)> {
     let mut pos = start + 2;
-    while pos < chars.len() && (chars[pos].is_ascii_hexdigit() || chars[pos] == '_') { pos += 1; }
+    let mut digits = 0usize;
+    while pos < chars.len() && (chars[pos].is_digit(radix) || chars[pos] == '_') {
+        if chars[pos] != '_' {
+            digits += 1;
+        }
+        pos += 1;
+    }
+    if digits == 0 {
+        return None;
+    }
     let raw: String = chars[start..pos].iter().collect();
     let end_col = col + (pos - start);
-    (Token { token_type: TokenType::Int, value: raw, line, col, end_col }, pos)
+    Some((Token { token_type: TokenType::Int, value: raw, line, col, end_col }, pos))
 }
 
 /// Scans a run of ASCII digits/underscores starting at `pos`, returning the
@@ -692,6 +725,44 @@ mod tests {
         // Single-quote strings decode the same way.
         assert_eq!(lex_string_value("let x = '\\x1b'\n"), "\u{1b}");
         assert_eq!(lex_string_value("let x = '\\u{41}'\n"), "A");
+    }
+
+    fn lex_kinds_and_values(src: &str) -> Vec<(TokenType, String)> {
+        Lexer::tokenize(src)
+            .into_iter()
+            .filter(|t| matches!(t.token_type, TokenType::Int | TokenType::Ident))
+            .map(|t| (t.token_type, t.value))
+            .collect()
+    }
+
+    // #873: all three radix prefixes lex as one Int token, in either case and
+    // with `_` separators — the digits reach `literals::radix_and_digits` raw.
+    #[test]
+    fn radix_prefixed_int_literals_lex() {
+        for src in ["let a = 0xFF\n", "let a = 0Xff\n", "let a = 0b1010\n",
+                    "let a = 0B10_10\n", "let a = 0o17\n", "let a = 0O1_7\n"] {
+            let toks = lex_kinds_and_values(src);
+            assert_eq!(toks.len(), 2, "expected [a, literal] in {src:?}, got {toks:?}");
+            assert_eq!(toks[1].0, TokenType::Int, "literal must be a single Int in {src:?}");
+            assert!(toks[1].1.starts_with('0'), "raw value keeps the prefix: {toks:?}");
+        }
+    }
+
+    // #873: a bare prefix (or prefix with only separators) must NOT lex as an
+    // Int — `0` lexes alone and the rest starts an identifier, so the typo
+    // fails to resolve instead of silently folding to 0.
+    #[test]
+    fn bare_radix_prefix_splits_into_zero_and_identifier() {
+        for (src, ident) in [("let a = 0x\n", "x"), ("let a = 0b\n", "b"),
+                             ("let a = 0o\n", "o"), ("let a = 0x_\n", "x_"),
+                             ("let a = 0xg\n", "xg"), ("let a = 0b2\n", "b2")] {
+            let toks = lex_kinds_and_values(src);
+            assert_eq!(
+                toks[1..],
+                [(TokenType::Int, "0".to_string()), (TokenType::Ident, ident.to_string())],
+                "in {src:?}"
+            );
+        }
     }
 
     // Malformed numeric escapes fall through to literal passthrough so existing
