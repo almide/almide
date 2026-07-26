@@ -67,8 +67,15 @@ fn constant_fold(program: &mut IrProgram) {
     // targets wrap at runtime; `fold_expr` already folds with wrapping ops).
     // Mutable `var` top-lets never substitute, and only Int/Float/Bool
     // literals do (a substituted String would clone its allocation site).
-    let mut env: std::collections::HashMap<VarId, IrExprKind> =
-        std::collections::HashMap::new();
+    // The env is PER REGION: the main program and each module are PRIVATE
+    // VarId numbering regions (each numbers from 0), so one shared env let a
+    // module's folded literal stand in for a SAME-NUMBERED unrelated var in a
+    // later region — ceangal's scroll `BOUNCING = 2` / `FRICTION = 0.035`
+    // replaced view's `_transparent` / `_white` Color refs inside `_default`
+    // (a silent wrong value; order-dependent on module link order). A
+    // cross-module top-let read goes through a synthesized ref in the
+    // READER's own region resolved by NAME later, never by a raw foreign id,
+    // so per-region scoping loses no legitimate #809 chain.
     let mut fold_top_let = |tl: &mut IrTopLet,
                             env: &mut std::collections::HashMap<VarId, IrExprKind>| {
         subst_const_vars(&mut tl.value, env);
@@ -84,10 +91,14 @@ fn constant_fold(program: &mut IrProgram) {
             env.insert(tl.var, tl.value.kind.clone());
         }
     };
+    let mut env: std::collections::HashMap<VarId, IrExprKind> =
+        std::collections::HashMap::new();
     for tl in &mut program.top_lets {
         fold_top_let(tl, &mut env);
     }
     for m in &mut program.modules {
+        let mut env: std::collections::HashMap<VarId, IrExprKind> =
+            std::collections::HashMap::new();
         for tl in &mut m.top_lets {
             fold_top_let(tl, &mut env);
         }
@@ -97,8 +108,9 @@ fn constant_fold(program: &mut IrProgram) {
 /// Replace every `Var` reference to an already-folded earlier top-let with its
 /// literal, bottom-up through `map_children` (the wildcard-free traversal
 /// primitive — a hand-rolled match would silently drop future node kinds).
-/// VarIds are globally unique post-lowering, so no shadowing can capture a
-/// substitution.
+/// VarIds are unique WITHIN a region (the caller scopes `env` per region —
+/// main vs each module — because regions each number from 0), so no
+/// shadowing can capture a substitution.
 fn subst_const_vars(slot: &mut IrExpr, env: &std::collections::HashMap<VarId, IrExprKind>) {
     if env.is_empty() {
         return;
