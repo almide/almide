@@ -197,7 +197,7 @@ fn reset_remaining(remaining: &mut HashMap<VarId, u32>, eligible: &HashSet<VarId
 /// in `insert_clones_live` / `insert_clone_stmts_live` (and their arm
 /// helpers), so each fn stays at or under the `max-params` limit. `in_loop`
 /// flips to `true` for a nested loop body/cond — built as a fresh `CloneCtx`
-/// reborrowing `remaining` (same shape as `HoistCtx` in pass_licm_p2.rs).
+/// reborrowing `remaining` (same shape as `HoistCtx` in pass_licm_hoist.rs).
 struct CloneCtx<'a> {
     always: &'a HashSet<VarId>,
     eligible: &'a HashSet<VarId>,

@@ -516,5 +516,5 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &M
     }
 }
 
-include!("pass_licm_p2.rs");
-include!("pass_licm_p3.rs");
+include!("pass_licm_hoist.rs");
+include!("pass_licm_purity.rs");

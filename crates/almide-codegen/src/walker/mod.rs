@@ -548,5 +548,5 @@ fn contains_aborting_int_div(expr: &IrExpr) -> bool {
     f.found
 }
 
-include!("mod_p2.rs");
-include!("mod_p3.rs");
+include!("program_render.rs");
+include!("extern_c.rs");

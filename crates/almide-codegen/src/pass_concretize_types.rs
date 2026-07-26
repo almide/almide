@@ -450,7 +450,7 @@ fn erase_pattern(pat: &mut IrPattern, aliases: &HashMap<String, Ty>) {
     }
 }
 
-include!("pass_concretize_types_p5.rs");
-include!("pass_concretize_types_p2.rs");
-include!("pass_concretize_types_p3.rs");
-include!("pass_concretize_types_p4.rs");
+include!("pass_concretize_types_signatures.rs");
+include!("pass_concretize_types_walker.rs");
+include!("pass_concretize_types_call_ret.rs");
+include!("pass_concretize_types_unresolved.rs");

@@ -640,4 +640,4 @@ fn render_stmt_bind_destructure(ctx: &RenderContext, stmt: &IrStmt) -> String {
         .unwrap_or_else(|| format!("let _ = _;"))
 }
 
-include!("statements_p2.rs");
+include!("statements_box_patterns.rs");

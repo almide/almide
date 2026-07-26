@@ -737,4 +737,4 @@ fn scan_non_tail_stmt(stmt: &IrStmt, fn_name: &str) -> (bool, bool) {
 }
 
 
-include!("pass_tco_p2.rs");
+include!("pass_tco_loop_rewrite.rs");

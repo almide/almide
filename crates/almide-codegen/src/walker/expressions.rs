@@ -584,4 +584,4 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
 }
 
-include!("expressions_p2.rs");
+include!("expressions_calls_binops.rs");

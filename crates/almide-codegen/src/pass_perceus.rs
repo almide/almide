@@ -566,5 +566,5 @@ impl NanoPass for PerceusPass {
     }
 }
 
-include!("pass_perceus_p2.rs");
-include!("pass_perceus_p3.rs");
+include!("pass_perceus_verify.rs");
+include!("pass_perceus_branch_balance.rs");
