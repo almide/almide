@@ -407,6 +407,43 @@ impl LowerCtx {
             }
             _ => e,
         };
+        // A BLOCK element — the heap-if-argument ANF (and its desugar
+        // siblings) wraps an element in a Block carrying its `let`s
+        // (`{ let t = if …; color(text(…), t) }`, the ceangal todo_item
+        // chain, #881). Lower the statements as effects in an element-local
+        // frame, then the TAIL as the element itself. The block's own heap
+        // lets are freed within the frame (the built element co-owns what it
+        // needs via its own Dup/moves), and the element object's tracking is
+        // restored afterwards so the caller's uniform Consume still sees it.
+        if let IrExprKind::Block { stmts, expr } = &e_ref.kind {
+            let tail = expr.as_deref()?;
+            let mark = self.live_heap_handles.len();
+            for s in stmts {
+                if let Err(e) = self.lower_stmt(s) {
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!("[elem-block] stmt declined: {e:?}")
+                    });
+                    return None;
+                }
+            }
+            let out = match self.lower_record_list_element(tail, forced_elem, elem_ty, kind) {
+                Some(o) => o,
+                None => {
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!("[elem-block] tail declined: {:?}", tail.kind)
+                    });
+                    return None;
+                }
+            };
+            if let Some(obj) = out {
+                self.live_heap_handles.retain(|h| *h != obj);
+            }
+            self.drop_arm_locals(mark);
+            if let Some(obj) = out {
+                self.live_heap_handles.push(obj);
+            }
+            return Some(out);
+        }
         // A CTOR-class element (`some(1)`, `err("x")`) materializes through the Option/Result
         // ctor builder (a fresh OWNED wrapper block; the ctor arms leave tracking to callers,
         // so push it for the uniform Consume below). A Var/call element of the SAME type takes

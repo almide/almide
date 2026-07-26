@@ -30,6 +30,7 @@ pub(crate) const CHANNELS: &[(&str, &str)] = &[
     ("ALMIDE_DUMP_IR", "the lowered IR of every fn whose name contains the value"),
     ("ALMIDE_DUMP_DROPS", "the computed drop set"),
     ("ALMIDE_MG_DEBUG", "mutable-global slot assignment and the cross-module name-bridge decisions"),
+    ("ALMIDE_DBG_ELEM", "why a list-literal Block element declined"),
     ("DBG_LOWER_FN", "the lowered body of the fn named by the value"),
     ("DBG_DESUGAR_FN", "the desugared body of the fn named by the value"),
     ("DBG_DESUGAR_RAW", "with DBG_DESUGAR_FN, the raw pre-desugar body too"),

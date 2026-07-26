@@ -545,6 +545,15 @@ fn lower_function_all_impl(
     } else {
         func_body
     };
+    // A HEAP-result `if` in call-argument position → its let-decomposed
+    // form (see `desugar_heap_if_call_args`, #881) — same slot.
+    let heap_if_arg_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_heap_if_call_args(func_body) {
+        heap_if_arg_body = rewritten;
+        &heap_if_arg_body
+    } else {
+        func_body
+    };
     // A call argument projecting a heap value out of a MUTABLE global
     // (`s(cached_items[i].content)`) → its let-decomposed form (see
     // `desugar_mutable_global_projection_args`, #881) — same slot.
