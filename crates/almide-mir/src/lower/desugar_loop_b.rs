@@ -101,7 +101,8 @@ pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> 
         (Some(f), Some(r)) => Some((f, r, &body.ty)),
         _ => None,
     };
-    let rewritten = loop_uw_rewrite(&body_block, ef, ev, &err_ty, vx, next_var)?;
+    let rewritten =
+        loop_uw_rewrite(&body_block, UwEnv { ef, ev, err_ty: &err_ty, vx }, next_var)?;
     // The combined not-exited condition: `not __ef` (and `not __vf` when the value pair
     // exists) — the ForIn body-guard / the While condition injection.
     let not_flag = |v: VarId| {
