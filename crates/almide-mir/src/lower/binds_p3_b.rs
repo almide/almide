@@ -18,6 +18,27 @@ impl LowerCtx {
         if let Some(rname) = self.record_or_anon_drop_type_name(elem_ty) {
             return Some(ListElemDrop::Record(rname));
         }
+        // A PLAIN variant element (`[shapes.circle(1.0)]` — a `List[Figure]`
+        // literal over a (cross-module) variant type, #875). A RICH variant
+        // (heap-bearing payloads) routes to the generated per-element
+        // recursive `$__drop_list_<V>` — the same `list_<name>` key the
+        // Record registration uses, and `is_rich_variant_ty` asks the SAME
+        // question the drop generator does, so admission ⊆ generation. A
+        // FLAT one (all-scalar payloads — `Circle(Float)`) has no generated
+        // list drop and needs none: per-element `rc_dec` frees each block
+        // exactly (the CtorFlat class). Checked before the tuple arms (a
+        // variant is never a tuple).
+        if is_heap_ty(elem_ty) && !matches!(elem_ty, Ty::Tuple(_)) {
+            let rich = self.variant_layouts.is_rich_variant_ty(elem_ty, &|rn| {
+                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+            });
+            if let Some(vname) = rich {
+                return Some(ListElemDrop::Record(vname));
+            }
+            if self.custom_variant_type_name(elem_ty).is_some() {
+                return Some(ListElemDrop::CtorFlat);
+            }
+        }
         if matches!(elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
                 && (matches!(tys[1], Ty::String)

@@ -2148,3 +2148,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/tco_map_acc_seed.almd", class = "fixture" },
 ]
+
+# ── LIST LITERALS OF VARIANT TYPES: BIND POSITION AND IF-ARM POSITION ─
+[[contract]]
+id        = "C-175"
+spec      = "ALS-M7"
+title     = "A List literal of a variant type builds and drops identically on both targets, in bind and heap-result-if-arm position"
+statement = "A `List` literal whose elements are VARIANT values — `[shapes.circle(1.0)]` over a cross-module variant, `[Circle(1.0), Rect(2.0, 3.0)]` over a local one — materializes on the wasm target instead of walling, and behaves byte-identically to native through construction, iteration, match-based consumption and scope-end teardown (#875). A FLAT variant element (every constructor payload scalar — `Circle(Float)`) frees with a per-element rc_dec (the CtorFlat class): each element block owns no nested heap, so the flat free is exact. A RICH variant element routes to the generated per-element-recursive `$__drop_list_<V>` — the classifier asks `is_rich_variant_ty`, the SAME question the drop generator answers, so admission stays a subset of generation and a misclassification cannot dangle a drop call. The same literal as a heap-result `if` ARM (`if n <= 0 then [] else [leaf(n)]` — the ceangal kids_of shape, #881) routes through the bind-position record-list builder, with the EMPTY arm materialized as the zero-length block of the same layout: every list drop at len 0 is exactly the block free, so the moved-out object is uniform across arms. Separately hardened in the same change: a generated-drop target (`$__drop_…`) rendered from a DropVariant/DropWrapperRec op is now gated like a CallFn — an unresolved one WALLS instead of emitting a dangling call (an INVALID module, observed for a bare record name whose generated drop keys the module-qualified twin), and a bare-vs-qualified name mismatch resolves to its unique same-family twin rather than walling spuriously."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_cross_module_variant.almd", class = "fixture" },
+]

@@ -340,6 +340,39 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A `List` LITERAL arm over HEAP elements (`if n <= 0 then []
+            // else [leaf(n)]` — ceangal's kids_of, the #875 class in arm
+            // position): the BIND-position record-list builder already
+            // materializes the non-empty form as ONE owned block with its
+            // registered recursive drop — route the arm through it and move
+            // the block out (`Consume`, the Call-arm "im" balance). The EMPTY
+            // arm is the zero-length block of the same layout; every list
+            // drop at len 0 is exactly the block free, so the moved-out
+            // object is uniform across arms.
+            IrExprKind::List { elements }
+                if matches!(result_ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 && crate::lower::is_heap_ty(&a[0])) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = if elements.is_empty() {
+                    let len = self.fresh_value();
+                    self.ops.push(crate::Op::ConstInt { dst: len, value: 0 });
+                    let dst = self.fresh_value();
+                    self.ops.push(crate::Op::Alloc {
+                        dst,
+                        repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                        init: crate::Init::DynList { len },
+                    });
+                    dst
+                } else {
+                    self.try_lower_record_list_literal(arm)?
+                };
+                self.ops.push(crate::Op::Consume { v: obj });
+                self.live_heap_handles.retain(|x| *x != obj);
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::Block { stmts, expr } => {
                 let tail = expr.as_deref()?;
                 let arm_mark = self.live_heap_handles.len();
