@@ -392,7 +392,10 @@ impl LowerCtx {
                 self.in_frame += 1;
                 let mut ok = true;
                 for stmt in stmts {
-                    if self.lower_stmt(stmt).is_err() {
+                    if let Err(e) = self.lower_stmt(stmt) {
+                        crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                            format!("[heap-if-arm] Block stmt declined: {e:?}")
+                        });
                         ok = false;
                         break;
                     }
