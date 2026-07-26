@@ -1,0 +1,195 @@
+// raytracer — a ray tracer that renders straight into your terminal.
+//
+// Three mirrored spheres over a checkerboard floor, one sun, soft sky —
+// rendered as ANSI 24-bit half-block art (each ▀ carries two pixels: fg =
+// upper, bg = lower). Pure Float math end to end: vectors as records, sphere
+// intersection, Lambertian shading, hard shadows, and three mirror bounces.
+//
+//   almide run examples/raytracer.almd                 # native
+//   almide run examples/raytracer.almd --target wasm   # byte-identical
+//
+// The output is DETERMINISTIC — the two targets produce the same bytes, which
+// is the cross-target promise this repo ships (docs/contracts/). No RNG, no
+// clock, no input: just math.
+
+type V3 = { x: Float, y: Float, z: Float }
+
+fn v3(x: Float, y: Float, z: Float) -> V3 = { x: x, y: y, z: z }
+fn vadd(a: V3, b: V3) -> V3 = v3(a.x + b.x, a.y + b.y, a.z + b.z)
+fn vsub(a: V3, b: V3) -> V3 = v3(a.x - b.x, a.y - b.y, a.z - b.z)
+fn vmul(a: V3, s: Float) -> V3 = v3(a.x * s, a.y * s, a.z * s)
+fn vhad(a: V3, b: V3) -> V3 = v3(a.x * b.x, a.y * b.y, a.z * b.z)
+fn vdot(a: V3, b: V3) -> Float = a.x * b.x + a.y * b.y + a.z * b.z
+fn vnorm(a: V3) -> V3 = {
+  let len = float.sqrt(vdot(a, a))
+  if len > 0.0 then vmul(a, 1.0 / len) else a
+}
+fn vreflect(d: V3, n: V3) -> V3 = vsub(d, vmul(n, 2.0 * vdot(d, n)))
+
+// A sphere: center, radius, surface color, mirror strength (0 = matte).
+type Sphere = { c: V3, r: Float, col: V3, refl: Float }
+
+fn ruby() -> Sphere = { c: v3(0.0, 1.0, 0.0), r: 1.0, col: v3(0.98, 0.20, 0.16), refl: 0.45 }
+fn azure() -> Sphere = { c: v3(-2.1, 0.7, 1.1), r: 0.7, col: v3(0.16, 0.38, 0.98), refl: 0.35 }
+fn amber() -> Sphere = { c: v3(1.9, 0.55, 1.4), r: 0.55, col: v3(0.98, 0.76, 0.14), refl: 0.35 }
+
+fn scene() -> List[Sphere] = [ruby(), azure(), amber()]
+
+// Ray↔sphere: smallest positive t, or -1.0 for a miss.
+fn hit_sphere(ro: V3, rd: V3, s: Sphere) -> Float = {
+  let oc = vsub(ro, s.c)
+  let b = vdot(oc, rd)
+  let c = vdot(oc, oc) - s.r * s.r
+  let disc = b * b - c
+  if disc < 0.0 then -1.0
+  else {
+    let sq = float.sqrt(disc)
+    let t1 = 0.0 - b - sq
+    let t2 = 0.0 - b + sq
+    if t1 > 0.001 then t1 else if t2 > 0.001 then t2 else -1.0
+  }
+}
+
+// Nearest sphere hit along the ray: (t, sphere index), t < 0.0 = none.
+fn nearest_hit(ro: V3, rd: V3) -> (Float, Int) = {
+  var best_t = -1.0
+  var best_i = -1
+  var i = 0
+  for s in scene() {
+    let t = hit_sphere(ro, rd, s)
+    if t > 0.0 and (best_t < 0.0 or t < best_t) then {
+      best_t = t
+      best_i = i
+    } else ()
+    i = i + 1
+  }
+  (best_t, best_i)
+}
+
+fn sphere_at(i: Int) -> Sphere =
+  if i == 0 then ruby() else if i == 1 then azure() else amber()
+
+fn light_dir() -> V3 = vnorm(v3(-0.55, 0.85, -0.45))
+
+// Is the point in shadow? (any occluder toward the light)
+fn in_shadow(p: V3) -> Bool = {
+  let (t, _) = nearest_hit(p, light_dir())
+  // The floor cannot occlude the sun from above, so spheres are the only test.
+  t > 0.0
+}
+
+fn sky(rd: V3) -> V3 = {
+  let t = 0.5 * (rd.y + 1.0)
+  vadd(vmul(v3(1.0, 0.98, 0.94), 1.0 - t), vmul(v3(0.30, 0.52, 0.96), t))
+}
+
+// Checkerboard floor at y = 0.
+fn floor_color(p: V3) -> V3 = {
+  let cx = float.to_int(float.floor(p.x * 0.9))
+  let cz = float.to_int(float.floor(p.z * 0.9))
+  if (cx + cz) % 2 == 0 then v3(0.97, 0.97, 0.97) else v3(0.09, 0.10, 0.13)
+}
+
+// x^32 by five squarings (the specular exponent; there is no float.pow).
+fn pow32(x: Float) -> Float = {
+  let x2 = x * x
+  let x4 = x2 * x2
+  let x8 = x4 * x4
+  let x16 = x8 * x8
+  x16 * x16
+}
+
+// Diffuse + hard shadow + a sun glint at a hit point with normal n, incoming
+// ray rd, and base color col.
+fn shade(p: V3, n: V3, rd: V3, col: V3) -> V3 = {
+  let diff = float.max(0.0, vdot(n, light_dir()))
+  let shadowed = in_shadow(vadd(p, vmul(n, 0.002)))
+  let lit = if shadowed then 0.0 else diff
+  let base = vmul(col, 0.13 + 0.95 * lit)
+  // Blinn-ish glint: how closely the mirrored sun lines up with the eye ray.
+  let glint = float.max(0.0, vdot(vreflect(vmul(light_dir(), -1.0), n), vmul(rd, -1.0)))
+  let spec = if shadowed then 0.0 else pow32(glint) * 0.75
+  vadd(base, v3(spec, spec, spec))
+}
+
+// Trace one ray with up to `depth` mirror bounces (iterative: color = sum of
+// attenuated local shading along the bounce chain).
+fn trace(ro0: V3, rd0: V3, depth: Int) -> V3 = {
+  var ro = ro0
+  var rd = rd0
+  var acc = v3(0.0, 0.0, 0.0)
+  var atten = 1.0
+  var bounce = 0
+  var done = false
+  while bounce <= depth and not done {
+    let (t, idx) = nearest_hit(ro, rd)
+    // Floor hit distance (ray pointing down onto y = 0), -1.0 when parallel/up.
+    let tf = if rd.y < -0.0001 then (0.0 - ro.y) / rd.y else -1.0
+    let sphere_first = t > 0.0 and (tf < 0.0 or t < tf)
+    if sphere_first then {
+      let s = sphere_at(idx)
+      let p = vadd(ro, vmul(rd, t))
+      let n = vnorm(vsub(p, s.c))
+      let surf = shade(p, n, rd, s.col)
+      acc = vadd(acc, vmul(surf, atten * (1.0 - s.refl)))
+      if s.refl > 0.0 and bounce < depth then {
+        atten = atten * s.refl
+        ro = vadd(p, vmul(n, 0.002))
+        rd = vnorm(vreflect(rd, n))
+      } else {
+        done = true
+      }
+    } else if tf > 0.0 then {
+      let p = vadd(ro, vmul(rd, tf))
+      let surf = shade(p, v3(0.0, 1.0, 0.0), rd, floor_color(p))
+      // The floor carries a faint mirror polish.
+      acc = vadd(acc, vmul(surf, atten * 0.82))
+      atten = atten * 0.18
+      ro = vadd(p, v3(0.0, 0.002, 0.0))
+      rd = vnorm(vreflect(rd, v3(0.0, 1.0, 0.0)))
+      if bounce >= depth then done = true else ()
+    } else {
+      acc = vadd(acc, vmul(sky(rd), atten))
+      done = true
+    }
+    bounce = bounce + 1
+  }
+  acc
+}
+
+fn channel(v: Float) -> Int = float.to_int(float.min(255.0, float.max(0.0, v * 255.0)))
+
+// Gamma-ish lift so the terminal image doesn't crush the shadows.
+fn tone(c: V3) -> V3 = v3(float.sqrt(c.x), float.sqrt(c.y), float.sqrt(c.z))
+
+fn pixel(px: Int, py: Int, w: Int, h: Int) -> V3 = {
+  let cam = v3(0.0, 1.4, -4.7)
+  let fx = (int.to_float(px) + 0.5) / int.to_float(w) * 2.0 - 1.0
+  let fy = 1.0 - (int.to_float(py) + 0.5) / int.to_float(h) * 2.0
+  let aspect = int.to_float(w) / int.to_float(h) * 0.5
+  let rd = vnorm(v3(fx * aspect, fy * 0.62 - 0.12, 1.0))
+  tone(trace(cam, rd, 3))
+}
+
+// Two pixel rows per text row: ▀ with fg = upper pixel, bg = lower pixel.
+fn render_row(py: Int, w: Int, h: Int) -> String = {
+  var line = ""
+  for px in 0..w {
+    let top = pixel(px, py, w, h)
+    let bot = pixel(px, py + 1, w, h)
+    let fg = "\x1b[38;2;${int.to_string(channel(top.x))};${int.to_string(channel(top.y))};${int.to_string(channel(top.z))}m"
+    let bg = "\x1b[48;2;${int.to_string(channel(bot.x))};${int.to_string(channel(bot.y))};${int.to_string(channel(bot.z))}m"
+    line = line + fg + bg + "\u{2580}"
+  }
+  line + "\x1b[0m"
+}
+
+fn main() -> Unit = {
+  let w = 96
+  let h = 54
+  var py = 0
+  while py < h {
+    println(render_row(py, w, h))
+    py = py + 2
+  }
+}
