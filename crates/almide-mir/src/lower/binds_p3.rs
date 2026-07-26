@@ -563,7 +563,12 @@ impl LowerCtx {
                 return self.try_lower_variant_ctor(value);
             }
         }
-        let (names, tys) = self.aggregate_field_tys(&value.ty)?;
+        let Some((names, tys)) = self.aggregate_field_tys(&value.ty) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!("[rec-construct] no aggregate layout for ty {:?}", value.ty)
+            });
+            return None;
+        };
         if tys.is_empty() {
             return None;
         }
@@ -627,10 +632,28 @@ impl LowerCtx {
             let idx = names.iter().position(|n| n == name)?;
             let is_heap = is_heap_ty(&expr.ty);
             if is_heap {
-                let obj = self.lower_owned_heap_field(expr)?;
+                let Some(obj) = self.lower_owned_heap_field(expr) else {
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!(
+                            "[rec-construct] heap field {} ({}) declined",
+                            name.as_str(),
+                            crate::lower::kind_name(&expr.kind)
+                        )
+                    });
+                    return None;
+                };
                 slots.push((idx, obj, true));
             } else {
-                let v = self.lower_scalar_value(expr)?;
+                let Some(v) = self.lower_scalar_value(expr) else {
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!(
+                            "[rec-construct] scalar field {} ({}) declined",
+                            name.as_str(),
+                            crate::lower::kind_name(&expr.kind)
+                        )
+                    });
+                    return None;
+                };
                 slots.push((idx, v, false));
             }
         }

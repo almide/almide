@@ -300,6 +300,16 @@ impl LowerCtx {
                     }
                 }
             }
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                match self.global_inits.get(&var) {
+                    Some(i) => format!(
+                        "[global-init] {var:?} init present, kind {}, contains_call={}\n{i:#?}",
+                        crate::lower::kind_name(&i.kind),
+                        crate::lower::expr_contains_call(i)
+                    ),
+                    None => format!("[global-init] {var:?} has NO global_inits entry"),
+                }
+            });
             return Err(LowerError::Unsupported(format!(
                 "reference to a heap module-level global {var:?} cannot be faithfully \
                  materialized in this brick (no CONST initializer — a computed init would \

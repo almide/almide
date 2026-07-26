@@ -486,10 +486,15 @@ impl LowerCtx {
                 }
                 self.lower_bind(var, ty, tail)
             }
-            other => Err(LowerError::Unsupported(format!(
-                "heap bind from {} not in this brick",
-                kind_name(other)
-            ))),
+            other => {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                    format!("[heap-bind] declined value (ty {ty:?}): {other:#?}")
+                });
+                Err(LowerError::Unsupported(format!(
+                    "heap bind from {} not in this brick",
+                    kind_name(other)
+                )))
+            }
         }
     }
 

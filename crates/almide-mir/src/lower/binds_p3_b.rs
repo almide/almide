@@ -635,7 +635,12 @@ impl LowerCtx {
         // The CANONICAL declaration-ordered (name, concrete-type) field list. The result's
         // type carries the instantiated generic args, so a `Pair[Int,String]` field `first: A`
         // resolves to `Int`. An unresolvable type ⇒ `None` ⇒ wall.
-        let (names, tys) = self.aggregate_field_tys(&value.ty)?;
+        let Some((names, tys)) = self.aggregate_field_tys(&value.ty) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!("[spread] no aggregate layout for ty {:?}", value.ty)
+            });
+            return None;
+        };
         let n = tys.len();
         if n == 0 || names.len() != n {
             return None;
@@ -647,6 +652,9 @@ impl LowerCtx {
             IrExprKind::Var { id } if is_heap_ty(&base.ty) => {
                 let src = self.value_or_global(*id).ok()?;
                 if !self.materialized_aggregates.contains(&src) {
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!("[spread] base Var {id:?} not a materialized aggregate")
+                    });
                     return None;
                 }
                 src
@@ -661,7 +669,16 @@ impl LowerCtx {
             {
                 self.try_lower_heap_field_borrow(base)?
             }
-            _ => return None,
+            _ => {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                    format!(
+                        "[spread] base kind {} (ty {:?}) outside the Var/Member subset",
+                        crate::lower::kind_name(&base.kind),
+                        base.ty
+                    )
+                });
+                return None;
+            }
         };
         // Per declared slot: the override expr (if the literal supplies it) or `None` (copy
         // from base). A field NOT in the declaration is a type error the checker rejects
@@ -684,10 +701,28 @@ impl LowerCtx {
         for (i, ov) in overrides.iter().enumerate() {
             if let Some(expr) = ov {
                 if is_heap_ty(&tys[i]) {
-                    let obj = self.lower_owned_heap_field(expr)?;
+                    let Some(obj) = self.lower_owned_heap_field(expr) else {
+                        crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                            format!(
+                                "[spread] heap override {} ({}) declined",
+                                names[i].as_str(),
+                                crate::lower::kind_name(&expr.kind)
+                            )
+                        });
+                        return None;
+                    };
                     override_vals[i] = Some((obj, true));
                 } else {
-                    let v = self.lower_scalar_value(expr)?;
+                    let Some(v) = self.lower_scalar_value(expr) else {
+                        crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                            format!(
+                                "[spread] scalar override {} ({}) declined",
+                                names[i].as_str(),
+                                crate::lower::kind_name(&expr.kind)
+                            )
+                        });
+                        return None;
+                    };
                     override_vals[i] = Some((v, false));
                 }
             }
