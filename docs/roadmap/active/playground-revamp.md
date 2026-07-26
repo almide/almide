@@ -31,9 +31,24 @@
 - あるもの: Shiki ハイライト、Output/Compiled Rust/AST の 3 タブ、AI 生成 + 自動修復ループ(BYOK 3 プロバイダ)
 - ないもの: 共有リンク、サンプル集、マルチファイル、補完、インラインエラー、Ctrl+Enter、Worker 隔離(無限ループでタブが固まる)
 
+## Progress
+
+**2026-07-26: Tier 1 + Tier 2 実装完了**(playground repo、ブラウザ E2E + ハーネス検証済み)
+
+- [x] 1.1 Worker 実行基盤 — worker.js/runner.js、stdout ストリーミング、Stop = terminate+respawn、30s タイムアウト。無限ループ→Stop→再実行を E2E 確認
+- [x] 1.2 CodeMirror 6 + インライン診断 — esm.sh importmap(ビルドレス維持)、Almide StreamLanguage、`check_project`(新 crate API、span 付き JSON 診断)をアイドル 500ms で実行、hint 併記、`try:` snippet は一click fix action、Ctrl/Cmd+Enter で Run
+- [x] 1.3 ファイルタブ + 仮想 FS — crate にインメモリ `import self.*` リゾルバ追加(`compile_project_to_*(files, entry)`)、非 .almd タブは browser_wasi_shim の PreopenDirectory("."), `fs.read_text("data.csv")` がブラウザで動作確認済み
+- [x] 2.1 URL hash 共有 — CompressionStream deflate-raw + base64url、タブ一式、ラウンドトリップ E2E 確認
+- [x] 2.2/2.3 TS 方式ギャラリー — 6 本(pattern-matching / pipes-and-lists / error-handling / modules / mini-markdown / csv-report)、カテゴリ付きメニュー、`?example=<id>` deep link、`tests/run.mjs` に examples セクション追加(native/wasm byte-parity、wall は即 fail)
+
+発見した課題(別対応):
+- `almide run --target wasm` が guest cwd を `$PWD` から導出しており、`getcwd` と食い違うと相対 fs read が wasm でだけ ENOENT(execFileSync 等 PWD を更新しない親から顕在化)。ハーネス側は PWD を明示して回避済み。**almide 本体で current_dir 参照に直すべき**
+- cross-module ADT(module 定義の variant 型を entry で使う形)は v1 wasm レンダラの wall(`main is outside the MIR-lowering subset`)。modules サンプルは関数モジュール(stats)に設計変更で回避
+- AI システムプロンプトの example が旧 `effect fn main(_args)` 形で E028 を誘発していたのを修正
+
 ## Roadmap
 
-### Tier 1 — 土台
+### Tier 1 — 土台(done 2026-07-26)
 
 #### 1.1 Worker 実行基盤
 コンパイル + 実行を Web Worker に隔離。無限ループで UI が固まらない、キャンセルボタン、
