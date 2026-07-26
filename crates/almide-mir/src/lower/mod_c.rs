@@ -545,6 +545,17 @@ fn lower_function_all_impl(
     } else {
         func_body
     };
+    // A call argument projecting a heap value out of a MUTABLE global
+    // (`s(cached_items[i].content)`) → its let-decomposed form (see
+    // `desugar_mutable_global_projection_args`, #881) — same slot.
+    let mg_projection_body;
+    let func_body: &IrExpr =
+        if let Some(rewritten) = desugar_mutable_global_projection_args(func_body) {
+            mg_projection_body = rewritten;
+            &mg_projection_body
+        } else {
+            func_body
+        };
     // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` (see
     // `desugar_bytes_index_assign`) — same desugar-before-both slot.
     let bytes_index_assign_body;

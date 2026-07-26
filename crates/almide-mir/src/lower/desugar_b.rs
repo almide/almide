@@ -734,3 +734,110 @@ pub(crate) fn desugar_hof_chain_anf(body: &IrExpr) -> Option<IrExpr> {
     }
     changed.then_some(out)
 }
+
+/// `s(cached_items[i].content)` — a call argument that PROJECTS a heap value
+/// out of a MUTABLE module-level global (an `IndexAccess`/`Member` chain
+/// rooted at a mutable-global var) walls in STRICT value mode, while the SAME
+/// projection decomposed into `let` steps lowers (the ceangal `get_item_text`
+/// export, #881's last brick). ANF exactly that shape: each such argument's
+/// projection chain is bound step-by-step into fresh `let`s and the argument
+/// becomes the final temp's `Var`; the call moves into a Block carrying the
+/// binds. Count-preserving (the same calls, merely let-bound) and rooted-at-a
+/// -mutable-global only, so ordinary local projections keep their existing
+/// lowering byte-for-byte.
+pub(crate) fn desugar_mutable_global_projection_args(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
+
+    fn projection_root(e: &IrExpr) -> Option<VarId> {
+        match &e.kind {
+            IrExprKind::Member { object, .. } => projection_root(object),
+            IrExprKind::IndexAccess { object, .. } => projection_root(object),
+            IrExprKind::Var { id } => Some(*id),
+            _ => None,
+        }
+    }
+    fn qualifies(a: &IrExpr) -> bool {
+        matches!(a.kind, IrExprKind::Member { .. } | IrExprKind::IndexAccess { .. })
+            && crate::lower::is_heap_ty(&a.ty)
+            && projection_root(a).is_some_and(crate::lower::is_mutable_global)
+    }
+    fn is_projection(e: &IrExpr) -> bool {
+        matches!(e.kind, IrExprKind::Member { .. } | IrExprKind::IndexAccess { .. })
+    }
+    /// Bind every projection level into a temp (innermost first), returning
+    /// the `Var` of the outermost temp.
+    fn bind_chain(e: &IrExpr, next: &mut u32, binds: &mut Vec<IrStmt>) -> IrExpr {
+        let rebuilt = match &e.kind {
+            IrExprKind::Member { object, field } if is_projection(object) => IrExpr {
+                kind: IrExprKind::Member {
+                    object: Box::new(bind_chain(object, next, binds)),
+                    field: *field,
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            },
+            IrExprKind::IndexAccess { object, index } if is_projection(object) => IrExpr {
+                kind: IrExprKind::IndexAccess {
+                    object: Box::new(bind_chain(object, next, binds)),
+                    index: index.clone(),
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            },
+            _ => e.clone(),
+        };
+        let tmp = VarId(*next);
+        *next += 1;
+        binds.push(IrStmt {
+            kind: IrStmtKind::Bind {
+                var: tmp,
+                mutability: Mutability::Let,
+                ty: e.ty.clone(),
+                value: rebuilt,
+            },
+            span: e.span.clone(),
+        });
+        IrExpr { kind: IrExprKind::Var { id: tmp }, ty: e.ty.clone(), span: e.span.clone(), def_id: None }
+    }
+
+    struct Rw {
+        changed: bool,
+        next: u32,
+    }
+    impl almide_ir::IrMutVisitor for Rw {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            almide_ir::visit_mut::walk_expr_mut(self, expr);
+            let IrExprKind::Call { args, .. } = &mut expr.kind else { return };
+            let mut binds = Vec::new();
+            for a in args.iter_mut() {
+                if qualifies(a) {
+                    let bound = bind_chain(a, &mut self.next, &mut binds);
+                    *a = bound;
+                }
+            }
+            if binds.is_empty() {
+                return;
+            }
+            self.changed = true;
+            let ty = expr.ty.clone();
+            let span = expr.span.clone();
+            let call = std::mem::replace(
+                expr,
+                IrExpr { kind: IrExprKind::Unit, ty: ty.clone(), span: span.clone(), def_id: None },
+            );
+            *expr = IrExpr {
+                kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(call)) },
+                ty,
+                span,
+                def_id: None,
+            };
+        }
+    }
+
+    let mut rw = Rw { changed: false, next: crate::lower::max_var_id(body) + 1 };
+    let mut out = body.clone();
+    almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut out);
+    rw.changed.then_some(out)
+}
