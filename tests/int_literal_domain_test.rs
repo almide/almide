@@ -122,10 +122,9 @@ const ACCEPTED: &[&str] = &[
 const MUST_NOT_SILENTLY_COMPILE: &[&str] = &[
     // Past the classifier's own u128 intermediate.
     "let a: Int = 99999999999999999999999999999999999999999999",
-    // A radix prefix with no digits. The lexer emits `0x` as one token and
-    // `int_value` parses it with `unwrap_or(0)`; the classifier now rejects it
-    // before that. The lexer should decline the prefix instead (#873) — this
-    // pins the LOUDNESS, not the wording.
+    // A radix prefix with no digits. The lexer declines the prefix (#873), so
+    // `0` lexes alone and `x` becomes an undefined identifier (E003) — this
+    // pins the LOUDNESS, not the wording or the layer that catches it.
     "let a: Int = 0x",
 ];
 
@@ -163,7 +162,7 @@ fn nothing_folds_to_zero_in_silence() {
     for binding in MUST_NOT_SILENTLY_COMPILE {
         let out = check(dir.path(), &body(binding));
         assert!(
-            out.contains("E024"),
+            out.contains("error["),
             "`{binding}` must be rejected, not folded to 0 in silence, got:\n{out}"
         );
     }
