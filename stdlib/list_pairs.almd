@@ -125,6 +125,21 @@ fn list_zip_hs(a: List[List[Int]], b: List[Int]) -> List[(List[Int], Int)] = {
   out
 }
 
+// DEEP-heap zip (`list.zip` over two List[Value]-class lists, #877): rc_inc is
+// layout-agnostic (a nested-heap handle is ONE i32 whatever it points at — the
+// C-172 pattern), so the share discipline is IDENTICAL to zip_rc; the split
+// name exists so the caller's result-drop classification keys the deep class.
+fn list_zip_h(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[Int])] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[(List[Int], List[Int])] = prim.alloc_list_str(n)
+  let _x = __zip_fill_rc(prim.handle(out), ha, hb, n, 0)
+  out
+}
+
 fn list_zip_rc(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

@@ -344,11 +344,14 @@ fn list_call_name_zip_variant(ea: &Ty, eb: &Ty) -> &'static str {
     if list_call_name_zip_is_flat_heap(ea) && list_call_name_zip_is_flat_heap(eb) {
         return "list.zip_rc";
     }
-    // MIXED scalar/flat-heap: co-own only the heap side (`_sh`/`_hs`).
-    if !is_heap_ty(ea) && list_call_name_zip_is_flat_heap(eb) {
+    // MIXED scalar/heap: co-own only the heap side (`_sh`/`_hs`; rc_inc is
+    // layout-agnostic, so ANY heap depth takes the same fill). `zip_h` is the
+    // BOTH-sides-heap deep quadrant — its fill rc_incs both slots, which
+    // would corrupt a scalar slot, so mixed pairs must never route there.
+    if !is_heap_ty(ea) && is_heap_ty(eb) {
         return "list.zip_sh";
     }
-    if list_call_name_zip_is_flat_heap(ea) && !is_heap_ty(eb) {
+    if is_heap_ty(ea) && !is_heap_ty(eb) {
         return "list.zip_hs";
     }
     "list.zip_h"

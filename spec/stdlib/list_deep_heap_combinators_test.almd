@@ -1,0 +1,34 @@
+// @contract: C-172
+// Deep-heap list combinators (#877): `list.zip` over two nested-heap lists
+// routes to the type-erased `list.zip_h` (share both sides — a nested-heap
+// handle is ONE i32 whatever it points at), `list.drop` to `drop_hshare`
+// (rc_inc-shared tail), and `list.take` with n<0 mirrors the native
+// `take(n as usize)` wrap — the WHOLE list (the old max(n,0) clamp returned
+// empty: a cross-target divergence, not a wall).
+
+fn fmt(x: List[Int]) -> String = x |> list.map(int.to_string) |> list.join(".")
+
+test "zip over nested-heap lists stops at the shorter" {
+  let a = [[1, 2], [3]]
+  let b = [[9], [8, 7], [6]]
+  let z = list.zip(a, b)
+  assert_eq(list.len(z), 2);
+  let shown = z |> list.map((p) => {
+    let (x, y) = p
+    fmt(x) + "|" + fmt(y)
+  }) |> list.join(" ")
+  assert_eq(shown, "1.2|9 3|8.7")
+}
+
+test "drop over nested-heap elements" {
+  let a = [[1, 2], [3], [4, 5]]
+  assert_eq(list.drop(a, 1) |> list.map((x) => fmt(x)) |> list.join(","), "3,4.5");
+  assert_eq(list.len(list.drop(a, -1)), 0);
+  assert_eq(list.len(list.drop(a, 9)), 0)
+}
+
+test "take negative count keeps the whole list" {
+  let a = [[1, 2], [3]]
+  assert_eq(list.len(list.take(a, -1)), 2);
+  assert_eq(list.take(a, 1) |> list.map((x) => fmt(x)) |> list.join(","), "1.2")
+}
