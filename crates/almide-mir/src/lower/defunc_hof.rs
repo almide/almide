@@ -67,206 +67,26 @@ impl LowerCtx {
         args: &[IrExpr],
         result_ty: &Ty,
     ) -> Option<ValueId> {
-        use almide_lang::types::constructor::TypeConstructorId;
-        // The closure arg index per combinator: map/filter/flat_map/filter_map = arg 1,
-        // fold = arg 2 (after init).
-        let (xs, lambda_idx, init_idx) = match func {
-            "map" | "filter" | "flat_map" | "filter_map" | "find" if args.len() == 2 => {
-                (&args[0], 1usize, None)
-            }
-            "fold" if args.len() == 3 => (&args[0], 2usize, Some(1usize)),
-            _ => return None,
-        };
-        // The CLOSURE arg is an INLINE lambda (`(x) => …`) OR a `Var` statically bound to a let lambda
-        // (`let g = (x) => …; xs |> list.map(g)` — the wasm-bindgen generate_dts/esm `sigs` shape, where
-        // a flat_map body defines `param_ty` and maps with it). A let-bound lambda is resolved through the
-        // EXISTING `lambda_bindings` registry (the same one the C1 direct-call inline uses) and inlined
-        // identically — its captures resolve through `value_of` exactly like an inline lambda. A first-
-        // class/opaque/FnRef closure is C2 (not inlinable here) → defer to the self-host path / WALL.
-        let resolved_lambda: Option<(Vec<(VarId, Ty)>, IrExpr)> = match &args[lambda_idx].kind {
-            IrExprKind::Lambda { params, body, .. } => Some((params.clone(), (**body).clone())),
-            IrExprKind::Var { id } => self.lambda_bindings.get(id).cloned(),
-            _ => None,
-        };
-        let (params, body) = match &resolved_lambda {
-            Some((p, b)) => (p, b),
-            None => return None,
-        };
+        let (xs, init_idx, lambda_params, lambda_body) = self.defunc_call_shape(func, args)?;
+        let (params, body) = (&lambda_params, &lambda_body);
         // `list.find` — an EARLY-EXIT scan returning `Option[elem]`, with its OWN gating
         // (the map/filter source/result gates below don't apply to it, so it is dispatched
-        // FIRST — placing it after `result_ok` silently killed it once).
+        // FIRST — placing it after the result gate silently killed it once).
         if func == "find" {
-            let f_ops = self.ops.len();
-            let f_lhh = self.live_heap_handles.len();
-            let f_lifted = self.lifted.len();
-            let f_vo = self.value_of.clone();
-            if let Some(dst) = self.try_lower_defunc_find(xs, params, body, result_ty) {
-                self.last_call_had_unlifted_closure = false;
+            return self.defunc_find_route(xs, params, body, result_ty);
+        }
+        if let Some(init) = init_idx.map(|ix| &args[ix]) {
+            if let Some(dst) = self.defunc_acc_fold_routes(xs, params, body, init, result_ty) {
                 return Some(dst);
             }
-            self.rollback_scalar_loop(f_ops, f_lhh, f_lifted, f_vo);
-            return None;
         }
-        // A TUPLE-accumulator `fold((<empty-list>, <int-init>), (state, e) => { let (acc, n) = state;
-        // (acc + [<elem>], n + <step>) })` returning `(List[T], Int)` — the wasm-bindgen
-        // `wasm_record_offsets` shape. The accumulator is a 2-tuple `(List[T], Int)`; the body
-        // destructures `state` then returns a tuple whose component0 is a `acc + [<elem>]` list APPEND
-        // and component1 a scalar `n + <step>`. The scalar `result_ok` gate below rejects this (a
-        // heap-and-not-String accumulator), so handle it HERE with a dedicated loop that carries TWO
-        // slots (a List append-accumulator + an Int scalar local) and builds the result tuple ONCE
-        // after the loop. The helper does its OWN strict gating + complete rollback (any deviation →
-        // None → rolls back → walls, never a wrong-bytes tuple).
-        if func == "fold" && args.len() == 3 {
-            let tup_mark = self.ops.len();
-            let tup_lhh = self.live_heap_handles.len();
-            let tup_lifted = self.lifted.len();
-            let tup_vo = self.value_of.clone();
-            if let Some(dst) = self.try_lower_defunc_tuple_acc_fold(
-                xs,
-                params,
-                body,
-                &args[init_idx.expect("init_idx is Some when func == \"fold\" && args.len() == 3, checked at this match's guard")],
-                result_ty,
-            ) {
-                // The closure was FAITHFULLY inlined — clear the unlifted-closure flag (see the tail
-                // of this function) so the bind path treats the tuple block as a genuinely-materialized
-                // aggregate, NOT an unfaithful HOF to WALL.
-                self.last_call_had_unlifted_closure = false;
-                return Some(dst);
-            }
-            self.rollback_scalar_loop(tup_mark, tup_lhh, tup_lifted, tup_vo);
-            // The RECORD-accumulator sibling (`{ out: List[String], in_ul: Bool }` — the
-            // playground `wrap_lists` (B)-mechanism shape). Same strict-gate + full-rollback
-            // discipline; see `try_lower_defunc_record_acc_fold`.
-            let rec_mark = self.ops.len();
-            let rec_lhh = self.live_heap_handles.len();
-            let rec_lifted = self.lifted.len();
-            let rec_vo = self.value_of.clone();
-            if let Some(dst) = self.try_lower_defunc_record_acc_fold(
-                xs,
-                params,
-                body,
-                &args[init_idx.expect("init_idx is Some when func == \"fold\" && args.len() == 3, checked at this match's guard")],
-                result_ty,
-            ) {
-                self.last_call_had_unlifted_closure = false;
-                return Some(dst);
-            }
-            self.rollback_scalar_loop(rec_mark, rec_lhh, rec_lifted, rec_vo);
-        }
-        // enumerate+map FUSION: `list.map(list.enumerate(real), (entry) => { let (i,key)=entry; <tail> })`
-        // → a map-with-index over `real`, binding i=loop-index + key=element, AVOIDING the (Int,String)
-        // intermediate list entirely (no enumerate self-host, no new tuple-list drop). Rebind the
-        // source/params/body to the fused form + remember the index var (bound to i_v in the inner).
-        let fuse_holder: Option<(Vec<(VarId, Ty)>, IrExpr)>;
-        let mut fuse_index: Option<VarId> = None;
-        // zip+map FUSION second source: `(b_expr, p1_var, t1)` — the loop iterates `a`
-        // as the primary source, borrows `b` alongside, binds p1 = b[i] each iteration,
-        // and bounds the loop by min(len_a, len_b) (v0 zip semantics). The (A,B) tuple
-        // list is never built.
-        let mut fuse_second: Option<(IrExpr, VarId, Ty)> = None;
-        let (xs, params, body) = if func == "map" {
-            match detect_enum_map_fusion(xs, params, body) {
-                Some((real, i_var, key_var, key_ty, tail)) => {
-                    fuse_index = Some(i_var);
-                    fuse_holder = Some((vec![(key_var, key_ty)], tail));
-                    let (p, b) = fuse_holder.as_ref().expect("fuse_holder was just set to Some on the previous line");
-                    (real, p.as_slice(), b)
-                }
-                None => match detect_zip_map_fusion(xs, params, body) {
-                    Some((a, b, p0, t0, p1, t1, new_body)) => {
-                        fuse_second = Some((b.clone(), p1, t1));
-                        fuse_holder = Some((vec![(p0, t0)], new_body));
-                        let (p, bd) = fuse_holder.as_ref().expect("fuse_holder was just set to Some on the previous line");
-                        (a, p.as_slice(), bd)
-                    }
-                    None => {
-                        fuse_holder = None;
-                        (xs, params.as_slice(), body)
-                    }
-                },
-            }
-        } else if func == "fold" {
-            // enumerate+FOLD fusion (`args |> list.enumerate |> list.fold(init, (acc, entry) => { let
-            // (i, key) = entry; … })`): iterate `real` directly, binding i=loop-index + key=element +
-            // KEEPING the acc param, so the `(Int,String)` intermediate is never built. The `find_flag`
-            // shape.
-            match detect_enum_fold_fusion(xs, params, body) {
-                Some((real, i_var, acc_param, key_var, key_ty, tail)) => {
-                    fuse_index = Some(i_var);
-                    fuse_holder = Some((vec![acc_param, (key_var, key_ty)], tail));
-                    let (p, b) = fuse_holder.as_ref().expect("fuse_holder was just set to Some on the previous line");
-                    (real, p.as_slice(), b)
-                }
-                None => {
-                    fuse_holder = None;
-                    (xs, params.as_slice(), body)
-                }
-            }
-        } else {
-            fuse_holder = None;
-            (xs, params.as_slice(), body)
-        };
-        let _ = &fuse_holder;
-        // (Every combinator the entry `match func` admits — map/filter/fold/flat_map/
-        // filter_map; `find` exited above — reads a heap source element as a borrowed
-        // handle, so there is no name-keyed source gate here: the per-shape gating lives
-        // in each combinator's own seed/body/result lowerers below.)
-        // map: a HEAP-element result list (`List[String]`/`List[Value]`) is now built too — each
-        // slot holds an OWNED handle the per-element body produces (via lower_heap_result_arm), and
-        // the result list is tracked for the recursive scope-end drop. filter keeps scalar results;
-        // fold a scalar accumulator. (A heap accumulator / heap-filter still defers.)
-        let result_heap_elem = matches!(func, "map" | "filter")
-            && matches!(result_ty,
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]));
-        // `flat_map`/`filter_map` over a `List[String]` source build a `List[String]` result by
-        // CONCATENATING each element's sublist (`flat_map` → `List[String]`; `filter_map` → the 0-or-1
-        // element `Option[String]`, physically a `DynListStr`) onto a loop-carried accumulator via the
-        // proven `__list_concat_rc` drop-old + SetLocal slot (the same `i(id)m` append-accumulator the
-        // heap `fold` arm uses). Gated to a `List[String]` result; any other element type defers.
-        let result_str_acc = matches!(func, "flat_map" | "filter_map")
-            && matches!(result_ty,
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String))
-            // A `flat_map` producing a `List[Matrix]` (`heads |> list.flat_map((h) =>
-            // list.repeat(h, n_rep))` — the nn repeat_kv GQA shape): the SAME
-            // append-accumulator loop; the acc/leaf drop grain is derived from the list
-            // TYPE inside (`is_list_list_str_ty` → the nested DropListListStr sweep).
-            || (func == "flat_map"
-                && matches!(result_ty,
-                    Ty::Applied(TypeConstructorId::List, a) if a.len() == 1
-                        && matches!(&a[0], Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))));
-        // A `filter_map` building a HEAP-but-non-String element list (`List[record]`/`List[Value]`/
-        // `List[(String,Value)]` — the dojo `backfill_dir` `task_files |> filter_map((f) => match
-        // fs.read_text(dir+"/"+f) { ok(c) => some(parse_task_md(f,c)), err(_) => none })`). A
-        // write-cursor result list (like `filter`) keeping the Ok/Some-arm-built OWNED element and
-        // skipping the Err/None arm — `lower_defunc_filter_map_hof`. (String-element filter_map stays
-        // the `result_str_acc` accumulator path above.)
-        let result_filter_map_heap = func == "filter_map"
-            && matches!(result_ty,
-                Ty::Applied(TypeConstructorId::List, a)
-                    if a.len() == 1 && is_heap_ty(&a[0]) && !matches!(a[0], Ty::String));
-        let result_ok = match func {
-            "map" => result_heap_elem
-                || matches!(result_ty,
-                    Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
-            "filter" => result_heap_elem
-                || matches!(result_ty,
-                    Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
-            // A SCALAR accumulator (Int/Bool/Float), OR any HEAP accumulator the seed/body
-            // machinery can handle (String, a list, a Matrix — `fold(layers, x, (h, l) =>
-            // block(h, l))`): the inlined `acc = <body>` is the loop-carried slot's
-            // drop-old + SetLocal (the proven i(id)m append-accumulator pattern). The
-            // strict per-shape gating lives in the SEED (LitStr/Var/list-literal only)
-            // and BODY (concat/fresh-owned-call only) lowerers — an unsupported shape
-            // returns None there and the whole HOF rolls back to the wall.
-            "fold" => true,
-            "flat_map" => result_str_acc,
-            "filter_map" => result_str_acc || result_filter_map_heap,
-            _ => false,
-        };
-        if !result_ok {
-            return None;
-        }
+        let (fuse_holder, fuse_index, fuse_second, fused_src) =
+            detect_defunc_fusion(func, xs, params, body);
+        let fused = fuse_holder.as_ref().map(|(p, b)| {
+            (fused_src.expect("a fused source accompanies every fusion holder"), p.as_slice(), b)
+        });
+        let (xs, params, body) = fused.unwrap_or((xs, params.as_slice(), body));
+        let gate = defunc_result_gate(func, result_ty)?;
         // map/filter have exactly ONE param (the element); fold has TWO (acc, element).
         let expected_params = if func == "fold" { 2 } else { 1 };
         if params.len() != expected_params {
@@ -284,58 +104,25 @@ impl LowerCtx {
         let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
 
-        // The result element type for a heap-element map (the per-element body's owned result is
-        // moved into a slot; the result list is recursively dropped). None ⇒ the scalar path.
-        let result_elem: Option<Ty> = if result_heap_elem || result_filter_map_heap {
-            match result_ty {
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => Some(a[0].clone()),
-                _ => None,
-            }
-        } else {
-            None
-        };
-        // SCALAR-TUPLE accumulator fold (the argmax idiom) — its own specialized loop.
-        if func == "fold" {
-            if let Some(init_e) = init_idx.map(|ix| &args[ix]) {
-                if matches!(result_ty, Ty::Tuple(ts) if ts.len() == 2
-                    && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]))
-                {
-                    if let Some(dst) = self.try_lower_defunc_scalar_tuple_fold(
-                        xs, DefuncLambda { params, body }, init_e, fuse_index, result_ty,
-                    ) {
-                        return Some(dst);
-                    }
-                }
-                // (scalar, Option[scalar]) accumulator — the find_chunk scanner.
-                if let Some(dst) = self.try_lower_defunc_opt_tuple_fold(
-                    xs, DefuncLambda { params, body }, init_e, fuse_index, result_ty,
-                ) {
-                    return Some(dst);
-                }
+        // SCALAR-TUPLE accumulator fold (the argmax idiom) — its own specialized
+        // loop. (`init_idx` is Some exactly for a 3-arg fold, so no func check.)
+        if let Some(init_e) = init_idx.map(|ix| &args[ix]) {
+            if let Some(dst) = self.defunc_scalar_tuple_routes(
+                xs, DefuncLambda { params, body }, init_e, fuse_index, result_ty,
+            ) {
+                return Some(dst);
             }
         }
-        let result = if result_str_acc {
-            // flat_map / filter_map: a dedicated `List[String]` append-accumulator loop (concat each
-            // element's sublist onto the loop-carried slot). The sublist body returns `List[String]`
-            // (flat_map) or `Option[String]` (filter_map) — both are a `DynListStr` the concat appends,
-            // and the per-leaf walker handles `some`/`none`/`[]`/list-concat uniformly by body shape.
-            self.lower_defunc_str_acc_hof(xs, params, body)
-        } else if result_filter_map_heap {
-            // filter_map → `List[record]`/`List[Value]`/`List[(String,Value)]`: a write-cursor result
-            // list keeping the Ok/Some-arm-built OWNED element, skipping Err/None (the dojo shape).
-            match result_elem.as_ref() {
-                Some(elem) => self.lower_defunc_filter_map_hof(xs, params, body, elem),
-                None => None,
-            }
-        } else {
-            self.lower_defunc_list_hof_inner(
-                func,
-                xs,
-                DefuncLambda { params, body },
-                DefuncAcc { init: init_idx.map(|i| &args[i]), result_elem },
-                DefuncFusion { index: fuse_index, second: fuse_second.as_ref() },
-            )
-        };
+        let result = self.run_defunc_route(
+            func,
+            xs,
+            DefuncRoute {
+                lambda: DefuncLambda { params, body },
+                init: init_idx.map(|i| &args[i]),
+                fuse: DefuncFusion { index: fuse_index, second: fuse_second.as_ref() },
+                gate,
+            },
+        );
         if result.is_none() {
             self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
         } else {
@@ -347,6 +134,311 @@ impl LowerCtx {
         }
         result
     }
+
+    /// The combinator's argument shape: `(source, init index, lambda params, lambda body)`.
+    /// The closure arg index per combinator: map/filter/flat_map/filter_map = arg 1,
+    /// fold = arg 2 (after init).
+    ///
+    /// The CLOSURE arg is an INLINE lambda (`(x) => …`) OR a `Var` statically bound to a let lambda
+    /// (`let g = (x) => …; xs |> list.map(g)` — the wasm-bindgen generate_dts/esm `sigs` shape, where
+    /// a flat_map body defines `param_ty` and maps with it). A let-bound lambda is resolved through the
+    /// EXISTING `lambda_bindings` registry (the same one the C1 direct-call inline uses) and inlined
+    /// identically — its captures resolve through `value_of` exactly like an inline lambda. A first-
+    /// class/opaque/FnRef closure is C2 (not inlinable here) → defer to the self-host path / WALL.
+    #[allow(clippy::type_complexity)]
+    fn defunc_call_shape<'a>(
+        &self,
+        func: &str,
+        args: &'a [IrExpr],
+    ) -> Option<(&'a IrExpr, Option<usize>, Vec<(VarId, Ty)>, IrExpr)> {
+        let (xs, lambda_idx, init_idx) = match func {
+            "map" | "filter" | "flat_map" | "filter_map" | "find" if args.len() == 2 => {
+                (&args[0], 1usize, None)
+            }
+            "fold" if args.len() == 3 => (&args[0], 2usize, Some(1usize)),
+            _ => return None,
+        };
+        let (params, body) = match &args[lambda_idx].kind {
+            IrExprKind::Lambda { params, body, .. } => (params.clone(), (**body).clone()),
+            IrExprKind::Var { id } => self.lambda_bindings.get(id).cloned()?,
+            _ => return None,
+        };
+        Some((xs, init_idx, params, body))
+    }
+
+    /// Dispatch the admitted HOF to its loop lowerer. The caller holds the
+    /// rollback marks — a `None` here means the route declined and the caller
+    /// rolls the whole HOF back to the wall.
+    fn run_defunc_route(
+        &mut self,
+        func: &str,
+        xs: &IrExpr,
+        route: DefuncRoute<'_>,
+    ) -> Option<ValueId> {
+        let DefuncRoute { lambda, init, fuse, gate } = route;
+        let DefuncLambda { params, body } = lambda;
+        if gate.str_acc {
+            // flat_map / filter_map: a dedicated `List[String]` append-accumulator loop (concat each
+            // element's sublist onto the loop-carried slot). The sublist body returns `List[String]`
+            // (flat_map) or `Option[String]` (filter_map) — both are a `DynListStr` the concat appends,
+            // and the per-leaf walker handles `some`/`none`/`[]`/list-concat uniformly by body shape.
+            self.lower_defunc_str_acc_hof(xs, params, body)
+        } else if gate.filter_map_heap {
+            // filter_map → `List[record]`/`List[Value]`/`List[(String,Value)]`: a write-cursor result
+            // list keeping the Ok/Some-arm-built OWNED element, skipping Err/None (the dojo shape).
+            match gate.result_elem.as_ref() {
+                Some(elem) => self.lower_defunc_filter_map_hof(xs, params, body, elem),
+                None => None,
+            }
+        } else {
+            self.lower_defunc_list_hof_inner(
+                func,
+                xs,
+                DefuncLambda { params, body },
+                DefuncAcc { init, result_elem: gate.result_elem },
+                fuse,
+            )
+        }
+    }
+
+    /// `list.find` — an EARLY-EXIT scan returning `Option[elem]`. Fully rolled
+    /// back on decline (the caller keeps the self-host / WALL path).
+    fn defunc_find_route(
+        &mut self,
+        xs: &IrExpr,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let f_ops = self.ops.len();
+        let f_lhh = self.live_heap_handles.len();
+        let f_lifted = self.lifted.len();
+        let f_vo = self.value_of.clone();
+        if let Some(dst) = self.try_lower_defunc_find(xs, params, body, result_ty) {
+            self.last_call_had_unlifted_closure = false;
+            return Some(dst);
+        }
+        self.rollback_scalar_loop(f_ops, f_lhh, f_lifted, f_vo);
+        None
+    }
+
+    /// A TUPLE-accumulator `fold((<empty-list>, <int-init>), (state, e) => { let (acc, n) = state;
+    /// (acc + [<elem>], n + <step>) })` returning `(List[T], Int)` — the wasm-bindgen
+    /// `wasm_record_offsets` shape. The accumulator is a 2-tuple `(List[T], Int)`; the body
+    /// destructures `state` then returns a tuple whose component0 is a `acc + [<elem>]` list APPEND
+    /// and component1 a scalar `n + <step>`. The scalar result gate rejects this (a
+    /// heap-and-not-String accumulator), so it is handled HERE with a dedicated loop that carries TWO
+    /// slots (a List append-accumulator + an Int scalar local) and builds the result tuple ONCE
+    /// after the loop. Each helper does its OWN strict gating + complete rollback (any deviation →
+    /// None → rolls back → walls, never a wrong-bytes tuple). The RECORD-accumulator sibling
+    /// (`{ out: List[String], in_ul: Bool }` — the playground `wrap_lists` (B)-mechanism shape)
+    /// is tried second, with the same discipline.
+    fn defunc_acc_fold_routes(
+        &mut self,
+        xs: &IrExpr,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        init: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let tup_mark = self.ops.len();
+        let tup_lhh = self.live_heap_handles.len();
+        let tup_lifted = self.lifted.len();
+        let tup_vo = self.value_of.clone();
+        if let Some(dst) = self.try_lower_defunc_tuple_acc_fold(xs, params, body, init, result_ty) {
+            // The closure was FAITHFULLY inlined — clear the unlifted-closure flag (see the tail
+            // of `try_lower_defunc_list_hof`) so the bind path treats the tuple block as a
+            // genuinely-materialized aggregate, NOT an unfaithful HOF to WALL.
+            self.last_call_had_unlifted_closure = false;
+            return Some(dst);
+        }
+        self.rollback_scalar_loop(tup_mark, tup_lhh, tup_lifted, tup_vo);
+        let rec_mark = self.ops.len();
+        let rec_lhh = self.live_heap_handles.len();
+        let rec_lifted = self.lifted.len();
+        let rec_vo = self.value_of.clone();
+        if let Some(dst) = self.try_lower_defunc_record_acc_fold(xs, params, body, init, result_ty) {
+            self.last_call_had_unlifted_closure = false;
+            return Some(dst);
+        }
+        self.rollback_scalar_loop(rec_mark, rec_lhh, rec_lifted, rec_vo);
+        None
+    }
+
+    /// SCALAR-TUPLE accumulator folds: the `(scalar, scalar)` argmax idiom, then
+    /// the `(scalar, Option[scalar])` find_chunk scanner — each with its own
+    /// specialized loop and its own gating/rollback.
+    fn defunc_scalar_tuple_routes(
+        &mut self,
+        xs: &IrExpr,
+        lambda: DefuncLambda<'_>,
+        init_e: &IrExpr,
+        fuse_index: Option<VarId>,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let DefuncLambda { params, body } = lambda;
+        if matches!(result_ty, Ty::Tuple(ts) if ts.len() == 2
+            && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]))
+        {
+            if let Some(dst) = self.try_lower_defunc_scalar_tuple_fold(
+                xs, DefuncLambda { params, body }, init_e, fuse_index, result_ty,
+            ) {
+                return Some(dst);
+            }
+        }
+        // (scalar, Option[scalar]) accumulator — the find_chunk scanner.
+        self.try_lower_defunc_opt_tuple_fold(
+            xs, DefuncLambda { params, body }, init_e, fuse_index, result_ty,
+        )
+    }
+}
+
+/// The admitted RESULT shapes of one defunctionalised HOF, all decided from
+/// `(func, result_ty)` alone — `None` = not admitted (the whole HOF defers).
+/// (A map/filter HEAP-element result — each slot an OWNED handle the
+/// per-element body produces, the list tracked for the recursive scope-end
+/// drop — is admission-only: it shows up here as `result_elem: Some`.)
+struct DefuncGate {
+    /// `flat_map`/`filter_map` building a `List[String]` result by CONCATENATING each element's
+    /// sublist (`flat_map` → `List[String]`; `filter_map` → the 0-or-1 element `Option[String]`,
+    /// physically a `DynListStr`) onto a loop-carried accumulator via the proven
+    /// `__list_concat_rc` drop-old + SetLocal slot (the same `i(id)m` append-accumulator the
+    /// heap `fold` arm uses) — plus `flat_map` → `List[Matrix]` (`heads |> list.flat_map((h) =>
+    /// list.repeat(h, n_rep))` — the nn repeat_kv GQA shape), whose acc/leaf drop grain is
+    /// derived from the list TYPE inside (`is_list_list_str_ty` → the nested DropListListStr sweep).
+    str_acc: bool,
+    /// A `filter_map` building a HEAP-but-non-String element list (`List[record]`/`List[Value]`/
+    /// `List[(String,Value)]` — the dojo `backfill_dir` shape): a write-cursor result list (like
+    /// `filter`) keeping the Ok/Some-arm-built OWNED element and skipping the Err/None arm —
+    /// `lower_defunc_filter_map_hof`. (String-element filter_map stays the `str_acc` path.)
+    filter_map_heap: bool,
+    /// The result element type for a heap-element map (the per-element body's owned result is
+    /// moved into a slot; the result list is recursively dropped). None ⇒ the scalar path.
+    result_elem: Option<Ty>,
+}
+
+/// One admitted route + its inputs, bundled so the dispatcher's signature
+/// stays small: the (possibly fused) lambda, the fold init, the fusion state
+/// and the result-shape gate travel together.
+struct DefuncRoute<'a> {
+    lambda: DefuncLambda<'a>,
+    init: Option<&'a IrExpr>,
+    fuse: DefuncFusion<'a>,
+    gate: DefuncGate,
+}
+
+/// The result type's single List element, when it is `List[T]`.
+fn list_elem_ty(result_ty: &Ty) -> Option<&Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match result_ty {
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => Some(&a[0]),
+        _ => None,
+    }
+}
+
+fn defunc_heap_elem_result(func: &str, result_ty: &Ty) -> bool {
+    matches!(func, "map" | "filter") && list_elem_ty(result_ty).is_some_and(is_heap_ty)
+}
+
+fn defunc_str_acc_result(func: &str, result_ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(func, "flat_map" | "filter_map")
+        && matches!(list_elem_ty(result_ty), Some(Ty::String))
+        || (func == "flat_map"
+            && matches!(list_elem_ty(result_ty),
+                Some(Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))))
+}
+
+fn defunc_filter_map_heap_result(func: &str, result_ty: &Ty) -> bool {
+    func == "filter_map"
+        && list_elem_ty(result_ty)
+            .is_some_and(|e| is_heap_ty(e) && !matches!(e, Ty::String))
+}
+
+/// Decide the result-shape admission for one combinator. `fold` is always
+/// admitted here — a SCALAR accumulator (Int/Bool/Float), OR any HEAP
+/// accumulator the seed/body machinery can handle (String, a list, a Matrix —
+/// `fold(layers, x, (h, l) => block(h, l))`): the inlined `acc = <body>` is
+/// the loop-carried slot's drop-old + SetLocal (the proven i(id)m
+/// append-accumulator pattern). The strict per-shape gating lives in the SEED
+/// (LitStr/Var/list-literal only) and BODY (concat/fresh-owned-call only)
+/// lowerers — an unsupported shape returns None there and the whole HOF rolls
+/// back to the wall.
+fn defunc_result_gate(func: &str, result_ty: &Ty) -> Option<DefuncGate> {
+    let heap_elem = defunc_heap_elem_result(func, result_ty);
+    let str_acc = defunc_str_acc_result(func, result_ty);
+    let filter_map_heap = defunc_filter_map_heap_result(func, result_ty);
+    let scalar_list_result = list_elem_ty(result_ty).is_some_and(|e| !is_heap_ty(e));
+    let result_ok = match func {
+        "map" | "filter" => heap_elem || scalar_list_result,
+        "fold" => true,
+        "flat_map" => str_acc,
+        "filter_map" => str_acc || filter_map_heap,
+        _ => false,
+    };
+    if !result_ok {
+        return None;
+    }
+    let result_elem: Option<Ty> = if heap_elem || filter_map_heap {
+        list_elem_ty(result_ty).cloned()
+    } else {
+        None
+    };
+    Some(DefuncGate { str_acc, filter_map_heap, result_elem })
+}
+
+/// Loop-fusion detection, dispatched by combinator:
+///
+/// enumerate+map (`list.map(list.enumerate(real), (entry) => { let (i,key)=entry; <tail> })`
+/// → a map-with-index over `real`, binding i=loop-index + key=element, AVOIDING the (Int,String)
+/// intermediate list entirely — no enumerate self-host, no new tuple-list drop); zip+map (the
+/// loop iterates `a` as the primary source, borrows `b` alongside, binds p1 = b[i] each
+/// iteration, and bounds the loop by min(len_a, len_b) — v0 zip semantics; the (A,B) tuple
+/// list is never built); enumerate+FOLD (`args |> list.enumerate |> list.fold(init, (acc,
+/// entry) => { let (i, key) = entry; … })`: iterate `real` directly, binding i=loop-index +
+/// key=element + KEEPING the acc param — the `find_flag` shape).
+///
+/// Returns `(holder, fuse_index, fuse_second, fused_source)`: `holder` OWNS the fused
+/// params+body (the caller rebinds its slices to it), `fused_source` is the unwrapped real
+/// source, and both are `Some`/`None` together.
+#[allow(clippy::type_complexity)]
+fn detect_defunc_fusion<'a>(
+    func: &str,
+    xs: &'a IrExpr,
+    params: &[(VarId, Ty)],
+    body: &IrExpr,
+) -> (
+    Option<(Vec<(VarId, Ty)>, IrExpr)>,
+    Option<VarId>,
+    Option<(IrExpr, VarId, Ty)>,
+    Option<&'a IrExpr>,
+) {
+    if func == "map" {
+        if let Some((real, i_var, key_var, key_ty, tail)) = detect_enum_map_fusion(xs, params, body)
+        {
+            return (Some((vec![(key_var, key_ty)], tail)), Some(i_var), None, Some(real));
+        }
+        if let Some((a, b, p0, t0, p1, t1, new_body)) = detect_zip_map_fusion(xs, params, body) {
+            return (
+                Some((vec![(p0, t0)], new_body)),
+                None,
+                Some((b.clone(), p1, t1)),
+                Some(a),
+            );
+        }
+    } else if func == "fold" {
+        if let Some((real, i_var, acc_param, key_var, key_ty, tail)) =
+            detect_enum_fold_fusion(xs, params, body)
+        {
+            return (
+                Some((vec![acc_param, (key_var, key_ty)], tail)),
+                Some(i_var),
+                None,
+                Some(real),
+            );
+        }
+    }
+    (None, None, None, None)
 }
 
 include!("defunc_hof_inner.rs");
