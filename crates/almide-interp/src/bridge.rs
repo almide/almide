@@ -382,10 +382,21 @@ fn string_fn_whole(func: &str, args: &[Value]) -> Option<Flow> {
             as_str(args.first())?
                 .replace(as_str(args.get(1))?, as_str(args.get(2))?),
         )),
-        "repeat" => Flow::val(Value::str(
-            // Negative counts clamp to 0 (C-054; mirrors runtime/rs string.rs).
-            as_str(args.first())?.repeat(as_int(args.get(1))?.max(0) as usize),
-        )),
+        "repeat" => {
+            // Negative counts clamp to 0 (C-054) and a result past the shared
+            // 2^31-byte ceiling aborts in the T6 form (C-169) — both mirror
+            // runtime/rs almide_rt_string_repeat exactly; without the ceiling
+            // the interp materialized multi-GB strings and dissented from the
+            // two backends' identical abort (nightly-fuzz OutputDivergence,
+            // seed 1785045556318379299 index 11).
+            let s = as_str(args.first())?;
+            let n = as_int(args.get(1))?.max(0);
+            if (s.len() as i64).saturating_mul(n) > (1_i64 << 31) {
+                Flow::Abort("repeat result too large".to_string())
+            } else {
+                Flow::val(Value::str(s.repeat(n as usize)))
+            }
+        }
         // Codepoint-count take, the C-054 unsigned discipline (mirrors
         // runtime/rs almide_rt_string_take: `chars().take(n as usize)` — a
         // negative n is enormous as usize, so take(-1) keeps the whole string).
