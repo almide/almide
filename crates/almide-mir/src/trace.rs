@@ -20,6 +20,7 @@
 ///
 /// A channel is either a flag (set it to anything) or takes a value, noted in
 /// the description.
+#[cfg_attr(not(test), allow(dead_code))] // read only by debug_channels_are_documented
 pub(crate) const CHANNELS: &[(&str, &str)] = &[
     ("ALMIDE_DBG_ANF", "why a lambda lift or statement inline declined"),
     ("ALMIDE_DBG_CELLS", "the captured / mutated / celled variable sets"),
