@@ -243,6 +243,16 @@ impl LowerCtx {
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
             )));
         }
+        // OUR OWN verdict, kept in a LOCAL. The flag on `self` is reset by every
+        // nested `lower_pure_module_call_args`, and an argument can contain one:
+        // `map.fold(if result.is_ok(t) then … else …, acc, (a, k, v) => acc)` lowers
+        // `result.is_ok` while walking arg0, which cleared a decline recorded for a
+        // SIBLING argument. The caller then read `false`, skipped the honest wall, and
+        // emitted the combinator call with the closure slot filled by an EMPTY block —
+        // the callee's `call_indirect` read past it and aborted (#905). Publishing the
+        // local AFTER the loop makes the flag describe THIS call's arguments, which is
+        // the only thing its reader asks about.
+        let mut dropped_closure = false;
         self.last_call_had_unlifted_closure = false;
         let mut out: Vec<CallArg> = Vec::with_capacity(args.len());
         for a in args {
@@ -265,7 +275,7 @@ impl LowerCtx {
                         // A lambda outside the liftable subset — no closure form. The
                         // self-host combinator runs with a missing closure slot → an
                         // empty/garbage result.
-                        self.last_call_had_unlifted_closure = true;
+                        dropped_closure = true;
                         self.record_elided_calls(body);
                     }
                 },
@@ -307,9 +317,29 @@ impl LowerCtx {
                 }
                 // A regular (non-closure) argument — lower it with the same per-arg machinery
                 // as any call, preserving argument ORDER among the closure slots.
+                // A Fn-TYPED argument that matched none of the closure arms above —
+                // not a Lambda, not a ClosureCreate/FnRef, not a first-class fn VALUE
+                // the closure machinery recognises. The generic path materializes it
+                // as a plain heap arg, which for a `Ty::Fn` slot means a DEFERRED
+                // EMPTY block: `list_new(0, 8)`, a list with no slots at all — not
+                // even the fnidx a real closure block carries at slot 0. A self-host
+                // combinator then `call_indirect`s through it and reads past the
+                // block (#905: `Error: index out of bounds`, wasm only, native fine).
+                // Record it as a dropped closure so the caller's honest wall fires:
+                // a wall is always acceptable here, a wrong value never is.
+                _ if matches!(a.ty, Ty::Fn { .. }) => {
+                    crate::trace::trace("ALMIDE_DBG_ANF", || format!(
+                        "[argfn] {module}.{func}: Fn-typed arg outside the closure arms ({})",
+                        crate::lower::kind_name(&a.kind)));
+                    dropped_closure = true;
+                    out.extend(self.lower_call_args(std::slice::from_ref(a))?);
+                }
                 _ => out.extend(self.lower_call_args(std::slice::from_ref(a))?),
             }
         }
+        // Publish OUR verdict last, so a nested call inside an argument cannot have
+        // cleared it (#905 — see the local's declaration above).
+        self.last_call_had_unlifted_closure = dropped_closure;
         Ok(out)
     }
 
