@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-181 contracts
+182 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -209,4 +209,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-179 | UInt64 reaches its full declared domain, with every observer reading the slot unsigned | 0.37.0 | active | fixture | 2 |
 | C-180 | Sized-integer +, - and * wrap at the declared width on both targets | 0.37.0 | active | fixture | 1 |
 | C-181 | args.positional returns every non-flag argument, and the args surface agrees across targets | 0.37.0 | active | fixture | 1 |
+| C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 1 |
 

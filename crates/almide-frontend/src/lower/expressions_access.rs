@@ -320,11 +320,22 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                         return ctx.mk(IrExprKind::LitInt { value }, ty.clone(), span);
                     }
                 }
+                // FOLD the negation into a FLOAT literal, at the CONTEXT type
+                // (#890). Lowered as a UnOp instead, the operand kept the bare
+                // `Float` the literal was inferred at while the result claimed
+                // the annotated `Float32`: native emitted `-(2.5f64)` into an
+                // f32 slot (E0308, a build failure) and wasm read the mismatched
+                // slot as `0.0` — a silent wrong value. The positive literal
+                // already took the context type, which is why only negatives
+                // broke. Same rule as the Int case above.
+                if let ast::ExprKind::Float { value, .. } = &operand.kind {
+                    return ctx.mk(IrExprKind::LitFloat { value: -value }, ty.clone(), span);
+                }
             }
             let o = lower_expr(ctx, operand);
             let un_op = match (op.as_str(), &o.ty) {
                 ("not", _) => UnOp::Not,
-                ("-", Ty::Float) => UnOp::NegFloat,
+                ("-", Ty::Float | Ty::Float32 | Ty::Float64) => UnOp::NegFloat,
                 _ => UnOp::NegInt,
             };
             ctx.mk(IrExprKind::UnOp { op: un_op, operand: Box::new(o) }, ty, span)
