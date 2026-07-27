@@ -300,9 +300,33 @@ impl LowerCtx {
                 // typing — an effectful closure is not a plain `(A) -> B` value), so the
                 // callback contributes no host capability of its own; a lifted lambda's
                 // caps were already folded at its creation site.
+                //
+                // `closure_values` membership is the WHOLE test, not a formality: a
+                // Fn-typed `Var` resolves through `value_of` whether or not its binding
+                // ever produced a callable block. When the bound lambda fell OUTSIDE the
+                // liftable subset, its `let` left a DEFERRED block behind —
+                // `list_new(0, 8)`, a list with no slots at all, not even the fnidx a
+                // real closure carries at slot 0 — and handing that to a self-host
+                // combinator makes its `call_indirect` read past the block (#905:
+                // `Error: index out of bounds` on wasm, correct on native). The same
+                // lambda written INLINE walls honestly, because the `Lambda` arm above
+                // sees `lift_lambda` decline; the two forms differ only by an ANF hoist,
+                // which a SIBLING argument can force —
+                // `map.fold(if c then m1 else m2, acc, (a, k, v) => acc)` hoists the
+                // lambda that `map.fold(m1, acc, (a, k, v) => acc)` leaves inline. Same
+                // program, same unliftable capture, opposite verdicts. `lift_lambda`
+                // already applies exactly this test to a CAPTURED Fn var; the argument
+                // position was the hole.
                 IrExprKind::Var { id } if matches!(a.ty, Ty::Fn { .. }) => {
                     match self.value_for(*id) {
-                        Ok(v) => out.push(CallArg::Handle(v)),
+                        Ok(v) if self.closure_values.contains(&v) => out.push(CallArg::Handle(v)),
+                        Ok(_) => {
+                            return Err(LowerError::Unsupported(format!(
+                                "Module call {module}.{func} with a function-value argument that never \
+                                 became a closure block (its lambda was outside the liftable subset) \
+                                 not in this brick"
+                            )))
+                        }
                         Err(_) => {
                             return Err(LowerError::Unsupported(format!(
                                 "Module call {module}.{func} with an unresolved function-value argument not in this brick"
@@ -310,6 +334,11 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A Fn-TYPED argument that matched none of the closure arms above — not
+                // a Lambda, not a ClosureCreate/FnRef, not a first-class fn VALUE the
+                // closure machinery recognises. The generic path would materialize it as
+                // a plain heap arg, i.e. the same empty block described above, so this
+                // walls rather than lowering it.
                 _ if matches!(a.ty, Ty::Fn { .. }) => {
                     return Err(LowerError::Unsupported(format!(
                         "Module call {module}.{func} with an opaque function-value argument (capabilities unanalyzable) not in this brick"
@@ -317,23 +346,6 @@ impl LowerCtx {
                 }
                 // A regular (non-closure) argument — lower it with the same per-arg machinery
                 // as any call, preserving argument ORDER among the closure slots.
-                // A Fn-TYPED argument that matched none of the closure arms above —
-                // not a Lambda, not a ClosureCreate/FnRef, not a first-class fn VALUE
-                // the closure machinery recognises. The generic path materializes it
-                // as a plain heap arg, which for a `Ty::Fn` slot means a DEFERRED
-                // EMPTY block: `list_new(0, 8)`, a list with no slots at all — not
-                // even the fnidx a real closure block carries at slot 0. A self-host
-                // combinator then `call_indirect`s through it and reads past the
-                // block (#905: `Error: index out of bounds`, wasm only, native fine).
-                // Record it as a dropped closure so the caller's honest wall fires:
-                // a wall is always acceptable here, a wrong value never is.
-                _ if matches!(a.ty, Ty::Fn { .. }) => {
-                    crate::trace::trace("ALMIDE_DBG_ANF", || format!(
-                        "[argfn] {module}.{func}: Fn-typed arg outside the closure arms ({})",
-                        crate::lower::kind_name(&a.kind)));
-                    dropped_closure = true;
-                    out.extend(self.lower_call_args(std::slice::from_ref(a))?);
-                }
                 _ => out.extend(self.lower_call_args(std::slice::from_ref(a))?),
             }
         }

@@ -497,3 +497,38 @@
             "a triply-nested list literal must still wall as a unit"
         );
     }
+
+    #[test]
+    fn an_anf_hoisted_unliftable_lambda_walls_like_its_inline_twin() {
+        // A combinator's closure argument reaches the lowerer in one of two shapes,
+        // and which one is not the program's choice: written INLINE it stays an
+        // `IrExprKind::Lambda`, but a SIBLING argument that needs ANF hoisting takes
+        // the lambda with it into a `let`, so the call sees an `IrExprKind::Var`.
+        // Here the only difference between the two sources is that `if c then m1
+        // else m2` in the map position forces that hoist.
+        //
+        // The lambda captures a `(Int, Bool)` — outside the liftable capture classes —
+        // so BOTH must wall. The `Var` form used to pass `value_of`'s block through
+        // unchecked; the failed lift had left a deferred `list_new(0, 8)` there, with
+        // no slots and no fnidx, and `map.fold`'s `call_indirect` read past it: wasm
+        // printed `Error: index out of bounds` where native printed `(2, false)`
+        // (#905). Agreement between the two shapes is the invariant — a wall is
+        // acceptable for both, a wrong value for neither.
+        let inline = "fn main() -> Unit = {\n  \
+            let acc: (Int, Bool) = (2, false)\n  \
+            let r: (Int, Bool) = map.fold([\"k0\": 1], acc, (a, k, v) => acc)\n  \
+            println(\"${r}\") }\n";
+        assert!(
+            !lower_source(inline).functions.iter().any(|f| f.name == "main"),
+            "the inline unliftable-capture lambda must wall"
+        );
+        let hoisted = "fn main() -> Unit = {\n  \
+            let acc: (Int, Bool) = (2, false)\n  \
+            let c: Bool = false\n  \
+            let r: (Int, Bool) = map.fold((if c then [\"k0\": 1] else [\"k0\": 127, \"k1\": 2]), acc, (a, k, v) => acc)\n  \
+            println(\"${r}\") }\n";
+        assert!(
+            !lower_source(hoisted).functions.iter().any(|f| f.name == "main"),
+            "the ANF-hoisted twin must wall too, not render a call through an empty block"
+        );
+    }
