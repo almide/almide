@@ -240,11 +240,13 @@ fn builtin_module_core(obj_ty: &Ty) -> Option<&'static str> {
 fn builtin_module_sized(obj_ty: &Ty) -> Option<&'static str> {
     match obj_ty {
     Ty::Int32 => Some("int32"),
+    Ty::Int64 => Some("int64"),
     Ty::UInt8 => Some("uint8"),
     Ty::UInt16 => Some("uint16"),
     Ty::UInt32 => Some("uint32"),
     Ty::UInt64 => Some("uint64"),
     Ty::Float32 => Some("float32"),
+    Ty::Float64 => Some("float64"),
     Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
     Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
         _ => None,

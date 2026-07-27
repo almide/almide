@@ -1,0 +1,54 @@
+// float64_convert — SELF-HOSTED float64.to_* sized conversions for v1:
+// `float.to_<dst>(float.from_float64(x))` unrolled to two `let`s (no call-as-arg),
+// byte-matching float64.almd. Cross-file callees, pure scalar. There is no `to_float64` —
+// identity.
+
+fn float64_to_string(x: Float64) -> String = {
+  let v = float.from_float64(x)
+  float.to_string(v)
+}
+
+fn float64_to_int8(x: Float64) -> Int8 = {
+  let v = float.from_float64(x)
+  float.to_int8(v)
+}
+
+fn float64_to_int16(x: Float64) -> Int16 = {
+  let v = float.from_float64(x)
+  float.to_int16(v)
+}
+
+fn float64_to_int32(x: Float64) -> Int32 = {
+  let v = float.from_float64(x)
+  float.to_int32(v)
+}
+
+fn float64_to_int64(x: Float64) -> Int64 = {
+  let v = float.from_float64(x)
+  float.to_int64(v)
+}
+
+fn float64_to_uint8(x: Float64) -> UInt8 = {
+  let v = float.from_float64(x)
+  float.to_uint8(v)
+}
+
+fn float64_to_uint16(x: Float64) -> UInt16 = {
+  let v = float.from_float64(x)
+  float.to_uint16(v)
+}
+
+fn float64_to_uint32(x: Float64) -> UInt32 = {
+  let v = float.from_float64(x)
+  float.to_uint32(v)
+}
+
+fn float64_to_uint64(x: Float64) -> UInt64 = {
+  let v = float.from_float64(x)
+  float.to_uint64(v)
+}
+
+fn float64_to_float32(x: Float64) -> Float32 = {
+  let v = float.from_float64(x)
+  float.to_float32(v)
+}

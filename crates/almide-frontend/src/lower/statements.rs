@@ -259,44 +259,54 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
 /// operand and the negation node have to carry the sized type or codegen emits a
 /// width mismatch between them.
 fn retype_scalar_literal(ir_val: &mut IrExpr, declared: &Ty) {
-    match &ir_val.kind {
-        IrExprKind::LitFloat { .. } if ir_val.ty == Ty::Float => {
-            ir_val.ty = declared.clone();
-        }
-        _ if is_default_int_tree(ir_val) => stamp_int_tree(ir_val, declared),
-        _ => {}
+    let default = match declared {
+        Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => Ty::Int,
+        Ty::Float32 | Ty::Float64 => Ty::Float,
+        _ => return,
+    };
+    if is_default_numeric_tree(ir_val, &default) {
+        stamp_numeric_tree(ir_val, declared);
     }
 }
 
-/// Whether every node of this expression is still the default `Int` and every
-/// leaf is an int literal — i.e. nothing in it chose a width.
-fn is_default_int_tree(e: &IrExpr) -> bool {
-    if e.ty != Ty::Int {
+/// Whether every node of this expression is still the `default` numeric type
+/// and every leaf is a literal of it — i.e. nothing in the tree chose a width.
+fn is_default_numeric_tree(e: &IrExpr, default: &Ty) -> bool {
+    if e.ty != *default {
         return false;
     }
+    let (neg_op, ops): (almide_ir::UnOp, &[BinOp]) = match (default, &e.kind) {
+        (Ty::Int, IrExprKind::LitInt { .. }) | (Ty::Float, IrExprKind::LitFloat { .. }) => return true,
+        (Ty::Int, _) => (
+            almide_ir::UnOp::NegInt,
+            &[BinOp::AddInt, BinOp::SubInt, BinOp::MulInt, BinOp::DivInt, BinOp::ModInt, BinOp::PowInt],
+        ),
+        (Ty::Float, _) => (
+            almide_ir::UnOp::NegFloat,
+            &[BinOp::AddFloat, BinOp::SubFloat, BinOp::MulFloat, BinOp::DivFloat, BinOp::ModFloat, BinOp::PowFloat],
+        ),
+        _ => return false,
+    };
     match &e.kind {
-        IrExprKind::LitInt { .. } => true,
-        IrExprKind::UnOp { op: almide_ir::UnOp::NegInt, operand } => is_default_int_tree(operand),
+        IrExprKind::UnOp { op, operand } if *op == neg_op => is_default_numeric_tree(operand, default),
         IrExprKind::BinOp { op, left, right } => {
-            matches!(
-                op,
-                BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt | BinOp::ModInt | BinOp::PowInt
-            ) && is_default_int_tree(left)
-                && is_default_int_tree(right)
+            ops.contains(op)
+                && is_default_numeric_tree(left, default)
+                && is_default_numeric_tree(right, default)
         }
         _ => false,
     }
 }
 
-/// Stamp `declared` on every node of a tree `is_default_int_tree` accepted.
+/// Stamp `declared` on every node of a tree `is_default_numeric_tree` accepted.
 /// Whole-tree, because an operator node and its operands must agree on width.
-fn stamp_int_tree(e: &mut IrExpr, declared: &Ty) {
+fn stamp_numeric_tree(e: &mut IrExpr, declared: &Ty) {
     e.ty = declared.clone();
     match &mut e.kind {
-        IrExprKind::UnOp { operand, .. } => stamp_int_tree(operand, declared),
+        IrExprKind::UnOp { operand, .. } => stamp_numeric_tree(operand, declared),
         IrExprKind::BinOp { left, right, .. } => {
-            stamp_int_tree(left, declared);
-            stamp_int_tree(right, declared);
+            stamp_numeric_tree(left, declared);
+            stamp_numeric_tree(right, declared);
         }
         _ => {}
     }

@@ -12,9 +12,9 @@ pub const STDLIB_MODULES: &[&str] = &[
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
     // so users never need `import int32`.
-    "int8", "int16", "int32",
+    "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
-    "float32",
+    "float32", "float64",
 ];
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
@@ -24,9 +24,9 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "mem", "net", "zlib",
-    "int8", "int16", "int32",
+    "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
-    "float32",
+    "float32", "float64",
     // The v1 primitive floor (raw memory + fd_write); v1 maps `prim.*` to MIR ops.
     "prim",
 ];
@@ -45,9 +45,9 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     // provided.
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
-    "int8", "int16", "int32",
+    "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
-    "float32",
+    "float32", "float64",
     // env / io / random / regex / testing are NOT auto-imported —
     // users still need `import env` / `import io` etc. These bundled
     // modules exist so `@inline_rust` templates are discoverable when
@@ -142,11 +142,13 @@ fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
         "int8" => Some(crate::embedded::SRC_INT8),
         "int16" => Some(crate::embedded::SRC_INT16),
         "int32" => Some(crate::embedded::SRC_INT32),
+        "int64" => Some(crate::embedded::SRC_INT64),
         "uint8" => Some(crate::embedded::SRC_UINT8),
         "uint16" => Some(crate::embedded::SRC_UINT16),
         "uint32" => Some(crate::embedded::SRC_UINT32),
         "uint64" => Some(crate::embedded::SRC_UINT64),
         "float32" => Some(crate::embedded::SRC_FLOAT32),
+        "float64" => Some(crate::embedded::SRC_FLOAT64),
         "net" => Some(crate::embedded::SRC_NET),
         "zlib" => Some(crate::embedded::SRC_ZLIB),
         // The v1 primitive floor (raw memory + fd_write). v1 maps `prim.*` to MIR
