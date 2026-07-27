@@ -10,6 +10,16 @@ struct PipelineLayouts {
     global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr>,
     main_globals: HashMap<almide_ir::VarId, almide_lang::types::Ty>,
     main_global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    /// Per-module globals for the MODULE-region lowering: the shared union plus that
+    /// module's own cross-module top-let references, bridged by name (#904). Keyed by
+    /// module name; a module with no such reference is absent and falls back to the
+    /// shared union. Two modules' reference ids can COLLIDE numerically (each region
+    /// numbers from 0), so this must stay per-module — one merged map would let one
+    /// module's `v.ROW` resolve another's unrelated id.
+    module_globals: HashMap<String, (HashMap<almide_ir::VarId, almide_lang::types::Ty>, HashMap<almide_ir::VarId, almide_ir::IrExpr>)>,
+    /// Mangled sibling fn name → owning module name, so the lowering picks that
+    /// module's `module_globals` entry.
+    fn_module: HashMap<String, String>,
     mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
     record_layouts: crate::lower::RecordLayouts,
     variant_layouts: crate::lower::VariantLayouts,
@@ -120,6 +130,7 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
     let (globals, global_inits) = collect_pipeline_globals(ir);
     let (main_globals, main_global_inits, mutable_toplet_aliases) =
         collect_pipeline_main_globals(ir, &globals, &global_inits);
+    let (module_globals, fn_module) = collect_pipeline_module_globals(ir, &globals, &global_inits);
     let record_layouts = collect_pipeline_record_layouts(ir);
     let variant_layouts = collect_pipeline_variant_layouts(ir);
 
@@ -128,10 +139,47 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
         global_inits,
         main_globals,
         main_global_inits,
+        module_globals,
+        fn_module,
         mutable_toplet_aliases,
         record_layouts,
         variant_layouts,
     }
+}
+
+/// Extracted from `collect_pipeline_layouts`: the MODULE-region globals — the shared
+/// union PLUS each module's own `mod.NAME` references bridged by name (see
+/// [`crate::lower::module_region_toplet_bridges`]). A module whose bridge adds nothing
+/// is left out of the map entirely so its fns keep using the shared union verbatim (no
+/// clone, no behavior change). The second return is the mangled-fn-name → module-name
+/// index the sibling lowering uses to pick the right map — the mangling
+/// (`user_module_fn_name`) is the same one `inline_and_classify_cross_module_fns`
+/// applies, and call targets are never renamed after it, so the key is stable.
+#[allow(clippy::type_complexity)]
+fn collect_pipeline_module_globals(
+    ir: &almide_ir::IrProgram,
+    globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) -> (
+    HashMap<String, (HashMap<almide_ir::VarId, almide_lang::types::Ty>, HashMap<almide_ir::VarId, almide_ir::IrExpr>)>,
+    HashMap<String, String>,
+) {
+    let bridges = crate::lower::module_region_toplet_bridges(ir, globals);
+    let mut module_globals = HashMap::new();
+    let mut fn_module = HashMap::new();
+    for m in &ir.modules {
+        let mname = m.name.as_str().to_string();
+        let Some((add_g, add_gi)) = bridges.get(&mname) else { continue };
+        let mut g = globals.clone();
+        let mut gi = global_inits.clone();
+        g.extend(add_g.iter().map(|(k, v)| (*k, v.clone())));
+        gi.extend(add_gi.iter().map(|(k, v)| (*k, v.clone())));
+        for f in &m.functions {
+            fn_module.insert(user_module_fn_name(&mname, f.name.as_str()), mname.clone());
+        }
+        module_globals.insert(mname, (g, gi));
+    }
+    (module_globals, fn_module)
 }
 
 /// Extracted from `collect_pipeline_layouts` (codopsy8 complexity sweep): an UNANNOTATED
@@ -790,10 +838,19 @@ fn lower_main_and_sibling_fns(
         if already.contains(func.name.as_str()) {
             continue;
         }
+        // The OWNING module's globals when its cross-module `mod.NAME` references were
+        // bridged (#904), else the shared union. Per-module because two modules' synthesized
+        // reference ids collide numerically — see `collect_pipeline_module_globals`.
+        let (g, gi) = layouts
+            .fn_module
+            .get(func.name.as_str())
+            .and_then(|m| layouts.module_globals.get(m))
+            .map(|(g, gi)| (g, gi))
+            .unwrap_or((&layouts.globals, &layouts.global_inits));
         match crate::lower::lower_function_all_with_globals(
             func,
-            &layouts.globals,
-            &layouts.global_inits,
+            g,
+            gi,
             &layouts.record_layouts,
             &layouts.variant_layouts,
         ) {

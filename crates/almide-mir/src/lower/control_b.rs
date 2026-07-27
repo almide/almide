@@ -211,10 +211,23 @@ impl LowerCtx {
         // var inside an arm must mutate that var's stable local IN PLACE (`SetLocal`), not
         // rebind a fresh frame-local — see `LowerCtx::unit_arm_depth`.
         self.unit_arm_depth += 1;
-        let then_ok = self.lower_branch_arm(None, then).is_ok();
+        // Report WHICH arm declined (#904): `lower_stmt_expr` falls back to
+        // `lower_branch` on a `false` here, and that path's wall names the
+        // CONDITION — so an arm-side decline was diagnosed as an unresolvable
+        // cond (ceangal's zip_view_rects: the cond lowered fine, the LIST arm's
+        // loop did not). The arm's own reason is the one worth reading.
+        let then_r = self.lower_branch_arm(None, then);
+        if let Err(e) = &then_r {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[unit-if] then arm declined: {e:?}"));
+        }
+        let then_ok = then_r.is_ok();
         let both_ok = then_ok && {
             self.ops.push(Op::Else { val: None });
-            self.lower_branch_arm(None, else_).is_ok()
+            let else_r = self.lower_branch_arm(None, else_);
+            if let Err(e) = &else_r {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[unit-if] else arm declined: {e:?}"));
+            }
+            else_r.is_ok()
         };
         self.unit_arm_depth -= 1;
         if both_ok {

@@ -728,7 +728,12 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
         for (mi, m) in program.modules.iter().enumerate() {
             for (i, info) in m.var_table.entries.iter().enumerate() {
                 let Some(mo) = &info.module_origin else { continue };
-                if mo == m.name.as_str() {
+                // A ref pointing at its OWN module is the per-region pass's job.
+                // The comparison must use the origin SPELLING (`ceangal_view`),
+                // not the dotted module name — with the dotted form this guard
+                // never fired, which was harmless only because the by_name lookup
+                // below never hit either (#904). Both are keyed consistently now.
+                if *mo == crate::lower::module_origin_key(m) {
                     continue;
                 }
                 let looked_up = by_name

@@ -515,10 +515,12 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
                     if !(c.has_call && (c.impure || named_effect)) {
                         return None;
                     }
-                    m.var_table
-                        .entries
-                        .get(tl.var.0 as usize)
-                        .map(|e| (m.name.as_str().to_string(), e.name.as_str().to_uppercase()))
+                    // Keyed by the `module_origin` SPELLING, which is what the
+                    // reference entries below carry — the dotted module name never
+                    // matched, so this wall silently under-fired (#904).
+                    m.var_table.entries.get(tl.var.0 as usize).map(|e| {
+                        (crate::lower::module_origin_key(m), e.name.as_str().to_uppercase())
+                    })
                 })
             })
             .collect();

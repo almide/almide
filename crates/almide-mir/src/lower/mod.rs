@@ -581,6 +581,86 @@ pub fn bridge_cross_module_toplets(
     bridge_cross_module_toplets_apply(ir, &by_name, &by_bare, globals, global_inits, mutable_aliases);
 }
 
+/// The module identity the cross-module top-let bridge keys on: the VERSIONED name when
+/// the module carries one (`snaidhm_v0.web.gpu`), else its plain name, with dots turned
+/// into underscores. This is byte-for-byte the `origin` the frontend's `module_top_let_var`
+/// writes into a synthesized reference's `VarInfo::module_origin`, so a lookup by that
+/// field hits — the single spelling both sides of the bridge agree on.
+pub(crate) fn module_origin_key(m: &almide_ir::IrModule) -> String {
+    m.versioned_name
+        .map(|v| v.as_str().to_string())
+        .unwrap_or_else(|| m.name.as_str().to_string())
+        .replace('.', "_")
+}
+
+/// The MODULE-region twin of [`bridge_cross_module_toplets`] (#904): a `mod.NAME` reference
+/// written INSIDE another module's function (ceangal's `render.almd` reading `v.ROW`) gets a
+/// synthesized reference VarId in the REFERENCING module's own numbering region — which no
+/// top-let ever owns, so the shared module-region globals union left it unbound and every
+/// function using it walled ("use of unbound var"). Main's references have been bridged since
+/// #500; module-to-module ones never were.
+///
+/// Only entries whose `module_origin` names a DIFFERENT module participate. That single test
+/// is what keeps the walk safe: `disambiguate_module_global_regions` PADS a module's var table
+/// up to its remapped top-let ids with clones of that module's OWN top-let info, so every pad
+/// entry carries this module's own ident and is skipped — bridging one would bind an unrelated
+/// id to a wrong init. Immutable `let`s only, and never overriding an existing binding: this
+/// adds resolutions, it never rewrites or removes one (the mutable-`var` alias story stays
+/// main-only, where the slot map's raw-u32 keying is unambiguous).
+/// Returns, per module NAME, only the entries the bridge ADDS (a module that resolves
+/// nothing is absent) — the caller overlays them on the shared union it already holds.
+#[allow(clippy::type_complexity)]
+pub fn module_region_toplet_bridges(
+    ir: &almide_ir::IrProgram,
+    globals: &std::collections::HashMap<almide_ir::VarId, Ty>,
+) -> std::collections::HashMap<
+    String,
+    (
+        std::collections::HashMap<almide_ir::VarId, Ty>,
+        std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    ),
+> {
+    // ONE lookup build for the whole program — the map is keyed by (module ident, NAME),
+    // so every module's walk reads the same finished table.
+    let (by_name, by_bare) = bridge_cross_module_toplets_build_lookup(ir);
+    let mut out = std::collections::HashMap::new();
+    for module in &ir.modules {
+        let own = module_origin_key(module);
+        let mut g = std::collections::HashMap::new();
+        let mut gi = std::collections::HashMap::new();
+        for (i, info) in module.var_table.entries.iter().enumerate() {
+            let Some(origin) = info.module_origin.as_deref() else { continue };
+            if origin == own {
+                continue;
+            }
+            let id = almide_ir::VarId(i as u32);
+            if globals.contains_key(&id) {
+                continue;
+            }
+            let looked = by_name
+                .get(&(origin.to_string(), info.name.as_str().to_uppercase()))
+                .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
+            let Some(Some((ty, init, false, _))) = looked else { continue };
+            if !bridged_ref_ty_agrees(ty, &info.ty) {
+                continue;
+            }
+            crate::trace::trace("ALMIDE_MG_DEBUG", || {
+                format!(
+                    "[bridge-mod] {} {id:?} {}@{origin} -> {ty:?}",
+                    module.name.as_str(),
+                    info.name.as_str()
+                )
+            });
+            g.insert(id, ty.clone());
+            gi.insert(id, (*init).clone());
+        }
+        if !g.is_empty() {
+            out.insert(module.name.as_str().to_string(), (g, gi));
+        }
+    }
+    out
+}
+
 /// Extracted from `bridge_cross_module_toplets` (codopsy8 complexity sweep, phase 1 of
 /// 2): the by-name/by-bare lookup maps of every module top-let. Verbatim.
 ///
@@ -601,6 +681,13 @@ pub fn bridge_cross_module_toplets(
 /// and layout.ROW — the ceangal zip class) resolves per-module instead of
 /// dropping as ambiguous. A bare-name fallback map keeps the pre-existing
 /// behavior for refs whose module_origin the frontend left unset.
+///
+/// The module key is the MANGLED ident ([`module_origin_key`] — dots become
+/// underscores, versioned name preferred), which is exactly the spelling
+/// `module_top_let_var` stamps into `VarInfo::module_origin`. Keying it by the
+/// DOTTED name made every multi-segment module (`ceangal.view`) miss `by_name`
+/// unconditionally and fall through to `by_bare`, where `ROW` — defined in BOTH
+/// `ceangal.view` (2) and `ceangal.layout` (0) — was dropped as ambiguous (#904).
 #[allow(clippy::type_complexity)]
 pub(crate) fn bridge_cross_module_toplets_build_lookup(
     ir: &almide_ir::IrProgram,
@@ -676,7 +763,7 @@ pub(crate) fn bridge_cross_module_toplets_build_lookup(
                 Some((ty.clone(), init, mutable, tl.var))
             };
             by_name
-                .entry((m.name.as_str().to_string(), info.name.as_str().to_uppercase()))
+                .entry((module_origin_key(m), info.name.as_str().to_uppercase()))
                 .and_modify(|e| *e = Option::None) // second definition ⇒ ambiguous, drop
                 .or_insert(entry.clone());
             by_bare
