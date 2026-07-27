@@ -6,7 +6,7 @@
 
 ## Active
 
-68 items
+69 items
 
 | Item | Description |
 |------|-------------|
@@ -55,6 +55,7 @@
 | [v1 Bolt Backlog(AI-DLC 管理)](active/v1-bolt-backlog.md) | AI-DLC Bolt backlog for the v1 climb — the camps/steps roadmap expressed as intent-driven, time-boxed Bolts (each with intent / Definition-of-Done / gate / deps / status). The construction guardrails are the goal-prompt discipline; each Bolt's exit gate is independent review (reviewer agent + Trust Spine CI + unbiased dual-oracle corpus); humans (Mob) decide at the marked forks. Tracks "あと何 Bolt" to each summit. |
 | [v1 → develop Reflow Strategy](active/v1-develop-reflow.md) | Strategy for flowing the develop-v1 trust spine back into develop — what moves, in what order, and what stays branch-local until its gate exists |
 | [v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)](active/v1-heap-result-control-flow.md) | Design for executing a heap-result if/match on the v1 leg without changing the Coq kernel |
+| [v1 join completeness + linear checkers](active/v1-join-completeness.md) | Kill continuation duplication via bind-position joins, and make the proven checkers linear in witness size |
 | [v1 KGI / KPI スコアボード](active/v1-kgi-kpi.md) | v1 KGI/KPI scoreboard — the terminal goal indicators (trust + writability), the guard invariants that must never degrade (checker size, TB purity, axiom cleanliness, zero claim-drift), and the progress KPIs toward each gap. Weekly fill-in. |
 | [v1 heap-loop-carried ownership — option C (cert-spine extension), the COMPLETENESS fix](active/v1-loop-ownership-cert.md) | Loop-carried heap ownership as a certificate-spine extension — the completeness fix, not a special case |
 | [Almide v1: MIR を唯一の真とする単一意味論アーキテクチャ](active/v1-mir-architecture.md) | The single-semantics architecture: ownership and layout are decided once in MIR, and renderers only replay the decision |

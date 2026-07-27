@@ -32,8 +32,26 @@ pub struct NameWitness {
 /// The proven checker accepts iff `used ⊆ defined` (no dangling reference).
 pub fn name_witness_string(func: &MirFunction) -> String {
     let w = name_witness(func);
-    let ids = |v: &[ValueId]| v.iter().map(|x| x.0.to_string()).collect::<Vec<_>>().join(" ");
-    format!("{}|{}", ids(&w.defined), ids(&w.used))
+    format!(
+        "{}|{}",
+        sorted_dedup_ids(w.defined.iter().map(|x| x.0)),
+        sorted_dedup_ids(w.used.iter().map(|x| x.0))
+    )
+}
+
+/// Serialize a witness id list SORTED and DEDUPED. The proven property is
+/// set-membership (`subset_prop` is permutation- and duplicate-invariant), so
+/// this changes no verdict — but the raw collectors push duplicates in bulk
+/// (the 2026-07-27 231KB names line was mostly repeats of a few thousand ids),
+/// and both checkers pay per BYTE: the extracted binary quadratically in the
+/// line, the kernel oracle ~10 constructor nodes per byte in the inlined
+/// literal. Sorted order is also what the O(n+m) merge fast path (arc
+/// v1-join-completeness, C3) verifies in one pass.
+fn sorted_dedup_ids(ids: impl Iterator<Item = u32>) -> String {
+    let mut v: Vec<u32> = ids.collect();
+    v.sort_unstable();
+    v.dedup();
+    v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
 }
 
 /// Collect the (defined, used) value ids of a function for name-totality.
@@ -341,10 +359,11 @@ fn cap_witness_op_call_indirect(func: &MirFunction, op: &Op, used: &mut Vec<Capa
 /// `used ⊆ allowed` (no undeclared host effect).
 pub fn cap_witness_string(func: &MirFunction) -> String {
     let w = cap_witness(func);
-    let ids = |v: &[Capability]| {
-        v.iter().map(|c| c.id().to_string()).collect::<Vec<_>>().join(" ")
-    };
-    format!("{}|{}", ids(&w.allowed), ids(&w.used))
+    format!(
+        "{}|{}",
+        sorted_dedup_ids(w.allowed.iter().map(|c| c.id())),
+        sorted_dedup_ids(w.used.iter().map(|c| c.id()))
+    )
 }
 
 /// The capabilities a function reaches TRANSITIVELY: its direct caps (its own
@@ -400,10 +419,11 @@ pub fn transitive_cap_witness_string(
 ) -> String {
     let mut visited = std::collections::BTreeSet::new();
     let reachable = reachable_caps(func.name.as_str(), program, &mut visited);
-    let ids = |v: &[Capability]| {
-        v.iter().map(|c| c.id().to_string()).collect::<Vec<_>>().join(" ")
-    };
-    format!("{}|{}", ids(&func.declared_caps), ids(&reachable))
+    format!(
+        "{}|{}",
+        sorted_dedup_ids(func.declared_caps.iter().map(|c| c.id())),
+        sorted_dedup_ids(reachable.iter().map(|c| c.id()))
+    )
 }
 
 /// A capability id NO real [`Capability::id`] emits (the registry is Stdout=0 today). The
@@ -433,9 +453,6 @@ pub fn program_cap_graph_witness(
     let index_of: BTreeMap<&str, usize> =
         names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
     let universe = names.len();
-    let ids = |v: &[Capability]| {
-        v.iter().map(|c| c.id().to_string()).collect::<Vec<_>>().join(" ")
-    };
     let mut fns: Vec<String> = Vec::with_capacity(names.len() + 1);
     for name in &names {
         let func = &program[*name];
@@ -457,8 +474,17 @@ pub fn program_cap_graph_witness(
                 // a known-effect-free out-of-program callee reaches nothing → omit
             }
         }
-        let cs = callees.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(" ");
-        fns.push(format!("{}|{}|{}", ids(&func.declared_caps), ids(&cap_witness(func).used), cs));
+        // Dedup matters doubly here: `fcallees` are the EDGES the proven
+        // `reaches` fold re-expands per depth (no memoization — its cost is
+        // Θ(b^F) in the branching factor), so repeated edges multiply the
+        // kernel's work, not just the bytes.
+        let cs = sorted_dedup_ids(callees.iter().map(|i| *i as u32));
+        fns.push(format!(
+            "{}|{}|{}",
+            sorted_dedup_ids(func.declared_caps.iter().map(|c| c.id())),
+            sorted_dedup_ids(cap_witness(func).used.iter().map(|c| c.id())),
+            cs
+        ));
     }
     // UNIVERSE: declares + directly uses the sentinel (so it passes its own check) and has no
     // callees, so it taints any function reaching it without polluting the real graph.

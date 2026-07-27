@@ -8,8 +8,9 @@
 // native and wasm and asserts byte-identical stdout. Native is the oracle.
 //
 // Probe matrix is aimed at the STRUCTURAL differences between the std-backed
-// native runtime (runtime/rs/src/string.rs) and the hand-written wasm bytes
-// (crates/almide-codegen/src/emit_wasm/rt_string_extra.rs):
+// native runtime (runtime/rs/src/string.rs) and the self-hosted wasm leg
+// (stdlib/string_replace.almd, string_first_last.almd, string_is_digit.almd,
+// string_cmp.almd):
 //   - cmp is BYTE-lexicographic with a length tiebreak, NOT codepoint order
 //     ("ä" > "z" because 0xC3 > 0x7A; "apple" > "Apple" because 'a' > 'A').
 //   - replace_first with an EMPTY pattern: native find("") = Some(0), so `to`

@@ -2,7 +2,7 @@
 // Cross-target equivalence for the vendored-libm trig (math.sin/cos/tan).
 //
 // Both targets run the SAME musl-libm algorithm (native: runtime/rs/src/libm.rs,
-// wasm: emit_wasm/rt_libm.rs), so every result must be byte-identical. Printed via
+// wasm: self-hosted stdlib/math_trig.almd), so every result must be byte-identical. Printed via
 // float.to_string (Dragon4), which is itself byte-identical cross-target, so any
 // diff the gate catches is the MATH. The point set deliberately hits each rem_pio2
 // path: small (|x|<pi/4), the small/medium pi/2-quadrant branches, and the

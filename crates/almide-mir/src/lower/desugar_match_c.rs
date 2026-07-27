@@ -160,6 +160,16 @@ pub fn desugar_tuple_empty_list_match(body: &IrExpr) -> Option<IrExpr> {
     let mut v = V { next: max_var_id(body) + 1, changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
+    // GROWTH CAP (arc v1-join-completeness, J0): this rewrite duplicates a
+    // catch-all body per specialization branch and runs OUTSIDE the
+    // desugar_heap_branches fixpoint, so MAX_DESUGARED_NODES never sees its
+    // output — it was one of the two UNCAPPED duplicators of the 2026-07-27
+    // incident class. Growth-based so a big-but-undupped body is not punished;
+    // past the cap the rewrite is DISCARDED and the un-desugared match walls
+    // honestly (the desugar_heap_branches discard precedent, one level out).
+    if v.changed && count_expr_nodes(&out) > count_expr_nodes(body) + 50_000 {
+        return None;
+    }
     v.changed.then_some(out)
 }
 
@@ -627,5 +637,15 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
     let mut v = V { next: max_var_id(body) + 1, changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
+    // GROWTH CAP (arc v1-join-completeness, J0): this rewrite duplicates a
+    // catch-all body per specialization branch and runs OUTSIDE the
+    // desugar_heap_branches fixpoint, so MAX_DESUGARED_NODES never sees its
+    // output — it was one of the two UNCAPPED duplicators of the 2026-07-27
+    // incident class. Growth-based so a big-but-undupped body is not punished;
+    // past the cap the rewrite is DISCARDED and the un-desugared match walls
+    // honestly (the desugar_heap_branches discard precedent, one level out).
+    if v.changed && count_expr_nodes(&out) > count_expr_nodes(body) + 50_000 {
+        return None;
+    }
     v.changed.then_some(out)
 }
