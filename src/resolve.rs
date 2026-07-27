@@ -158,6 +158,20 @@ fn resolve_self_import(
 
 /// `resolve_imports_with_deps`'s non-`self` import branch (`import X` /
 /// `import pkg.submodule`). Extracted verbatim.
+/// Load what a NON-`self` import names — the single rule for every import
+/// position (the entry program, a module's imports, a sub-namespace's imports,
+/// a dependency submodule's imports).
+///
+/// `import pkg` loads the package entry point and, through it, the package's
+/// sibling sub-namespaces. `import pkg.sub` loads ONLY that sub-module and its
+/// transitive imports. Keeping those apart matters: the non-entry positions used
+/// to route a dotted import through `load_module(path[0])`, which loaded the
+/// dependency's ROOT module and every sibling in its `src/` — a consumer that
+/// imported `ceangal.view` from a `self.` submodule got ceangal's demo app and
+/// its internal modules linked in, and their calls (into modules the consumer
+/// never imports, whose generics monomorphization had dropped as unreachable)
+/// failed IR verification (#884). The entry program's own imports always took
+/// the correct path, which is why the same import from the ROOT module built.
 fn resolve_named_import(path: &[crate::intern::Sym], ctx: &mut ResolveCtx) -> Result<(), String> {
     if path.len() == 1 {
         let name = &path[0];
@@ -281,20 +295,15 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
             load_self_module(sub_mod_name, sub_mod_path, src_dir, ctx, false)?;
         }
     } else {
-        let dep_name = &path[0];
-        // Bundled .almd stdlib modules (fs, process, http, json, ...)
-        // must be loaded from embedded source so their type_decls and
-        // @inline_rust fns reach codegen. Without this, a submodule's
-        // `import fs` is silently skipped because is_stdlib_module is
-        // true — the top-level resolver has this branch; recursive
-        // self-module loading needs it too.
-        if let Some(source) = stdlib::get_bundled_source(dep_name) {
-            if !ctx.loaded_names.contains(dep_name.as_str()) {
-                load_bundled_module(dep_name, source, ctx)?;
-            }
-        } else if !stdlib::is_stdlib_module(dep_name) {
-            load_module(dep_name, ctx)?;
-        }
+        // The SAME rule the entry program uses: `import pkg` loads the package,
+        // `import pkg.sub` loads only that sub-module. This position used to
+        // load `path[0]` whole, so a `self.` submodule's `import ceangal.view`
+        // dragged in ceangal's root module and every sibling in its `src/`
+        // (#884) — while the identical import from the consumer's ROOT module,
+        // which goes through `resolve_named_import`, did not. Bundled stdlib
+        // handling comes along with it (a submodule's `import fs` must load the
+        // embedded source, not be skipped as "stdlib").
+        resolve_named_import(path, ctx)?;
     }
     Ok(())
 }
@@ -415,9 +424,7 @@ fn load_module(name: &str, ctx: &mut ResolveCtx) -> Result<(), String> {
                 }
                 continue;
             }
-            if !stdlib::is_stdlib_module(dep_name) {
-                load_module(dep_name, ctx)?;
-            }
+            resolve_named_import(path, ctx)?;
         }
     }
 
@@ -466,9 +473,8 @@ fn resolve_submodule_imports(
                 }
                 continue;
             }
-            if !stdlib::is_stdlib_module(first) {
-                load_module(first, ctx)?;
-            }
+            let _ = first;
+            resolve_named_import(path, ctx)?;
         }
     }
     Ok(())
@@ -624,13 +630,8 @@ fn load_submodule(pkg_name: &str, sub_path: &[crate::intern::Sym], mod_name: &st
                 }
                 continue;
             }
-            if let Some(source) = stdlib::get_bundled_source(dep_name) {
-                if !ctx.loaded_names.contains(dep_name.as_str()) {
-                    load_bundled_module(dep_name, source, ctx)?;
-                }
-            } else if !stdlib::is_stdlib_module(dep_name) {
-                load_module(dep_name, ctx)?;
-            }
+            let _ = dep_name;
+            resolve_named_import(path, ctx)?;
         }
     }
 
