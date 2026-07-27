@@ -499,36 +499,56 @@
     }
 
     #[test]
-    fn an_anf_hoisted_unliftable_lambda_walls_like_its_inline_twin() {
+    fn an_anf_hoisted_lambda_gets_the_same_verdict_as_its_inline_twin() {
         // A combinator's closure argument reaches the lowerer in one of two shapes,
         // and which one is not the program's choice: written INLINE it stays an
         // `IrExprKind::Lambda`, but a SIBLING argument that needs ANF hoisting takes
-        // the lambda with it into a `let`, so the call sees an `IrExprKind::Var`.
-        // Here the only difference between the two sources is that `if c then m1
-        // else m2` in the map position forces that hoist.
+        // the lambda with it into a `let`, so the call sees an `IrExprKind::Var`. In
+        // each pair below the only difference is that `if c then m1 else m2` in the
+        // map position forces that hoist.
         //
-        // The lambda captures a `(Int, Bool)` — outside the liftable capture classes —
-        // so BOTH must wall. The `Var` form used to pass `value_of`'s block through
-        // unchecked; the failed lift had left a deferred `list_new(0, 8)` there, with
-        // no slots and no fnidx, and `map.fold`'s `call_indirect` read past it: wasm
-        // printed `Error: index out of bounds` where native printed `(2, false)`
-        // (#905). Agreement between the two shapes is the invariant — a wall is
-        // acceptable for both, a wrong value for neither.
-        let inline = "fn main() -> Unit = {\n  \
-            let acc: (Int, Bool) = (2, false)\n  \
-            let r: (Int, Bool) = map.fold([\"k0\": 1], acc, (a, k, v) => acc)\n  \
-            println(\"${r}\") }\n";
+        // The two shapes must reach the SAME verdict. They did not: the `Var` arm
+        // passed `value_of`'s block through unchecked, and when the lift had failed
+        // that block was a deferred `list_new(0, 8)` — no slots, not even the fnidx a
+        // real closure carries at slot 0 — so `map.fold`'s `call_indirect` read past
+        // it and wasm printed `Error: index out of bounds` where native printed
+        // `(2, false)` (#905). Agreement is the invariant, in whichever direction the
+        // liftable subset happens to draw its line; the wrong value is what is
+        // forbidden.
+        //
+        // Both directions are pinned, so widening the subset cannot quietly retire
+        // half the test: a `(Int, Bool)` capture is a flat scalar block and LIFTS, a
+        // `Float` capture is not in the env classes at all and WALLS.
+        let liftable = |m: &str| {
+            format!(
+                "fn main() -> Unit = {{\n  \
+                 let acc: (Int, Bool) = (2, false)\n  \
+                 let c: Bool = false\n  \
+                 let r: (Int, Bool) = map.fold({m}, acc, (a, k, v) => acc)\n  \
+                 println(\"${{r}}\") }}\n"
+            )
+        };
+        let unliftable = |m: &str| {
+            format!(
+                "fn main() -> Unit = {{\n  \
+                 let acc: Float = 2.5\n  \
+                 let c: Bool = false\n  \
+                 let r: Float = map.fold({m}, acc, (a, k, v) => acc)\n  \
+                 println(\"${{r}}\") }}\n"
+            )
+        };
+        const INLINE: &str = "[\"k0\": 1]";
+        const HOISTED: &str = "(if c then [\"k0\": 1] else [\"k0\": 127, \"k1\": 2])";
+        let lowers = |src: String| lower_source(&src).functions.iter().any(|f| f.name == "main");
+
+        assert!(lowers(liftable(INLINE)), "a flat-scalar-block capture must lift inline");
         assert!(
-            !lower_source(inline).functions.iter().any(|f| f.name == "main"),
-            "the inline unliftable-capture lambda must wall"
+            lowers(liftable(HOISTED)),
+            "the ANF hoist must not change the verdict — same program, same capture"
         );
-        let hoisted = "fn main() -> Unit = {\n  \
-            let acc: (Int, Bool) = (2, false)\n  \
-            let c: Bool = false\n  \
-            let r: (Int, Bool) = map.fold((if c then [\"k0\": 1] else [\"k0\": 127, \"k1\": 2]), acc, (a, k, v) => acc)\n  \
-            println(\"${r}\") }\n";
+        assert!(!lowers(unliftable(INLINE)), "a Float capture is outside the env classes");
         assert!(
-            !lower_source(hoisted).functions.iter().any(|f| f.name == "main"),
-            "the ANF-hoisted twin must wall too, not render a call through an empty block"
+            !lowers(unliftable(HOISTED)),
+            "the hoisted twin must wall too, not call through an empty block"
         );
     }
