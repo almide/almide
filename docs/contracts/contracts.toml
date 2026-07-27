@@ -2268,3 +2268,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_pow_operator_negative_base.almd", class = "fixture" },
 ]
+
+# ── fan.any FIRST-OK REGARDLESS OF POSITION ─
+[[contract]]
+id        = "C-185"
+spec      = "ALS-C3"
+title     = "fan.any returns the first Ok in list order on both targets, whatever position it is in"
+statement = "`fan.any([t0, t1, …])` yields the FIRST thunk whose result is Ok, in list order, identically on native and wasm — and the fixed `fan.any: all candidates failed` Err when none is (#900). On wasm the combinator is INLINED into a match-over-call chain rather than materializing a `List[funcref]`, and the chain reused one CLONED Ok arm at every level, so every level bound the SAME VarId. The renderer resolves a VarId to one local at one binding site — the innermost it saw — so an outer level extracted its payload into a local nothing read, and the duplicated body read the inner level's local, which on that path was never stored. `fan.any([() => ok(11), () => ok(22)])` returned 0: a plausible value, not a trap and not a wall, in the combinator whose documented purpose is redundancy. Each level now binds its OWN fresh var with the body substituted accordingly, and the desugar seeds from and publishes back the chain's shared var counter so no later rewrite in the same loop can reissue those ids."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_any_early_winner.almd", class = "fixture" },
+]

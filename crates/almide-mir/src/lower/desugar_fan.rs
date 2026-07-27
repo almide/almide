@@ -7,7 +7,7 @@
 /// Each `t_i` is a no-param lambda whose body is a `Result[T, String]` (an effect fn call). The inlined
 /// form is a plain match-over-a-call chain, all in v1's subset. A NON-literal thunk list (`let ts =
 /// […]; fan.race(ts)`) has no inlinable bodies → left for the call-site purity wall.
-pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr> {
+pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_ir::{CallTarget, IrMatchArm, IrPattern};
     // A LET-BOUND, never-reassigned thunk-list literal (`let lam: List[() -> R] = [() => …];
@@ -141,12 +141,55 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
                                 },
                                 _ => err_arm.body.clone(),
                             };
+                            // Each level gets its OWN Ok binder. Cloning `ok_arm` verbatim
+                            // gave every level the SAME VarId, and the renderer resolves a
+                            // VarId to ONE local at ONE binding site — the innermost one it
+                            // saw. So an outer level extracted its payload into a local
+                            // nothing read, and the duplicated body read the inner level's
+                            // local, which on that path was never stored: `fan.any` returned
+                            // 0 whenever a thunk other than the last one won (#900). Only the
+                            // "winner is last" case aliased to the right local, which is
+                            // exactly the set of cases that looked correct.
+                            let ok_binder = match &ok_arm.pattern {
+                                IrPattern::Ok { inner } => match &**inner {
+                                    IrPattern::Bind { var, ty } => Some((*var, ty.clone())),
+                                    _ => None,
+                                },
+                                _ => None,
+                            };
                             for tb in bodies.into_iter().rev() {
+                                let level_ok_arm = match &ok_binder {
+                                    Some((var, ty)) => {
+                                        let fresh = almide_ir::VarId(self.next_var);
+                                        self.next_var += 1;
+                                        let fresh_ref = IrExpr {
+                                            kind: IrExprKind::Var { id: fresh },
+                                            ty: ty.clone(),
+                                            span: None,
+                                            def_id: None,
+                                        };
+                                        IrMatchArm {
+                                            pattern: IrPattern::Ok {
+                                                inner: Box::new(IrPattern::Bind {
+                                                    var: fresh,
+                                                    ty: ty.clone(),
+                                                }),
+                                            },
+                                            guard: ok_arm.guard.clone(),
+                                            body: almide_ir::substitute_var_in_expr(
+                                                &ok_arm.body,
+                                                *var,
+                                                &fresh_ref,
+                                            ),
+                                        }
+                                    }
+                                    None => ok_arm.clone(),
+                                };
                                 acc = IrExpr {
                                     kind: IrExprKind::Match {
                                         subject: Box::new(tb),
                                         arms: vec![
-                                            ok_arm.clone(),
+                                            level_ok_arm,
                                             IrMatchArm {
                                                 pattern: IrPattern::Err {
                                                     inner: Box::new(IrPattern::Wildcard),
@@ -338,9 +381,17 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             }
         }
     }
-    let mut v = V { changed: false, next_var: max_var_id(body) + 1, thunk_lets };
+    // Seed above BOTH the body's own vars and the shared counter, and write the
+    // counter back. `desugar_heap_branches_inner` threads ONE `next_var` through
+    // every rewrite in its loop; this one used to ignore the parameter in both
+    // directions, seeding only from `max_var_id(body) + 1` and never publishing
+    // what it consumed — so a later rewrite in the same loop could hand out an
+    // id the per-level Ok binders here already own.
+    let seed = (max_var_id(body) + 1).max(*next_var);
+    let mut v = V { changed: false, next_var: seed, thunk_lets };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
+    *next_var = v.next_var;
     if v.changed {
         Some(out)
     } else {

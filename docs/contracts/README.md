@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-184 contracts
+185 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -212,4 +212,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 1 |
 | C-183 | A loop-carried append of a list-of-scalar-records executes on both targets | 0.37.0 | active | fixture | 1 |
 | C-184 | The integer `^` operator is the same total exponentiation as math.pow on both targets | 0.37.0 | active | fixture | 1 |
+| C-185 | fan.any returns the first Ok in list order on both targets, whatever position it is in | 0.37.0 | active | fixture | 1 |
 

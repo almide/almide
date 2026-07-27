@@ -1,0 +1,54 @@
+// @contract: C-185
+//
+// `fan.any` returns the FIRST Ok in list order on both targets, whichever
+// position it is in.
+//
+// On wasm the fan combinators are inlined into a match-over-call chain
+// (`match t0 { ok(v) => <body>, err(_) => <rest> }`). The chain reused ONE
+// cloned Ok arm for every level, so every level bound the SAME VarId — and the
+// renderer resolves a VarId to one local at one binding site, the innermost it
+// saw. An outer level extracted its payload into a local nothing read, and the
+// duplicated body read the inner level's local, which on that path was never
+// stored. The result was a plausible 0 rather than a trap or a wall (#900).
+//
+// Only "the winning thunk is LAST" aliased to the right local, which is the
+// shape the docs happened to use. Every arrangement is pinned here.
+
+effect fn ok11() -> Result[Int, String] = ok(11)
+effect fn ok22() -> Result[Int, String] = ok(22)
+effect fn ok33() -> Result[Int, String] = ok(33)
+effect fn boom() -> Result[Int, String] = err("boom")
+
+effect fn main() -> Result[Unit, String] = {
+  // Winner FIRST — the case that returned 0.
+  let a = fan.any([() => ok11(), () => ok22()])
+  println("a=" + int.to_string(a))
+
+  // Winner first, loser after.
+  let b = fan.any([() => ok11(), () => boom()])
+  println("b=" + int.to_string(b))
+
+  // Winner last: the arrangement that always worked.
+  let c = fan.any([() => boom(), () => ok22()])
+  println("c=" + int.to_string(c))
+
+  // Three levels, so the chain is deeper than the single nesting.
+  let d = fan.any([() => ok11(), () => ok22(), () => ok33()])
+  println("d=" + int.to_string(d))
+
+  let e = fan.any([() => boom(), () => ok22(), () => ok33()])
+  println("e=" + int.to_string(e))
+
+  let f = fan.any([() => boom(), () => boom(), () => ok33()])
+  println("f=" + int.to_string(f))
+
+  // The match-subject spelling of the same call, and the all-failed fallback.
+  match fan.any([() => ok11(), () => ok22()]) {
+    ok(v) => println("m=" + int.to_string(v)),
+    err(er) => println("m-err=" + er),
+  }
+  match fan.any([() => boom(), () => boom()]) {
+    ok(v) => println("g=" + int.to_string(v)),
+    err(er) => println("g-err=" + er),
+  }
+}
