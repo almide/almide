@@ -110,6 +110,11 @@ fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
   if n == 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
+  // v0 is `xs.chunks(n as usize)`: a NEGATIVE n reinterprets as a huge usize —
+  // one chunk holding everything. The Int variant above gained this clamp with
+  // C-054 and this heap-element twin was left behind: with n = i32::MIN the
+  // unclamped `clen = cn` asked __chunk_one_str for a NEGATIVE-length alloc.
+  let n = if n < 0 then (if total > 0 then total else 1) else n
   let num = (total + n - 1) / n
   let outer = prim.alloc_list_str(num)
   let _x = __chunk_outer_str(prim.handle(outer), sh, total, n, 0, 0)
@@ -128,7 +133,13 @@ fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
   if n == 0 then prim.die(prim.handle("Error: window size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
-  let num = if n > total then 0 else total - n + 1
+  // v0 is `xs.windows(n as usize)`: a NEGATIVE n is a huge usize — n > len → [].
+  // The Int variant above gained this clamp with C-054 and this heap-element twin
+  // was left behind: `n > total` is FALSE for any negative n, so with
+  // n = i32::MIN `total - n + 1` came out at ~2^31 and the outer fill looped two
+  // billion times — a wasm hang against native's instant `[]` (differential
+  // fuzz, seed 1785165458340124000 index 803, a chunk_str.almd mutation).
+  let num = if n < 0 or n > total then 0 else total - n + 1
   let outer = prim.alloc_list_str(num)
   let _x = __win_outer_str(prim.handle(outer), sh, n, num, 0)
   outer

@@ -1,4 +1,4 @@
-// @contract: C-101
+// @contract: C-101, C-054
 // list.chunk / windows over a List[String] → List[List[String]]. Each cell is DEEP-COPIED into the
 // inner chunk (single-owned, no double-free — the bug the generic i64 impl had). The result's
 // scope-end Op::DropListListStr recursively frees each cell String + each row + the outer (the
@@ -12,4 +12,17 @@ effect fn main() -> Unit = {
   println(int.to_string(list.len(list.windows(xs, 2))))
   let one = ["solo"]
   println(int.to_string(list.len(list.chunk(one, 5))))
+
+  // C-054's negative-count rule on the HEAP-element variants. The Int variants
+  // gained their clamps with that contract; these _str twins in the same file
+  // were left on the pre-clamp form, so `windows(xs, i32::MIN)` computed
+  // `total - n + 1` ≈ 2^31 windows and looped two billion times on wasm against
+  // native's instant `[]` (differential fuzz, seed 1785165458340124000 index
+  // 803), and a negative chunk count reached an alloc as a negative length.
+  // Negative n reads as v0's `n as usize`: chunk → ONE chunk holding
+  // everything, windows → n > len → [].
+  println(int.to_string(list.len(list.windows(xs, -2147483648))))
+  println(int.to_string(list.len(list.windows(xs, -1))))
+  println(int.to_string(list.len(list.chunk(xs, -2147483648))))
+  println(int.to_string(list.len(list.chunk(one, -1))))
 }

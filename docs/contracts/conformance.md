@@ -76,6 +76,6 @@
 | ALS-T13 | C-023 | `spec/wasm_cross/float_shortest_roundtrip.almd` (byte-compare)<br>`spec/wasm_cross/num_edge_to_string.almd` (byte-compare) |
 | ALS-T14 | C-048 | `spec/wasm_cross/int_wrap_rotate_width.almd` (byte-compare) |
 | ALS-T15 | C-049, C-140 | `spec/wasm_cross/float_sign_minmax_ieee.almd` (byte-compare)<br>`spec/wasm_cross/float_round_negzero.almd` (byte-compare) |
-| ALS-T16 | C-054, C-056 | `spec/wasm_cross/list_count_index_truncation.almd` (byte-compare)<br>`spec/wasm_cross/string_count_truncation.almd` (byte-compare)<br>`spec/wasm_cross/map_wide_int_key.almd` (byte-compare)<br>`spec/wasm_cross/list_product_overflow.almd` (byte-compare) |
+| ALS-T16 | C-054, C-056 | `spec/wasm_cross/list_count_index_truncation.almd` (byte-compare)<br>`spec/wasm_cross/string_count_truncation.almd` (byte-compare)<br>`spec/wasm_cross/map_wide_int_key.almd` (byte-compare)<br>`spec/wasm_cross/chunk_str.almd` (byte-compare)<br>`spec/wasm_cross/list_product_overflow.almd` (byte-compare) |
 | ALS-T17 | C-128 | `spec/wasm_cross/datetime_format.almd` (byte-compare) |
 | ALS-T18 | C-153 | `spec/wasm_cross/assert_abort_eq.almd` (byte-compare)<br>`spec/wasm_cross/assert_abort_ne.almd` (byte-compare)<br>`spec/wasm_cross/assert_abort_msg.almd` (byte-compare) |

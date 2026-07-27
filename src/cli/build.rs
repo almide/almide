@@ -107,7 +107,28 @@ fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps:
                     let _ = std::fs::create_dir_all(parent);
                 }
             }
-            if let Err(e) = std::fs::copy(&bin_path, output) {
+            // Stage-and-RENAME, never copy onto an existing executable. A bare
+            // `fs::copy` rewrites the destination IN PLACE (same inode), and on
+            // macOS the kernel's code-signature cache is keyed by vnode: a
+            // binary overwritten at the same inode after its previous content
+            // was executed gets SIGKILLed on the next exec — no exit code, no
+            // stderr, nothing to debug. `almide build app.almd -o app` twice in
+            // a row then `./app` reproduced it sporadically, and the fuzzer's
+            // per-worker reused output path hit it reliably deep into a
+            // campaign (seed 1785165458340124000 index 572: a phantom
+            // "native run failed while wasm succeeded"). The rename gives the
+            // destination a fresh inode atomically; the staging temp lives in
+            // the SAME directory so the rename cannot cross a filesystem.
+            let staged = {
+                let out_path = std::path::Path::new(&output);
+                let file_name = out_path.file_name().map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| output.to_string());
+                out_path.with_file_name(format!(".{}.staged-{}", file_name, std::process::id()))
+            };
+            let copy_then_rename = std::fs::copy(&bin_path, &staged)
+                .and_then(|_| std::fs::rename(&staged, output));
+            if let Err(e) = copy_then_rename {
+                let _ = std::fs::remove_file(&staged);
                 err(&format!("Failed to copy binary to {}: {}", output, e));
                 std::process::exit(1);
             }
