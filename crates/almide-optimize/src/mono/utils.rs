@@ -31,7 +31,7 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
                 format!("{}_{}", name, arg_strs.join("_"))
             }
         }
-        Ty::Record { fields } => {
+        Ty::Record { fields } if !fields.is_empty() => {
             let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
             names.sort();
             names.join("_")
@@ -61,7 +61,24 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
             let ps: Vec<String> = params.iter().map(mangle_ty).collect();
             format!("Fn{}_{}_to_{}", params.len(), ps.join("_"), mangle_ty(ret))
         }
-        _ => "Unknown".into(),
+        // A mono key's ONE invariant is that two DIFFERENT types never share it: the
+        // key decides whether two call sites reuse one specialization, so a collision
+        // emits a single function for both and the second call site's whole signature
+        // — closure parameter included — is wrong. Every arm above yields a distinct
+        // name for a distinct type; anything that reaches here (an empty structural
+        // record, an unhandled constructor) used to collapse to a shared literal
+        // (`"Unknown"`, or `""` for a field-less record — which is how
+        // `result.filter` at `Result[(Bool, String), String]` and at
+        // `Result[Result[Float, String], String]` both keyed `_String` and became one
+        // function, #905). A structural digest keeps the invariant without pretending
+        // to name the type: it is stable within a build, and distinct debug forms give
+        // distinct keys.
+        other => {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            format!("{other:?}").hash(&mut h);
+            format!("Ty{:x}", h.finish())
+        }
     }
 }
 
