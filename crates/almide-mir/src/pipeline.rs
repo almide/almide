@@ -114,6 +114,31 @@ pub fn linkable_module_fns(m: &almide_ir::IrModule) -> std::collections::HashSet
         .collect()
 }
 
+/// The package a resolved sibling module belongs to, if it is a DEPENDENCY's
+/// submodule.
+///
+/// The MIR pipeline re-runs the frontend from source, so it has to re-derive
+/// what the CLI driver knows from the resolver: a dependency's modules are
+/// registered under package-qualified names (`ceangal.render`), and inside such
+/// a module `import self.layout` must resolve against the PACKAGE, not against
+/// the module itself. Without that, `resolve_import_canonical` built the fqn
+/// `ceangal.render.layout`, found it unregistered, fell back to the bare leaf
+/// `layout`, and the sibling call's signature was never found — the call typed
+/// `Unknown` and the function walled with "Unknown type reached MIR lowering",
+/// which the consumer then saw as an unlinked
+/// `almide_rt_ceangal_render_render_at` (#904). The package's OWN build never
+/// hit this: standalone, its modules are named bare, so the leaf fallback
+/// happened to be right.
+///
+/// A `self` module (the project's own `src/*.almd`) keeps its leaf-name
+/// registration and needs no package scope.
+fn dependency_package_of(name: &str, is_self: bool) -> Option<&str> {
+    if is_self {
+        return None;
+    }
+    name.split_once('.').map(|(pkg, _)| pkg)
+}
+
 fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     use almide_ir::{walk_expr_mut, CallTarget, IrExprKind, IrMutVisitor};
     use almide_lang::intern::sym;
@@ -129,6 +154,31 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     struct Rw<'a> {
         user_mods: &'a std::collections::HashMap<String, std::collections::HashSet<String>>,
         root_fns: std::collections::HashSet<String>,
+        /// The module whose body is being rewritten, if any. A dependency's
+        /// modules are registered under their PACKAGE-QUALIFIED names
+        /// (`ceangal.layout`), but a call BETWEEN them still names the sibling
+        /// the way that package's own source does — bare `layout.layout`. With
+        /// no enclosing scope the bare name matched no user module, the call
+        /// stayed a `CallTarget::Module`, and the MIR walled it as an
+        /// "effectful/impure stdlib Module call layout.layout" (#904).
+        enclosing: Option<String>,
+    }
+    impl Rw<'_> {
+        /// The user module a call's `module` segment refers to: an exact match,
+        /// or — inside a package — the sibling under the enclosing module's own
+        /// package prefix.
+        fn resolve_module<'m>(&'m self, m: &'m str, f: &str) -> Option<&'m str> {
+            if self.user_mods.get(m).is_some_and(|fs| fs.contains(f)) {
+                return Some(m);
+            }
+            let prefix = self.enclosing.as_deref()?.rsplit_once('.')?.0;
+            let qualified = format!("{prefix}.{m}");
+            let (k, _) = self
+                .user_mods
+                .get_key_value(&qualified)
+                .filter(|(_, fs)| fs.contains(f))?;
+            Some(k.as_str())
+        }
     }
     impl IrMutVisitor for Rw<'_> {
         fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
@@ -136,8 +186,8 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
             if let IrExprKind::Call { target, .. } = &mut e.kind {
                 if let CallTarget::Module { module, func, .. } = target {
                     let (m, f) = (module.as_str(), func.as_str());
-                    if self.user_mods.get(m).is_some_and(|fs| fs.contains(f)) {
-                        *target = CallTarget::Named { name: sym(&user_module_fn_name(m, f)) };
+                    if let Some(owner) = self.resolve_module(m, f) {
+                        *target = CallTarget::Named { name: sym(&user_module_fn_name(owner, f)) };
                     }
                 } else if let CallTarget::Named { name } = target {
                     // A BARE Named call to a fn that lives in exactly ONE linked user module: the
@@ -158,7 +208,7 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     }
     let root_fns: std::collections::HashSet<String> =
         ir.functions.iter().map(|f| f.name.as_str().to_string()).collect();
-    let mut rw = Rw { user_mods: &user_mods, root_fns };
+    let mut rw = Rw { user_mods: &user_mods, root_fns, enclosing: None };
     for func in &mut ir.functions {
         rw.visit_expr_mut(&mut func.body);
     }
@@ -166,6 +216,7 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
         rw.visit_expr_mut(&mut tl.value);
     }
     for m in &mut ir.modules {
+        rw.enclosing = Some(m.name.as_str().to_string());
         for func in &mut m.functions {
             rw.visit_expr_mut(&mut func.body);
         }
@@ -211,13 +262,17 @@ fn source_to_ir_with(
     // cross-module reader of a generic-ctor top-let (`let MAYBE = some(Cfg
     // {…})`) sees the registration seed `Option[Unknown]`, the match payload
     // binding stays Unknown, and the whole program walls.
-    for (name, mod_prog, _) in modules {
+    for (name, mod_prog, is_self_mod) in modules {
         if almide_lang::stdlib_info::is_stdlib_module(name)
             && !almide_lang::stdlib_info::is_bundled_module(name)
         {
             continue;
         }
+        let saved_self = checker.env.self_module_name;
+        checker.env.self_module_name =
+            dependency_package_of(name, *is_self_mod).map(almide_lang::intern::sym);
         checker.refresh_module_top_lets(mod_prog, name);
+        checker.env.self_module_name = saved_self;
     }
     let diags = checker.infer_program(&mut prog);
     let errors: Vec<_> = diags
@@ -241,7 +296,12 @@ fn source_to_ir_with(
             continue;
         }
         let mut mod_prog = mod_prog.clone();
-        let _ = is_self;
+        // Scope the module to its PACKAGE while it is inferred and lowered, so
+        // `import self.<sibling>` inside a dependency resolves to the
+        // package-qualified sibling the resolver registered (#904).
+        let saved_self = checker.env.self_module_name;
+        checker.env.self_module_name =
+            dependency_package_of(name, *is_self).map(almide_lang::intern::sym);
         checker.infer_module(&mut mod_prog, name);
         let self_name = checker.env.self_module_name.map(|s| s.to_string());
         let import_table_name = self_name.as_deref().unwrap_or(name.as_str());
@@ -259,6 +319,7 @@ fn source_to_ir_with(
             None,
         );
         checker.env.import_table = saved_table;
+        checker.env.self_module_name = saved_self;
         ir.modules.push(mod_ir);
     }
 
