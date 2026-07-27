@@ -583,11 +583,12 @@ evidence  = [
 id        = "C-041"
 spec      = "ALS-I1"
 title     = "Heap / RC primitives honour the Lean-certified Perceus discipline"
-statement = "alloc/realloc-growth, refcount inc/dec, string alloc, and the arena checkpoint primitives (heap_save/heap_restore) produce byte-identical observable results native == wasm under heavy churn — no observable leak effect, double-free, or realloc clobber. Since 0.27.0 the wasm rc bodies are REAL by default (C-066): rc_dec frees to a reuse list, double-frees trap on a rc==0 sentinel, rc_inc of a freed block traps (resurrection), and heap_restore / the per-iteration loop region reset also clear the free list so allocator state never straddles a rolled-back frontier. The IR-level Inc/Dec balance is certified by the `0 sorry` Lean Perceus belt; these fixtures are the executable counterpart. The opaque checkpoint value (0 native vs a real pointer wasm) is never printed."
+statement = "alloc/realloc-growth, refcount inc/dec, string alloc, and the arena checkpoint primitives (heap_save/heap_restore) produce byte-identical observable results native == wasm under heavy churn — no observable leak effect, double-free, or realloc clobber. Since 0.27.0 the wasm rc bodies are REAL by default (C-066): rc_dec frees to a reuse list, double-frees trap on a rc==0 sentinel, rc_inc of a freed block traps (resurrection), and heap_restore / the per-iteration loop region reset also clear the free list so allocator state never straddles a rolled-back frontier. Every heap block satisfies the free-list's SIZE INVARIANT `block_bytes == LIST_HEADER + cap*ELEM_SIZE` — `$alloc` keeps no size record and recomputes a freed block's size from its own `cap` field, so a block whose allocated size disagrees with its cap is handed back for a larger request and the reuse overruns into a live neighbour (#892/#903: the WASI host-floor String constructors sized `LIST_HEADER + len` with `cap := len`). The IR-level Inc/Dec balance is certified by the `0 sorry` Lean Perceus belt; these fixtures are the executable counterpart. The opaque checkpoint value (0 native vs a real pointer wasm) is never printed."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/rc_alloc_stress.almd", class = "fixture" },
+  { path = "spec/wasm_cross/host_floor_string_alloc.almd", class = "fixture" },
   { path = "spec/wasm_cross/memory_stress.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_arena.almd", class = "fixture" },
   { path = "spec/wasm_cross/hof_closure_string_tail.almd", class = "fixture" },

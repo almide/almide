@@ -36,6 +36,7 @@ encoding_base64  out-of-interp-scope capability: base64.encode
 env_args  out-of-interp-scope capability: env.args
 env_get  out-of-interp-scope capability: env.get
 fan_any_allfail  out-of-interp-scope capability: fan.any
+fan_any_early_winner  out-of-interp-scope capability: fan.any
 fan_deterministic  out-of-interp-scope capability: fan.map
 fan_map_err  out-of-interp-scope capability: fan.map
 fan_map_inline_err  out-of-interp-scope capability: fan.map
@@ -49,6 +50,7 @@ fs_relative_path  out-of-interp-scope capability: fs.mkdir_p
 heap_arena  out-of-interp-scope capability: bytes.heap_save
 heap_result_if_match_arm_frame  out-of-interp-scope capability: value.str
 heap_result_tuple_return  out-of-interp-scope capability: value.str
+host_floor_string_alloc  out-of-interp-scope capability: fs.mkdir_p
 inplace_mutator_statement  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)
 int8_div_overflow  out-of-interp-scope capability: int.from_int8
 int_from_hex  out-of-interp-scope capability: int.from_hex

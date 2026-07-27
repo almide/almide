@@ -10,6 +10,14 @@ pub(crate) fn preamble() -> String {
 /// 8*mutable_global_count`), so the mutable-global slots `[HEAP_BASE, bump_base)`
 /// are never allocated over. With no mutable globals this IS `preamble()`.
 pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
+    // Byte-length → ELEMENT-count rounding for a canonical String's `cap` field:
+    // `cap = ((len + ELEM_SIZE-1) & -ELEM_SIZE) >> log2(ELEM_SIZE)`. Derived from
+    // ELEM_SIZE here (not spelled 7/-8/3) so the allocator's size invariant
+    // `block_bytes == LIST_HEADER + cap*ELEM_SIZE` cannot drift if ELEM_SIZE changes —
+    // the same three constants the renderer's `Init::DynStr` path computes (#892).
+    let elem_round_add = ELEM_SIZE - 1;
+    let elem_round_mask = -(ELEM_SIZE as i32);
+    let elem_shift = ELEM_SIZE.trailing_zeros();
     format!(
         r#"(module
   (import "wasi_snapshot_preview1" "fd_write"
@@ -396,7 +404,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (local $argc_ptr i32) (local $bufsz_ptr i32) (local $argc i32)
     (local $count i32) (local $bufsz i32) (local $argv i32) (local $argbuf i32)
     (local $result i32) (local $i i32) (local $cstr i32) (local $slen i32)
-    (local $str i32) (local $j i32)
+    (local $str i32)
     ;; Phase 1: argc + total argv buffer size (two i32 out-params from the bump heap).
     ;; The WASI ABI validates POINTER ALIGNMENT on its out-params and the bump
     ;; allocator packs bytes tightly, so round the block up to 4 (over-alloc 3
@@ -433,19 +441,9 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
         (br_if $sdone (i32.eqz (i32.load8_u (i32.add (local.get $cstr) (local.get $slen)))))
         (local.set $slen (i32.add (local.get $slen) (i32.const 1)))
         (br $sloop)))
-      ;; alloc a canonical String [rc][len][cap][bytes] and set its header
-      (local.set $str (call $alloc (i32.add (i32.const {LIST_HEADER}) (local.get $slen))))
-      (i32.store (i32.add (local.get $str) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))
-      (i32.store (i32.add (local.get $str) (i32.const {LIST_LEN_OFFSET})) (local.get $slen))
-      (i32.store (i32.add (local.get $str) (i32.const {LIST_CAP_OFFSET})) (local.get $slen))
-      ;; copy $slen bytes from cstr into str+LIST_HEADER
-      (local.set $j (i32.const 0))
-      (block $cdone (loop $cloop
-        (br_if $cdone (i32.ge_u (local.get $j) (local.get $slen)))
-        (i32.store8 (i32.add (i32.add (local.get $str) (i32.const {LIST_HEADER})) (local.get $j))
-                    (i32.load8_u (i32.add (local.get $cstr) (local.get $j))))
-        (local.set $j (i32.add (local.get $j) (i32.const 1)))
-        (br $cloop)))
+      ;; build the canonical String through the ONE host-floor constructor — an inline
+      ;; copy here is what broke the allocator's size invariant in #892 (see `$rtf_str`)
+      (local.set $str (call $rtf_str (local.get $cstr) (local.get $slen)))
       ;; result[$i] = str (i64-widened pointer in the 8-byte element slot)
       (call $list_set (local.get $result) (local.get $i) (i64.extend_i32_u (local.get $str)))
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
@@ -511,18 +509,9 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
             (br_if $sdone (i32.eqz (i32.load8_u (i32.add (local.get $val) (local.get $vlen)))))
             (local.set $vlen (i32.add (local.get $vlen) (i32.const 1)))
             (br $sloop)))
-          ;; Build the canonical value String [rc][len][cap][bytes].
-          (local.set $str (call $alloc (i32.add (i32.const {LIST_HEADER}) (local.get $vlen))))
-          (i32.store (i32.add (local.get $str) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))
-          (i32.store (i32.add (local.get $str) (i32.const {LIST_LEN_OFFSET})) (local.get $vlen))
-          (i32.store (i32.add (local.get $str) (i32.const {LIST_CAP_OFFSET})) (local.get $vlen))
-          (local.set $j (i32.const 0))
-          (block $cdone (loop $cloop
-            (br_if $cdone (i32.ge_u (local.get $j) (local.get $vlen)))
-            (i32.store8 (i32.add (i32.add (local.get $str) (i32.const {LIST_HEADER})) (local.get $j))
-                        (i32.load8_u (i32.add (local.get $val) (local.get $j))))
-            (local.set $j (i32.add (local.get $j) (i32.const 1)))
-            (br $cloop)))
+          ;; Build the canonical value String through the ONE host-floor constructor —
+          ;; an inline copy here is what broke the allocator's size invariant in #892.
+          (local.set $str (call $rtf_str (local.get $val) (local.get $vlen)))
           ;; some(str): a len-1 block owning the String @12.
           (local.set $opt (call $list_new (i32.const 1) (i32.const 1)))
           (call $list_set (local.get $opt) (i32.const 0) (i64.extend_i32_u (local.get $str)))))
@@ -711,12 +700,32 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
         (call $rtf_result (local.get $str) (i32.const 0)))))
 
   ;; helper: copy $len bytes at $src into a fresh canonical String `[rc][len][cap][bytes…]`.
+  ;; THE single host-floor String constructor — every WASI exit that turns raw host bytes
+  ;; into an Almide String (`$args_get_list`, `$env_get`, `$read_text_file`, `$read_line`,
+  ;; `$read_n_bytes`, `$read_dir`, every error-message wrap) builds through here.
+  ;;
+  ;; #892/#903 — the block MUST satisfy the ALLOCATOR'S SIZE INVARIANT
+  ;; `block_bytes == LIST_HEADER + cap*ELEM_SIZE`, because `$alloc`'s free-list reuse test
+  ;; RECOMPUTES a freed block's size from its `cap` field (it has no other record of it).
+  ;; This helper and the two inline copies in `$args_get_list`/`$env_get` used to allocate
+  ;; `LIST_HEADER + len` bytes and store `cap := len` — a BYTE count where the invariant
+  ;; wants ELEMENTS. A 1-byte argv String then occupied 13 bytes while advertising
+  ;; `12 + 1*8 = 20`, so once it was freed the next `alloc(20)` matched it and handed back
+  ;; the 13-byte hole: the new block's header and payload wrote 7 bytes straight INTO the
+  ;; live neighbour. No trap, no `$rc_dec` sentinel — silent corruption of whatever String
+  ;; sat next to it (`args.option_or("a","-") + args.option_or("b","=")` in one expression
+  ;; churns exactly the free/reuse pattern that lands the overlap on a live value).
+  ;;
+  ;; Building through `$list_new` — the ONE place that establishes the invariant — is what
+  ;; keeps it true by construction, and makes a host-floor String byte-identical in shape
+  ;; to a renderer-built one (`Init::Str`/`Init::DynStr` round the same way), so the two
+  ;; interchange freely on the free list instead of poisoning it.
   (func $rtf_str (param $src i32) (param $len i32) (result i32)
     (local $str i32) (local $j i32)
-    (local.set $str (call $alloc (i32.add (i32.const {LIST_HEADER}) (local.get $len))))
-    (i32.store (i32.add (local.get $str) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))
-    (i32.store (i32.add (local.get $str) (i32.const {LIST_LEN_OFFSET})) (local.get $len))
-    (i32.store (i32.add (local.get $str) (i32.const {LIST_CAP_OFFSET})) (local.get $len))
+    (local.set $str (call $list_new (local.get $len)
+      (i32.shr_u (i32.and (i32.add (local.get $len) (i32.const {elem_round_add}))
+                          (i32.const {elem_round_mask}))
+                 (i32.const {elem_shift}))))
     (local.set $j (i32.const 0))
     (block $cdone (loop $cloop
       (br_if $cdone (i32.ge_u (local.get $j) (local.get $len)))
