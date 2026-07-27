@@ -239,7 +239,9 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         | "is_subset" | "is_disjoint" => vec!["set"],
 
         // ── int-only ──
-        "to_string" | "to_hex"
+        // (`to_string` is NOT here: every sized-numeric module declares one,
+        // so it belongs to the sized-numeric table below — see #893.)
+        "to_hex"
         | "band" | "bor" | "bxor" | "bnot" | "bshl" | "bshr"
         | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left"
         | "to_u32" | "to_u8" => vec!["int"],
@@ -343,11 +345,21 @@ fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
     match method {
         "to_int8" | "to_int16" | "to_int32" | "to_int64"
         | "to_uint8" | "to_uint16" | "to_uint32" | "to_uint64"
-        | "to_float32" | "to_float64" => vec![
+        | "to_float32" | "to_float64"
+        // `to_string` too (#893): every sized-numeric module declares one, and
+        // the UFCS resolver reaches this table when `env.functions` has no
+        // entry — which is the case for an embedder that hands the renderer a
+        // bare source (no resolved bundled modules), so `big.to_string()`
+        // reported "undefined method" through the API while the CLI, whose
+        // resolver HAD registered the bundled signatures, accepted it. The
+        // candidate list is only consulted after `builtin_module_for_type`
+        // has already picked the ONE module for the receiver's type, so
+        // listing them together cannot make a call ambiguous.
+        | "to_string" => vec![
             "int", "float",
-            "int8", "int16", "int32",
+            "int8", "int16", "int32", "int64",
             "uint8", "uint16", "uint32", "uint64",
-            "float32",
+            "float32", "float64",
         ],
 
         _ => vec![],
