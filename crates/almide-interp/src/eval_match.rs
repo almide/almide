@@ -261,10 +261,15 @@ impl<'a> Interpreter<'a> {
     /// Re-wrap an arithmetic result to the DECLARED narrow width of whichever
     /// operand carries it (a literal operand records the canonical `Int`).
     /// Comparisons cannot leave the range, and `/`/`%` cannot either once the
-    /// operands are in it, so only `+`/`-`/`*` are wrapped.
+    /// operands are in it, so `+`/`-`/`*` are wrapped — and `^`, which is
+    /// repeated multiplication and wraps like it (congruent mod 2^bits, so
+    /// wrapping the final value equals wrapping every step). `^` was missing
+    /// from this gate exactly as it was missing from the renderers' (C-180's
+    /// pow amendment): `Int32 999997 ^ 2` had the interpreter dissenting from
+    /// a correct two-target consensus with the un-narrowed 999994000009.
     fn narrow_wrap_flow(flow: Flow, op: BinOp, lt: &Ty, rt: &Ty) -> Flow {
         use BinOp::*;
-        if !matches!(op, AddInt | SubInt | MulInt) {
+        if !matches!(op, AddInt | SubInt | MulInt | PowInt) {
             return flow;
         }
         let width = |t: &Ty| match t {

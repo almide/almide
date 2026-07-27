@@ -133,16 +133,55 @@ pub fn run_ladder(
         return Outcome::Finding(finding);
     }
 
-    // ── Rung (c): native build + run ──
-    let native = tc.run_native(file);
-    if native.spawn_failed {
+    // ── Rung (c): native build + run — TWO timed steps, so rustc's compile
+    // time can never masquerade as the program's run time (see
+    // `Toolchain::build_native`). ──
+    let native_bin = wasm_out.with_extension("nativebin");
+    let nbuild = tc.build_native(file, &native_bin);
+    if nbuild.spawn_failed {
         return Outcome::Skipped {
             reason: format!(
                 "could not spawn almide: {}",
-                String::from_utf8_lossy(&native.stderr)
+                String::from_utf8_lossy(&nbuild.stderr)
             ),
         };
     }
+    if nbuild.timed_out {
+        // rustc outran the budget — a toolchain/load event with no program
+        // observable in it. The one-step `almide run` form classified this as
+        // a run HANG whenever the (rustc-free) wasm leg finished, minting a
+        // phantom nightly-red finding under machine load.
+        return Outcome::Skipped {
+            reason: "native BUILD timed out (rustc under load) — no program ran, \
+                     so there is no hang or divergence oracle"
+                .into(),
+        };
+    }
+    if !nbuild.success() {
+        // Rung (a) accepted the program, so a real COMPILE failure here is the
+        // check-vs-build gap finding. Anything else (a transient cargo/linker
+        // failure with no compile diagnostic) has no program observable — skip,
+        // matching the one-step form, which only ever minted this finding on
+        // the diagnostic markers.
+        let stderr = String::from_utf8_lossy(&nbuild.stderr);
+        if stderr.contains("Compile error") || stderr.contains("error[E") {
+            return Outcome::Finding(Finding {
+                rung: Rung::NativeBuild,
+                kind: FindingKind::NativeBuildFailure,
+                summary: "native build failed after check accepted".into(),
+                native: Some(RunEvidence::from(&nbuild)),
+                wasm: None,
+            });
+        }
+        return Outcome::Skipped {
+            reason: format!(
+                "native build failed without a compile diagnostic (toolchain \
+                 event): {}",
+                stderr.lines().last().unwrap_or("")
+            ),
+        };
+    }
+    let native = tc.run_native_bin(&native_bin);
     if native.timed_out {
         // A native hang is not, by itself, a cross-target finding: a mutation
         // can synthesize a genuinely non-terminating program (`pos + 0` in a
@@ -172,25 +211,14 @@ pub fn run_ladder(
                 .into(),
         };
     }
-    if !native.success() {
-        // A COMPILE failure is an immediate finding: rung (a) accepted the
-        // program, so failing to build it is a check-vs-build gap. A RUNTIME
-        // error is NOT — a corpus MUTATION can synthesize a program that
-        // ABORTS BY DESIGN (a bounds/div-fixture variant in the mutation
-        // pool), and the abort form is itself a cross-target contract
-        // (ALS-T6): the ORACLE is the comparison below — wasm must reach the
-        // same observables, divergence surfaces there.
-        let stderr = String::from_utf8_lossy(&native.stderr);
-        if stderr.contains("Compile error") || stderr.contains("error[E") {
-            return Outcome::Finding(Finding {
-                rung: Rung::NativeBuild,
-                kind: FindingKind::NativeBuildFailure,
-                summary: "native build failed after check accepted".into(),
-                native: Some(RunEvidence::from(&native)),
-                wasm: None,
-            });
-        }
-    }
+    // A RUNTIME failure is NOT a finding by itself — a corpus MUTATION can
+    // synthesize a program that ABORTS BY DESIGN (a bounds/div-fixture variant
+    // in the mutation pool), and the abort form is itself a cross-target
+    // contract (ALS-T6): the ORACLE is the comparison below — wasm must reach
+    // the same observables, divergence surfaces there. (Compile failures were
+    // classified at the build step above; with the two-step native leg they can
+    // no longer be conflated with a program whose OWN stderr contains a
+    // compiler-diagnostic-shaped string.)
 
     // ── Rung (d): wasm build ──
     let wasm_build = tc.build_wasm(file, wasm_out);

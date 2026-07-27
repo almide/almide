@@ -72,9 +72,34 @@ impl Toolchain {
         ])
     }
 
-    /// `almide run <file>` — native compile + execute (cargo-backed).
-    pub fn run_native(&self, file: &Path) -> ProcResult {
-        self.run_almide(&["run", &file.to_string_lossy()])
+    /// `almide build <file> -o <out>` — native compile ONLY (cargo-backed).
+    ///
+    /// The native leg is built and executed as TWO timed steps, not one
+    /// `almide run`. Under one budget, rustc's compile time was
+    /// indistinguishable from the program's run time: on a loaded machine the
+    /// compile alone blew the per-program timeout, the (cheap, rustc-free)
+    /// wasm leg finished cleanly, and the ladder minted a phantom
+    /// "native run hung while wasm succeeded" finding — a nightly-red class
+    /// with no program divergence in it (seed 1785159097100061000 index 1206:
+    /// 16s on an idle machine, nearly all of it rustc). A BUILD timeout is a
+    /// toolchain resource event and skips; only the program's OWN wall-clock
+    /// is hang evidence.
+    pub fn build_native(&self, file: &Path, out: &Path) -> ProcResult {
+        self.run_almide(&[
+            "build",
+            &file.to_string_lossy(),
+            "-o",
+            &out.to_string_lossy(),
+        ])
+    }
+
+    /// Execute the native binary `build_native` produced. This is exactly the
+    /// grandchild `almide run` used to exec — same stdout, same abort forms,
+    /// same exit code — with the timeout now covering ONLY the program.
+    pub fn run_native_bin(&self, bin: &Path) -> ProcResult {
+        let mut cmd = Command::new(bin);
+        cmd.env("NO_COLOR", "1");
+        self.spawn_timed(cmd)
     }
 
     /// `wasmtime <wasm>` — execute the WASM build.
