@@ -273,9 +273,9 @@ impl Checker {
             "+" => {
                 let lc = resolve_ty(&lt, &self.uf);
                 let rc = resolve_ty(&rt, &self.uf);
-                self.infer_plus_op(&lc, &rc, lt)
+                self.infer_plus_op(&lc, &rc, lt, left, right)
             }
-            "-" | "*" | "/" | "%" | "^" => self.infer_binop_arith(op, &lt, &rt),
+            "-" | "*" | "/" | "%" | "^" => self.infer_binop_arith(op, &lt, &rt, left, right),
             "++" => {
                 self.emit(super::err(
                     format!("operator '++' has been removed. Use '+' for concatenation"),
@@ -337,7 +337,7 @@ impl Checker {
     /// `-`/`*`/`/`/`%`/`^` arm of [`Self::infer_expr_g2_binary`]: Matrix
     /// arithmetic, numeric-operand and mixed-sized-width diagnostics, and
     /// same-width/Float-promotion result-type resolution. Verbatim text move.
-    fn infer_binop_arith(&mut self, op: &Sym, lt: &Ty, rt: &Ty) -> Ty {
+    fn infer_binop_arith(&mut self, op: &Sym, lt: &Ty, rt: &Ty, left: &ast::Expr, right: &ast::Expr) -> Ty {
         let lc = resolve_ty(lt, &self.uf);
         let rc = resolve_ty(rt, &self.uf);
         // Matrix operators: *, +, - on Matrix types
@@ -367,6 +367,11 @@ impl Checker {
                 self.emit(super::err(
                     format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
                     "Use numeric types (Int or Float)", format!("operator {}", op)));
+            }
+            // A sized operand meeting a canonical `Int`/`Float` VALUE is the
+            // same mistake with the wide side spelled differently (#902).
+            if let Some(t) = self.check_mixed_canonical_width(op.as_str(), &lc, &rc, left, right) {
+                return t;
             }
             // Stage 1c: reject mixed-sized-width arithmetic.
             // See `infer_plus_op` for rationale.

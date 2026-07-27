@@ -475,7 +475,7 @@ impl Checker {
     }
 
     /// Infer the result type of the + operator (numeric add or string/list concat).
-    fn infer_plus_op(&mut self, lc: &Ty, rc: &Ty, lt: Ty) -> Ty {
+    fn infer_plus_op(&mut self, lc: &Ty, rc: &Ty, lt: Ty, left: &ast::Expr, right: &ast::Expr) -> Ty {
         if let Some(t) = self.infer_plus_op_concat(lc, rc, &lt) {
             return t;
         }
@@ -484,7 +484,7 @@ impl Checker {
             return Ty::Matrix;
         }
         self.infer_plus_op_numeric_check(lc, rc);
-        if let Some(t) = self.infer_plus_op_sized(lc, rc) {
+        if let Some(t) = self.infer_plus_op_sized(lc, rc, left, right) {
             return t;
         }
         if *lc == Ty::Float || *rc == Ty::Float { Ty::Float } else { lt }
@@ -549,7 +549,7 @@ impl Checker {
     /// widths (E-diagnostic + return the left type), or return the common
     /// sized type when both sides are sized and compatible. Verbatim text
     /// move.
-    fn infer_plus_op_sized(&mut self, lc: &Ty, rc: &Ty) -> Option<Ty> {
+    fn infer_plus_op_sized(&mut self, lc: &Ty, rc: &Ty, left: &ast::Expr, right: &ast::Expr) -> Option<Ty> {
         // Result type resolution:
         //   - Same sized type on both sides → that sized type.
         //   - Canonical Float promotes Int mixes to Float (legacy rule).
@@ -568,6 +568,11 @@ impl Checker {
         // `let x: Int32 = 42` style bindings). Mixing `Int32` and `Int16`
         // has no such cover — it's always wrong, always needs explicit
         // `.to_intN()`.
+        // A sized operand meeting a canonical `Int`/`Float` VALUE is the same
+        // mistake with the wide side spelled differently (#902).
+        if let Some(t) = self.check_mixed_canonical_width("+", lc, rc, left, right) {
+            return Some(t);
+        }
         if is_sized_scalar(lc) && is_sized_scalar(rc) && lc != rc {
             self.emit(super::err(
                 format!(

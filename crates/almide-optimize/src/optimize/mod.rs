@@ -409,13 +409,36 @@ fn try_fold_binop_int(
             _ => None,
         };
     }
+    let wrap = |v: i64| IrExprKind::LitInt { value: narrow_to_width(v, left_ty) };
     match op {
-        BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(b) }),
-        BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(b) }),
-        BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(b) }),
-        BinOp::DivInt if b != 0 => Some(IrExprKind::LitInt { value: a / b }),
-        BinOp::ModInt if b != 0 => Some(IrExprKind::LitInt { value: a % b }),
+        BinOp::AddInt => Some(wrap(a.wrapping_add(b))),
+        BinOp::SubInt => Some(wrap(a.wrapping_sub(b))),
+        BinOp::MulInt => Some(wrap(a.wrapping_mul(b))),
+        BinOp::DivInt if b != 0 => Some(wrap(a / b)),
+        BinOp::ModInt if b != 0 => Some(wrap(a % b)),
         _ => None,
+    }
+}
+
+/// Wrap a folded value into the two's-complement range of `ty`.
+///
+/// The fold happens at i64 width, but the RESULT is emitted as a literal of the
+/// declared type: `let a: Int8 = 127; let b: Int8 = 1; a + b` folded to `128`
+/// and rendered `128i8`, which rustc rejects outright — a program that `check`
+/// accepted and could not build, while the wasm leg (which never sees a Rust
+/// literal) printed the correct `-128` (#901). The runtime path already wraps
+/// (#889); this is the same rule applied at fold time, so the two agree.
+/// Canonical `Int` is already i64-wide, so it is returned unchanged.
+fn narrow_to_width(v: i64, ty: &almide_lang::types::Ty) -> i64 {
+    use almide_lang::types::Ty;
+    match ty {
+        Ty::Int8 => v as i8 as i64,
+        Ty::Int16 => v as i16 as i64,
+        Ty::Int32 => v as i32 as i64,
+        Ty::UInt8 => v as u8 as i64,
+        Ty::UInt16 => v as u16 as i64,
+        Ty::UInt32 => v as u32 as i64,
+        _ => v,
     }
 }
 

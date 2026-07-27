@@ -28,4 +28,28 @@ fn main() -> Unit = {
   // In-range arithmetic is untouched.
   println(int8.to_string(a8(3, 4)))          // 7
   println(uint8.to_string(au8(3, 4)))        // 7
+
+  // The SAME edges reached WITHOUT a call, so the constant folder computes
+  // them instead of the runtime (#901). Folding kept i64 width and emitted the
+  // result as a literal of the declared type — `128i8`, which rustc rejects
+  // outright, so the native leg would not build while wasm printed the correct
+  // -128. Fold-time now narrows exactly as the runtime path wraps.
+  let p8: Int8 = 127
+  let q8: Int8 = 1
+  println(int8.to_string(p8 + q8))           // -128
+  let pu8: UInt8 = 200
+  let qu8: UInt8 = 100
+  println(uint8.to_string(pu8 + qu8))        // 44
+  let p16: Int16 = 32767
+  let q16: Int16 = 1
+  println(int16.to_string(p16 + q16))        // -32768
+  let p32: Int32 = 2147483647
+  let q32: Int32 = 1
+  println(int32.to_string(p32 + q32))        // -2147483648
+  let pu32: UInt32 = 4294967295
+  let qu32: UInt32 = 1
+  println(uint32.to_string(pu32 + qu32))     // 0
+  let m1: Int8 = 64
+  let m2: Int8 = 4
+  println(int8.to_string(m1 * m2))           // 0
 }

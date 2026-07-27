@@ -488,6 +488,62 @@ impl Checker {
         self.constrain_with_hint(expected, actual, context, None);
     }
 
+    /// Reject arithmetic that mixes a SIZED numeric type with a canonical
+    /// `Int` / `Float` VALUE, and return the sized type so inference carries on.
+    ///
+    /// The mixed-width rule (`Int32 + Int16`) was enforced on the sized types
+    /// only, which let the same mistake through whenever the wide side was
+    /// spelled `Int`: `fn add32(a: Int32, b: Int) -> Int32 = a + b` passed
+    /// `check`, failed the native build with a rustc E0308, and on wasm — where
+    /// every scalar rides one i64 — computed a value outside the declared width
+    /// (#902). Spelling the same parameter `Int64` WAS caught, so the rule was
+    /// really enforcing a spelling rather than a type.
+    ///
+    /// The canonical side is exempt only when it is a LITERAL-ONLY expression,
+    /// which is the case the permissive pair exists for: `let x: Int32 = 1;
+    /// x + 2` must keep working, because the literal adopts the sized width at
+    /// lowering. A literal-only tree is the same shape lowering retypes whole —
+    /// literals, negation, and arithmetic over them, nothing that could have
+    /// chosen a width of its own.
+    pub(crate) fn check_mixed_canonical_width(
+        &mut self,
+        op: &str,
+        lc: &Ty,
+        rc: &Ty,
+        left: &ast::Expr,
+        right: &ast::Expr,
+    ) -> Option<Ty> {
+        let canonical_peer = |sized: &Ty, canon: &Ty| match (sized, canon) {
+            (s, Ty::Int) if is_sized_int(s) => true,
+            (s, Ty::Float) if matches!(s, Ty::Float32 | Ty::Float64) => true,
+            _ => false,
+        };
+        let (sized, canon_ty, canon_expr) = if canonical_peer(lc, rc) {
+            (lc, rc, right)
+        } else if canonical_peer(rc, lc) {
+            (rc, lc, left)
+        } else {
+            return None;
+        };
+        if is_literal_numeric_ast(canon_expr) {
+            return None;
+        }
+        self.emit(err(
+            format!(
+                "operator '{}' mixes sized numeric type {} with a canonical {} value — \
+                 explicit conversion required (e.g. `.to_{}()`)",
+                op,
+                sized.display(),
+                canon_ty.display(),
+                sized.display().to_lowercase()
+            ),
+            "Convert one side with `.to_intN()` / `.to_floatN()` before the op. A literal \
+             adopts the sized width automatically; a VALUE does not.",
+            format!("operator {}", op),
+        ));
+        Some(sized.clone())
+    }
+
     /// `if` / `while` take a `Bool` condition, full stop — Almide has no
     /// truthiness, and until this constraint existed the checker accepted every
     /// condition type (#896). `if 1 then …` ran with C-style truthiness and
@@ -804,6 +860,31 @@ impl Checker {
         best.map(|(_, module, fn_name)| (module, fn_name))
     }
 
+}
+
+/// The sized INT widths (the sized floats are matched separately, since their
+/// canonical peer is `Float`, not `Int`).
+fn is_sized_int(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+    )
+}
+
+/// Whether this expression is built ONLY from numeric literals — literals,
+/// parentheses, negation, and arithmetic over them. Such an expression chose no
+/// width of its own, so it adopts its context's; anything else is a value with a
+/// width already, and mixing it with a different width is an error.
+fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
+    match &e.kind {
+        ast::ExprKind::Int { .. } | ast::ExprKind::Float { .. } => true,
+        ast::ExprKind::Paren { expr } => is_literal_numeric_ast(expr),
+        ast::ExprKind::Unary { op, operand } if op.as_str() == "-" => is_literal_numeric_ast(operand),
+        ast::ExprKind::Binary { op, left, right } if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") => {
+            is_literal_numeric_ast(left) && is_literal_numeric_ast(right)
+        }
+        _ => false,
+    }
 }
 
 include!("post_solve_validation.rs");
