@@ -1125,6 +1125,7 @@ statement = "json.parse decodes \\uXXXX escapes (BMP 1/2/3-byte UTF-8 plus high+
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_number_unicode.almd", class = "fixture" },
+  { path = "spec/wasm_cross/json_string_span.almd", class = "fixture" },
 ]
 
 [[contract]]
