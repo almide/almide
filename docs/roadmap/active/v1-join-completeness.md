@@ -1,9 +1,21 @@
 <!-- description: Kill continuation duplication via bind-position joins, and make the proven checkers linear in witness size -->
 # v1 join completeness + linear checkers
 
-Status: **DESIGN (surveyed 2026-07-28)** — three independent code surveys done
-(join machinery map, duplication inventory, cert grammar + checker complexity).
-No implementation yet. Born from the 2026-07-27 trust-spine incident.
+Status: **Track C LANDED through C1/C2/C3/C6 (2026-07-28); Track J and C4/C5
+open.** Three independent code surveys done (join machinery map, duplication
+inventory, cert grammar + checker complexity). Born from the 2026-07-27
+trust-spine incident.
+
+Measured C-track results (local M-series, full corpus):
+- incident-class 231KB names witness: **>10min (never finished) → 7–9s**
+  (sorted merge path; the unsorted FALLBACK stays quadratic by design — the
+  64KB per-line gate keeps that class out of CI);
+- kernel oracle: **254s → 74s**; corpus-wall.sh total: **5m20s → 2m16s**;
+- witness bytes corpus-wide: names.cert −30% (1,351KB → 939KB), max line
+  −33%, caps_graph −24% (sort+dedup, set-semantics-sound);
+- proof spine + coqchk + claim-drift + gate.sh + `cargo test -p almide-mir`
+  (597) all green; `merge_subset_sound` / `subset_check_fast_sound` added to
+  the axiom ledger, kernel-checked.
 
 ## The incident that named the problem
 
@@ -132,23 +144,28 @@ value, F = functions): Θ(n²) `split_bar` accumulator-append (both backends) +
 Θ(F·b^F) worst case, the sharpest latent cliff in the spine (currently masked
 by tiny per-file graphs).
 
-**C1 — emitter sort + dedup (zero proof change).** `subset_prop` is
-set-membership; `certificate.rs` itself documents "duplicates are harmless".
-`sort_unstable() + dedup()` in `name_witness_string` / `cap_witness_string` is
-sound TODAY and shrinks duplication-heavy witnesses by a large constant before
-any asymptotic work. Land first.
+**C1 — emitter sort + dedup (zero proof change). DONE 2026-07-28.**
+`subset_prop` is set-membership; `certificate.rs` itself documents "duplicates
+are harmless". `sorted_dedup_ids` now serializes `name_witness_string` /
+`cap_witness_string` / `transitive_cap_witness_string` /
+`program_cap_graph_witness` (callee edges deduped too — they multiply the
+un-memoized `reaches` fold). Corpus: names.cert −30%, max line −33%.
 
-**C2 — Θ(n) parsing in Gallina.** Replace `left ++ String a EmptyString` /
-`acc ++ [n]` / `split_semi`'s appends with cons+rev (or one fused fixpoint),
-and parse over `list ascii` (`String.list_ascii_of_string` extracts to a
-single Θ(n) conversion). Kills all four parse quadratics in BOTH backends. No
-format change; re-prove the parser lemmas.
+**C2 — Θ(n) parsing in Gallina. DONE 2026-07-28.** `pnats` / `split_bar` /
+`split_semi` keep their names and signatures but walk `list ascii`
+(cons-accumulated, one `rev_append` at the boundary;
+`list_ascii_of_string` extracts to one O(n) `List.init`). All four parse
+quadratics gone in BOTH backends. Behavior pinned by the in-file Examples +
+the 3-way corpus gate.
 
-**C3 — sorted fast path.** `sortedb` (Θ(n)) + `merge_subset` (Θ(n+m)) with
-fallback: `if sortedb sup && sortedb sub then merge_subset … else
-subset_check …`. Soundness = disjunction of two lemmas; every existing
-unsorted cert verifies bit-identically. Pure ADD, mirroring the v1→v4
-ownership-format precedent (each a strict superset).
+**C3 — sorted fast path. DONE 2026-07-28.** `sortedb` + `drop_lt` +
+`merge_subset` in Subset.v; `subset_check_fast` dispatches, `check_names` /
+`check_caps` route through it. The merge's soundness
+(`merge_subset_sound`) needs NO sortedness hypothesis — accepted elements are
+literally found in a suffix of `sup` — so the trust theorem is unconditional
+and sortedness only gates completeness (falls back to `subset_check`; every
+pre-existing witness verifies bit-identically). `CapabilityReach.prog_within`
+deliberately stays on `subset_check` (reach lists are unsorted until C5).
 
 **C4 — id type `nat` → `N`.** Removes unary-nat digit/eqb costs in both
 backends. Witness bytes unchanged; proof-side refactor of
@@ -159,10 +176,12 @@ backends. Witness bytes unchanged; proof-side refactor of
 the fuel-bounded re-expansion. Kills the exponential cliff BEFORE any corpus
 file grows a dense call graph.
 
-**C6 — kernel-oracle hygiene.** The `Goal check_bc "<entire ownership.cert>"`
-literal inlines the WHOLE file as one ~10·N-node term — the per-line
-`MAX_WITNESS_LINE` gate misses the aggregate entirely. Chunk the goals (one
-per K witnesses) and extend the size gate to the total. Script-only.
+**C6 — kernel-oracle hygiene. DONE 2026-07-28.** Goals are chunked (500
+witnesses per names/caps/tcaps goal, 4,000 ownership LINES per goal — sound:
+`check_bc` folds per line, `forallb` distributes over ++), bounding the peak
+term and letting coqc GC between goals. `MAX_CERT_TOTAL=8388608` aggregate
+gate added beside the per-line gate (current full-corpus total ~1.1MB).
+Kernel oracle: 254s → 74s.
 
 ## Order and gates
 
@@ -171,6 +190,15 @@ term size immediately; J0 closes the uncapped-duplicator class). Then C2/C3 as
 one proof PR. J1 is the pivot — adversarial pass, then J2's ratchet makes the
 progress monotone and visible. J3 is the payoff demo (the incident shape,
 linear). C4/C5 and J4/J5 ride behind.
+
+C-track remainder, deferred with reasons (the honesty precedent): **C4**
+(nat→N) removes the residual unary-nat arithmetic — the 7–9s still paid on an
+incident-CLASS witness — but that class cannot reach CI (64KB gate) and the
+refactor spans CallModes/CapabilityReach proof surfaces; do it as its own
+focused PR. **C5** (`reaches` memoization) closes a real exponential cliff
+that is currently masked (tiny per-file graphs) and, if hit, fails RED by the
+100-min workflow timeout rather than zombie-ing — urgent the moment caps
+graphs densify, not before.
 
 Every stage gates on: `make verify-trust` green at ~17 min (the incident
 taught us to watch the CLOCK, not just the verdict — a green run 3× slower is

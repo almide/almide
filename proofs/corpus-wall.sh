@@ -79,6 +79,24 @@ fi
 # CANCELLED, never red. Fail FAST here with the likely offender instead. The largest
 # legitimate line today is ~19KB (regex_fuzz_batch); 64KB is headroom, not a target.
 MAX_WITNESS_LINE=65536
+# Aggregate ceiling (arc v1-join-completeness, C6): the kernel oracle's cost is
+# linear in TOTAL cert bytes even after per-goal chunking — a corpus whose
+# witness set grows 10x makes verify-trust 10x slower while every line stays
+# under the per-line cap. Today's full-corpus total is ~1.1MB; 8MB is headroom,
+# not a target. Breach = grow the corpus deliberately (raise with a reviewed
+# commit) or find the function whose lowering ballooned.
+MAX_CERT_TOTAL=8388608
+TOTAL_BYTES=0
+for cert in names caps caps_graph ownership; do
+  f="$OUTDIR/$cert.cert"
+  [ -f "$f" ] && TOTAL_BYTES=$((TOTAL_BYTES + $(wc -c < "$f")))
+done
+if [ "$TOTAL_BYTES" -gt "$MAX_CERT_TOTAL" ]; then
+  echo "WALL GATE FAIL: total witness bytes $TOTAL_BYTES exceed $MAX_CERT_TOTAL — the kernel" >&2
+  echo "oracle pays linearly in aggregate cert size; find the ballooned function(s):" >&2
+  sed "s|^$ROOT/||" "$OUTDIR/ownership.names" | sort | uniq -c | sort -rn | head -3 >&2
+  cleanup; exit 1
+fi
 for cert in names caps caps_graph ownership; do
   f="$OUTDIR/$cert.cert"
   [ -f "$f" ] || continue
@@ -218,26 +236,38 @@ echo "== KERNEL ORACLE (brick 6b): the Rocq KERNEL re-verifies the ENTIRE corpus
 # codegen + ocamlopt) is a FAST PATH, no longer a trust root for the corpus gate
 # (TRUSTED_BASE §2, brick 6). Measured ~4 min on the full 27k-object corpus.
 KGEN="$(mktemp /tmp/KernelCorpus_XXXXXX).v"
+# CHUNKED goals (arc v1-join-completeness, C6): a Coq string literal is an
+# N-deep inductive spine (~10 constructor nodes per byte), and every Goal pays
+# for its literal at elaboration, vm_compute bytecode-compilation, Qed
+# re-checking, and .vo serialization. One goal over the WHOLE witness set made
+# the peak term multi-million-node (the 2026-07-27 oracle park). Chunking bounds
+# the peak per goal and lets coqc GC between goals; `check_bc` folds per LINE
+# and `forallb` distributes over ++, so per-chunk goals certify exactly the
+# same verdicts.
 python3 - "$OUTDIR" > "$KGEN" <<'PYEOF'
 import sys, os
 out = sys.argv[1]
+CHUNK = 500          # witnesses per names/caps/tcaps goal
+OWN_CHUNK = 4000     # ownership cert LINES per goal (whole lines only)
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 def lines(name):
     return [l for l in open(os.path.join(out, name)).read().splitlines() if l.strip()]
-own = open(os.path.join(out, 'ownership.cert')).read()
+def chunked(xs, n):
+    return [xs[i:i+n] for i in range(0, len(xs), n)] or [[]]
 print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach.")
 print("From Stdlib Require Import String List.")
 print("Import ListNotations.")
 print("Open Scope string_scope.")
-print("Goal check_bc %s = true." % lit(own))
-print("Proof. vm_compute. reflexivity. Qed.")
-print("Goal forallb check_names_cert [%s] = true." % ";".join(lit(w) for w in lines('names.cert')))
-print("Proof. vm_compute. reflexivity. Qed.")
-print("Goal forallb check_caps_cert [%s] = true." % ";".join(lit(w) for w in lines('caps.cert')))
-print("Proof. vm_compute. reflexivity. Qed.")
-print("Goal forallb check_prog_cert [%s] = true." % ";".join(lit(w) for w in lines('caps_graph.cert')))
-print("Proof. vm_compute. reflexivity. Qed.")
+for chunk in chunked(lines('ownership.cert'), OWN_CHUNK):
+    print("Goal check_bc %s = true." % lit("\n".join(chunk) + "\n"))
+    print("Proof. vm_compute. reflexivity. Qed.")
+for name, fn in (('names.cert', 'check_names_cert'),
+                 ('caps.cert', 'check_caps_cert'),
+                 ('caps_graph.cert', 'check_prog_cert')):
+    for chunk in chunked(lines(name), CHUNK):
+        print("Goal forallb %s [%s] = true." % (fn, ";".join(lit(w) for w in chunk)))
+        print("Proof. vm_compute. reflexivity. Qed.")
 PYEOF
 KSTART=$(date +%s)
 if (cd "$ROOT/proofs" && "${COQC:-$(command -v coqc)}" -Q . AlmideTrust "$KGEN" >/dev/null 2>&1); then
