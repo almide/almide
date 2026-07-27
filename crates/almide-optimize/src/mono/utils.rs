@@ -44,6 +44,23 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
                 format!("{}_{}", name, arg_strs.join("_"))
             }
         }
+        // A TUPLE and a FN type carry their components in the key. Falling to the
+        // `Unknown` catch-all below made every compound-payload instantiation share
+        // ONE key, so two calls at different types collapsed into a single
+        // monomorphized function: `result.filter` at `Result[(Bool, String), String]`
+        // and at `Result[Result[Float, String], String]` both keyed
+        // `Result_Unknown_String`, and the survivor's whole signature — closure
+        // parameter included — was emitted for both call sites (#905). Two SCALAR
+        // instantiations never collided, because scalars have real names; it took a
+        // compound payload to expose the hole.
+        Ty::Tuple(elems) => {
+            let parts: Vec<String> = elems.iter().map(mangle_ty).collect();
+            format!("Tup{}_{}", elems.len(), parts.join("_"))
+        }
+        Ty::Fn { params, ret } => {
+            let ps: Vec<String> = params.iter().map(mangle_ty).collect();
+            format!("Fn{}_{}_to_{}", params.len(), ps.join("_"), mangle_ty(ret))
+        }
         _ => "Unknown".into(),
     }
 }
