@@ -408,6 +408,39 @@ impl LowerCtx {
             }
             return Ok(());
         }
+        // A VARIANT (Option/Result)-typed `match` RHS — the match twin of
+        // `lower_bind_heap_if`'s variant path (arc v1-join-completeness, J2a:
+        // fan.any's first-Ok chain binds through here once
+        // `desugar_let_bound_heap_branch` declines it instead of duplicating).
+        // EXECUTE via the same match-VALUE routers the tail position trusts —
+        // each arm materializes + Consumes its value, the merge is the ONE
+        // owned rc=1 block (released-merge-dst `i` credit) — then bind +
+        // scope-track it and SEED its variant read-shape so a following
+        // `match $r` / `$r!` takes the executing tag-read path.
+        if is_variant_ty(ty) {
+            let mark = self.ops.len();
+            let lhh_mark = self.live_heap_handles.len();
+            let mut dst = self.try_lower_custom_variant_match(subject, arms, ty);
+            if dst.is_none() && is_variant_ty(&subject.ty) {
+                dst = self.try_lower_variant_value_match(subject, arms, ty);
+            }
+            if dst.is_none() {
+                dst = self.try_lower_result_match_value(subject, arms, ty);
+            }
+            if dst.is_none() {
+                dst = self.try_lower_option_match_value(subject, arms, ty);
+            }
+            if let Some(obj) = dst {
+                self.value_of.insert(var, obj);
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                self.seed_variant_param(obj, ty);
+                return Ok(());
+            }
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh_mark);
+        }
         Err(LowerError::Unsupported(
             "heap-result `match` bound to a let/var cannot be faithfully \
              computed in this brick (would bind an empty deferred heap value); \

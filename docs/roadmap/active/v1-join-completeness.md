@@ -1,10 +1,17 @@
 <!-- description: Kill continuation duplication via bind-position joins, and make the proven checkers linear in witness size -->
 # v1 join completeness + linear checkers
 
-Status: **Track C LANDED through C1/C2/C3/C6 (2026-07-28); Track J and C4/C5
-open.** Three independent code surveys done (join machinery map, duplication
+Status: **Track C landed through C1/C2/C3/C6; Track J landed through
+J0/J2a/J3 (2026-07-28). J1 (non-variant widening), J4, J5 and C4/C5 open.**
+Three independent code surveys done (join machinery map, duplication
 inventory, cert grammar + checker complexity). Born from the 2026-07-27
 trust-spine incident.
+
+Measured J results: the incident fixture's 8-chain `main` is RESTORED to one
+function and lowers LINEARLY — names witness 231,114B → **4,002B** (~58×),
+growth +480B per chained fan.any (was ×3.5 multiplicative). All fan fixtures
+byte-identical native/wasm (the #900 pins), corpus walls 0, ratchet clean,
+kernel oracle 74s, `cargo test -p almide-mir` 597 green.
 
 Measured C-track results (local M-series, full corpus):
 - incident-class 231KB names witness: **>10min (never finished) → 7–9s**
@@ -92,10 +99,13 @@ it", each step corpus-ratcheted.
 
 ## Track J — join admission (kill the duplication)
 
-**J0 — safety bricks (no behavior change).** Cap the two UNCAPPED duplicators
-(`desugar_tuple_empty_list_match`, `desugar_list_pattern_match` — both run
-outside the 200k fixpoint cap; same class as the incident). Add the `parse_bc`
-second-bar hygiene rejection. Cheap, immediate.
+**J0 — safety bricks (no behavior change). CAPS DONE 2026-07-28.**
+`desugar_tuple_empty_list_match` and `desugar_list_pattern_match` (both run
+outside the 200k fixpoint cap — the two UNCAPPED duplicators) now carry a
+growth cap (+50k nodes over the input; past it the rewrite is DISCARDED and
+the match walls honestly, the desugar_heap_branches precedent). The `parse_bc`
+second-bar hygiene rejection remains open (cosmetic — the emitter never
+produces it and the soundness theorem quantifies over the parse result).
 
 **J1 — bind-position join for non-variant heap types.** Lift the
 `lower_bind_heap_if` / `lower_bind_heap_match` wall for String/List/typed
@@ -103,22 +113,35 @@ merges using the released-merge-dst credit machinery (the variant-ty precedent,
 generalized). The bound merge joins as `IfThen dst`, gets scope-tracked, drops
 at scope end → cert line `im`/`id`. Adversarial pass REQUIRED. Gate: corpus
 walls stay 0; ownership count may shift (arms go per-arm-balanced) — sound as
-long as ACCEPT holds.
+long as ACCEPT holds. PARTIAL SLICE LANDED 2026-07-28 with J3: the VARIANT
+match-bind join — `lower_bind_heap_match` gained the variant path its `if`
+twin already had (the same match-VALUE routers the tail position trusts:
+custom-variant / variant-value / Result / Option merges), bind + scope-track +
+`seed_variant_param`. No new cert surface (existing tail-trusted routers).
 
-**J2 — narrow `desugar_let_bound_heap_branch`.** Where J1 lowers the bind, the
-desugar must decline (else it still fires first in the fixpoint and duplicates
-anyway — measured on the fan bind-form). TCO carve-out: keep duplicating when
-the continuation contains a self-recursive tail call. Ratchet: a
+**J2 — narrow `desugar_let_bound_heap_branch`. J2a DONE 2026-07-28.**
+`is_first_ok_chain` (co-located with the chain builder in desugar_fan.rs)
+recognizes exactly the shape `first_ok_chain` emits; the tail-duplication's
+trigger AND its rest-counter both exclude it, so the chain bind reaches the
+variant bind-position join instead of being duplicated (measured ×3.5/call
+before the decline). The predicate is deliberately strict — nothing
+hand-written trips it — and widens only in step with J1's admission. The
+general narrowing (a shared join-admissibility predicate over ordinary
+branch binds) still awaits J1; the TCO carve-out (keep duplicating when the
+continuation contains a self-recursive tail call) applies to THAT step, not
+to the chain shape (a fan chain never contains the outer function's
+recursion in its arms — the arms are `ok($x)`/nested-chain only). Ratchet: a
 duplication-fire counter over the corpus, checked in like the walled-real
 baseline — the count may only SHRINK.
 
-**J3 — fan.any linear re-land.** With J1+J2, the first-Ok chain VALUE
-(`match t0 { ok($x) => ok($x), err(_) => <next> }`, innermost
-`err("fan.any: all candidates failed")`) + ONE bind + the ORIGINAL match
-becomes the linear lowering; `inline_match_over_any` dies, and #900's
-per-level fresh-binder machinery dies with it (one binder, bound once).
-Re-join the split fixture cases into one function as the regression proof —
-the witness-size gate is the ratchet that it STAYS linear.
+**J3 — fan.any linear re-land. DONE 2026-07-28.** `inline_match_over_any` and
+the #900 per-level fresh-binder machinery are DELETED; the match-over-any
+shape now folds through `first_ok_chain` (shared with the value position) +
+ONE bind + the ORIGINAL match, and the split fixture is re-joined into the
+original 8-chain `main` as the standing linearity regression — the
+witness-size gate turns any regression back to duplication into a fast red
+naming the function. Witness: 231,114B → 4,002B; growth +480B per chained
+call.
 
 **J4 — migrate or bound the remaining duplicators.** In inventory order of
 blast radius: `desugar_stmt_control_unwrap` (continuation into every arm tail,
