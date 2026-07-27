@@ -105,118 +105,176 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
         }
         Some(bodies)
     }
+    // The ALL-FAILED seed of the pre-order `fan.any` fold: v0's fixed
+    // `fan.any: all candidates failed` message, run through the outer `err` arm's body
+    // (a bound err var is substituted by the literal; a `Wildcard` err pattern just runs
+    // the body unchanged). Extracted verbatim from `visit_expr_mut` (codopsy r2, #852,
+    // group 1 of 3).
+    fn allfail_fallback(err_arm: &IrMatchArm) -> IrExpr {
+        let msg = IrExpr {
+            kind: IrExprKind::LitStr {
+                value: "fan.any: all candidates failed".to_string(),
+            },
+            ty: almide_lang::types::Ty::String,
+            span: None,
+            def_id: None,
+        };
+        match &err_arm.pattern {
+            IrPattern::Err { inner } => match &**inner {
+                IrPattern::Bind { var, .. } => {
+                    almide_ir::substitute_var_in_expr(&err_arm.body, *var, &msg)
+                }
+                _ => err_arm.body.clone(),
+            },
+            _ => err_arm.body.clone(),
+        }
+    }
+    // What the outer `ok` arm BINDS: the payload var + its type when the pattern is
+    // `ok(x)` with a Bind inside, `None` for any other ok-pattern shape (nothing to
+    // re-bind per level — the arm is cloned verbatim instead). Extracted verbatim from
+    // `visit_expr_mut` (codopsy r2, #852, group 1 of 3).
+    fn ok_payload_binder(ok_arm: &IrMatchArm) -> Option<(VarId, Ty)> {
+        match &ok_arm.pattern {
+            IrPattern::Ok { inner } => match &**inner {
+                IrPattern::Bind { var, ty } => Some((*var, ty.clone())),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
     impl IrMutVisitor for V {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-            // PRE-order: `match fan.any([() => t0, …]) { ok(pat) => okbody, err(epat) => errbody }` —
-            // INLINE the outer arms into each thunk level (avoiding the intermediate Result + a
-            // match-over-match). Each thunk `t_i` runs, an Ok takes `okbody`, an Err falls to the NEXT
-            // thunk; the LAST thunk's Err takes the original `errbody` (the all-errored fallback). Only
-            // one arm ever executes, so duplicating `okbody` per level is dead-code-safe.
-            if let IrExprKind::Match { subject, arms } = &e.kind {
-                if arms.len() == 2 {
-                    if let Some(bodies) = fan_bodies(subject, "any", &self.thunk_lets) {
-                        let ty = e.ty.clone();
-                        let ok_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Ok { .. }));
-                        let err_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Err { .. }));
-                        if let (Some(ok_arm), Some(err_arm)) = (ok_arm, err_arm) {
-                            // The ALL-FAILED fallback is v0's fixed `fan.any: all candidates failed`
-                            // Err (NOT the last thunk's own error): run the outer `err` arm's body with
-                            // its bound var substituted by that literal (a `Wildcard` err pattern just
-                            // runs the body). Then wrap each thunk: `match t_i { ok(pat) => okbody,
-                            // err(_) => rest }` — an Ok short-circuits, an Err falls through in order.
-                            let msg = IrExpr {
-                                kind: IrExprKind::LitStr {
-                                    value: "fan.any: all candidates failed".to_string(),
+            // PRE-order: the match-over-`fan.any` arm inliner — on a hit, walk the rewritten
+            // node and stop (the original control flow); see `inline_match_over_any`.
+            if self.inline_match_over_any(e) {
+                walk_expr_mut(self, e);
+                return;
+            }
+            // BIND-VALUE / BLOCK-TAIL settle/any VALUE rewrites — see
+            // `rewrite_settle_any_in_block`.
+            self.rewrite_settle_any_in_block(e);
+            walk_expr_mut(self, e);
+            // POST-order: the `fan.race` head substitution — see `rewrite_race_head`.
+            self.rewrite_race_head(e);
+            // POST-order: `fan.settle([() => t0, …])` in ANY position — deterministic sequential
+            // semantics on wasm: the results list IS the list of each thunk's Result, in order.
+            // Rewrite to the LITERAL `[t0, t1, …]` — the List[Result] literal machinery (the
+            // lenlist stage) materializes it; a declared-Result thunk body keeps its Result type
+            // (a never-err LIFTED body's raw type is declined by the literal's e.ty == elem_ty
+            // gate → the whole call walls honestly, as before).
+            let _ = e; // settle/any handled position-limited via rewrite_settle_any above
+        }
+    }
+    impl V {
+        // PRE-order: `match fan.any([() => t0, …]) { ok(pat) => okbody, err(epat) => errbody }` —
+        // INLINE the outer arms into each thunk level (avoiding the intermediate Result + a
+        // match-over-match). Each thunk `t_i` runs, an Ok takes `okbody`, an Err falls to the NEXT
+        // thunk; the LAST thunk's Err takes the original `errbody` (the all-errored fallback). Only
+        // one arm ever executes, so duplicating `okbody` per level is dead-code-safe.
+        // Returns true when the rewrite fired (the caller then walks the rewritten node and
+        // stops, exactly the original control flow). Extracted verbatim from `visit_expr_mut`
+        // (codopsy r2, #852, group 1 of 3).
+        fn inline_match_over_any(&mut self, e: &mut IrExpr) -> bool {
+            let IrExprKind::Match { subject, arms } = &e.kind else {
+                return false;
+            };
+            if arms.len() != 2 {
+                return false;
+            }
+            let Some(bodies) = fan_bodies(subject, "any", &self.thunk_lets) else {
+                return false;
+            };
+            let ty = e.ty.clone();
+            let ok_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Ok { .. }));
+            let err_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Err { .. }));
+            let (Some(ok_arm), Some(err_arm)) = (ok_arm, err_arm) else {
+                return false;
+            };
+            // The ALL-FAILED fallback is v0's fixed `fan.any: all candidates failed`
+            // Err (NOT the last thunk's own error): run the outer `err` arm's body with
+            // its bound var substituted by that literal (a `Wildcard` err pattern just
+            // runs the body). Then wrap each thunk: `match t_i { ok(pat) => okbody,
+            // err(_) => rest }` — an Ok short-circuits, an Err falls through in order.
+            let mut acc = allfail_fallback(err_arm);
+            // Each level gets its OWN Ok binder. Cloning `ok_arm` verbatim
+            // gave every level the SAME VarId, and the renderer resolves a
+            // VarId to ONE local at ONE binding site — the innermost one it
+            // saw. So an outer level extracted its payload into a local
+            // nothing read, and the duplicated body read the inner level's
+            // local, which on that path was never stored: `fan.any` returned
+            // 0 whenever a thunk other than the last one won (#900). Only the
+            // "winner is last" case aliased to the right local, which is
+            // exactly the set of cases that looked correct.
+            let ok_binder = ok_payload_binder(ok_arm);
+            for tb in bodies.into_iter().rev() {
+                let level_ok_arm = self.fresh_level_ok_arm(&ok_binder, ok_arm);
+                acc = IrExpr {
+                    kind: IrExprKind::Match {
+                        subject: Box::new(tb),
+                        arms: vec![
+                            level_ok_arm,
+                            IrMatchArm {
+                                pattern: IrPattern::Err {
+                                    inner: Box::new(IrPattern::Wildcard),
                                 },
-                                ty: almide_lang::types::Ty::String,
-                                span: None,
-                                def_id: None,
-                            };
-                            let mut acc = match &err_arm.pattern {
-                                IrPattern::Err { inner } => match &**inner {
-                                    IrPattern::Bind { var, .. } => {
-                                        almide_ir::substitute_var_in_expr(&err_arm.body, *var, &msg)
-                                    }
-                                    _ => err_arm.body.clone(),
-                                },
-                                _ => err_arm.body.clone(),
-                            };
-                            // Each level gets its OWN Ok binder. Cloning `ok_arm` verbatim
-                            // gave every level the SAME VarId, and the renderer resolves a
-                            // VarId to ONE local at ONE binding site — the innermost one it
-                            // saw. So an outer level extracted its payload into a local
-                            // nothing read, and the duplicated body read the inner level's
-                            // local, which on that path was never stored: `fan.any` returned
-                            // 0 whenever a thunk other than the last one won (#900). Only the
-                            // "winner is last" case aliased to the right local, which is
-                            // exactly the set of cases that looked correct.
-                            let ok_binder = match &ok_arm.pattern {
-                                IrPattern::Ok { inner } => match &**inner {
-                                    IrPattern::Bind { var, ty } => Some((*var, ty.clone())),
-                                    _ => None,
-                                },
-                                _ => None,
-                            };
-                            for tb in bodies.into_iter().rev() {
-                                let level_ok_arm = match &ok_binder {
-                                    Some((var, ty)) => {
-                                        let fresh = almide_ir::VarId(self.next_var);
-                                        self.next_var += 1;
-                                        let fresh_ref = IrExpr {
-                                            kind: IrExprKind::Var { id: fresh },
-                                            ty: ty.clone(),
-                                            span: None,
-                                            def_id: None,
-                                        };
-                                        IrMatchArm {
-                                            pattern: IrPattern::Ok {
-                                                inner: Box::new(IrPattern::Bind {
-                                                    var: fresh,
-                                                    ty: ty.clone(),
-                                                }),
-                                            },
-                                            guard: ok_arm.guard.clone(),
-                                            body: almide_ir::substitute_var_in_expr(
-                                                &ok_arm.body,
-                                                *var,
-                                                &fresh_ref,
-                                            ),
-                                        }
-                                    }
-                                    None => ok_arm.clone(),
-                                };
-                                acc = IrExpr {
-                                    kind: IrExprKind::Match {
-                                        subject: Box::new(tb),
-                                        arms: vec![
-                                            level_ok_arm,
-                                            IrMatchArm {
-                                                pattern: IrPattern::Err {
-                                                    inner: Box::new(IrPattern::Wildcard),
-                                                },
-                                                guard: None,
-                                                body: acc,
-                                            },
-                                        ],
-                                    },
-                                    ty: ty.clone(),
-                                    span: None,
-                                    def_id: None,
-                                };
-                            }
-                            *e = acc;
-                            self.changed = true;
-                            walk_expr_mut(self, e);
-                            return;
-                        }
+                                guard: None,
+                                body: acc,
+                            },
+                        ],
+                    },
+                    ty: ty.clone(),
+                    span: None,
+                    def_id: None,
+                };
+            }
+            *e = acc;
+            self.changed = true;
+            true
+        }
+        // Mint ONE level's `ok` arm for the fold above: with a payload binder, a FRESH
+        // VarId is bound and substituted through the duplicated `okbody` (the #900 fix —
+        // see the caller's comment); without one, the outer arm is cloned verbatim.
+        // Extracted verbatim from `visit_expr_mut` (codopsy r2, #852, group 1 of 3).
+        fn fresh_level_ok_arm(
+            &mut self,
+            ok_binder: &Option<(VarId, Ty)>,
+            ok_arm: &IrMatchArm,
+        ) -> IrMatchArm {
+            match ok_binder {
+                Some((var, ty)) => {
+                    let fresh = almide_ir::VarId(self.next_var);
+                    self.next_var += 1;
+                    let fresh_ref = IrExpr {
+                        kind: IrExprKind::Var { id: fresh },
+                        ty: ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    IrMatchArm {
+                        pattern: IrPattern::Ok {
+                            inner: Box::new(IrPattern::Bind {
+                                var: fresh,
+                                ty: ty.clone(),
+                            }),
+                        },
+                        guard: ok_arm.guard.clone(),
+                        body: almide_ir::substitute_var_in_expr(
+                            &ok_arm.body,
+                            *var,
+                            &fresh_ref,
+                        ),
                     }
                 }
+                None => ok_arm.clone(),
             }
-            // BIND-VALUE / BLOCK-TAIL positions for the settle/any VALUE rewrites: an
-            // `!`-wrapped `fan.any(…)!` must stay for the effect-unwrap desugar (which builds
-            // the match shape the PRE-order inliner above handles) — rewriting under the
-            // Unwrap left a match-over-match the subject tracking cannot follow (the
-            // fan_any_allfail regression, by-name diff).
+        }
+        // BIND-VALUE / BLOCK-TAIL positions for the settle/any VALUE rewrites: an
+        // `!`-wrapped `fan.any(…)!` must stay for the effect-unwrap desugar (which builds
+        // the match shape the PRE-order inliner above handles) — rewriting under the
+        // Unwrap left a match-over-match the subject tracking cannot follow (the
+        // fan_any_allfail regression, by-name diff). Extracted verbatim from
+        // `visit_expr_mut` (codopsy r2, #852, group 2 of 3).
+        fn rewrite_settle_any_in_block(&mut self, e: &mut IrExpr) {
             if let IrExprKind::Block { stmts, expr } = &mut e.kind {
                 for st in stmts.iter_mut() {
                     if let IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =
@@ -229,31 +287,34 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
                     self.rewrite_settle_any(t);
                 }
             }
-            walk_expr_mut(self, e);
-            // POST-order: `fan.race([() => t0, …])` — the FIRST thunk's body (deterministic head).
-            // The CHECKED type of `fan.race(…)` is uniformly `Result[T, String]` (the fan thunk
-            // convention — see `desugar_fan_block`'s twin comment), even when every thunk is a
-            // PLAIN (non-Result) fn (`fan.race([thunk_a, thunk_b])`, `thunk_a -> Int` — v0's
-            // FanLowering wraps a non-Result thunk in an Ok adapter). A caller reaching `fan.race`
-            // through an un-annotated bind (`let r = fan.race([...])`) gets the frontend's auto-`?`
-            // `Try` node over this Result-checked type — which `desugar_effect_unwrap` (a LATER
-            // pass) turns into a real `match … { err(e)=>.., ok(r)=>.. }`. If this rule substitutes
-            // the RAW thunk body (`t0`, Int-typed) in place of the ORIGINAL Result-typed call, the
-            // surrounding Try/match sees a type it no longer matches — producing a structurally
-            // invalid `Ok/Err`-pattern match over a scalar Int subject (confirmed via debug tracing
-            // on `fan_pure_thunks.almd`: exactly this shape reaches `lower_branch`'s untracked-
-            // subject-with-call-bearing-arm wall). PRESERVE the Result contract instead: when the
-            // ORIGINAL call was Result-typed but `t0` is not, wrap `t0` in a genuine `ok(t0)`
-            // (`ResultOk`) at the original type — sound for EVERY position (Try, match subject, a
-            // scalar use), not just the one that happened to break, and unconditionally in step
-            // with the "FanLowering always Oks a non-Result thunk" contract this file's header
-            // documents. A thunk that is ALREADY Result-typed (a real fallible race — not used in
-            // this corpus but structurally possible) is untouched — its own `!`/match handles the
-            // real Err path.
+        }
+        // POST-order: `fan.race([() => t0, …])` — the FIRST thunk's body (deterministic head).
+        // The CHECKED type of `fan.race(…)` is uniformly `Result[T, String]` (the fan thunk
+        // convention — see `desugar_fan_block`'s twin comment), even when every thunk is a
+        // PLAIN (non-Result) fn (`fan.race([thunk_a, thunk_b])`, `thunk_a -> Int` — v0's
+        // FanLowering wraps a non-Result thunk in an Ok adapter). A caller reaching `fan.race`
+        // through an un-annotated bind (`let r = fan.race([...])`) gets the frontend's auto-`?`
+        // `Try` node over this Result-checked type — which `desugar_effect_unwrap` (a LATER
+        // pass) turns into a real `match … { err(e)=>.., ok(r)=>.. }`. If this rule substitutes
+        // the RAW thunk body (`t0`, Int-typed) in place of the ORIGINAL Result-typed call, the
+        // surrounding Try/match sees a type it no longer matches — producing a structurally
+        // invalid `Ok/Err`-pattern match over a scalar Int subject (confirmed via debug tracing
+        // on `fan_pure_thunks.almd`: exactly this shape reaches `lower_branch`'s untracked-
+        // subject-with-call-bearing-arm wall). PRESERVE the Result contract instead: when the
+        // ORIGINAL call was Result-typed but `t0` is not, wrap `t0` in a genuine `ok(t0)`
+        // (`ResultOk`) at the original type — sound for EVERY position (Try, match subject, a
+        // scalar use), not just the one that happened to break, and unconditionally in step
+        // with the "FanLowering always Oks a non-Result thunk" contract this file's header
+        // documents. A thunk that is ALREADY Result-typed (a real fallible race — not used in
+        // this corpus but structurally possible) is untouched — its own `!`/match handles the
+        // real Err path. Extracted verbatim from `visit_expr_mut` (codopsy r2, #852,
+        // group 3 of 3).
+        fn rewrite_race_head(&mut self, e: &mut IrExpr) {
             if let Some(bodies) = fan_bodies(e, "race", &self.thunk_lets) {
                 let orig_ty = e.ty.clone();
                 let t0 = bodies.into_iter().next().expect("fan_bodies() never returns Some(bodies) with an empty bodies (elements.is_empty() is rejected internally)");
-                *e = if crate::lower::is_result_ty(&orig_ty) && !crate::lower::is_result_ty(&t0.ty) {
+                *e = if crate::lower::is_result_ty(&orig_ty) && !crate::lower::is_result_ty(&t0.ty)
+                {
                     IrExpr {
                         kind: IrExprKind::ResultOk { expr: Box::new(t0) },
                         ty: orig_ty,
@@ -265,16 +326,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
                 };
                 self.changed = true;
             }
-            // POST-order: `fan.settle([() => t0, …])` in ANY position — deterministic sequential
-            // semantics on wasm: the results list IS the list of each thunk's Result, in order.
-            // Rewrite to the LITERAL `[t0, t1, …]` — the List[Result] literal machinery (the
-            // lenlist stage) materializes it; a declared-Result thunk body keeps its Result type
-            // (a never-err LIFTED body's raw type is declined by the literal's e.ty == elem_ty
-            // gate → the whole call walls honestly, as before).
-            let _ = e; // settle/any handled position-limited via rewrite_settle_any above
         }
-    }
-    impl V {
         fn rewrite_settle_any(&mut self, e: &mut IrExpr) {
             use almide_ir::{IrMatchArm, IrPattern};
             // `fan.settle([…])` as a bind value / tail — the results list literal.

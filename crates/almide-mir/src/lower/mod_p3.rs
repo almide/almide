@@ -468,192 +468,269 @@ impl LowerCtx {
     }
 
     /// The scalar-loop-body reassignment arm of [`Self::lower_stmt_assign`]
-    /// (`self.scalar_loop_depth > 0`) — verbatim move, always returns.
+    /// (`self.scalar_loop_depth > 0`) — verbatim move, always returns. Now a
+    /// router (codopsy r2, #852): a HEAP reassignment goes to
+    /// [`Self::lower_scalar_loop_heap_reassign`], a scalar one to
+    /// [`Self::lower_scalar_loop_scalar_reassign`] — the same two-way
+    /// `is_heap_ty` split the original body opened with.
     fn lower_stmt_assign_scalar_loop(
         &mut self,
         var: VarId,
         value: &IrExpr,
     ) -> Result<(), LowerError> {
-                if is_heap_ty(&value.ty) {
-                    // APPEND ACCUMULATOR (option C): `slot = slot + [x]` → alloc the new list, DROP
-                    // the old slot, rebind the slot IN PLACE (`SetLocal`). The slot is an OWNED
-                    // loop-carried list (initialized to an owned copy of the param before the loop by
-                    // the TCO); each iteration drops the previous object + acquires the new one — the
-                    // cert-`i(id)m` loop-carried slot PROVED leak/double-free-free for any iteration
-                    // count (OwnershipChecker.v `check_line_unroll_sound`). Only a SELF-append
-                    // (`Var(slot) + …`) qualifies; any other heap reassign still defers below.
-                    if let IrExprKind::BinOp {
-                        op: almide_ir::BinOp::ConcatList,
-                        left,
-                        ..
-                    } = &value.kind
-                    {
-                        if matches!(&left.kind, IrExprKind::Var { id } if id == &var) {
-                            if let Some(&slot_local) = self.value_of.get(&var) {
-                                if let Some(new) = self.try_lower_concat_list(value) {
-                                    let drop_op = self.drop_op_for(slot_local);
-                                    self.ops.push(drop_op);
-                                    self.ops
-                                        .push(Op::SetLocal { local: slot_local, src: new });
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                    // RESET to a fresh EMPTY heap value (`cur = []` / `acc = ""` — the parser
-                    // resets the current-row accumulator after a delimiter): materialize the empty
-                    // block, drop the old slot, rebind IN PLACE. Not a ConcatList (fast-path) nor
-                    // a `lower_owned_heap_field` shape, so handle it here. Cert: drop-old (`d`) +
-                    // alloc (`i`) = the same loop-carried `i(id)` the append slot proves.
-                    if let Some(&slot_local) = self.value_of.get(&var) {
-                        let empty = match &value.kind {
-                            IrExprKind::List { elements } if elements.is_empty() => Some(
-                                crate::Init::IntList(vec![]),
-                            ),
-                            IrExprKind::LitStr { value: s } if s.is_empty() => {
-                                Some(crate::Init::Str(String::new()))
-                            }
-                            _ => None,
-                        };
-                        if let Some(init) = empty {
-                            let new = self.fresh_value();
-                            self.ops.push(Op::Alloc {
-                                dst: new,
-                                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-                                init,
-                            });
-                            let drop_op = self.drop_op_for(slot_local);
-                            self.ops.push(drop_op);
-                            self.ops.push(Op::SetLocal { local: slot_local, src: new });
-                            return Ok(());
-                        }
-                    }
-                    // GENERAL loop-carried heap slot — `slot = <any fresh-owned heap expr>`: a
-                    // non-self list/string concat (`result = rows + [cur]`), or a call result
-                    // (`result = paf(text, np, rows, cur + [field])` — the TCO RESULT ACCUMULATOR
-                    // that carries a base case out of the loop, where its loop-body-local inputs
-                    // like a destructured `field` are still live). Each builds a FRESH owned value
-                    // (cert `i`); drop the old slot (`d`) and rebind in place (`m`) — the SAME
-                    // loop-carried `i(id)m` the self-append/reset slots prove (OwnershipChecker.v
-                    // `check_line_unroll_sound`), generalized to any fresh-owned producer.
-                    if let Some(&slot_local) = self.value_of.get(&var) {
-                        let new = match &value.kind {
-                            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
-                                self.try_lower_concat_list(value)
-                            }
-                            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
-                                self.try_lower_concat_str(value)
-                            }
-                            // TCO RESULT-ACCUMULATOR base delivery: `result = ok(acc)` / `result =
-                            // err(e)` (the unwrap-`!` desugar's TCO over a `match` — base64
-                            // decode_chunks). lower_result_str_piece DUPs a Var payload (rc_inc,
-                            // cert `a`) so the loop-carried `acc` / borrowed `e` stays valid for its
-                            // OWN scope-end drop — `result` owns a FRESH cap-tag Result block, so the
-                            // slot's `i(id)m` + the payload's rc stay balanced (no double-free, no
-                            // leak). `is_err` picks the @16 tag; `value.ty`'s Result repr is the
-                            // 1-slot DynListStr block materialize_result_str builds.
-                            IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
-                                let is_err = matches!(&value.kind, IrExprKind::ResultErr { .. });
-                                // Repr dispatch: a HEAP-Ok Result (`Result[String,_]` — base64
-                                // decode_chunks) is the cap-tag block `materialize_result_str`
-                                // builds; a SCALAR-Ok Result (`Result[Int,String]` — the
-                                // early-return `res` accumulator) is the LEN-AS-TAG family, so
-                                // routing it through the str builder emitted a scalar payload
-                                // into a handle slot — invalid wasm (i32/i64 mismatch) that
-                                // ESCAPED the render wall (probe-confirmed). Build len-tag:
-                                // Ok → `materialize_result_ok` (len 0, scalar @12); Err →
-                                // `materialize_opt_str_some` (len 1, owned String @12 — the
-                                // same physical block `try_lower_result_err_variant_ctor`
-                                // uses; the slot's bind-time tracking already frees slot-0
-                                // on the Err path via DropListStr).
-                                if Self::is_heap_ok_result(&value.ty) {
-                                    match (self.lower_result_str_piece(expr), repr_of(&value.ty)) {
-                                        (Some(piece), Ok(repr)) => {
-                                            Some(self.materialize_result_str(piece, repr, is_err, false))
-                                        }
-                                        _ => None,
-                                    }
-                                } else if is_err {
-                                    match (self.lower_result_str_piece(expr), repr_of(&value.ty)) {
-                                        (Some(piece), Ok(repr)) => {
-                                            Some(self.materialize_opt_str_some(piece, repr))
-                                        }
-                                        _ => None,
-                                    }
-                                } else {
-                                    match (self.lower_scalar_value(expr), repr_of(&value.ty)) {
-                                        (Some(payload), Ok(repr)) => {
-                                            Some(self.materialize_result_ok(payload, repr))
-                                        }
-                                        _ => None,
-                                    }
-                                }
-                            }
-                            // CLOSURE-CALL accumulator: `acc = f(acc, x)` where `f` is a
-                            // first-class lifted combinator (the self-host `list_reduce_str` /
-                            // `list_fold` loop). The CallIndirect yields a FRESH OWNED heap result
-                            // (cert `i`, exactly the value-position closure call in binds_p2) — the
-                            // loop-carried slot then drops-old (`d`) + SetLocals (`m`) it: the SAME
-                            // proven `i(id)m` slot, generalized to a CallIndirect producer
-                            // (OwnershipChecker.v `check_line_unroll_sound` — any fresh-owned
-                            // producer). NOT pushed to live_heap_handles (the slot owns it).
-                            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                                if self.closure_value_of(callee).is_some() =>
-                            {
-                                let blk = self.closure_value_of(callee).expect("this arm's guard already proved closure_value_of(callee).is_some() for the same callee");
-                                match (repr_of(&value.ty), self.lower_call_args(args)) {
-                                    (Ok(repr), Ok(lowered)) => {
-                                        let new = self.fresh_value();
-                                        self.emit_closure_call(blk, Some(new), lowered, Some(repr));
-                                        Some(new)
-                                    }
-                                    _ => None,
-                                }
-                            }
-                            _ => self.lower_owned_heap_field(value),
-                        };
-                        if let Some(new) = new {
-                            if new != slot_local {
-                                let drop_op = self.drop_op_for(slot_local);
-                                self.ops.push(drop_op);
-                                self.ops.push(Op::SetLocal { local: slot_local, src: new });
-                                self.live_heap_handles.retain(|&v| v != new);
-                                return Ok(());
-                            }
-                        }
-                    }
-                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
-                        format!(
-                            "[loop-assign] var {var:?} slot={} value kind {} ty {:?}",
-                            self.value_of.contains_key(&var),
-                            crate::lower::kind_name(&value.kind),
-                            value.ty
-                        )
-                    });
-                    return Err(LowerError::Unsupported(
-                        "heap reassignment in a scalar loop body".into(),
-                    ));
+        if is_heap_ty(&value.ty) {
+            return self.lower_scalar_loop_heap_reassign(var, value);
+        }
+        self.lower_scalar_loop_scalar_reassign(var, value)
+    }
+
+    /// Extracted from [`Self::lower_stmt_assign_scalar_loop`] (codopsy r2, #852): the
+    /// HEAP side of a scalar-loop reassignment. Tries, in the ORIGINAL order, the
+    /// self-append accumulator, the empty-reset, then the general fresh-owned-producer
+    /// slot rebind; anything left is walled. Verbatim move — each attempt's fall-through
+    /// (`false` / no-match) lands on exactly the next block the original fell to.
+    fn lower_scalar_loop_heap_reassign(
+        &mut self,
+        var: VarId,
+        value: &IrExpr,
+    ) -> Result<(), LowerError> {
+        if self.try_lower_scalar_loop_self_append(var, value) {
+            return Ok(());
+        }
+        if self.try_lower_scalar_loop_empty_reset(var, value) {
+            return Ok(());
+        }
+        // GENERAL loop-carried heap slot — `slot = <any fresh-owned heap expr>`: a
+        // non-self list/string concat (`result = rows + [cur]`), or a call result
+        // (`result = paf(text, np, rows, cur + [field])` — the TCO RESULT ACCUMULATOR
+        // that carries a base case out of the loop, where its loop-body-local inputs
+        // like a destructured `field` are still live). Each builds a FRESH owned value
+        // (cert `i`); drop the old slot (`d`) and rebind in place (`m`) — the SAME
+        // loop-carried `i(id)m` the self-append/reset slots prove (OwnershipChecker.v
+        // `check_line_unroll_sound`), generalized to any fresh-owned producer.
+        if let Some(&slot_local) = self.value_of.get(&var) {
+            let new = self.lower_scalar_loop_fresh_owned_producer(value);
+            if let Some(new) = new {
+                if new != slot_local {
+                    let drop_op = self.drop_op_for(slot_local);
+                    self.ops.push(drop_op);
+                    self.ops.push(Op::SetLocal { local: slot_local, src: new });
+                    self.live_heap_handles.retain(|&v| v != new);
+                    return Ok(());
                 }
-                let local = *self.value_of.get(&var).ok_or_else(|| {
-                    LowerError::Unsupported("scalar loop reassigns an unbound var".into())
-                })?;
-                // The reassigned value is a SCALAR: a literal/arithmetic (lower_scalar_value) OR a
-                // scalar-returning CALL (`last = string.len(e)` / `list.len(xs)`). Without the call
-                // fallback the whole `while` rolls back to model-one-iteration (runs the body ONCE
-                // → wrong accumulation AND — worse — it MASKS per-iteration leaks: a body that
-                // leaks each turn looks clean when run once). A heap value was already rejected
-                // above, so this only admits a scalar; the call's caps stay in the cert (a real
-                // CallFn). Faithful-execution by design: this surfaces real leaks, it does not hide
-                // them (see the set.from_list/string.split in-loop known-hole).
-                let src = self
-                    .lower_scalar_value(value)
-                    .or_else(|| self.try_lower_scalar_call(value, &value.ty))
-                    .ok_or_else(|| {
-                        LowerError::Unsupported(
-                            "non-scalar value in a scalar loop reassignment".into(),
-                        )
-                    })?;
-                self.ops.push(Op::SetLocal { local, src });
-                return Ok(());
+            }
+        }
+        crate::trace::trace("ALMIDE_DBG_ELEM", || {
+            format!(
+                "[loop-assign] var {var:?} slot={} value kind {} ty {:?}",
+                self.value_of.contains_key(&var),
+                crate::lower::kind_name(&value.kind),
+                value.ty
+            )
+        });
+        Err(LowerError::Unsupported(
+            "heap reassignment in a scalar loop body".into(),
+        ))
+    }
+
+    /// Extracted from [`Self::lower_stmt_assign_scalar_loop`] (codopsy r2, #852): decides
+    /// whether the reassignment is the self-append accumulator shape and, if so, emits the
+    /// drop-old + `SetLocal` rebind (returns `true`); `false` means no match and the caller
+    /// falls through to the next attempt — exactly the original block's fall-through.
+    ///
+    /// APPEND ACCUMULATOR (option C): `slot = slot + [x]` → alloc the new list, DROP
+    /// the old slot, rebind the slot IN PLACE (`SetLocal`). The slot is an OWNED
+    /// loop-carried list (initialized to an owned copy of the param before the loop by
+    /// the TCO); each iteration drops the previous object + acquires the new one — the
+    /// cert-`i(id)m` loop-carried slot PROVED leak/double-free-free for any iteration
+    /// count (OwnershipChecker.v `check_line_unroll_sound`). Only a SELF-append
+    /// (`Var(slot) + …`) qualifies; any other heap reassign still defers below.
+    fn try_lower_scalar_loop_self_append(&mut self, var: VarId, value: &IrExpr) -> bool {
+        if let IrExprKind::BinOp {
+            op: almide_ir::BinOp::ConcatList,
+            left,
+            ..
+        } = &value.kind
+        {
+            if matches!(&left.kind, IrExprKind::Var { id } if id == &var) {
+                if let Some(&slot_local) = self.value_of.get(&var) {
+                    if let Some(new) = self.try_lower_concat_list(value) {
+                        let drop_op = self.drop_op_for(slot_local);
+                        self.ops.push(drop_op);
+                        self.ops
+                            .push(Op::SetLocal { local: slot_local, src: new });
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Extracted from [`Self::lower_stmt_assign_scalar_loop`] (codopsy r2, #852): decides
+    /// whether the reassignment resets the slot to a fresh empty heap value and, if so,
+    /// emits the alloc + drop-old + `SetLocal` rebind (returns `true`); `false` means no
+    /// match and the caller falls through — exactly the original block's fall-through.
+    ///
+    /// RESET to a fresh EMPTY heap value (`cur = []` / `acc = ""` — the parser
+    /// resets the current-row accumulator after a delimiter): materialize the empty
+    /// block, drop the old slot, rebind IN PLACE. Not a ConcatList (fast-path) nor
+    /// a `lower_owned_heap_field` shape, so handle it here. Cert: drop-old (`d`) +
+    /// alloc (`i`) = the same loop-carried `i(id)` the append slot proves.
+    fn try_lower_scalar_loop_empty_reset(&mut self, var: VarId, value: &IrExpr) -> bool {
+        if let Some(&slot_local) = self.value_of.get(&var) {
+            let empty = match &value.kind {
+                IrExprKind::List { elements } if elements.is_empty() => Some(
+                    crate::Init::IntList(vec![]),
+                ),
+                IrExprKind::LitStr { value: s } if s.is_empty() => {
+                    Some(crate::Init::Str(String::new()))
+                }
+                _ => None,
+            };
+            if let Some(init) = empty {
+                let new = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: new,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init,
+                });
+                let drop_op = self.drop_op_for(slot_local);
+                self.ops.push(drop_op);
+                self.ops.push(Op::SetLocal { local: slot_local, src: new });
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Extracted from [`Self::lower_stmt_assign_scalar_loop`] (codopsy r2, #852): the
+    /// fresh-owned-producer dispatch of the GENERAL loop-carried heap slot — decides,
+    /// by the reassigned expression's kind (arms in the ORIGINAL order), which builder
+    /// materializes the fresh owned value the caller then drop-old + `SetLocal`s into
+    /// the slot. `None` means no builder matched (the caller falls to the wall) —
+    /// verbatim move of the original `let new = match &value.kind { .. }`.
+    fn lower_scalar_loop_fresh_owned_producer(&mut self, value: &IrExpr) -> Option<ValueId> {
+        match &value.kind {
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
+                self.try_lower_concat_list(value)
+            }
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                self.try_lower_concat_str(value)
+            }
+            // TCO RESULT-ACCUMULATOR base delivery: `result = ok(acc)` / `result =
+            // err(e)` (the unwrap-`!` desugar's TCO over a `match` — base64
+            // decode_chunks). lower_result_str_piece DUPs a Var payload (rc_inc,
+            // cert `a`) so the loop-carried `acc` / borrowed `e` stays valid for its
+            // OWN scope-end drop — `result` owns a FRESH cap-tag Result block, so the
+            // slot's `i(id)m` + the payload's rc stay balanced (no double-free, no
+            // leak). `is_err` picks the @16 tag; `value.ty`'s Result repr is the
+            // 1-slot DynListStr block materialize_result_str builds.
+            IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
+                self.lower_scalar_loop_result_delivery(value, expr)
+            }
+            // CLOSURE-CALL accumulator: `acc = f(acc, x)` where `f` is a
+            // first-class lifted combinator (the self-host `list_reduce_str` /
+            // `list_fold` loop). The CallIndirect yields a FRESH OWNED heap result
+            // (cert `i`, exactly the value-position closure call in binds_p2) — the
+            // loop-carried slot then drops-old (`d`) + SetLocals (`m`) it: the SAME
+            // proven `i(id)m` slot, generalized to a CallIndirect producer
+            // (OwnershipChecker.v `check_line_unroll_sound` — any fresh-owned
+            // producer). NOT pushed to live_heap_handles (the slot owns it).
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                if self.closure_value_of(callee).is_some() =>
+            {
+                let blk = self.closure_value_of(callee).expect("this arm's guard already proved closure_value_of(callee).is_some() for the same callee");
+                match (repr_of(&value.ty), self.lower_call_args(args)) {
+                    (Ok(repr), Ok(lowered)) => {
+                        let new = self.fresh_value();
+                        self.emit_closure_call(blk, Some(new), lowered, Some(repr));
+                        Some(new)
+                    }
+                    _ => None,
+                }
+            }
+            _ => self.lower_owned_heap_field(value),
+        }
+    }
+
+    /// Extracted from [`Self::lower_stmt_assign_scalar_loop`] (codopsy r2, #852): the
+    /// `ResultOk`/`ResultErr` arm's repr dispatch — decides which Result-block builder
+    /// (cap-tag str vs len-as-tag Ok/Err) materializes the delivered base value.
+    /// Verbatim move of the arm body; `value` is the whole reassigned expression
+    /// (its kind picks `is_err`, its ty picks the repr), `expr` its payload.
+    ///
+    /// Repr dispatch: a HEAP-Ok Result (`Result[String,_]` — base64
+    /// decode_chunks) is the cap-tag block `materialize_result_str`
+    /// builds; a SCALAR-Ok Result (`Result[Int,String]` — the
+    /// early-return `res` accumulator) is the LEN-AS-TAG family, so
+    /// routing it through the str builder emitted a scalar payload
+    /// into a handle slot — invalid wasm (i32/i64 mismatch) that
+    /// ESCAPED the render wall (probe-confirmed). Build len-tag:
+    /// Ok → `materialize_result_ok` (len 0, scalar @12); Err →
+    /// `materialize_opt_str_some` (len 1, owned String @12 — the
+    /// same physical block `try_lower_result_err_variant_ctor`
+    /// uses; the slot's bind-time tracking already frees slot-0
+    /// on the Err path via DropListStr).
+    fn lower_scalar_loop_result_delivery(
+        &mut self,
+        value: &IrExpr,
+        expr: &IrExpr,
+    ) -> Option<ValueId> {
+        let is_err = matches!(&value.kind, IrExprKind::ResultErr { .. });
+        if Self::is_heap_ok_result(&value.ty) {
+            match (self.lower_result_str_piece(expr), repr_of(&value.ty)) {
+                (Some(piece), Ok(repr)) => {
+                    Some(self.materialize_result_str(piece, repr, is_err, false))
+                }
+                _ => None,
+            }
+        } else if is_err {
+            match (self.lower_result_str_piece(expr), repr_of(&value.ty)) {
+                (Some(piece), Ok(repr)) => {
+                    Some(self.materialize_opt_str_some(piece, repr))
+                }
+                _ => None,
+            }
+        } else {
+            match (self.lower_scalar_value(expr), repr_of(&value.ty)) {
+                (Some(payload), Ok(repr)) => {
+                    Some(self.materialize_result_ok(payload, repr))
+                }
+                _ => None,
+            }
+        }
+    }
+
+    /// Extracted from [`Self::lower_stmt_assign_scalar_loop`] (codopsy r2, #852): the
+    /// SCALAR side of a scalar-loop reassignment — mutates the var's stable local via
+    /// `SetLocal`. Verbatim move (the heap side was already routed away by the caller,
+    /// exactly as the original's `is_heap_ty` block always returned before this code).
+    fn lower_scalar_loop_scalar_reassign(
+        &mut self,
+        var: VarId,
+        value: &IrExpr,
+    ) -> Result<(), LowerError> {
+        let local = *self.value_of.get(&var).ok_or_else(|| {
+            LowerError::Unsupported("scalar loop reassigns an unbound var".into())
+        })?;
+        // The reassigned value is a SCALAR: a literal/arithmetic (lower_scalar_value) OR a
+        // scalar-returning CALL (`last = string.len(e)` / `list.len(xs)`). Without the call
+        // fallback the whole `while` rolls back to model-one-iteration (runs the body ONCE
+        // → wrong accumulation AND — worse — it MASKS per-iteration leaks: a body that
+        // leaks each turn looks clean when run once). A heap value was already rejected
+        // above, so this only admits a scalar; the call's caps stay in the cert (a real
+        // CallFn). Faithful-execution by design: this surfaces real leaks, it does not hide
+        // them (see the set.from_list/string.split in-loop known-hole).
+        let src = self
+            .lower_scalar_value(value)
+            .or_else(|| self.try_lower_scalar_call(value, &value.ty))
+            .ok_or_else(|| {
+                LowerError::Unsupported(
+                    "non-scalar value in a scalar loop reassignment".into(),
+                )
+            })?;
+        self.ops.push(Op::SetLocal { local, src });
+        Ok(())
     }
 }

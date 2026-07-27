@@ -220,141 +220,253 @@ struct ScanState<'a> {
     all_covs: &'a mut Vec<BTreeMap<usize, usize>>,
 }
 
+/// The per-member scan workspace: the value tables `chase_elem` resolves
+/// against, plus everything one function's scan accumulates for itself (the
+/// chase audit trail and the construction coverage) — as opposed to the
+/// family-wide `ScanState` it also extends.
+///
+/// Extracted from `scan_region_function` (codopsy r2, #852): these six values
+/// were the one-body scan's plain locals; the per-arm deciders below share
+/// them through this struct instead. (The old body also re-borrowed the
+/// `ScanState` fields into plain locals to keep its `*n_elems = Some(n)` /
+/// `*max_k` spellings; the deciders now read `st.` paths directly, so that
+/// re-borrow is retired.)
+struct MemberScan<'f> {
+    /// The family member under scan.
+    f: &'f MirFunction,
+    /// value → defining-op index (from `fn_tables`).
+    def: BTreeMap<ValueId, usize>,
+    /// value → const-int (from `fn_tables`).
+    consts: BTreeMap<ValueId, i64>,
+    /// Every op a chase traversed — exempt from the escape audit.
+    chain_ops: BTreeSet<usize>,
+    /// Every value a chase traversed — nothing outside the chains may use one.
+    chain_vals: BTreeSet<ValueId>,
+    /// dst → per-slot construction-store count (must end exactly-once each).
+    site_cov: BTreeMap<ValueId, BTreeMap<usize, usize>>,
+}
+
 /// Scan one function of a clone family.
 ///
 /// `None` rejects the whole family: the layouts must agree across it, so a
 /// single member that cannot be compacted disqualifies the rest.
+///
+/// Router only (codopsy r2, #852): the block-source pass, the four memory-op
+/// arms, and the escape audit each moved verbatim into the named deciders
+/// below. The op-kind dispatch keeps the ORIGINAL arm order — the two
+/// wrong-width `Load`/`Store` rejections must stay behind their 8-byte
+/// siblings.
 fn scan_region_function(
     prog: &MirProgram,
     fi: usize,
     st: &mut ScanState<'_>,
 ) -> Option<()> {
-    let ScanState { n_elems, tag, slot_map, rewrites, max_k, all_covs } = st;
-    // Re-borrow through the struct's references so the moved body, which was
-    // written against plain locals, keeps its `*n_elems = Some(n)` / `*max_k`
-    // spellings.
-    let (n_elems, tag, mut slot_map, mut rewrites, max_k, mut all_covs) =
-        (&mut **n_elems, &mut **tag, &mut **slot_map, &mut **rewrites, &mut **max_k, &mut **all_covs);
     let f = &prog.functions[fi];
     let (def, consts) = fn_tables(f);
-    let mut chain_ops: BTreeSet<usize> = BTreeSet::new();
-    let mut chain_vals: BTreeSet<ValueId> = BTreeSet::new();
-    // dst → per-slot construction-store count (must end exactly-once each).
-    let mut site_cov: BTreeMap<ValueId, BTreeMap<usize, usize>> = BTreeMap::new();
+    let mut ms = MemberScan {
+        f,
+        def,
+        consts,
+        chain_ops: BTreeSet::new(),
+        chain_vals: BTreeSet::new(),
+        site_cov: BTreeMap::new(),
+    };
 
-    // Block sources first: exactly the DynList-const shape, nothing else.
-    for (i, op) in f.ops.iter().enumerate() {
-        match op {
-            Op::Alloc { dst, init: Init::DynList { len }, .. } => {
-                let &n = consts.get(len)?;
-                let n = usize::try_from(n).ok().filter(|n| (1..=16).contains(n))?;
-                match n_elems {
-                    Some(prev) if *prev != n => return None,
-                    _ => *n_elems = Some(n),
-                }
-                site_cov.insert(*dst, BTreeMap::new());
-                rewrites.insert((fi, i), Rw::AllocC { dst: *dst });
-            }
-            Op::Alloc { .. } | Op::ListLit { .. } | Op::ListSetScalar { .. } => return None,
-            Op::Prim { kind: PrimKind::ElemAddr, .. } => return None,
-            _ => {}
-        }
-    }
+    scan_block_sources(&mut ms, st, fi)?;
 
     for (i, op) in f.ops.iter().enumerate() {
         match op {
             Op::ListGetScalar { dst, list, idx } => {
-                let &k = consts.get(idx)?;
-                let k = usize::try_from(k).ok()?;
-                if k == 0 {
-                    rewrites.insert((fi, i), Rw::TagRead { dst: *dst, base: *list });
-                } else {
-                    *max_k = (*max_k).max(k);
-                    unify_slot(&mut slot_map, k, false)?;
-                    rewrites.insert((fi, i), Rw::LoadS { dst: *dst, base: *list, k });
-                }
+                scan_list_get_scalar(&ms, st, (fi, i), *dst, *list, *idx)?;
             }
             Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } => {
-                let (base, k) =
-                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                if k == 0 {
-                    return None; // a tag is never a handle
-                }
-                *max_k = (*max_k).max(k);
-                unify_slot(&mut slot_map, k, true)?;
-                rewrites.insert((fi, i), Rw::LoadH { dst: *d, base, k });
+                scan_handle_load(&mut ms, st, (fi, i), *d, args)?;
             }
             Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(d), args } => {
-                let (base, k) =
-                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                if k == 0 {
-                    rewrites.insert((fi, i), Rw::TagRead { dst: *d, base });
-                } else {
-                    *max_k = (*max_k).max(k);
-                    unify_slot(&mut slot_map, k, false)?;
-                    rewrites.insert((fi, i), Rw::LoadS { dst: *d, base, k });
-                }
+                scan_scalar_load(&mut ms, st, (fi, i), *d, args)?;
             }
             Op::Prim { kind: PrimKind::Load { .. }, .. } => return None,
             Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } => {
-                let (base, k) =
-                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                // Construction only: the root must be this family's own
-                // fresh Alloc (no writes into loaded/param blocks).
-                let cov = site_cov.get_mut(&base)?;
-                *cov.entry(k).or_insert(0) += 1;
-                if k == 0 {
-                    let &t = consts.get(&args[1])?;
-                    match tag {
-                        Some(prev) if *prev != t => return None,
-                        _ => *tag = Some(t),
-                    }
-                    rewrites.insert((fi, i), Rw::Delete);
-                } else if let Some(&hd) = def.get(&args[1]) {
-                    *max_k = (*max_k).max(k);
-                    if let Op::Prim { kind: PrimKind::Handle, args: hargs, .. } = &f.ops[hd] {
-                        // A handle bridged to i64 for the old 8-byte slot:
-                        // store the raw i32 pointer instead.
-                        chain_ops.insert(hd);
-                        chain_vals.insert(args[1]);
-                        unify_slot(&mut slot_map, k, true)?;
-                        rewrites
-                            .insert((fi, i), Rw::StoreH { base, val: hargs[0], k });
-                    } else {
-                        unify_slot(&mut slot_map, k, false)?;
-                        rewrites.insert((fi, i), Rw::StoreS { base, val: args[1], k });
-                    }
-                } else {
-                    *max_k = (*max_k).max(k);
-                    unify_slot(&mut slot_map, k, false)?;
-                    rewrites.insert((fi, i), Rw::StoreS { base, val: args[1], k });
-                }
+                scan_construction_store(&mut ms, st, (fi, i), args)?;
             }
             Op::Prim { kind: PrimKind::Store { .. }, .. } => return None,
             _ => {}
         }
     }
 
-    // Escape audit: a chased address (or bridged handle-int) may only be
-    // consumed by its own chain or by an op this pass rewrites away.
-    let mut vals: Vec<ValueId> = Vec::new();
+    audit_chain_escapes(&ms, st, fi)?;
+    st.all_covs.extend(ms.site_cov.into_values());
+    Some(())
+}
+
+/// Block sources first: exactly the DynList-const shape, nothing else.
+///
+/// Extracted from `scan_region_function` (codopsy r2, #852): decides the
+/// family's element count from each dynamic `Alloc` site (all sites must
+/// agree, 1..=16), opens the site's construction-coverage map, and plans the
+/// `RegionAllocC` rewrite; any other block source — another `Alloc` init, a
+/// surviving `ListLit`, `ListSetScalar`, or `ElemAddr` — rejects the family
+/// (soundness §1/§3). Verbatim.
+fn scan_block_sources(ms: &mut MemberScan<'_>, st: &mut ScanState<'_>, fi: usize) -> Option<()> {
+    let f = ms.f;
     for (i, op) in f.ops.iter().enumerate() {
-        if chain_ops.contains(&i) || rewrites.contains_key(&(fi, i)) {
+        match op {
+            Op::Alloc { dst, init: Init::DynList { len }, .. } => {
+                let &n = ms.consts.get(len)?;
+                let n = usize::try_from(n).ok().filter(|n| (1..=16).contains(n))?;
+                match st.n_elems {
+                    Some(prev) if *prev != n => return None,
+                    _ => *st.n_elems = Some(n),
+                }
+                ms.site_cov.insert(*dst, BTreeMap::new());
+                st.rewrites.insert((fi, i), Rw::AllocC { dst: *dst });
+            }
+            Op::Alloc { .. } | Op::ListLit { .. } | Op::ListSetScalar { .. } => return None,
+            Op::Prim { kind: PrimKind::ElemAddr, .. } => return None,
+            _ => {}
+        }
+    }
+    Some(())
+}
+
+/// Extracted from `scan_region_function` (codopsy r2, #852): the
+/// `ListGetScalar` arm — a const-index read is either the tag (`k == 0`,
+/// planned as the `RegionTagSel` chain) or a field load (`k ≥ 1`, unified as
+/// a scalar slot). A non-const index rejects the family. Verbatim.
+fn scan_list_get_scalar(
+    ms: &MemberScan<'_>,
+    st: &mut ScanState<'_>,
+    key: (usize, usize),
+    dst: ValueId,
+    list: ValueId,
+    idx: ValueId,
+) -> Option<()> {
+    let &k = ms.consts.get(&idx)?;
+    let k = usize::try_from(k).ok()?;
+    if k == 0 {
+        st.rewrites.insert(key, Rw::TagRead { dst, base: list });
+    } else {
+        *st.max_k = (*st.max_k).max(k);
+        unify_slot(st.slot_map, k, false)?;
+        st.rewrites.insert(key, Rw::LoadS { dst, base: list, k });
+    }
+    Some(())
+}
+
+/// Extracted from `scan_region_function` (codopsy r2, #852): the `LoadHandle`
+/// arm — chase the address to `(base, k)`, reject a tag-slot hit, unify slot
+/// `k` as a handle, and plan the `RegionLoadH` rewrite. Verbatim.
+fn scan_handle_load(
+    ms: &mut MemberScan<'_>,
+    st: &mut ScanState<'_>,
+    key: (usize, usize),
+    d: ValueId,
+    args: &[ValueId],
+) -> Option<()> {
+    let (base, k) =
+        chase_elem(ms.f, &ms.def, &ms.consts, args[0], &mut ms.chain_ops, &mut ms.chain_vals)?;
+    if k == 0 {
+        return None; // a tag is never a handle
+    }
+    *st.max_k = (*st.max_k).max(k);
+    unify_slot(st.slot_map, k, true)?;
+    st.rewrites.insert(key, Rw::LoadH { dst: d, base, k });
+    Some(())
+}
+
+/// Extracted from `scan_region_function` (codopsy r2, #852): the 8-byte `Load`
+/// arm — chase the address to `(base, k)`; elem 0 is a tag read, any other
+/// slot unifies as a scalar and plans the `RegionLoadS` rewrite. Verbatim.
+fn scan_scalar_load(
+    ms: &mut MemberScan<'_>,
+    st: &mut ScanState<'_>,
+    key: (usize, usize),
+    d: ValueId,
+    args: &[ValueId],
+) -> Option<()> {
+    let (base, k) =
+        chase_elem(ms.f, &ms.def, &ms.consts, args[0], &mut ms.chain_ops, &mut ms.chain_vals)?;
+    if k == 0 {
+        st.rewrites.insert(key, Rw::TagRead { dst: d, base });
+    } else {
+        *st.max_k = (*st.max_k).max(k);
+        unify_slot(st.slot_map, k, false)?;
+        st.rewrites.insert(key, Rw::LoadS { dst: d, base, k });
+    }
+    Some(())
+}
+
+/// Extracted from `scan_region_function` (codopsy r2, #852): the 8-byte
+/// `Store` arm — a construction store into the family's own fresh block. A
+/// tag-slot store (`k == 0`) must carry the family's one const tag and is
+/// planned away (`Rw::Delete`); a field store unifies the slot as handle or
+/// scalar depending on whether the stored value is a `Handle` bridge.
+/// Verbatim.
+fn scan_construction_store(
+    ms: &mut MemberScan<'_>,
+    st: &mut ScanState<'_>,
+    key: (usize, usize),
+    args: &[ValueId],
+) -> Option<()> {
+    let (base, k) =
+        chase_elem(ms.f, &ms.def, &ms.consts, args[0], &mut ms.chain_ops, &mut ms.chain_vals)?;
+    // Construction only: the root must be this family's own
+    // fresh Alloc (no writes into loaded/param blocks).
+    let cov = ms.site_cov.get_mut(&base)?;
+    *cov.entry(k).or_insert(0) += 1;
+    if k == 0 {
+        let &t = ms.consts.get(&args[1])?;
+        match st.tag {
+            Some(prev) if *prev != t => return None,
+            _ => *st.tag = Some(t),
+        }
+        st.rewrites.insert(key, Rw::Delete);
+    } else if let Some(&hd) = ms.def.get(&args[1]) {
+        *st.max_k = (*st.max_k).max(k);
+        if let Op::Prim { kind: PrimKind::Handle, args: hargs, .. } = &ms.f.ops[hd] {
+            // A handle bridged to i64 for the old 8-byte slot:
+            // store the raw i32 pointer instead.
+            ms.chain_ops.insert(hd);
+            ms.chain_vals.insert(args[1]);
+            unify_slot(st.slot_map, k, true)?;
+            st.rewrites
+                .insert(key, Rw::StoreH { base, val: hargs[0], k });
+        } else {
+            unify_slot(st.slot_map, k, false)?;
+            st.rewrites.insert(key, Rw::StoreS { base, val: args[1], k });
+        }
+    } else {
+        *st.max_k = (*st.max_k).max(k);
+        unify_slot(st.slot_map, k, false)?;
+        st.rewrites.insert(key, Rw::StoreS { base, val: args[1], k });
+    }
+    Some(())
+}
+
+/// Escape audit: a chased address (or bridged handle-int) may only be
+/// consumed by its own chain or by an op this pass rewrites away.
+///
+/// Extracted from `scan_region_function` (codopsy r2, #852): rejects the
+/// family (soundness §3) when any op outside the chains — or the function
+/// result — consumes a chained value. Verbatim.
+fn audit_chain_escapes(ms: &MemberScan<'_>, st: &ScanState<'_>, fi: usize) -> Option<()> {
+    let mut vals: Vec<ValueId> = Vec::new();
+    for (i, op) in ms.f.ops.iter().enumerate() {
+        if ms.chain_ops.contains(&i) || st.rewrites.contains_key(&(fi, i)) {
             continue;
         }
         vals.clear();
         op_values(op, &mut vals);
         let dst = defined_value(op);
-        if vals.iter().any(|v| Some(*v) != dst && chain_vals.contains(v)) {
+        if vals.iter().any(|v| Some(*v) != dst && ms.chain_vals.contains(v)) {
             return None;
         }
     }
-    if let Some(r) = f.ret {
-        if chain_vals.contains(&r) {
+    if let Some(r) = ms.f.ret {
+        if ms.chain_vals.contains(&r) {
             return None;
         }
     }
-    all_covs.extend(site_cov.into_values());
     Some(())
 }
 
