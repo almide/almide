@@ -59,11 +59,13 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("int8", "8-bit signed integer conversions"),
     ("int16", "16-bit signed integer conversions"),
     ("int32", "32-bit signed integer conversions"),
+    ("int64", "64-bit signed integer conversions"),
     ("uint8", "8-bit unsigned integer conversions"),
     ("uint16", "16-bit unsigned integer conversions"),
     ("uint32", "32-bit unsigned integer conversions"),
     ("uint64", "64-bit unsigned integer conversions"),
     ("float32", "32-bit floating-point conversions"),
+    ("float64", "64-bit floating-point conversions"),
 ];
 
 /// Short description of a stdlib module (for error hints).
