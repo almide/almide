@@ -155,7 +155,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
     use almide_base::intern::sym;
     use discovery::collect_mono_bindings;
-    use utils::{BoundedParam, ty_to_name, ty_contains_typevar};
+    use utils::{BoundedParam, module_mono_suffix, ty_contains_typevar};
     use specialization::specialize_function;
 
     // (module_idx, fn_idx, generic names, bounded param list)
@@ -240,16 +240,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                         && !ty.contains_typevar()
                     );
                     if !all_concrete { continue; }
-                    let generic_names: Vec<String> = self.generics[gi].bounds.iter()
-                        .map(|b| b.type_var.clone()).collect::<std::collections::HashSet<_>>()
-                        .into_iter().collect::<Vec<_>>();
-                    let mut sorted = generic_names;
-                    sorted.sort();
-                    let suffix = sorted.iter()
-                        .filter_map(|g| bindings.get(g))
-                        .filter_map(|t| ty_to_name(t))
-                        .collect::<Vec<_>>()
-                        .join("_");
+                    let suffix = module_mono_suffix(&self.generics[gi].bounds, &bindings);
                     self.out.push((g.mi, g.fi, bindings, suffix));
                     break;
                 }
@@ -277,17 +268,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                         eprintln!("[mono-debug] {m}.{f} args={atys:?} ptys={ptys:?} bindings={bindings:?} concrete={all_concrete}");
                     }
                     if !all_concrete { continue; }
-                    // Deterministic suffix
-                    let generic_names: Vec<String> = self.generics[gi].bounds.iter()
-                        .map(|b| b.type_var.clone()).collect::<std::collections::HashSet<_>>()
-                        .into_iter().collect::<Vec<_>>();
-                    let mut sorted = generic_names;
-                    sorted.sort();
-                    let suffix = sorted.iter()
-                        .filter_map(|g| bindings.get(g))
-                        .filter_map(|t| ty_to_name(t))
-                        .collect::<Vec<_>>()
-                        .join("_");
+                    let suffix = module_mono_suffix(&self.generics[gi].bounds, &bindings);
                     self.out.push((g.mi, g.fi, bindings, suffix));
                     break;
                 }
@@ -406,15 +387,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                     && !ty.contains_typevar()
                 );
                 if !all_concrete { break; }
-                let generic_names: std::collections::HashSet<String> = g.bounds.iter()
-                    .map(|b| b.type_var.clone()).collect();
-                let mut sorted: Vec<String> = generic_names.into_iter().collect();
-                sorted.sort();
-                let suffix = sorted.iter()
-                    .filter_map(|gn| bindings.get(gn))
-                    .filter_map(|t| ty_to_name(t))
-                    .collect::<Vec<_>>()
-                    .join("_");
+                let suffix = module_mono_suffix(&g.bounds, &bindings);
                 if let Some(new_name) = self.rename.get(&(m.clone(), g.name.clone(), suffix)) {
                     *name = sym(&format!("almide_rt_{}_{}", m, new_name));
                 }
@@ -434,15 +407,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                     && !ty.contains_typevar()
                 );
                 if !all_concrete { break; }
-                let generic_names: std::collections::HashSet<String> = g.bounds.iter()
-                    .map(|b| b.type_var.clone()).collect();
-                let mut sorted: Vec<String> = generic_names.into_iter().collect();
-                sorted.sort();
-                let suffix = sorted.iter()
-                    .filter_map(|gn| bindings.get(gn))
-                    .filter_map(|t| ty_to_name(t))
-                    .collect::<Vec<_>>()
-                    .join("_");
+                let suffix = module_mono_suffix(&g.bounds, &bindings);
                 if let Some(new_name) = self.rename.get(&(m.to_string(), f.clone(), suffix)) {
                     *func = sym(new_name);
                 }
