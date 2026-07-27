@@ -469,7 +469,7 @@ fn render_op_call_intbinop(op: &Op, fuser: &mut Fuser) -> String {
             // #806 step 3c: splice pending single-use defs into the operands
             // (Div/Mod below read operands several times, so they stay plain
             // `local.get` — the caller flushed any pending among them).
-            let args = if matches!(op, IntOp::Div | IntOp::Mod) {
+            let args = if matches!(op, IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU) {
                 format!("(local.get {}) (local.get {})", local(*a), local(*b))
             } else {
                 format!("{} {}", fuser.operand(*a), fuser.operand(*b))
@@ -482,6 +482,20 @@ fn render_op_call_intbinop(op: &Op, fuser: &mut Fuser) -> String {
             // calls); the expansion is instruction-for-instruction the SAME
             // semantics as `$__chk_div`/`$__chk_rem`. Operands are locals, so the
             // re-evaluations cost nothing and no scratch local is needed.
+            // UNSIGNED division/remainder (#872): the same divisor-zero abort as
+            // the signed pair ($__div_trap, native-identical stderr) — there is
+            // no MIN÷-1 overflow case in the unsigned domain, and no signed
+            // strength-reduction applies (the constant is a bit pattern).
+            if matches!(op, IntOp::DivU | IntOp::ModU) {
+                let instr = if matches!(op, IntOp::DivU) { "i64.div_u" } else { "i64.rem_u" };
+                return format!(
+                    "    (if (i64.eqz (local.get {b}))\n\
+                     \x20     (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))\n\
+                     \x20   (local.set {d} ({instr} {args}))\n",
+                    b = local(*b),
+                    d = local(*dst),
+                );
+            }
             if matches!(op, IntOp::Div | IntOp::Mod) {
                 let instr = if matches!(op, IntOp::Div) { "i64.div_s" } else { "i64.rem_s" };
                 // #806 step 3c: a CONSTANT nonzero divisor decides both checks
@@ -549,8 +563,14 @@ fn render_op_call_intbinop(op: &Op, fuser: &mut Fuser) -> String {
                 IntOp::Add => format!("(i64.add {args})"),
                 IntOp::Sub => format!("(i64.sub {args})"),
                 IntOp::Mul => format!("(i64.mul {args})"),
-                IntOp::Div | IntOp::Mod => unreachable!("inline-expanded above"),
+                IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU => {
+                    unreachable!("inline-expanded above")
+                }
                 IntOp::Lt => format!("(i64.extend_i32_u (i64.lt_s {args}))"),
+                IntOp::LtU => format!("(i64.extend_i32_u (i64.lt_u {args}))"),
+                IntOp::LeU => format!("(i64.extend_i32_u (i64.le_u {args}))"),
+                IntOp::GtU => format!("(i64.extend_i32_u (i64.gt_u {args}))"),
+                IntOp::GeU => format!("(i64.extend_i32_u (i64.ge_u {args}))"),
                 IntOp::Le => format!("(i64.extend_i32_u (i64.le_s {args}))"),
                 IntOp::Gt => format!("(i64.extend_i32_u (i64.gt_s {args}))"),
                 IntOp::Ge => format!("(i64.extend_i32_u (i64.ge_s {args}))"),

@@ -238,7 +238,43 @@ impl<'a> Interpreter<'a> {
 
         let l = val!(self.eval_expr(left, scope));
         let r = val!(self.eval_expr(right, scope));
+        // The UNSIGNED 64-bit lane (#872, C-179): a `UInt64` operand's `i64`
+        // slot is a u64 BIT PATTERN, so division, remainder and ordering must
+        // read it unsigned — the signed reading made `u64::MAX / 3` come out
+        // 0 while both backends agreed on the right answer (the third oracle
+        // dissenting from a correct consensus). Either side may be the one
+        // carrying the declared type: a literal operand records `Int`.
+        if matches!(left.ty, Ty::UInt64) || matches!(right.ty, Ty::UInt64) {
+            if let Some(f) = Self::apply_binop_unsigned(op, &l, &r) {
+                return f;
+            }
+        }
         self.apply_binop(op, l, r)
+    }
+
+    /// The `UInt64` reading of the integer operators whose signedness is
+    /// observable. Add/sub/mul wrap identically under either reading and are
+    /// deliberately absent; anything not listed falls through to the signed
+    /// table.
+    fn apply_binop_unsigned(op: BinOp, l: &Value, r: &Value) -> Option<Flow> {
+        use BinOp::*;
+        let (Value::Int(a), Value::Int(b)) = (l, r) else { return None };
+        let (ua, ub) = (*a as u64, *b as u64);
+        Some(match op {
+            DivInt => match ua.checked_div(ub) {
+                Some(v) => Flow::val(Value::Int(v as i64)),
+                None => Flow::Abort(div_msg(*b)),
+            },
+            ModInt => match ua.checked_rem(ub) {
+                Some(v) => Flow::val(Value::Int(v as i64)),
+                None => Flow::Abort(div_msg(*b)),
+            },
+            Lt => Flow::val(Value::Bool(ua < ub)),
+            Lte => Flow::val(Value::Bool(ua <= ub)),
+            Gt => Flow::val(Value::Bool(ua > ub)),
+            Gte => Flow::val(Value::Bool(ua >= ub)),
+            _ => return None,
+        })
     }
 
     pub(crate) fn apply_binop(&mut self, op: BinOp, l: Value, r: Value) -> Flow {

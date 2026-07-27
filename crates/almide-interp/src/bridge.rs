@@ -28,8 +28,25 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
         "bool" => bool_fn(func, args),
         "path" => path_fn(func, args),
         "bytes" => bytes_fn(func, args),
+        "uint64" => uint64_fn(func, args),
         _ => None,
     }
+}
+
+/// `uint64.*` — the UNSIGNED 64-bit observers (#872, C-179). The interpreter
+/// carries integers in the same `i64` slot the IR does, so the upper half of
+/// `UInt64` arrives here as a NEGATIVE `i64` bit pattern: read it back as
+/// `u64` rather than pivoting through the signed value (which printed `-1`
+/// for `u64::MAX`). Bridged so the third oracle EVALUATES the lane instead of
+/// abstaining — an abstention is a hole in the executable spec.
+fn uint64_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let n = as_int(args.first())? as u64;
+    let f = match func {
+        "to_string" => Flow::val(Value::str(n.to_string())),
+        "to_float32" | "to_float64" => Flow::val(Value::Float(n as f64)),
+        _ => return None,
+    };
+    Some(f)
 }
 
 /// `path.*` — pure path-STRING manipulation, so the third oracle can evaluate it
@@ -191,7 +208,27 @@ fn int_fn_b(func: &str, args: &[Value]) -> Option<Flow> {
 
 // ── float ───────────────────────────────────────────────────────
 
+/// The sized-float CONVERSIONS (`float.to_float32`/`to_float64`/
+/// `from_float32`/`from_float64`): the interpreter carries every float in one
+/// `f64`, and `Float32`/`Float64` are the SAME carrier at the language level
+/// (the narrowing to f32 precision is the emitters' concern), so each of these
+/// is the identity here. Bridged so a fixture that merely NAMES a sized float
+/// still evaluates in the third oracle instead of abstaining.
+fn float_sized_conv(func: &str, args: &[Value]) -> Option<Flow> {
+    let n = as_float(args.first())?;
+    match func {
+        "to_float64" | "from_float64" => Some(Flow::val(Value::Float(n))),
+        // f32 round-trips through the narrower precision, exactly as both
+        // emitters do — the value a `Float32` can actually hold.
+        "to_float32" | "from_float32" => Some(Flow::val(Value::Float(n as f32 as f64))),
+        _ => None,
+    }
+}
+
 fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    if let Some(f) = float_sized_conv(func, args) {
+        return Some(f);
+    }
     float_fn_core(func, args).or_else(|| float_fn_convert(func, args))
 }
 

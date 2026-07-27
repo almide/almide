@@ -428,16 +428,6 @@ impl Checker {
                     eff.display(),
                     signed_counterpart(&eff).unwrap_or("Int"),
                 ),
-                // In range for the DECLARED domain, out of range for the
-                // compiler. "Use a wider type" is the wrong advice here because
-                // there is no wider type — say so instead of implying one.
-                LiteralFit::Carrier => format!(
-                    "this magnitude is inside {}'s declared range but above the i64 the \
-                     compiler carries every integer in, so it would be signed past \
-                     9223372036854775807 on both targets (#872); keep it at or below \
-                     9223372036854775807, or carry it as a string / Float (lossy)",
-                    eff.display(),
-                ),
                 // State the range rather than referring to it. Rust puts it in
                 // a note on the same error, and it is the difference between a
                 // hint that can be acted on and one that sends the reader to go

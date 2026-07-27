@@ -253,7 +253,9 @@ fn float_operand(fuser: &mut Fuser, floats: &BTreeSet<ValueId>, v: ValueId) -> S
 /// operand several times.
 fn splice_capable(op: &Op) -> bool {
     match op {
-        Op::IntBinOp { op, .. } => !matches!(op, IntOp::Div | IntOp::Mod),
+        Op::IntBinOp { op, .. } => {
+            !matches!(op, IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU)
+        }
         // No read positions at all — trivially splice-clean, and its dst is a
         // prime defer candidate (a single-use const in a hot loop).
         Op::ConstInt { .. } => true,

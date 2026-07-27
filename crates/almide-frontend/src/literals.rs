@@ -23,19 +23,27 @@ pub(crate) fn radix_and_digits(clean: &str) -> (u32, &str) {
     }
 }
 
-/// Decode an int literal token to the `i64` the IR carries.
+/// Decode an int literal token to the `i64` SLOT the IR carries.
 ///
-/// Returns 0 for a token that does not parse. That is not error recovery here:
-/// the lexer cannot produce such a token, and a literal too large for the `i64`
-/// carrier is rejected by E024 in EVERY context — including the unsigned ones,
-/// whose declared domain runs past the carrier (#872) — so by the time lowering
-/// runs the only reachable failures have a diagnostic attached and the value is
-/// never observed. That is a real invariant, not a hopeful one: the fallback
-/// context E024 uses when no type is recorded is `Int`, the strictest of them.
+/// The slot is a 64-BIT PATTERN, not a signed number: a magnitude in
+/// `UInt64`'s upper half (`i64::MAX+1 ..= u64::MAX`) parses as `u64` and is
+/// reinterpreted, exactly as the renderers interpret it — `IntOp::DivU` and
+/// friends read the same slot unsigned (#872). Every OTHER context rejects
+/// such a magnitude with E024 before lowering (its declared domain stops at
+/// or below `i64::MAX`), so the reinterpretation is only ever observed where
+/// it is the right reading.
+///
+/// Returns 0 for a token that parses as neither. That is not error recovery:
+/// the lexer cannot produce such a token, and a magnitude past `u64::MAX` is
+/// E024 in every context — the fallback context when no type is recorded is
+/// `Int`, the strictest of them.
 pub(crate) fn int_value(raw: &str) -> i64 {
     let clean = raw.replace('_', "");
     let (radix, digits) = radix_and_digits(&clean);
-    i64::from_str_radix(digits, radix).unwrap_or(0)
+    if let Ok(v) = i64::from_str_radix(digits, radix) {
+        return v;
+    }
+    u64::from_str_radix(digits, radix).map(|u| u as i64).unwrap_or(0)
 }
 
 /// Decode a negated int literal token to its `i64` value.

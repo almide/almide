@@ -278,21 +278,16 @@ pub(crate) enum LiteralFit {
     /// type has no negative values at ANY magnitude. `-0` is not this — it is
     /// `0`, which every unsigned type represents.
     Sign,
-    /// Inside the type's DECLARED domain but above the `i64` the IR carries
-    /// every integer in (#872) — so only ever `UInt64`, whose declared domain
-    /// is the one that runs past the carrier.
-    Carrier,
 }
 
 /// Classify `raw` against the range `ty` can represent in this position.
 ///
 /// For a SIGNED type the magnitude bound is `MAX` (or `MAX+1` when `negated`,
-/// reaching `MIN`). For an unsigned type it is the unsigned `MAX`, capped at
-/// the `i64` carrier: MIR — the default path for both targets — knows only
-/// `NTy::I64`, so above the carrier `/` is a signed divide and `to_string`
-/// prints signed, identically wrong on both legs. Capping turns that silent
-/// wrong answer into an E024 and lifts cleanly once the lane exists. Narrower
-/// unsigned widths are untouched: `u32::MAX` < `i64::MAX`.
+/// reaching `MIN`). For an unsigned type it is the unsigned `MAX` — the FULL
+/// declared domain: the i64 slot is a 64-bit PATTERN and the `UInt64` upper
+/// half is carried in it, with `IntOp::DivU`/`ModU`/`LtU`… reading it
+/// unsigned on both targets (#872). (The interim carrier cap that rejected
+/// that band is gone with the lane that replaced it.)
 ///
 /// A non-integer type `Fits` — the literal does not belong there, and saying so
 /// is the normal type checker's job, not this diagnostic's.
@@ -317,14 +312,6 @@ pub(crate) fn classify_int_literal(raw: &str, ty: &Ty, negated: bool) -> Literal
     match () {
         _ if !signed && negated && mag != 0 => LiteralFit::Sign,
         _ if mag > declared => LiteralFit::Magnitude,
-        // Carrier is an UNSIGNED-only deviation. A signed type's own domain
-        // already stops at the carrier in the positive direction, and in the
-        // negative direction `i64::MIN`'s magnitude is 2^63 — one PAST
-        // `i64::MAX` and perfectly representable, since the `-` is what makes
-        // it so. Testing the magnitude without that guard rejects `let lo: Int
-        // = -9223372036854775808`, which is the very literal E024 was taught to
-        // accept in #626.
-        _ if !signed && mag > i64::MAX as u128 => LiteralFit::Carrier,
         _ => LiteralFit::Fits,
     }
 }
@@ -340,10 +327,7 @@ pub(crate) fn int_type_range(ty: &Ty) -> Option<String> {
     Some(if signed {
         format!("-{}..={}", 1u128 << (bits - 1), (1u128 << (bits - 1)) - 1)
     } else {
-        // The stated ceiling is the one actually enforced, carrier cap and all
-        // (#872) — a range in a diagnostic that the compiler does not honour is
-        // worse than no range.
-        format!("0..={}", ((1u128 << bits) - 1).min(i64::MAX as u128))
+        format!("0..={}", (1u128 << bits) - 1)
     })
 }
 

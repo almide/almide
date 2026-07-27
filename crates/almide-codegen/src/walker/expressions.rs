@@ -105,6 +105,12 @@ fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, ann
 /// Int / Unknown.
 fn render_expr_lit_int(ctx: &RenderContext, expr: &IrExpr, value: i64) -> String {
     let value_s = value.to_string();
+    // The IR slot is a 64-BIT PATTERN, not a signed number: a `UInt64`
+    // magnitude in the upper half arrives here as a NEGATIVE i64 (#872), and
+    // `-1u64` is not a Rust literal at all (E0600). Reinterpret at the
+    // declared width — the narrower unsigned widths cannot reach the upper
+    // half (their whole domain is below `i64::MAX`), so only `UInt64` needs it.
+    let unsigned_s = (value as u64).to_string();
     match &expr.ty {
         Ty::Int8 => format!("{}i8", value_s),
         Ty::Int16 => format!("{}i16", value_s),
@@ -112,7 +118,7 @@ fn render_expr_lit_int(ctx: &RenderContext, expr: &IrExpr, value: i64) -> String
         Ty::UInt8 => format!("{}u8", value_s),
         Ty::UInt16 => format!("{}u16", value_s),
         Ty::UInt32 => format!("{}u32", value_s),
-        Ty::UInt64 => format!("{}u64", value_s),
+        Ty::UInt64 => format!("{}u64", unsigned_s),
         _ => ctx.templates.render_with("int_literal", None, &[], &[("value", value_s.as_str())])
             .unwrap_or_else(|| value.to_string()),
     }

@@ -367,12 +367,19 @@ impl LowerCtx {
     /// is TOTAL once matched (no internal failure after a guard commits), so unlike
     /// the guard-then-possibly-fail routers elsewhere, chaining via `.or_else()` is
     /// safe: neither half can partially match and fall through wrongly.
-    fn scalar_binop_int_arith_op(op: &almide_ir::BinOp) -> Option<crate::IntOp> {
+    fn scalar_binop_int_arith_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
         use almide_ir::BinOp;
+        // The unsigned 64-bit lane (#872): a `UInt64` operand's i64 slot
+        // carries the u64 bit pattern — add/sub/mul wrap identically in
+        // two's complement, but division/remainder must interpret it
+        // unsigned (the signed op computed `u64::MAX / 2` as `-1 / 2 = 0`).
+        let u64_lane = matches!(left_ty, Ty::UInt64);
         Some(match op {
             BinOp::AddInt => crate::IntOp::Add,
             BinOp::SubInt => crate::IntOp::Sub,
             BinOp::MulInt => crate::IntOp::Mul,
+            BinOp::DivInt if u64_lane => crate::IntOp::DivU,
+            BinOp::ModInt if u64_lane => crate::IntOp::ModU,
             BinOp::DivInt => crate::IntOp::Div,
             BinOp::ModInt => crate::IntOp::Mod,
             _ => return None,
@@ -386,6 +393,17 @@ impl LowerCtx {
     // `scalar_binop_int_cmp_op` below.
     fn scalar_binop_int_ord_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
         use almide_ir::BinOp;
+        // `UInt64` ordering is unsigned (#872): the signed compare put the
+        // upper half of the domain below zero.
+        if matches!(left_ty, Ty::UInt64) {
+            return Some(match op {
+                BinOp::Lt => crate::IntOp::LtU,
+                BinOp::Lte => crate::IntOp::LeU,
+                BinOp::Gt => crate::IntOp::GtU,
+                BinOp::Gte => crate::IntOp::GeU,
+                _ => return None,
+            });
+        }
         Some(match op {
             BinOp::Lt if Self::int_ord_operand_ty(left_ty) => crate::IntOp::Lt,
             BinOp::Lte if Self::int_ord_operand_ty(left_ty) => crate::IntOp::Le,
@@ -420,7 +438,8 @@ impl LowerCtx {
     // eager `IntBinOp` path. Native + interp evaluate the RHS lazily. Pow, Float, concat,
     // non-Int/Bool compares: defer — neither half above matches, so `None` falls through.)
     fn scalar_binop_int_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
-        Self::scalar_binop_int_arith_op(op).or_else(|| Self::scalar_binop_int_cmp_op(op, left_ty))
+        Self::scalar_binop_int_arith_op(op, left_ty)
+            .or_else(|| Self::scalar_binop_int_cmp_op(op, left_ty))
     }
 
     fn lower_scalar_binop_int_fallback(
@@ -429,7 +448,11 @@ impl LowerCtx {
         left: &IrExpr,
         right: &IrExpr,
     ) -> Option<ValueId> {
-        let iop = Self::scalar_binop_int_op(op, &left.ty)?;
+        // Either operand may be the one carrying the declared `UInt64` — a
+        // literal operand records the checker's default `Int` (#872), so
+        // asking only the left one missed `u64::MAX / 2`.
+        let lane_ty = if matches!(right.ty, Ty::UInt64) { &right.ty } else { &left.ty };
+        let iop = Self::scalar_binop_int_op(op, lane_ty)?;
         let a = self.lower_scalar_value(left)?;
         let b = self.lower_scalar_value(right)?;
         self.emit_narrow_div_overflow_guard(iop, &left.ty, a, b);

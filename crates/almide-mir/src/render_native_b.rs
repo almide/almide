@@ -622,6 +622,22 @@ fn render_int_binop(
             used_shims.push(shim("__chk_mod").expect("\"__chk_mod\" is a literal shim() match arm, always Some").2);
             format!("rt_chk_mod({l}, {r})")
         }
+        // The unsigned 64-bit lane (#872): the i64 local carries the u64 bit
+        // pattern — cast both sides for div/rem/ordering. Divide-by-zero
+        // aborts through the same checked shim family as the signed pair
+        // (identical stderr bytes); there is no MIN÷-1 case unsigned.
+        IntOp::DivU => {
+            used_shims.push(shim("__chk_div_u").expect("\"__chk_div_u\" is a literal shim() match arm, always Some").2);
+            format!("rt_chk_div_u({l}, {r})")
+        }
+        IntOp::ModU => {
+            used_shims.push(shim("__chk_mod_u").expect("\"__chk_mod_u\" is a literal shim() match arm, always Some").2);
+            format!("rt_chk_mod_u({l}, {r})")
+        }
+        IntOp::LtU => format!("(({l} as u64) < ({r} as u64)) as i64"),
+        IntOp::LeU => format!("(({l} as u64) <= ({r} as u64)) as i64"),
+        IntOp::GtU => format!("(({l} as u64) > ({r} as u64)) as i64"),
+        IntOp::GeU => format!("(({l} as u64) >= ({r} as u64)) as i64"),
         IntOp::Eq => format!("({l} == {r}) as i64"),
         IntOp::Ne => format!("({l} != {r}) as i64"),
         IntOp::Lt => format!("({l} < {r}) as i64"),

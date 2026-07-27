@@ -22,8 +22,12 @@ fn fusable_expr(
                 IntOp::Add => "i64.add",
                 IntOp::Sub => "i64.sub",
                 IntOp::Mul => "i64.mul",
-                IntOp::Div | IntOp::Mod => return None,
+                IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU => return None,
                 IntOp::Lt => "i64.lt_s",
+                IntOp::LtU => "i64.lt_u",
+                IntOp::LeU => "i64.le_u",
+                IntOp::GtU => "i64.gt_u",
+                IntOp::GeU => "i64.ge_u",
                 IntOp::Le => "i64.le_s",
                 IntOp::Gt => "i64.gt_s",
                 IntOp::Ge => "i64.ge_s",
@@ -41,7 +45,19 @@ fn fusable_expr(
             let core = format!("({instr} {ea} {eb})");
             let e = if matches!(
                 iop,
-                IntOp::Lt | IntOp::Le | IntOp::Gt | IntOp::Ge | IntOp::Eq | IntOp::Ne
+                IntOp::Lt
+                    | IntOp::Le
+                    | IntOp::Gt
+                    | IntOp::Ge
+                    | IntOp::Eq
+                    | IntOp::Ne
+                    // The unsigned lane's comparisons yield an i32 too (#872) —
+                    // omitting them here spliced a raw i32 where the i64 scalar
+                    // model was expected (an INVALID module, not a wrong value).
+                    | IntOp::LtU
+                    | IntOp::LeU
+                    | IntOp::GtU
+                    | IntOp::GeU
             ) {
                 format!("(i64.extend_i32_u {core})")
             } else {

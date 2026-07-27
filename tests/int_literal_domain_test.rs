@@ -1,24 +1,24 @@
-//! E024 must distinguish WHY a literal is out of range, because the three
-//! deviations take three different fixes and the wrong hint sends the reader
+//! E024 must distinguish WHY a literal is out of range, because the two
+//! deviations take different fixes and the wrong hint sends the reader
 //! somewhere there is nothing.
 //!
 //! - **magnitude** — too large for the width. A smaller literal, or a wider
 //!   type, fixes it.
 //! - **sign** — negated in an unsigned context. No magnitude fixes it; an
 //!   unsigned type has no negative values at all. `-0` is exempt: it is `0`.
-//! - **carrier** — inside `UInt64`'s *declared* domain but above the `i64` the
-//!   IR carries every integer in. Neither a smaller literal nor a wider type
-//!   fixes it, because there is no wider type (#872).
 //!
 //! The sign case was a real acceptance gap: `let k: UInt64 = -5` passed
 //! `almide check` — 5 is in range for UInt64 — and native rustc then rejected
 //! the emitted `-5u64` with `error[E0600]: cannot apply unary operator '-' to
-//! type 'u64'` (differential fuzz). The carrier case was worse: it was accepted
-//! and *ran*, printing the same wrong answer on both targets, which is exactly
-//! why the cross-target differential fuzzer never surfaced it.
+//! type 'u64'` (differential fuzz).
 //!
-//! This pins the classification at the diagnostic's surface. The three hints
-//! are distinguishable strings on purpose — merging them would pass a test that
+//! A THIRD deviation existed while `UInt64`'s upper half had no lane: the
+//! interim CARRIER rejection (C-173). The lane landed (#872, C-179), so that
+//! band is ACCEPTED again — pinned below among the accepted boundaries, and
+//! its runtime behaviour by `spec/wasm_cross/uint64_upper_half.almd`.
+//!
+//! This pins the classification at the diagnostic's surface. The hints are
+//! distinguishable strings on purpose — merging them would pass a test that
 //! only asserted "E024 fires".
 
 use std::process::Command;
@@ -77,19 +77,24 @@ const REJECTED: &[(&str, &str)] = &[
     // A negated literal that would be in range as a MAGNITUDE is still a sign
     // error — the distinction the unsigned branch used to miss entirely.
     ("let a: UInt8 = -200", "has no negative values at all"),
-    // ── carrier ──────────────────────────────────────────────────────────
-    ("let a: UInt64 = 9223372036854775808", "above the i64 the compiler carries"),
-    ("let a: UInt64 = 18446744073709551615", "above the i64 the compiler carries"),
+    // ── magnitude, unsigned edge ─────────────────────────────────────────
+    // One PAST the declared domain of the widest unsigned type.
+    ("let a: UInt64 = 18446744073709551616", "would silently fold to 0 here"),
 ];
 
 /// Bindings that must keep compiling. Each one sits on a boundary that a
 /// careless bound would take out with the real errors.
 const ACCEPTED: &[&str] = &[
-    // Every unsigned width's maximum that the carrier reaches.
+    // Every unsigned width's DECLARED maximum — `UInt64` included: the i64
+    // slot carries its upper half as a bit pattern and the unsigned lane
+    // reads it back (#872, C-179).
     "let a: UInt8 = 255",
     "let a: UInt16 = 65535",
     "let a: UInt32 = 4294967295",
     "let a: UInt64 = 9223372036854775807",
+    "let a: UInt64 = 9223372036854775808",
+    "let a: UInt64 = 18446744073709551615",
+    "let a: UInt64 = 0x8000000000000000",
     // `-0` is `0`, which every unsigned type represents. The sign rule must not
     // eat it.
     "let a: UInt8 = -0",
@@ -180,15 +185,17 @@ fn representable_boundaries_still_compile() {
     }
 }
 
-/// A radix literal past the carrier must be caught too — the classifier splits
+/// A radix literal past the DOMAIN must be caught too — the classifier splits
 /// the prefix before comparing, so a hex form cannot slip past a decimal bound.
+/// (Its counterpart, a hex literal in `UInt64`'s upper half, is ACCEPTED — see
+/// the accepted list; the classifier reads both radices at the same width.)
 #[test]
 fn radix_forms_are_classified_the_same() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let out = check(dir.path(), &body("let a: UInt64 = 0x8000000000000000"));
+    let out = check(dir.path(), &body("let a: UInt64 = 0x10000000000000000"));
     assert!(
-        out.contains("E024") && out.contains("above the i64 the compiler carries"),
-        "hex one past the carrier must be the carrier deviation, got:\n{out}"
+        out.contains("E024") && out.contains("would silently fold to 0 here"),
+        "hex one past the declared domain must be the magnitude deviation, got:\n{out}"
     );
     let out = check(dir.path(), &body("let a: UInt8 = -0x1"));
     assert!(
