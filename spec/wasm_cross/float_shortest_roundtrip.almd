@@ -1,8 +1,9 @@
 // @contract: C-023
 // Regression: WASM float.to_string must produce the SAME bytes as native —
 // Rust's f64 Display (shortest round-tripping decimal, fixed notation) plus the
-// ".0" integer suffix. The WASM runtime implements Dragon4 with exact
-// big-integer arithmetic (crates/almide-codegen/src/emit_wasm/rt_dragon.rs).
+// ".0" integer suffix. The WASM leg implements Dragon4 with exact big-integer
+// arithmetic in SELF-HOSTED Almide (stdlib/float_to_string.almd), transcribed
+// from v0's Rust emitter (emit_wasm/rt_dragon.rs, retired in c71eff7b).
 // Previously WASM emitted fixed-precision digits (native 0.30000000000000004 vs
 // wasm 0.3) AND trapped via i64_trunc for |x| >= 2^63.
 effect fn main() -> Unit = {
