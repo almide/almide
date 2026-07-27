@@ -235,6 +235,25 @@ impl LowerCtx {
             // LIST's TYPE alone (`List[(Int)->Int]`) does not preclude a capturing element).
             return Some(ListElemDrop::Closure);
         }
+        // A SCALAR-ONLY aggregate element (a record/tuple whose every field is
+        // inline scalar — snaidhm's `GlyphPoint`, ceangal's rect records). Its
+        // block is FLAT: it owns no further heap, so the per-element `rc_dec` of
+        // the Flat class IS its full free — exactly the physics `calls_p2`'s
+        // `scalar_aggregate_elem` and C-183's nested sweep already rely on, and
+        // the same reason a flat VARIANT element takes `CtorFlat` above.
+        //
+        // Classifying it here is what lets a `[xs[i]]` operand of a
+        // `List[<flat record>]` concat go through the LITERAL builder (which has
+        // the per-element arms) instead of the generic call-argument path, which
+        // declined it and walled the enclosing accumulator loop (#888/#904).
+        if is_heap_ty(elem_ty)
+            && self
+                .aggregate_field_tys(elem_ty)
+                .and_then(|(_, tys)| crate::lower::layout::scalar_slots(&tys))
+                .is_some()
+        {
+            return Some(ListElemDrop::CtorFlat);
+        }
         None
     }
 
@@ -380,6 +399,64 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// `xs[i]` as a list-literal ELEMENT — an OWNED handle on the element block.
+    ///
+    /// The container still owns the element, so the load is a BORROW and the
+    /// `Dup` (rc_inc) is what makes the returned handle owned: the enclosing
+    /// literal stores it and `Consume`s it, and that literal's own drop releases
+    /// the reference. Exactly the ownership the let-bound spelling produces
+    /// (`let c = xs[i]; acc + [c]`), which is why this shape is safe — it is the
+    /// same `a`+`d` pair, just without the user having to write the binding
+    /// (#888).
+    ///
+    /// The address arithmetic is the element-slot form the per-element for-in
+    /// loop already uses: `handle + 12 + i*8`. A non-heap element or a container
+    /// that does not lower to a single handle declines, leaving the caller's
+    /// wall in place.
+    fn lower_list_index_element(&mut self, e: &IrExpr) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        let IrExprKind::IndexAccess { object, index } = &e.kind else { return None };
+        if !crate::lower::is_heap_ty(&e.ty) {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let container = match self.lower_call_args(std::slice::from_ref(&**object)) {
+            Ok(args) => match args.into_iter().next() {
+                Some(crate::CallArg::Handle(v)) => v,
+                _ => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            },
+            Err(_) => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let Some(idx) = self.lower_scalar_value(index) else {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![container] });
+        let eight = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+        let scaled = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: scaled, op: IntOp::Mul, a: idx, b: eight });
+        let base = self.load_addr(h, 12);
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: base, b: scaled });
+        let borrowed = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(borrowed), args: vec![addr] });
+        let owned = self.fresh_value();
+        self.ops.push(Op::Dup { dst: owned, src: borrowed });
+        Some(owned)
+    }
+
     /// Lower one element of a record-list literal to an OWNED handle.
     ///
     /// `None` from the outer `Option` declines the whole literal, so the caller
@@ -417,6 +494,22 @@ impl LowerCtx {
         // restored afterwards so the caller's uniform Consume still sees it.
         if matches!(e_ref.kind, IrExprKind::Block { .. }) {
             return self.lower_block_list_element(e_ref, forced_elem, elem_ty, kind);
+        }
+        // An INDEX-READ element (`acc = acc + [xs[i]]` — snaidhm's ttf
+        // `expand_implied` rotate, ceangal's zip_view_rects; #888/#904). The
+        // element TYPE was already accepted by the concat gate; only this
+        // EXPRESSION shape had no arm, so the append declined, the enclosing
+        // `for` fell back to model-one-iteration, and the whole heap-result
+        // `if` walled. Writing it as `let c = xs[i]` then `acc + [c]` always
+        // worked — this makes the inline spelling reach the same lowering.
+        if matches!(e_ref.kind, IrExprKind::IndexAccess { .. }) {
+            if let Some(obj) = self.lower_list_index_element(e_ref) {
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                return Some(Some(obj));
+            }
+            return None;
         }
         // A CTOR-class element (`some(1)`, `err("x")`) materializes through the Option/Result
         // ctor builder (a fresh OWNED wrapper block; the ctor arms leave tracking to callers,

@@ -198,14 +198,32 @@ impl LowerCtx {
         // helper with the concat's NAMED element type (`elem_ty`) so it materializes + registers its
         // drop with the SAME declared layout the concat result uses (`list_<Named>`). Other operands
         // (the `acc` Var / a nested concat) lower generically.
-        let args = if record_elem.is_some() {
+        // A FLAT-record element takes the same forced-literal route as a
+        // recursive-drop record: its `[xs[i]]` / `[{…}]` operand needs the
+        // per-element arms of the literal builder, which the generic
+        // call-argument path does not have (#888/#904).
+        let args = if record_elem.is_some() || scalar_aggregate_elem {
             let mut out: Vec<CallArg> = Vec::with_capacity(arg_exprs.len());
             let mut ok = true;
             for a in &arg_exprs {
                 if matches!(a.kind, IrExprKind::List { .. }) {
                     match self.try_lower_record_list_literal_as(a, Some(&elem_ty)) {
                         Some(d) => out.push(CallArg::Handle(d)),
-                        None => { ok = false; break; }
+                        // A RECURSIVE-drop record must NOT fall back: the generic path
+                        // materializes a structural literal in SOURCE field order, which the
+                        // declared-order `$__drop_<R>` would then free wrongly (the soundness
+                        // crux this forced route exists for). A FLAT record has no such drop —
+                        // per-element `rc_dec` is its full free whatever the order — so it
+                        // keeps the generic path as a fallback, which is exactly the route it
+                        // took before the literal builder learned its element arms. That makes
+                        // this widening strictly ADDITIVE: shapes that lowered before still
+                        // take the same path, and only the ones that walled gain a route
+                        // (#888/#904).
+                        None if record_elem.is_some() => { ok = false; break; }
+                        None => match self.lower_call_args(std::slice::from_ref(a)) {
+                            Ok(mut la) => out.append(&mut la),
+                            Err(_) => { ok = false; break; }
+                        },
                     }
                 } else {
                     match self.lower_call_args(std::slice::from_ref(a)) {

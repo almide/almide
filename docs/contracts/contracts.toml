@@ -2280,3 +2280,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_any_early_winner.almd", class = "fixture" },
 ]
+
+# ── INLINE INDEX READ AS A LIST-ACCUMULATOR ELEMENT ─
+[[contract]]
+id        = "C-186"
+spec      = "ALS-M4"
+title     = "Appending an inline index read to a list accumulator lowers and runs on both targets"
+statement = "`acc = acc + [xs[i]]` — an INLINE index read as the appended element — executes identically on native and wasm (#888, snaidhm's ttf `expand_implied` rotate; the same wall blocked ceangal consumers). The element TYPE was already admitted: a scalar-only record's block is FLAT, so per-element `rc_dec` is its full free (C-183's physics). What had no lowering arm was the element EXPRESSION. The literal builder knew Block / ctor / Var / call elements and not an index read, so the append declined, which dropped the enclosing `for` to its model-one-iteration fallback, which walled the loop variable under STRICT value mode, which collapsed the enclosing heap-result `if` — three layers of fallback turning one missing arm into `heap-result 'if' outside the executable subset`, and a CONSUMER of the walled function saw only an unlinked `almide_rt_*` call with no hint of the cause. Writing the identical thing as `let c = xs[i]; acc + [c]` always worked, and that is exactly the ownership the arm reproduces: the container keeps owning the element, the slot load is a BORROW, and the `Dup` (rc_inc) makes the handle the literal stores an owned one, released when that literal is dropped. A scalar-only record's list literal is now classified (Flat class) so its operands reach the per-element arms at all; a recursive-drop record still REFUSES to fall back to the generic path, because that materializes a structural literal in source field order which the declared-order `$__drop_<R>` would free wrongly — a flat record has no such drop and keeps the generic path as a fallback, which makes the widening strictly additive."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_index_element_append.almd", class = "fixture" },
+]
