@@ -25,22 +25,24 @@ BASELINE_FILE="scripts/embedded-size-baseline.txt"
 BUDGET_PCT="${EMBEDDED_SIZE_BUDGET_PCT:-10}"
 
 sources() {
-  # Distinct `stdlib/<name>.almd` paths named by either embed site. `sort -u`
-  # is what makes the total a real footprint rather than a sum with duplicates
-  # (the two sites embed disjoint sets today; this stays correct if they stop
-  # being disjoint, since the binary would still carry each source once per
-  # crate — the honest floor).
+  # Distinct stdlib stems named by either embed site (`SRC_<STEM>`, the consts
+  # `crates/almide-types/build.rs` generates). `sort -u` makes the total a real
+  # footprint rather than a sum with duplicates.
   {
-    grep -o 'stdlib/[a-z0-9_]*\.almd' crates/almide-mir/src/render_wasm/registry.rs
-    grep -o 'stdlib/[a-z0-9_]*\.almd' crates/almide-types/src/stdlib_info.rs
-  } | sort -u
+    grep -o 'SRC_[A-Z0-9_]*' crates/almide-mir/src/render_wasm/registry.rs
+    grep -o 'SRC_[A-Z0-9_]*' crates/almide-types/src/stdlib_info.rs
+  } | sort -u | sed 's/^SRC_//' | tr 'A-Z' 'a-z' | sed 's|^|stdlib/|; s|$|.almd|'
 }
 
+# Count what SHIPS, not what the repo holds: the embed blanks whole-line
+# comments (#878), so a comment costs zero embedded bytes even though it stays
+# in the file. Measuring the repo bytes instead would make the gate fire on
+# documentation, which is exactly the growth we want to keep encouraging.
 total=0
 count=0
 while read -r f; do
   [ -f "$f" ] || continue
-  n=$(wc -c < "$f" | tr -d ' ')
+  n=$(awk '{ if ($0 ~ /^[[:space:]]*\/\//) print ""; else print }' "$f" | wc -c | tr -d ' ')
   total=$((total + n))
   count=$((count + 1))
 done < <(sources)

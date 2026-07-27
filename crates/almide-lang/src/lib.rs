@@ -8,6 +8,8 @@ pub use almide_syntax::parser;
 pub use almide_syntax::parse_cached;
 
 pub use almide_types::types;
+/// The comment-blanked embedded stdlib (#878) — see `almide_types::embedded`.
+pub use almide_types::embedded;
 pub use almide_types::stdlib_info;
 
 // Re-export almide-base for convenience

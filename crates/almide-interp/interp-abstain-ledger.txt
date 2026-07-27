@@ -12,6 +12,7 @@
 
 alias_combinator_rc  out-of-interp-scope capability: option.flatten
 alias_cow  out-of-interp-scope capability: in-place container mutation `list.pop` (mut receiver; interp args are by-value so the binding cannot be written back)
+args_surface  out-of-interp-scope capability: env.args
 base64_encode  out-of-interp-scope capability: string.to_bytes
 bundled_pure_modules  out-of-interp-scope capability: args.flag
 bytes_f16  out-of-interp-scope capability: bytes.read_f16_le
@@ -133,7 +134,7 @@ string_split_rle_codepoint  out-of-interp-scope capability: string.run_length_en
 string_whitespace  out-of-interp-scope capability: string.from_codepoint
 tco_map_acc_seed  out-of-interp-scope capability: map.from_list
 trig_libm  out-of-interp-scope capability: transcendental `math.sin` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
-unsigned_literal_domain  out-of-interp-scope capability: uint8.to_string
+unsigned_literal_domain  out-of-interp-scope capability: int.from_int8
 unwrap_or_operand  out-of-interp-scope capability: string.codepoint
 value_array_leak_loop  out-of-interp-scope capability: value.int
 value_array_tuple_tco  out-of-interp-scope capability: value.str

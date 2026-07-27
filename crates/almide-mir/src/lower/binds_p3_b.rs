@@ -415,34 +415,8 @@ impl LowerCtx {
         // lets are freed within the frame (the built element co-owns what it
         // needs via its own Dup/moves), and the element object's tracking is
         // restored afterwards so the caller's uniform Consume still sees it.
-        if let IrExprKind::Block { stmts, expr } = &e_ref.kind {
-            let tail = expr.as_deref()?;
-            let mark = self.live_heap_handles.len();
-            for s in stmts {
-                if let Err(e) = self.lower_stmt(s) {
-                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
-                        format!("[elem-block] stmt declined: {e:?}")
-                    });
-                    return None;
-                }
-            }
-            let out = match self.lower_record_list_element(tail, forced_elem, elem_ty, kind) {
-                Some(o) => o,
-                None => {
-                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
-                        format!("[elem-block] tail declined: {:?}", tail.kind)
-                    });
-                    return None;
-                }
-            };
-            if let Some(obj) = out {
-                self.live_heap_handles.retain(|h| *h != obj);
-            }
-            self.drop_arm_locals(mark);
-            if let Some(obj) = out {
-                self.live_heap_handles.push(obj);
-            }
-            return Some(out);
+        if matches!(e_ref.kind, IrExprKind::Block { .. }) {
+            return self.lower_block_list_element(e_ref, forced_elem, elem_ty, kind);
         }
         // A CTOR-class element (`some(1)`, `err("x")`) materializes through the Option/Result
         // ctor builder (a fresh OWNED wrapper block; the ctor arms leave tracking to callers,
@@ -574,6 +548,51 @@ impl LowerCtx {
         }
         return Some(Some(self.lower_owned_heap_field(e_ref)?));
         Some(Some(self.lower_owned_heap_field(e_ref)?))
+    }
+
+    /// The BLOCK-element arm of [`Self::lower_record_list_element`], extracted
+    /// (codopsy r2, #852 — that fn is the crate's worst at cog 93, and this is
+    /// its one self-contained frame-managing arm). Verbatim: the statements
+    /// lower as effects in an element-local frame, the TAIL becomes the element,
+    /// and the produced object's tracking is restored so the caller's uniform
+    /// `Consume` still sees it. `None` (not `Some(None)`) on a declined stmt or
+    /// tail, exactly as before — the caller treats that as "this element is not
+    /// in the subset" and walls.
+    fn lower_block_list_element(
+        &mut self,
+        e_ref: &IrExpr,
+        forced_elem: Option<&Ty>,
+        elem_ty: &Ty,
+        kind: ListElemDrop,
+    ) -> Option<Option<ValueId>> {
+        let IrExprKind::Block { stmts, expr } = &e_ref.kind else { return None };
+        let tail = expr.as_deref()?;
+        let mark = self.live_heap_handles.len();
+        for s in stmts {
+            if let Err(e) = self.lower_stmt(s) {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                    format!("[elem-block] stmt declined: {e:?}")
+                });
+                return None;
+            }
+        }
+        let out = match self.lower_record_list_element(tail, forced_elem, elem_ty, kind) {
+            Some(o) => o,
+            None => {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                    format!("[elem-block] tail declined: {:?}", tail.kind)
+                });
+                return None;
+            }
+        };
+        if let Some(obj) = out {
+            self.live_heap_handles.retain(|h| *h != obj);
+        }
+        self.drop_arm_locals(mark);
+        if let Some(obj) = out {
+            self.live_heap_handles.push(obj);
+        }
+        Some(out)
     }
 
     /// A heap-element `List` LITERAL RETURNED in TAIL position (`fn aliases() ->

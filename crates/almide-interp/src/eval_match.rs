@@ -249,7 +249,38 @@ impl<'a> Interpreter<'a> {
                 return f;
             }
         }
-        self.apply_binop(op, l, r)
+        let out = self.apply_binop(op, l, r);
+        // Arithmetic on a NARROW sized integer wraps at its declared width on
+        // both backends (C-180, #889) — the interpreter carries every integer
+        // in one i64 like the IR does, so it has to re-wrap for the same
+        // reason the renderers do, or the third oracle dissents from a correct
+        // consensus (`Int8 127 + 1` = 128 here vs -128 there).
+        Self::narrow_wrap_flow(out, op, &left.ty, &right.ty)
+    }
+
+    /// Re-wrap an arithmetic result to the DECLARED narrow width of whichever
+    /// operand carries it (a literal operand records the canonical `Int`).
+    /// Comparisons cannot leave the range, and `/`/`%` cannot either once the
+    /// operands are in it, so only `+`/`-`/`*` are wrapped.
+    fn narrow_wrap_flow(flow: Flow, op: BinOp, lt: &Ty, rt: &Ty) -> Flow {
+        use BinOp::*;
+        if !matches!(op, AddInt | SubInt | MulInt) {
+            return flow;
+        }
+        let width = |t: &Ty| match t {
+            Ty::Int8 => Some((8u32, true)),
+            Ty::Int16 => Some((16, true)),
+            Ty::Int32 => Some((32, true)),
+            Ty::UInt8 => Some((8, false)),
+            Ty::UInt16 => Some((16, false)),
+            Ty::UInt32 => Some((32, false)),
+            _ => None,
+        };
+        let Some((bits, signed)) = width(lt).or_else(|| width(rt)) else { return flow };
+        let Flow::Value(Value::Int(v)) = flow else { return flow };
+        let shift = 64 - bits;
+        let wrapped = if signed { (v << shift) >> shift } else { (v as u64 & ((1u64 << bits) - 1)) as i64 };
+        Flow::val(Value::Int(wrapped))
     }
 
     /// The `UInt64` reading of the integer operators whose signedness is
