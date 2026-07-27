@@ -525,8 +525,17 @@ impl Checker {
         } else {
             return None;
         };
+        // A LITERAL canonical side is the case the permissive pair exists for: it
+        // adopts the sized width at lowering, so it is not an error. But the
+        // RESULT is still the SIZED type — returning `None` here let the caller
+        // fall through to its `lt.clone()` default and type `0 - int8v` as
+        // canonical `Int`, while lowering had already stamped the whole
+        // literal-only tree Int8. The checker then said `i64` over an `i8`
+        // expression and the generated Rust would not build (the
+        // `self_hosted_float_convert` shape: `let nm = 0 - float.to_int8(f)`).
+        // Same rule as the peer join below — the sized member wins.
         if is_literal_numeric_ast(canon_expr) {
-            return None;
+            return Some(sized.clone());
         }
         self.emit(err(
             format!(
