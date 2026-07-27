@@ -219,12 +219,16 @@ pub fn render_wasm_fn(
         if_stack: Vec::new(),
         loop_stack: Vec::new(),
         loop_ctr: 0,
+        switch_ctr: 0,
     };
     st.fuser.scan_consts(&func.ops);
     st.fuser.scan_evens(&func.ops);
     render_op_range(&ctx, &mut st, 0, func.ops.len(), None, &mut body);
     st.fuser.flush_all(&mut body);
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
+    if std::env::var("ALMIDE_DBG_WAT").is_ok_and(|p| func.name.contains(&p)) {
+        eprintln!("  (func ${} {params}{result} {locals_decl}\n{body}{tail}  )", func.name);
+    }
     format!("  (func ${} {params}{result} {locals_decl}\n{body}{tail}  )\n", func.name)
 }
 
@@ -252,6 +256,10 @@ struct RenderFnState {
     if_stack: Vec<Option<ValueId>>,
     loop_stack: Vec<u32>,
     loop_ctr: u32,
+    /// #882: the same function-wide-counter discipline for the `$sw…` labels a
+    /// recognized dense match emits — a versioned region renders its switch
+    /// twice, and the two copies must not share a label.
+    switch_ctr: u32,
 }
 
 /// Render `func.ops[start..end]` into `body`. A `LoopStart` carrying a
@@ -283,6 +291,16 @@ fn render_op_range(
         let op = &ctx.func.ops[op_idx];
         i += 1;
         if ctx.fused_skip.contains(&op_idx) {
+            continue;
+        }
+        // #882: a DENSE `match` — a long `subj == literal` if-else chain — renders
+        // as one `br_table` instead of N compare-and-branch pairs. The arms are
+        // re-rendered from the same op ranges by the recursion below, so only the
+        // dispatch differs; anything that fails the recognizer falls through to
+        // the ordinary nested-`if` markers unchanged. See render_wasm_switch.rs.
+        if let Some(plan) = plan_switch(&ctx.func.ops, ctx.occ, op_idx, end) {
+            render_switch(ctx, st, &plan, region, body);
+            i = plan.end_idx + 1;
             continue;
         }
         match op {

@@ -55,9 +55,35 @@ impl Checker {
                     ty
                 }
                 else {
+                    // #880: the list's element type is the SIZED peer's width when the
+                    // elements mix one in, not element 0's — `[1, u8v]` and `[u8v, 1]`
+                    // are the same list, and only the `[u8v, 1]` spelling used to say
+                    // so. The peer set is collected alongside the ORIGINAL infer /
+                    // constrain order (each element still unifies with element 0 as it
+                    // is inferred, since a later element's inference can read a var an
+                    // earlier constraint bound); only the RESULT type is the join.
                     let first = self.infer_expr(&mut elements[0]);
-                    for elem in elements.iter_mut().skip(1) { let et = self.infer_expr(elem); self.constrain(first.clone(), et, "list element"); }
-                    Ty::list(first)
+                    let mut peers: Vec<(Ty, Option<ast::Span>, bool)> = vec![
+                        (first.clone(), elements[0].span, super::is_literal_numeric_ast(&elements[0])),
+                    ];
+                    for elem in elements.iter_mut().skip(1) {
+                        let et = self.infer_expr(elem);
+                        peers.push((et.clone(), elem.span, super::is_literal_numeric_ast(elem)));
+                        self.constrain(first.clone(), et, "list element");
+                    }
+                    let joined = self.join_sized_peers(&peers, "list element").unwrap_or(first);
+                    // The joined width is also the RANGE context for every bare
+                    // literal element (`[300, u8v]` is out of range, not a
+                    // wrap) — the same pinning an ANNOTATED element type does,
+                    // via the same helper. Without it the join would stamp
+                    // `300u8` at lowering and leave the diagnostic to rustc,
+                    // which is the acceptance gap this issue is about (#880).
+                    if super::is_narrow_sized(&joined) {
+                        for elem in elements.iter() {
+                            self.record_int_literal_context(elem, &joined);
+                        }
+                    }
+                    Ty::list(joined)
                 }
             }
 
@@ -95,6 +121,9 @@ impl Checker {
                 // value — it is NOT divergent — so even when every arm is `err`,
                 // the match still has a concrete Result type (not `Never`).
                 let mut arm_real_types = Vec::new();
+                // #880 peer set: (arm type, arm span, arm body is literal-only).
+                // Match arms join exactly like list elements and `if` branches.
+                let mut arm_peers: Vec<(Ty, Option<ast::Span>, bool)> = Vec::new();
                 // If ANY arm is an explicit `ok(..)`/`err(..)` ctor, this match PRODUCES a Result (it
                 // re-wraps — base64 decode's `match bs { ok(b) => ok(string.from_bytes(b)), err(e) =>
                 // err(e) }`), so NO arm is auto-unwrapped: every arm keeps its Result type and the
@@ -129,6 +158,7 @@ impl Checker {
                     } else {
                         arm_ty
                     };
+                    arm_peers.push((arm_ty.clone(), arm.body.span, super::is_literal_numeric_ast(&arm.body)));
                     arm_types.push(arm_ty);
                     self.env.pop_scope();
                 }
@@ -137,6 +167,13 @@ impl Checker {
                 if let Some(first) = arm_types.first().cloned() {
                     for aty in &arm_types[1..] {
                         self.constrain(first.clone(), aty.clone(), "match arm");
+                    }
+                    // #880: a sized arm wins the join over canonical peers, the
+                    // same rule the `if` arms and list elements follow. Checked
+                    // before the `Never` recovery below because a numeric-scalar
+                    // join and a `Never`/Result arm set are disjoint cases.
+                    if let Some(joined) = self.join_sized_peers(&arm_peers, "match arm") {
+                        return joined;
                     }
                     // The overall match type is the first non-`Never` arm type.
                     // `Never` arms (every `err(..)` arm) carry no useful result
@@ -243,8 +280,27 @@ impl Checker {
                 // bare assignment `x = ...` (returns Unit), we want to cite
                 // the actual variable name in the suggested rewrite.
                 let hint = if_arm_fix_hint(then, else_);
+                // #880: the two arms are PEERS, but the if's type was the THEN
+                // arm's — so `if b then 1 else u8v` typed `Int` and emitted an
+                // i64 `if` whose else arm is a `u8`. The sized arm wins the join
+                // (a canonical arm may only be a literal); everything else keeps
+                // the then-arm rule, including the Result shape the auto-unwrap
+                // comment above depends on.
+                let peers = [
+                    (cmp_then.clone(), then.span, super::is_literal_numeric_ast(then)),
+                    (cmp_else.clone(), else_.span, super::is_literal_numeric_ast(else_)),
+                ];
+                let joined = self.join_sized_peers(&peers, "if branches");
                 self.constrain_with_hint(cmp_then, cmp_else, "if branches", hint);
-                then_ty
+                // The join only replaces the then-arm rule when the then arm is
+                // ITSELF a bare numeric scalar. `cmp_then` may be an auto-unwrapped
+                // `Result[T, E]`, and the paragraph above requires the if's type to
+                // keep that wrapper for the wasm emitter — handing back the
+                // unwrapped width there would retype the whole expression.
+                match joined {
+                    Some(t) if super::solving::is_numeric_scalar(&resolve_ty(&then_ty, &self.uf)) => t,
+                    _ => then_ty,
+                }
     }
 
     fn infer_expr_g2_unary(&mut self, expr: &mut ast::Expr) -> Ty {

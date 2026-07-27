@@ -234,6 +234,62 @@ impl Checker {
         self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
     }
 
+    /// The DIRECTIONAL half of the width rule (#880): the fn body against the
+    /// DECLARED return type.
+    ///
+    /// Every other slot with a real direction — call arguments, annotations —
+    /// goes through `types_mismatch`, where `compatible` is one-way (#867).
+    /// Return position never did: it hands both types to the solver, and the
+    /// solver's peer-join fallback unifies numeric scalars in EITHER direction.
+    /// So `fn f(u: UInt8) -> Int = u` passed `check`, ran on wasm (one i64 lane
+    /// per scalar) and failed the native build with a rustc E0308.
+    ///
+    /// This is the same rule the arc enforces everywhere else: a sized value
+    /// never flows into a canonical slot without an explicit widening (#867).
+    ///
+    /// `is_effect` unwraps one `Result` layer first, matching what
+    /// `constrain_effect_body` compares — an effect fn's body carries the
+    /// wrapper the signature does not spell.
+    fn check_return_width(
+        &mut self,
+        name: &str,
+        ret_ty: &Ty,
+        body_ty: &Ty,
+        body: &ast::Expr,
+        is_effect: bool,
+    ) {
+        let rr = resolve_ty(ret_ty, &self.uf);
+        let mut rb = resolve_ty(body_ty, &self.uf);
+        if is_effect && !rr.is_result() {
+            if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = rb.clone() {
+                if let Some(ok) = args.first() { rb = resolve_ty(ok, &self.uf); }
+            }
+        }
+        // NOT covered here: the OPPOSITE direction, a canonical VALUE returned
+        // into a sized slot (`fn h(x: Int) -> Int8 = x`, also a native E0308).
+        // Every v1 stdlib self-host is written that way on purpose — v1 gives
+        // each scalar one i64 lane, so `float_to_int8` computes its clamp in
+        // canonical `Int` and declares `-> Int8` — and rejecting it would wall
+        // the wasm leg for the whole `float.to_*` / `int.to_*` family. Closing
+        // that direction means retyping those lanes first; it is a separate
+        // change, tracked on #880.
+        //
+        // A sized VALUE returned into the canonical slot: `fn f(u: UInt8) -> Int = u`.
+        // No literal ever has a sized type, so there is nothing to exempt.
+        if is_narrow_sized(&rb) && is_canonical_peer_of(&rb, &rr) {
+            self.emit(err(
+                format!(
+                    "fn '{}' declares -> {} but its body is a {} value — \
+                     explicit widening required (e.g. `int.from_{}(...)`)",
+                    name, rr.display(), rb.display(), rb.display().to_lowercase()
+                ),
+                "Widen the value at the return: `int.from_uint8(x)` / `int.from_int32(x)` \
+                 (`float.from_float32(x)` for the float widths).",
+                format!("fn '{}'", name),
+            ).with_code("E001"));
+        }
+    }
+
     fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
         let FnToCheck { params, return_type, body, effect, generics } = decl;
         self.env.push_scope();
@@ -273,6 +329,7 @@ impl Checker {
         self.env.auto_unwrap = is_effect;
         self.env.lambda_depth = 0;
         let body_ity = self.infer_expr(body);
+        self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
         if effect.unwrap_or(false) {
             self.constrain_effect_body(name, &ret_ty, body_ity);
         } else {

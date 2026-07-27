@@ -11,6 +11,25 @@ use super::statements::lower_pattern;
 use super::types::resolve_type_expr;
 
 pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
+    let mut e = lower_expr_dispatch(ctx, expr);
+    // #880: the PEER-JOIN shapes — a list literal and the arms of an `if` /
+    // `match` — get their width from the checker's join, not from an
+    // annotation, and their bare literal members stay at the default `Ty::Int`.
+    // `[1, u8v]` therefore emitted `vec![1i64, 3u8]` into a `Vec<u8>` slot,
+    // which rustc rejects. The declared-type path already runs this coercion
+    // from a `let xs: List[UInt8]` / `let v: UInt8` annotation; the node's OWN
+    // inferred type is the same authority when there is no annotation, so run
+    // it here from that — one rule, both spellings. Restricted to those three
+    // kinds: every other slot with a width already coerces where it is
+    // declared, and this runs on every lowered node.
+    if matches!(e.kind, IrExprKind::List { .. } | IrExprKind::If { .. } | IrExprKind::Match { .. }) {
+        let own = e.ty.clone();
+        super::statements::coerce_literal_to_sized(&mut e, &own, ctx.env);
+    }
+    e
+}
+
+fn lower_expr_dispatch(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     let ty = ctx.expr_ty(expr);
     let span = expr.span;
 

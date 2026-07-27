@@ -864,6 +864,7 @@ include!("render_wasm_bce.rs");
 include!("render_wasm_c.rs");
 include!("render_wasm_dce.rs");
 include!("render_wasm_peephole.rs");
+include!("render_wasm_switch.rs");
 
 /// The self-hosted stdlib runtime registry: `(call name, impl fn name, Almide source)`.
 /// The v1 linker auto-includes an entry when its `call name` is invoked but undefined,

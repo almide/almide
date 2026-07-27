@@ -213,6 +213,25 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
         coerce_literal_to_sized(tail, declared, env);
         return;
     }
+    // #880: an `if` / `match` carries no literal of its own — its ARMS are the
+    // peers that do. The slot's width belongs to each arm the same way it
+    // belongs to a block tail, so descend and let every arm coerce on its own
+    // (`let v: UInt8 = if b then 1 else u8v` emitted `if … { 1i64 } else { 3u8 }`
+    // into a `u8` binding — one arm retyped by the peer join, the other not).
+    match &mut ir_val.kind {
+        IrExprKind::If { then, else_, .. } => {
+            coerce_literal_to_sized(then, declared, env);
+            coerce_literal_to_sized(else_, declared, env);
+            return;
+        }
+        IrExprKind::Match { arms, .. } => {
+            for arm in arms.iter_mut() {
+                coerce_literal_to_sized(&mut arm.body, declared, env);
+            }
+            return;
+        }
+        _ => {}
+    }
     // Resolve a named type alias to its structural form so a record / sized
     // alias declared via `type Rec = { b: Int8, .. }` (a `Ty::Named`) becomes
     // its `Ty::Record { .. }` / `Ty::Int8` / etc. before the match below.

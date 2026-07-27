@@ -544,6 +544,57 @@ impl Checker {
         Some(sized.clone())
     }
 
+    /// The PEER-JOIN half of the same width rule (#880).
+    ///
+    /// `check_mixed_canonical_width` above governs the operator sites, where the
+    /// two operands really are symmetric. A peer join — list elements, `if` /
+    /// `match` arms — is not: it took the FIRST peer's type as the join, so
+    /// `[1, u8v]` typed the whole literal `List[Int]` while `[u8v, 1]` typed it
+    /// `List[UInt8]`. The same program, elements swapped, two different types;
+    /// the `Int` reading then emitted `vec![1i64, 3u8]`, which rustc rejects.
+    ///
+    /// The SIZED peer is the only one that ever chose a width, so it wins the
+    /// join and the canonical peers coerce into it — but a canonical peer may
+    /// coerce only when it is a LITERAL (the same exemption as the operator
+    /// rule: lowering retypes a literal-only tree whole, and nothing else).
+    /// A canonical VALUE keeps its own i64/f64 width and is an error.
+    ///
+    /// `peers` is `(type, span, is_literal_only)` per member, already inferred —
+    /// the caller owns the AST walk, which keeps this free of the borrow that
+    /// holding `&ast::Expr` across `&mut self` would need. Returns the joined
+    /// (sized) type, or `None` when the peers are not a canonical/sized mix.
+    pub(crate) fn join_sized_peers(
+        &mut self,
+        peers: &[(Ty, Option<ast::Span>, bool)],
+        context: &str,
+    ) -> Option<Ty> {
+        let resolved: Vec<Ty> = peers.iter().map(|(t, _, _)| resolve_ty(t, &self.uf)).collect();
+        let sized = resolved.iter().find(|t| is_narrow_sized(t))?.clone();
+        let saved = self.current_span;
+        for (i, t) in resolved.iter().enumerate() {
+            if !is_canonical_peer_of(&sized, t) || peers[i].2 {
+                continue;
+            }
+            self.current_span = peers[i].1.or(saved);
+            self.emit(err(
+                format!(
+                    "{} mixes sized numeric type {} with a canonical {} value — \
+                     explicit conversion required (e.g. `.to_{}()`)",
+                    context,
+                    sized.display(),
+                    t.display(),
+                    sized.display().to_lowercase()
+                ),
+                "Convert the value with `.to_intN()` / `.to_floatN()` so every peer has \
+                 the same width. A literal adopts the sized width automatically; a VALUE \
+                 does not.",
+                context.to_string(),
+            ).with_code("E001"));
+        }
+        self.current_span = saved;
+        Some(sized)
+    }
+
     /// `if` / `while` take a `Bool` condition, full stop — Almide has no
     /// truthiness, and until this constraint existed the checker accepted every
     /// condition type (#896). `if 1 then …` ran with C-style truthiness and
@@ -871,11 +922,37 @@ fn is_sized_int(t: &Ty) -> bool {
     )
 }
 
+/// The sized widths that are NOT the canonical runtime type. `Int64` and
+/// `Float64` are deliberately absent: they are `Int` / `Float` at runtime and
+/// `compatible` bridges them in BOTH directions, so a join that mixes them can
+/// neither lose a width nor emit a rustc mismatch — rejecting it would be a
+/// false rejection. Everything here is reachable only through the one-way
+/// literal coercion, which is what #880 makes conditional on being a literal.
+pub(crate) fn is_narrow_sized(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int8 | Ty::Int16 | Ty::Int32
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32
+    )
+}
+
+/// Whether `other` is the canonical type whose values coerce into `sized`
+/// (`Int` / `Int64` for the integer widths, `Float` / `Float64` for `Float32`) —
+/// the exact pairs `compatible_numeric_coerce` accepts one-way.
+pub(crate) fn is_canonical_peer_of(sized: &Ty, other: &Ty) -> bool {
+    match sized {
+        Ty::Float32 => matches!(other, Ty::Float | Ty::Float64),
+        s if is_narrow_sized(s) => matches!(other, Ty::Int | Ty::Int64),
+        _ => false,
+    }
+}
+
 /// Whether this expression is built ONLY from numeric literals — literals,
 /// parentheses, negation, and arithmetic over them. Such an expression chose no
 /// width of its own, so it adopts its context's; anything else is a value with a
 /// width already, and mixing it with a different width is an error.
-fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
+pub(crate) fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
     match &e.kind {
         ast::ExprKind::Int { .. } | ast::ExprKind::Float { .. } => true,
         ast::ExprKind::Paren { expr } => is_literal_numeric_ast(expr),

@@ -247,6 +247,21 @@ impl Checker {
         if let Some(kind) = empty_collection_ctor_kind(callee) {
             self.register_empty_collection(ty.clone(), kind);
         }
+        // #880: `assert_eq` / `assert_ne` compare two PEERS. `check_builtin_output`
+        // constrains them symmetrically (it only ever sees the arg TYPES), so
+        // `assert_eq(n, u8v)` passed check and emitted `almide_eq!(i64, u8)` —
+        // a native E0308. The arg AST is only in scope here, which is where the
+        // literal exemption can be decided.
+        if matches!(&callee.kind, ExprKind::Ident { name, .. } if matches!(name.as_str(), "assert_eq" | "assert_ne"))
+            && args.len() >= 2
+        {
+            let peers: Vec<(Ty, Option<ast::Span>, bool)> = args.iter().take(2).map(|a| (
+                self.type_map.get(&a.id).cloned().unwrap_or(Ty::Unknown),
+                a.span,
+                super::is_literal_numeric_ast(a),
+            )).collect();
+            self.join_sized_peers(&peers, "assert argument");
+        }
         ty
     }
 
