@@ -130,47 +130,49 @@ struct OwnershipScan {
 impl OwnershipScan {
     /// One op's ownership transition. Verbatim text move of the scan loop body
     /// (locals renamed to fields).
+    ///
+    /// ROUTER (codopsy r2, #852 — this was the crate's worst fn at cyclomatic 79 /
+    /// cog 92): each arm's BODY moved into the helper below it that names the
+    /// decision it makes (open a fresh owned object, live-check a borrowed use,
+    /// acquire a reference, release one, borrow a call's args and own its result,
+    /// enter/leave a branch frame, apply a Value-rc prim event, rebind a slot). The
+    /// `match` itself is untouched and still EXHAUSTIVE — no catch-all arm — so a new
+    /// [`Op`] variant remains a COMPILE error here, which is the property that makes
+    /// this function the ownership source of truth rather than a best-effort scan. No
+    /// arm was reordered, no condition rewritten; the arms that merged into one
+    /// (`Const`/`ConstInt`/`FuncRef`/`IntBinOp`/the loop markers) all had the SAME
+    /// empty body, and each kept its own comment above its own pattern.
     fn step(&mut self, i: usize, op: &Op) {
         match op {
             Op::Alloc { dst, repr, .. } => {
                 debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
-                self.object_of.insert(*dst, *dst);
-                self.rc.insert(*dst, 1);
-                self.dead.insert(*dst, false);
+                self.own_fresh_object(*dst);
             }
             // A rung-4 scalar-list LITERAL is alloc-class: one fresh owned object
             // (the identical accounting the replaced `Alloc{DynList}` had). Its
             // element values are raw i64 slot scalars — no ownership to check.
-            Op::ListLit { dst, .. } => {
-                self.object_of.insert(*dst, *dst);
-                self.rc.insert(*dst, 1);
-                self.dead.insert(*dst, false);
-            }
+            Op::ListLit { dst, .. } => self.own_fresh_object(*dst),
             // The rung-4 element load/store BORROW the list handle (live-check,
             // no refcount change — exactly the `Borrow`/`MakeUnique` discipline);
             // the scalar element/index/value carry no ownership.
             Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => {
-                if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *list).is_none() {
-                    self.violations.push(violation(i, *list, ViolationKind::UseAfterFree));
-                }
+                self.check_borrowed_use(i, *list)
             }
-            Op::Const { dst: _ } | Op::ConstInt { .. } => {
-                // A scalar — no ownership accounting.
-            }
-            Op::FuncRef { .. } => {
-                // A function-table slot index — a scalar constant, no ownership.
-            }
-            Op::Dup { dst, src } => {
-                if let Some(o) = live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *src) {
-                    // Acquire OUR own reference. A `Dup` of a self.borrowed param has no
-                    // prior self.rc entry (we owned none) — start it at 0, then +1.
-                    *self.rc.entry(o).or_insert(0) += 1;
-                    self.object_of.insert(*dst, o);
-                    self.dead.insert(*dst, false);
-                } else {
-                    self.violations.push(violation(i, *src, ViolationKind::UseAfterFree));
-                }
-            }
+            // A scalar — no ownership accounting.
+            Op::Const { dst: _ }
+            | Op::ConstInt { .. }
+            // A function-table slot index — a scalar constant, no ownership.
+            | Op::FuncRef { .. }
+            // Scalar arithmetic — no ownership.
+            // A scalar arithmetic op and a primitive-floor op carry no ownership: a
+            // scalar result is Copy and a `Prim` handle arg is BORROWED (read only).
+            | Op::IntBinOp { .. }
+            // Loop markers carry no ownership; the body ops between them are
+            // per-iteration-balanced (verified flat, one iteration).
+            | Op::LoopStart
+            | Op::LoopBreakUnless { .. }
+            | Op::LoopEnd => {}
+            Op::Dup { dst, src } => self.acquire_reference(i, *dst, *src),
             // A `DropListStr`/`DropListValue` releases the LIST object exactly like a `Drop` (the
             // recursive element free is a RENDER concern, gated on self.rc==1; the cert sees one −1 on the
             // list — its elements were `Consume`d into it when stored).
@@ -192,31 +194,11 @@ impl OwnershipScan {
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. }
             | Op::DropWrapperRec { v, .. } => {
-                match release(&self.object_of, &mut self.rc, &mut self.dead, &self.borrowed, *v) {
-                    Ok(()) => {}
-                    Err(()) => self.violations.push(violation(i, *v, ViolationKind::DoubleFree)),
-                }
+                self.release_or_report(i, *v, ViolationKind::DoubleFree)
             }
-            Op::Consume { v } => match release(&self.object_of, &mut self.rc, &mut self.dead, &self.borrowed, *v) {
-                Ok(()) => {}
-                Err(()) => self.violations.push(violation(i, *v, ViolationKind::UseAfterMove)),
-            },
-            Op::Borrow { v } | Op::MakeUnique { v } => {
-                if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none() {
-                    self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
-                }
-            }
-            Op::Pure { dst: _, uses } => {
-                for v in uses {
-                    // Only heap handles are accountable; scalar uses are absent
-                    // from `self.object_of` and correctly skipped.
-                    if self.object_of.contains_key(v)
-                        && live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none()
-                    {
-                        self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
-                    }
-                }
-            }
+            Op::Consume { v } => self.release_or_report(i, *v, ViolationKind::UseAfterMove),
+            Op::Borrow { v } | Op::MakeUnique { v } => self.check_borrowed_use(i, *v),
+            Op::Pure { dst: _, uses } => self.check_pure_uses(i, uses),
             // A runtime/user call BORROWS its heap-handle args (live-checked, no
             // refcount change). Immediate/label args carry no ownership. A call
             // whose `result` is a heap repr returns a FRESH OWNED value (the
@@ -232,111 +214,18 @@ impl OwnershipScan {
             // must be live, a heap result is a FRESH OWNED value. The `table_idx` is a
             // scalar closure value (no ownership).
             | Op::CallIndirect { args, dst, result, .. } => {
-                for a in args {
-                    if let CallArg::Handle(v) = a {
-                        if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none() {
-                            self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
-                        }
-                    }
-                }
-                if let (Some(d), Some(r)) = (dst, result) {
-                    if r.is_heap() {
-                        self.object_of.insert(*d, *d);
-                        self.rc.insert(*d, 1);
-                        self.dead.insert(*d, false);
-                    }
-                }
+                self.borrow_call_args_and_own_result(i, args, dst, result)
             }
             // The if-markers carry no ownership of their own, but they scope the
             // BRANCH JOIN: both arms run from the entry state and must agree.
-            Op::IfThen { .. } => {
-                self.branches.push(BranchFrame {
-                    entry_rc: self.rc.clone(),
-                    entry_dead: self.dead.clone(),
-                    then_exit: None,
-                });
-            }
-            Op::Else { .. } => {
-                if let Some(fr) = self.branches.last_mut() {
-                    fr.then_exit = Some((self.rc.clone(), self.dead.clone()));
-                    self.rc = fr.entry_rc.clone();
-                    self.dead = fr.entry_dead.clone();
-                }
-            }
-            Op::EndIf { .. } => {
-                if let Some(fr) = self.branches.pop() {
-                    let (then_rc, then_dead) = match fr.then_exit {
-                        Some(t) => t,
-                        // No Else marker: everything since IfThen was the then arm;
-                        // the else arm is empty (= the entry state).
-                        None => {
-                            let cur = (self.rc.clone(), self.dead.clone());
-                            self.rc = fr.entry_rc.clone();
-                            self.dead = fr.entry_dead.clone();
-                            cur
-                        }
-                    };
-                    // Agreement per object (absent = 0 owned refs).
-                    let keys: BTreeSet<ValueId> =
-                        then_rc.keys().chain(self.rc.keys()).copied().collect();
-                    for k in keys {
-                        let a = then_rc.get(&k).copied().unwrap_or(0);
-                        let b = self.rc.get(&k).copied().unwrap_or(0);
-                        if a != b {
-                            self.violations.push(violation(i, k, ViolationKind::BranchDisagreement));
-                        }
-                    }
-                    // Continue with the JOIN: pointwise max keeps the run stable
-                    // after a reported disagreement (no cascading underflows); on
-                    // agreement it is the common value. A handle self.dead on EITHER
-                    // path is unusable after the merge.
-                    for (k, v) in then_rc {
-                        let e = self.rc.entry(k).or_insert(0);
-                        if v > *e {
-                            *e = v;
-                        }
-                    }
-                    for (k, d) in then_dead {
-                        let e = self.dead.entry(k).or_insert(d);
-                        *e = *e || d;
-                    }
-                }
-            }
-            // Scalar arithmetic — no ownership.
-            // A scalar arithmetic op and a primitive-floor op carry no ownership: a
-            // scalar result is Copy and a `Prim` handle arg is BORROWED (read only).
-            Op::IntBinOp { .. }
-            // Loop markers carry no ownership; the body ops between them are
-            // per-iteration-balanced (verified flat, one iteration).
-            | Op::LoopStart
-            | Op::LoopBreakUnless { .. }
-            | Op::LoopEnd => {}
+            Op::IfThen { .. } => self.enter_branch_frame(),
+            Op::Else { .. } => self.switch_to_else_arm(),
+            Op::EndIf { .. } => self.join_branch_arms(i),
             // VALUE-RC modeling (柱C extension) — bring the Value refcount ops out of the prim blind
             // spot for the NAMEABLE case: prim.handle(v) carries its source object in args[0], so the
             // self.rc events on it verify against the same self.rc machine. load64-fed handles have no carrier
             // and stay unmodeled (the differential-test floor). MIRRORED in ownership_certificate.
-            Op::Prim { kind, dst, args } => match kind {
-                PrimKind::Handle => {
-                    if let (Some(d), Some(&o)) =
-                        (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
-                    {
-                        self.object_of.insert(*d, o);
-                    }
-                }
-                PrimKind::RcInc => {
-                    if let Some(&o) = args.first().and_then(|a| self.object_of.get(a)) {
-                        *self.rc.entry(o).or_insert(0) += 1;
-                    }
-                }
-                PrimKind::RcDec => {
-                    if let Some(&o) = args.first().and_then(|a| self.object_of.get(a)) {
-                        if self.rc.get(&o).copied().unwrap_or(0) >= 1 {
-                            *self.rc.entry(o).or_insert(0) -= 1;
-                        }
-                    }
-                }
-                _ => {}
-            },
+            Op::Prim { kind, dst, args } => self.apply_prim_rc_event(kind, dst, args),
             // `SetLocal` into a HEAP slot is a loop-carried REBIND (`acc = acc + [x]`):
             // the slot now aliases the source's object. The slot's OLD object was
             // released by a preceding `Drop` in the loop body, so rebinding makes the
@@ -346,12 +235,225 @@ impl OwnershipScan {
             // (a self.rc-preserving loop body is leak/double-free-free for any iteration
             // count). For a SCALAR src (the scalar-TCO loop var) `self.object_of` has no
             // entry, so this is a no-op, as before.
-            Op::SetLocal { local, src } => {
-                if let Some(o) = self.object_of.get(src).copied() {
-                    self.object_of.insert(*local, o);
-                    self.dead.insert(*local, false);
+            Op::SetLocal { local, src } => self.rebind_local_slot(*local, *src),
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): a FRESH owned object —
+    /// `dst` is its own object representative, WE hold its single reference, and the
+    /// handle is live. The shared body of the `Alloc` and `ListLit` arms and of a
+    /// heap call `result` (all three are the same alloc-class +1), verbatim.
+    fn own_fresh_object(&mut self, dst: ValueId) {
+        self.object_of.insert(dst, dst);
+        self.rc.insert(dst, 1);
+        self.dead.insert(dst, false);
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): a BORROWING use — the handle
+    /// must be live, and nothing about the refcount changes. Records a
+    /// [`ViolationKind::UseAfterFree`] when it is not. The shared body of the
+    /// `ListGetScalar`/`ListSetScalar` and `Borrow`/`MakeUnique` arms, verbatim.
+    fn check_borrowed_use(&mut self, i: usize, v: ValueId) {
+        if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, v).is_none() {
+            self.violations.push(violation(i, v, ViolationKind::UseAfterFree));
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): the `Dup` arm — `dst` becomes
+    /// a second handle on `src`'s object and we acquire one more reference to it.
+    /// Verbatim.
+    fn acquire_reference(&mut self, i: usize, dst: ValueId, src: ValueId) {
+        if let Some(o) = live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, src) {
+            // Acquire OUR own reference. A `Dup` of a self.borrowed param has no
+            // prior self.rc entry (we owned none) — start it at 0, then +1.
+            *self.rc.entry(o).or_insert(0) += 1;
+            self.object_of.insert(dst, o);
+            self.dead.insert(dst, false);
+        } else {
+            self.violations.push(violation(i, src, ViolationKind::UseAfterFree));
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): release ONE reference held
+    /// by handle `v`, recording `on_failure` when we hold none to release. The two
+    /// callers differ only in that kind — the whole DROP family reports
+    /// [`ViolationKind::DoubleFree`], `Consume` reports
+    /// [`ViolationKind::UseAfterMove`] — so the kind is the parameter and the
+    /// [`release`] call is verbatim.
+    fn release_or_report(&mut self, i: usize, v: ValueId, on_failure: ViolationKind) {
+        match release(&self.object_of, &mut self.rc, &mut self.dead, &self.borrowed, v) {
+            Ok(()) => {}
+            Err(()) => self.violations.push(violation(i, v, on_failure)),
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): the `Pure` arm — a
+    /// computation that BORROWS every one of its uses, so each accountable one must
+    /// be live. Verbatim.
+    fn check_pure_uses(&mut self, i: usize, uses: &[ValueId]) {
+        for v in uses {
+            // Only heap handles are accountable; scalar uses are absent
+            // from `self.object_of` and correctly skipped.
+            if self.object_of.contains_key(v)
+                && live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none()
+            {
+                self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
+            }
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): the shared body of the
+    /// `Call`/`CallFn`/`CallImport`/`CallIndirect` arms — every heap-handle arg is
+    /// live-checked (borrowed, refcount unchanged) and a heap `result` opens a fresh
+    /// owned object on `dst`. Verbatim, with the three result-insert lines reading
+    /// through [`Self::own_fresh_object`] (the same three inserts, same order).
+    fn borrow_call_args_and_own_result(
+        &mut self,
+        i: usize,
+        args: &[CallArg],
+        dst: &Option<ValueId>,
+        result: &Option<Repr>,
+    ) {
+        for a in args {
+            if let CallArg::Handle(v) = a {
+                if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none() {
+                    self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                 }
             }
+        }
+        if let (Some(d), Some(r)) = (dst, result) {
+            if r.is_heap() {
+                self.own_fresh_object(*d);
+            }
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): the `IfThen` arm — open a
+    /// branch frame remembering the ENTRY state both arms run from. Verbatim.
+    fn enter_branch_frame(&mut self) {
+        self.branches.push(BranchFrame {
+            entry_rc: self.rc.clone(),
+            entry_dead: self.dead.clone(),
+            then_exit: None,
+        });
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): the `Else` arm — park the
+    /// then arm's EXIT state in the frame and rewind the scan to the entry state, so
+    /// the else arm runs from the same place the then arm did. Verbatim.
+    fn switch_to_else_arm(&mut self) {
+        if let Some(fr) = self.branches.last_mut() {
+            fr.then_exit = Some((self.rc.clone(), self.dead.clone()));
+            self.rc = fr.entry_rc.clone();
+            self.dead = fr.entry_dead.clone();
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): the `EndIf` arm — close the
+    /// frame, then run the two phases the arm always ran in this order, the
+    /// agreement CHECK first (it only reads) and the JOIN second. Verbatim.
+    fn join_branch_arms(&mut self, i: usize) {
+        if let Some(fr) = self.branches.pop() {
+            let (then_rc, then_dead) = self.take_then_arm_exit(fr);
+            self.check_branch_agreement(i, &then_rc);
+            self.merge_branch_exits(then_rc, then_dead);
+        }
+    }
+
+    /// Extracted from [`Self::step`]'s `EndIf` arm (codopsy r2, #852, phase 1 of 3):
+    /// the then arm's exit state, rewinding the scan to the frame's entry state when
+    /// there was no `Else` marker. Verbatim.
+    fn take_then_arm_exit(
+        &mut self,
+        fr: BranchFrame,
+    ) -> (BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>) {
+        match fr.then_exit {
+            Some(t) => t,
+            // No Else marker: everything since IfThen was the then arm;
+            // the else arm is empty (= the entry state).
+            None => {
+                let cur = (self.rc.clone(), self.dead.clone());
+                self.rc = fr.entry_rc.clone();
+                self.dead = fr.entry_dead.clone();
+                cur
+            }
+        }
+    }
+
+    /// Extracted from [`Self::step`]'s `EndIf` arm (codopsy r2, #852, phase 2 of 3):
+    /// the arms must AGREE on every object's leaving count — a disagreement is a
+    /// path-dependent leak or double-free. Verbatim.
+    fn check_branch_agreement(&mut self, i: usize, then_rc: &BTreeMap<ValueId, i64>) {
+        // Agreement per object (absent = 0 owned refs).
+        let keys: BTreeSet<ValueId> = then_rc.keys().chain(self.rc.keys()).copied().collect();
+        for k in keys {
+            let a = then_rc.get(&k).copied().unwrap_or(0);
+            let b = self.rc.get(&k).copied().unwrap_or(0);
+            if a != b {
+                self.violations.push(violation(i, k, ViolationKind::BranchDisagreement));
+            }
+        }
+    }
+
+    /// Extracted from [`Self::step`]'s `EndIf` arm (codopsy r2, #852, phase 3 of 3):
+    /// the state the scan continues from after the branch. Verbatim.
+    fn merge_branch_exits(
+        &mut self,
+        then_rc: BTreeMap<ValueId, i64>,
+        then_dead: BTreeMap<ValueId, bool>,
+    ) {
+        // Continue with the JOIN: pointwise max keeps the run stable
+        // after a reported disagreement (no cascading underflows); on
+        // agreement it is the common value. A handle self.dead on EITHER
+        // path is unusable after the merge.
+        for (k, v) in then_rc {
+            let e = self.rc.entry(k).or_insert(0);
+            if v > *e {
+                *e = v;
+            }
+        }
+        for (k, d) in then_dead {
+            let e = self.dead.entry(k).or_insert(d);
+            *e = *e || d;
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): the `Prim` arm — the three
+    /// NAMEABLE Value-rc events (`handle` carries its source object into a second
+    /// handle, `rc_inc`/`rc_dec` move that object's count); every other prim kind is
+    /// ownership-neutral. Verbatim.
+    fn apply_prim_rc_event(&mut self, kind: &PrimKind, dst: &Option<ValueId>, args: &[ValueId]) {
+        match kind {
+            PrimKind::Handle => {
+                if let (Some(d), Some(&o)) =
+                    (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
+                {
+                    self.object_of.insert(*d, o);
+                }
+            }
+            PrimKind::RcInc => {
+                if let Some(&o) = args.first().and_then(|a| self.object_of.get(a)) {
+                    *self.rc.entry(o).or_insert(0) += 1;
+                }
+            }
+            PrimKind::RcDec => {
+                if let Some(&o) = args.first().and_then(|a| self.object_of.get(a)) {
+                    if self.rc.get(&o).copied().unwrap_or(0) >= 1 {
+                        *self.rc.entry(o).or_insert(0) -= 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Extracted from [`Self::step`] (codopsy r2, #852): the `SetLocal` arm — a
+    /// loop-carried rebind aliases the slot onto the source's object and makes it
+    /// live again. Verbatim.
+    fn rebind_local_slot(&mut self, local: ValueId, src: ValueId) {
+        if let Some(o) = self.object_of.get(&src).copied() {
+            self.object_of.insert(local, o);
+            self.dead.insert(local, false);
         }
     }
 }

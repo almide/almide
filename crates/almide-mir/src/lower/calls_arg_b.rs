@@ -10,58 +10,20 @@ impl LowerCtx {
     /// source order. `Ok(None)` means "not my group" — the router tries the groups
     /// in that order, so which rule an argument takes is unchanged, and an `Err`
     /// still aborts the whole call as before.
+    ///
+    /// Each arm's BODY now lives in its own helper below (codopsy round-2 complexity
+    /// sweep, cyc 58 / cog 75): this is a pure dispatch table, so the arm patterns,
+    /// their guards and their order — and therefore which rule an argument takes —
+    /// are byte-for-byte the ones that were here before.
     fn lower_call_arg_operator(
         &mut self,
         a: &IrExpr,
         out: &mut Vec<CallArg>,
     ) -> Result<Option<ArgOutcome>, LowerError> {
         let _ = &out;
-        Ok(Some(ArgOutcome::Value(match &a.kind {
+        match &a.kind {
             IrExprKind::UnwrapOr { expr, fallback } => {
-                let mark = self.ops.len();
-                let lhh_mark = self.live_heap_handles.len();
-                match self.try_lower_option_unwrap_or(expr, fallback, true) {
-                    Some(v) if is_heap_ty(&a.ty) => CallArg::Handle(v),
-                    Some(v) => CallArg::Scalar(v),
-                    None => {
-                        self.ops.truncate(mark);
-                        self.live_heap_handles.truncate(lhh_mark);
-                        if is_heap_ty(&a.ty) {
-                            // A non-lowerable `??` with a HEAP result as a call ARGUMENT
-                            // would borrow an empty deferred heap value = a SILENT
-                            // MISCOMPILE. Reject. (A SCALAR `??` falls to the deferred
-                            // `Const` 0 below — the separate silent-zero class, left as-is.)
-                            return Err(LowerError::Unsupported(
-                                "non-lowerable `??` with a heap result in a call-argument \
-                                 position (would borrow an empty deferred heap value)"
-                                    .into(),
-                            ));
-                        }
-                        // A `??` over an OPTION operand whose Some-payload could NOT be read
-                        // (`r.opt ?? -1.0` over an `Option[scalar]` FIELD access — no tracked
-                        // handle) must NOT silently take the fallback: a `Const 0` reads the
-                        // WRONG arm when the Option is `Some` (a silent miscompile, exposed once
-                        // derived-Codec `Option` decode links — codec_float_int). WALL it. A
-                        // Result `??` (`int.parse(s) ?? -1`) keeps the Const-0 class below.
-                        if matches!(&expr.ty,
-                            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
-                        {
-                            return Err(LowerError::Unsupported(
-                                "non-lowerable `??` over an Option operand in a call-argument \
-                                 position cannot be faithfully computed (a Const-0 would take \
-                                 the fallback when the Option is Some) not in this brick"
-                                    .into(),
-                            ));
-                        }
-                        let dst = self.fresh_value();
-                        self.record_elided_calls(a);
-                        if crate::lower::strict_values() {
-                return Err(crate::lower::strict_const_wall(&format!("call argument ({})", kind_name(&a.kind))));
-            }
-            self.ops.push(Op::Const { dst });
-                        CallArg::Scalar(dst)
-                    }
-                }
+                self.lower_call_arg_unwrap_or(a, expr, fallback).map(Some)
             }
             // A scalar-result `match` over a HEAP subject must EXECUTE: a VARIANT
             // (Option/Result) via the tag-read value-match, a scalar-pattern subject via
@@ -73,20 +35,7 @@ impl LowerCtx {
             IrExprKind::Match { subject, .. }
                 if !is_heap_ty(&a.ty) && is_heap_ty(&subject.ty) =>
             {
-                let mark = self.ops.len();
-                match self.lower_scalar_value(a) {
-                    Some(v) => CallArg::Scalar(v),
-                    None => {
-                        self.ops.truncate(mark);
-                        return Err(LowerError::Unsupported(
-                            "scalar-result match over a heap subject in a call-argument \
-                             position outside the executable subset cannot be faithfully \
-                             computed (a Const-0 would silently pick a wrong arm) not in \
-                             this brick"
-                                .into(),
-                        ));
-                    }
-                }
+                self.lower_call_arg_scalar_match_over_heap(a).map(Some)
             }
             // A fresh BinOp/UnOp result as an argument (`f(a + b)`, `f(-n)`), or an
             // ERROR OPERATOR result (`f(x!)`, `f(x ?? d)`, `f(x?.field)`): a fresh
@@ -97,59 +46,21 @@ impl LowerCtx {
             // deferred `Const`/`Opaque` = a SILENT MISCOMPILE (`f(int.parse(s)!)` passed 0).
             // The faithful lowering needs early-return-on-Err (a later brick); until then
             // WALL it — NEVER pass a silently-wrong value (the ② cardinal rule).
-            IrExprKind::Unwrap { .. } => {
-                return Err(LowerError::Unsupported(
-                    "unwrap `!` in a call-argument position cannot be faithfully computed \
-                     (needs early-return propagation; a Const/Opaque would be a silently \
-                     wrong value) not in this brick"
-                        .into(),
-                ));
-            }
+            IrExprKind::Unwrap { .. } => Err(LowerError::Unsupported(
+                "unwrap `!` in a call-argument position cannot be faithfully computed \
+                 (needs early-return propagation; a Const/Opaque would be a silently \
+                 wrong value) not in this brick"
+                    .into(),
+            )),
             // A RANGE argument with SCALAR bounds (`f(0..n)` — the gguf
             // parse_metadata_entries `for _ in 0..count` append-accumulator desugar):
             // materialize the REAL list via the self-hosted `list.range` (a fresh owned
             // List[Int], borrowed into the call, dropped at scope end). An inclusive
             // range widens the end by one (`a..=b` = `range(a, b+1)`), exactly v0's
             // iteration space. Non-scalar bounds still wall below.
-            IrExprKind::Range { start, end, inclusive } if is_heap_ty(&a.ty) => {
-                let range_mark = self.ops.len();
-                let (s_v, e_v0) = match (
-                    self.lower_scalar_value(start),
-                    self.lower_scalar_value(end),
-                ) {
-                    (Some(sv), Some(ev)) => (sv, ev),
-                    _ => {
-                        self.ops.truncate(range_mark);
-                        return Err(LowerError::Unsupported(
-                            "heap-result Range in a call-argument position cannot be                                  faithfully computed in this brick (non-scalar bound)"
-                                .into(),
-                        ));
-                    }
-                };
-                let mut e_v = e_v0;
-                if *inclusive {
-                    let one = self.fresh_value();
-                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                    let e2 = self.fresh_value();
-                    self.ops.push(Op::IntBinOp {
-                        dst: e2,
-                        op: crate::IntOp::Add,
-                        a: e_v,
-                        b: one,
-                    });
-                    e_v = e2;
-                }
-                let repr = repr_of(&a.ty)?;
-                let dst = self.fresh_value();
-                self.ops.push(Op::CallFn {
-                    dst: Some(dst),
-                    name: "list.range".to_string(),
-                    args: vec![CallArg::Scalar(s_v), CallArg::Scalar(e_v)],
-                    result: Some(repr),
-                });
-                out.push(self.materialized_call_arg(dst, repr, &a.ty));
-                return Ok(Some(ArgOutcome::Pushed));
-            }
+            IrExprKind::Range { start, end, inclusive } if is_heap_ty(&a.ty) => self
+                .lower_call_arg_range_list(a, start, end, *inclusive, out)
+                .map(Some),
             IrExprKind::BinOp { .. }
             | IrExprKind::UnOp { .. }
             | IrExprKind::Try { .. }
@@ -164,34 +75,7 @@ impl LowerCtx {
             | IrExprKind::RuntimeCall { .. }
             | IrExprKind::If { .. }
             | IrExprKind::Match { .. } => {
-                if is_heap_ty(&a.ty) {
-                    // A heap-result operator / branch as a call ARGUMENT (`f(a ++ b)`
-                    // unlowered, `f(if c then "a" else "b")`, `f(0..n)`) would borrow an
-                    // empty deferred heap value into the callee = a SILENT MISCOMPILE.
-                    return Err(LowerError::Unsupported(format!(
-                        "heap-result {} in a call-argument position cannot be faithfully \
-                         computed in this brick (would borrow an empty deferred heap value)",
-                        kind_name(&a.kind)
-                    )));
-                } else {
-                    // A scalar Int arithmetic / comparison / prim arg computes its
-                    // REAL value (`f(n / 10)` → IntBinOp); outside that subset it
-                    // rolls back to the deferred Const + elided caps marker.
-                    let mark = self.ops.len();
-                    match self.lower_scalar_value(a) {
-                        Some(v) => CallArg::Scalar(v),
-                        None => {
-                            self.ops.truncate(mark);
-                            let dst = self.fresh_value();
-                            self.record_elided_calls(a);
-                            if crate::lower::strict_values() {
-                return Err(crate::lower::strict_const_wall(&format!("call argument ({})", kind_name(&a.kind))));
-            }
-            self.ops.push(Op::Const { dst });
-                            CallArg::Scalar(dst)
-                        }
-                    }
-                }
+                self.lower_call_arg_fresh_operator_value(a).map(Some)
             }
             // A field/element/tuple EXTRACTION argument. A SCALAR result is an
             // unambiguous COPY → `Const`. A HEAP result is an ALIAS/share of
@@ -203,105 +87,7 @@ impl LowerCtx {
             | IrExprKind::IndexAccess { .. }
             | IrExprKind::MapAccess { .. }
             | IrExprKind::TupleIndex { .. } => {
-                if is_heap_ty(&a.ty) {
-                    let repr = repr_of(&a.ty)?;
-                    // A non-var container (`f().x`) cannot be aliased (no single `src` to
-                    // `Dup`); the deferred Opaque empty value borrowed into the callee is a
-                    // SILENT MISCOMPILE, so a failed extraction rejects here.
-                    let dst = self.lower_heap_extraction(a)?;
-                    // A precise heap-field BORROW (`b.label`) is in `param_values` — the
-                    // container owns it, so it is passed by Handle WITHOUT joining the
-                    // scope-end drop set (no second owner, no double-free). A container-
-                    // grain Dup / deferred Opaque is a fresh owned temp → tracked normally.
-                    if self.param_values.contains(&dst) {
-                        CallArg::Handle(dst)
-                    } else {
-                        self.materialized_call_arg(dst, repr, &a.ty)
-                    }
-                } else {
-                    // A SCALAR extraction (`r.x`, `t.0`, `xs[i]`) — load the REAL field /
-                    // element value from the block's layout slot when the container is a
-                    // materialized scalar aggregate / a tracked list (the VALUE MODEL).
-                    // `lower_scalar_value` dispatches Member/TupleIndex to the field load and
-                    // IndexAccess to the bounds-checked `$elem_addr` load. Outside that subset
-                    // (a non-var / heap-field-aggregate container, or a computed container
-                    // `g().field`) it rolls back to a deferred `Const` copy with the
-                    // container's calls elided (the caps fold then sees them), as before.
-                    let mark = self.ops.len();
-                    match self.lower_scalar_value(a) {
-                        Some(v) => CallArg::Scalar(v),
-                        None => {
-                            self.ops.truncate(mark);
-                            // ANF-LIFT `f().x` (a scalar field on a call result — the
-                            // paren-defaults `mk_defaults().port` shape): bind the call
-                            // to a SYNTHETIC temp exactly like `let tmp = f(); tmp.x`
-                            // (the tail.rs heap-extraction discipline — the bind tracks
-                            // + seeds the record's read shape), then the field-slot load
-                            // resolves over the tracked temp.
-                            let lifted = if let IrExprKind::Member { object, field } = &a.kind
-                            {
-                                if matches!(object.kind, IrExprKind::Call { .. })
-                                    && is_heap_ty(&object.ty)
-                                {
-                                    let tmp = self.fresh_synth_var();
-                                    let field = *field;
-                                    let obj_ty = object.ty.clone();
-                                    self.lower_bind(tmp, &obj_ty, object).ok().and_then(
-                                        |_| {
-                                            let synth = IrExpr {
-                                                kind: IrExprKind::Member {
-                                                    object: Box::new(IrExpr {
-                                                        kind: IrExprKind::Var { id: tmp },
-                                                        ty: obj_ty,
-                                                        span: object.span.clone(),
-                                                        def_id: None,
-                                                    }),
-                                                    field,
-                                                },
-                                                ty: a.ty.clone(),
-                                                span: a.span.clone(),
-                                                def_id: None,
-                                            };
-                                            self.lower_scalar_value(&synth)
-                                        },
-                                    )
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-                            if let Some(v) = lifted {
-                                out.push(CallArg::Scalar(v));
-                                return Ok(Some(ArgOutcome::Pushed));
-                            }
-                            self.ops.truncate(mark);
-                            // A scalar field access on a COMPUTED CALL result (`mk(5).x`)
-                            // — the call result is not a tracked aggregate, so a Const-0
-                            // reads a WRONG value (and the record-returning callee now
-                            // renders, making it observable). WALL it. A tracked-Var
-                            // container (`r.x`) lowered above and never reaches here; other
-                            // computed containers keep the deferred Const (unchanged).
-                            if let IrExprKind::Member { object, .. } = &a.kind {
-                                if matches!(object.kind, IrExprKind::Call { .. }) {
-                                    return Err(LowerError::Unsupported(
-                                        "scalar field access on a computed call result \
-                                         cannot be faithfully computed in this brick (a \
-                                         Const-0 would read a wrong value) not in this brick"
-                                            .into(),
-                                    ));
-                                }
-                            }
-                            let dst = self.fresh_value();
-                            if crate::lower::strict_values() {
-                return Err(crate::lower::strict_const_wall(&format!("call argument ({})", kind_name(&a.kind))));
-            }
-            self.ops.push(Op::Const { dst });
-                            self.record_elided_calls(a);
-                            CallArg::Scalar(dst)
-                        }
-                    }
-                }
+                self.lower_call_arg_extraction(a, out).map(Some)
             }
             // A custom-variant CONSTRUCTOR argument (`val(Num(7))`, `f(Eof)`) — NOT a
             // function call: materialize the tagged value-model block (tag@slot0 + scalar
@@ -310,8 +96,353 @@ impl LowerCtx {
             // Must PRECEDE the generic Named-call arm, which would emit a dangling
             // `CallFn "Num"` (an unlinked call = invalid wasm). Outside the subset (a
             // heap/recursive ctor field — ADT brick 5) it WALLs, never a wrong-bytes block.
-            _ => return Ok(None),
-        })))
+            _ => Ok(None),
+        }
+    }
+
+    /// A `??` ARGUMENT: the self-host-materialized unwrap when
+    /// `try_lower_option_unwrap_or` executes it (a heap result is BORROWED, a scalar
+    /// passed by value), otherwise the speculative ops + handles are rolled back to
+    /// their marks and [`Self::deferred_unwrap_or_call_arg`] decides the fallback.
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the `UnwrapOr` arm verbatim, rollback marks and all.
+    fn lower_call_arg_unwrap_or(
+        &mut self,
+        a: &IrExpr,
+        expr: &IrExpr,
+        fallback: &IrExpr,
+    ) -> Result<ArgOutcome, LowerError> {
+        let mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        Ok(ArgOutcome::Value(
+            match self.try_lower_option_unwrap_or(expr, fallback, true) {
+                Some(v) if is_heap_ty(&a.ty) => CallArg::Handle(v),
+                Some(v) => CallArg::Scalar(v),
+                None => {
+                    self.ops.truncate(mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    self.deferred_unwrap_or_call_arg(a, expr)?
+                }
+            },
+        ))
+    }
+
+    /// What a NON-lowerable `??` argument becomes once the speculative lowering has
+    /// been rolled back: a WALL for the two shapes where the deferred value would be
+    /// a silent miscompile (a heap result, an Option operand), the deferred `Const`
+    /// otherwise.
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the `UnwrapOr` arm's `None` branch verbatim, every guard in source order.
+    fn deferred_unwrap_or_call_arg(
+        &mut self,
+        a: &IrExpr,
+        expr: &IrExpr,
+    ) -> Result<CallArg, LowerError> {
+        if is_heap_ty(&a.ty) {
+            // A non-lowerable `??` with a HEAP result as a call ARGUMENT
+            // would borrow an empty deferred heap value = a SILENT
+            // MISCOMPILE. Reject. (A SCALAR `??` falls to the deferred
+            // `Const` 0 below — the separate silent-zero class, left as-is.)
+            return Err(LowerError::Unsupported(
+                "non-lowerable `??` with a heap result in a call-argument \
+                 position (would borrow an empty deferred heap value)"
+                    .into(),
+            ));
+        }
+        // A `??` over an OPTION operand whose Some-payload could NOT be read
+        // (`r.opt ?? -1.0` over an `Option[scalar]` FIELD access — no tracked
+        // handle) must NOT silently take the fallback: a `Const 0` reads the
+        // WRONG arm when the Option is `Some` (a silent miscompile, exposed once
+        // derived-Codec `Option` decode links — codec_float_int). WALL it. A
+        // Result `??` (`int.parse(s) ?? -1`) keeps the Const-0 class below.
+        if matches!(&expr.ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
+        {
+            return Err(LowerError::Unsupported(
+                "non-lowerable `??` over an Option operand in a call-argument \
+                 position cannot be faithfully computed (a Const-0 would take \
+                 the fallback when the Option is Some) not in this brick"
+                    .into(),
+            ));
+        }
+        let dst = self.fresh_value();
+        self.record_elided_calls(a);
+        if crate::lower::strict_values() {
+            return Err(crate::lower::strict_const_wall(&format!(
+                "call argument ({})",
+                kind_name(&a.kind)
+            )));
+        }
+        self.ops.push(Op::Const { dst });
+        Ok(CallArg::Scalar(dst))
+    }
+
+    /// A scalar-result `match` over a HEAP subject: the executing forms yield a real
+    /// `CallArg::Scalar`, anything outside the executable subset rolls the ops back
+    /// and WALLs (a Const-0 would silently pick a wrong arm).
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the guarded `Match` arm verbatim.
+    fn lower_call_arg_scalar_match_over_heap(
+        &mut self,
+        a: &IrExpr,
+    ) -> Result<ArgOutcome, LowerError> {
+        let mark = self.ops.len();
+        Ok(ArgOutcome::Value(match self.lower_scalar_value(a) {
+            Some(v) => CallArg::Scalar(v),
+            None => {
+                self.ops.truncate(mark);
+                return Err(LowerError::Unsupported(
+                    "scalar-result match over a heap subject in a call-argument \
+                     position outside the executable subset cannot be faithfully \
+                     computed (a Const-0 would silently pick a wrong arm) not in \
+                     this brick"
+                        .into(),
+                ));
+            }
+        }))
+    }
+
+    /// A heap-result RANGE argument with scalar bounds: the REAL `list.range` list,
+    /// pushed to `out` itself (a multi-push shape) and dropped at scope end; a
+    /// non-scalar bound rolls the ops back and WALLs.
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the guarded `Range` arm verbatim, including its own `out.push` + `Pushed`.
+    fn lower_call_arg_range_list(
+        &mut self,
+        a: &IrExpr,
+        start: &IrExpr,
+        end: &IrExpr,
+        inclusive: bool,
+        out: &mut Vec<CallArg>,
+    ) -> Result<ArgOutcome, LowerError> {
+        let range_mark = self.ops.len();
+        let (s_v, e_v0) = match (
+            self.lower_scalar_value(start),
+            self.lower_scalar_value(end),
+        ) {
+            (Some(sv), Some(ev)) => (sv, ev),
+            _ => {
+                self.ops.truncate(range_mark);
+                return Err(LowerError::Unsupported(
+                    "heap-result Range in a call-argument position cannot be                                  faithfully computed in this brick (non-scalar bound)"
+                        .into(),
+                ));
+            }
+        };
+        let mut e_v = e_v0;
+        if inclusive {
+            let one = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: one, value: 1 });
+            let e2 = self.fresh_value();
+            self.ops.push(Op::IntBinOp {
+                dst: e2,
+                op: crate::IntOp::Add,
+                a: e_v,
+                b: one,
+            });
+            e_v = e2;
+        }
+        let repr = repr_of(&a.ty)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: "list.range".to_string(),
+            args: vec![CallArg::Scalar(s_v), CallArg::Scalar(e_v)],
+            result: Some(repr),
+        });
+        out.push(self.materialized_call_arg(dst, repr, &a.ty));
+        Ok(ArgOutcome::Pushed)
+    }
+
+    /// The grouped operator / branch argument (BinOp, UnOp, Try, ToOption,
+    /// OptionalChain, Range, RuntimeCall, `if`, `match`): a heap result WALLs, a
+    /// scalar computes its REAL value or rolls back to the deferred `Const`.
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the grouped arm's body verbatim, its `is_heap_ty` half turned into a guard
+    /// clause over the SAME condition.
+    fn lower_call_arg_fresh_operator_value(
+        &mut self,
+        a: &IrExpr,
+    ) -> Result<ArgOutcome, LowerError> {
+        if is_heap_ty(&a.ty) {
+            // A heap-result operator / branch as a call ARGUMENT (`f(a ++ b)`
+            // unlowered, `f(if c then "a" else "b")`, `f(0..n)`) would borrow an
+            // empty deferred heap value into the callee = a SILENT MISCOMPILE.
+            return Err(LowerError::Unsupported(format!(
+                "heap-result {} in a call-argument position cannot be faithfully \
+                 computed in this brick (would borrow an empty deferred heap value)",
+                kind_name(&a.kind)
+            )));
+        }
+        // A scalar Int arithmetic / comparison / prim arg computes its
+        // REAL value (`f(n / 10)` → IntBinOp); outside that subset it
+        // rolls back to the deferred Const + elided caps marker.
+        let mark = self.ops.len();
+        Ok(ArgOutcome::Value(match self.lower_scalar_value(a) {
+            Some(v) => CallArg::Scalar(v),
+            None => {
+                self.ops.truncate(mark);
+                let dst = self.fresh_value();
+                self.record_elided_calls(a);
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall(&format!(
+                        "call argument ({})",
+                        kind_name(&a.kind)
+                    )));
+                }
+                self.ops.push(Op::Const { dst });
+                CallArg::Scalar(dst)
+            }
+        }))
+    }
+
+    /// A field/element/tuple EXTRACTION argument: the heap half aliases the
+    /// container, the scalar half loads the real field/element value.
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the grouped extraction arm's `is_heap_ty` split, each half verbatim in the
+    /// helper below it.
+    fn lower_call_arg_extraction(
+        &mut self,
+        a: &IrExpr,
+        out: &mut Vec<CallArg>,
+    ) -> Result<ArgOutcome, LowerError> {
+        if is_heap_ty(&a.ty) {
+            return self.alias_heap_extraction_call_arg(a);
+        }
+        self.load_scalar_extraction_call_arg(a, out)
+    }
+
+    /// A HEAP extraction argument: the container-grain `Op::Dup` alias, or — when
+    /// the extraction resolved to a precise heap-field BORROW the container already
+    /// owns — a bare `Handle` that stays out of the scope-end drop set.
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the extraction arm's `is_heap_ty` branch verbatim.
+    fn alias_heap_extraction_call_arg(
+        &mut self,
+        a: &IrExpr,
+    ) -> Result<ArgOutcome, LowerError> {
+        let repr = repr_of(&a.ty)?;
+        // A non-var container (`f().x`) cannot be aliased (no single `src` to
+        // `Dup`); the deferred Opaque empty value borrowed into the callee is a
+        // SILENT MISCOMPILE, so a failed extraction rejects here.
+        let dst = self.lower_heap_extraction(a)?;
+        // A precise heap-field BORROW (`b.label`) is in `param_values` — the
+        // container owns it, so it is passed by Handle WITHOUT joining the
+        // scope-end drop set (no second owner, no double-free). A container-
+        // grain Dup / deferred Opaque is a fresh owned temp → tracked normally.
+        Ok(ArgOutcome::Value(if self.param_values.contains(&dst) {
+            CallArg::Handle(dst)
+        } else {
+            self.materialized_call_arg(dst, repr, &a.ty)
+        }))
+    }
+
+    /// A SCALAR extraction argument: the real field/element load, else the ANF-lift
+    /// of a call-result field, else the computed-call-result WALL, else the deferred
+    /// `Const` copy with the container's calls elided.
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the extraction arm's scalar branch verbatim, guards in source order.
+    fn load_scalar_extraction_call_arg(
+        &mut self,
+        a: &IrExpr,
+        out: &mut Vec<CallArg>,
+    ) -> Result<ArgOutcome, LowerError> {
+        // A SCALAR extraction (`r.x`, `t.0`, `xs[i]`) — load the REAL field /
+        // element value from the block's layout slot when the container is a
+        // materialized scalar aggregate / a tracked list (the VALUE MODEL).
+        // `lower_scalar_value` dispatches Member/TupleIndex to the field load and
+        // IndexAccess to the bounds-checked `$elem_addr` load. Outside that subset
+        // (a non-var / heap-field-aggregate container, or a computed container
+        // `g().field`) it rolls back to a deferred `Const` copy with the
+        // container's calls elided (the caps fold then sees them), as before.
+        let mark = self.ops.len();
+        Ok(ArgOutcome::Value(match self.lower_scalar_value(a) {
+            Some(v) => CallArg::Scalar(v),
+            None => {
+                self.ops.truncate(mark);
+                let lifted = self.lift_call_result_field_load(a);
+                if let Some(v) = lifted {
+                    out.push(CallArg::Scalar(v));
+                    return Ok(ArgOutcome::Pushed);
+                }
+                self.ops.truncate(mark);
+                // A scalar field access on a COMPUTED CALL result (`mk(5).x`)
+                // — the call result is not a tracked aggregate, so a Const-0
+                // reads a WRONG value (and the record-returning callee now
+                // renders, making it observable). WALL it. A tracked-Var
+                // container (`r.x`) lowered above and never reaches here; other
+                // computed containers keep the deferred Const (unchanged).
+                if let IrExprKind::Member { object, .. } = &a.kind {
+                    if matches!(object.kind, IrExprKind::Call { .. }) {
+                        return Err(LowerError::Unsupported(
+                            "scalar field access on a computed call result \
+                             cannot be faithfully computed in this brick (a \
+                             Const-0 would read a wrong value) not in this brick"
+                                .into(),
+                        ));
+                    }
+                }
+                let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall(&format!(
+                        "call argument ({})",
+                        kind_name(&a.kind)
+                    )));
+                }
+                self.ops.push(Op::Const { dst });
+                self.record_elided_calls(a);
+                CallArg::Scalar(dst)
+            }
+        }))
+    }
+
+    /// ANF-LIFT `f().x` (a scalar field on a call result — the
+    /// paren-defaults `mk_defaults().port` shape): bind the call
+    /// to a SYNTHETIC temp exactly like `let tmp = f(); tmp.x`
+    /// (the tail.rs heap-extraction discipline — the bind tracks
+    /// + seeds the record's read shape), then the field-slot load
+    /// resolves over the tracked temp.
+    ///
+    /// Extracted from `lower_call_arg_operator` (codopsy round-2 complexity sweep):
+    /// the scalar-extraction arm's `lifted` binding verbatim. A `None` (a non-Member
+    /// argument, a non-heap-call container, a failed bind or load) leaves the caller
+    /// to roll `self.ops` back to its mark, exactly as before.
+    fn lift_call_result_field_load(&mut self, a: &IrExpr) -> Option<ValueId> {
+        let IrExprKind::Member { object, field } = &a.kind else {
+            return None;
+        };
+        if matches!(object.kind, IrExprKind::Call { .. }) && is_heap_ty(&object.ty) {
+            let tmp = self.fresh_synth_var();
+            let field = *field;
+            let obj_ty = object.ty.clone();
+            self.lower_bind(tmp, &obj_ty, object).ok().and_then(|_| {
+                let synth = IrExpr {
+                    kind: IrExprKind::Member {
+                        object: Box::new(IrExpr {
+                            kind: IrExprKind::Var { id: tmp },
+                            ty: obj_ty,
+                            span: object.span.clone(),
+                            def_id: None,
+                        }),
+                        field,
+                    },
+                    ty: a.ty.clone(),
+                    span: a.span.clone(),
+                    def_id: None,
+                };
+                self.lower_scalar_value(&synth)
+            })
+        } else {
+            None
+        }
     }
 
     /// Calls — named, module-qualified and computed — plus member access.

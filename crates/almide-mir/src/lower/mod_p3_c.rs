@@ -134,34 +134,7 @@ impl LowerCtx {
         // by construction (only real constructions are ever stored through `__mg_take`/
         // `Store`), so member reads and spreads work on it.
         if let Some((index, ty)) = crate::lower::mutable_global_info(var) {
-            let addr = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
-            if is_heap_ty(&ty) {
-                let repr = repr_of(&ty)?;
-                // BORROW the slot's handle then `Dup` it — the same borrow-then-Dup the
-                // spread-record copy uses (cert `a`; the render's Dup IS the `rc_inc`),
-                // so the function owns a real reference the slot's later reassignment
-                // cannot invalidate. No call op is injected (the caps count stays exact).
-                let borrowed = self.fresh_value();
-                self.ops.push(Op::Prim {
-                    kind: crate::PrimKind::LoadHandle,
-                    dst: Some(borrowed),
-                    args: vec![addr],
-                });
-                let dst = self.fresh_value();
-                self.ops.push(Op::Dup { dst, src: borrowed });
-                self.materialized_call_arg(dst, repr, &ty);
-                self.materialized_aggregates.insert(dst);
-                self.materialized_lists.insert(dst);
-                return Ok(dst);
-            }
-            let dst = self.fresh_value();
-            self.ops.push(Op::Prim {
-                kind: crate::PrimKind::Load { width: 8 },
-                dst: Some(dst),
-                args: vec![addr],
-            });
-            return Ok(dst);
+            return self.read_mutable_global_slot(index, &ty);
         }
         let ty = self
             .globals
@@ -169,152 +142,7 @@ impl LowerCtx {
             .cloned()
             .ok_or_else(|| LowerError::Unsupported(format!("use of unbound var {var:?}")))?;
         if is_heap_ty(&ty) {
-            // A HEAP module-level global (the base64 alphabet, the aes S-box): MATERIALIZE a FRESH
-            // OWNED copy of its CONST initializer as a DIRECT `Alloc` — a string literal (`Init::Str`),
-            // an int-list literal (`Init::IntList`), or `bytes.from_list([int literals])` (`Init::Bytes`).
-            // CRITICAL: only a CONST-foldable init (NO runtime call) is admitted, so the materialization
-            // injects ZERO `CallFn` ops — the gate's IR-side `count_ir_calls` stays exact (`mir == ir`).
-            // A COMPUTED init (`string.from_codepoint(10)`, a user call) would inject a call the IR-body
-            // count never sees (mir>ir = a false caps de-taint), so it keeps WALLING (no regression).
-            // The fresh owned copy is dropped at scope end like any literal (cert: one `i` + one `d`);
-            // `value_of[var]` caches it so repeated references in the SAME function reuse the one copy.
-            if let Some(init) = self.global_inits.get(&var).cloned() {
-                // A global whose init is ANOTHER global (`let DIRECT = letlib.GREETING` —
-                // the #632 alias-let): recurse through value_or_global on the SOURCE id (a
-                // fresh owned copy of ITS const init, cached + dropped at scope end); this
-                // reference aliases the same local copy (reads only — no second owner).
-                // Zero calls injected (the source resolves through the same const-only
-                // machinery), so the count gate stays exact.
-                if let IrExprKind::Var { id: src } = &init.kind {
-                    let src = *src;
-                    // `let snapshot = counter` over a MUTABLE source: v0 evaluates the
-                    // alias ONCE at startup; recursing here would read the slot's CURRENT
-                    // value at each use — a divergence, so WALL the alias instead.
-                    if crate::lower::is_mutable_global(src) {
-                        return Err(LowerError::Unsupported(format!(
-                            "global alias-let of a MUTABLE module-level var {src:?} (a \
-                             startup snapshot) is not in this brick"
-                        )));
-                    }
-                    if self.globals.contains_key(&src) {
-                        let v = self.value_or_global(src)?;
-                        self.value_of.insert(var, v);
-                        return Ok(v);
-                    }
-                }
-                if let Some(const_init) = const_global_init(&init) {
-                    let repr = repr_of(&ty)?;
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::Alloc { dst, repr, init: const_init });
-                    self.live_heap_handles.push(dst);
-                    self.value_of.insert(var, dst);
-                    return Ok(dst);
-                }
-                // A NESTED-OWNERSHIP heap global with no flat CONST-data form but a PURE
-                // (call-free) LITERAL initializer — the `let DIFFICULTIES = ["basic", …]`
-                // shape: materialize a FRESH OWNED copy via the SAME `DynListStr` builder a
-                // local `let xs = [..]` uses (`try_lower_str_list_literal`). GATED to a
-                // call-free literal list (`is_pure_literal_list`) so the materialization
-                // injects ZERO `CallFn` — the IR reference is a single `Var` (0 calls), so the
-                // gate's `mir == ir` count stays exact. A COMPUTED element (`[f(x)]`,
-                // `string.repeat(..)`) is NOT pure → keeps walling (no mir>ir de-taint). The
-                // builder registers the right recursive drop set (`heap_elem_lists` →
-                // `DropListStr`); we add it to `live_heap_handles` so the fresh owned copy is
-                // freed at scope end (cert one `i` + one `d`), the real module global untouched.
-                if is_pure_literal_list(&init) {
-                    if let Some(dst) = self.try_lower_str_list_literal(&init) {
-                        self.live_heap_handles.push(dst);
-                        self.value_of.insert(var, dst);
-                        return Ok(dst);
-                    }
-                }
-                // A RECORD-literal heap global (`let CFG = Cfg { name: "c" }` — the #502
-                // spread/member base): call-free fields construct through the SAME builder
-                // a local record `let` uses (`try_lower_record_construct` — allocs + stores
-                // ONLY, zero `CallFn`, so the gate's `mir == ir` count stays exact), which
-                // registers the record's own drop route. The fresh owned copy frees at
-                // scope end; the real module global is untouched.
-                if matches!(init.kind, IrExprKind::Record { .. })
-                    && !crate::lower::expr_contains_call(&init)
-                {
-                    // A SCALAR-ONLY record global (`let _transparent = { r: 0.0, a: 0.0 }`)
-                    // constructs through the scalar builder (the mixed builder defers it).
-                    if let Some(dst) = self
-                        .try_lower_record_construct(&init)
-                        .or_else(|| self.try_lower_scalar_record_construct(&init))
-                    {
-                        if !self.live_heap_handles.contains(&dst) {
-                            self.live_heap_handles.push(dst);
-                        }
-                        // The copy's slots are REAL — register it so member reads and
-                        // `{ ...global, override }` spreads take the materialized path.
-                        self.materialized_aggregates.insert(dst);
-                        // A heap-nested record copy (`_default`'s `bg: Color` slot) frees
-                        // via its recursive `$__drop_<R>` at scope end — the flat mask
-                        // alone would leak a heap-IN-nested field on deeper shapes.
-                        if let Some(name) = self.record_or_anon_drop_type_name(&ty) {
-                            self.record_masks.remove(&dst);
-                            self.variant_drop_handles.insert(dst, name);
-                        }
-                        self.value_of.insert(var, dst);
-                        return Ok(dst);
-                    }
-                }
-                // An OPTION-ctor heap global (`let MAYBE = some(Cfg { name: "opt" })` —
-                // the crossmod option_record_toplet): a call-free `some(...)`/`none`
-                // initializer builds through the SAME ctor builder a local `let o =
-                // some(..)` uses (allocs + stores only, zero `CallFn` — the count gate
-                // stays exact), which registers the Option's own drop route. Tracked in
-                // `materialized_options` so a `match m.MAYBE { some(c) => … }` over the
-                // fresh copy EXECUTES (reads the real len-as-tag).
-                if matches!(init.kind, IrExprKind::OptionSome { .. } | IrExprKind::OptionNone)
-                    && !crate::lower::expr_contains_call(&init)
-                {
-                    if let Some(dst) = self.try_lower_option_ctor(&init, &ty) {
-                        if !self.live_heap_handles.contains(&dst) {
-                            self.live_heap_handles.push(dst);
-                        }
-                        self.materialized_options.insert(dst);
-                        self.value_of.insert(var, dst);
-                        return Ok(dst);
-                    }
-                }
-                // A LIST-OF-RECORDS heap global (`let CFGS = [Cfg { name: "a" }, Cfg { name:
-                // "b" }]` — cross_module_toplet_byvalue's #486 list-of-records shape): a
-                // call-free `List` initializer whose elements are all record ctors builds
-                // through the SAME builder a local `let xs = [Cfg{..}, ..]` uses
-                // (`try_lower_record_list_literal` — per-element `try_lower_record_construct`
-                // MOVED into owned i64 slots, zero `CallFn`, so the gate's `mir == ir` count
-                // stays exact), which registers the list's own recursive `$__drop_list_<R>`
-                // drop route (each element freed via `$__drop_<R>`). The fresh owned copy
-                // frees at scope end; the real module global is untouched.
-                if matches!(init.kind, IrExprKind::List { .. })
-                    && !crate::lower::expr_contains_call(&init)
-                {
-                    if let Some(dst) = self.try_lower_record_list_literal(&init) {
-                        if !self.live_heap_handles.contains(&dst) {
-                            self.live_heap_handles.push(dst);
-                        }
-                        self.value_of.insert(var, dst);
-                        return Ok(dst);
-                    }
-                }
-            }
-            crate::trace::trace("ALMIDE_DBG_ELEM", || {
-                match self.global_inits.get(&var) {
-                    Some(i) => format!(
-                        "[global-init] {var:?} init present, kind {}, contains_call={}\n{i:#?}",
-                        crate::lower::kind_name(&i.kind),
-                        crate::lower::expr_contains_call(i)
-                    ),
-                    None => format!("[global-init] {var:?} has NO global_inits entry"),
-                }
-            });
-            return Err(LowerError::Unsupported(format!(
-                "reference to a heap module-level global {var:?} cannot be faithfully \
-                 materialized in this brick (no CONST initializer — a computed init would \
-                 inject an uncounted call)"
-            )));
+            return self.materialize_heap_global(var, &ty);
         }
         // A SCALAR module-level global: materialize its CONST (call-free)
         // initializer's REAL value — a literal, const arithmetic, or a
@@ -324,39 +152,8 @@ impl LowerCtx {
         // zero (top_let_test printed `PI = 0`, a silent miscompile). A
         // call-bearing init would inject CallFn ops the gate's IR-side count
         // never sees, so it WALLS instead (honest, never wrong).
-        if let Some(init) = self.global_inits.get(&var) {
-            fn init_has_call(e: &IrExpr) -> bool {
-                use almide_ir::visit::{walk_expr, IrVisitor};
-                struct C(bool);
-                impl IrVisitor for C {
-                    fn visit_expr(&mut self, e: &IrExpr) {
-                        if matches!(
-                            e.kind,
-                            IrExprKind::Call { .. }
-                                | IrExprKind::TailCall { .. }
-                                | IrExprKind::RuntimeCall { .. }
-                        ) {
-                            self.0 = true;
-                        }
-                        walk_expr(self, e);
-                    }
-                }
-                let mut c = C(false);
-                c.visit_expr(e);
-                c.0
-            }
-            if !init_has_call(init) {
-                let init = init.clone();
-                let mark = self.ops.len();
-                if let Some(dst) = self.lower_scalar_value(&init) {
-                    self.value_of.insert(var, dst);
-                    return Ok(dst);
-                }
-                self.ops.truncate(mark);
-            }
-            return Err(LowerError::Unsupported(format!(
-                "scalar module-level global {var:?} has a non-const-foldable initializer                  (a call would be uncounted; a deferred Const-0 would be silently wrong)                  not in this brick"
-            )));
+        if let Some(init) = self.global_inits.get(&var).cloned() {
+            return self.materialize_scalar_global(var, &init);
         }
         if crate::lower::strict_values() {
             return Err(crate::lower::strict_const_wall("module-level global"));
@@ -365,6 +162,334 @@ impl LowerCtx {
         self.ops.push(Op::Const { dst });
         self.value_of.insert(var, dst);
         Ok(dst)
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 1 of 3): the
+    /// MUTABLE module-level `var` arm verbatim — the fresh STORAGE-SLOT read whose "never
+    /// cached in `value_of`" rationale the caller documents at the dispatch site. A scalar
+    /// is a plain slot `Load`; a heap global borrows the slot's handle and `Dup`s it. Pure
+    /// text move.
+    fn read_mutable_global_slot(&mut self, index: u32, ty: &Ty) -> Result<ValueId, LowerError> {
+        let addr = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+        if is_heap_ty(ty) {
+            let repr = repr_of(ty)?;
+            // BORROW the slot's handle then `Dup` it — the same borrow-then-Dup the
+            // spread-record copy uses (cert `a`; the render's Dup IS the `rc_inc`),
+            // so the function owns a real reference the slot's later reassignment
+            // cannot invalidate. No call op is injected (the caps count stays exact).
+            let borrowed = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::LoadHandle,
+                dst: Some(borrowed),
+                args: vec![addr],
+            });
+            let dst = self.fresh_value();
+            self.ops.push(Op::Dup { dst, src: borrowed });
+            self.materialized_call_arg(dst, repr, ty);
+            self.materialized_aggregates.insert(dst);
+            self.materialized_lists.insert(dst);
+            return Ok(dst);
+        }
+        let dst = self.fresh_value();
+        self.ops.push(Op::Prim {
+            kind: crate::PrimKind::Load { width: 8 },
+            dst: Some(dst),
+            args: vec![addr],
+        });
+        Ok(dst)
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
+    /// `is_heap_ty` arm verbatim — a fresh owned copy of the global's CONST initializer,
+    /// or the wall when no admissible const form exists. The per-initializer-SHAPE arms
+    /// moved on to `materialize_heap_global_from_init`; nothing else changed.
+    fn materialize_heap_global(&mut self, var: VarId, ty: &Ty) -> Result<ValueId, LowerError> {
+        // A HEAP module-level global (the base64 alphabet, the aes S-box): MATERIALIZE a FRESH
+        // OWNED copy of its CONST initializer as a DIRECT `Alloc` — a string literal (`Init::Str`),
+        // an int-list literal (`Init::IntList`), or `bytes.from_list([int literals])` (`Init::Bytes`).
+        // CRITICAL: only a CONST-foldable init (NO runtime call) is admitted, so the materialization
+        // injects ZERO `CallFn` ops — the gate's IR-side `count_ir_calls` stays exact (`mir == ir`).
+        // A COMPUTED init (`string.from_codepoint(10)`, a user call) would inject a call the IR-body
+        // count never sees (mir>ir = a false caps de-taint), so it keeps WALLING (no regression).
+        // The fresh owned copy is dropped at scope end like any literal (cert: one `i` + one `d`);
+        // `value_of[var]` caches it so repeated references in the SAME function reuse the one copy.
+        if let Some(init) = self.global_inits.get(&var).cloned() {
+            if let Some(v) = self.materialize_heap_global_from_init(var, ty, &init)? {
+                return Ok(v);
+            }
+        }
+        crate::trace::trace("ALMIDE_DBG_ELEM", || {
+            match self.global_inits.get(&var) {
+                Some(i) => format!(
+                    "[global-init] {var:?} init present, kind {}, contains_call={}\n{i:#?}",
+                    crate::lower::kind_name(&i.kind),
+                    crate::lower::expr_contains_call(i)
+                ),
+                None => format!("[global-init] {var:?} has NO global_inits entry"),
+            }
+        });
+        Err(LowerError::Unsupported(format!(
+            "reference to a heap module-level global {var:?} cannot be faithfully \
+             materialized in this brick (no CONST initializer — a computed init would \
+             inject an uncounted call)"
+        )))
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
+    /// initializer-SHAPE router for a heap module-level global. Each shape is tried in the
+    /// ORIGINAL order (alias-let → flat const data → pure literal list → record literal →
+    /// Option ctor → list-of-records) and every arm body is a verbatim move; `Ok(None)`
+    /// means no shape matched and the caller walls exactly as the fallthrough did.
+    fn materialize_heap_global_from_init(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        init: &IrExpr,
+    ) -> Result<Option<ValueId>, LowerError> {
+        if let Some(v) = self.materialize_global_alias_let(var, init)? {
+            return Ok(Some(v));
+        }
+        if let Some(v) = self.materialize_const_data_global(var, ty, init)? {
+            return Ok(Some(v));
+        }
+        if let Some(v) = self.materialize_literal_list_global(var, init) {
+            return Ok(Some(v));
+        }
+        if let Some(v) = self.materialize_record_literal_global(var, ty, init) {
+            return Ok(Some(v));
+        }
+        if let Some(v) = self.materialize_option_ctor_global(var, ty, init) {
+            return Ok(Some(v));
+        }
+        Ok(self.materialize_record_list_global(var, init))
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
+    /// alias-let shape, verbatim. `Ok(None)` = the init is not a bare `Var`, or its source
+    /// is not a declared global (the caller tries the next shape); `Err` = the MUTABLE
+    /// source wall.
+    fn materialize_global_alias_let(
+        &mut self,
+        var: VarId,
+        init: &IrExpr,
+    ) -> Result<Option<ValueId>, LowerError> {
+        // A global whose init is ANOTHER global (`let DIRECT = letlib.GREETING` —
+        // the #632 alias-let): recurse through value_or_global on the SOURCE id (a
+        // fresh owned copy of ITS const init, cached + dropped at scope end); this
+        // reference aliases the same local copy (reads only — no second owner).
+        // Zero calls injected (the source resolves through the same const-only
+        // machinery), so the count gate stays exact.
+        let IrExprKind::Var { id: src } = &init.kind else {
+            return Ok(None);
+        };
+        let src = *src;
+        // `let snapshot = counter` over a MUTABLE source: v0 evaluates the
+        // alias ONCE at startup; recursing here would read the slot's CURRENT
+        // value at each use — a divergence, so WALL the alias instead.
+        if crate::lower::is_mutable_global(src) {
+            return Err(LowerError::Unsupported(format!(
+                "global alias-let of a MUTABLE module-level var {src:?} (a \
+                 startup snapshot) is not in this brick"
+            )));
+        }
+        if self.globals.contains_key(&src) {
+            let v = self.value_or_global(src)?;
+            self.value_of.insert(var, v);
+            return Ok(Some(v));
+        }
+        Ok(None)
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the flat
+    /// CONST-data shape, verbatim — a `const_global_init`-foldable initializer (string
+    /// literal, int-list literal, `bytes.from_list`) becomes a direct owned `Alloc`.
+    fn materialize_const_data_global(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        init: &IrExpr,
+    ) -> Result<Option<ValueId>, LowerError> {
+        let Some(const_init) = const_global_init(init) else {
+            return Ok(None);
+        };
+        let repr = repr_of(ty)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc { dst, repr, init: const_init });
+        self.live_heap_handles.push(dst);
+        self.value_of.insert(var, dst);
+        Ok(Some(dst))
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
+    /// pure-literal-list shape, verbatim (the gate and the builder call are unchanged, the
+    /// nesting is now a guard clause).
+    fn materialize_literal_list_global(
+        &mut self,
+        var: VarId,
+        init: &IrExpr,
+    ) -> Option<ValueId> {
+        // A NESTED-OWNERSHIP heap global with no flat CONST-data form but a PURE
+        // (call-free) LITERAL initializer — the `let DIFFICULTIES = ["basic", …]`
+        // shape: materialize a FRESH OWNED copy via the SAME `DynListStr` builder a
+        // local `let xs = [..]` uses (`try_lower_str_list_literal`). GATED to a
+        // call-free literal list (`is_pure_literal_list`) so the materialization
+        // injects ZERO `CallFn` — the IR reference is a single `Var` (0 calls), so the
+        // gate's `mir == ir` count stays exact. A COMPUTED element (`[f(x)]`,
+        // `string.repeat(..)`) is NOT pure → keeps walling (no mir>ir de-taint). The
+        // builder registers the right recursive drop set (`heap_elem_lists` →
+        // `DropListStr`); we add it to `live_heap_handles` so the fresh owned copy is
+        // freed at scope end (cert one `i` + one `d`), the real module global untouched.
+        if !is_pure_literal_list(init) {
+            return None;
+        }
+        let dst = self.try_lower_str_list_literal(init)?;
+        self.live_heap_handles.push(dst);
+        self.value_of.insert(var, dst);
+        Some(dst)
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
+    /// record-literal shape, verbatim. The two-part admission gate keeps its original
+    /// evaluation order (`Record` shape first, `expr_contains_call` only after it matches).
+    fn materialize_record_literal_global(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        init: &IrExpr,
+    ) -> Option<ValueId> {
+        // A RECORD-literal heap global (`let CFG = Cfg { name: "c" }` — the #502
+        // spread/member base): call-free fields construct through the SAME builder
+        // a local record `let` uses (`try_lower_record_construct` — allocs + stores
+        // ONLY, zero `CallFn`, so the gate's `mir == ir` count stays exact), which
+        // registers the record's own drop route. The fresh owned copy frees at
+        // scope end; the real module global is untouched.
+        if !matches!(init.kind, IrExprKind::Record { .. }) {
+            return None;
+        }
+        if crate::lower::expr_contains_call(init) {
+            return None;
+        }
+        // A SCALAR-ONLY record global (`let _transparent = { r: 0.0, a: 0.0 }`)
+        // constructs through the scalar builder (the mixed builder defers it).
+        let dst = self
+            .try_lower_record_construct(init)
+            .or_else(|| self.try_lower_scalar_record_construct(init))?;
+        if !self.live_heap_handles.contains(&dst) {
+            self.live_heap_handles.push(dst);
+        }
+        // The copy's slots are REAL — register it so member reads and
+        // `{ ...global, override }` spreads take the materialized path.
+        self.materialized_aggregates.insert(dst);
+        // A heap-nested record copy (`_default`'s `bg: Color` slot) frees
+        // via its recursive `$__drop_<R>` at scope end — the flat mask
+        // alone would leak a heap-IN-nested field on deeper shapes.
+        if let Some(name) = self.record_or_anon_drop_type_name(ty) {
+            self.record_masks.remove(&dst);
+            self.variant_drop_handles.insert(dst, name);
+        }
+        self.value_of.insert(var, dst);
+        Some(dst)
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
+    /// Option-ctor shape, verbatim. The two-part admission gate keeps its original
+    /// evaluation order (ctor shape first, `expr_contains_call` only after it matches).
+    fn materialize_option_ctor_global(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        init: &IrExpr,
+    ) -> Option<ValueId> {
+        // An OPTION-ctor heap global (`let MAYBE = some(Cfg { name: "opt" })` —
+        // the crossmod option_record_toplet): a call-free `some(...)`/`none`
+        // initializer builds through the SAME ctor builder a local `let o =
+        // some(..)` uses (allocs + stores only, zero `CallFn` — the count gate
+        // stays exact), which registers the Option's own drop route. Tracked in
+        // `materialized_options` so a `match m.MAYBE { some(c) => … }` over the
+        // fresh copy EXECUTES (reads the real len-as-tag).
+        if !matches!(init.kind, IrExprKind::OptionSome { .. } | IrExprKind::OptionNone) {
+            return None;
+        }
+        if crate::lower::expr_contains_call(init) {
+            return None;
+        }
+        let dst = self.try_lower_option_ctor(init, ty)?;
+        if !self.live_heap_handles.contains(&dst) {
+            self.live_heap_handles.push(dst);
+        }
+        self.materialized_options.insert(dst);
+        self.value_of.insert(var, dst);
+        Some(dst)
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
+    /// list-of-records shape, verbatim. The two-part admission gate keeps its original
+    /// evaluation order (`List` shape first, `expr_contains_call` only after it matches).
+    fn materialize_record_list_global(&mut self, var: VarId, init: &IrExpr) -> Option<ValueId> {
+        // A LIST-OF-RECORDS heap global (`let CFGS = [Cfg { name: "a" }, Cfg { name:
+        // "b" }]` — cross_module_toplet_byvalue's #486 list-of-records shape): a
+        // call-free `List` initializer whose elements are all record ctors builds
+        // through the SAME builder a local `let xs = [Cfg{..}, ..]` uses
+        // (`try_lower_record_list_literal` — per-element `try_lower_record_construct`
+        // MOVED into owned i64 slots, zero `CallFn`, so the gate's `mir == ir` count
+        // stays exact), which registers the list's own recursive `$__drop_list_<R>`
+        // drop route (each element freed via `$__drop_<R>`). The fresh owned copy
+        // frees at scope end; the real module global is untouched.
+        if !matches!(init.kind, IrExprKind::List { .. }) {
+            return None;
+        }
+        if crate::lower::expr_contains_call(init) {
+            return None;
+        }
+        let dst = self.try_lower_record_list_literal(init)?;
+        if !self.live_heap_handles.contains(&dst) {
+            self.live_heap_handles.push(dst);
+        }
+        self.value_of.insert(var, dst);
+        Some(dst)
+    }
+
+    /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 3 of 3): the
+    /// SCALAR module-level global arm verbatim — const-fold the initializer's REAL value
+    /// (rolling `self.ops` back to the mark when the fold fails), else wall. The caller now
+    /// clones the init before dispatching, which the const-fold path did for itself.
+    fn materialize_scalar_global(
+        &mut self,
+        var: VarId,
+        init: &IrExpr,
+    ) -> Result<ValueId, LowerError> {
+        fn init_has_call(e: &IrExpr) -> bool {
+            use almide_ir::visit::{walk_expr, IrVisitor};
+            struct C(bool);
+            impl IrVisitor for C {
+                fn visit_expr(&mut self, e: &IrExpr) {
+                    if matches!(
+                        e.kind,
+                        IrExprKind::Call { .. }
+                            | IrExprKind::TailCall { .. }
+                            | IrExprKind::RuntimeCall { .. }
+                    ) {
+                        self.0 = true;
+                    }
+                    walk_expr(self, e);
+                }
+            }
+            let mut c = C(false);
+            c.visit_expr(e);
+            c.0
+        }
+        if !init_has_call(init) {
+            let mark = self.ops.len();
+            if let Some(dst) = self.lower_scalar_value(init) {
+                self.value_of.insert(var, dst);
+                return Ok(dst);
+            }
+            self.ops.truncate(mark);
+        }
+        Err(LowerError::Unsupported(format!(
+            "scalar module-level global {var:?} has a non-const-foldable initializer                  (a call would be uncounted; a deferred Const-0 would be silently wrong)                  not in this brick"
+        )))
     }
 
     /// The correct release op for a heap value at scope/frame end, by its tracking set (the SINGLE
