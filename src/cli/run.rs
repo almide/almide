@@ -89,6 +89,36 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
 /// previously gated on a per-source-path side file, so path-unstable callers
 /// like the 268-fixture cross-target gate paid a full rustc per fixture per
 /// run even when the generated code was byte-identical.)
+/// A content digest of every file under `<root>/native/` (recursively — asset
+/// subdirectories travel with the modules and are `include_str!`d by them, so
+/// they shape the binary too). Sorted by path so the digest is deterministic.
+/// Empty when there is no `native/` directory.
+fn native_sources_key(root: &std::path::Path) -> String {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if let Ok(bytes) = std::fs::read(&p) {
+                out.push((p, bytes));
+            }
+        }
+    }
+    let native = root.join("native");
+    if !native.is_dir() {
+        return String::new();
+    }
+    let mut files = Vec::new();
+    walk(&native, &mut files);
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut acc = String::new();
+    for (path, bytes) in files {
+        acc.push_str(&format!("{}:{:016x};", path.display(), hash64(&bytes)));
+    }
+    acc
+}
+
 pub(crate) fn build_native_cached(
     rs_code: &str,
     use_test_harness: bool,
@@ -114,9 +144,15 @@ pub(crate) fn build_native_cached(
         .map(|d| format!("{}={}", d.name, d.spec))
         .collect::<Vec<_>>()
         .join(",");
+    // The `native/*.rs` modules are compiled INTO the binary, so their
+    // CONTENTS are part of its identity (#887). Keyed only by the source_root
+    // PATH, editing a native module was a cache hit: nothing recompiled and
+    // `almide build` reported success while shipping the previous binary —
+    // exit 0 even with syntactically invalid Rust in the module.
+    let native_key = source_root.map(native_sources_key).unwrap_or_default();
     let hash_input = format!(
-        "{}:test={}:release={}:deps={}:root={:?}",
-        &rs_code, use_test_harness, release, dep_key, source_root
+        "{}:test={}:release={}:deps={}:root={:?}:native={}",
+        &rs_code, use_test_harness, release, dep_key, source_root, native_key
     );
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let profile_dir = if release { "release" } else { "debug" };
