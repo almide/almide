@@ -71,6 +71,30 @@ if [ ! -s "$OUTDIR/ownership.cert" ]; then
   cleanup; exit 1
 fi
 
+# WITNESS-SIZE GATE (the 2026-07-27 trust-spine incident): the extracted checker and
+# the kernel oracle are SUPERLINEAR in a single witness line. One 231KB names witness
+# (fan_any_early_winner's 8 chained fan.any — the inliner's per-level continuation
+# duplication compounds across sequential calls in ONE function) took [names] from
+# 13s to 53min and parked the kernel oracle past 4 hours; every push after it died
+# CANCELLED, never red. Fail FAST here with the likely offender instead. The largest
+# legitimate line today is ~19KB (regex_fuzz_batch); 64KB is headroom, not a target.
+MAX_WITNESS_LINE=65536
+for cert in names caps caps_graph ownership; do
+  f="$OUTDIR/$cert.cert"
+  [ -f "$f" ] || continue
+  OVER="$(awk -v cap="$MAX_WITNESS_LINE" 'length($0) > cap {print NR": "length($0)" bytes"}' "$f" | head -3)"
+  if [ -n "$OVER" ]; then
+    echo "WALL GATE FAIL: $cert.cert witness line(s) exceed $MAX_WITNESS_LINE bytes — the proven" >&2
+    echo "checker + kernel oracle go superlinear on lines this size (13s -> 53min at 231KB)." >&2
+    echo "Split the offending function (fan.any / branch-bind duplication compounds across" >&2
+    echo "sequential calls in one function) or shrink its lowering:" >&2
+    echo "$OVER" | sed 's/^/  line /' >&2
+    echo "largest functions by heap-object count (the usual suspects):" >&2
+    sed "s|^$ROOT/||" "$OUTDIR/ownership.names" | sort | uniq -c | sort -rn | head -3 >&2
+    cleanup; exit 1
+  fi
+done
+
 # WALLED-REAL RATCHET (enumerated, ratchet-down). History: the wall=0 ENDGAME
 # was reached 2026-07-14 over the then-measured corpus (112 -> 0, docs/roadmap:
 # v1-wall-histogram-goal). The v1 test-runner flip (2026-07-16) then made every

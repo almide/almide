@@ -56,6 +56,12 @@ jobs:
     if: github.server_url == 'https://github.com'
     name: Coq proofs + axiom audit + PCC gate
     runs-on: ubuntu-latest
+    # A green run is ~17 min warm; ~80 min cold (OCaml + Rocq built from source on
+    # an opam cache miss). Without a ceiling, a superlinear-witness regression runs
+    # to GitHub's 6h default and dies CANCELLED by the next push — never red, so
+    # nobody sees it (the 2026-07-27 fan_any_early_winner incident burned a full
+    # day of runners this way). 100 min = cold build + headroom, still a fast red.
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v7
 

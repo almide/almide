@@ -13,42 +13,83 @@
 //
 // Only "the winning thunk is LAST" aliased to the right local, which is the
 // shape the docs happened to use. Every arrangement is pinned here.
+//
+// ONE CASE PER FUNCTION (load-bearing, 2026-07-28): the inliner duplicates the
+// match's ok body — the function's remaining CONTINUATION — once per chain
+// level, so sequential fan.any calls in ONE function MULTIPLY. This file's
+// original 8-call main expanded ~1,700-fold into a 231KB names witness that
+// took trust-spine's [names] pass from 13s to 53min and parked the kernel
+// oracle past 4 hours (2026-07-27; every push after it died cancelled, never
+// red). Function boundaries stop the compounding — each case's duplication is
+// confined to its own tiny body. corpus-wall.sh's witness-size gate now holds
+// this line; removing the duplication itself (join points) is a MIR-level
+// brick, not a desugar rewrite — every join-free encoding re-duplicates
+// somewhere (measured: arm-inlining ~2-3x/call, bind-the-chain ~3.5x/call via
+// desugar_let_bound_heap_branch, guarded var-reassign ~2x/level via the
+// scalar-if-arm branch lowering).
 
 effect fn ok11() -> Result[Int, String] = ok(11)
 effect fn ok22() -> Result[Int, String] = ok(22)
 effect fn ok33() -> Result[Int, String] = ok(33)
 effect fn boom() -> Result[Int, String] = err("boom")
 
-effect fn main() -> Result[Unit, String] = {
-  // Winner FIRST — the case that returned 0.
+// Winner FIRST — the case that returned 0.
+effect fn case_a() -> Result[Unit, String] = {
   let a = fan.any([() => ok11(), () => ok22()])
   println("a=" + int.to_string(a))
+}
 
-  // Winner first, loser after.
+// Winner first, loser after.
+effect fn case_b() -> Result[Unit, String] = {
   let b = fan.any([() => ok11(), () => boom()])
   println("b=" + int.to_string(b))
+}
 
-  // Winner last: the arrangement that always worked.
+// Winner last: the arrangement that always worked.
+effect fn case_c() -> Result[Unit, String] = {
   let c = fan.any([() => boom(), () => ok22()])
   println("c=" + int.to_string(c))
+}
 
-  // Three levels, so the chain is deeper than the single nesting.
+// Three levels, so the chain is deeper than the single nesting.
+effect fn case_d() -> Result[Unit, String] = {
   let d = fan.any([() => ok11(), () => ok22(), () => ok33()])
   println("d=" + int.to_string(d))
+}
 
+effect fn case_e() -> Result[Unit, String] = {
   let e = fan.any([() => boom(), () => ok22(), () => ok33()])
   println("e=" + int.to_string(e))
+}
 
+effect fn case_f() -> Result[Unit, String] = {
   let f = fan.any([() => boom(), () => boom(), () => ok33()])
   println("f=" + int.to_string(f))
+}
 
-  // The match-subject spelling of the same call, and the all-failed fallback.
+// The match-subject spelling of the same call.
+effect fn case_m() -> Result[Unit, String] = {
   match fan.any([() => ok11(), () => ok22()]) {
     ok(v) => println("m=" + int.to_string(v)),
     err(er) => println("m-err=" + er),
   }
+}
+
+// The all-failed fallback.
+effect fn case_g() -> Result[Unit, String] = {
   match fan.any([() => boom(), () => boom()]) {
     ok(v) => println("g=" + int.to_string(v)),
     err(er) => println("g-err=" + er),
   }
+}
+
+effect fn main() -> Result[Unit, String] = {
+  case_a()
+  case_b()
+  case_c()
+  case_d()
+  case_e()
+  case_f()
+  case_m()
+  case_g()
 }
