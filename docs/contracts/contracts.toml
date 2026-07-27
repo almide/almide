@@ -2244,3 +2244,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/negative_float_literal_sized.almd", class = "fixture" },
 ]
+
+# ── NESTED SCALAR-RECORD LIST APPEND ─
+[[contract]]
+id        = "C-183"
+spec      = "ALS-M4"
+title     = "A loop-carried append of a list-of-scalar-records executes on both targets"
+statement = "`gs = gs + [inner]` where the element is `List[P]` and `P` has only scalar fields lowers and runs identically on both targets (#888 — snaidhm's ttf `contours = contours + [pts]`). The concat admitted `List[List[String]]` and `List[List[scalar]]` but not `List[List[<scalar-only record>]]`, so the append fell out of the scalar-loop subset, the enclosing `for` rolled back to its model-one-iteration form, and the function walled on the loop variable. The physics are the same as the admitted cases: a scalar-only record's block is FLAT, so its `rc_dec` IS its full free (which the one-level `scalar_aggregate_elem` case already relies on), and the two-level `DropListListStr` sweep frees each inner element, each inner block, then the outer. Both levels are read back in the fixture so a wrong element handle would surface."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nested_scalar_record_append.almd", class = "fixture" },
+]

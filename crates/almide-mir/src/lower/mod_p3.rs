@@ -622,6 +622,14 @@ impl LowerCtx {
                             }
                         }
                     }
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!(
+                            "[loop-assign] var {var:?} slot={} value kind {} ty {:?}",
+                            self.value_of.contains_key(&var),
+                            crate::lower::kind_name(&value.kind),
+                            value.ty
+                        )
+                    });
                     return Err(LowerError::Unsupported(
                         "heap reassignment in a scalar loop body".into(),
                     ));

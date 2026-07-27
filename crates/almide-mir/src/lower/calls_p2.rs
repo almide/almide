@@ -165,9 +165,26 @@ impl LowerCtx {
         // element recursively via `__drop_closure` — the SAME route the List[Fn] LITERAL
         // builder registers (`ListElemDrop::Closure`), so build and concat agree on the drop.
         let closure_elem = matches!(&elem_ty, Ty::Fn { .. });
+        // A `List[<SCALAR-ONLY record>]` ELEMENT (so `value` is
+        // `List[List[P]]` — snaidhm's ttf `contours = contours + [pts]`,
+        // #888). The inner list is a block of FLAT element blocks, so the
+        // nested `DropListListStr` sweep is exact: it frees each inner
+        // element then each inner block then the outer — the same physics as
+        // the `List[List[String]]` case right above, since a scalar-only
+        // record's `rc_dec` IS its full free (that is what
+        // `scalar_aggregate_elem` already relies on one level down).
+        let list_scalar_aggregate_elem = matches!(&elem_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a) if a.len() == 1)
+            && match &elem_ty {
+                Ty::Applied(_, a) => self
+                    .aggregate_field_tys(&a[0])
+                    .and_then(|(_, tys)| crate::lower::layout::scalar_slots(&tys))
+                    .is_some(),
+                _ => false,
+            };
         if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !flat_list_elem
             && !str_str_elem && !int_str_elem && !str_int_elem && !scalar_aggregate_elem
-            && !flat_variant_elem && !closure_elem
+            && !flat_variant_elem && !closure_elem && !list_scalar_aggregate_elem
             && rich_variant_elem.is_none() && record_elem.is_none()
         {
             return None;
@@ -259,7 +276,10 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Some(dst);
         }
-        if list_str_elem {
+        if list_str_elem || list_scalar_aggregate_elem {
+            // Two-level: the nested sweep frees each inner element, each inner
+            // block, then the outer — exact for a scalar-only record element
+            // too, whose own rc_dec is its full free (#888).
             self.list_list_str_lists.insert(dst);
             return Some(dst);
         }
