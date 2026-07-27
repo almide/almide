@@ -2256,3 +2256,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_scalar_record_append.almd", class = "fixture" },
 ]
+
+# ── INTEGER `^` OPERATOR == math.pow ─
+[[contract]]
+id        = "C-184"
+spec      = "ALS-T6"
+title     = "The integer `^` operator is the same total exponentiation as math.pow on both targets"
+statement = "`a ^ b` on integers evaluates identically to `math.pow(a, b)` on BOTH targets, including a NEGATIVE base and a negative exponent (#895). The wasm leg has always routed `^` through `math.pow`; native rendered it as the OPERATOR form `{left}.pow({right} as u32)`, which carried two divergences. (1) PRECEDENCE: Rust binds a method call tighter than unary minus, so a const-folded negative base emitted `-3i64.pow(2)` == `-(3.pow(2))` == -9 where wasm said 9 — odd exponents agreed by coincidence, which is how it survived to 0.36.0. (2) NEGATIVE EXPONENT: `as u32` wrapped `-1` into 4294967295 and returned garbage instead of the C-047 abort. Native now emits the `almide_pow!` prelude macro — exponentiation by squaring with wrapping multiply, at the BASE's own width, aborting `Error: negative exponent` + exit 1 — so the operator, the stdlib function, and the interpreter's `int_pow` are one implementation in three places. A literal-only sized-int expression (`let b: Int32 = 5 - 3`) is also retyped whole rather than only when it is a bare literal, since nothing in such a tree chose a width and the folded value otherwise reached an `i32` slot as `2i64`."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_pow_operator_negative_base.almd", class = "fixture" },
+]

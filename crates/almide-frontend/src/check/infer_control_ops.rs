@@ -196,7 +196,8 @@ impl Checker {
 
     fn infer_expr_g2_if(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::If { cond, then, else_, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_if called on the wrong ExprKind") };
-                self.infer_expr(cond);
+                let cond_ty = self.infer_expr(cond);
+                self.constrain_condition(cond, cond_ty, "if");
                 let then_ty = self.infer_expr(then);
                 let else_ty = self.infer_expr(else_);
                 // In effect fn bodies, auto-unwrap Result[T, E] → T per

@@ -340,9 +340,16 @@ impl<'a> Interpreter<'a> {
                 Some(v) => Flow::val(Value::Int(v)),
                 None => Flow::Abort(div_msg(b)),
             }),
-            // base.pow(exp as u32), wrapping in release; negative exp is a
-            // type error upstream.
-            PowInt => int2(l, r, |a, b| Flow::val(Value::Int(a.wrapping_pow(b as u32)))),
+            // Total pow: `almide_pow!` / `almide_rt_math_pow` semantics —
+            // exponentiation by squaring over the FULL i64 exponent, wrapping
+            // multiply, and a negative exponent aborts with the same message as
+            // both compiled targets (#895). `wrapping_pow(b as u32)` diverged
+            // twice: it wrapped a negative exponent into a huge u32 and it
+            // truncated exponents past 2^32.
+            PowInt => int2(l, r, |a, b| match int_pow(a, b) {
+                Some(v) => Flow::val(Value::Int(v)),
+                None => Flow::Abort("negative exponent".to_string()),
+            }),
 
             AddFloat => float2(l, r, |a, b| a + b),
             SubFloat => float2(l, r, |a, b| a - b),
@@ -471,6 +478,27 @@ fn float2(l: Value, r: Value, f: impl FnOnce(f64, f64) -> f64) -> Flow {
             b.type_name()
         )),
     }
+}
+
+/// Integer `^`, step for step with `almide_pow!` (native) and the wasm
+/// `math.pow` loop: exponentiation by squaring with wrapping multiply over the
+/// full i64 exponent. `None` means a NEGATIVE exponent, which has no integer
+/// result and aborts on every target (#895).
+fn int_pow(base: i64, exp: i64) -> Option<i64> {
+    if exp < 0 {
+        return None;
+    }
+    let (mut result, mut b, mut e) = (1i64, base, exp as u64);
+    while e > 0 {
+        if e & 1 == 1 {
+            result = result.wrapping_mul(b);
+        }
+        e >>= 1;
+        if e > 0 {
+            b = b.wrapping_mul(b);
+        }
+    }
+    Some(result)
 }
 
 /// The exact native abort message for a failing checked int div/mod.

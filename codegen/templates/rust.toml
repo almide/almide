@@ -68,9 +68,14 @@ template = "almide_ne!({left}, {right})"
 
 # ── Power (type-dispatched) ──
 
+# Int `^` routes through the almide_pow! prelude macro, NOT `.pow()`. The
+# operator form had the SAME precedence trap the Float arm below describes
+# (`-3i64.pow(2)` == `-(3.pow(2))` == -9 where wasm says 9), and its `as u32`
+# exponent cast silently wrapped a negative exponent instead of aborting the way
+# the wasm __pow_trap does. See the macro's comment in almide-codegen (#895).
 [[power_expr]]
 when_type = "Int"
-template = "{left}.pow({right} as u32)"
+template = "almide_pow!({left}, {right})"
 
 # Float `**` routes through the vendored musl-libm pow (almide_rt_math_fpow →
 # almide_rt_libm_pow), NOT platform `f64::powf`, so the result is deterministic

@@ -409,6 +409,24 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // (`Error: <msg>\n` + exit 1) and to the WASM div/mod trap.
     s.push_str(&format!("{macro_attr}macro_rules! almide_div {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_div(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_mod {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_rem(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
+    // almide_pow!: integer `^`. A CALL form, not `{left}.pow({right} as u32)`, for
+    // two reasons that were both live divergences (#895):
+    //   * PRECEDENCE — `-3i64.pow(2)` parses as `-(3.pow(2))` == -9, because Rust
+    //     binds method calls tighter than unary minus. The wasm leg (which routes
+    //     `^` to `math.pow`) said 9. The same trap was already fixed for Float `^`
+    //     by giving it a call form; Int kept the operator form and kept the bug.
+    //   * NEGATIVE EXPONENT — `exp as u32` wrapped a `-1` into 4294967295 and
+    //     computed garbage, where wasm aborts. `^` is TOTAL like `/` and `%`
+    //     (C-001 family): a negative exponent has no integer result, so it aborts
+    //     with the same `Error: negative exponent` + exit 1 as the wasm __pow_trap.
+    // Exponentiation-by-squaring with WRAPPING multiply, matching the wrap-
+    // arithmetic contract and `almide_rt_math_pow` step for step. Generic over
+    // every int width: the accumulator starts at `__b.pow(0)` — one AT THE
+    // BASE'S OWN WIDTH — so a sized-int base keeps its width instead of
+    // widening to i64, and rustc has a concrete receiver type for the
+    // `wrapping_mul` below (a bare `1` literal is an ambiguous `{integer}` that
+    // no method call can resolve).
+    s.push_str(&format!("{macro_attr}macro_rules! almide_pow {{ ($a:expr, $b:expr) => {{{{ let mut __b = $a; let __e0 = ($b) as i64; if __e0 < 0 {{ eprintln!(\"Error: negative exponent\"); std::process::exit(1); }} let mut __e = __e0 as u64; let mut __r = __b.pow(0); while __e > 0 {{ if __e & 1 == 1 {{ __r = __r.wrapping_mul(__b); }} __e >>= 1; if __e > 0 {{ __b = __b.wrapping_mul(__b); }} }} __r }}}}; }}\n"));
     // almide_index!/almide_index_set!: bounds-checked `xs[i]` get/set that abort
     // with the UNIFIED message (`Error: index out of bounds\n` + exit 1), so a
     // native OOB index matches the wasm trap and the div/mod abort contract

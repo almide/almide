@@ -50,7 +50,8 @@ impl Checker {
             }
 
             ExprKind::While { cond, body, .. } => {
-                self.infer_expr(cond);
+                let cond_ty = self.infer_expr(cond);
+                self.constrain_condition(cond, cond_ty, "while");
                 self.env.push_scope();
                 for stmt in body.iter_mut() { self.check_stmt(stmt); }
                 self.env.pop_scope();

@@ -488,6 +488,30 @@ impl Checker {
         self.constrain_with_hint(expected, actual, context, None);
     }
 
+    /// `if` / `while` take a `Bool` condition, full stop — Almide has no
+    /// truthiness, and until this constraint existed the checker accepted every
+    /// condition type (#896). `if 1 then …` ran with C-style truthiness and
+    /// `if "s" then …` passed `check` and then died in codegen as an ICE; both
+    /// are now the ordinary E001 the language always claimed they were.
+    ///
+    /// In an effect fn a condition may still be wearing its `Result[Bool, E]`
+    /// wrapper (the same auto-unwrap asymmetry the if-branch comparison below
+    /// handles), so compare at the unwrapped level when `auto_unwrap` is on.
+    pub(crate) fn constrain_condition(&mut self, cond: &ast::Expr, cond_ty: Ty, keyword: &str) {
+        let actual = if self.env.auto_unwrap {
+            match resolve_ty(&cond_ty, &self.uf) {
+                Ty::Applied(crate::types::TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
+                _ => cond_ty,
+            }
+        } else {
+            cond_ty
+        };
+        let saved = self.current_span;
+        self.current_span = cond.span.or(saved);
+        self.constrain(Ty::Bool, actual, format!("{keyword} condition"));
+        self.current_span = saved;
+    }
+
     pub(crate) fn constrain_with_hint(
         &mut self,
         expected: Ty,
