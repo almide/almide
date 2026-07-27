@@ -204,15 +204,16 @@ fn try_render_wasm_source_impl_rest(
 
     repair_and_substitute_globals(ir, &mut inlined_fns, &mut module_fn_sibs, &layouts, &all_fns);
 
-    let mut main_wall: Option<String> = None;
+    let mut fn_walls: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut functions = lower_main_and_sibling_fns(
         &inlined_fns,
         &module_fn_sibs,
         &layouts,
         ir.functions.len(),
         verbose,
-        &mut main_wall,
+        &mut fn_walls,
     );
+    let main_wall = fn_walls.get("main").cloned();
 
     // Self-append windows (`x = x + [e]`, incl. the `list.push` desugar) →
     // the amortized-O(1) `__list_append1` (self-hosted in list_concat.almd —
@@ -383,10 +384,24 @@ fn try_render_wasm_source_impl_rest(
                 };
                 exports.push((export_name, n.to_string(), param_floats, ret_float));
             } else {
-                return Err(LowerError::Unsupported(format!(
-                    "exported `pub fn {n}` is outside the MIR-lowering subset (the wasm module \
-                     must carry its export)"
-                )));
+                // Name the CAUSE, not just the enclosing construct. The bare
+                // "must carry its export" text described the CONSEQUENCE while the
+                // real decline sat one level down in the fn body, so every
+                // reconstruction of the reported shape compiled and the reader
+                // burned the search on the export machinery — the same
+                // mis-attribution class as #904, reported as #906. `main` has
+                // carried its inner reason since #812; an export now does too.
+                return Err(LowerError::Unsupported(match fn_walls.get(n) {
+                    Some(reason) => format!(
+                        "exported `pub fn {n}` is outside the MIR-lowering subset \
+                         (the wasm module must carry its export): {reason}"
+                    ),
+                    None => format!(
+                        "exported `pub fn {n}` is outside the MIR-lowering subset (the wasm \
+                         module must carry its export; no per-function wall was recorded — \
+                         it was dropped before lowering)"
+                    ),
+                }));
             }
         }
     }

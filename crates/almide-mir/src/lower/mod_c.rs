@@ -682,6 +682,11 @@ mod calls;
 // `classify_corpus` caps counter consults the SAME predicate the lowering uses (no count drift).
 pub use control::unwrap_or_operand_admitted;
 
+// The in-place `&mut` mutator surface (a free fn in the private `calls` module) — re-exported so
+// `inline_pure_call_globals`'s receiver fence tests the SAME predicate the receiver COW does, and
+// the two can never drift apart (#906).
+pub(crate) use calls::is_inplace_mutator;
+
 
 #[cfg(test)]
 mod tests;

@@ -354,15 +354,12 @@ impl LowerCtx {
         //     caller-visible (var_in_if_skinning's blend writes its non-mut
         //     `verts` param and the caller reads the results) — the bare
         //     write-through CallFn is exactly right, no COW.
-        //   - anything else (a record FIELD needs the two-level record+field COW;
-        //     a mutable GLOBAL receiver would mutate a local copy): WALL — a
-        //     possibly-shared write is a silent aliasing miscompile, never emitted.
-        if (module == "bytes"
-            && (func.starts_with("set_")
-                || func.starts_with("write_")
-                || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
-            || (module == "list" && func == "pop")
-        {
+        //   - a mutable module-level `var`: the block is owned by the global's
+        //     STORAGE SLOT, so the COW is the slot's — see `mutable_global_cow`.
+        //   - anything else (a record FIELD needs the two-level record+field COW):
+        //     WALL — a possibly-shared write is a silent aliasing miscompile,
+        //     never emitted.
+        if is_inplace_mutator(module, func) {
             self.cow_inplace_receiver(module, func, args)?;
         }
         let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
@@ -402,9 +399,16 @@ impl LowerCtx {
     /// The #794 in-place-mutator RECEIVER discipline shared by the bytes mutators and
     /// `list.pop`: a LOCAL var receiver gets `Op::MakeUnique` (COW — an alias must keep
     /// the pre-mutation value: `var b = a; list.pop(a)` leaves `b` intact), a BORROWED
-    /// PARAM writes through bare (the caller sees the mutation — the &mut protocol),
-    /// and any other receiver shape (a record field, a fresh temp) WALLS — the write
-    /// would land in a materialized copy and vanish, or alias a shared field.
+    /// PARAM writes through bare (the caller sees the mutation — the &mut protocol), a
+    /// mutable module-level `var` COWs its STORAGE SLOT ([`Self::mutable_global_cow`]),
+    /// a record field takes the two-level record+field COW, and anything else WALLS —
+    /// the write would land in a materialized copy and vanish, or alias a shared field.
+    ///
+    /// Every decline here names the ACTUAL receiver shape (#906). The old text said
+    /// "over a non-var receiver … the two-level record+field COW" for EVERY shape,
+    /// including a plain `var` module-level buffer where neither clause was true —
+    /// so the one action it implied ("make it a `var`") did not lift the wall and the
+    /// reader had nothing to act on.
     pub(crate) fn cow_inplace_receiver(
         &mut self,
         module: &str,
@@ -413,6 +417,26 @@ impl LowerCtx {
     ) -> Result<(), LowerError> {
         match args.first().map(|a| &a.kind) {
             Some(IrExprKind::Var { id }) => {
+                // A MUTABLE module-level `var` is NOT in `value_of` (it is read fresh
+                // from its slot on every reference) — it must be recognized BEFORE
+                // `value_for`, which would report it as an unbound var.
+                if let Some((index, gty)) = crate::lower::mutable_global_info(*id) {
+                    return self.mutable_global_cow(module, func, *id, index, &gty);
+                }
+                // An IMMUTABLE module-level `let` has no storage slot: every reference
+                // materializes a fresh per-use copy (a computed init is inlined at the
+                // use site outright), so the write would land in a temporary and vanish.
+                // Native does not accept this shape either — it renders the top-let as a
+                // non-writable Rust `static` and the generated crate fails to build — so
+                // there is nothing to be faithful TO. Say what actually fixes it.
+                if self.globals.contains_key(id) {
+                    return Err(LowerError::Unsupported(format!(
+                        "in-place mutator {module}.{func} over the IMMUTABLE module-level \
+                         `let` {id:?} — a module-level `let` has no storage slot (each \
+                         reference is a fresh per-use copy), so the write would vanish. \
+                         Declare the buffer `var` to give it one"
+                    )));
+                }
                 let v = self.value_for(*id)?;
                 if !self.param_values.contains(&v) {
                     self.ops.push(Op::MakeUnique { v });
@@ -424,19 +448,101 @@ impl LowerCtx {
             Some(IrExprKind::Member { object, field }) => {
                 self.two_level_field_cow(object, *field).ok_or_else(|| {
                     LowerError::Unsupported(format!(
-                        "in-place mutator {module}.{func} over a non-var receiver \
-                         (a shared record field would alias the write — the two-level \
-                         record+field COW) not in this brick"
+                        "in-place mutator {module}.{func} over the record field `.{}` of a \
+                         receiver that is not a local var bound to a materialized record \
+                         with a resolvable layout — the two-level record+field COW (#794) \
+                         has nothing to make unique",
+                        field.as_str()
                     ))
                 })
             }
-            _ => Err(LowerError::Unsupported(format!(
-                "in-place mutator {module}.{func} over a non-var receiver \
-                 (a shared record field would alias the write — the two-level \
-                 record+field COW) not in this brick"
+            other => Err(LowerError::Unsupported(format!(
+                "in-place mutator {module}.{func} over a {} receiver — a writable receiver \
+                 is a local var, a borrowed param, a module-level `var`, or a record field. \
+                 A temporary (a call result, a literal) has no owner to write back to",
+                other.map(kind_name).unwrap_or("missing"),
             ))),
         }
     }
+
+    /// #906: COW the STORAGE SLOT of a mutable module-level `var` before an in-place
+    /// mutator writes through it — nendo's module-level scratch arena
+    /// (`var g_pool = bytes.new(N)` + `bytes.set_f32_le(g_pool, …)`), which walled with
+    /// "use of unbound var" because a mutable global never enters `value_of`.
+    ///
+    /// The slot owns the block, so this is the two-level COW with the RECORD level
+    /// replaced by the slot (which is real storage — nothing to copy): borrow the slot's
+    /// handle, `Op::MakeUnique` it (at rc > 1 the render's `rc_dec` releases the SLOT's
+    /// reference and a fresh uniquely-owned copy takes its place; at rc == 1 it is a
+    /// no-op), and store the unique handle BACK into the slot. The mutator's own receiver
+    /// arg then re-reads the slot (`value_or_global` never caches a mutable global) and
+    /// writes the uniquely-owned block, so every later read of the global sees the write.
+    ///
+    /// This is the native oracle's semantics exactly: there the global is an `RcCow` and
+    /// the mutator's `make_mut` COWs a shared block, so `let snap = g; bytes.set_at(g, …)`
+    /// leaves `snap` at the pre-write value — verified against the native leg.
+    fn mutable_global_cow(
+        &mut self,
+        module: &str,
+        func: &str,
+        var: almide_ir::VarId,
+        index: u32,
+        gty: &Ty,
+    ) -> Result<(), LowerError> {
+        use crate::PrimKind;
+        // Same fence as `lower_mutable_global_assign`: a MODELED (non-executable) frame
+        // must not carry a global write — both eliding and emitting one diverge from the
+        // native leg, because the write is an EFFECT and the frame never runs.
+        if self.in_frame > 0 && self.unit_arm_depth == 0 && self.scalar_loop_depth == 0 {
+            return Err(LowerError::Unsupported(format!(
+                "in-place mutator {module}.{func} over mutable module-level var {var:?} \
+                 inside a modeled (non-executable) frame — the global write is an effect \
+                 the model would elide"
+            )));
+        }
+        // A SCALAR global holds its value inline, not a block handle: there is no block
+        // to make unique and no in-place mutator takes a scalar receiver anyway.
+        if !is_heap_ty(gty) {
+            return Err(LowerError::Unsupported(format!(
+                "in-place mutator {module}.{func} over the SCALAR module-level var \
+                 {var:?} — its slot holds a value, not a block to write through"
+            )));
+        }
+        let addr = self.fresh_value();
+        self.ops
+            .push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+        let buf = self.fresh_value();
+        self.ops
+            .push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(buf), args: vec![addr] });
+        self.ops.push(Op::MakeUnique { v: buf });
+        // Recompute the address (the store must not depend on the load's operand
+        // staying live across the COW) and write the — possibly new — handle back.
+        let addr2 = self.fresh_value();
+        self.ops
+            .push(Op::ConstInt { dst: addr2, value: crate::mg_slot_addr(index) as i64 });
+        let handle = self.fresh_value();
+        self.ops
+            .push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![buf] });
+        self.ops.push(Op::Prim {
+            kind: PrimKind::Store { width: 8 },
+            dst: None,
+            args: vec![addr2, handle],
+        });
+        Ok(())
+    }
+}
+
+/// The IN-PLACE `&mut` mutator surface: the bytes writers (set_*/write_*/fill/clear/
+/// copy_within/copy_from — their self-host bodies store through args[0]'s block) and
+/// the in-place `list.pop` (the same &mut protocol over a list receiver). Shared with
+/// `inline_pure_call_globals`, which must not substitute a global's initializer into a
+/// RECEIVER position: the write would land in a fresh temporary (#906).
+pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
+    (module == "bytes"
+        && (func.starts_with("set_")
+            || func.starts_with("write_")
+            || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
+        || (module == "list" && func == "pop")
 }
 
 /// Extracted from `LowerCtx::lower_pure_module_call_args` (codopsy8 complexity sweep): the

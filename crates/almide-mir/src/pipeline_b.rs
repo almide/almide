@@ -781,13 +781,19 @@ fn repair_and_substitute_globals(
 /// the main-region tail-inlining pass) or one that itself walls is silently skipped
 /// (the caller then fails the unlinked-call render wall if it truly needed it — stdlib
 /// modules stay out, self-host-linked below).
+///
+/// `fn_walls` collects EVERY walled fn's own reason by name — not just `main`'s. The
+/// exported-`pub fn` decline one layer up reports the ENCLOSING construct, and without
+/// this map it had no inner cause to name; a reader then saw "the wasm module must carry
+/// its export" for a wall that was really a receiver-shape decline one level down, which
+/// is the exact mis-attribution that cost hours on #904 (#906).
 fn lower_main_and_sibling_fns(
     inlined_fns: &[almide_ir::IrFunction],
     module_fn_sibs: &[almide_ir::IrFunction],
     layouts: &PipelineLayouts,
     total_ir_fn_count: usize,
     verbose: bool,
-    main_wall: &mut Option<String>,
+    fn_walls: &mut std::collections::HashMap<String, String>,
 ) -> Vec<crate::MirFunction> {
     let mut functions = Vec::new();
     let mut walled = Vec::new();
@@ -806,14 +812,13 @@ fn lower_main_and_sibling_fns(
         ) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => {
-                // `main`'s own reason is the one worth reporting: when it walls
-                // there is no `$main`, and the whole module declines. Reporting
-                // only the absence turned every distinct cause into one
-                // unattributable bucket — a third of the fuzzer's wall
-                // histogram (#812).
-                if func.name.as_str() == "main" {
-                    *main_wall = Some(format!("{e:?}"));
-                }
+                // Every walled fn's own reason is worth keeping, `main`'s most of
+                // all: when `main` walls there is no `$main` and the whole module
+                // declines, and reporting only the absence turned every distinct
+                // cause into one unattributable bucket — a third of the fuzzer's
+                // wall histogram (#812). An exported `pub fn` declines the module
+                // the same way, so it reads its reason out of here too (#906).
+                fn_walls.insert(func.name.as_str().to_string(), format!("{e:?}"));
                 walled.push(format!("{}: {e:?}", func.name.as_str()));
             }
         }

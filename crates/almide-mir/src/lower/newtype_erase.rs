@@ -629,6 +629,7 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
         fn_bodies: &mut [almide_ir::IrFunction],
         fns: &HashMap<String, IrExpr>,
         effects: &HashSet<String>,
+        mutated: &HashSet<almide_ir::VarId>,
     ) {
         let qualifying: Vec<(almide_ir::VarId, IrExpr)> = top_lets
             .iter()
@@ -636,6 +637,15 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
             // site freezes the read at the init value (writes through the global slot
             // become invisible — `speeds[i]` read `list.repeat(0.0, 4)[i]` = 0.0 forever).
             .filter(|tl| !tl.mutable)
+            // Nor may an IN-PLACE MUTATOR's receiver (#906): substituting `bytes.new(64)`
+            // into `bytes.set_f32_le(g_pool, …)` turns the receiver into a fresh temporary,
+            // and the wall that catches it names the SUBSTITUTED shape ("a non-var
+            // receiver") instead of the global the user wrote. Keeping the `Var` lets the
+            // receiver check report the real cause and the real fix (declare it `var`).
+            // Costs nothing: such a program cannot lower on EITHER leg today — the wasm
+            // receiver check walls it and native renders the top-let as a non-writable
+            // Rust `static`, so the generated crate does not build.
+            .filter(|tl| !mutated.contains(&tl.var))
             .filter(|tl| crate::lower::expr_contains_call(&tl.value))
             .filter(|tl| {
                 let mut visiting = HashSet::new();
@@ -699,15 +709,19 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
 
     let fns_snapshot = fns_by_name;
     let effects_snapshot = effect_fns;
+    // Program-wide (both regions + every module body), so a global mutated in ONE
+    // module is fenced everywhere it is referenced.
+    let mutated = collect_inplace_mutator_receivers(program);
     run_region(
         &mut program.top_lets,
         &mut program.functions,
         &fns_snapshot,
         &effects_snapshot,
+        &mutated,
     );
     let mut modules = std::mem::take(&mut program.modules);
     for m in modules.iter_mut() {
-        run_region(&mut m.top_lets, &mut m.functions, &fns_snapshot, &effects_snapshot);
+        run_region(&mut m.top_lets, &mut m.functions, &fns_snapshot, &effects_snapshot, &mutated);
     }
     program.modules = modules;
 
@@ -772,6 +786,52 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
             f.body = almide_ir::substitute_var_in_expr(&f.body, id, &init);
         }
     }
+}
+
+/// Every var used as the RECEIVER (args[0]) of an in-place `&mut` mutator anywhere in
+/// the program — the [`inline_pure_call_globals`] fence (#906). A receiver position is
+/// a WRITE target, so substituting a global's initializer there produces a temporary
+/// nobody owns; keeping the `Var` lets the receiver check name the global and the fix.
+/// Over-approximating by ignoring VarId regions is harmless: an id that is a local in
+/// one region and a top-let in another only loses an inlining opportunity.
+fn collect_inplace_mutator_receivers(
+    program: &almide_ir::IrProgram,
+) -> std::collections::HashSet<almide_ir::VarId> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    use almide_ir::{CallTarget, IrExprKind};
+    struct V(std::collections::HashSet<almide_ir::VarId>);
+    impl IrVisitor for V {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            | IrExprKind::TailCall {
+                target: CallTarget::Module { module, func, .. }, args, ..
+            } = &e.kind
+            {
+                if crate::lower::is_inplace_mutator(module.as_str(), func.as_str()) {
+                    if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                        self.0.insert(*id);
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut v = V(std::collections::HashSet::new());
+    for f in &program.functions {
+        v.visit_expr(&f.body);
+    }
+    for tl in &program.top_lets {
+        v.visit_expr(&tl.value);
+    }
+    for m in &program.modules {
+        for f in &m.functions {
+            v.visit_expr(&f.body);
+        }
+        for tl in &m.top_lets {
+            v.visit_expr(&tl.value);
+        }
+    }
+    v.0
 }
 
 /// True when the expression tree contains ANY `Var` node — the cross-region

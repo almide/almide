@@ -2293,3 +2293,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_index_element_append.almd", class = "fixture" },
 ]
+
+# ── IN-PLACE MUTATION OF A MODULE-LEVEL `var` BUFFER ─
+[[contract]]
+id        = "C-187"
+spec      = "ALS-M4"
+title     = "An in-place mutator writing through a module-level `var` buffer behaves identically on both targets"
+statement = "`var arena = bytes.new(N)` written with `bytes.set_f32_le` / `bytes.set_at` / `list.pop` — from `main`, from a callee, from a loop, from an `@export(wasm, …)` fn — produces byte-identical output on native and wasm instead of walling the renderer (#906; it blocked almide-graphics/nendo's VRM viewer, which keeps its whole scratch arena in one module-level buffer). A mutable global is deliberately never cached in `value_of` — it is read fresh from its storage slot on every reference so an intervening write is seen — so the in-place-mutator receiver check asked `value_for` and got `use of unbound var`: the receiver was never a local to begin with. The block is owned by the SLOT, so the copy-on-write is the slot's, the two-level record+field COW with the record level replaced by real storage: borrow the slot handle, `MakeUnique` it (at rc > 1 the render's `rc_dec` releases the slot's reference and a fresh uniquely-owned copy takes its place; at rc == 1 it is a no-op), store the unique handle back into the slot. The mutator's own receiver arg then re-reads the slot and writes the uniquely-owned block, so every later read of the global — in any function — sees the write. The aliasing half is what makes the COW load-bearing rather than decoration: native models the global as an `RcCow` whose `make_mut` copies a SHARED block, so `let snap = arena; bytes.set_f32_le(arena, 0, 99.5)` must leave `snap` at the pre-write bytes, which eliding the COW would silently break and copying unconditionally would pay for on every unshared write. A write inside a MODELED (non-executable) frame still walls, the same fence a mutable-global assignment carries: the write is an effect the model would elide. An IMMUTABLE module-level `let` receiver stays refused — it has no storage slot, each reference is a fresh per-use copy, and native renders it as a non-writable Rust `static` — but now says so and names `var` as the fix, instead of reporting `a non-var receiver … the two-level record+field COW`, which was true of neither the shape nor the remedy."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mutable_global_bytes_arena.almd", class = "fixture" },
+]
