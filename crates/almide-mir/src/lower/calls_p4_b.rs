@@ -458,7 +458,54 @@ impl LowerCtx {
         self.emit_narrow_div_overflow_guard(iop, &left.ty, a, b);
         let dst = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
-        Some(dst)
+        Some(self.narrow_wrap(dst, lane_ty, iop))
+    }
+
+    /// Re-wrap an arithmetic result to its DECLARED narrow width (#889).
+    ///
+    /// The MIR carries every integer in one i64, so `Int8 127 + 1` computes
+    /// `128` in the lane; native emits real `i8` arithmetic and wraps to
+    /// `-128`, so the wasm leg printed a value OUTSIDE the type's range and
+    /// the two targets disagreed. Wrapping at the declared width is the
+    /// documented semantics ("narrowing wraps rather than trapping",
+    /// stdlib/int8.almd), so re-apply it here for the ops that can leave the
+    /// range: signed → shift left then ARITHMETIC shift right (sign-extends
+    /// the truncated value), unsigned → mask. Comparisons and Int/Int64
+    /// (already the carrier's own width) are untouched, and `/`/`%` cannot
+    /// leave the range once their operands are in it — the one exception,
+    /// `MIN / -1`, already aborts via `emit_narrow_div_overflow_guard`.
+    fn narrow_wrap(&mut self, v: ValueId, ty: &Ty, iop: crate::IntOp) -> ValueId {
+        if !matches!(
+            iop,
+            crate::IntOp::Add | crate::IntOp::Sub | crate::IntOp::Mul
+        ) {
+            return v;
+        }
+        let (bits, signed) = match ty {
+            Ty::Int8 => (8u32, true),
+            Ty::Int16 => (16, true),
+            Ty::Int32 => (32, true),
+            Ty::UInt8 => (8, false),
+            Ty::UInt16 => (16, false),
+            Ty::UInt32 => (32, false),
+            _ => return v,
+        };
+        if signed {
+            let shift = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: shift, value: (64 - bits) as i64 });
+            let up = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: up, op: crate::IntOp::Shl, a: v, b: shift });
+            let down = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: down, op: crate::IntOp::Shr, a: up, b: shift });
+            down
+        } else {
+            let mask = self.fresh_value();
+            let m = if bits == 64 { -1i64 } else { ((1u64 << bits) - 1) as i64 };
+            self.ops.push(Op::ConstInt { dst: mask, value: m });
+            let out = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: out, op: crate::IntOp::And, a: v, b: mask });
+            out
+        }
     }
 
     /// Extracted from `Self::lower_scalar_binop_int_fallback` (ninth-round split, cog

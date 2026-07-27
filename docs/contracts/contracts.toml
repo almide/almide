@@ -2208,3 +2208,27 @@ evidence  = [
   { path = "spec/wasm_cross/uint64_upper_half.almd", class = "fixture" },
   { path = "spec/wasm_cross/unsigned_literal_domain.almd", class = "fixture" },
 ]
+
+# ── SIZED-INTEGER ARITHMETIC WRAPS AT ITS DECLARED WIDTH ─
+[[contract]]
+id        = "C-180"
+spec      = "ALS-M2"
+title     = "Sized-integer +, - and * wrap at the declared width on both targets"
+statement = "Arithmetic on a narrow sized integer (`Int8`/`Int16`/`Int32`, `UInt8`/`UInt16`/`UInt32`) produces the SAME value on both targets, wrapping at the declared width — the documented semantics (stdlib/int8.almd: narrowing wraps rather than traps). The MIR carries every integer in one i64, so `Int8 127 + 1` computed `128` in the lane; native emits real `i8` arithmetic and wrapped to `-128`, so the wasm leg printed a value OUTSIDE the type's range entirely and the two legs disagreed (#889 — `UInt8 200 + 100` was `44` natively and `300` on wasm; anything that later narrowed, compared or serialized the wasm value was off). Each `+`/`-`/`*` whose operand type is a narrow width now re-wraps its result: signed via shift-left then ARITHMETIC shift-right (sign-extending the truncation), unsigned via a mask. `Int`/`Int64`/`UInt64` are the carrier's own width and are untouched; comparisons cannot leave the range; `/` and `%` cannot either once their operands are in it, and their one exception (`MIN / -1`) already aborts on both legs (C-002). In-range arithmetic is bit-identical to before."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/sized_int_overflow_wrap.almd", class = "fixture" },
+]
+
+# ── COMMAND-LINE ARGUMENT SURFACE ─
+[[contract]]
+id        = "C-181"
+spec      = "ALS-M8"
+title     = "args.positional returns every non-flag argument, and the args surface agrees across targets"
+statement = "`args.positional()` returns EVERY argument that is not a flag — it used to drop the first one (#891): `env.args()` already excludes argv[0], and the body dropped one more, so `-- input.csv out.csv` yielded only `out.csv` on BOTH targets (a stdlib logic bug, not a codegen one). The rest of the surface (`raw`, `flag`, `option`, `option_or`) is pinned here too, cross-target. `flag` and `option` are written as index recursions rather than `list.any`/`list.find` over CAPTURING lambdas: a capture inside a BUNDLED module mislowers on the wasm leg (#892 — the closure env held garbage, so `\"${args.flag(\\\"quiet\\\")}\"` printed a truncated `f` instead of `false`), and the recursion carries its comparands as parameters so nothing is captured. #892 stays OPEN for the underlying capture defect, whose remaining reproducer is a bundled-module call bound to a `let` AND called again inline in the same function."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/args_surface.almd", class = "fixture" },
+]

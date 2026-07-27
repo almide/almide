@@ -29,6 +29,29 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
         "path" => path_fn(func, args),
         "bytes" => bytes_fn(func, args),
         "uint64" => uint64_fn(func, args),
+        "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
+        | "float32" | "float64" => sized_numeric_fn(module, func, args),
+        _ => None,
+    }
+}
+
+/// The SIZED-numeric observers (`int8.to_string`, `uint16.to_string`, …).
+/// Every one of these widths fits the interpreter's `i64`/`f64` carrier
+/// exactly — the values arriving here were already wrapped to the declared
+/// width by the arithmetic that produced them (C-180) — so printing is the
+/// canonical print of the carrier. Bridged so a fixture that merely NAMES a
+/// sized width still evaluates in the third oracle instead of abstaining.
+fn sized_numeric_fn(module: &str, func: &str, args: &[Value]) -> Option<Flow> {
+    match func {
+        "to_string" => {
+            if module.starts_with("float") {
+                let f = as_float(args.first())?;
+                Some(Flow::val(Value::str(float_to_string(f))))
+            } else {
+                let n = as_int(args.first())?;
+                Some(Flow::val(Value::str(n.to_string())))
+            }
+        }
         _ => None,
     }
 }

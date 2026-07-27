@@ -1,0 +1,31 @@
+// @contract: C-180
+// Sized-integer arithmetic WRAPS at the declared width on both targets (#889).
+// The MIR carries every integer in one i64, so `Int8 127 + 1` computes 128 in
+// the lane while native emits real `i8` arithmetic and wraps to -128: the wasm
+// leg printed a value outside the type's range entirely. Each `+`/`-`/`*` on a
+// narrow width is now re-wrapped (signed: shl+sar; unsigned: mask).
+fn a8(x: Int8, y: Int8) -> Int8 = x + y
+fn s8(x: Int8, y: Int8) -> Int8 = x - y
+fn m8(x: Int8, y: Int8) -> Int8 = x * y
+fn au8(x: UInt8, y: UInt8) -> UInt8 = x + y
+fn su8(x: UInt8, y: UInt8) -> UInt8 = x - y
+fn a16(x: Int16, y: Int16) -> Int16 = x + y
+fn au16(x: UInt16, y: UInt16) -> UInt16 = x + y
+fn a32(x: Int32, y: Int32) -> Int32 = x + y
+fn au32(x: UInt32, y: UInt32) -> UInt32 = x + y
+
+fn main() -> Unit = {
+  // Each width's overflow edge, signed and unsigned.
+  println(int8.to_string(a8(127, 1)))        // -128
+  println(int8.to_string(s8(-128, 1)))       // 127
+  println(int8.to_string(m8(64, 4)))         // 0
+  println(uint8.to_string(au8(200, 100)))    // 44
+  println(uint8.to_string(su8(0, 1)))        // 255
+  println(int16.to_string(a16(32767, 1)))    // -32768
+  println(uint16.to_string(au16(65535, 1)))  // 0
+  println(int32.to_string(a32(2147483647, 1)))   // -2147483648
+  println(uint32.to_string(au32(4294967295, 1))) // 0
+  // In-range arithmetic is untouched.
+  println(int8.to_string(a8(3, 4)))          // 7
+  println(uint8.to_string(au8(3, 4)))        // 7
+}
