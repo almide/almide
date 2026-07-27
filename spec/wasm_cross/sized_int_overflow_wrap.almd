@@ -52,4 +52,26 @@ fn main() -> Unit = {
   let m1: Int8 = 64
   let m2: Int8 = 4
   println(int8.to_string(m1 * m2))           // 0
+
+  // `^` is repeated multiplication, so it wraps at the declared width like `*`.
+  // It reached the lane by a different road and missed the wrap: on wasm the
+  // operator lowers to a `math.pow` CALL, which never passed through the IntBinOp
+  // path that re-wraps, so `Int32 999997 ^ 2` printed the un-narrowed
+  // 999994000009 against native's -733379959 — while `a * a` at the very same type
+  // agreed on both legs, which is what named the operator rather than the type as
+  // the divergence (differential fuzz, seed 1785159097100061000 index 1049).
+  // Wrapping once at the end is wrapping at every step: two's-complement
+  // multiplication is congruent mod 2^bits.
+  let e32: Int32 = 1000000 - 3
+  println(int32.to_string(e32 ^ 2))          // -733379959
+  let e8: Int8 = 5
+  println(int8.to_string(e8 ^ 3))            // 125
+  let f8: Int8 = 6
+  println(int8.to_string(f8 ^ 3))            // -40
+  let eu8: UInt8 = 20
+  println(uint8.to_string(eu8 ^ 2))          // 144
+  let e16: Int16 = 300
+  println(int16.to_string(e16 ^ 2))          // 24464
+  // The carrier's own width is untouched: no wrap is applied to Int.
+  println(int.to_string(2 ^ 62))             // 4611686018427387904
 }

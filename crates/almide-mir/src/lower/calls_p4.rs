@@ -490,6 +490,16 @@ impl LowerCtx {
                 args: vec![CallArg::Scalar(a), CallArg::Scalar(b)],
                 result: Some(repr),
             });
+            // `math.pow` computes in the i64 carrier every integer rides here, so a
+            // NARROW result type (`Int32`, `UInt8`, …) has to come back to its declared
+            // width — the same wrap `*` and `+` already apply through `narrow_wrap`.
+            // Without it `let a: Int32 = 999997` made `a ^ 2` print the un-narrowed
+            // `999994000009` on wasm against native's `-733379959`, while `a * a` at the
+            // very same type agreed on both legs. `math.fpow` returns a float and has no
+            // declared-width notion, so only the integer operator wraps.
+            if matches!(op, BinOp::PowInt) {
+                return Some(self.wrap_to_declared_width(dst, &expr.ty));
+            }
             return Some(dst);
         }
         None

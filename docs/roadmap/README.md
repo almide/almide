@@ -6,7 +6,7 @@
 
 ## Active
 
-67 items
+68 items
 
 | Item | Description |
 |------|-------------|
@@ -40,6 +40,7 @@
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) | Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field |
 | [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) | Routing almide build --target rust through the same v1 Perceus MIR as wasm, so one memory model serves both legs |
+| [Outside-Review Audit 2026-07 — 証拠層の負債バーンダウン](active/outside-review-audit-2026-07.md) | The 2026-07-27 five-lens outside-reviewer audit — the evidence layer lagged the v0→v1 transition and the honesty gradient inverted (internal docs honest, outward claims false); the layered burn-down to "zero false claims, every gate real" with issue links #913-#932 |
 | [Playground UI Revamp](active/playground-revamp.md) | Playground UI revamp: file tabs, share URLs, TS-style example gallery |
 | [Post-0.29 Improvement Sweep](active/post-0.29-improvement-sweep.md) | Post-0.29.0 improvement sweep — every open gap issue-ized and ordered, from face-fixes to the v0 wasm retirement |
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |

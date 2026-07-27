@@ -696,11 +696,28 @@ impl<'a> Interpreter<'a> {
 /// binding is unreachable from the dispatch point); it reports `Unsupported`
 /// for them so the 3-way oracle records an honest skip instead of a wrong vote.
 ///
-/// Source of truth: the `mut`-receiver Unit/Option-returning functions in
+/// Source of truth: the receiver-mutating Unit/Option-returning functions in
 /// `stdlib/{list,map,string,bytes}.almd`. The FUNCTIONAL siblings (`list.set`,
 /// `list.insert`, `map.set`, `set.insert` — all `-> NewContainer`) are NOT
 /// listed and remain fully supported.
+///
+/// `bytes` is matched by PREFIX rather than by name. Only three of its mutators
+/// (`push`, `set_at`, `copy_within`) spell `mut` on the receiver; the ~40 in the
+/// `set_*` / `append_*` / `write_*` families do not — they are `@intrinsic`s whose
+/// mutation lives in the native signature (`&mut Vec<u8>`), invisible to the `.almd`
+/// declaration. So an enumerated list here had nothing to be checked against and
+/// silently fell behind: `bytes.set_f32_le` reported the generic "unknown
+/// capability" abstain instead of naming what it actually is, which is what the
+/// ledger gate caught on `mutable_global_bytes_arena`. Every `set_*`/`append_*`/
+/// `write_*` in `stdlib/bytes.almd` returns Unit and mutates in place, and the
+/// functional `bytes.set(b, i, v) -> Bytes` is excluded by the underscore — the
+/// prefix is the whole rule, and a new family member is covered on arrival.
 fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
+    if module == "bytes"
+        && (func.starts_with("set_") || func.starts_with("append_") || func.starts_with("write_"))
+    {
+        return true;
+    }
     matches!(
         (module, func),
         ("list", "push")
@@ -712,7 +729,10 @@ fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
             | ("string", "push")
             | ("string", "clear")
             | ("bytes", "push")
-            | ("bytes", "set_at")
+            | ("bytes", "clear")
+            | ("bytes", "fill")
+            | ("bytes", "copy_from")
             | ("bytes", "copy_within")
+            | ("bytes", "heap_restore")
     )
 }

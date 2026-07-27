@@ -152,11 +152,19 @@ impl LowerCtx {
         // variant / heap-field-record capture (or a `Float`, f64↔i64 reinterpret not in the
         // prim vocabulary) still defers — honest wall, recorded in the goal file.
         use almide_lang::types::constructor::TypeConstructorId;
-        let one_level_exact = |ty: &Ty| -> bool {
-            matches!(ty, Ty::String)
-                || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
-                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float))
-        };
+        // `is_flat_scalar_block_ty` IS this predicate — the crate's canonical name for
+        // "every slot is a raw i64, so one rc_dec is the full free", which is exactly
+        // what the FLAT env class promises. This used to be spelled out again here, and
+        // more narrowly (`List[Int|Float]` only), so shapes with identical physics were
+        // refused: an all-scalar TUPLE, a `List[Bool]` or `List[Int32]`, an
+        // `Option[<scalar>]`. A refused capture is not merely a missing feature — it
+        // leaves the lambda deferred, and `map.fold(m, acc, (a, k, v) => acc)` over a
+        // `(Int, Bool)` accumulator walls on exactly that (#905). Reading the one
+        // definition instead of restating a subset of it keeps the two from drifting
+        // again. `String` stays a separate clause: it is flat under rc_dec too, but it
+        // is a byte buffer rather than a slot block, so it is not that predicate's job.
+        let one_level_exact =
+            |ty: &Ty| -> bool { matches!(ty, Ty::String) || crate::lower::is_flat_scalar_block_ty(ty) };
         let is_nested_list_str = |ty: &Ty| -> bool {
             matches!(ty, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && matches!(a[0], Ty::String))

@@ -481,6 +481,21 @@ impl LowerCtx {
         ) {
             return v;
         }
+        self.wrap_to_declared_width(v, ty)
+    }
+
+    /// Wrap `v` to `ty`'s declared width — [`Self::narrow_wrap`] without the
+    /// which-operator gate, for a producer that is not an `IntBinOp`.
+    ///
+    /// The `^` OPERATOR needs it: on wasm it lowers to a `math.pow` CALL, so it
+    /// never passed through the `IntBinOp` path that wraps, and `Int32 999997 ^ 2`
+    /// printed the full i64 `999994000009` while native — which computes at the
+    /// base's own width — printed the wrapped `-733379959`. `*` and `+` at the same
+    /// type already agreed, so the divergence was the operator's, not the type's.
+    /// Wrapping once at the end is exactly wrapping at each step: two's-complement
+    /// multiplication is congruent mod 2^bits, so a product of wrapped factors and
+    /// the wrap of the full product are the same value.
+    pub(crate) fn wrap_to_declared_width(&mut self, v: ValueId, ty: &Ty) -> ValueId {
         let (bits, signed) = match ty {
             Ty::Int8 => (8u32, true),
             Ty::Int16 => (16, true),

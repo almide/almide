@@ -102,6 +102,7 @@ module_global_const  out-of-interp-scope capability: bytes.read_u8
 module_var_alias_cow  out-of-interp-scope capability: list.repeat
 mut_heap_param  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)
 mut_map_param  out-of-interp-scope capability: in-place container mutation `map.insert` (mut receiver; interp args are by-value so the binding cannot be written back)
+mutable_global_bytes_arena  out-of-interp-scope capability: in-place container mutation `bytes.set_f32_le` (mut receiver; interp args are by-value so the binding cannot be written back)
 mutual_append  out-of-interp-scope capability: string.get
 mutual_tail_recursion  interp fuel/recursion budget exhausted
 negative_offset_and_width_totality  out-of-interp-scope capability: bytes.read_f16_le
