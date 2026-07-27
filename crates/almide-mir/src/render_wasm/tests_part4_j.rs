@@ -552,3 +552,31 @@
             "the hoisted twin must wall too, not call through an empty block"
         );
     }
+
+    #[test]
+    fn an_outer_var_reassigned_in_a_scalar_if_arm_hits_its_stable_local() {
+        // A SCALAR `if`'s arms execute under real IfThen/Else/EndIf markers — exactly
+        // one arm runs — so a scalar reassignment of an OUTER var inside one must
+        // `SetLocal` the var's stable local. `lower_scalar_arm` raised only
+        // `in_frame`, not `unit_arm_depth`, so the assign rebound `value_of` to a
+        // fresh frame-local instead — frame-local rebinds are last-writer-wins, and a
+        // read after the branch saw only the LAST-LOWERED arm's local: `h(9)` printed
+        // 1 (the then-arm's `r = 100` lost) against native's 1001 — a silent wrong
+        // value, not a wall (#907's C-188 reassign half; the mutable-global half
+        // needs the pipeline's global slots, pinned in pipeline_c.rs's test).
+        let src = "fn h(n: Int) -> Int = {\n  \
+              var r = 0\n  \
+              let x = if n > 5 then { r = 100; 1 } else { r = 7; 2 }\n  \
+              r * 10 + x\n}\n\
+            fn main() -> Unit = {\n  \
+              println(int.to_string(h(9)))\n  \
+              println(int.to_string(h(1))) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "main"),
+            "the reassigning scalar-if must lower (real markers, one arm runs)"
+        );
+        if let Some(out) = build_and_run("scalar_if_arm_reassign", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1001\n72");
+        }
+    }

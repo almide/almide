@@ -1,0 +1,32 @@
+// @contract: C-188, C-187
+// A SCALAR `if` arm is a real branch (IfThen/Else/EndIf — exactly one arm runs), so its
+// statement EFFECTS execute on both targets: (1) an in-place mutable-global write inside the
+// ordinary early-return guard `if bytes.len(d) < 12 then 0 else { bytes.set_i32_le(g, …); … }`
+// lowers and lands, instead of tripping the modeled-frame fence and sending the whole fn to
+// the linearization wall blaming the CONDITION (#907 — nendo's load_vrm_data and set_skeleton,
+// the VRM/GLB entry points); (2) a scalar reassignment of an outer `var` hits the var's STABLE
+// local — the pre-fix rebind was frame-local and last-writer-wins, so `reassign_in_arm(9)`
+// printed 1 on wasm against native's 1001 (the silent-wrong-value class, worse than the wall).
+var g = bytes.new(4)
+
+fn guarded_write(data: Bytes) -> Int = {
+  if bytes.len(data) < 12 then 0
+  else {
+    bytes.set_i32_le(g, 0, 7)
+    1
+  }
+}
+
+fn reassign_in_arm(n: Int) -> Int = {
+  var r = 0
+  let x = if n > 5 then { r = 100; 1 } else { r = 7; 2 }
+  r * 10 + x
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(guarded_write(bytes.new(16))))
+  println(int.to_string(guarded_write(bytes.new(4))))
+  println(int.to_string(bytes.read_i32_le(g, 0)))
+  println(int.to_string(reassign_in_arm(9)))
+  println(int.to_string(reassign_in_arm(1)))
+}

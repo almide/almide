@@ -694,4 +694,47 @@ fn main() -> Unit = {
             "a source with a dropped top-level statement must wall, not silently compile"
         );
     }
+
+    #[test]
+    fn a_scalar_if_arm_admits_a_global_write_but_the_linearization_still_walls() {
+        // C-188 / #907: a SCALAR `if` arm runs under real IfThen/Else/EndIf markers —
+        // exactly one arm executes — so an in-place mutable-global write inside the
+        // ordinary early-return guard shape is a real conditional effect and must
+        // lower. `lower_scalar_arm` raised only `in_frame`, so C-187's modeled-frame
+        // fence misfired, the scalar-if rolled back, and the whole fn fell to the
+        // both-arms linearization wall naming the CONDITION as unresolvable (nendo's
+        // load_vrm_data — the cond had lowered fine; the arm's fence was the
+        // decliner). Needs the full pipeline: the mutable-global storage slots are
+        // assigned here, not in the render_wasm test feeder.
+        let guard = r#"
+var g = bytes.new(4)
+fn f(data: Bytes) -> Int = {
+  if bytes.len(data) < 12 then 0
+  else {
+    bytes.set_i32_le(g, 0, 7)
+    1
+  }
+}
+fn main() -> Unit = {
+  println(int.to_string(f(bytes.new(16))))
+  println(int.to_string(bytes.read_i32_le(g, 0)))
+}
+"#;
+        let ok = try_render_wasm_source(guard, &[], false);
+        assert!(
+            ok.is_ok(),
+            "the guard-shaped global write must lower (real markers, one arm runs): {:?}",
+            ok.err()
+        );
+        // The OTHER direction — a global write inside a genuinely LINEARIZED (both
+        // arms run) frame must keep walling — holds structurally rather than by a
+        // source-level pin: `lower_branch_arm` raises only `in_frame`, never
+        // `unit_arm_depth`, so any write reaching it still trips the fence. A source
+        // pin was attempted and abandoned: every natural call-free-armed shape
+        // (closure-param cond, `?? 0` MapAccess cond, effect-fn cond, nested-list
+        // eq cond) now real-branches and correctly ADMITS the write — the
+        // linearization is only reachable through conds with no executable lowering,
+        // which the fuzz corpus exercises (its call-bearing-arm walls), not stable
+        // hand-written source.
+    }
 }

@@ -678,8 +678,21 @@ impl LowerCtx {
         };
         let lhh_mark = self.live_heap_handles.len();
         self.in_frame += 1;
+        // Every caller emits this arm under REAL `IfThen`/`Else`/`EndIf` markers (the
+        // scalar-if machinery, the variant/refinement chains, the desugared match
+        // chains) — exactly ONE arm runs at runtime, so a mutable-global/shared-cell
+        // write inside it is a real conditional effect, and a scalar reassignment of
+        // an outer var must hit its stable local (see `LowerCtx::unit_arm_depth`).
+        // Without this the modeled-frame fence (`in_frame > 0 && unit_arm_depth == 0`)
+        // misfired on the ordinary early-return guard `if len(d) < 12 then 0 else
+        // { bytes.set_i32_le(g, …) … }`: the arm's stmt walled, the scalar-if rolled
+        // back, and the whole fn fell to the linearization wall blaming the CONDITION
+        // (#907, nendo's load_vrm_data). The fence still walls the true both-arms
+        // linearization — `lower_branch_arm` raises only `in_frame`.
+        self.unit_arm_depth += 1;
         for stmt in stmts {
             if self.lower_stmt(stmt).is_err() {
+                self.unit_arm_depth -= 1;
                 self.in_frame -= 1;
                 return None;
             }
@@ -737,6 +750,7 @@ impl LowerCtx {
             }
             _ => self.lower_scalar_value(t).or_else(|| self.try_lower_scalar_call(t, &t.ty)),
         });
+        self.unit_arm_depth -= 1;
         self.in_frame -= 1;
         self.drop_arm_locals(lhh_mark);
         val
