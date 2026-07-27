@@ -13,9 +13,10 @@ concise on purpose. Follow the link map for depth.
 - Extension: `.almd`. Auto-imported (no `import` needed): `string`, `int`,
   `float`, `list`, `map`, `set`, `option`, `result`, `value`, `error`,
   `math`, `datetime`.
-  Sized-numeric conversion modules (`int8`, `int16`, `int32`, `uint8`,
-  `uint16`, `uint32`, `uint64`, `float32`) are also auto-imported for
-  UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to `int32.to_int64(x)`.
+  Sized-numeric conversion modules (`int8`, `int16`, `int32`, `int64`,
+  `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`) are also
+  auto-imported for UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to
+  `int32.to_int64(x)`.
   Everything else needs an explicit `import`: `args`, `base64`, `bytes`,
   `env`, `fs`, `hex`, `html`, `http`, `io`, `json`, `matrix`, `mem`, `net`,
   `path`, `process`, `random`, `regex`, `testing`, `zlib`.
