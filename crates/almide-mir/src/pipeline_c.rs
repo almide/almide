@@ -422,6 +422,40 @@ fn try_render_wasm_source_impl_rest(
     // Any UNLINKED stdlib/runtime call would render a dangling `(call $name)` (invalid wasm) — the
     // renderer rejects it cleanly. Returns the WAT on success.
     try_render_wasm_program(&MirProgram { functions, exports, mutable_global_count })
+        .map_err(|e| attribute_unlinked_calls(e, &fn_walls))
+}
+
+/// Turn the unlinked-call gate's name list into the reasons those names are
+/// missing.
+///
+/// The gate can only report that a definition is absent. When the callee is a
+/// module sibling that WALLED during lowering, its own reason was recorded and
+/// is the actual diagnosis — without it the message names a mangled symbol
+/// (`almide_rt_lib_write_many`) and says to "add the callee to the self-host
+/// registry", which is advice for a stdlib gap and actively misleading for a
+/// user module that is sitting right there in the package (#943).
+fn attribute_unlinked_calls(
+    e: LowerError,
+    fn_walls: &std::collections::HashMap<String, String>,
+) -> LowerError {
+    let LowerError::Unsupported(msg) = &e else { return e };
+    let Some(rest) = msg.strip_prefix("unlinked stdlib/runtime call(s) with no wasm definition: ")
+    else {
+        return e;
+    };
+    let names: Vec<&str> = rest.split(" — ").next().unwrap_or("").split(", ").collect();
+    let attributed: Vec<String> = names
+        .iter()
+        .filter_map(|n| fn_walls.get(*n).map(|r| format!("`{n}` walled while lowering: {r}")))
+        .collect();
+    if attributed.is_empty() {
+        return e;
+    }
+    LowerError::Unsupported(format!(
+        "unlinked call(s) with no wasm definition — the callee is present in the package but \
+         did not survive lowering: {}",
+        attributed.join("; ")
+    ))
 }
 
 /// NATIVE leg of the trust spine (#764, rung 1): lower `.almd` source through the
@@ -693,6 +727,70 @@ fn main() -> Unit = {
             result.is_err(),
             "a source with a dropped top-level statement must wall, not silently compile"
         );
+    }
+
+    #[test]
+    fn a_module_siblings_parameter_is_not_the_consumers_top_let() {
+        // #943: `cow_inplace_receiver` consulted `self.globals` BEFORE resolving the
+        // receiver locally, inverting the precedence `value_or_global` documents (a
+        // function-local — parameter included — is in `value_of`; only a MISS can be
+        // a global). The two are not in one numbering space: a module sibling lowers
+        // against whichever globals map its region resolves to while its own VarIds
+        // are numbered independently, so `VarId(0)` was this fn's first PARAMETER and
+        // the consumer's first top-let at once. The parameter was reported as an
+        // "IMMUTABLE module-level `let`", the sibling was dropped, and — because a
+        // dropped sibling is not fatal — the only thing the user saw was the caller's
+        // "unlinked call ... no wasm definition". ONE unrelated `let` in the consumer
+        // was the whole trigger; without it the same program built.
+        let lib = r#"
+pub fn write_many(m: Bytes, o: Int, v: Float) -> Unit = {
+  var i = 0
+  while i < 16 {
+    bytes.set_f32_le(m, o + i * 4, v + int.to_float(i))
+    i = i + 1
+  }
+}
+"#;
+        let consumer = r#"
+import self.lib as lib
+
+let UNRELATED = 1
+
+var g = bytes.new(256)
+
+@export(wasm, "u")
+fn u(v: Float) -> Unit = lib.write_many(g, 0, v)
+"#;
+        let tokens = almide_lang::lexer::Lexer::tokenize(lib);
+        let prog = almide_lang::parser::Parser::new(tokens).parse().expect("sibling parses");
+        let mods = vec![("lib".to_string(), prog, false)];
+        let out = try_render_wasm_source_library(consumer, &mods, false);
+        assert!(
+            out.is_ok(),
+            "a sibling writing through its own Bytes PARAMETER must link even when the \
+             consumer has a top-let occupying the same VarId: {out:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_immutable_top_let_receiver_still_walls() {
+        // The other side of the precedence fix: resolving locally first must not
+        // disarm the #906 diagnostic. A genuine module-level `let` buffer written in
+        // place has no storage slot, so the write would vanish — it must still decline,
+        // and still name the fix.
+        let source = r#"
+let g = bytes.new(64)
+
+@export(wasm, "u")
+fn u(v: Float) -> Unit = bytes.set_f32_le(g, 0, v)
+"#;
+        match try_render_wasm_source_library(source, &[], false) {
+            Err(LowerError::Unsupported(r)) => assert!(
+                r.contains("IMMUTABLE module-level") && r.contains("Declare the buffer `var`"),
+                "the immutable-top-let decline must survive and keep naming the fix, got: {r}"
+            ),
+            other => panic!("expected the immutable-top-let wall, got {other:?}"),
+        }
     }
 
     #[test]
