@@ -3,8 +3,8 @@
 // (Rust `s.trim().parse::<f64>()`), i.e. correctly-rounded round-to-nearest-even.
 // The old WASM parser accumulated the mantissa in f64 (`acc*10+digit`, `*10^exp`),
 // which is NOT correctly rounded: "0.3" → 0.30000000000000004, long mantissas drift,
-// subnormals collapse to 0. The runtime now uses Clinger AlgorithmM with exact
-// big-integer arithmetic (crates/almide-codegen/src/emit_wasm/rt_dec2flt.rs),
+// subnormals collapse to 0. The WASM leg now uses Clinger AlgorithmM with exact
+// big-integer arithmetic in SELF-HOSTED Almide (stdlib/float_parse.almd),
 // reusing the Dragon4 bignum. Each parse is printed via the (shortest-round-trip)
 // float.to_string so any 1-ULP error would show as different bytes.
 effect fn main() -> Unit = {

@@ -3,8 +3,8 @@
 //
 // Native oracle (runtime/rs/src/int.rs):
 //   i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string())
-// The WASM runtime `emit_wasm/rt_numeric.rs::compile_int_from_hex` must mirror
-// it exactly, INCLUDING the native quirks (see contract_notes):
+// The self-hosted WASM leg `stdlib/int_hex.almd` must mirror it exactly,
+// INCLUDING the native quirks (see contract_notes):
 //   - "0X10" → Err (the "0x" strip is lowercase-only / case-sensitive)
 //   - "0x0xff" → Ok(255) (trim_start_matches strips "0x" REPEATEDLY)
 //   - "f_f" → Err (NO underscore skipping)
