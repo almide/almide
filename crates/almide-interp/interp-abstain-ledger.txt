@@ -62,6 +62,7 @@ io_write_ordering  out-of-interp-scope capability: io.write
 json_gltf_walk  out-of-interp-scope capability: json.parse
 json_number_unicode  out-of-interp-scope capability: json.parse
 json_path_edges  out-of-interp-scope capability: json.parse
+json_string_span  out-of-interp-scope capability: json.parse
 json_stringify_pretty  out-of-interp-scope capability: json.from_string
 json_value  out-of-interp-scope capability: json.parse
 let_unwrap_propagation  out-of-interp-scope capability: value.str
