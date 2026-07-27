@@ -29,7 +29,7 @@ wat = "1"
 # Structural validation of the assembled v1 module: `wat` assembles without full stack-shape
 # validation, so the test harness validates before accepting a v1 module (invalid → the test
 # harness falls back to native execution; there is no v0 wasm emitter anymore).
-wasmparser = "0.253"
+wasmparser = "0.254"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
