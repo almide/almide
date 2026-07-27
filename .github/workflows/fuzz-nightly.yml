@@ -248,6 +248,20 @@ jobs:
             gh issue create --title "$TITLE" --body "$BODY" --label fuzz
           fi
 
+      # A night with findings is NOT a green night. Before this the campaign's
+      # status was captured with `set +e` and never re-raised, so a run that
+      # found real divergences still reported green — the only thing that ever
+      # turned this workflow red was the runner being reclaimed (#796). With the
+      # build split out the campaign now completes, so its verdict is the thing
+      # worth reporting: fail iff it recorded a finding. The findings are already
+      # uploaded and filed as an issue by the steps above, so failing here loses
+      # nothing and makes "two consecutive green nights" mean what it says.
+      - name: Fail the night on findings
+        if: steps.campaign.outputs.findings != '0'
+        run: |
+          echo "::error::the campaign recorded ${{ steps.campaign.outputs.findings }} finding(s) — see the uploaded artifacts and the tracking issue"
+          exit 1
+
   coverage-ratchet:
     name: Compiler structural coverage ratchet (#566)
     runs-on: ubuntu-latest
