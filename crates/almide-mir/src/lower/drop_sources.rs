@@ -650,3 +650,58 @@ pub(crate) fn anon_record_drop_name(fields: &[(almide_lang::intern::Sym, Ty)]) -
     }
     format!("anonrec_{h:016x}")
 }
+
+// The Option[(String, _)] payload drops moved here from drop_sources_c.rs
+// (max-lines, #852): `map.find`'s Some((key, value)) result release — verbatim.
+/// The ALMIDE SOURCE of `__drop_opt_str_int` — the recursive release of an
+/// `Option[(String, Int)]` (`map.find`'s predicate-search result: `Some((key,
+/// value))` on a hit). Wrapper `[rc][len@4=0-or-1 (Option's tag)][cap@8][@12
+/// payload]`: at the wrapper's last ref (rc==1), IFF len==1 (Some) the @12
+/// payload is the `(String, Int)` tuple's handle — at the TUPLE's own last ref,
+/// `rc_dec` its String slot0 @12 (the Int slot1 @20 is scalar), then the tuple
+/// block; len==0 (None) frees nothing at the payload. THEN the wrapper block,
+/// always. A blind flat `rc_dec` of the @12 payload slot (the generic
+/// `heap_elem_lists`/`DropListStr` route every OTHER self-host Option call
+/// uses) would only decrement the TUPLE's own refcount, leaking its String —
+/// the exact class of bug this session's `_str`-dispatch fix caught elsewhere.
+/// Named for the (String, Int) shape specifically; a (String, Bool)/(String,
+/// Float) `map.find` result reuses the SAME generated fn (the render never
+/// reads the Int slot's bits, only rc_decs the String slot — the established
+/// type-stand-in convention, e.g. `list_hshare.almd`'s `List[Int]` stand-in).
+pub const OPT_STR_INT_DROP_SRC: &str = "\
+fn __drop_opt_str_int(o: List[Int]) -> Unit = {
+  let h = prim.handle(o)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 4) == 1 then {
+      let th = prim.load64(h + 12)
+      if prim.load32(th + 0) == 1 then prim.rc_dec(prim.load64(th + 12)) else ()
+      prim.rc_dec(th)
+    } else ()
+  } else ()
+  prim.rc_dec(h)
+}
+";
+
+/// The ALMIDE SOURCE of `__drop_opt_str_str` — the recursive release of an
+/// `Option[(String, String)]` (the if-merged `some((s1, s2))` ctor the fuzz
+/// index-374 divergence exposed): at the wrapper's last ref, IFF Some the @12
+/// payload tuple owns TWO Strings (@12 and @20 — both rc_dec'd at the tuple's
+/// last ref), then the tuple block, then the wrapper. The `__drop_opt_str_int`
+/// twin with the second slot's dec added.
+pub const OPT_STR_STR_DROP_SRC: &str = "\
+fn __drop_opt_str_str(o: List[Int]) -> Unit = {
+  let h = prim.handle(o)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 4) == 1 then {
+      let th = prim.load64(h + 12)
+      if prim.load32(th + 0) == 1 then {
+        prim.rc_dec(prim.load64(th + 12))
+        prim.rc_dec(prim.load64(th + 20))
+      }
+      else ()
+      prim.rc_dec(th)
+    } else ()
+  } else ()
+  prim.rc_dec(h)
+}
+";

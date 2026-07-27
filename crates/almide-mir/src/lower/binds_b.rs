@@ -509,5 +509,6 @@ include!("binds_p3.rs");
 include!("binds_p3_b.rs");
 include!("list_literal_elements.rs");
 include!("binds_p4.rs");
+include!("owned_heap_field.rs");
 include!("binds_p4_b.rs");
 include!("binds_p4_b_b.rs");

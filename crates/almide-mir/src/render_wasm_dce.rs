@@ -253,3 +253,140 @@ pub(crate) fn filter_unreachable_preamble(pre: &str, used_text: &str) -> String 
         })
         .collect()
 }
+
+// prune_unreachable_functions moved here from render_wasm.rs (max-lines, #852):
+// the MIR-function twin of the preamble reachability pass below — same family,
+// moved verbatim.
+/// Drop every `MirFunction` unreachable from `main` / a declared export, so the
+/// wasm renderer never has to emit it (nor put it in the closure-dispatch
+/// function table, nor carry its `@extern` import).
+///
+/// Reachability is computed the SAME way [`filter_unreachable_preamble`] computes
+/// it for the fixed runtime: render every function ONCE with the full,
+/// UNPRUNED `func_slots`/`label_off` (reachability doesn't depend on final
+/// slot numbers, only on which names get referenced — those are recomputed
+/// fresh, self-consistently, when [`render_wasm_program`] renders the pruned
+/// result), then text-scan each rendered body for `$name` references via
+/// [`reference_tokens`]. This is deliberately NOT a hand-enumerated match over
+/// `Op` variants: an early version of this pass matched only `CallFn`/
+/// `FuncRef`/`DropVariant`/`DropWrapperRec` and missed BOTH `Op::Call{RtFn::
+/// PrintStr}` (a runtime-boundary call to the auto-linked `print_str` fn,
+/// outside `CallFn`) and the `DropListStrValue`-family ops that ALSO hardcode
+/// a `(call $__drop_..)` outside those four — each one only surfaced as a
+/// `wat::parse_str` "undefined function" error on a DIFFERENT spec file.
+/// Scanning the ACTUAL RENDERED TEXT can't have a fourth such gap: whatever
+/// `Op` produced a call, by the time this runs it's already literal `$name`
+/// text, the same text `wat::parse_str` itself resolves names from.
+///
+/// ONE edge kind can't be recovered from text: `Op::FuncRef` (a lifted
+/// lambda's VALUE, used as a `CallIndirect`'s dispatch index) renders to a
+/// bare `(i64.const {slot})`, not a `$name` — the closure's identity IS the
+/// numeric slot. A missed `FuncRef` edge doesn't fail to parse (no dangling
+/// name — the SLOT still exists, just pointing at whatever ELSE the pruned
+/// list's reindexing put there), so it can silently mis-dispatch at runtime
+/// instead of erroring at build time (caught via `codegen_functional_test`'s
+/// "multi-fn HOF" trapping after this pass, not via a build failure) — this
+/// is read from the STRUCTURED `Op::FuncRef` list below, never from text.
+///
+/// SOUNDNESS: this can only ever REMOVE a function nothing calls — dropping
+/// something still truly needed can only manifest as `wat::parse_str`
+/// rejecting a dangling `(call $name)` at build time, a loud failure, never a
+/// silent miscompile (see `cli/build.rs`'s `render_wasm_module`). Iterated to
+/// a fixpoint (a dead function referenced only by another dead function
+/// prunes in a later round).
+pub(crate) fn prune_unreachable_functions(prog: &MirProgram) -> MirProgram {
+    let mut label_off: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut cursor = LABELS_ADDR;
+    for func in &prog.functions {
+        for op in &func.ops {
+            let Op::Call { args, .. } = op else { continue };
+            for a in args {
+                let CallArg::Label(label) = a else { continue };
+                if label_off.contains_key(label) {
+                    continue;
+                }
+                let len = label.len() as u32;
+                label_off.insert(label.clone(), (cursor, len));
+                cursor += len;
+            }
+        }
+    }
+    let func_slots: BTreeMap<String, u32> =
+        prog.functions.iter().enumerate().map(|(i, f)| (f.name.clone(), i as u32)).collect();
+    let param_counts: BTreeMap<String, usize> =
+        prog.functions.iter().map(|f| (f.name.clone(), f.params.len())).collect();
+    let bodies: BTreeMap<String, String> = prog
+        .functions
+        .iter()
+        .map(|f| (f.name.clone(), render_wasm_fn(f, &label_off, &func_slots, &param_counts)))
+        .collect();
+    // `Op::FuncRef { name, .. }` — "the function-table slot of the lifted
+    // function `name`" — renders to a bare `(i64.const {slot})`, NOT a `$name`
+    // token (see its arm in `render_wasm_p2_b.rs`): the closure value IS the
+    // numeric slot, materialized once the table's final layout is known. A
+    // text scan of the rendered body therefore can't see this edge at all —
+    // read it from the STRUCTURED `Op` instead, the one edge kind that can't
+    // be recovered from rendered text.
+    let func_ref_edges: BTreeMap<String, Vec<String>> = prog
+        .functions
+        .iter()
+        .map(|f| {
+            let targets = f
+                .ops
+                .iter()
+                .filter_map(|op| match op {
+                    Op::FuncRef { name, .. } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            (f.name.clone(), targets)
+        })
+        .collect();
+
+    // `__mg_init` (mutable-global slot init) and `__global_init` (abortable
+    // top-let init) are called from the SYNTHESIZED `_start` wrapper
+    // (`render_wasm_program`'s `ginit`/`mg_init` locals), never from any
+    // `MirFunction`'s own ops — so neither text-scanning nor `FuncRef`
+    // tracking can ever find a reference to them. `render_wasm_program`
+    // itself decides whether to emit the call by NAME EXISTENCE in
+    // `prog.functions` (`prog.functions.iter().any(|f| f.name == "...")`);
+    // mirror that exact condition here as an extra root, or the ONLY thing
+    // that decides whether these run becomes "did this pass happen to keep
+    // them" instead of "does the program need them" — which is how
+    // `module_var_test.almd`'s mutable globals silently stayed at their
+    // zero-init default (a runtime wrong-answer, not a build failure).
+    let roots: BTreeSet<String> = std::iter::once("main".to_string())
+        .chain(prog.exports.iter().map(|(_, internal, _, _)| internal.clone()))
+        .chain(
+            prog.functions
+                .iter()
+                .map(|f| f.name.as_str())
+                .filter(|n| *n == "__mg_init" || *n == "__global_init")
+                .map(String::from),
+        )
+        .collect();
+    let mut reachable: BTreeSet<String> = roots.clone();
+    let mut frontier: Vec<String> = roots.into_iter().collect();
+    while let Some(name) = frontier.pop() {
+        let mut targets: Vec<String> = Vec::new();
+        if let Some(body) = bodies.get(&name) {
+            targets.extend(reference_tokens(body).into_iter().filter(|t| bodies.contains_key(t)));
+        }
+        if let Some(refs) = func_ref_edges.get(&name) {
+            targets.extend(refs.iter().cloned());
+        }
+        for token in targets {
+            if bodies.contains_key(&token) && reachable.insert(token.clone()) {
+                frontier.push(token);
+            }
+        }
+    }
+
+    let kept: Vec<MirFunction> =
+        prog.functions.iter().filter(|f| reachable.contains(&f.name)).cloned().collect();
+    MirProgram {
+        functions: kept,
+        exports: prog.exports.clone(),
+        mutable_global_count: prog.mutable_global_count,
+    }
+}
