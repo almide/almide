@@ -1,0 +1,54 @@
+// UFCS on a USER-DEFINED function (#898).
+//
+// `f(x, y)` and `x.f(y)` are documented as equivalent, but UFCS on a local
+// function lowered to a `Method` target that carried the receiver OUTSIDE the
+// argument list. Every downstream pass keyed on a callee signature therefore
+// skipped it — borrow inference being the visible one: a `String` / `List[T]`
+// parameter is rendered `&str` / `&[T]`, and the call site handed it an owned
+// value, so the program passed `almide check` and then failed to build.
+//
+// A local UFCS call now lowers to exactly the IR the canonical spelling
+// produces, so the two spellings cannot drift again. Scalar parameters always
+// worked (they are never borrowed); they are here to pin that they still do.
+
+fn up(s: String) -> String = string.to_upper(s)
+fn total(xs: List[Int]) -> Int = list.sum(xs)
+fn twice(n: Int) -> Int = n * 2
+fn joined(xs: List[String], sep: String) -> String = list.join(xs, sep)
+fn wrapped(s: String, prefix: String, suffix: String) -> String = prefix + s + suffix
+fn shout(s: String, mark: String = "!") -> String = string.to_upper(s) + mark
+
+test "UFCS on a reference-shaped parameter matches the canonical call" {
+  assert_eq("ab".up(), up("ab"));
+  assert_eq("ab".up(), "AB");
+  assert_eq([1, 2, 3].total(), total([1, 2, 3]));
+  assert_eq([1, 2, 3].total(), 6)
+}
+
+test "UFCS on a scalar parameter matches the canonical call" {
+  assert_eq(21.twice(), twice(21));
+  assert_eq(21.twice(), 42)
+}
+
+test "UFCS with further arguments matches the canonical call" {
+  assert_eq(["a", "b"].joined("-"), joined(["a", "b"], "-"));
+  assert_eq(["a", "b"].joined("-"), "a-b");
+  assert_eq("x".wrapped("<", ">"), wrapped("x", "<", ">"));
+  assert_eq("x".wrapped("<", ">"), "<x>")
+}
+
+test "UFCS still fills a defaulted trailing argument" {
+  assert_eq("hi".shout(), "HI!");
+  assert_eq("hi".shout("?"), "HI?")
+}
+
+test "a UFCS receiver stays usable afterwards" {
+  // The receiver is borrowed, not moved, so the binding survives the call —
+  // the property the `&str` / `&[T]` signature exists to provide.
+  let s = "ab"
+  let listed = [1, 2, 3]
+  assert_eq(s.up(), "AB");
+  assert_eq(listed.total(), 6);
+  assert_eq(s, "ab");
+  assert_eq(list.len(listed), 3)
+}

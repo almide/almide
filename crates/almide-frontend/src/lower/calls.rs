@@ -33,6 +33,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
     let mut target = lower_call_target(ctx, callee);
     rewrite_crossmodule_ufcs(ctx, &mut target, &mut ir_args);
+    rewrite_local_ufcs(ctx, &mut target, &mut ir_args);
 
     if named_args.is_empty() {
         // Default args for a plain positional call.
@@ -96,6 +97,35 @@ fn rewrite_crossmodule_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &m
         func: sym(func_str),
         def_id: ctx.def_map.get(&sym(&format!("{}.{}", mod_str, func_str))).copied(),
     };
+}
+
+/// Rewrite UFCS on a LOCAL user function: `Method { object, "up" }` becomes
+/// `Named { "up" }` with the object prepended to the arguments — the exact IR
+/// the canonical spelling `up(object)` produces.
+///
+/// `f(x, y)` and `x.f(y)` are documented as equivalent, but the `Method` form
+/// carried the receiver OUTSIDE `args`, so every downstream pass keyed on a
+/// callee signature silently skipped it. Borrow inference was the visible one:
+/// it wraps a call's args per the callee's `ParamBorrow` decisions and looks
+/// callees up by name, and a dot-free `Method` matched no name at all — so a
+/// `String`/`List[T]` parameter, which the signature pass renders as `&str` /
+/// `&[T]`, received an owned value and rustc rejected the generated code after
+/// `almide check` had passed (#898). Scalar params were unaffected because they
+/// are never borrowed, and stdlib UFCS was unaffected because it resolves to a
+/// `Module` target earlier in the guard chain.
+///
+/// Only a dot-free method that names a real top-level function is rewritten. A
+/// dotted key is a convention/protocol method (`Dog.repr`, `T.show`) or the
+/// cross-module form the rewrite above already handled, and a method that names
+/// no function is the checker's error to report — inventing a `Named` call for
+/// it would turn a diagnostic into a link failure.
+fn rewrite_local_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &mut Vec<IrExpr>) {
+    let CallTarget::Method { object, method } = &*target else { return };
+    if method.as_str().contains('.') || !ctx.env.functions.contains_key(method) {
+        return;
+    }
+    ir_args.insert(0, (**object).clone());
+    *target = CallTarget::Named { name: *method };
 }
 
 /// Place named arguments into their positional slots, filling any gap from the
