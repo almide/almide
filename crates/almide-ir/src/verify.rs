@@ -274,7 +274,27 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
             .filter(|b| !b.is_empty())
             .collect();
         funcs.extend(bases);
-        known_module_functions.insert(m.name.to_string(), funcs);
+        // The module's EXPORTS are its DECLARED surface, captured at lowering
+        // — before monomorphization, which drops a generic fn that no
+        // reachable call instantiated. A dependency module linked but never
+        // reached from the consumer's entry still has its body verified, and
+        // its calls into a sibling's generic fn then named something mono had
+        // removed (#884: `ceangal.cell.get`, while the non-generic
+        // `is_dirty` in the same module verified fine). The declared surface
+        // is the right question for "does this function exist".
+        funcs.extend(m.exports.iter().filter_map(|e| match e {
+            crate::IrExport::Function { name, .. } => Some(name.to_string()),
+            _ => None,
+        }));
+        // A duplicate module NAME must not silently overwrite: two IrModules
+        // sharing a name (a dependency's root and a sibling, #884) would leave
+        // the map holding whichever came last, and every call into the other
+        // would report unknown. Merge instead — the union is the honest
+        // surface, and the gate still catches a genuinely absent name.
+        known_module_functions
+            .entry(m.name.to_string())
+            .or_default()
+            .extend(funcs);
     }
 
     // Verify type declarations
