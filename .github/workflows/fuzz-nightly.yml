@@ -27,15 +27,23 @@ env:
   RUST_TOOLCHAIN: "1.89.0"
   # Default budget for the scheduled run; the dispatch input overrides it.
   #
-  # 25 minutes is ~5,000 programs at the throughput this job sees, which matches
-  # the campaign size the wall histogram in #812 was measured at — so this is the
-  # established coverage, not a reduced one. The previous 60 was overshooting
-  # into runner-preemption territory: the 2026-07-25 run was killed by a
-  # shutdown signal at 18 minutes (`exit 143`), which no `set +e` or
-  # `timeout-minutes` can catch, and which reports as a plain job failure
-  # indistinguishable from a real finding. Deep runs stay available through the
-  # `minutes` dispatch input.
-  FUZZ_MINUTES: "25"
+  # Sized to what the hosted runner RELIABLY grants, not to what it sometimes
+  # allows. Measured job lifetimes for the five nights to 2026-07-26 were 8, 25,
+  # 65, 23 and 13 minutes — the 25-minute budget (already a reduction from 60
+  # after the 2026-07-25 preemption) was still killed by a shutdown signal at
+  # ~13 minutes on 07-26, with only 470s of its 1500s budget spent. `exit 143`
+  # from a runner shutdown is a JOB-level kill: no `set +e`, no
+  # `timeout-minutes`, and no later step can catch it, so it reports exactly
+  # like a real finding and no night can ever be scored green (#796 asks for two
+  # consecutive green nights — none of the last five could have qualified
+  # regardless of what the fuzzer found).
+  #
+  # 10 minutes is ~2,000 programs at this job's measured 210 prog/min. That is
+  # less coverage per night, deliberately: a campaign that FINISHES produces a
+  # verdict, and a verdict every night beats a larger campaign that is
+  # truncated at random. Deep runs stay available through the `minutes`
+  # dispatch input, which is where the #812-scale histograms should come from.
+  FUZZ_MINUTES: "10"
 
 jobs:
   fuzz:
