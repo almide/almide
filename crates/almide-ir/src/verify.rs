@@ -256,7 +256,24 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
         if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
             continue;
         }
-        let funcs: std::collections::HashSet<String> = m.functions.iter().map(|f| f.name.to_string()).collect();
+        let mut funcs: std::collections::HashSet<String> =
+            m.functions.iter().map(|f| f.name.to_string()).collect();
+        // MONOMORPHIZATION renames a generic module fn to its specialized
+        // instances (`get` → `get__Int`, …) and the ORIGINAL disappears from
+        // `m.functions`, while a call site that mono did not rewrite still
+        // names the generic (#884: `ceangal.cell.get` reported unknown while
+        // the non-generic `is_dirty` in the same module verified fine — and
+        // only when the module was reached through a consumer's import graph,
+        // which is what made it look import-order dependent). Credit the
+        // generic BASE name of every specialized instance: an instance is
+        // `<base>__<suffix>`, so the base is what a not-yet-rewritten call
+        // spells. This keeps the gate on genuinely-absent names.
+        let bases: Vec<String> = funcs
+            .iter()
+            .filter_map(|n| n.split_once("__").map(|(b, _)| b.to_string()))
+            .filter(|b| !b.is_empty())
+            .collect();
+        funcs.extend(bases);
         known_module_functions.insert(m.name.to_string(), funcs);
     }
 
