@@ -61,8 +61,16 @@ toolchain_fingerprint() {
         git -C "$root" rev-parse HEAD 2>/dev/null
         git -C "$root" status --porcelain -uall 2>/dev/null
         git -C "$root" diff HEAD 2>/dev/null
+        # `cut -f1`: shasum PRINTS THE PATH it hashed, and callers pass `root`
+        # differently (the Makefile recipe passes `.`, receipt.sh an absolute
+        # path) — leaving the path in made the fingerprint depend on the
+        # caller's spelling, so the same tree hashed differently the moment a
+        # single untracked file existed. The path still contributes through the
+        # porcelain listing above; only the digest is taken from here.
         git -C "$root" status --porcelain -uall 2>/dev/null \
             | awk '$1=="??"{ $1=""; sub(/^ /,""); print }' \
-            | while IFS= read -r f; do shasum -a 256 "$root/$f" 2>/dev/null; done
+            | while IFS= read -r f; do
+                shasum -a 256 "$root/$f" 2>/dev/null | cut -d' ' -f1
+            done
     } | shasum -a 256 | cut -d' ' -f1
 }
