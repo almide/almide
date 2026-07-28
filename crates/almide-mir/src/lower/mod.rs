@@ -33,6 +33,21 @@ pub enum LowerError {
     Unsupported(String),
 }
 
+/// The USER-FACING rendering: the reason, bare. The `Debug` form wraps it in
+/// `Unsupported("…")` — and because walls nest (a fn's wall is quoted inside
+/// the program's), Debug-formatting at each level compounded into
+/// `Unsupported("…: Unsupported(\"…\")")` with escaped quotes, the worst
+/// diagnostic in the compiler (#931). Every layer that shows a wall to a HUMAN
+/// — the fn-wall ledger, the CLI's wall error, the native-fallback notice —
+/// formats through THIS, so the reason reads as one sentence at any depth.
+impl std::fmt::Display for LowerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LowerError::Unsupported(reason) => f.write_str(reason),
+        }
+    }
+}
+
 /// A FLAT scalar-slot heap block: an all-scalar tuple (`(Int, Int)`) or a
 /// `List[<scalar>]` (`List[Int]`) — every slot in the block is a raw i64 value,
 /// never a nested handle. Mirrors the `ListElemDrop::ScalarAggregate` gate in

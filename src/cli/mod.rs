@@ -106,9 +106,11 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
             v1_code
         }
         Err(e) => {
-            if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                err(&format!("native: v1 walled ({e:?}) — falling back to v0 codegen"));
-            }
+            // The fallback is SILENT no more (#931): the user asked for the
+            // verified render, so tell them in one line that they did not get
+            // it and why — the full reason, not a Debug dump. The env var now
+            // only adds the success-path confirmation above.
+            err(&format!("note: verified native render walled — building via the standard codegen\n  reason: {e}"));
             rs_code
         }
     }

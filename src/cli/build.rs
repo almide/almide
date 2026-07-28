@@ -512,12 +512,16 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
             }
         },
         Err(e) => {
+            // The reason renders through `LowerError`'s Display — one readable
+            // sentence, however deep the wall nested — never the `{:?}` form,
+            // whose per-level `Unsupported("…")` wrappers and escaped quotes
+            // were the worst diagnostic in the compiler (#931).
             err(&format!(
-                "error: this program shape is not yet supported by the verified wasm renderer\n  \
-                 wall: {e:?}\n  \
-                 The unverified v0 wasm emitter was retired (#782): a wall is now an honest\n  \
-                 error instead of a silent fallback. Please file an issue with the wall reason\n  \
-                 above and the source shape that triggered it:\n  \
+                "error: this program shape is not yet supported by the verified wasm renderer\n\n  \
+                 {e}\n\n  \
+                 The unverified v0 wasm emitter was retired (#782): a wall is an honest error\n  \
+                 instead of a silent fallback. If this names a missing capability, please file\n  \
+                 it with the source shape that triggered it:\n  \
                  https://github.com/almide/almide/issues"
             ));
             Err(())
