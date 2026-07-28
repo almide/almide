@@ -741,9 +741,30 @@ fn scan_submodules_recursive(dir: &std::path::Path, prefix: &str, out: &mut std:
     }
 }
 
-pub fn cmd_fmt(files: &[String], write_back: bool) {
+/// What `almide fmt` does with the formatted text, per `docs/specs/cli.md`.
+///
+/// `Check` and `DryRun` were one `write_back: bool` that printed the formatted text and
+/// exited 0 unconditionally, so `almide fmt --check` reported nothing and every CI gate
+/// written against it was a no-op (#919). They are distinct in the spec and now in the
+/// code: `--check` is the GATE (say which files differ, exit 1), `--dry-run` SHOWS the
+/// formatted text without touching the file.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FmtMode {
+    /// Format and write the file back (the default).
+    Write,
+    /// Compare only: report each file that is not already formatted, exit 1 if any is.
+    Check,
+    /// Print the formatted text; never write, never fail.
+    DryRun,
+}
+
+pub fn cmd_fmt(files: &[String], mode: FmtMode) {
     // Load dependency info from almide.toml (if present)
     let (dep_names, dep_submodules) = load_dep_info_for_fmt();
+    // `--check` is a gate: a file that differs, and a file that cannot even be parsed,
+    // both make the run fail. Under the other modes a parse error stays a skip.
+    let mut unformatted: Vec<String> = Vec::new();
+    let mut unreadable = false;
 
     for file in files {
         let (mut program, source_text, parse_errors) = parse_file(file);
@@ -755,6 +776,7 @@ pub fn cmd_fmt(files: &[String], write_back: bool) {
                 err(&format!("{}", crate::diagnostic_render::display_with_source(e, &source_text)));
             }
             err(&format!("{}: {} parse error(s), skipping", file, parse_errors.len()));
+            unreadable = true;
             continue;
         }
         // Auto-manage imports: add missing, remove unused
@@ -763,14 +785,37 @@ pub fn cmd_fmt(files: &[String], write_back: bool) {
             err(&format!("{}: {}", file, msg));
         }
         let formatted = fmt::format_program(&program);
-        if write_back {
-            std::fs::write(file, &formatted)
-                .unwrap_or_else(|e| { err(&format!("Failed to write {}: {}", file, e)); std::process::exit(1); });
-            err(&format!("Formatted {}", file));
-        } else {
-            out_no_nl(&format!("{}", formatted));
+        match mode {
+            FmtMode::Write => {
+                std::fs::write(file, &formatted)
+                    .unwrap_or_else(|e| { err(&format!("Failed to write {}: {}", file, e)); std::process::exit(1); });
+                err(&format!("Formatted {}", file));
+            }
+            FmtMode::Check => {
+                if formatted != source_text {
+                    unformatted.push(file.clone());
+                }
+            }
+            FmtMode::DryRun => out_no_nl(&format!("{}", formatted)),
         }
     }
+
+    if mode != FmtMode::Check {
+        return;
+    }
+    if unformatted.is_empty() && !unreadable {
+        err(&format!("fmt: {} file(s) already formatted", files.len()));
+        return;
+    }
+    for f in &unformatted {
+        err(&format!("not formatted: {}", f));
+    }
+    err(&format!(
+        "fmt --check: {} of {} file(s) need formatting — run `almide fmt <path>`",
+        unformatted.len(),
+        files.len()
+    ));
+    std::process::exit(1);
 }
 
 pub fn cmd_clean() {
