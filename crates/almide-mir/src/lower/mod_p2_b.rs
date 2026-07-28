@@ -463,6 +463,17 @@ pub(crate) struct LowerCtx {
     /// `__mg_take`+Store). Computed by `collect_cell_vars` over the final desugared body
     /// before lowering, so bind/read/write/capture all agree on which vars are cells.
     cell_vars: HashSet<VarId>,
+    /// VarId → how many times it is READ in the WHOLE (final, desugared) body.
+    /// Computed once before lowering, because `LowerCtx` lowers statement by
+    /// statement and cannot otherwise see whether a variable is read LATER.
+    ///
+    /// Consumer: the in-place accumulator fold (`try_lower_line_cond_acc`),
+    /// which rebinds the else-arm variable's SLOT — sound only when this bind
+    /// is that variable's LAST reader (the source-level shadow rebind `let acc
+    /// = if c then acc + [x] else acc`). Comparing this whole-body count with
+    /// the count inside the bind's own value decides exactly that; a var read
+    /// anywhere else declines the fold. Empty map = "unknown", which declines.
+    var_read_counts: HashMap<VarId, u32>,
     /// var → its live CELL BLOCK value (`cell_vars` members only, populated at the
     /// `Bind`). Reads load slot 0 fresh (never cached in `value_of` — an intervening
     /// closure call may have written it); assigns take+drop the old slot value and

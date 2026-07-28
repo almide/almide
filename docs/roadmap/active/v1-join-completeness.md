@@ -144,8 +144,18 @@ custom-variant / variant-value / Result / Option merges), bind + scope-track +
 > a routing-invariant comment at the fold site and a standing cross-target pin
 > (`spec/wasm_cross/heap_result_if_bind_chain.almd::clobber`, two links — at
 > four or more the dense branch-lift outlines each bind and hides it).
-> FIX: gate the fold on real shadow/last-use liveness, or let the join (which
-> copies via `Op::Dup` — value semantics, always correct) run FIRST.
+> FIXED 2026-07-28 (the J1 prerequisite): the fold now carries a LAST-READER
+> gate. `LowerCtx::var_read_counts` counts every variable's reads over the
+> whole final body (computed beside `cell_vars`, where the body is whole —
+> the statement-at-a-time lowering cannot see later reads on its own), and
+> `try_lower_line_cond_acc` folds only when the accumulator's whole-body read
+> count equals its read count inside THIS bind's value, i.e. this bind is its
+> last reader. That is exactly what the source-level shadow rebind provides,
+> so stacked shadow accumulators (porta `serialize_opts`) keep folding in
+> place; any other binder declines to the ordinary route. The precondition is
+> now CHECKED rather than maintained by the accident that
+> `desugar_let_bound_heap_branch` intercepts these binds first — which is
+> precisely what J1 changes.
 >
 > **Defect 2 — merge-dst drop class missing for nested heap types (NEW).**
 > The widening pushes the merge dst to `live_heap_handles` but registers no
@@ -160,6 +170,15 @@ custom-variant / variant-value / Result / Option merges), bind + scope-track +
 > (mirror `seed_call_module_heap_drop_route` / `register_owned_heap_eq_drop`),
 > or restrict the widening to flat-drop-exact types (`String`) until that
 > lands.
+> NOT SEPARABLE — land it WITH J1, not before (measured 2026-07-28). The
+> existing variant join does NOT have this gap: a `Result[List[String],
+> String]` merge bind churns 100k times inside a 4MB wasm cap with the right
+> value, because `seed_variant_param` already routes its recursive drop; and
+> a deeper `Result[List[List[String]], String]` merge WALLS rather than
+> lowering. So there is no shape today whose drop class is both missing and
+> reachable — registering it now would be untestable dead code, and the
+> honest sequencing is to add the call in the same change that admits the
+> types needing it, verified by those types' churn probes.
 >
 > **Process note (kept deliberately):** corpus-wall was GREEN, the walled-real
 > ratchet was CLEAN, every pre-existing cross-target fixture passed, and the

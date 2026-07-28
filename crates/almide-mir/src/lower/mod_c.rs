@@ -616,6 +616,12 @@ fn lower_function_all_impl(
     // so bind/read/write/capture all classify the same vars as cells. A pure scan —
     // no rewrite, so the counted tree is untouched.
     ctx.cell_vars = collect_cell_vars(final_body, &ctx.globals, &func.params);
+    // WHOLE-BODY read counts, over the SAME final tree — the liveness oracle the
+    // statement-at-a-time lowering cannot derive on its own. Its consumer is the
+    // in-place accumulator fold, which rebinds a variable's SLOT and is therefore
+    // sound only when the bind doing so is that variable's LAST reader. A pure
+    // scan; the counted tree is untouched.
+    ctx.var_read_counts = collect_var_read_counts(final_body);
     let ret = ctx.lower_body_into(final_body)?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
     // has one capability (Stdout); an `effect fn` declares it may reach the host, so
