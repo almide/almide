@@ -1,7 +1,7 @@
 // llm-json-extract — Extract structured data from text using LLM + JSON mode
 //
 // Usage:
-//   almide run examples/llm-json-extract.almd
+//   almide run examples/llm/llm-json-extract.almd
 //
 // Demonstrates almai's JSON mode for structured output.
 

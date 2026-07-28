@@ -1,7 +1,7 @@
 // llm-code-review — Automated code review using almai + tool calling
 //
 // Usage:
-//   almide run examples/llm-code-review.almd
+//   almide run examples/llm/llm-code-review.almd
 //
 // Demonstrates tool calling: the LLM requests file contents,
 // then provides a review.

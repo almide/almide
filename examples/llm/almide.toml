@@ -1,0 +1,9 @@
+# The LLM examples are a real subproject: they import the real almai package
+# (github.com/almide/almai — multi-provider LLM client), pinned by almide.lock
+# to an exact commit, so `almide check` verifies them against the actual API
+# instead of a vendored stub that would drift (#922).
+[package]
+name = "llm_examples"
+
+[dependencies]
+almai = { git = "https://github.com/almide/almai", branch = "main" }

@@ -1,6 +1,6 @@
 // almide-grep — search files for a pattern
 //
-// Usage: almide run showcase/almide-grep.almd -- "pattern" [path]
+// Usage: almide run examples/almide-grep.almd -- "pattern" [path]
 import env
 import fs
 

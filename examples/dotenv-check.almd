@@ -1,6 +1,9 @@
 // dotenv-check — validate .env against .env.example
 //
-// Usage: almide run showcase/dotenv-check.almd -- .env .env.example
+// Usage: almide run examples/dotenv-check.almd -- .env .env.example
+
+import env
+import fs
 
 effect fn main() -> Unit = {
   let args = env.args()
