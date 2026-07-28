@@ -9,8 +9,10 @@
 // live in `pass_stdlib_lowering::try_inline_intrinsic`; those entries
 // are now dead code and are deleted in the same commit.
 //
-// WASM dispatch stays on `emit_wasm/calls_float.rs` until a later
-// `@wasm_intrinsic` sub-phase.
+// On WASM the float fns are SELF-HOSTED (`stdlib/float_to_string.almd`,
+// `float_parse.almd`, `float_bits.almd`, …), registered in
+// `crates/almide-mir/src/render_wasm/registry.rs`. (v0 dispatched through
+// `emit_wasm/calls_float.rs`, retired in c71eff7b.)
 
 // ── Conversions ──
 

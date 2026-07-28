@@ -7,8 +7,10 @@
 // collapse them into typed generics; this migration only moves the
 // source of truth from TOML to bundled `.almd` + `@inline_rust`.
 //
-// Rust runtime stays in `runtime/rs/src/bytes.rs`. WASM dispatch stays
-// in `emit_wasm/calls_bytes.rs`.
+// Rust runtime stays in `runtime/rs/src/bytes.rs`. On WASM the bytes fns
+// are SELF-HOSTED across `stdlib/bytes_*.almd`, registered in
+// `crates/almide-mir/src/render_wasm/registry.rs`. (v0 dispatched through
+// `emit_wasm/calls_bytes.rs`, retired in c71eff7b.)
 
 @intrinsic("almide_rt_bytes_append_f32_be")
 fn append_f32_be(b: Bytes, val: Float) -> Unit = _
@@ -448,7 +450,7 @@ type Endian = | LittleEndian | BigEndian
 // targets.
 //
 // Write / set wrappers stay on `@inline_rust` — they mutate `Bytes`
-// in place, and the WASM emitter's var-update pattern (see
+// in place, and the WASM emitter's var-update pattern (v0's
 // `emit_bytes_append_i` in `emit_wasm/calls_bytes.rs`) only fires
 // when the `bytes.append_...` call site has the caller's `Var`
 // directly. Routing through a bundled-body wrapper hides the
