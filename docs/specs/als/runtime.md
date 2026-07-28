@@ -46,7 +46,16 @@ Contracts: C-012。
 観測し、存在すれば some(値)、無ければ none を両ターゲットで同一バイトで
 返す（wasm は WASI environ + ランナーの環境継承）。`random.int(a, b)` は
 WASI entropy 下でも常に [a, b] 範囲内。
-Contracts: C-096, C-112, C-118, C-133。
+
+`env.os()` と `env.temp_dir()` は等価性則の**唯一の適用除外**である。両者は
+実行中のホストを報告するため、native は実 OS 名と実 temp ディレクトリを、
+wasm レグは WASI サンドボックス（`wasi` / `/tmp`）を返す。両ターゲットで
+一致させることこそが欠陥であり、「今どのプラットフォームか」を問う
+プログラムには真を返さねばならない。除外は無制限ではなく、両レグで同一の
+決定的不変量（os は閉じた集合 {macos, linux, windows, wasi} の要素、
+temp_dir は非空かつ posix ホストでは絶対パス）が証明対象となる。第三の関数を
+除外に加えるには C-189 の statement とその fixture の改訂を要する。
+Contracts: C-096, C-112, C-118, C-133, C-189。
 
 ## ALS-R6 ファイルシステムのパス解決
 

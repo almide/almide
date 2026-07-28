@@ -5,7 +5,8 @@
 // (±32 byte loop), so every non-ASCII case op diverged: accents, Greek, Cyrillic,
 // the length-CHANGING maps (ß -> SS), and the context-sensitive Greek sigma
 // (Final_Sigma: word-final ς vs medial σ). The runtime now embeds oracle-derived
-// Unicode case tables (crates/almide-codegen/src/emit_wasm/rt_string_case.rs) and
+// Unicode case tables in SELF-HOSTED Almide (stdlib/string_to_upper.almd,
+// stdlib/string_to_lower.almd, stdlib/string_capitalize.almd) and
 // resolves Final_Sigma at runtime — byte-identical to native for ALL scalars.
 effect fn main() -> Unit = {
   // ── ASCII (the old fast path; still correct) ──

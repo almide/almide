@@ -553,6 +553,121 @@ pub fn rewrap_never_err_into_result_targets(
                 def_id: None,
             };
         }
+
+        /// Extracted verbatim from [`visit_expr_mut`] (codopsy round-3 sweep, #852): decides
+        /// whether a LIST literal's element slot is declared Result, and re-wraps every raw
+        /// never-err call sitting in one.
+        // `[step(), step()]: List[Result[..]]` — the element slot type is the LIST's
+        // own type's sole type arg (mirrors auto_try.rs's `elem_is_result`).
+        // Guard-clause flattening: this arm is the tail of `visit_expr_mut` (the
+        // last statement in the function, and match arms are mutually exclusive),
+        // so an early `return` on any unmet condition is identical to falling
+        // through to the end of the arm's block. No behavior change.
+        fn rewrap_result_typed_list_elements(&self, list_ty: &Ty, elements: &mut [IrExpr]) {
+            let Ty::Applied(TypeConstructorId::List, a) = list_ty else {
+                return;
+            };
+            if a.len() != 1 {
+                return;
+            }
+            let Ty::Applied(TypeConstructorId::Result, _) = &a[0] else {
+                return;
+            };
+            let elem_ty = a[0].clone();
+            for el in elements.iter_mut() {
+                if self.is_raw_never_err_call(el) {
+                    self.wrap(el, elem_ty.clone());
+                }
+            }
+        }
+
+        /// Extracted verbatim from [`visit_expr_mut`] (codopsy round-3 sweep, #852): decides
+        /// which ARGUMENT slots of a `Named` call are declared Result by the callee's own
+        /// param signature, and re-wraps the raw never-err calls sitting in them.
+        // `unwrap(step())` — a CALL-ARGUMENT position whose CALLEE PARAM's declared
+        // type is Result (#840 follow-up class, the yaml `unwrap(parse(s))` shape):
+        // the callee reads a real Result block off its param, so a raw never-err
+        // call in that slot must re-wrap exactly like a bind/construction target.
+        // Positional zip against the callee's declared params; an arity mismatch
+        // (a shape this pre-pass doesn't understand) is left untouched — the
+        // lowering's own walls stay the safety net.
+        fn rewrap_result_typed_call_args(
+            &self,
+            name: &almide_lang::intern::Sym,
+            args: &mut [IrExpr],
+        ) {
+            let Some(ptys) = self.param_sigs.get(name.as_str()) else {
+                return;
+            };
+            if ptys.len() != args.len() {
+                return;
+            }
+            for (arg, pty) in args.iter_mut().zip(ptys.iter()) {
+                if matches!(pty, Ty::Applied(TypeConstructorId::Result, _))
+                    && self.is_raw_never_err_call(arg)
+                {
+                    self.wrap(arg, pty.clone());
+                }
+            }
+        }
+
+        /// Extracted verbatim from [`visit_expr_mut`] (codopsy round-3 sweep, #852): decides
+        /// which TUPLE slots are declared Result by the tuple expr's own type, and re-wraps
+        /// the raw never-err calls sitting in them.
+        // `(step(), 9): (Result[..], Int)` — each slot's type comes directly from the
+        // TUPLE expr's own `Ty::Tuple` positionally (no registry lookup needed).
+        fn rewrap_result_typed_tuple_slots(&self, tuple_ty: &Ty, elements: &mut [IrExpr]) {
+            if let Ty::Tuple(tys) = tuple_ty {
+                if tys.len() == elements.len() {
+                    for (el, t) in elements.iter_mut().zip(tys.iter()) {
+                        if matches!(t, Ty::Applied(TypeConstructorId::Result, _))
+                            && self.is_raw_never_err_call(el)
+                        {
+                            self.wrap(el, t.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        /// Extracted verbatim from [`visit_expr_mut`] (codopsy round-3 sweep, #852): resolves a
+        /// record literal's declared field types (structural type first, then the layout
+        /// registry) and re-wraps the raw never-err calls sitting in Result-typed fields.
+        // `Holder { r: step() }` — field types come from the record expr's own
+        // structural type (`Ty::Record`/`Ty::OpenRecord`) or, for a NAMED record, the
+        // declared layout registry — mirrors auto_try.rs's `field_tys` construction.
+        fn rewrap_result_typed_record_fields(
+            &self,
+            record_ty: &Ty,
+            name: &Option<almide_lang::intern::Sym>,
+            fields: &mut [(almide_lang::intern::Sym, IrExpr)],
+        ) {
+            let field_tys: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+                match record_ty {
+                    Ty::Record { fields: fs } | Ty::OpenRecord { fields: fs } => {
+                        fs.iter().cloned().collect()
+                    }
+                    Ty::Named(tn, _) => self
+                        .record_layouts
+                        .get(tn.as_str())
+                        .map(|(_, fs)| fs.iter().cloned().collect())
+                        .unwrap_or_default(),
+                    _ => name
+                        .as_ref()
+                        .and_then(|n| self.record_layouts.get(n.as_str()))
+                        .map(|(_, fs)| fs.iter().cloned().collect())
+                        .unwrap_or_default(),
+                };
+            for (k, v) in fields.iter_mut() {
+                if let Some(ft) = field_tys.get(k) {
+                    if matches!(ft, Ty::Applied(TypeConstructorId::Result, _))
+                        && self.is_raw_never_err_call(v)
+                    {
+                        self.wrap(v, ft.clone());
+                    }
+                }
+            }
+        }
     }
     impl IrMutVisitor for S<'_> {
         fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
@@ -579,96 +694,21 @@ pub fn rewrap_never_err_into_result_targets(
         }
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
+            // The four target-directed positions, each delegating to the decider that owns
+            // its slot-type rule (codopsy round-3 sweep, #852). Arms stay mutually exclusive
+            // and in their original order; every arm body moved verbatim, comments included.
             match &mut expr.kind {
-                // `[step(), step()]: List[Result[..]]` — the element slot type is the LIST's
-                // own type's sole type arg (mirrors auto_try.rs's `elem_is_result`).
-                // Guard-clause flattening: this arm is the tail of `visit_expr_mut` (the
-                // last statement in the function, and match arms are mutually exclusive),
-                // so an early `return` on any unmet condition is identical to falling
-                // through to the end of the arm's block. No behavior change.
                 IrExprKind::List { elements } => {
-                    let Ty::Applied(TypeConstructorId::List, a) = &expr.ty else {
-                        return;
-                    };
-                    if a.len() != 1 {
-                        return;
-                    }
-                    let Ty::Applied(TypeConstructorId::Result, _) = &a[0] else {
-                        return;
-                    };
-                    let elem_ty = a[0].clone();
-                    for el in elements.iter_mut() {
-                        if self.is_raw_never_err_call(el) {
-                            self.wrap(el, elem_ty.clone());
-                        }
-                    }
+                    self.rewrap_result_typed_list_elements(&expr.ty, elements)
                 }
-                // `unwrap(step())` — a CALL-ARGUMENT position whose CALLEE PARAM's declared
-                // type is Result (#840 follow-up class, the yaml `unwrap(parse(s))` shape):
-                // the callee reads a real Result block off its param, so a raw never-err
-                // call in that slot must re-wrap exactly like a bind/construction target.
-                // Positional zip against the callee's declared params; an arity mismatch
-                // (a shape this pre-pass doesn't understand) is left untouched — the
-                // lowering's own walls stay the safety net.
                 IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                    let Some(ptys) = self.param_sigs.get(name.as_str()) else {
-                        return;
-                    };
-                    if ptys.len() != args.len() {
-                        return;
-                    }
-                    for (arg, pty) in args.iter_mut().zip(ptys.iter()) {
-                        if matches!(pty, Ty::Applied(TypeConstructorId::Result, _))
-                            && self.is_raw_never_err_call(arg)
-                        {
-                            self.wrap(arg, pty.clone());
-                        }
-                    }
+                    self.rewrap_result_typed_call_args(name, args)
                 }
-                // `(step(), 9): (Result[..], Int)` — each slot's type comes directly from the
-                // TUPLE expr's own `Ty::Tuple` positionally (no registry lookup needed).
                 IrExprKind::Tuple { elements } => {
-                    if let Ty::Tuple(tys) = &expr.ty {
-                        if tys.len() == elements.len() {
-                            for (el, t) in elements.iter_mut().zip(tys.iter()) {
-                                if matches!(t, Ty::Applied(TypeConstructorId::Result, _))
-                                    && self.is_raw_never_err_call(el)
-                                {
-                                    self.wrap(el, t.clone());
-                                }
-                            }
-                        }
-                    }
+                    self.rewrap_result_typed_tuple_slots(&expr.ty, elements)
                 }
-                // `Holder { r: step() }` — field types come from the record expr's own
-                // structural type (`Ty::Record`/`Ty::OpenRecord`) or, for a NAMED record, the
-                // declared layout registry — mirrors auto_try.rs's `field_tys` construction.
                 IrExprKind::Record { name, fields } => {
-                    let field_tys: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
-                        match &expr.ty {
-                            Ty::Record { fields: fs } | Ty::OpenRecord { fields: fs } => {
-                                fs.iter().cloned().collect()
-                            }
-                            Ty::Named(tn, _) => self
-                                .record_layouts
-                                .get(tn.as_str())
-                                .map(|(_, fs)| fs.iter().cloned().collect())
-                                .unwrap_or_default(),
-                            _ => name
-                                .as_ref()
-                                .and_then(|n| self.record_layouts.get(n.as_str()))
-                                .map(|(_, fs)| fs.iter().cloned().collect())
-                                .unwrap_or_default(),
-                        };
-                    for (k, v) in fields.iter_mut() {
-                        if let Some(ft) = field_tys.get(k) {
-                            if matches!(ft, Ty::Applied(TypeConstructorId::Result, _))
-                                && self.is_raw_never_err_call(v)
-                            {
-                                self.wrap(v, ft.clone());
-                            }
-                        }
-                    }
+                    self.rewrap_result_typed_record_fields(&expr.ty, name, fields)
                 }
                 _ => {}
             }

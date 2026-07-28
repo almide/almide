@@ -20,7 +20,9 @@ From Stdlib Require Import String.
 Record CapWitness := { allowed : list nat; used_caps : list nat }.
 
 (* THE CHECKER: every used capability is in the declared allowlist. *)
-Definition check_caps (w : CapWitness) : bool := subset_check (allowed w) (used_caps w).
+(* Routed through the sorted fast path (Subset.v, arc v1-join-completeness C3):
+   sorted witnesses decide in Th(n+m); unsorted ones fall back. Sound either way. *)
+Definition check_caps (w : CapWitness) : bool := subset_check_fast (allowed w) (used_caps w).
 
 (* THE PROPERTY: the artifact stays within its declared capability bound. *)
 Definition within_bound (w : CapWitness) : Prop := subset_prop (allowed w) (used_caps w).
@@ -28,7 +30,7 @@ Definition within_bound (w : CapWitness) : Prop := subset_prop (allowed w) (used
 (* SOUNDNESS: acceptance guarantees no undeclared capability (the shared law). *)
 Theorem check_caps_sound :
   forall w, check_caps w = true -> within_bound w.
-Proof. intros w. apply subset_check_sound. Qed.
+Proof. intros w. apply subset_check_fast_sound. Qed.
 
 (* non-vacuous: a "no network" program (network = cap 0 not in allowlist) is
    accepted when it uses only fs-read (cap 1); rejected if it reaches network. *)

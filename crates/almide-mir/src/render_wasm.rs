@@ -352,55 +352,10 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
     // Remap aliasable burned names BEFORE the unlinked check (clone only when an
     // alias actually applies — the common path stays zero-copy).
     let resolvable = resolvable_call_names(prog);
-    let needs_alias = prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| match op {
-        Op::CallFn { name, .. } => {
-            !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some()
-        }
-        Op::DropVariant { ty, .. } => {
-            !resolvable.contains(&drop_target_name(ty))
-                && resolve_drop_alias(&drop_target_name(ty), &resolvable).is_some()
-        }
-        Op::DropWrapperRec { drop_fn, .. } => {
-            !resolvable.contains(&drop_target_name(drop_fn))
-                && resolve_drop_alias(&drop_target_name(drop_fn), &resolvable).is_some()
-        }
-        _ => false,
-    });
     let remapped;
-    let prog = if needs_alias {
+    let prog = if any_call_needs_alias(prog, &resolvable) {
         let mut p = prog.clone();
-        for f in &mut p.functions {
-            for op in &mut f.ops {
-                match op {
-                    Op::CallFn { name, .. } => {
-                        if !resolvable.contains(name) {
-                            if let Some(alias) = resolve_rt_alias(name, &resolvable) {
-                                *name = alias;
-                            }
-                        }
-                    }
-                    Op::DropVariant { ty, .. } => {
-                        if !resolvable.contains(&drop_target_name(ty)) {
-                            if let Some(alias) =
-                                resolve_drop_alias(&drop_target_name(ty), &resolvable)
-                            {
-                                *ty = alias;
-                            }
-                        }
-                    }
-                    Op::DropWrapperRec { drop_fn, .. } => {
-                        if !resolvable.contains(&drop_target_name(drop_fn)) {
-                            if let Some(alias) =
-                                resolve_drop_alias(&drop_target_name(drop_fn), &resolvable)
-                            {
-                                *drop_fn = alias;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        remap_burned_names_to_aliases(&mut p, &resolvable);
         remapped = p;
         &remapped
     } else {
@@ -433,6 +388,65 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
         )));
     }
     Ok(render_wasm_program(&pruned))
+}
+
+/// Whether ANY op names a burned callee/drop target that is unresolvable as spelled but
+/// DOES resolve through an alias — the zero-copy test that decides whether the program
+/// must be cloned for the remap at all. Extracted verbatim from
+/// [`try_render_wasm_program`] (codopsy round-3 sweep, #852).
+fn any_call_needs_alias(prog: &MirProgram, resolvable: &BTreeSet<String>) -> bool {
+    prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| match op {
+        Op::CallFn { name, .. } => {
+            !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some()
+        }
+        Op::DropVariant { ty, .. } => {
+            !resolvable.contains(&drop_target_name(ty))
+                && resolve_drop_alias(&drop_target_name(ty), &resolvable).is_some()
+        }
+        Op::DropWrapperRec { drop_fn, .. } => {
+            !resolvable.contains(&drop_target_name(drop_fn))
+                && resolve_drop_alias(&drop_target_name(drop_fn), &resolvable).is_some()
+        }
+        _ => false,
+    })
+}
+
+/// Rewrite every unresolvable-as-spelled call / drop target that HAS an alias to that
+/// alias, in place. Extracted verbatim from [`try_render_wasm_program`] (codopsy
+/// round-3 sweep, #852).
+fn remap_burned_names_to_aliases(p: &mut MirProgram, resolvable: &BTreeSet<String>) {
+        for f in &mut p.functions {
+            for op in &mut f.ops {
+                match op {
+                    Op::CallFn { name, .. } => {
+                        if !resolvable.contains(name) {
+                            if let Some(alias) = resolve_rt_alias(name, &resolvable) {
+                                *name = alias;
+                            }
+                        }
+                    }
+                    Op::DropVariant { ty, .. } => {
+                        if !resolvable.contains(&drop_target_name(ty)) {
+                            if let Some(alias) =
+                                resolve_drop_alias(&drop_target_name(ty), &resolvable)
+                            {
+                                *ty = alias;
+                            }
+                        }
+                    }
+                    Op::DropWrapperRec { drop_fn, .. } => {
+                        if !resolvable.contains(&drop_target_name(drop_fn)) {
+                            if let Some(alias) =
+                                resolve_drop_alias(&drop_target_name(drop_fn), &resolvable)
+                            {
+                                *drop_fn = alias;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
 }
 
 /// Render a whole MIR program (functions + `_start` → `main`) to a WAT module.

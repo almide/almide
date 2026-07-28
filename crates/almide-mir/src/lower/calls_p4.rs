@@ -123,9 +123,58 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// The scalar-operand dispatch TABLE. Each `IrExprKind` group routes to the decider
+    /// that owns it; the groups are DISJOINT by discriminant, so this router carries no
+    /// guards — every guard, arm order and fall-through inside a group lives verbatim in
+    /// that group's helper, which reproduces the original `_ => None` for the shapes the
+    /// group admits but this position does not (a `Block` with no tail, a heap-typed `if`,
+    /// a non-`Result` `!`, …). Decomposed in the codopsy round-3 sweep (#852).
     fn lower_scalar_value_inner(&mut self, expr: &IrExpr) -> Option<ValueId> {
         match &expr.kind {
             IrExprKind::Var { id } => self.value_or_global(*id).ok(),
+            IrExprKind::Block { .. } => self.lower_scalar_block_binds_then_tail(expr),
+            // A SCALAR record field / tuple element (`r.x`, `t.0`) — load from the
+            // block's layout slot. Defers (→ None) for a non-materialized container.
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
+                self.lower_scalar_field_access(expr)
+            }
+            // A scalar list element `xs[i]` (`xs: List[Int/Float/Bool]`) — a bounds-checked
+            // element load. Defers (→ None) for a heap element (an i32-handle slot) or a
+            // non-resolvable container.
+            IrExprKind::IndexAccess { object, index } => {
+                self.lower_scalar_index_access(object, index, &expr.ty)
+            }
+            IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. } => {
+                self.lower_scalar_literal(expr)
+            }
+            // Decomposed (#781): the 340-line operator dispatch is a verbatim
+            // text move into `lower_scalar_binop`.
+            IrExprKind::BinOp { op, left, right } => {
+                self.lower_scalar_binop(expr, op, left, right)
+            }
+            // A scalar-result PRIMITIVE-FLOOR call (`prim.handle`/`prim.load32`/
+            // `prim.fd_write`) — `@intrinsic` lowers it to a `RuntimeCall`; we map the
+            // `almide_rt_prim_*` symbol to an [`Op::Prim`] (NOT the deferred Const a
+            // generic RuntimeCall gets). The self-host floor reaching executable code.
+            IrExprKind::RuntimeCall { symbol, args } => {
+                let func = symbol.as_str().strip_prefix("almide_rt_prim_")?;
+                self.lower_prim_call(func, args).ok().flatten()
+            }
+            IrExprKind::Call { .. } => self.lower_scalar_call_form(expr),
+            IrExprKind::If { .. } => self.lower_scalar_if_operand(expr),
+            IrExprKind::Match { .. } => self.lower_scalar_match_operand(expr),
+            IrExprKind::UnOp { .. } => self.lower_scalar_unop(expr),
+            IrExprKind::UnwrapOr { .. } => self.lower_scalar_unwrap_or_operand(expr),
+            IrExprKind::Unwrap { .. } => self.lower_scalar_ok_payload_unwrap(expr),
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
+    /// #852): whether a `Block` operand's bind chain AND its scalar tail both lower — and
+    /// the rollback mark that undoes the partial ops when either leaves the subset.
+    fn lower_scalar_block_binds_then_tail(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             // A SCALAR BLOCK body (`{ let freq = …; let h = …; h * enorm }` — the mel
             // inner map): lower the binds then the scalar tail. Any stmt outside the
             // subset rolls this back (partial ops truncated) and returns None — the
@@ -149,17 +198,15 @@ impl LowerCtx {
                     }
                 }
             }
-            // A SCALAR record field / tuple element (`r.x`, `t.0`) — load from the
-            // block's layout slot. Defers (→ None) for a non-materialized container.
-            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
-                self.lower_scalar_field_access(expr)
-            }
-            // A scalar list element `xs[i]` (`xs: List[Int/Float/Bool]`) — a bounds-checked
-            // element load. Defers (→ None) for a heap element (an i32-handle slot) or a
-            // non-resolvable container.
-            IrExprKind::IndexAccess { object, index } => {
-                self.lower_scalar_index_access(object, index, &expr.ty)
-            }
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
+    /// #852): which constant an Int/Bool/Float literal materializes into the i64-uniform
+    /// scalar slot.
+    fn lower_scalar_literal(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             IrExprKind::LitInt { value } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst, value: *value });
@@ -179,19 +226,19 @@ impl LowerCtx {
                 self.ops.push(Op::ConstInt { dst, value: crate::lower::float_lit_bits(*value, &expr.ty) });
                 Some(dst)
             }
-            // Decomposed (#781): the 340-line operator dispatch is a verbatim
-            // text move into `lower_scalar_binop`.
-            IrExprKind::BinOp { op, left, right } => {
-                self.lower_scalar_binop(expr, op, left, right)
-            }
-            // A scalar-result PRIMITIVE-FLOOR call (`prim.handle`/`prim.load32`/
-            // `prim.fd_write`) — `@intrinsic` lowers it to a `RuntimeCall`; we map the
-            // `almide_rt_prim_*` symbol to an [`Op::Prim`] (NOT the deferred Const a
-            // generic RuntimeCall gets). The self-host floor reaching executable code.
-            IrExprKind::RuntimeCall { symbol, args } => {
-                let func = symbol.as_str().strip_prefix("almide_rt_prim_")?;
-                self.lower_prim_call(func, args).ok().flatten()
-            }
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
+    /// #852): which of the four admitted `Call` shapes an operand call is — the `prim`
+    /// module floor, the identity int widening, the `float.from_int` sitofp prim, or the
+    /// general scalar-result call. The arm ORDER is load-bearing (the `prim` module arm and
+    /// the two predicate arms all precede the general `!is_heap_ty` admission) and is
+    /// preserved exactly; a `Call` matching an earlier arm that then yields None stays None
+    /// here, never falling through to a later arm.
+    fn lower_scalar_call_form(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             // The same prim floor reached as a MODULE call (`prim.handle(buf)`) in a value
             // position — e.g. an address operand `prim.handle(buf) + LIST_HEADER`. prim
             // calls are pure scalar/handle ops (no ownership), so this is the narrow,
@@ -227,6 +274,31 @@ impl LowerCtx {
                 });
                 Some(dst)
             }
+            // A scalar user/stdlib CALL as an OPERAND (`5 + string.len(s)`, `5 +
+            // string.len("abc")` after the optimizer inlines a `let s = "abc"`, `g(a) +
+            // h(b)`, `string.len(s) > 0`, a nested `f(g(x))`): EXECUTE it via the same
+            // `try_lower_scalar_call` the direct-bind path uses. Its argument lowering
+            // (`lower_call_args`) materializes/borrows heap args exactly as a bound `let k =
+            // call` already does — a heap `Var` is BORROWED (`CallArg::Handle`, no ownership
+            // event), a FRESH heap literal is `Alloc`'d into an owned temp released at scope
+            // end. The latter pushes to `live_heap_handles`, but the SELF-ROLLBACK wrapper
+            // (see `lower_scalar_value`) restores both `ops` and `live_heap_handles` if this
+            // (or a sibling operand) later fails, so the materialize is rollback-safe. A
+            // Method/Computed/impure-Module callee returns `None` from `try_lower_scalar_call`
+            // (rolled back) and DEFERS — honest, the caps fold tags the elided callee. A heap
+            // RESULT operand is NOT this path (string `+` is ConcatStr; a let-bound heap if is
+            // the separate escalated-cert path) — it is gated out by `!is_heap_ty`.
+            IrExprKind::Call { .. } if !is_heap_ty(&expr.ty) => {
+                self.try_lower_scalar_call(expr, &expr.ty)
+            }
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
+    /// #852): whether an `if` in operand position is a SCALAR one this path may execute.
+    fn lower_scalar_if_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             // A scalar `if`/`match` as an OPERAND (`a + (if c then 1 else 2)`,
             // `n + match k { 0 => x, _ => y }`): EXECUTE it to a scalar via the same
             // `try_lower_scalar_if` the let-bind path uses — only the taken arm runs. The
@@ -239,6 +311,16 @@ impl LowerCtx {
             IrExprKind::If { cond, then, else_ } if !is_heap_ty(&expr.ty) => {
                 self.try_lower_scalar_if(cond, then, else_, &expr.ty)
             }
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
+    /// #852): which match-execution strategy a scalar `match` operand gets — custom-variant
+    /// tag dispatch, tuple refinement, variant (Option/Result) value-match, or the desugared
+    /// if/block chain — in that priority order.
+    fn lower_scalar_match_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             IrExprKind::Match { subject, arms } if !is_heap_ty(&expr.ty) => {
                 // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
                 if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, &expr.ty) {
@@ -261,23 +343,14 @@ impl LowerCtx {
                 let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
                 self.lower_scalar_arm(&if_expr)
             }
-            // A scalar user/stdlib CALL as an OPERAND (`5 + string.len(s)`, `5 +
-            // string.len("abc")` after the optimizer inlines a `let s = "abc"`, `g(a) +
-            // h(b)`, `string.len(s) > 0`, a nested `f(g(x))`): EXECUTE it via the same
-            // `try_lower_scalar_call` the direct-bind path uses. Its argument lowering
-            // (`lower_call_args`) materializes/borrows heap args exactly as a bound `let k =
-            // call` already does — a heap `Var` is BORROWED (`CallArg::Handle`, no ownership
-            // event), a FRESH heap literal is `Alloc`'d into an owned temp released at scope
-            // end. The latter pushes to `live_heap_handles`, but the SELF-ROLLBACK wrapper
-            // (see `lower_scalar_value`) restores both `ops` and `live_heap_handles` if this
-            // (or a sibling operand) later fails, so the materialize is rollback-safe. A
-            // Method/Computed/impure-Module callee returns `None` from `try_lower_scalar_call`
-            // (rolled back) and DEFERS — honest, the caps fold tags the elided callee. A heap
-            // RESULT operand is NOT this path (string `+` is ConcatStr; a let-bound heap if is
-            // the separate escalated-cert path) — it is gated out by `!is_heap_ty`.
-            IrExprKind::Call { .. } if !is_heap_ty(&expr.ty) => {
-                self.try_lower_scalar_call(expr, &expr.ty)
-            }
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
+    /// #852): which instruction shape a scalar unary op takes once its operand lowers.
+    fn lower_scalar_unop(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             // A scalar UNARY op (`-a`, `not x`). The operand lowers via the SAME scalar
             // value path (a Var load, a literal, a nested compare/arith) — if it is not
             // scalar-lowerable we return None (WALL/defer), never a silent 0. Previously
@@ -327,6 +400,15 @@ impl LowerCtx {
                     }
                 }
             }
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
+    /// #852): whether a `??` operand has a SCALAR fallback, the only shape this path
+    /// executes the unwrap for.
+    fn lower_scalar_unwrap_or_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             // A SCALAR `??` in a value/operand position (`(int.parse(s) ?? 0) - 48`,
             // `(codepoint(ch) ?? 0)` fed to arithmetic) — execute the unwrap (tag read +
             // payload-or-fallback) via the same machinery the tail/let positions use. Without this
@@ -337,6 +419,15 @@ impl LowerCtx {
             IrExprKind::UnwrapOr { expr, fallback } if !is_heap_ty(&fallback.ty) => {
                 self.try_lower_option_unwrap_or(expr, fallback, false)
             }
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::lower_scalar_value_inner`] (codopsy round-3 sweep,
+    /// #852): whether an `e!` operand is a scalar-Ok `Result` whose payload can be read out
+    /// of the materialized block, and the rollback when the inner call does not lower.
+    fn lower_scalar_ok_payload_unwrap(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             // A scalar `e!` (Unwrap) in a VALUE/OPERAND position (`acc + int.parse(s)!`) over a
             // `Result[scalar, String]` call. The auto-`?` left the operand as `Unwrap{Call(Result)}`
             // (the let-bind position got it type-stripped to a bare scalar Call; the BinOp operand

@@ -146,19 +146,51 @@ fn __jp_value(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
 }
 
 // ── strings ──
-// One pass: over-allocate (decoded output is never longer than the raw span),
-// write bytes through a cursor, then patch the String's len header — the same
-// write-cursor + len-patch discipline as list.filter. p is at the opening `"`
-// (or whatever byte the object-key path hands it — consumed unconditionally,
-// like the oracle's parse_string).
+// Two passes over THIS string's own bytes: measure an upper bound on the
+// decoded length, allocate exactly that, then write bytes through a cursor and
+// patch the String's len header — the same write-cursor + len-patch discipline
+// as list.filter. p is at the opening `"` (or whatever byte the object-key path
+// hands it — consumed unconditionally, like the oracle's parse_string).
+//
+// The bound must come from the string's own span, NOT from `len - p - 1` (the
+// rest of the document): sizing by the document remainder makes parsing cost
+// O(strings x document length), which timed out on real glTF (#939). The span
+// pass mirrors __jp_str_fill's advance and stop conditions exactly — advancing
+// less would under-allocate and corrupt the heap, so the two must stay in step.
 
 fn __jp_string(base: Int, len: Int, p: Int) -> (String, Int) = {
-  let buf = prim.alloc_str(if len > p + 1 then len - p - 1 else 0)
+  let buf = prim.alloc_str(__jp_str_span(base, len, p + 1, 0))
   let dh = prim.handle(buf) + 12
   let (np, outn) = __jp_str_fill(base, len, p + 1, dh, 0)
   prim.store32(prim.handle(buf) + 4, outn)
   (buf, np)
 }
+
+// An upper bound on the bytes __jp_str_fill will write, walking the same path
+// it does. Per branch: a simple escape consumes 2 and writes at most 1; a
+// \uXXXX consumes 6 and writes at most 3 (any BMP codepoint); a surrogate pair
+// consumes 12 and writes exactly 4; a plain byte is 1 for 1.
+fn __jp_str_span(base: Int, len: Int, p: Int, n: Int) -> Int =
+  if p >= len then n
+  else {
+    let b = prim.load8(base + p)
+    if b == 34 then n
+    else if b == 92 then {
+      let e = if p + 1 < len then prim.load8(base + p + 1) else 0
+      if e == 117 then {
+        let unit = __jp_hex4(base, len, p + 2)
+        if unit >= 55296 and unit <= 56319
+          and p + 8 <= len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then {
+          let lo = __jp_hex4(base, len, p + 8)
+          if lo >= 56320 and lo <= 57343 then __jp_str_span(base, len, p + 12, n + 4)
+          else __jp_str_span(base, len, p + 6, n + 3)
+        }
+        else __jp_str_span(base, len, p + 6, n + 3)
+      }
+      else __jp_str_span(base, len, p + 2, n + 1)
+    }
+    else __jp_str_span(base, len, p + 1, n + 1)
+  }
 
 // Returns (position after the closing quote / end, bytes written).
 fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =

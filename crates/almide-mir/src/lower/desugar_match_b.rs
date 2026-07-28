@@ -522,40 +522,11 @@ pub fn desugar_tuple_variant_match_deep(
         }
         let first_all_trivial = rows.first()?.pats.iter().all(trivial);
         if first_all_trivial {
-            let r = &rows[0];
-            let mut b = r.body.clone();
-            for (i, p) in r.pats.iter().enumerate() {
-                if let IrPattern::Bind { var, .. } = p {
-                    b = almide_ir::substitute_var_in_expr(&b, *var, &refs[i]);
-                }
-            }
-            emitted[r.idx] += 1;
-            return Some(b);
+            return Some(trivial_row_body(&rows[0], refs, emitted));
         }
         let j = (0..refs.len()).find(|&c| rows.iter().any(|r| !trivial(&r.pats[c])))?;
-        // A Bind in the dispatch column names the WHOLE component: substitute the component
-        // ref now (once, before the row joins multiple branches) and dispatch on `_`.
-        let rows: Vec<Row> = rows
-            .into_iter()
-            .map(|mut r| {
-                if let IrPattern::Bind { var, .. } = &r.pats[j] {
-                    r.body = almide_ir::substitute_var_in_expr(&r.body, *var, &refs[j]);
-                    r.pats[j] = IrPattern::Wildcard;
-                }
-                r
-            })
-            .collect();
-        // Ordered ctor heads (first occurrence); a same-head arity drift declines.
-        let mut keys: Vec<(HKey, usize)> = Vec::new();
-        for r in &rows {
-            if let Some((k, args)) = head_of(&r.pats[j]) {
-                match keys.iter().find(|(k2, _)| *k2 == k) {
-                    Some((_, a)) if *a != args.len() => return None,
-                    Some(_) => {}
-                    None => keys.push((k, args.len())),
-                }
-            }
-        }
+        let rows = substitute_dispatch_column_binds(rows, refs, j);
+        let keys = ordered_ctor_heads(&rows, j)?;
         let mut arms: Vec<IrMatchArm> = Vec::new();
         for (key, arity) in &keys {
             let ftys = head_field_tys(key, *arity, &refs[j].ty, layouts)?;
@@ -567,63 +538,18 @@ pub fn desugar_tuple_variant_match_deep(
                     (v, t.clone())
                 })
                 .collect();
-            let mut nrefs: Vec<IrExpr> = Vec::with_capacity(refs.len() - 1 + arity);
-            nrefs.extend_from_slice(&refs[..j]);
-            for (v, t) in &fresh {
-                nrefs.push(IrExpr {
-                    kind: IrExprKind::Var { id: *v },
-                    ty: t.clone(),
-                    span: tmpl.span.clone(),
-                    def_id: None,
-                });
-            }
-            nrefs.extend_from_slice(&refs[j + 1..]);
-            let mut nrows: Vec<Row> = Vec::new();
-            for r in &rows {
-                match head_of(&r.pats[j]) {
-                    Some((k, args)) if k == *key => {
-                        let mut np = Vec::with_capacity(nrefs.len());
-                        np.extend_from_slice(&r.pats[..j]);
-                        np.extend(args);
-                        np.extend_from_slice(&r.pats[j + 1..]);
-                        nrows.push(Row { pats: np, body: r.body.clone(), idx: r.idx });
-                    }
-                    Some(_) => {}
-                    None => {
-                        let mut np = Vec::with_capacity(nrefs.len());
-                        np.extend_from_slice(&r.pats[..j]);
-                        np.extend(std::iter::repeat(IrPattern::Wildcard).take(*arity));
-                        np.extend_from_slice(&r.pats[j + 1..]);
-                        nrows.push(Row { pats: np, body: r.body.clone(), idx: r.idx });
-                    }
-                }
-            }
+            let nrefs = refs_with_head_fields(refs, j, &fresh, tmpl);
+            let nrows = specialize_rows_for_head(&rows, j, key, *arity, nrefs.len());
             let branch = compile(&nrefs, nrows, tmpl, next, layouts, emitted)?;
-            let mut pat_args: Vec<IrPattern> = fresh
+            let pat_args: Vec<IrPattern> = fresh
                 .iter()
                 .map(|(v, t)| IrPattern::Bind { var: *v, ty: t.clone() })
                 .collect();
-            let pattern = match key {
-                HKey::User(name) => {
-                    IrPattern::Constructor { name: name.clone(), args: pat_args }
-                }
-                HKey::Some_ => IrPattern::Some { inner: Box::new(pat_args.remove(0)) },
-                HKey::None_ => IrPattern::None,
-                HKey::Ok_ => IrPattern::Ok { inner: Box::new(pat_args.remove(0)) },
-                HKey::Err_ => IrPattern::Err { inner: Box::new(pat_args.remove(0)) },
-            };
-            arms.push(IrMatchArm { pattern, guard: None, body: branch });
+            arms.push(IrMatchArm { pattern: head_pattern(key, pat_args), guard: None, body: branch });
         }
         let head_keys: Vec<HKey> = keys.iter().map(|(k, _)| k.clone()).collect();
         if !heads_cover(&head_keys, layouts) {
-            let mut drows: Vec<Row> = Vec::new();
-            for r in &rows {
-                if head_of(&r.pats[j]).is_none() {
-                    let mut np = r.pats.clone();
-                    np.remove(j);
-                    drows.push(Row { pats: np, body: r.body.clone(), idx: r.idx });
-                }
-            }
+            let drows = rows_without_dispatch_column(&rows, j);
             if drows.is_empty() {
                 // Frontend exhaustiveness says this path is unreachable, but emitting a
                 // non-exhaustive inner match would wall — decline instead.
@@ -641,6 +567,138 @@ pub fn desugar_tuple_variant_match_deep(
             def_id: tmpl.def_id,
         })
     }
+
+    /// The LEAF of [`compile`]: an all-trivial row matches unconditionally, so its body IS
+    /// the branch — with each `Bind` pattern's var substituted by the column ref it names,
+    /// and the row's duplication count bumped (the gate reads it after). Extracted verbatim
+    /// (codopsy round-3 sweep, #852).
+    fn trivial_row_body(r: &Row, refs: &[IrExpr], emitted: &mut [usize]) -> IrExpr {
+        let mut b = r.body.clone();
+        for (i, p) in r.pats.iter().enumerate() {
+            if let IrPattern::Bind { var, .. } = p {
+                b = almide_ir::substitute_var_in_expr(&b, *var, &refs[i]);
+            }
+        }
+        emitted[r.idx] += 1;
+        b
+    }
+
+    /// A `Bind` in the DISPATCH column names the WHOLE component: substitute the component
+    /// ref now (once, before the row joins multiple branches) and dispatch on `_`. Extracted
+    /// verbatim from [`compile`] (codopsy round-3 sweep, #852).
+    fn substitute_dispatch_column_binds(rows: Vec<Row>, refs: &[IrExpr], j: usize) -> Vec<Row> {
+        rows.into_iter()
+            .map(|mut r| {
+                if let IrPattern::Bind { var, .. } = &r.pats[j] {
+                    r.body = almide_ir::substitute_var_in_expr(&r.body, *var, &refs[j]);
+                    r.pats[j] = IrPattern::Wildcard;
+                }
+                r
+            })
+            .collect()
+    }
+
+    /// The dispatch column's ctor heads in FIRST-OCCURRENCE order, with each head's arity.
+    /// `None` declines the whole compile: a same-head arity drift cannot be dispatched.
+    /// Extracted verbatim from [`compile`] (codopsy round-3 sweep, #852).
+    fn ordered_ctor_heads(rows: &[Row], j: usize) -> Option<Vec<(HKey, usize)>> {
+        let mut keys: Vec<(HKey, usize)> = Vec::new();
+        for r in rows {
+            if let Some((k, args)) = head_of(&r.pats[j]) {
+                match keys.iter().find(|(k2, _)| *k2 == k) {
+                    Some((_, a)) if *a != args.len() => return None,
+                    Some(_) => {}
+                    None => keys.push((k, args.len())),
+                }
+            }
+        }
+        Some(keys)
+    }
+
+    /// The column refs ONE head's branch sees: the dispatch column replaced in place by the
+    /// head's freshly-bound field refs. Extracted verbatim from [`compile`] (codopsy round-3
+    /// sweep, #852).
+    fn refs_with_head_fields(
+        refs: &[IrExpr],
+        j: usize,
+        fresh: &[(VarId, Ty)],
+        tmpl: &IrExpr,
+    ) -> Vec<IrExpr> {
+        let mut nrefs: Vec<IrExpr> = Vec::with_capacity(refs.len() - 1 + fresh.len());
+        nrefs.extend_from_slice(&refs[..j]);
+        for (v, t) in fresh {
+            nrefs.push(IrExpr {
+                kind: IrExprKind::Var { id: *v },
+                ty: t.clone(),
+                span: tmpl.span.clone(),
+                def_id: None,
+            });
+        }
+        nrefs.extend_from_slice(&refs[j + 1..]);
+        nrefs
+    }
+
+    /// The rows ONE head's branch sees: a row whose head IS this key contributes its head
+    /// args in the dispatch column's place; a HEADLESS (trivial) row contributes wildcards
+    /// there (it still matches); a row with a DIFFERENT head is dropped. Extracted verbatim
+    /// from [`compile`] (codopsy round-3 sweep, #852).
+    fn specialize_rows_for_head(
+        rows: &[Row],
+        j: usize,
+        key: &HKey,
+        arity: usize,
+        width: usize,
+    ) -> Vec<Row> {
+        let mut nrows: Vec<Row> = Vec::new();
+        for r in rows {
+            match head_of(&r.pats[j]) {
+                Some((k, args)) if k == *key => {
+                    let mut np = Vec::with_capacity(width);
+                    np.extend_from_slice(&r.pats[..j]);
+                    np.extend(args);
+                    np.extend_from_slice(&r.pats[j + 1..]);
+                    nrows.push(Row { pats: np, body: r.body.clone(), idx: r.idx });
+                }
+                Some(_) => {}
+                None => {
+                    let mut np = Vec::with_capacity(width);
+                    np.extend_from_slice(&r.pats[..j]);
+                    np.extend(std::iter::repeat(IrPattern::Wildcard).take(arity));
+                    np.extend_from_slice(&r.pats[j + 1..]);
+                    nrows.push(Row { pats: np, body: r.body.clone(), idx: r.idx });
+                }
+            }
+        }
+        nrows
+    }
+
+    /// One head key as the arm PATTERN binding its fresh field vars. Extracted verbatim
+    /// from [`compile`] (codopsy round-3 sweep, #852).
+    fn head_pattern(key: &HKey, mut pat_args: Vec<IrPattern>) -> IrPattern {
+        match key {
+            HKey::User(name) => IrPattern::Constructor { name: name.clone(), args: pat_args },
+            HKey::Some_ => IrPattern::Some { inner: Box::new(pat_args.remove(0)) },
+            HKey::None_ => IrPattern::None,
+            HKey::Ok_ => IrPattern::Ok { inner: Box::new(pat_args.remove(0)) },
+            HKey::Err_ => IrPattern::Err { inner: Box::new(pat_args.remove(0)) },
+        }
+    }
+
+    /// The DEFAULT arm's rows: the headless rows only, with the dispatch column removed
+    /// (nothing tested it). Extracted verbatim from [`compile`] (codopsy round-3 sweep,
+    /// #852).
+    fn rows_without_dispatch_column(rows: &[Row], j: usize) -> Vec<Row> {
+        let mut drows: Vec<Row> = Vec::new();
+        for r in rows {
+            if head_of(&r.pats[j]).is_none() {
+                let mut np = r.pats.clone();
+                np.remove(j);
+                drows.push(Row { pats: np, body: r.body.clone(), idx: r.idx });
+            }
+        }
+        drows
+    }
+
 
     struct V<'a> {
         next: u32,

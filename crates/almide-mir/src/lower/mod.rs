@@ -399,13 +399,56 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
 /// when set, every lowering site that would fall back to `Op::Const` (the
 /// deferred ZERO whose only legitimate consumer is the caps-counting
 /// classifier) REFUSES instead — a walled function can never print a silently
-/// wrong value (the `prim.handle(<literal>)` → address-0 class). Set ONCE by
-/// the render/output entrypoints (render_program); the classifier and the
-/// in-process unit tests keep the permissive caps-counting behavior.
-pub static STRICT_VALUES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// wrong value (the `prim.handle(<literal>)` → address-0 class). Set by the
+/// render/output entrypoints (render_program); the classifier and the in-process
+/// unit tests keep the permissive caps-counting behavior.
+///
+/// THREAD-LOCAL, for the same reason [`mod_p2::NEVER_ERR_LIFTED_FNS`] is:
+/// lowering runs single-threaded per program, so per-thread state carries the
+/// mode faithfully on the real render path. A process-global `AtomicBool` did
+/// not: `cargo test` runs a crate's unit tests as many threads in ONE process,
+/// so a test that enabled strict mode leaked it into every test that ran after
+/// it on any thread. `lower::tests::scalar_loop_with_break_walls` asserts a
+/// break/continue wall and intermittently saw a STRICT-mode wall instead —
+/// order-dependent, invisible when the test ran alone, and the doc-comment above
+/// claimed the opposite ("the in-process unit tests keep the permissive
+/// behavior") while nothing enforced it.
+pub fn set_strict_values(on: bool) {
+    STRICT_VALUES.with(|s| s.set(on));
+}
+
+/// Enable strict mode for a scope and restore the previous value on drop.
+///
+/// Prefer this over the bare setter. Thread-locality alone is not enough: it
+/// isolates the PARALLEL test runner (libtest gives each test its own thread),
+/// but `--test-threads=1` runs every test on the same thread, where an
+/// unrestored setter leaks exactly as the process-global did. It also matters
+/// outside tests — a long-lived process that compiles more than one program
+/// (the playground, the language server) would otherwise have the first strict
+/// render pin the mode for everything after it.
+#[must_use = "the guard restores the previous mode when dropped; binding it to `_` restores immediately"]
+pub struct StrictValuesGuard(bool);
+
+impl StrictValuesGuard {
+    pub fn set(on: bool) -> Self {
+        let prev = strict_values();
+        set_strict_values(on);
+        Self(prev)
+    }
+}
+
+impl Drop for StrictValuesGuard {
+    fn drop(&mut self) {
+        set_strict_values(self.0);
+    }
+}
+
+thread_local! {
+    static STRICT_VALUES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 pub(crate) fn strict_values() -> bool {
-    STRICT_VALUES.load(std::sync::atomic::Ordering::Relaxed)
+    STRICT_VALUES.with(|s| s.get())
 }
 
 pub(crate) fn strict_const_wall(what: &str) -> LowerError {

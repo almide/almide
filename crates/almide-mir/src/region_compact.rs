@@ -470,91 +470,156 @@ fn audit_chain_escapes(ms: &MemberScan<'_>, st: &ScanState<'_>, fi: usize) -> Op
     Some(())
 }
 
+/// Everything one planned rewrite needs in order to become ops.
+///
+/// The first three fields are the family's compact layout (the packed field
+/// offsets, the block size, the one const tag); `shapes` are the family's
+/// singleton shapes and `sing` the singleton params of the member currently
+/// being rewritten. Bundling them is what keeps `compact_replacement` and
+/// `tag_select_chain` off a seven-value argument list (the `MemberScan`
+/// precedent above).
+struct CompactSite<'a> {
+    /// Packed byte offset of each FIELD slot (elem 1..n), from `field_offsets`.
+    offs: &'a [u32],
+    /// The compact block size in bytes, from `field_offsets`.
+    bytes: u32,
+    /// The family's one const tag — the dynamic-block answer of a tag read.
+    tag: i64,
+    /// The family's singleton shapes, in the order pass B2 appended them.
+    shapes: &'a [Vec<i64>],
+    /// This member's singleton params, positionally aligned with `shapes`.
+    sing: &'a [ValueId],
+}
+
+/// Rewrite one clone family's planned ops to the compact layout.
+///
+/// Router only (codopsy round-3 sweep, #852): the fresh-id watermark scan, the
+/// singleton param slice, the per-`Rw` op construction and the tag-select chain
+/// each moved verbatim into the named helpers below. The planned rewrites are
+/// still walked in REVERSE op order, so a splice never shifts an index that is
+/// still pending, and `max_id` still threads across the whole member so every
+/// tag chain in it mints distinct ids.
 fn apply(prog: &mut MirProgram, idxs: &[usize], plan: &Plan, shapes: &[Vec<i64>]) {
     let (offs, bytes) = field_offsets(&plan.slots);
     for &fi in idxs {
         let f = &mut prog.functions[fi];
         let m = shapes.len();
-        // Pass B2 appended the singleton params last, in shape order.
-        let sing: Vec<ValueId> =
-            f.params[f.params.len() - m..].iter().map(|p| p.value).collect();
-        let mut max_id: u32 = 0;
-        let mut vals: Vec<ValueId> = Vec::new();
-        for op in &f.ops {
-            vals.clear();
-            op_values(op, &mut vals);
-            for v in &vals {
-                max_id = max_id.max(v.0);
-            }
-        }
-        for p in &f.params {
-            max_id = max_id.max(p.value.0);
-        }
+        let sing = trailing_singleton_params(f, m);
+        let mut max_id: u32 = max_value_id(f);
 
         let items: Vec<(usize, Rw)> = plan
             .rewrites
             .range((fi, 0)..=(fi, usize::MAX))
             .map(|((_, i), rw)| (*i, rw.clone()))
             .collect();
+        let site = CompactSite { offs: &offs, bytes, tag: plan.tag, shapes, sing: &sing };
         for (i, rw) in items.into_iter().rev() {
-            let repl: Vec<Op> = match rw {
-                Rw::Delete => vec![],
-                Rw::AllocC { dst } => vec![Op::Prim {
-                    kind: PrimKind::RegionAllocC { bytes, zero: false },
-                    dst: Some(dst),
-                    args: vec![],
-                }],
-                Rw::StoreH { base, val, k } => vec![Op::Prim {
-                    kind: PrimKind::RegionStoreH { off: offs[k - 1] },
-                    dst: None,
-                    args: vec![base, val],
-                }],
-                Rw::StoreS { base, val, k } => vec![Op::Prim {
-                    kind: PrimKind::RegionStoreS { off: offs[k - 1] },
-                    dst: None,
-                    args: vec![base, val],
-                }],
-                Rw::LoadH { dst, base, k } => vec![Op::Prim {
-                    kind: PrimKind::RegionLoadH { off: offs[k - 1] },
-                    dst: Some(dst),
-                    args: vec![base],
-                }],
-                Rw::LoadS { dst, base, k } => vec![Op::Prim {
-                    kind: PrimKind::RegionLoadS { off: offs[k - 1] },
-                    dst: Some(dst),
-                    args: vec![base],
-                }],
-                Rw::TagRead { dst, base } => {
-                    if m == 0 {
-                        vec![Op::ConstInt { dst, value: plan.tag }]
-                    } else {
-                        // dst = (base==s0) ? tag0 : ((base==s1) ? tag1 : dyn)
-                        let mut seq = Vec::with_capacity(m + 1);
-                        max_id += 1;
-                        let mut cur = ValueId(max_id);
-                        seq.push(Op::ConstInt { dst: cur, value: plan.tag });
-                        for (j, s) in shapes.iter().enumerate().rev() {
-                            let d = if j == 0 {
-                                dst
-                            } else {
-                                max_id += 1;
-                                ValueId(max_id)
-                            };
-                            seq.push(Op::Prim {
-                                kind: PrimKind::RegionTagSel { tag: s[0] },
-                                dst: Some(d),
-                                args: vec![base, sing[j], cur],
-                            });
-                            cur = d;
-                        }
-                        seq
-                    }
-                }
-            };
+            let repl: Vec<Op> = compact_replacement(&site, rw, &mut max_id);
             f.ops.splice(i..=i, repl);
         }
         sweep_dead(f);
     }
+}
+
+/// Extracted verbatim from `apply` (codopsy round-3 sweep, #852): the member's
+/// own singleton parameter values, positionally aligned with the family's
+/// shape vector.
+fn trailing_singleton_params(f: &MirFunction, m: usize) -> Vec<ValueId> {
+    // Pass B2 appended the singleton params last, in shape order.
+    f.params[f.params.len() - m..].iter().map(|p| p.value).collect()
+}
+
+/// Extracted verbatim from `apply` (codopsy round-3 sweep, #852): the highest
+/// `ValueId` the function mentions, across its ops and its params — the
+/// watermark the tag-select chain mints fresh ids above.
+fn max_value_id(f: &MirFunction) -> u32 {
+    let mut max_id: u32 = 0;
+    let mut vals: Vec<ValueId> = Vec::new();
+    for op in &f.ops {
+        vals.clear();
+        op_values(op, &mut vals);
+        for v in &vals {
+            max_id = max_id.max(v.0);
+        }
+    }
+    for p in &f.params {
+        max_id = max_id.max(p.value.0);
+    }
+    max_id
+}
+
+/// Extracted verbatim from `apply` (codopsy round-3 sweep, #852): the ops one
+/// planned rewrite expands to. Arm order and every emitted op are unchanged;
+/// `max_id` is threaded through so the tag chain keeps handing out fresh ids in
+/// the same sequence as when this match sat inline.
+fn compact_replacement(site: &CompactSite<'_>, rw: Rw, max_id: &mut u32) -> Vec<Op> {
+    match rw {
+        Rw::Delete => vec![],
+        Rw::AllocC { dst } => vec![Op::Prim {
+            kind: PrimKind::RegionAllocC { bytes: site.bytes, zero: false },
+            dst: Some(dst),
+            args: vec![],
+        }],
+        Rw::StoreH { base, val, k } => vec![Op::Prim {
+            kind: PrimKind::RegionStoreH { off: site.offs[k - 1] },
+            dst: None,
+            args: vec![base, val],
+        }],
+        Rw::StoreS { base, val, k } => vec![Op::Prim {
+            kind: PrimKind::RegionStoreS { off: site.offs[k - 1] },
+            dst: None,
+            args: vec![base, val],
+        }],
+        Rw::LoadH { dst, base, k } => vec![Op::Prim {
+            kind: PrimKind::RegionLoadH { off: site.offs[k - 1] },
+            dst: Some(dst),
+            args: vec![base],
+        }],
+        Rw::LoadS { dst, base, k } => vec![Op::Prim {
+            kind: PrimKind::RegionLoadS { off: site.offs[k - 1] },
+            dst: Some(dst),
+            args: vec![base],
+        }],
+        Rw::TagRead { dst, base } => tag_select_chain(site, dst, base, max_id),
+    }
+}
+
+/// Extracted verbatim from `apply` (codopsy round-3 sweep, #852): an elem-0
+/// read becomes the `RegionTagSel` chain over the family's singletons. With no
+/// singletons the family's one const tag is the whole answer. Otherwise the
+/// chain is built innermost-first — the dynamic-block tag is the default and
+/// each shape wraps it in reverse shape order, so the LAST op emitted is the
+/// shape-0 test and it is the one that defines `dst`.
+fn tag_select_chain(
+    site: &CompactSite<'_>,
+    dst: ValueId,
+    base: ValueId,
+    max_id: &mut u32,
+) -> Vec<Op> {
+    let m = site.shapes.len();
+    if m == 0 {
+        return vec![Op::ConstInt { dst, value: site.tag }];
+    }
+    // dst = (base==s0) ? tag0 : ((base==s1) ? tag1 : dyn)
+    let mut seq = Vec::with_capacity(m + 1);
+    *max_id += 1;
+    let mut cur = ValueId(*max_id);
+    seq.push(Op::ConstInt { dst: cur, value: site.tag });
+    for (j, s) in site.shapes.iter().enumerate().rev() {
+        let d = if j == 0 {
+            dst
+        } else {
+            *max_id += 1;
+            ValueId(*max_id)
+        };
+        seq.push(Op::Prim {
+            kind: PrimKind::RegionTagSel { tag: s[0] },
+            dst: Some(d),
+            args: vec![base, site.sing[j], cur],
+        });
+        cur = d;
+    }
+    seq
 }
 
 /// Remove pure value ops (const / add-chain / Handle bridge) the rewrite left
@@ -589,6 +654,12 @@ fn sweep_dead(f: &mut MirFunction) {
 /// compact twins. The singleton dsts are exactly the trailing `m` Handle args
 /// of every `__rgn_` call into the family (pass B1 built them for those calls
 /// alone), so the scan is positional, not nominal.
+///
+/// Router only (codopsy round-3 sweep, #852): the call scan and the in-place
+/// `ListLit` rewrite moved verbatim into the two named helpers below. The
+/// per-host order is unchanged — collect the dsts over the WHOLE body first,
+/// then rewrite, then sweep, so a `ListLit` that precedes its `__rgn_` call is
+/// still caught.
 fn compact_host_singletons(
     prog: &mut MirProgram,
     hosts: &BTreeSet<usize>,
@@ -601,31 +672,48 @@ fn compact_host_singletons(
     }
     for &hf in hosts {
         let f = &mut prog.functions[hf];
-        let mut sdsts: BTreeSet<ValueId> = BTreeSet::new();
-        for op in &f.ops {
-            if let Op::CallFn { name, args, .. } = op {
-                let Some(orig) = name.strip_prefix("__rgn_") else { continue };
-                if names.contains(orig) && args.len() >= m {
-                    for a in &args[args.len() - m..] {
-                        if let crate::CallArg::Handle(v) = a {
-                            sdsts.insert(*v);
-                        }
+        let sdsts = host_singleton_dsts(f, names, m);
+        replace_singleton_list_lits(f, &sdsts, bytes);
+        sweep_dead(f);
+    }
+}
+
+/// Extracted verbatim from `compact_host_singletons` (codopsy round-3 sweep,
+/// #852): the host's singleton dsts — the trailing `m` `Handle` args of every
+/// `__rgn_` call whose ORIGINAL name belongs to the family. A call with fewer
+/// than `m` args, or a non-`Handle` arg in the trailing window, contributes
+/// nothing; the scan stays positional, not nominal.
+fn host_singleton_dsts(f: &MirFunction, names: &BTreeSet<String>, m: usize) -> BTreeSet<ValueId> {
+    let mut sdsts: BTreeSet<ValueId> = BTreeSet::new();
+    for op in &f.ops {
+        if let Op::CallFn { name, args, .. } = op {
+            let Some(orig) = name.strip_prefix("__rgn_") else { continue };
+            if names.contains(orig) && args.len() >= m {
+                for a in &args[args.len() - m..] {
+                    if let crate::CallArg::Handle(v) = a {
+                        sdsts.insert(*v);
                     }
                 }
             }
         }
-        for op in f.ops.iter_mut() {
-            if let Op::ListLit { dst, .. } = op {
-                if sdsts.contains(dst) {
-                    *op = Op::Prim {
-                        kind: PrimKind::RegionAllocC { bytes, zero: true },
-                        dst: Some(*dst),
-                        args: vec![],
-                    };
-                }
+    }
+    sdsts
+}
+
+/// Extracted verbatim from `compact_host_singletons` (codopsy round-3 sweep,
+/// #852): rewrites every `ListLit` whose dst is a singleton into its
+/// zero-filled compact twin, in place, leaving every other op untouched.
+fn replace_singleton_list_lits(f: &mut MirFunction, sdsts: &BTreeSet<ValueId>, bytes: u32) {
+    for op in f.ops.iter_mut() {
+        if let Op::ListLit { dst, .. } = op {
+            if sdsts.contains(dst) {
+                *op = Op::Prim {
+                    kind: PrimKind::RegionAllocC { bytes, zero: true },
+                    dst: Some(*dst),
+                    args: vec![],
+                };
             }
         }
-        sweep_dead(f);
     }
 }
 

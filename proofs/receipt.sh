@@ -14,16 +14,44 @@ stamp_toolchain "$ROOT" || exit 1
 
 pass() { "$@" >/dev/null 2>&1 && echo PASS || echo FAIL; }
 
-PROOF=$(pass "$ROOT/proofs/check.sh")          # kernel + coqchk + axiom audit
-GATE=$(pass "$ROOT/proofs/gate.sh")            # compiler cert ⊳ proven checker
-CWALL=$(pass "$ROOT/proofs/corpus-wall.sh")    # whole v0 corpus ⊳ wall + PCC
-VTEST=$(pass bash -c "cd '$ROOT' && cargo test -q -p almide-mir translation_validation")
+# SAME-TREE RE-USE. `make verify-trust` runs check.sh + gate.sh + corpus-wall.sh
+# + `cargo test -p almide-mir` — a strict superset of the four verdicts below —
+# and records the fingerprint of the tree+toolchain it verified. When that
+# fingerprint still matches (the CI job's verify-trust step immediately precedes
+# its receipt step), re-running them would re-derive the identical verdicts on
+# the identical inputs: 232s of the CI job, ~36% of it, spent proving something
+# just proven. Fold them in instead.
+#
+# The honesty rail is the FINGERPRINT, not a timestamp or a flag: it covers the
+# compiler binary, every toolchain the gates invoke, the commit, the content of
+# tracked modifications, and every untracked file. Edit anything, switch a
+# toolchain, or run this standalone on a tree nobody verified, and it does not
+# match — so the third-party path (`git clone && make receipt`) verifies in full
+# exactly as before. A receipt can therefore never claim PASS for a tree that
+# was not actually verified.
+VERIFIED_STAMP="$ROOT/proofs/.verified-fingerprint"
+REUSED=no
+if [ -f "$VERIFIED_STAMP" ] \
+    && [ "$(cat "$VERIFIED_STAMP")" = "$(toolchain_fingerprint "$ROOT")" ]; then
+    REUSED=yes
+    PROOF=PASS; GATE=PASS; CWALL=PASS; VTEST=PASS
+else
+    PROOF=$(pass "$ROOT/proofs/check.sh")          # kernel + coqchk + axiom audit
+    GATE=$(pass "$ROOT/proofs/gate.sh")            # compiler cert ⊳ proven checker
+    CWALL=$(pass "$ROOT/proofs/corpus-wall.sh")    # whole v0 corpus ⊳ wall + PCC
+    VTEST=$(pass bash -c "cd '$ROOT' && cargo test -q -p almide-mir translation_validation")
+fi
 
 cat <<EOF
 # Receipt — Almide v1 trust chain
 
 Reproduce every line: \`make verify-trust\` (proof + gate + tests).
 Trusted base & known-limitations: proofs/TRUSTED_BASE.md.
+
+Verdicts below were $( [ "$REUSED" = yes ] \
+  && echo "folded in from a \`make verify-trust\` of THIS EXACT tree and toolchain (fingerprint match; see proofs/lib/stamp.sh)" \
+  || echo "derived by running check.sh, gate.sh, corpus-wall.sh and the verifier tests just now" )\
+.
 
 | claim | meaning | status | evidence | scope (honest) |
 |---|---|---|---|---|

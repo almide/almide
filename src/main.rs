@@ -605,9 +605,18 @@ fn dispatch_ide(cmd: IdeCommand) {
     }
 }
 
-/// `dispatch`'s `Commands::Fmt` arm. Extracted verbatim.
+/// `dispatch`'s `Commands::Fmt` arm.
+///
+/// A DIRECTORY argument recurses (`almide fmt --check spec/`) — it used to reach
+/// `parse_file` as-is and report "Is a directory", which the always-zero exit then
+/// swallowed, so a CI job pointed at a tree silently checked nothing (#919). With no
+/// argument at all the `src/` sweep is unchanged.
 fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool) {
-    let write_back = !check && !dry_run;
+    let mode = match (check, dry_run) {
+        (true, _) => cli::FmtMode::Check,
+        (false, true) => cli::FmtMode::DryRun,
+        (false, false) => cli::FmtMode::Write,
+    };
     let fmt_files = if files.is_empty() {
         let mut found = Vec::new();
         if std::path::Path::new("src").is_dir() {
@@ -619,9 +628,18 @@ fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool) {
         }
         found
     } else {
-        files
+        let mut expanded = Vec::new();
+        for f in files {
+            let p = std::path::Path::new(&f);
+            if p.is_dir() {
+                collect_almd_files(p, &mut expanded);
+            } else {
+                expanded.push(f);
+            }
+        }
+        expanded
     };
-    cli::cmd_fmt(&fmt_files, write_back);
+    cli::cmd_fmt(&fmt_files, mode);
 }
 
 /// `dispatch`'s `Commands::Add` arm. Extracted verbatim.

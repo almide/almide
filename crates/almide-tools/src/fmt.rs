@@ -389,7 +389,13 @@ pub fn format_program(program: &Program) -> String {
         out.push('\n');
     }
     for decl in &program.decls {
-        out.push('\n');
+        // The blank line SEPARATES declarations — so it belongs before every one except the
+        // first thing in the file. Emitting it unconditionally opened every import-less file
+        // with a blank line (#919: the leading-blank diff on every such spec fixture), which
+        // is also not idempotent-looking output for a file that starts with a doc comment.
+        if !out.is_empty() {
+            out.push('\n');
+        }
         emit_comments(&mut out, &mut ci);
         fmt_decl(&mut out, decl, 0);
         out.push('\n');

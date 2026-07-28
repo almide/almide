@@ -444,10 +444,15 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
             _ => false,
         }
     }
+    // A first-Ok-chain bind (fan.any's J3 shape, `is_first_ok_chain`) is EXCLUDED:
+    // it is variant-typed, so the bind-position join lowers it linearly — see the
+    // predicate's comment in desugar_fan.rs. `find_map` keeps scanning, so a later
+    // ordinary branch bind in the same block still tail-duplicates as before.
     let (i, bind_var, bind_ty, branch) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
         IrStmtKind::Bind { var, ty, value, .. }
             if (is_heap_ty(ty) || arm_has_error_op(value))
-                && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) =>
+                && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+                && !is_first_ok_chain(value) =>
         {
             Some((i, *var, ty.clone(), value))
         }
@@ -465,6 +470,9 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     // tail-duplication resolve all 4 (each leaf independently binds + drops its own list — corpus-wall
     // re-verifies every arm). The leaves are mostly literal-list concats (cheap), so 16× is tolerable for
     // a build-time codegen tool; deeper stacks still WALL rather than blow up.
+    // Chain binds are excluded here too — they never duplicate (declined above),
+    // so counting them would inflate toward the `> 3` refusal and spuriously wall
+    // a block mixing ordinary branch binds with fan.any chains.
     let rest_branch_binds = stmts[i + 1..]
         .iter()
         .filter(|s| {
@@ -473,6 +481,7 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
                 IrStmtKind::Bind { ty, value, .. }
                     if is_heap_ty(ty)
                         && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+                        && !is_first_ok_chain(value)
             )
         })
         .count();

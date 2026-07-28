@@ -56,7 +56,8 @@ impl Checker {
             // unless this binding is later used as a `match x { ok(_) =>
             // ..., err(_) => ... }` subject — in which case the user
             // wants to inspect the Result directly.
-            let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
+            let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name))
+                || Self::rhs_keeps_result_shape(value));
             // #662: an un-annotated binding whose value type carries an
             // unconstrained phantom slot (only an un-exercised branch
             // could pin it) is undecidable — re-check post-solve.
@@ -94,7 +95,8 @@ impl Checker {
             let t = resolve_ty(&val_ty, &self.uf);
             // Same rule as Let, including the usage-skip: a `var r =
             // effectCall()` later matched on ok/err keeps the Result.
-            let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
+            let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name))
+                || Self::rhs_keeps_result_shape(value));
             // #662: same undecidable-phantom-slot re-check as Let.
             self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
                 ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,

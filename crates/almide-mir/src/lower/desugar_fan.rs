@@ -105,48 +105,12 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
         }
         Some(bodies)
     }
-    // The ALL-FAILED seed of the pre-order `fan.any` fold: v0's fixed
-    // `fan.any: all candidates failed` message, run through the outer `err` arm's body
-    // (a bound err var is substituted by the literal; a `Wildcard` err pattern just runs
-    // the body unchanged). Extracted verbatim from `visit_expr_mut` (codopsy r2, #852,
-    // group 1 of 3).
-    fn allfail_fallback(err_arm: &IrMatchArm) -> IrExpr {
-        let msg = IrExpr {
-            kind: IrExprKind::LitStr {
-                value: "fan.any: all candidates failed".to_string(),
-            },
-            ty: almide_lang::types::Ty::String,
-            span: None,
-            def_id: None,
-        };
-        match &err_arm.pattern {
-            IrPattern::Err { inner } => match &**inner {
-                IrPattern::Bind { var, .. } => {
-                    almide_ir::substitute_var_in_expr(&err_arm.body, *var, &msg)
-                }
-                _ => err_arm.body.clone(),
-            },
-            _ => err_arm.body.clone(),
-        }
-    }
-    // What the outer `ok` arm BINDS: the payload var + its type when the pattern is
-    // `ok(x)` with a Bind inside, `None` for any other ok-pattern shape (nothing to
-    // re-bind per level — the arm is cloned verbatim instead). Extracted verbatim from
-    // `visit_expr_mut` (codopsy r2, #852, group 1 of 3).
-    fn ok_payload_binder(ok_arm: &IrMatchArm) -> Option<(VarId, Ty)> {
-        match &ok_arm.pattern {
-            IrPattern::Ok { inner } => match &**inner {
-                IrPattern::Bind { var, ty } => Some((*var, ty.clone())),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
     impl IrMutVisitor for V {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-            // PRE-order: the match-over-`fan.any` arm inliner — on a hit, walk the rewritten
-            // node and stop (the original control flow); see `inline_match_over_any`.
-            if self.inline_match_over_any(e) {
+            // PRE-order: the match-over-`fan.any` subject rewrite — on a hit, walk the
+            // rewritten node and stop (the original control flow); see
+            // `bind_match_over_any`.
+            if self.bind_match_over_any(e) {
                 walk_expr_mut(self, e);
                 return;
             }
@@ -167,106 +131,155 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
     }
     impl V {
         // PRE-order: `match fan.any([() => t0, …]) { ok(pat) => okbody, err(epat) => errbody }` —
-        // INLINE the outer arms into each thunk level (avoiding the intermediate Result + a
-        // match-over-match). Each thunk `t_i` runs, an Ok takes `okbody`, an Err falls to the NEXT
-        // thunk; the LAST thunk's Err takes the original `errbody` (the all-errored fallback). Only
-        // one arm ever executes, so duplicating `okbody` per level is dead-code-safe.
+        // fold the thunks into ONE Result value and apply the ORIGINAL match to it once:
+        //   `{ let $r = <first-Ok chain>; match $r { ok(pat) => okbody, err(epat) => errbody } }`
+        // Every piece appears exactly once: each thunk body once inside the chain, each outer
+        // arm once in the single match. The all-failed path reaches `errbody` through the
+        // chain's innermost `err("fan.any: all candidates failed")` — v0's fixed message, so
+        // a bound err var reads the same string the old body-substitution produced.
+        //
+        // SHAPE HISTORY (both rejected alternatives are load-bearing):
+        //  - Inlining the outer arms into each thunk level (the pre-J3 form) duplicated
+        //    `okbody` — the function's whole remaining continuation — once per level, which
+        //    COMPOUNDS across sequential fan.any calls: fan_any_early_winner.almd's eight
+        //    chained calls multiplied to ~1,700 copies of the tail, the 231KB names witness
+        //    of the 2026-07-27 trust-spine incident. It also needed a fresh Ok binder per
+        //    level (#900); binding once, the aliasing class is gone structurally.
+        //  - Substituting the chain DIRECTLY as the match subject leaves a match-over-match
+        //    the branch lowering's subject tracking cannot follow (the fan_any_allfail
+        //    regression — see `rewrite_settle_any_in_block`'s comment). The `$r` bind gives
+        //    the match the var subject it can track.
+        // The bind form is LINEAR only because `desugar_let_bound_heap_branch` DECLINES the
+        // first-Ok-chain shape (`is_first_ok_chain`, arc v1-join-completeness J2a) — without
+        // that decline it tail-duplicates the following match into every chain arm
+        // (measured ~3.5×/chained call). The two pieces land together and the fixture's
+        // 8-chain main + corpus-wall's witness-size gate ratchet the linearity.
+        // A guarded ok arm now evaluates its guard ONCE on the folded Result — equal to v0
+        // native, which picks the first Ok and only then runs the match guard.
         // Returns true when the rewrite fired (the caller then walks the rewritten node and
-        // stops, exactly the original control flow). Extracted verbatim from `visit_expr_mut`
-        // (codopsy r2, #852, group 1 of 3).
-        fn inline_match_over_any(&mut self, e: &mut IrExpr) -> bool {
+        // stops, exactly the original control flow).
+        fn bind_match_over_any(&mut self, e: &mut IrExpr) -> bool {
+            use almide_lang::types::constructor::TypeConstructorId;
             let IrExprKind::Match { subject, arms } = &e.kind else {
                 return false;
             };
             if arms.len() != 2 {
                 return false;
             }
+            let has_ok = arms.iter().any(|a| matches!(a.pattern, IrPattern::Ok { .. }));
+            let has_err = arms.iter().any(|a| matches!(a.pattern, IrPattern::Err { .. }));
+            if !has_ok || !has_err {
+                return false;
+            }
             let Some(bodies) = fan_bodies(subject, "any", &self.thunk_lets) else {
                 return false;
             };
-            let ty = e.ty.clone();
-            let ok_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Ok { .. }));
-            let err_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Err { .. }));
-            let (Some(ok_arm), Some(err_arm)) = (ok_arm, err_arm) else {
-                return false;
+            let (result_ty, ok_ty) = match &subject.ty {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
+                    (subject.ty.clone(), a[0].clone())
+                }
+                _ => return false,
             };
-            // The ALL-FAILED fallback is v0's fixed `fan.any: all candidates failed`
-            // Err (NOT the last thunk's own error): run the outer `err` arm's body with
-            // its bound var substituted by that literal (a `Wildcard` err pattern just
-            // runs the body). Then wrap each thunk: `match t_i { ok(pat) => okbody,
-            // err(_) => rest }` — an Ok short-circuits, an Err falls through in order.
-            let mut acc = allfail_fallback(err_arm);
-            // Each level gets its OWN Ok binder. Cloning `ok_arm` verbatim
-            // gave every level the SAME VarId, and the renderer resolves a
-            // VarId to ONE local at ONE binding site — the innermost one it
-            // saw. So an outer level extracted its payload into a local
-            // nothing read, and the duplicated body read the inner level's
-            // local, which on that path was never stored: `fan.any` returned
-            // 0 whenever a thunk other than the last one won (#900). Only the
-            // "winner is last" case aliased to the right local, which is
-            // exactly the set of cases that looked correct.
-            let ok_binder = ok_payload_binder(ok_arm);
+            let arms = arms.clone();
+            let chain = self.first_ok_chain(bodies, &result_ty, &ok_ty);
+            let r = VarId(self.next_var);
+            self.next_var += 1;
+            let match_once = IrExpr {
+                kind: IrExprKind::Match {
+                    subject: Box::new(IrExpr {
+                        kind: IrExprKind::Var { id: r },
+                        ty: result_ty.clone(),
+                        span: None,
+                        def_id: None,
+                    }),
+                    arms,
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            *e = IrExpr {
+                kind: IrExprKind::Block {
+                    stmts: vec![almide_ir::IrStmt {
+                        kind: almide_ir::IrStmtKind::Bind {
+                            var: r,
+                            mutability: almide_ir::Mutability::Let,
+                            ty: result_ty,
+                            value: chain,
+                        },
+                        span: None,
+                    }],
+                    expr: Some(Box::new(match_once)),
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+            true
+        }
+        // The first-Ok chain VALUE over the inlined thunk bodies:
+        //   `match t0 { ok($x) => ok($x), err(_) => <next … err("fan.any: all candidates
+        //   failed")> }`
+        // — the innermost fallback is v0's fixed all-failed message. LINEAR by construction:
+        // each thunk body appears exactly once and nothing else is duplicated. Both fan.any
+        // positions (bind-value / block-tail AND match-subject) fold through here, and
+        // `is_first_ok_chain` (the J2a decline predicate) recognizes exactly this shape.
+        fn first_ok_chain(&mut self, bodies: Vec<IrExpr>, result_ty: &Ty, ok_ty: &Ty) -> IrExpr {
+            use almide_ir::{IrMatchArm, IrPattern};
+            let mut acc = IrExpr {
+                kind: IrExprKind::ResultErr {
+                    expr: Box::new(IrExpr {
+                        kind: IrExprKind::LitStr {
+                            value: "fan.any: all candidates failed".to_string(),
+                        },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }),
+                },
+                ty: result_ty.clone(),
+                span: None,
+                def_id: None,
+            };
             for tb in bodies.into_iter().rev() {
-                let level_ok_arm = self.fresh_level_ok_arm(&ok_binder, ok_arm);
+                let x = VarId(self.next_var);
+                self.next_var += 1;
+                let x_ref = IrExpr {
+                    kind: IrExprKind::Var { id: x },
+                    ty: ok_ty.clone(),
+                    span: None,
+                    def_id: None,
+                };
                 acc = IrExpr {
                     kind: IrExprKind::Match {
                         subject: Box::new(tb),
                         arms: vec![
-                            level_ok_arm,
                             IrMatchArm {
-                                pattern: IrPattern::Err {
-                                    inner: Box::new(IrPattern::Wildcard),
+                                pattern: IrPattern::Ok {
+                                    inner: Box::new(IrPattern::Bind { var: x, ty: ok_ty.clone() }),
                                 },
+                                guard: None,
+                                body: IrExpr {
+                                    kind: IrExprKind::ResultOk { expr: Box::new(x_ref) },
+                                    ty: result_ty.clone(),
+                                    span: None,
+                                    def_id: None,
+                                },
+                            },
+                            IrMatchArm {
+                                pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
                                 guard: None,
                                 body: acc,
                             },
                         ],
                     },
-                    ty: ty.clone(),
+                    ty: result_ty.clone(),
                     span: None,
                     def_id: None,
                 };
             }
-            *e = acc;
-            self.changed = true;
-            true
-        }
-        // Mint ONE level's `ok` arm for the fold above: with a payload binder, a FRESH
-        // VarId is bound and substituted through the duplicated `okbody` (the #900 fix —
-        // see the caller's comment); without one, the outer arm is cloned verbatim.
-        // Extracted verbatim from `visit_expr_mut` (codopsy r2, #852, group 1 of 3).
-        fn fresh_level_ok_arm(
-            &mut self,
-            ok_binder: &Option<(VarId, Ty)>,
-            ok_arm: &IrMatchArm,
-        ) -> IrMatchArm {
-            match ok_binder {
-                Some((var, ty)) => {
-                    let fresh = almide_ir::VarId(self.next_var);
-                    self.next_var += 1;
-                    let fresh_ref = IrExpr {
-                        kind: IrExprKind::Var { id: fresh },
-                        ty: ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                    IrMatchArm {
-                        pattern: IrPattern::Ok {
-                            inner: Box::new(IrPattern::Bind {
-                                var: fresh,
-                                ty: ty.clone(),
-                            }),
-                        },
-                        guard: ok_arm.guard.clone(),
-                        body: almide_ir::substitute_var_in_expr(
-                            &ok_arm.body,
-                            *var,
-                            &fresh_ref,
-                        ),
-                    }
-                }
-                None => ok_arm.clone(),
-            }
+            acc
         }
         // BIND-VALUE / BLOCK-TAIL positions for the settle/any VALUE rewrites: an
         // `!`-wrapped `fan.any(…)!` must stay for the effect-unwrap desugar (which builds
@@ -365,9 +378,9 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
                 self.changed = true;
                 return;
             }
-            // `fan.any([…])` as a bind value / tail — the first-Ok chain VALUE:
-            // `match t0 { ok($x) => ok($x), err(_) => <next … err("fan.any: all candidates
-            // failed")> }`. The match-subject shape (pre-order) already inlined outer arms.
+            // `fan.any([…])` as a bind value / tail — the first-Ok chain VALUE (the shared
+            // `first_ok_chain` builder). The match-subject shape (pre-order) folds through
+            // the same builder via `bind_match_over_any`.
             if let Some(bodies) = fan_bodies(e, "any", &self.thunk_lets) {
                 use almide_lang::types::constructor::TypeConstructorId;
                 use almide_lang::types::Ty;
@@ -376,59 +389,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
                     _ => return,
                 };
                 let ty = e.ty.clone();
-                let mut acc = IrExpr {
-                    kind: IrExprKind::ResultErr {
-                        expr: Box::new(IrExpr {
-                            kind: IrExprKind::LitStr {
-                                value: "fan.any: all candidates failed".to_string(),
-                            },
-                            ty: Ty::String,
-                            span: None,
-                            def_id: None,
-                        }),
-                    },
-                    ty: ty.clone(),
-                    span: None,
-                    def_id: None,
-                };
-                for tb in bodies.into_iter().rev() {
-                    let x = VarId(self.next_var);
-                    self.next_var += 1;
-                    let x_ref = IrExpr {
-                        kind: IrExprKind::Var { id: x },
-                        ty: ok_ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                    acc = IrExpr {
-                        kind: IrExprKind::Match {
-                            subject: Box::new(tb),
-                            arms: vec![
-                                IrMatchArm {
-                                    pattern: IrPattern::Ok {
-                                        inner: Box::new(IrPattern::Bind { var: x, ty: ok_ty.clone() }),
-                                    },
-                                    guard: None,
-                                    body: IrExpr {
-                                        kind: IrExprKind::ResultOk { expr: Box::new(x_ref) },
-                                        ty: ty.clone(),
-                                        span: None,
-                                        def_id: None,
-                                    },
-                                },
-                                IrMatchArm {
-                                    pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
-                                    guard: None,
-                                    body: acc,
-                                },
-                            ],
-                        },
-                        ty: ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                }
-                *e = acc;
+                *e = self.first_ok_chain(bodies, &ty, &ok_ty);
                 self.changed = true;
             }
         }
@@ -451,6 +412,44 @@ pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
     }
 }
 
+
+/// Recognize EXACTLY the shape `first_ok_chain` builds (arc v1-join-completeness,
+/// J2a — the decline predicate for `desugar_let_bound_heap_branch`):
+///   chain ::= err("fan.any: all candidates failed")
+///           | match <thunk> { ok($x) => ok($x), err(_) => chain }
+/// A bind of this shape must NOT be tail-duplicated: the chain is variant-typed, so
+/// the bind-position join (`lower_bind_heap_if`/`_match`'s `is_variant_ty` path,
+/// certified by the released-merge-dst credits) lowers it LINEARLY — duplicating
+/// instead re-multiplies the following match into every chain arm (~3.5× per
+/// chained fan.any, the 2026-07-27 exponential through a different door). The
+/// pattern is strict (matching binder-to-var Ok arm, wildcard Err arm, the exact
+/// v0 all-failed literal innermost) so nothing hand-written trips it today; if the
+/// builder above changes shape, change THIS in the same commit.
+fn is_first_ok_chain(e: &IrExpr) -> bool {
+    use almide_ir::IrPattern;
+    match &e.kind {
+        IrExprKind::ResultErr { expr } => matches!(
+            &expr.kind,
+            IrExprKind::LitStr { value } if value == "fan.any: all candidates failed"
+        ),
+        IrExprKind::Match { subject: _, arms } => {
+            let [ok, err] = &arms[..] else { return false };
+            let ok_shape = ok.guard.is_none()
+                && match (&ok.pattern, &ok.body.kind) {
+                    (IrPattern::Ok { inner }, IrExprKind::ResultOk { expr }) => matches!(
+                        (&**inner, &expr.kind),
+                        (IrPattern::Bind { var, .. }, IrExprKind::Var { id }) if var == id
+                    ),
+                    _ => false,
+                };
+            let err_shape = err.guard.is_none()
+                && matches!(&err.pattern, IrPattern::Err { inner }
+                    if matches!(&**inner, IrPattern::Wildcard));
+            ok_shape && err_shape && is_first_ok_chain(&err.body)
+        }
+        _ => false,
+    }
+}
 
 /// Rewrite a `fan { e1; e2; … }` BLOCK whose expressions are all NON-Result into the
 /// plain tuple `(e1, e2, …)` — v0's wasm emission for the fan block IS the sequential

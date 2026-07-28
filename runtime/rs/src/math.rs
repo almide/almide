@@ -4,8 +4,8 @@
 // sin/cos/tan delegate to the vendored musl-libm reference (runtime/rs/src/libm.rs)
 // instead of the platform `f64::sin`/`cos`/`tan`. The system libm's last-ULP result
 // is platform-specific, so it can't be a stable cross-target oracle. The vendored
-// algorithm is deterministic across platforms AND bit-identical to the WASM port
-// (`emit_wasm/rt_libm.rs`), which mirrors libm.rs function-for-function.
+// algorithm is deterministic across platforms AND bit-identical to the self-hosted
+// WASM port (`stdlib/math_trig.almd`), which mirrors libm.rs function-for-function.
 #[inline(always)] pub fn almide_rt_math_sin(x: f64) -> f64 { almide_rt_libm_sin(x) }
 #[inline(always)] pub fn almide_rt_math_cos(x: f64) -> f64 { almide_rt_libm_cos(x) }
 #[inline(always)] pub fn almide_rt_math_tan(x: f64) -> f64 { almide_rt_libm_tan(x) }
@@ -77,7 +77,7 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
 #[inline(always)] pub fn almide_rt_math_sign(n: i64) -> i64 { if n > 0 { 1 } else if n < 0 { -1 } else { 0 } }
 
 // Float min/max — explicit NaN/tie decision tree, mirrored bit-for-bit by the
-// wasm emitter (`emit_float_min_max` in emit_wasm/calls_numeric.rs).
+// self-hosted wasm leg (`float_min`/`float_max` in stdlib/float_core.almd).
 // Deliberately NOT `f64::min`/`f64::max`: those are the llvm.minnum/maxnum
 // intrinsics whose ±0-tie order is UNSPECIFIED — under `#[inline(always)]`
 // x86 selects `maxsd` (returns the SECOND operand on ties), silently
@@ -114,7 +114,7 @@ pub fn almide_rt_math_choose(n: i64, k: i64) -> i64 {
 // fix routes native through the SAME vendored `almide_rt_libm_log` and pins the
 // `0.5·ln(2π)` term to its exact f64 bit-pattern (the platform `ln` of `2π`
 // happens to equal this literal, but hard-coding it removes the platform call),
-// making native == wasm bit-for-bit. See emit_wasm/calls_numeric.rs "log_gamma".
+// making native == wasm bit-for-bit. See stdlib/math_lgamma.almd.
 const LANCZOS_G_OFFSET: f64 = 7.5; // t = x + g + 0.5  with g = 7
 /// `0.5 · ln(2π)`, pinned to its exact f64 bit-pattern (= `(2π).ln() * 0.5`),
 /// shared verbatim with the wasm emit so the constant term cannot drift.

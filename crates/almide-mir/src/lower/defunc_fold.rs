@@ -353,6 +353,31 @@ impl LowerCtx {
             IrExprKind::Var { id } if *id == acc_id => {}
             _ => return false,
         }
+        // LAST-READER GATE. The fold rebinds `acc_id`'s SLOT IN PLACE, so it is sound
+        // only when NOTHING reads `acc_id` after this bind — which is exactly what the
+        // source-level shadow rebind (`let acc = if c then acc + [x] else acc`) gives:
+        // the name is rebound, so no later read can reach the old value. The arm shape
+        // alone does NOT imply that: `let b = seed + "B"; let j = if c then "A" else b;
+        // b + "/" + j` has the same shape with a DIFFERENT binder, and folding it made
+        // every later read of `b` return the wrong block — a live wrong value the
+        // ownership certificate happily ACCEPTs, because the `a` (acquire on the new
+        // object) and the `d` (release on the old one) land on one stream line and the
+        // checker cannot see they are different runtime objects. It was reachable only
+        // because `desugar_let_bound_heap_branch` intercepts such binds first; the J1
+        // join-admission work re-routes them here, so the precondition is now CHECKED
+        // rather than accidentally maintained.
+        //
+        // The test is exact: `acc_id`'s reads in the WHOLE body (counted before
+        // lowering — see `LowerCtx::var_read_counts`) must all be the ones inside THIS
+        // bind's value. Fewer here than there means a read elsewhere: decline, and the
+        // bind takes the ordinary route (the merge join copies via `Op::Dup`, which is
+        // value semantics and always correct). Stacked shadow rebinds still fold: each
+        // shadow is its own VarId, read only by the next link.
+        // Pinned by `spec/wasm_cross/heap_result_if_bind_chain.almd::clobber`.
+        match self.var_read_counts.get(&acc_id) {
+            Some(&whole_body) if whole_body == count_var_reads(value, acc_id) => {}
+            _ => return false,
+        }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         let cond_v = match self.lower_scalar_value(cond) {
@@ -640,3 +665,27 @@ impl LowerCtx {
         self.lower_stmt(s).is_ok()
     }
 }
+
+/// How many times `id` is READ (an `IrExprKind::Var` occurrence) inside `e`.
+///
+/// The liveness oracle for the in-place accumulator fold below: comparing the
+/// whole-body count against the count inside one bind's value decides whether
+/// that bind is the accumulator's LAST reader.
+pub(crate) fn count_var_reads(e: &IrExpr, id: VarId) -> u32 {
+    struct C {
+        id: VarId,
+        n: u32,
+    }
+    impl almide_ir::visit::IrVisitor for C {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(&e.kind, IrExprKind::Var { id } if *id == self.id) {
+                self.n += 1;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut c = C { id, n: 0 };
+    almide_ir::visit::IrVisitor::visit_expr(&mut c, e);
+    c.n
+}
+

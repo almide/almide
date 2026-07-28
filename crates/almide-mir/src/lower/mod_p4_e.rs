@@ -182,13 +182,76 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bo
 /// order the single table used, so which variant a call routes to is
 /// unchanged.
 fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
+    // Every arm of the former one-body match required a HEAP key — a scalar key
+    // reached only the closing `_ => None` — so decline it up front.
+    if !r.key_heap {
+        return None;
+    }
+    // The heap-key/heap-value routes, split by what they decide and chained in
+    // their original arm order: the `_hval` construction family, the nested-map
+    // (`_msv`/`_mlo`) family with the already-suffixed display passthroughs, then
+    // the named-value / scalar-record-key / tuple-value / type-changing routes.
+    if r.val_heap {
+        if let Some(name) = map_heap_val_construction_route(r)
+            .or_else(|| map_heap_val_nested_route(r))
+            .or_else(|| map_heap_val_named_and_typechange_route(r))
+        {
+            return Some(name);
+        }
+        if !r.val_is_string {
+            return Some(MapName::Suffix("_hval_wall"));
+        }
+    }
+    // A fn OUTSIDE the family's implemented list must fall to an UNREGISTERED
+    // wall suffix, NEVER to `None`: a `None` here returns the BARE `map.{func}`
+    // name, which links the scalar-key map_core generic against the string-key
+    // 16-byte-stride layout — raw i64 slot copies of STRING handles with no
+    // rc_inc, so the result map aliases its inputs' keys unowned and scope-end
+    // double-frees them (`map.merge` on `Map[String, Int]` trapped the rc_dec
+    // sentinel on the verified default — the #790 map-merge row).
+    // `to_string` (the `${map}` interp display) links the BARE self-host
+    // `map.to_string` — the pre-wall behavior this family's wall must not
+    // mangle (map_interp_self_hosts_via_keys_values pins it).
+    // Every `${map}` display name the interp leaf table synthesizes passes
+    // through VERBATIM. `to_string` is the bare self-host; the rest already
+    // carry the repr suffix that picked them (`to_string_ss` for the all-String
+    // map, `to_string_sb` for Bool values, `to_string_x` for a pairing with no
+    // variant). Re-suffixing them fabricated `to_string_ss_str_wall` and
+    // `to_string_x_skv_wall` — names nothing defines — so a `${Map[String,
+    // String]}` or `${Map[String, Float]}` interpolation walled the whole
+    // program even though the variant it names is self-hosted and correct.
+    // (The `to_string_hval` lesson, applied to the whole family.)
+    if r.key_is_string && r.func.starts_with("to_string") {
+        return Some(MapName::Suffix(""));
+    }
+    if r.val_heap && r.key_is_string {
+        return Some(if matches!(
+            r.func,
+            "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
+                | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count"
+                | "fold" | "entries"
+        ) {
+            MapName::Suffix("_str")
+        } else {
+            MapName::Suffix("_str_wall")
+        });
+    }
+    // TYPE-CHANGING `map.map` skv → str (`map.map(mi, (v) => int.to_string(v)
+    // + "!")` — C-039): String values in the result → the typechange twin.
+    None
+}
+
+/// Extracted verbatim from [`map_variant_heap_key`] (codopsy round-3 sweep, #852):
+/// the `_hval` construction family (a flat `List[scalar]` value, a closure value, the `Map[String, <Fn>]` / `Map[String, List[Int]]` `from_list`) plus the all-String `from_list` that routes `_str`.
+///
+/// The arms are in their original order and `None` means "no route here", so the
+/// caller chaining the deciders with `.or_else` IS the former match's top-to-bottom
+/// fall-through. Reached only with a heap key AND a heap value; the `(key_heap,
+/// val_heap)` match is kept so each arm reads exactly as it did in the one body.
+fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
     use almide_lang::types::constructor::TypeConstructorId;
-    let MapRoute {
-        func, arg_tys, result_ty, key_heap, val_heap,
-        key_is_string, val_is_string, val_is_flat_list, val_is_fn,
-        key_nullary: map_key_nullary, key_scalar_rec: map_key_scalar_rec,
-    } = r;
-    match (key_heap, val_heap) {
+    let MapRoute { func, result_ty, val_is_string, val_is_flat_list, val_is_fn, .. } = r;
+    match (r.key_heap, r.val_heap) {
     // `Map[String, List[scalar]]` — the implemented subset of the heap-value
     // family (new/set/eq/len/contains/get/get_or; other funcs keep the
     // unregistered wall name). `get`/`get_or` SHARE the stored value (the
@@ -246,6 +309,21 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
     {
         Some(MapName::Suffix("_hval"))
     }
+    _ => None,
+    }
+}
+
+/// Extracted verbatim from [`map_variant_heap_key`] (codopsy round-3 sweep, #852):
+/// the NESTED-map families — `Map[String, Map[String, String]]` `get_or`/`from_list` (`_msv`) and the `_mlo` literal — plus the already-suffixed display names that must pass through verbatim rather than be re-suffixed.
+///
+/// The arms are in their original order and `None` means "no route here", so the
+/// caller chaining the deciders with `.or_else` IS the former match's top-to-bottom
+/// fall-through. Reached only with a heap key AND a heap value; the `(key_heap,
+/// val_heap)` match is kept so each arm reads exactly as it did in the one body.
+fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let MapRoute { func, arg_tys, result_ty, .. } = r;
+    match (r.key_heap, r.val_heap) {
     // `Map[String, Map[String, String]]` get_or / from_list — the msv family
     // (map_fold_heap_acc's nested-map literal + get_or default).
     (true, true)
@@ -283,6 +361,21 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
     // leaf) — pass through verbatim (re-suffixing would fabricate
     // `to_string_mlo_hval_wall`).
     (true, true) if func == "to_string_mlo" => Some(MapName::Suffix("")),
+    _ => None,
+    }
+}
+
+/// Extracted verbatim from [`map_variant_heap_key`] (codopsy round-3 sweep, #852):
+/// the remaining heap-value routes: a NAMED-value `from_list` (`_hobj`), an all-scalar record KEY (`_srec`), the tuple-valued `entries` (`_hvalt`), and the type-changing `map.map` whose result value narrows to a scalar (`_str2skv`).
+///
+/// The arms are in their original order and `None` means "no route here", so the
+/// caller chaining the deciders with `.or_else` IS the former match's top-to-bottom
+/// fall-through. Reached only with a heap key AND a heap value; the `(key_heap,
+/// val_heap)` match is kept so each arm reads exactly as it did in the one body.
+fn map_heap_val_named_and_typechange_route(r: MapRoute<'_>) -> Option<MapName> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let MapRoute { func, arg_tys, result_ty, key_is_string, key_scalar_rec: map_key_scalar_rec, .. } = r;
+    match (r.key_heap, r.val_heap) {
     // `map.from_list` over a NAMED-value map (`["o": Point{..}]` / `["a":
     // Circle(3.0)]` — the desugared map literal): construction is handle-level
     // (the `_str` family's pair copy + co-own rc_inc works for ANY heap value
@@ -335,45 +428,10 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
     {
         Some(MapName::Suffix("_str2skv"))
     }
-    (true, true) if !val_is_string => Some(MapName::Suffix("_hval_wall")),
-    // A fn OUTSIDE the family's implemented list must fall to an UNREGISTERED
-    // wall suffix, NEVER to `None`: a `None` here returns the BARE `map.{func}`
-    // name, which links the scalar-key map_core generic against the string-key
-    // 16-byte-stride layout — raw i64 slot copies of STRING handles with no
-    // rc_inc, so the result map aliases its inputs' keys unowned and scope-end
-    // double-frees them (`map.merge` on `Map[String, Int]` trapped the rc_dec
-    // sentinel on the verified default — the #790 map-merge row).
-    // `to_string` (the `${map}` interp display) links the BARE self-host
-    // `map.to_string` — the pre-wall behavior this family's wall must not
-    // mangle (map_interp_self_hosts_via_keys_values pins it).
-    // Every `${map}` display name the interp leaf table synthesizes passes
-    // through VERBATIM. `to_string` is the bare self-host; the rest already
-    // carry the repr suffix that picked them (`to_string_ss` for the all-String
-    // map, `to_string_sb` for Bool values, `to_string_x` for a pairing with no
-    // variant). Re-suffixing them fabricated `to_string_ss_str_wall` and
-    // `to_string_x_skv_wall` — names nothing defines — so a `${Map[String,
-    // String]}` or `${Map[String, Float]}` interpolation walled the whole
-    // program even though the variant it names is self-hosted and correct.
-    // (The `to_string_hval` lesson, applied to the whole family.)
-    (true, true) | (true, false)
-        if key_is_string && func.starts_with("to_string") => Some(MapName::Suffix("")),
-    (true, true) if key_is_string => Some(
-        if matches!(
-            func,
-            "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
-                | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count"
-                | "fold" | "entries"
-        ) {
-            MapName::Suffix("_str")
-        } else {
-            MapName::Suffix("_str_wall")
-        },
-    ),
-    // TYPE-CHANGING `map.map` skv → str (`map.map(mi, (v) => int.to_string(v)
-    // + "!")` — C-039): String values in the result → the typechange twin.
-        _ => None,
+    _ => None,
     }
 }
+
 
 /// The `_skv` family (String key, i64 value), the routes a String key takes
 /// regardless of value heap-ness, and the scalar-KEY families (`_ivh` and the

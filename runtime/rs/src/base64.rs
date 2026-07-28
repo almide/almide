@@ -1,8 +1,9 @@
 // base64 — RFC 4648 Base64 encoding/decoding (standard + URL-safe alphabets).
 //
 // This is the native oracle for `base64.{encode,decode,encode_url,decode_url}`.
-// The WASM runtime (`emit_wasm/rt_encoding.rs`) must byte-match these outputs,
-// including the exact error strings.
+// The self-hosted WASM leg (`stdlib/base64_encode.almd`) must byte-match these
+// outputs, including the exact error strings. (v0's leg was
+// `emit_wasm/rt_encoding.rs`, retired in c71eff7b.)
 //
 // Standard alphabet (RFC 4648 §4):  A-Z a-z 0-9 + /  with '=' padding.
 // URL-safe alphabet (RFC 4648 §5):  A-Z a-z 0-9 - _  with '=' padding.

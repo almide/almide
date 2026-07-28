@@ -2,8 +2,9 @@
 // Cross-target differential fixture: base64 encode/decode (standard + URL-safe).
 //
 // Native `runtime/rs/src/base64.rs` is the oracle (RFC 4648, canonical padded
-// form for BOTH alphabets); the WASM runtime `emit_wasm/rt_encoding.rs` must
-// produce byte-identical output, including the decode error strings:
+// form for BOTH alphabets); the self-hosted WASM leg `stdlib/base64_encode.almd`
+// (encode AND decode) must produce byte-identical output, including the decode
+// error strings:
 //   - "invalid base64 character"
 //   - "invalid base64 length: <orig_len>"
 // Drains the rt-oracle-registry compile_base64_{encode,decode} entries, and
