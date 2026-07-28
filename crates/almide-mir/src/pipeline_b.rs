@@ -629,10 +629,18 @@ fn lower_main_and_sibling_fns(
             // "no wasm definition" message is undiagnosable without the
             // sibling's own reason (#881 — eight aliased-signature fns walled
             // invisibly while their callers rendered).
-            Err(e) if verbose => {
-                eprintln!("[v1-wall] module sibling {}: {e:?}", func.name.as_str());
+            //
+            // Recording the reason is what makes that possible. It used to be
+            // printed only under `verbose`, which the CLI never sets, so every
+            // user-visible occurrence was the bare "no wasm definition" text
+            // with the cause discarded one frame down — the same mis-attribution
+            // #906 fixed for exports and #904 for qualified type names (#943).
+            Err(e) => {
+                fn_walls.insert(func.name.as_str().to_string(), format!("{e:?}"));
+                if verbose {
+                    eprintln!("[v1-wall] module sibling {}: {e:?}", func.name.as_str());
+                }
             }
-            Err(_) => {}
         }
     }
     functions

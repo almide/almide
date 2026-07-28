@@ -465,6 +465,27 @@ impl LowerCtx {
                 if let Some((index, gty)) = crate::lower::mutable_global_info(*id) {
                     return self.mutable_global_cow(module, func, *id, index, &gty);
                 }
+                // Resolve LOCALLY first. `value_or_global` states the invariant this
+                // relies on: a function-local var — parameter or `let` — is in
+                // `value_of`, and the frontend guarantees every non-global reference is
+                // bound by a preceding local form, so only a MISS can be a global.
+                //
+                // Consulting `self.globals` before that got the precedence backwards,
+                // and the two are not in the same numbering space. A module sibling is
+                // lowered against whichever globals map its region resolves to, while
+                // its own VarIds are numbered independently — so `VarId(0)` can be this
+                // function's first PARAMETER and, simultaneously, an unrelated top-let
+                // in the map. A `pub fn f(m: Bytes, …)` that writes through `m` was then
+                // reported as an "IMMUTABLE module-level `let`" and dropped, and because
+                // a dropped sibling is not fatal the only user-visible symptom was the
+                // caller's "unlinked call, no wasm definition" (#943). Adding one
+                // unrelated `let` to the consumer was enough to trigger it.
+                if let Ok(v) = self.value_for(*id) {
+                    if !self.param_values.contains(&v) {
+                        self.ops.push(Op::MakeUnique { v });
+                    }
+                    return Ok(());
+                }
                 // An IMMUTABLE module-level `let` has no storage slot: every reference
                 // materializes a fresh per-use copy (a computed init is inlined at the
                 // use site outright), so the write would land in a temporary and vanish.
@@ -479,6 +500,7 @@ impl LowerCtx {
                          Declare the buffer `var` to give it one"
                     )));
                 }
+                // Neither locally bound nor a declared global — a genuine gap.
                 let v = self.value_for(*id)?;
                 if !self.param_values.contains(&v) {
                     self.ops.push(Op::MakeUnique { v });
