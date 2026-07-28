@@ -6,7 +6,7 @@ Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self
 
 | Program | Verified, as shipped | After `wasm-opt -Oz --all-features` |
 |---------|-----:|-----:|
-| Hello World | **770 B** | **548 B** |
+| Hello World | **703 B** | **545 B** |
 | FizzBuzz 1–100 | **1,793 B** | **1,092 B** |
 | Fibonacci (recursive) | **1,441 B** | **771 B** |
 | Closure + call_indirect | **2,744 B** | **1,672 B** |
@@ -21,9 +21,13 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Metric | Value |
 |--------|-------|
 | Binary size (minigit CLI) | **444 KB** (stripped) |
-| Runtime (100 ops) | **1.1s** |
 | Dependencies | **0** (single static binary) |
 | WASM target | `almide build app.almd --target wasm` |
+
+Runtime performance against Rust is tracked per-benchmark on the wasm leg (see
+[WASM-OUTPUT.md](./WASM-OUTPUT.md) and the benchmark suite); a native runtime
+scoreboard with a stated baseline and repro script is #917 — no number is
+published here until it exists.
 
 ## AI Coding Language Benchmark
 

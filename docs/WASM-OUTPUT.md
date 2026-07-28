@@ -14,7 +14,7 @@ Reproduce any of them with the commands shown.
 
 | Program | Almide (verified, as shipped) | Almide + `wasm-opt -Oz` | Rust `--release` (default) | Rust size-tuned¹ |
 |---|---:|---:|---:|---:|
-| Hello, world | **770 B** | **548 B** | 64,430 B | 40,754 B |
+| Hello, world | **703 B** | **545 B** | 64,430 B | 40,754 B |
 | FizzBuzz 1–100 | **1,793 B** | **1,092 B** | — | 42,434 B |
 | Fibonacci (recursive) | 1,441 B | 771 B | — | — |
 | Closure + `call_indirect` | 2,744 B | 1,672 B | — | — |
@@ -43,7 +43,7 @@ Two honest framings for that table:
 
 ## What is actually inside a module
 
-Section layout of the 770-byte Hello, world (via `wasm-objdump -h`):
+Section layout of the 703-byte Hello, world (via `wasm-objdump -h`):
 
 | Section | Size | Contents |
 |---|---:|---|
@@ -120,12 +120,14 @@ un-certified tool rewrote. That line is why it stays opt-in:
 If you want minimum bytes and accept leaving the verified envelope:
 
 ```bash
-wasm-opt -Oz --all-features app.wasm -o app.min.wasm
+almide build app.almd --target wasm --wasm-opt   # runs: wasm-opt -Oz \
+#   --enable-nontrapping-float-to-int --enable-tail-call  (the features the
+#   v1 renderer actually emits — no SIMD in the default output)
 ```
 
 (`--all-features` is required — the runtime's fs helpers return multi-value
 pairs, and the float printer uses post-MVP integer ops. Binaryen then squeezes
-further: Hello, world drops from 770 B to 548 B.)
+further: Hello, world drops from 703 B to 545 B.)
 
 **`-Oz` trades speed for those bytes.** The verified renderer versions hot
 loops into a guarded fast path with the bounds checks discharged up front
@@ -149,8 +151,8 @@ exit code** native ⇄ wasm, tracked contract-by-contract in
 ```bash
 # Almide
 echo 'fn main() -> Unit = println("Hello, world!")' > hello.almd
-almide build hello.almd --target wasm -o hello.wasm      # 770 B (verified)
-wasm-opt -Oz --all-features hello.wasm -o hello.min.wasm  # 548 B
+almide build hello.almd --target wasm -o hello.wasm      # 703 B (verified)
+almide build hello.almd --target wasm --wasm-opt -o hello.min.wasm  # 545 B
 wasm-objdump -h hello.wasm                                # the section table above
 
 # Rust (same target, full size profile)

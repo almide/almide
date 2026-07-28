@@ -673,20 +673,21 @@ fn write_leb128_u32(mut v: u32) -> Vec<u8> {
     }
 }
 
-/// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.
+/// Run `wasm-opt -Oz` on the output file, in-place.
 /// Returns the new file size on success.
 fn run_wasm_opt(path: &str) -> Result<usize, String> {
-    // --enable-bulk-memory required: matrix runtime emits memory.fill for
-    // result buffer zero-init. --enable-simd preserves f64x2 instructions
-    // from matrix.scale / add / sub / div / fma / fma3.
-    // --enable-nontrapping-float-to-int: sized numeric conversions now
-    // emit `i32.trunc_sat_f64_s` etc. (post-Stdlib-Unification, all
-    // float→int routes through `emit_sized_conv_call`).
+    // `-Oz`, matching the flag's documented contract: `--wasm-opt` exists to
+    // shrink the module (the published size tables are -Oz numbers), and the
+    // implementation silently ran `-O3 --enable-simd` instead — a speed
+    // profile with a feature the v1 renderer does not emit (no v128 in the
+    // default output, #864/#916), so the documented numbers were not
+    // reproducible through the flag.
+    // --enable-nontrapping-float-to-int: float→int renders as
+    // `i64.trunc_sat_f64_s` (the saturating truncate, lib_b.rs).
+    // --enable-tail-call: mutual/self tail recursion renders `return_call`.
     let status = std::process::Command::new("wasm-opt")
         .args([
-            "-O3",
-            "--enable-simd",
-            "--enable-bulk-memory",
+            "-Oz",
             "--enable-nontrapping-float-to-int",
             "--enable-tail-call",
             path,

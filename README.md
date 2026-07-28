@@ -210,9 +210,8 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 
 | Headline | Value |
 |---|---|
-| WASM "Hello World" binary | **770 B** verified as shipped (reachability-pruned runtime + function-name debug info) — **548 B** after `wasm-opt -Oz`; Rust on the same target is 40 KB+ even fully size-tuned |
+| WASM "Hello World" binary | **703 B** verified as shipped (reachability-pruned runtime + function-name debug info) — **545 B** after `almide build --wasm-opt` (`wasm-opt -Oz`); Rust on the same target is 40 KB+ even fully size-tuned |
 | Native minigit CLI binary | **444 KB** stripped, 0 dependencies |
-| MiniGit AI-coding benchmark | **100% pass** (Sonnet 5 × 20 trials) — most concise of 5 languages (233 LOC), faster than Gleam/MoonBit |
 
 The verified pipeline ships the exact bytes its own rendering process produced —
 reachability DCE prunes unreached runtime helpers inside the renderer itself, but
@@ -233,7 +232,7 @@ Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.m
 | Stdlib | 869 functions across 41 modules |
 | Tests | 310 test files pass (299 via WASM, 11 native) + 164-contract cross-target ledger |
 | MSR | 100% (30/30 tasks, Sonnet 4.6) — see the [scorecard](#msr-scorecard) above, measured by [almide-dojo](https://github.com/almide/almide-dojo) |
-| MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, same-model snapshot vs Gleam/MoonBit/Rust/TypeScript ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
+| MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, most concise of 5 languages (233 LOC); fastest agent completion wall-clock vs Gleam/MoonBit — an LLM-writability number (measured under 6–9× self-parallelism), **not** generated-code speed ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 

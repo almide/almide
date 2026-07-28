@@ -1,3 +1,11 @@
+> **HISTORICAL (#916).** The vs-Rust scoreboard and all 27 "Completed
+> Optimizations" below were measured at v0.25.0 against the **v0 emitter
+> retired in #782**, in files that no longer exist — on a machine the raw
+> log itself notes was under load. Kept as the record of that campaign; the
+> re-benchmark of the v1 legs with a stated baseline is #917. The current
+> vs-Rust story lives in docs/WASM-OUTPUT.md and the memory ledger's
+> "Rust-wasm打倒アーク" (v0.34.1, adversarial-Rust 4-0).
+
 <!-- description: WASM optimization roadmap and the running scoreboard against Rust+LLVM -->
 # WASM Optimization Roadmap
 
