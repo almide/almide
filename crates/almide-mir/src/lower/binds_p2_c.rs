@@ -474,6 +474,21 @@ impl LowerCtx {
                 }
             }
         }
+        // ROUTING INVARIANT — READ BEFORE CHANGING WHAT REACHES THIS BIND (2026-07-28
+        // adversarial audit, arc v1-join-completeness): the fold below rebinds the ELSE
+        // arm's variable SLOT IN PLACE, which is sound ONLY when the binder SHADOWS that
+        // variable (the source name is rebound, so no later read can reach the old value).
+        // Nothing here checks that: the guard tests only that the else arm is an owned,
+        // scope-tracked Var. A NON-shadow bind — `let b = seed + "B"; let j = if c then
+        // "A" else b; b + "/" + j`, where `b` is read AFTER — silently corrupts `b`
+        // (native `sB/A` vs wasm `A/A`, exit 0 both, ownership cert ACCEPT). It is
+        // unreachable today ONLY because `desugar_let_bound_heap_branch` intercepts such
+        // binds first and tail-duplicates them; a J1 slice that declines that duplication
+        // to route binds into the merge join below DID expose it. If you change that
+        // routing, either gate this fold on real shadow/last-use liveness or let the join
+        // (which copies via `Op::Dup` — value semantics, always correct) run first.
+        // Pinned by `spec/wasm_cross/heap_result_if_bind_chain.almd::clobber`.
+        //
         // STRAIGHT-LINE identity-else shadow rebind `let acc = if cond then acc + [x] else acc`
         // (porta `serialize_opts`' 7 stacked optional-arg appends on one `args` slot). The ELSE
         // arm is EXACTLY the accumulator var — the PROVEN loop-carried `i(id)m` append slot,

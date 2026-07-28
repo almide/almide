@@ -119,6 +119,48 @@ twin already had (the same match-VALUE routers the tail position trusts:
 custom-variant / variant-value / Result / Option merges), bind + scope-track +
 `seed_variant_param`. No new cert surface (existing tail-trusted routers).
 
+> **ATTEMPT 1 REFUTED (2026-07-28) — do not retry without the two fixes below.**
+> A full widening (`is_heap_ty` in both bind sites + a `bind_join_lowerable`
+> decline predicate admitting LitStr / heap Var / ConcatStr / nested-if arms
+> under a scalar cond) was implemented and killed by the mandatory adversarial
+> pass: 2 of 3 independent auditors returned REFUTED with distinct defects, and
+> 5 lowering unit tests that pin the duplication route failed. The patch is
+> archived at `scratchpad/j1_attempt_REFUTED.patch` (not committed).
+>
+> **Defect 1 — live-variable clobber (LATENT, exposed by the rerouting).**
+> Admitting a bare-Var else arm let non-shadow binds (`let b = …; let j = if c
+> then "A" else b; b + "/" + j`) reach the identity-else accumulator slot fold
+> (`try_lower_line_cond_acc`), whose guard checks only that the else arm is an
+> owned scope-tracked Var — never that the binder SHADOWS it. The fold rebinds
+> `b`'s slot in place, so later reads of `b` return the wrong block: native
+> `sB/A` vs wasm `A/A`, exit 0 on both, ownership cert ACCEPT. Verified
+> UNREACHABLE on develop (the duplication desugar intercepts first), so nothing
+> shipped is broken — but it is a trap under ANY future rerouting. Now carries
+> a routing-invariant comment at the fold site and a standing cross-target pin
+> (`spec/wasm_cross/heap_result_if_bind_chain.almd::clobber`, two links — at
+> four or more the dense branch-lift outlines each bind and hides it).
+> FIX: gate the fold on real shadow/last-use liveness, or let the join (which
+> copies via `Op::Dup` — value semantics, always correct) run FIRST.
+>
+> **Defect 2 — merge-dst drop class missing for nested heap types (NEW).**
+> The widening pushes the merge dst to `live_heap_handles` but registers no
+> drop CLASS; only variants got `seed_variant_param`. A `List[String]` merge
+> therefore gets a flat `Op::Drop`, freeing the outer block and LEAKING every
+> element String — reproduced independently by two auditors (native bounded
+> 105MB at N=2M vs wasm 2.88GB unbounded; traps under any fixed
+> `--max-memory-size`). The ownership cert ACCEPTs because its `d` cannot
+> distinguish a flat from a recursive drop. Pre-change this shape WALLED, so
+> the widening converted an honest refusal into a certified leak.
+> FIX: register the merge dst's drop class by result type at both join sites
+> (mirror `seed_call_module_heap_drop_route` / `register_owned_heap_eq_drop`),
+> or restrict the widening to flat-drop-exact types (`String`) until that
+> lands.
+>
+> **Process note (kept deliberately):** corpus-wall was GREEN, the walled-real
+> ratchet was CLEAN, every pre-existing cross-target fixture passed, and the
+> proven checker ACCEPTed both defects. Only the adversarial pass caught them.
+> That is the whole argument for keeping it a gate rather than a suggestion.
+
 **J2 — narrow `desugar_let_bound_heap_branch`. J2a DONE 2026-07-28.**
 `is_first_ok_chain` (co-located with the chain builder in desugar_fan.rs)
 recognizes exactly the shape `first_ok_chain` emits; the tail-duplication's

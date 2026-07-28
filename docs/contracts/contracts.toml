@@ -1393,6 +1393,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/heap_result_if_append.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_bind_chain.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_result_if_match_arm_frame.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_result_if_record_arm.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_result_if_str_int.almd", class = "fixture" },
