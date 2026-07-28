@@ -86,54 +86,9 @@ impl LowerCtx {
         if crate::lower::is_heap_elem_list_ty(&subject.ty) {
             self.heap_elem_lists.insert(subj);
         }
-        // Parse the arms into (some_body, some_bind, none_body). A SCALAR payload binds a value COPY;
-        // a HEAP payload (`pl: Value`) binds the slot-0 @12 handle as a BORROW, gated on the subject
-        // being a tracked nested-ownership list (`heap_elem_lists`). A nested ctor / heap bind over a
-        // non-nested-ownership subject declines.
-        let mut some: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
-        let mut none: Option<&IrExpr> = None;
-        for arm in arms {
-            match &arm.pattern {
-                IrPattern::Some { inner } => {
-                    let bind = match inner.as_ref() {
-                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false)),
-                        IrPattern::Bind { var, ty }
-                            if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
-                        {
-                            Some((*var, true))
-                        }
-                        IrPattern::Wildcard => None,
-                        _ => {
-                            self.ops.truncate(ops_mark);
-                            self.live_heap_handles.truncate(lhh_mark);
-                            return None;
-                        }
-                    };
-                    if some.is_some() {
-                        self.ops.truncate(ops_mark);
-                        self.live_heap_handles.truncate(lhh_mark);
-                        return None;
-                    }
-                    some = Some((&arm.body, bind));
-                }
-                IrPattern::None | IrPattern::Wildcard => {
-                    if none.is_some() {
-                        self.ops.truncate(ops_mark);
-                        self.live_heap_handles.truncate(lhh_mark);
-                        return None;
-                    }
-                    none = Some(&arm.body);
-                }
-                _ => {
-                    self.ops.truncate(ops_mark);
-                    self.live_heap_handles.truncate(lhh_mark);
-                    return None;
-                }
-            }
-        }
-        let ((some_body, some_bind), none_body) = match (some, none) {
-            (Some(s), Some(n)) => (s, n),
-            _ => {
+        let ((some_body, some_bind), none_body) = match self.parse_option_append_arms(arms, subj) {
+            Some(parsed) => parsed,
+            None => {
                 self.ops.truncate(ops_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
@@ -146,17 +101,7 @@ impl LowerCtx {
         // Bind the Some payload BEFORE the IfThen so it is in scope for the some-arm. A SCALAR is a
         // value COPY (load64); a HEAP element is `LoadHandle` (@12, an i32 Ptr) recorded in
         // `param_values` (a BORROW — the subject owns it, freed by its post-arm DropListStr).
-        if let Some((bind_var, is_heap)) = some_bind {
-            let payload = if is_heap {
-                self.load_at_offset(h, 12, PrimKind::LoadHandle)
-            } else {
-                self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
-            };
-            self.value_of.insert(bind_var, payload);
-            if is_heap {
-                self.param_values.insert(payload);
-            }
-        }
+        self.bind_variant_payload_from_slot0(h, some_bind);
         self.ops.push(Op::IfThen { cond: tag, dst: None });
         // BRANCH OWNERSHIP ISOLATION: the arms are alternate — snapshot the owned/borrowed sets
         // before the some-arm, restore before the none-arm (the emitted ops are per-branch; only the
@@ -183,39 +128,114 @@ impl LowerCtx {
         // owned Value payload), closing the per-iteration `i…d` balance. The subject is ALWAYS a fresh
         // owned inline-call result (the Var-subject borrow form is gated out above), so this drop is
         // unconditional.
+        self.drop_owned_subject_after_arms(subj);
+        Some(())
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_str_acc`] (codopsy round-3 sweep,
+    /// #852): parses the two arms into `((some_body, some_bind), none_body)`, deciding each Some
+    /// payload's bind form (scalar COPY / heap BORROW / nothing). Takes `&self` — it reads the
+    /// tracking sets but emits NO ops, which is exactly why the caller's rollback (unchanged, now at
+    /// the call site) is equivalent to the original inline rollback: nothing can have been emitted
+    /// between a decline here and the truncate there.
+    #[allow(clippy::type_complexity)]
+    fn parse_option_append_arms<'a>(
+        &self,
+        arms: &'a [IrMatchArm],
+        subj: ValueId,
+    ) -> Option<((&'a IrExpr, Option<(VarId, bool)>), &'a IrExpr)> {
+        // Parse the arms into (some_body, some_bind, none_body). A SCALAR payload binds a value COPY;
+        // a HEAP payload (`pl: Value`) binds the slot-0 @12 handle as a BORROW, gated on the subject
+        // being a tracked nested-ownership list (`heap_elem_lists`). A nested ctor / heap bind over a
+        // non-nested-ownership subject declines.
+        let mut some: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        let mut none: Option<&IrExpr> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::Some { inner } => {
+                    let bind = self.heap_elem_list_or_scalar_bind(subj, inner.as_ref()).ok()?;
+                    if some.is_some() {
+                        return None;
+                    }
+                    some = Some((&arm.body, bind));
+                }
+                IrPattern::None | IrPattern::Wildcard => {
+                    if none.is_some() {
+                        return None;
+                    }
+                    none = Some(&arm.body);
+                }
+                _ => return None,
+            }
+        }
+        match (some, none) {
+            (Some(s), Some(n)) => Some((s, n)),
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_str_acc`] (codopsy round-3 sweep,
+    /// #852) via [`Self::parse_option_append_arms`]: decides ONE `some(…)` payload's bind form — a
+    /// scalar `Bind` is a value COPY, a heap `Bind` the @12 handle as a BORROW, a `Wildcard` binds
+    /// nothing, any other pattern declines. NOT [`Self::heap_or_scalar_variant_bind`] (the
+    /// result-list twin) — that one ALSO admits a heap bind over a `value_result_lists` /
+    /// `value_result_results` subject, which the str-acc path never did; the gate here is
+    /// `heap_elem_lists` ALONE, so the two must stay separate.
+    fn heap_elem_list_or_scalar_bind(
+        &self,
+        subj: ValueId,
+        inner: &IrPattern,
+    ) -> Result<Option<(VarId, bool)>, ()> {
+        match inner {
+            IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
+            IrPattern::Bind { var, ty }
+                if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+            {
+                Ok(Some((*var, true)))
+            }
+            IrPattern::Wildcard => Ok(None),
+            _ => Err(()),
+        }
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_str_acc`] AND
+    /// [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep, #852) — the block was
+    /// TEXTUALLY IDENTICAL in both (there a `bind_payload` closure): binds one arm's payload from
+    /// the subject's slot-0 (@12), a SCALAR as a value COPY (load64), a HEAP element as a
+    /// `LoadHandle` BORROW recorded in `param_values`. NOT [`Self::bind_variant_payload`]
+    /// (control_p2.rs) — that sibling also takes the payload's `Ty` and `seed_variant_param`s a heap
+    /// bind, which NEITHER call site here ever did; reusing it would add new behavior for a nested
+    /// variant payload, not just move code.
+    fn bind_variant_payload_from_slot0(&mut self, h: ValueId, bind: Option<(VarId, bool)>) {
+        use crate::PrimKind;
+        if let Some((bind_var, is_heap)) = bind {
+            let payload = if is_heap {
+                self.load_at_offset(h, 12, PrimKind::LoadHandle)
+            } else {
+                self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
+            };
+            self.value_of.insert(bind_var, payload);
+            if is_heap {
+                self.param_values.insert(payload);
+            }
+        }
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_str_acc`] AND
+    /// [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep, #852) — the block was
+    /// TEXTUALLY IDENTICAL in both: takes the per-iteration subject out of `live_heap_handles` and
+    /// emits its drop, closing the per-iteration `i…d` balance. Same body as `drop_owned_subject`
+    /// (control_p2.rs), which is private to that module and so not callable from here; the reason
+    /// each call site's own comment stays at the call site is that it justifies the drop POSITION
+    /// (after both arms), which is a property of the caller, not of this move.
+    fn drop_owned_subject_after_arms(&mut self, subj: ValueId) {
         if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
             self.live_heap_handles.remove(pos);
             let op = self.drop_op_for(subj);
             self.ops.push(op);
         }
-        Some(())
     }
 
-    /// A `filter_map` closure body that is a 2-arm VARIANT `match subj { … }` deciding keep/skip,
-    /// lowered into a WRITE-CURSOR result list (`lower_defunc_filter_map_hof`). The subject is a
-    /// self-host Option CALL (`some(pl)`/`none`) OR a self-host Result(-str) CALL (`ok(pl)`/`err(_)`)
-    /// — the dojo `match fs.read_text(dir+"/"+f) { ok(content) => some(parse_task_md(f, content)),
-    /// err(_) => none }`. Mirrors `append_variant_match_to_str_acc` (UNIT control, per-arm action,
-    /// branch isolation, drop-subject-after) BUT (a) ADMITS Result `ok`/`err` arms with the INVERSE
-    /// tag (Result Ok = tag==0 vs Option Some = tag!=0) exactly as `try_lower_variant_value_match`
-    /// already does (control_p2), and (b) the keep arm stores an OWNED record/Value at the cursor
-    /// instead of appending a String. Returns `Some(())` on success, `None` (the caller rolls back +
-    /// WALLs) outside the subset.
-    ///
-    /// SOUNDNESS — per-iteration subject + borrowed payload, exactly the Option path:
-    ///  - The subject (`fs.read_text(…)`) is materialized into a FRESH OWNED block (cert `i`) INSIDE
-    ///    this iteration's frame, tracked so its post-arm drop frees the owned payload recursively. A
-    ///    str-Result (cap-as-tag @16) is `materialized_results_str` + `heap_elem_lists` (DropListStr
-    ///    frees slot-0's String); a scalar Result (len-as-tag @4) is `materialized_results`; an Option
-    ///    (len-as-tag @4) is `materialized_options` (+ `heap_elem_lists` for a heap payload).
-    ///  - A `some(pl)`/`ok(pl)` HEAP payload binds `pl` to the subject's slot-0 @12 handle as a BORROW
-    ///    (`param_values`) — the subject still owns it, freed once by its post-arm drop. The keep arm
-    ///    builds a FRESH OWNED element (`lower_heap_result_arm`), so no double-free.
-    ///  - The subject must stay live THROUGH the keep arm (the borrow is read there) → dropped AFTER
-    ///    both arms (cert `d`), closing the per-iteration `i…d` balance.
-    ///  - BRANCH OWNERSHIP ISOLATION around the then-arm (snapshot/restore param_values +
-    ///    live_heap_handles + materialized_aggregates), so a consume in one alternate arm does not
-    ///    leak into the other's lowering view.
     /// The HEAP-Ok Result SUBJECT drop-route classification for
     /// [`Self::append_variant_match_to_result_list`] — routes `subj`'s scope-end drop by the
     /// Ok payload's exact shape. NOT [`Self::track_heap_ok_result_subject_drop`] (control_p2.rs)
@@ -252,6 +272,194 @@ impl LowerCtx {
         self.heap_elem_lists.insert(subj);
     }
 
+    /// Extracted verbatim from [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep,
+    /// #852): records the freshly materialized subject in the tracking set(s) that decide its
+    /// per-iteration drop route — a self-host or user `Named` Option, a scalar-Ok (len-as-tag)
+    /// Result, or a heap-Ok (cap-as-tag) str-Result.
+    fn track_variant_match_subject_drop_sets(&mut self, subject: &IrExpr, subj: ValueId) {
+        // Track the subject EXACTLY as `try_lower_variant_value_match` (control_p2): a self-host or
+        // user `Named` Option/Result, with the type-driven drop set so the per-iteration subject drop
+        // frees its owned payload correctly. The arm tag arrangement is the uniform skeleton then=tag≠0
+        // / else=tag==0 (Option → then=Some/else=None; Result → then=Err/else=Ok).
+        let is_named_call =
+            matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. });
+        self.track_subject_as_option(subject, subj, is_named_call);
+        self.track_subject_as_scalar_ok_result(subject, subj, is_named_call);
+        self.track_subject_as_heap_ok_result(subject, subj, is_named_call);
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep,
+    /// #852) via [`Self::track_variant_match_subject_drop_sets`]: the FIRST of the three sequential
+    /// subject-shape tests — a self-host or user `Named` OPTION subject (len-as-tag @4), plus the
+    /// nested-ownership `heap_elem_lists` route for a heap payload.
+    fn track_subject_as_option(&mut self, subject: &IrExpr, subj: ValueId, is_named_call: bool) {
+        if is_self_host_option_call(subject)
+            || (is_named_call
+                && is_variant_ty(&subject.ty)
+                && !crate::lower::is_result_ty(&subject.ty))
+        {
+            self.materialized_options.insert(subj);
+            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                self.heap_elem_lists.insert(subj);
+            }
+        }
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep,
+    /// #852) via [`Self::track_variant_match_subject_drop_sets`]: the SECOND of the three sequential
+    /// subject-shape tests — a self-host or user `Named` scalar-Ok RESULT subject (len-as-tag @4).
+    fn track_subject_as_scalar_ok_result(
+        &mut self,
+        subject: &IrExpr,
+        subj: ValueId,
+        is_named_call: bool,
+    ) {
+        if is_self_host_result_call(subject)
+            || (is_named_call
+                && crate::lower::is_result_ty(&subject.ty)
+                && !Self::is_heap_ok_result(&subject.ty))
+        {
+            self.materialized_results.insert(subj);
+            // Scalar-Ok / heap-Err `Result[Int, String]` (the byte-match fixture's `mkResult`): the
+            // len-as-tag read stays @4, but track heap_elem_lists so the Err arm's String payload drops
+            // via DropListStr (Ok=len0 frees nothing, Err=len1 frees slot-0's String).
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) =
+                &subject.ty
+            {
+                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
+                    self.heap_elem_lists.insert(subj);
+                }
+            }
+        }
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep,
+    /// #852) via [`Self::track_variant_match_subject_drop_sets`]: the THIRD of the three sequential
+    /// subject-shape tests — a self-host or user `Named` heap-Ok str-RESULT subject (cap-as-tag @16),
+    /// whose exact drop route is then picked by
+    /// [`Self::track_heap_ok_result_subj_drop_no_record`].
+    fn track_subject_as_heap_ok_result(
+        &mut self,
+        subject: &IrExpr,
+        subj: ValueId,
+        is_named_call: bool,
+    ) {
+        if is_self_host_result_str_call(subject)
+            || (is_named_call && Self::is_heap_ok_result(&subject.ty))
+        {
+            self.materialized_results_str.insert(subj);
+            self.track_heap_ok_result_subj_drop_no_record(subj, &subject.ty);
+        }
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_result_list`]'s `heap_or_scalar_bind`
+    /// closure (codopsy round-3 sweep, #852): decides ONE variant payload's bind form — a scalar
+    /// `Bind` is a value COPY, a heap `Bind` the @12 handle as a BORROW (admitted only over a subject
+    /// tracked as nested-ownership), a `Wildcard` binds nothing, any other pattern declines.
+    fn heap_or_scalar_variant_bind(
+        &self,
+        subj: ValueId,
+        inner: &IrPattern,
+    ) -> Result<Option<(VarId, bool)>, ()> {
+        match inner {
+            IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
+            IrPattern::Bind { var, ty }
+                if is_heap_ty(ty)
+                    && (self.heap_elem_lists.contains(&subj)
+                        || self.value_result_lists.contains(&subj)
+                        || self.value_result_results.contains(&subj)) =>
+            {
+                Ok(Some((*var, true)))
+            }
+            IrPattern::Wildcard => Ok(None),
+            _ => Err(()),
+        }
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep,
+    /// #852): parses the two arms into the uniform then/else skeleton. Takes `&self` — it emits NO
+    /// ops, which is exactly why the caller's `rollback` (unchanged, now at the call site) is
+    /// equivalent to the original inline `return rollback(self)`: nothing can have been emitted
+    /// between a decline here and the truncate there.
+    #[allow(clippy::type_complexity)]
+    fn parse_keep_skip_arms<'a>(
+        &self,
+        arms: &'a [IrMatchArm],
+        subj: ValueId,
+        is_option: bool,
+    ) -> Option<((&'a IrExpr, Option<(VarId, bool)>), (&'a IrExpr, Option<(VarId, bool)>))> {
+        // Parse the arms into (then_body, then_bind) [tag != 0] and (else_body, else_bind) [tag == 0],
+        // the uniform skeleton: Option → then=Some / else=None; Result → then=Err / else=Ok. A heap
+        // payload binds the @12 handle as a BORROW (gated on the subject being a nested-ownership list);
+        // a scalar payload a value copy; a wildcard nothing.
+        let mut then_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        let mut else_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        for arm in arms {
+            let parsed: Result<(bool, Option<(VarId, bool)>), ()> =
+                self.keep_skip_arm_side_and_bind(subj, is_option, &arm.pattern);
+            match parsed {
+                Ok((true, bind)) if then_slot.is_none() => then_slot = Some((&arm.body, bind)),
+                Ok((false, bind)) if else_slot.is_none() => else_slot = Some((&arm.body, bind)),
+                _ => return None,
+            }
+        }
+        match (then_slot, else_slot) {
+            (Some(t), Some(e)) => Some((t, e)),
+            _ => None,
+        }
+    }
+
+    /// Extracted verbatim from [`Self::append_variant_match_to_result_list`] (codopsy round-3 sweep,
+    /// #852) via [`Self::parse_keep_skip_arms`]: decides which SIDE of the uniform tag skeleton ONE
+    /// arm belongs to (`true` = then / tag != 0, `false` = else / tag == 0) together with its payload
+    /// bind — Option `some`/`none` vs Result `err`/`ok`, the INVERSE tag pairing. Declines (`Err`) on
+    /// any pattern outside those four.
+    fn keep_skip_arm_side_and_bind(
+        &self,
+        subj: ValueId,
+        is_option: bool,
+        pattern: &IrPattern,
+    ) -> Result<(bool, Option<(VarId, bool)>), ()> {
+        match pattern {
+            IrPattern::Some { inner } if is_option => {
+                self.heap_or_scalar_variant_bind(subj, inner).map(|b| (true, b))
+            }
+            IrPattern::None | IrPattern::Wildcard if is_option => Ok((false, None)),
+            IrPattern::Err { inner } if !is_option => {
+                self.heap_or_scalar_variant_bind(subj, inner).map(|b| (true, b))
+            }
+            IrPattern::Ok { inner } if !is_option => {
+                self.heap_or_scalar_variant_bind(subj, inner).map(|b| (false, b))
+            }
+            _ => Err(()),
+        }
+    }
+
+    /// A `filter_map` closure body that is a 2-arm VARIANT `match subj { … }` deciding keep/skip,
+    /// lowered into a WRITE-CURSOR result list (`lower_defunc_filter_map_hof`). The subject is a
+    /// self-host Option CALL (`some(pl)`/`none`) OR a self-host Result(-str) CALL (`ok(pl)`/`err(_)`)
+    /// — the dojo `match fs.read_text(dir+"/"+f) { ok(content) => some(parse_task_md(f, content)),
+    /// err(_) => none }`. Mirrors `append_variant_match_to_str_acc` (UNIT control, per-arm action,
+    /// branch isolation, drop-subject-after) BUT (a) ADMITS Result `ok`/`err` arms with the INVERSE
+    /// tag (Result Ok = tag==0 vs Option Some = tag!=0) exactly as `try_lower_variant_value_match`
+    /// already does (control_p2), and (b) the keep arm stores an OWNED record/Value at the cursor
+    /// instead of appending a String. Returns `Some(())` on success, `None` (the caller rolls back +
+    /// WALLs) outside the subset.
+    ///
+    /// SOUNDNESS — per-iteration subject + borrowed payload, exactly the Option path:
+    ///  - The subject (`fs.read_text(…)`) is materialized into a FRESH OWNED block (cert `i`) INSIDE
+    ///    this iteration's frame, tracked so its post-arm drop frees the owned payload recursively. A
+    ///    str-Result (cap-as-tag @16) is `materialized_results_str` + `heap_elem_lists` (DropListStr
+    ///    frees slot-0's String); a scalar Result (len-as-tag @4) is `materialized_results`; an Option
+    ///    (len-as-tag @4) is `materialized_options` (+ `heap_elem_lists` for a heap payload).
+    ///  - A `some(pl)`/`ok(pl)` HEAP payload binds `pl` to the subject's slot-0 @12 handle as a BORROW
+    ///    (`param_values`) — the subject still owns it, freed once by its post-arm drop. The keep arm
+    ///    builds a FRESH OWNED element (`lower_heap_result_arm`), so no double-free.
+    ///  - The subject must stay live THROUGH the keep arm (the borrow is read there) → dropped AFTER
+    ///    both arms (cert `d`), closing the per-iteration `i…d` balance.
+    ///  - BRANCH OWNERSHIP ISOLATION around the then-arm (snapshot/restore param_values +
+    ///    live_heap_handles + materialized_aggregates), so a consume in one alternate arm does not
+    ///    leak into the other's lowering view.
     fn append_variant_match_to_result_list(
         &mut self,
         subject: &IrExpr,
@@ -285,45 +493,7 @@ impl LowerCtx {
             Some(CallArg::Handle(v)) => v,
             _ => return rollback(self),
         };
-        // Track the subject EXACTLY as `try_lower_variant_value_match` (control_p2): a self-host or
-        // user `Named` Option/Result, with the type-driven drop set so the per-iteration subject drop
-        // frees its owned payload correctly. The arm tag arrangement is the uniform skeleton then=tag≠0
-        // / else=tag==0 (Option → then=Some/else=None; Result → then=Err/else=Ok).
-        let is_named_call =
-            matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. });
-        if is_self_host_option_call(subject)
-            || (is_named_call
-                && is_variant_ty(&subject.ty)
-                && !crate::lower::is_result_ty(&subject.ty))
-        {
-            self.materialized_options.insert(subj);
-            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                self.heap_elem_lists.insert(subj);
-            }
-        }
-        if is_self_host_result_call(subject)
-            || (is_named_call
-                && crate::lower::is_result_ty(&subject.ty)
-                && !Self::is_heap_ok_result(&subject.ty))
-        {
-            self.materialized_results.insert(subj);
-            // Scalar-Ok / heap-Err `Result[Int, String]` (the byte-match fixture's `mkResult`): the
-            // len-as-tag read stays @4, but track heap_elem_lists so the Err arm's String payload drops
-            // via DropListStr (Ok=len0 frees nothing, Err=len1 frees slot-0's String).
-            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) =
-                &subject.ty
-            {
-                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                    self.heap_elem_lists.insert(subj);
-                }
-            }
-        }
-        if is_self_host_result_str_call(subject)
-            || (is_named_call && Self::is_heap_ok_result(&subject.ty))
-        {
-            self.materialized_results_str.insert(subj);
-            self.track_heap_ok_result_subj_drop_no_record(subj, &subject.ty);
-        }
+        self.track_variant_match_subject_drop_sets(subject, subj);
         let is_option = self.materialized_options.contains(&subj);
         let is_result_str = self.materialized_results_str.contains(&subj);
         let is_result = self.materialized_results.contains(&subj) || is_result_str;
@@ -331,71 +501,18 @@ impl LowerCtx {
             return rollback(self);
         }
         let tag_off = if is_result_str { 16 } else { 4 };
-        // Parse the arms into (then_body, then_bind) [tag != 0] and (else_body, else_bind) [tag == 0],
-        // the uniform skeleton: Option → then=Some / else=None; Result → then=Err / else=Ok. A heap
-        // payload binds the @12 handle as a BORROW (gated on the subject being a nested-ownership list);
-        // a scalar payload a value copy; a wildcard nothing.
-        let heap_or_scalar_bind = |s: &Self, inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
-            match inner {
-                IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
-                IrPattern::Bind { var, ty }
-                    if is_heap_ty(ty)
-                        && (s.heap_elem_lists.contains(&subj)
-                            || s.value_result_lists.contains(&subj)
-                            || s.value_result_results.contains(&subj)) =>
-                {
-                    Ok(Some((*var, true)))
-                }
-                IrPattern::Wildcard => Ok(None),
-                _ => Err(()),
-            }
-        };
-        let mut then_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
-        let mut else_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
-        for arm in arms {
-            let parsed: Result<(bool, Option<(VarId, bool)>), ()> = match &arm.pattern {
-                IrPattern::Some { inner } if is_option => {
-                    heap_or_scalar_bind(self, inner).map(|b| (true, b))
-                }
-                IrPattern::None | IrPattern::Wildcard if is_option => Ok((false, None)),
-                IrPattern::Err { inner } if !is_option => {
-                    heap_or_scalar_bind(self, inner).map(|b| (true, b))
-                }
-                IrPattern::Ok { inner } if !is_option => {
-                    heap_or_scalar_bind(self, inner).map(|b| (false, b))
-                }
-                _ => Err(()),
+        let ((then_body, then_bind), (else_body, else_bind)) =
+            match self.parse_keep_skip_arms(arms, subj, is_option) {
+                Some(parsed) => parsed,
+                None => return rollback(self),
             };
-            match parsed {
-                Ok((true, bind)) if then_slot.is_none() => then_slot = Some((&arm.body, bind)),
-                Ok((false, bind)) if else_slot.is_none() => else_slot = Some((&arm.body, bind)),
-                _ => return rollback(self),
-            }
-        }
-        let ((then_body, then_bind), (else_body, else_bind)) = match (then_slot, else_slot) {
-            (Some(t), Some(e)) => (t, e),
-            _ => return rollback(self),
-        };
         // tag = load32(handle(subj) + tag_off); bind payload(s) BEFORE the IfThen (in scope for the
         // arm that reads them); then a UNIT IfThen (dst None) with per-arm keep/skip.
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
-        let bind_payload = |s: &mut Self, bind: Option<(VarId, bool)>| {
-            if let Some((bind_var, is_heap)) = bind {
-                let payload = if is_heap {
-                    s.load_at_offset(h, 12, PrimKind::LoadHandle)
-                } else {
-                    s.load_at_offset(h, 12, PrimKind::Load { width: 8 })
-                };
-                s.value_of.insert(bind_var, payload);
-                if is_heap {
-                    s.param_values.insert(payload);
-                }
-            }
-        };
-        bind_payload(self, then_bind);
-        bind_payload(self, else_bind);
+        self.bind_variant_payload_from_slot0(h, then_bind);
+        self.bind_variant_payload_from_slot0(h, else_bind);
         self.ops.push(Op::IfThen { cond: tag, dst: None });
         let pv_snapshot = self.param_values.clone();
         let lhh_snapshot = self.live_heap_handles.clone();
@@ -415,11 +532,7 @@ impl LowerCtx {
         }
         // SUBJECT-DROP-AFTER-ARMS: the keep arm borrowed slot-0, so the fresh per-iteration subject
         // stayed live through both arms — drop it ONCE here, closing the per-iteration `i…d` balance.
-        if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
-            self.live_heap_handles.remove(pos);
-            let op = self.drop_op_for(subj);
-            self.ops.push(op);
-        }
+        self.drop_owned_subject_after_arms(subj);
         Some(())
     }
 
