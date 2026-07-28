@@ -13,3 +13,7 @@ __pycache__/
 research/benchmark/framework/config.yaml
 research/benchmark/framework/results/
 docs-site/
+
+# The tree+toolchain fingerprint `make verify-trust` records so `make receipt`
+# can fold in a verification of the identical tree (proofs/lib/stamp.sh).
+proofs/.verified-fingerprint
