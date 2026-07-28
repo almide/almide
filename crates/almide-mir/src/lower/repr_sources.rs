@@ -137,52 +137,62 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
             if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
                 for p in parts {
                     let almide_ir::IrStringPart::Expr { expr } = p else { continue };
-                    match &expr.ty {
-                        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                            if let Ty::Named(n, args) = &a[0] {
-                                self.track_list_named(*n, args);
-                            }
-                            // `${List[(Int, String)]}` — a scalar-component tuple
-                            // element: the generator emits its `__repr_list_tup_<key>`.
-                            if let Ty::Tuple(ts) = &a[0] {
-                                self.track_list_tuple(ts);
-                            }
-                        }
-                        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                            if let Ty::Named(n, args) = &a[0] {
-                                self.track_option_named(*n, args);
-                            }
-                            // `${Option[(Bool, Bool)]}` (a list.min/max result) — the
-                            // generator emits its `__repr_opt_tup_<key>`.
-                            if let Ty::Tuple(ts) = &a[0] {
-                                self.track_option_tuple(ts);
-                            }
-                        }
-                        Ty::Applied(TypeConstructorId::Map, a)
-                            if a.len() == 2 && matches!(a[0], Ty::String) =>
-                        {
-                            if let Ty::Named(n, _) = &a[1] {
-                                self.track_map_named(*n);
-                            }
-                        }
-                        // A GENERIC-variant instance part (`${l}` over
-                        // `ReprEither[Int, String]`) — record the instantiation so the
-                        // generator emits its keyed repr.
-                        Ty::Named(n, args)
-                            if !args.is_empty() && self.var_names.contains(n.as_str()) =>
-                        {
-                            self.out.var_insts.push((n.as_str().to_string(), args.clone()));
-                        }
-                        // A bare `${obj}` over a `Value` — the generator emits the
-                        // `__repr_Value` wrapper (value_core's JSON serializer, C-060).
-                        t if crate::lower::is_value_ty(t) => {
-                            self.out.value_parts = true;
-                        }
-                        _ => {}
-                    }
+                    self.track_interp_part_containers(&expr.ty);
                 }
             }
             walk_expr(self, e);
+        }
+    }
+    impl C {
+        /// The container shapes ONE `${…}` interp part contributes: a `List`/`Option` of a
+        /// NAMED or scalar-component TUPLE element, a `Map[String, <Named>]` value, a
+        /// generic-variant INSTANTIATION, or a bare `Value`. Extracted verbatim from
+        /// [`IrVisitor::visit_expr`] (codopsy round-3 sweep, #852) — arm order unchanged, so
+        /// the first matching shape still wins.
+        fn track_interp_part_containers(&mut self, part_ty: &Ty) {
+            match part_ty {
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+                    if let Ty::Named(n, args) = &a[0] {
+                        self.track_list_named(*n, args);
+                    }
+                    // `${List[(Int, String)]}` — a scalar-component tuple
+                    // element: the generator emits its `__repr_list_tup_<key>`.
+                    if let Ty::Tuple(ts) = &a[0] {
+                        self.track_list_tuple(ts);
+                    }
+                }
+                Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+                    if let Ty::Named(n, args) = &a[0] {
+                        self.track_option_named(*n, args);
+                    }
+                    // `${Option[(Bool, Bool)]}` (a list.min/max result) — the
+                    // generator emits its `__repr_opt_tup_<key>`.
+                    if let Ty::Tuple(ts) = &a[0] {
+                        self.track_option_tuple(ts);
+                    }
+                }
+                Ty::Applied(TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String) =>
+                {
+                    if let Ty::Named(n, _) = &a[1] {
+                        self.track_map_named(*n);
+                    }
+                }
+                // A GENERIC-variant instance part (`${l}` over
+                // `ReprEither[Int, String]`) — record the instantiation so the
+                // generator emits its keyed repr.
+                Ty::Named(n, args)
+                    if !args.is_empty() && self.var_names.contains(n.as_str()) =>
+                {
+                    self.out.var_insts.push((n.as_str().to_string(), args.clone()));
+                }
+                // A bare `${obj}` over a `Value` — the generator emits the
+                // `__repr_Value` wrapper (value_core's JSON serializer, C-060).
+                t if crate::lower::is_value_ty(t) => {
+                    self.out.value_parts = true;
+                }
+                _ => {}
+            }
         }
     }
     impl C {
