@@ -589,23 +589,7 @@ impl LowerCtx {
             (pattern, &value.kind)
         {
             if pats.len() == vals.len() {
-                for (p, v) in pats.iter().zip(vals) {
-                    match p {
-                        IrPattern::Bind { var, ty } => self.lower_bind(*var, ty, v)?,
-                        IrPattern::Wildcard => {}
-                        // A NESTED tuple sub-pattern `(b, c)` binds against the
-                        // corresponding element value `v` — recurse (the same two sound
-                        // shapes: a same-arity tuple literal binds component-wise, a
-                        // tracked heap var aliases the container).
-                        IrPattern::Tuple { .. } => self.lower_destructure(p, v)?,
-                        _ => {
-                            return Err(LowerError::Unsupported(
-                                "destructure sub-pattern (only a bound var, `_`, or nested tuple) not in this brick"
-                                    .into(),
-                            ))
-                        }
-                    }
-                }
+                self.lower_tuple_literal_components(pats, vals)?;
                 return Ok(());
             }
         }
@@ -623,6 +607,56 @@ impl LowerCtx {
             self.record_elided_calls(value);
             None
         };
+        if self.try_lower_tuple_pattern_from_subject(pattern, subject, value) {
+            return Ok(());
+        }
+        if self.try_lower_record_pattern_from_subject(pattern, subject, value) {
+            return Ok(());
+        }
+        self.bind_pattern(pattern, subject)
+    }
+
+    /// Extracted verbatim from [`Self::lower_destructure`] (codopsy round-3 sweep, #852):
+    /// binds every component of a same-arity tuple LITERAL against its ACTUAL element value,
+    /// deciding per sub-pattern whether it is an ordinary bind, an ignored `_`, a nested
+    /// tuple to recurse into, or an out-of-brick shape that walls. Runs only after the caller
+    /// has matched the tuple-pattern/tuple-literal pair and checked the arities.
+    fn lower_tuple_literal_components(
+        &mut self,
+        pats: &[IrPattern],
+        vals: &[IrExpr],
+    ) -> Result<(), LowerError> {
+        for (p, v) in pats.iter().zip(vals) {
+            match p {
+                IrPattern::Bind { var, ty } => self.lower_bind(*var, ty, v)?,
+                IrPattern::Wildcard => {}
+                // A NESTED tuple sub-pattern `(b, c)` binds against the
+                // corresponding element value `v` — recurse (the same two sound
+                // shapes: a same-arity tuple literal binds component-wise, a
+                // tracked heap var aliases the container).
+                IrPattern::Tuple { .. } => self.lower_destructure(p, v)?,
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "destructure sub-pattern (only a bound var, `_`, or nested tuple) not in this brick"
+                            .into(),
+                    ))
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Extracted verbatim from [`Self::lower_destructure`] (codopsy round-3 sweep, #852):
+    /// decides whether a TUPLE pattern over a resolvable subject can be destructured
+    /// PER-SLOT (seeding the call-result mask first when the subject is a fresh owned block).
+    /// Returns whether the destructure landed; `false` falls through to the container-grain
+    /// `bind_pattern`, exactly as the inline `if let` chain did.
+    fn try_lower_tuple_pattern_from_subject(
+        &mut self,
+        pattern: &IrPattern,
+        subject: Option<ValueId>,
+        value: &IrExpr,
+    ) -> bool {
         // PRECISE tuple field extraction (the layout brick): a tuple value is a block
         // [rc][len][cap][f0@12, f1@20, ...]; a destructure (`let (a, b) = t`) loads each field at
         // its OWN slot instead of the container-grain alias. A SCALAR field is a value COPY; a HEAP
@@ -647,10 +681,24 @@ impl LowerCtx {
                     self.seed_call_result_tuple_mask(subj, elements, value);
                 }
                 if self.try_lower_tuple_destructure(elements, subj, Some(&value.ty)) {
-                    return Ok(());
+                    return true;
                 }
             }
         }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_destructure`] (codopsy round-3 sweep, #852):
+    /// decides whether a RECORD pattern over a resolvable subject can be destructured
+    /// PER-SLOT (seeding the call-result mask first when the subject is a fresh owned block).
+    /// Returns whether the destructure landed; `false` falls through to the container-grain
+    /// `bind_pattern`, exactly as the inline `if let` chain did.
+    fn try_lower_record_pattern_from_subject(
+        &mut self,
+        pattern: &IrPattern,
+        subject: Option<ValueId>,
+        value: &IrExpr,
+    ) -> bool {
         // PRECISE record field extraction (`let { x, y } = p`) — the record sibling of the tuple
         // path above. Load each field from its OWN layout slot instead of the container-grain alias
         // (`bind_pattern` bound every field to the record pointer → `i64.add` on two ptrs / NUL
@@ -671,10 +719,10 @@ impl LowerCtx {
                     }
                 }
                 if self.try_lower_record_destructure(fields, &value.ty, subj) {
-                    return Ok(());
+                    return true;
                 }
             }
         }
-        self.bind_pattern(pattern, subject)
+        false
     }
 }

@@ -341,128 +341,24 @@ impl LowerCtx {
             // A discarded HEAP result is a fresh `Alloc{Opaque}` dropped at scope end;
             // a Unit/scalar result carries no ownership.
             CallTarget::Computed { callee } => {
-                // C1 UNIT DIRECT-CALL INLINE — the statement-position twin of
-                // `try_inline_direct_lambda_call`: `let inc = () => { count = count + 1 };
-                // inc()` (the escape_analysis counter shape). The body's statements lower
-                // AT THE CALL SITE — a MUTABLE capture is an ordinary in-scope Assign, so
-                // no closure object and no lift is needed. Zero-param calls only in this
-                // brick, and the body must not re-enter the same callee (a recursive
-                // lambda would inline forever); failure rolls back to the paths below.
-                // Guard-clause flattening of the former 5-deep nested-if (no `else` anywhere:
-                // any unmet condition falls through to the code after this block, unchanged —
-                // `break` exits the labeled block and resumes there, exactly as the original
-                // fell out of the if-pyramid). No behavior change — see
-                // docs/roadmap/active/code-health-codopsy.md.
-                'inline_lambda_call: {
-                    if !args.is_empty() {
-                        break 'inline_lambda_call;
-                    }
-                    let IrExprKind::Var { id } = &callee.kind else {
-                        break 'inline_lambda_call;
-                    };
-                    let id = *id;
-                    let Some((params, body)) = self.lambda_bindings.get(&id).cloned() else {
-                        break 'inline_lambda_call;
-                    };
-                    let recurses = {
-                        struct R {
-                            id: almide_ir::VarId,
-                            found: bool,
-                        }
-                        impl almide_ir::visit::IrVisitor for R {
-                            fn visit_expr(&mut self, e: &IrExpr) {
-                                if matches!(&e.kind, IrExprKind::Var { id } if *id == self.id) {
-                                    self.found = true;
-                                }
-                                almide_ir::visit::walk_expr(self, e);
-                            }
-                        }
-                        let mut r = R { id, found: false };
-                        almide_ir::visit::IrVisitor::visit_expr(&mut r, &body);
-                        r.found
-                    };
-                    if params.is_empty() && !recurses {
-                        let ops_mark = self.ops.len();
-                        let lhh_mark = self.live_heap_handles.len();
-                        let stmt = almide_ir::IrStmt {
-                            kind: almide_ir::IrStmtKind::Expr { expr: body },
-                            span: None,
-                        };
-                        match self.lower_stmt(&stmt) {
-                            Ok(()) => return Ok(()),
-                            Err(e) => {
-                                crate::trace::trace("ALMIDE_DBG_ANF", || format!(
-                                    "[c1-stmt-inline] body failed in {}: {e:?}", self.fn_name));
-                            }
-                        }
-                        self.ops.truncate(ops_mark);
-                        self.live_heap_handles.truncate(lhh_mark);
-                    }
-                }
-                // A Unit-result call THROUGH a lifted lambda value EXECUTES via CallIndirect
-                // (e.g. `let f = (x) => print_it(x); f(3)`). Otherwise — a dynamic closure
-                // value we cannot name — DEFER as before (calls captured, the Computed call
-                // elided ⇒ honest caps taint).
-                if let Some(blk) = self.closure_block_of_mut(callee) {
-                    let mark = self.ops.len();
-                    let lhh = self.live_heap_handles.len();
-                    if let Ok(lowered) = self.lower_call_args(args) {
-                        // The CallIndirect's declared RESULT selects the wasm func TYPE
-                        // (none/i64/i32 — render_wasm's sig classes), and the lifted
-                        // lambda's own table type comes from its RETURN repr. A
-                        // result-less dispatch to a VALUE-returning closure (`drain()`
-                        // where `drain = () => { list.pop(xs) }` returns Option[Int])
-                        // therefore declared the WRONG type — "indirect call type
-                        // mismatch" at runtime — and leaked the returned block. Derive
-                        // the result from the callee's Fn RETURN type: a discarded HEAP
-                        // result is a fresh owned value dropped at scope end (its
-                        // type-routed recursive drop registered); a discarded scalar
-                        // binds an unused dst; Unit keeps the result-less dispatch.
-                        let ret_ty = match &callee.ty {
-                            Ty::Fn { ret, .. } => (**ret).clone(),
-                            _ => Ty::Unit,
-                        };
-                        if matches!(ret_ty, Ty::Unit) {
-                            self.emit_closure_call(blk, None, lowered, None);
-                        } else {
-                            let repr = repr_of(&ret_ty)?;
-                            let dst = self.fresh_value();
-                            self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
-                            if is_heap_ty(&ret_ty) {
-                                self.live_heap_handles.push(dst);
-                                self.register_owned_heap_eq_drop(dst, &ret_ty);
-                            }
-                        }
-                        return Ok(());
-                    }
-                    self.ops.truncate(mark);
-                    self.live_heap_handles.truncate(lhh);
-                }
-                // STRICT value mode (the real render path — pipeline.rs sets it): eliding a
-                // dynamic closure INVOCATION drops its side effects entirely (`run3(() => {
-                // p = p + 10 })` printed p=0 — a silent wrong value, worse than the honest
-                // caps taint the elision was designed around). REFUSE instead: the function
-                // walls and `--verified` falls back to v0. The permissive caps-counting
-                // classifier path keeps the elision (its only consumer is call accounting).
-                if crate::lower::strict_values() {
-                    return Err(LowerError::Unsupported(
-                        "computed closure call outside the liftable subset cannot be \
-                         faithfully executed (eliding it would drop the invocation's \
-                         effects — a silently wrong value) not in this brick"
-                            .into(),
-                    ));
-                }
-                self.record_elided_calls(call);
-                if is_heap_ty(&call.ty) {
-                    let dst = self.fresh_value();
-                    let repr = repr_of(&call.ty)?;
-                    self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                    self.live_heap_handles.push(dst);
-                }
-                return Ok(());
+                return self.lower_effect_computed_call(call, callee, args)
             }
         };
-        match (name, args.as_slice()) {
+        self.lower_named_effect_call(call, name, args)
+    }
+
+    /// Extracted verbatim from [`Self::lower_effect_call`] (codopsy round-3 sweep, #852):
+    /// decides which runtime shape a NAMED (`CallTarget::Named`) effect callee takes — the
+    /// recognized `println(s)` [`RtFn::PrintStr`] intrinsic, or the generic user
+    /// [`Op::CallFn`] whose result class follows the call's (post-never-err-rewrite) type.
+    /// The arm ORDER is the original one: `println` first, the catch-all second.
+    fn lower_named_effect_call(
+        &mut self,
+        call: &IrExpr,
+        name: &str,
+        args: &[IrExpr],
+    ) -> Result<(), LowerError> {
+        match (name, args) {
             // println(s) — the heap-string argument is BORROWED for a Stdout write.
             // A non-var arg (a literal `println("x")`, a concat `println(a ++ b)`,
             // an interpolation `println("${x}")`, or a call result `println(f())`)
@@ -515,6 +411,168 @@ impl LowerCtx {
                 Ok(())
             }
         }
+    }
+
+    /// Extracted verbatim from [`Self::lower_effect_call`] (codopsy round-3 sweep, #852):
+    /// decides how a Computed (closure-valued) STATEMENT callee `(g)()` executes — a
+    /// zero-param direct-lambda INLINE, a lifted-closure `CallIndirect` DISPATCH, a
+    /// STRICT-mode REFUSAL, or the permissive DEFERRAL that keeps the honest caps taint.
+    /// The four candidates are tried in the original order, and each falls through to the
+    /// next exactly as it did inline.
+    fn lower_effect_computed_call(
+        &mut self,
+        call: &IrExpr,
+        callee: &IrExpr,
+        args: &[IrExpr],
+    ) -> Result<(), LowerError> {
+        if self.try_inline_unit_direct_lambda_call(callee, args) {
+            return Ok(());
+        }
+        // A Unit-result call THROUGH a lifted lambda value EXECUTES via CallIndirect
+        // (e.g. `let f = (x) => print_it(x); f(3)`). Otherwise — a dynamic closure
+        // value we cannot name — DEFER as before (calls captured, the Computed call
+        // elided ⇒ honest caps taint).
+        if self.try_lower_effect_closure_dispatch(callee, args)? {
+            return Ok(());
+        }
+        // STRICT value mode (the real render path — pipeline.rs sets it): eliding a
+        // dynamic closure INVOCATION drops its side effects entirely (`run3(() => {
+        // p = p + 10 })` printed p=0 — a silent wrong value, worse than the honest
+        // caps taint the elision was designed around). REFUSE instead: the function
+        // walls and `--verified` falls back to v0. The permissive caps-counting
+        // classifier path keeps the elision (its only consumer is call accounting).
+        if crate::lower::strict_values() {
+            return Err(LowerError::Unsupported(
+                "computed closure call outside the liftable subset cannot be \
+                 faithfully executed (eliding it would drop the invocation's \
+                 effects — a silently wrong value) not in this brick"
+                    .into(),
+            ));
+        }
+        self.record_elided_calls(call);
+        if is_heap_ty(&call.ty) {
+            let dst = self.fresh_value();
+            let repr = repr_of(&call.ty)?;
+            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+            self.live_heap_handles.push(dst);
+        }
+        Ok(())
+    }
+
+    /// Extracted verbatim from [`Self::lower_effect_call`] (codopsy round-3 sweep, #852):
+    /// decides whether a zero-param Computed statement callee is a let-bound, NON-recursive
+    /// lambda whose body can be inlined AT THE CALL SITE. Returns whether the inline landed
+    /// (`true` = the statement is fully lowered, the caller returns `Ok(())`); a `false`
+    /// leaves the ops/live-handle stacks exactly as it found them.
+    fn try_inline_unit_direct_lambda_call(&mut self, callee: &IrExpr, args: &[IrExpr]) -> bool {
+        // C1 UNIT DIRECT-CALL INLINE — the statement-position twin of
+        // `try_inline_direct_lambda_call`: `let inc = () => { count = count + 1 };
+        // inc()` (the escape_analysis counter shape). The body's statements lower
+        // AT THE CALL SITE — a MUTABLE capture is an ordinary in-scope Assign, so
+        // no closure object and no lift is needed. Zero-param calls only in this
+        // brick, and the body must not re-enter the same callee (a recursive
+        // lambda would inline forever); failure rolls back to the paths below.
+        // Guard-clause flattening of the former 5-deep nested-if (no `else` anywhere:
+        // any unmet condition falls through to the code after this block, unchanged —
+        // `break` exits the labeled block and resumes there, exactly as the original
+        // fell out of the if-pyramid). No behavior change — see
+        // docs/roadmap/active/code-health-codopsy.md.
+        'inline_lambda_call: {
+            if !args.is_empty() {
+                break 'inline_lambda_call;
+            }
+            let IrExprKind::Var { id } = &callee.kind else {
+                break 'inline_lambda_call;
+            };
+            let id = *id;
+            let Some((params, body)) = self.lambda_bindings.get(&id).cloned() else {
+                break 'inline_lambda_call;
+            };
+            let recurses = {
+                struct R {
+                    id: almide_ir::VarId,
+                    found: bool,
+                }
+                impl almide_ir::visit::IrVisitor for R {
+                    fn visit_expr(&mut self, e: &IrExpr) {
+                        if matches!(&e.kind, IrExprKind::Var { id } if *id == self.id) {
+                            self.found = true;
+                        }
+                        almide_ir::visit::walk_expr(self, e);
+                    }
+                }
+                let mut r = R { id, found: false };
+                almide_ir::visit::IrVisitor::visit_expr(&mut r, &body);
+                r.found
+            };
+            if params.is_empty() && !recurses {
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let stmt = almide_ir::IrStmt {
+                    kind: almide_ir::IrStmtKind::Expr { expr: body },
+                    span: None,
+                };
+                match self.lower_stmt(&stmt) {
+                    Ok(()) => return true,
+                    Err(e) => {
+                        crate::trace::trace("ALMIDE_DBG_ANF", || format!(
+                            "[c1-stmt-inline] body failed in {}: {e:?}", self.fn_name));
+                    }
+                }
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+            }
+        }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_effect_call`] (codopsy round-3 sweep, #852):
+    /// decides whether a Computed statement callee resolves to a tracked closure BLOCK and,
+    /// if so, emits the `CallIndirect` dispatch with the result class its Fn RETURN type
+    /// demands. `Ok(true)` = dispatched (the caller returns `Ok(())`); `Ok(false)` = not a
+    /// closure block, or its args did not lower (ops/live handles rolled back to the mark);
+    /// `Err` propagates an unrepresentable return repr exactly as the inline `?` did.
+    fn try_lower_effect_closure_dispatch(
+        &mut self,
+        callee: &IrExpr,
+        args: &[IrExpr],
+    ) -> Result<bool, LowerError> {
+        if let Some(blk) = self.closure_block_of_mut(callee) {
+            let mark = self.ops.len();
+            let lhh = self.live_heap_handles.len();
+            if let Ok(lowered) = self.lower_call_args(args) {
+                // The CallIndirect's declared RESULT selects the wasm func TYPE
+                // (none/i64/i32 — render_wasm's sig classes), and the lifted
+                // lambda's own table type comes from its RETURN repr. A
+                // result-less dispatch to a VALUE-returning closure (`drain()`
+                // where `drain = () => { list.pop(xs) }` returns Option[Int])
+                // therefore declared the WRONG type — "indirect call type
+                // mismatch" at runtime — and leaked the returned block. Derive
+                // the result from the callee's Fn RETURN type: a discarded HEAP
+                // result is a fresh owned value dropped at scope end (its
+                // type-routed recursive drop registered); a discarded scalar
+                // binds an unused dst; Unit keeps the result-less dispatch.
+                let ret_ty = match &callee.ty {
+                    Ty::Fn { ret, .. } => (**ret).clone(),
+                    _ => Ty::Unit,
+                };
+                if matches!(ret_ty, Ty::Unit) {
+                    self.emit_closure_call(blk, None, lowered, None);
+                } else {
+                    let repr = repr_of(&ret_ty)?;
+                    let dst = self.fresh_value();
+                    self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
+                    if is_heap_ty(&ret_ty) {
+                        self.live_heap_handles.push(dst);
+                        self.register_owned_heap_eq_drop(dst, &ret_ty);
+                    }
+                }
+                return Ok(true);
+            }
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh);
+        }
+        Ok(false)
     }
 }
 
