@@ -254,7 +254,19 @@ impl LowerCtx {
                 nested_heap_caps.push((v, ty));
                 continue;
             }
-            if matches!(ty, Ty::Int | Ty::Bool) {
+            // `!is_heap_ty` IS this bucket's promise — the crate's canonical name for
+            // "one raw i64 slot, no refcount", which is exactly what the scalar region
+            // of the env stores and what `ListGetScalar` reads back. This used to
+            // restate a SUBSET of it (`Int | Bool`), so every other scalar was refused
+            // for no physical reason: a `Float` capture in particular, on the belief
+            // that its slot needed an f64↔i64 reinterpret the prim vocabulary lacked.
+            // It does not — a MIR float local ALREADY holds its bits in an i64 and
+            // every float op reinterprets around itself, so the bits round-trip through
+            // the slot untouched. `(s) => d` over `let d: Float` walled on that
+            // misreading (#954, surfaced by the nightly fuzz), and so did captures of
+            // every sized int width. Reading the one definition instead of restating
+            // part of it is the same fix `one_level_exact` above already took.
+            if !is_heap_ty(&ty) {
                 scalar_caps.push((v, ty));
                 continue;
             }

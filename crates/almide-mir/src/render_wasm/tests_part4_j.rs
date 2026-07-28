@@ -518,25 +518,30 @@
         //
         // Both directions are pinned, so widening the subset cannot quietly retire
         // half the test: a `(Int, Bool)` capture is a flat scalar block and LIFTS, a
-        // `Float` capture is not in the env classes at all and WALLS.
-        let liftable = |m: &str| {
+        // `List[List[Int]]` capture is not in the env classes at all and WALLS.
+        //
+        // The walling type is chosen for a STRUCTURAL reason, not an incidental one —
+        // it has to keep walling for as long as the test is meant to say something.
+        // Each element of a `List[List[Int]]` is itself owned heap, so the env has no
+        // class that frees it: a flat rc_dec of the outer block leaks every inner list,
+        // and the nested walk `__drop_list_str` is a String walk. This slot used to
+        // hold `Float`, which walled for a much weaker reason — a belief that its slot
+        // needed a reinterpret the prims lacked — and it lifts now (#954), so it moved
+        // to the LIFTING side below rather than being deleted.
+        let capture_of = |ty: &str, init: &str, m: &str| {
             format!(
                 "fn main() -> Unit = {{\n  \
-                 let acc: (Int, Bool) = (2, false)\n  \
+                 let acc: {ty} = {init}\n  \
                  let c: Bool = false\n  \
-                 let r: (Int, Bool) = map.fold({m}, acc, (a, k, v) => acc)\n  \
+                 let r: {ty} = map.fold({m}, acc, (a, k, v) => acc)\n  \
                  println(\"${{r}}\") }}\n"
             )
         };
-        let unliftable = |m: &str| {
-            format!(
-                "fn main() -> Unit = {{\n  \
-                 let acc: Float = 2.5\n  \
-                 let c: Bool = false\n  \
-                 let r: Float = map.fold({m}, acc, (a, k, v) => acc)\n  \
-                 println(\"${{r}}\") }}\n"
-            )
-        };
+        let liftable = |m: &str| capture_of("(Int, Bool)", "(2, false)", m);
+        // A MIR float local already holds its bits in an i64, so the scalar env slot
+        // carries it unchanged — same physics as the `Int` beside it.
+        let liftable_float = |m: &str| capture_of("Float", "2.5", m);
+        let unliftable = |m: &str| capture_of("List[List[Int]]", "[[1, 2]]", m);
         const INLINE: &str = "[\"k0\": 1]";
         const HOISTED: &str = "(if c then [\"k0\": 1] else [\"k0\": 127, \"k1\": 2])";
         let lowers = |src: String| lower_source(&src).functions.iter().any(|f| f.name == "main");
@@ -546,7 +551,15 @@
             lowers(liftable(HOISTED)),
             "the ANF hoist must not change the verdict — same program, same capture"
         );
-        assert!(!lowers(unliftable(INLINE)), "a Float capture is outside the env classes");
+        assert!(lowers(liftable_float(INLINE)), "a Float capture is a scalar env slot");
+        assert!(
+            lowers(liftable_float(HOISTED)),
+            "the ANF hoist must not change the Float verdict either"
+        );
+        assert!(
+            !lowers(unliftable(INLINE)),
+            "a List[List[Int]] capture is outside the env classes"
+        );
         assert!(
             !lowers(unliftable(HOISTED)),
             "the hoisted twin must wall too, not call through an empty block"
