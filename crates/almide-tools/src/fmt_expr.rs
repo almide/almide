@@ -401,7 +401,13 @@ fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
         Stmt::Comment { text } => { wln!(out, "{i}{text}"); return; }
         Stmt::Error { .. } => return,
     }
-    out.push_str(";\n");
+    // A NEWLINE alone separates statements — the `;` the parser also accepts is optional
+    // (`parse_block` consumes one if present, then keeps going on the newline either way).
+    // Emitting it wrote a form that appears in no hand-written Almide, no stdlib module and
+    // no doc example, so `almide fmt` rewrote idiomatic source into a style the project does
+    // not use — which is why a tree-wide `fmt --check` gate could never be green (#919:
+    // 313 of 317 spec/wasm_cross files differed, every diff only this).
+    out.push('\n');
 }
 
 /// One test `where` clause, matching the parsed grammar:
