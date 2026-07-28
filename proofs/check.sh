@@ -1,43 +1,90 @@
 #!/usr/bin/env bash
 # Re-derive every proof in the trust spine from scratch — the third-party
 # "make verify". Anyone with Rocq/Coq runs this and the kernel + the INDEPENDENT
-# re-checker (coqchk, the De Bruijn criterion) confirm every theorem, with the
-# axiom audit (`Print Assumptions`) printed so the trusted base is visible.
+# re-checker (coqchk, the De Bruijn criterion) confirm every theorem, and the
+# axiom audit (`Print Assumptions`) is ASSERTED, not just printed: any output
+# that is not "Closed under the global context" fails the gate (#920 — the
+# flagship invariant used to be a printf, so an added `Axiom` shipped green).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 COQC="${COQC:-$(command -v coqc)}"
 COQCHK="${COQCHK:-$(command -v coqchk)}"
 
+# The spine, in dependency order. The compile loop, the coqchk module list, and
+# the Print-Assumptions expectation are ALL derived from this one list, so a
+# module added here is counted everywhere by construction. (Extract.v is the
+# extraction driver — build-checker.sh's input, not a theorem module.)
+SPINE_FILES=(
+  Subset.v OwnershipChecker.v OwnershipLoop.v OwnershipFilter.v CoownLoop.v
+  CoownCompose.v ALS.v Translation.v RuntimeModel.v NameTotality.v
+  TypeConcretization.v CapabilityBound.v CapabilityReach.v CallModes.v
+  StackBalance.v Termination.v FreeList.v WasmRcDec.v WasmEncode.v WasmExec.v
+  WasmIsa.v WasmDecode.v CowSafety.v
+)
+
 echo "== kernel check (coqc) + axiom audit (Print Assumptions) =="
-"$COQC" -Q . AlmideTrust Subset.v
-"$COQC" -Q . AlmideTrust OwnershipChecker.v
-"$COQC" -Q . AlmideTrust OwnershipLoop.v
-"$COQC" -Q . AlmideTrust OwnershipFilter.v
-"$COQC" -Q . AlmideTrust CoownLoop.v
-"$COQC" -Q . AlmideTrust CoownCompose.v
-"$COQC" -Q . AlmideTrust ALS.v
-"$COQC" -Q . AlmideTrust Translation.v
-"$COQC" -Q . AlmideTrust RuntimeModel.v
-"$COQC" -Q . AlmideTrust NameTotality.v
-"$COQC" -Q . AlmideTrust TypeConcretization.v
-"$COQC" -Q . AlmideTrust CapabilityBound.v
-"$COQC" -Q . AlmideTrust CapabilityReach.v
-"$COQC" -Q . AlmideTrust CallModes.v
-"$COQC" -Q . AlmideTrust StackBalance.v
-"$COQC" -Q . AlmideTrust Termination.v
-"$COQC" -Q . AlmideTrust FreeList.v
-"$COQC" -Q . AlmideTrust WasmRcDec.v
-"$COQC" -Q . AlmideTrust WasmEncode.v
-"$COQC" -Q . AlmideTrust WasmExec.v
-"$COQC" -Q . AlmideTrust WasmIsa.v
-"$COQC" -Q . AlmideTrust WasmDecode.v
-"$COQC" -Q . AlmideTrust CowSafety.v
+COQC_LOG="$(mktemp)"
+trap 'rm -f "$COQC_LOG"' EXIT
+for f in "${SPINE_FILES[@]}"; do
+  "$COQC" -Q . AlmideTrust "$f" 2>&1 | tee -a "$COQC_LOG"
+done
+
+echo
+echo "== axiom-cleanliness gate (#920): every Print Assumptions must be closed =="
+# (c) No Admitted/admit anywhere in the spine sources — the Coq counterpart of
+# ci.yml's Lean sorry-grep.
+if grep -rn 'Admitted\.\|admit\.' ./*.v; then
+  echo "FAIL: Admitted/admit in the proof spine — a hole is not a proof."
+  exit 1
+fi
+# (a) Every `Print Assumptions` must have answered "Closed under the global
+# context" — an `Axioms:` section in the compile output is a FAILURE, and the
+# closed-count must equal the number of Print Assumptions statements in the
+# spine (so deleting a Print Assumptions cannot shrink coverage silently).
+if grep -n '^Axioms:' "$COQC_LOG"; then
+  echo "FAIL: a theorem depends on an Axiom (Print Assumptions above names it)."
+  exit 1
+fi
+want="$(cat "${SPINE_FILES[@]}" | grep -cE '^Print Assumptions')"
+got="$(grep -c 'Closed under the global context' "$COQC_LOG")"
+if [ "$got" -ne "$want" ]; then
+  echo "FAIL: $want Print Assumptions statements but $got 'Closed under the global context' answers."
+  exit 1
+fi
+echo "  ok   $got/$want assumptions audits answered 'Closed under the global context'"
+
+# Detector drill (the gate.sh tamper-drill pattern): compile a scratch module
+# whose theorem DOES rest on an Axiom and prove the grep above would have seen
+# it — so the assertion can never rot into matching nothing.
+DRILL_DIR="$(mktemp -d)"
+cat > "$DRILL_DIR/Tamper.v" <<'EOF'
+Axiom oops : False.
+Theorem tampered : False.
+Proof. exact oops. Qed.
+Print Assumptions tampered.
+EOF
+DRILL_OUT="$("$COQC" "$DRILL_DIR/Tamper.v" 2>&1 || true)"
+rm -rf "$DRILL_DIR"
+if printf '%s\n' "$DRILL_OUT" | grep -q '^Axioms:'; then
+  echo "  ok   detector drill: an injected Axiom IS caught by this gate's pattern"
+else
+  echo "FAIL: the axiom detector did not flag a tampered module — the gate's grep is blind."
+  exit 1
+fi
 
 echo
 echo "== independent re-check (coqchk — De Bruijn criterion) =="
-COQCHK_OUT="$("$COQCHK" -Q . AlmideTrust AlmideTrust.Subset AlmideTrust.OwnershipChecker AlmideTrust.OwnershipLoop AlmideTrust.OwnershipFilter AlmideTrust.CoownLoop AlmideTrust.CoownCompose AlmideTrust.ALS AlmideTrust.Translation AlmideTrust.RuntimeModel AlmideTrust.NameTotality AlmideTrust.TypeConcretization AlmideTrust.CapabilityBound AlmideTrust.CapabilityReach AlmideTrust.CallModes AlmideTrust.StackBalance AlmideTrust.Termination AlmideTrust.FreeList AlmideTrust.WasmRcDec AlmideTrust.WasmEncode AlmideTrust.WasmExec AlmideTrust.WasmIsa AlmideTrust.WasmDecode AlmideTrust.CowSafety 2>&1)"
+COQCHK_MODULES=()
+for f in "${SPINE_FILES[@]}"; do COQCHK_MODULES+=("AlmideTrust.${f%.v}"); done
+COQCHK_OUT="$("$COQCHK" -Q . AlmideTrust "${COQCHK_MODULES[@]}" 2>&1)"
 echo "$COQCHK_OUT"
+# (b) coqchk's summary lists an "* Axioms:" section when any constant rests on
+# one — the independent checker's edition of the same assertion.
+if printf '%s\n' "$COQCHK_OUT" | grep -qE '^\s*\*?\s*Axioms:'; then
+  echo "FAIL: coqchk reports an Axioms section — the spine is not axiom-clean."
+  exit 1
+fi
 
 echo
 echo "== claim-drift gate (#34, indicator ⑤): TRUSTED_BASE axiom ledger ⊆ kernel-checked =="
@@ -66,4 +113,4 @@ bash ./check-wasm-exec.sh
 
 echo
 echo "PROOF SPINE OK: kernel-checked, axiom-clean (Closed under the global"
-echo "context), and independently re-verified."
+echo "context — asserted, with the detector drilled), and independently re-verified."
