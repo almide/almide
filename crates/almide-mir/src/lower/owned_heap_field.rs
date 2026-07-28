@@ -136,32 +136,9 @@ impl LowerCtx {
     /// `_ => None` meant. Collapsing them makes a declined field fall through to
     /// a later group and lower by the wrong rule.
     fn lower_owned_heap_field_aggregate(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
-        use almide_ir::BinOp;
         Some(match &expr.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                // A variant CONSTRUCTOR element (`(IntV(p), p + 4)` — the gguf read_one
-                // tuple-return shape): `IntV` is a registered ctor, NOT a user fn — a plain
-                // CallFn would emit a dangling `(call $IntV)` (unlinked). Materialize the
-                // fresh OWNED tag-block via `try_lower_variant_ctor` (the same pre-check the
-                // list-element arm uses) and track it for the caller's move-in.
-                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
-                    let obj = self.try_lower_variant_ctor(expr)?;
-                    if !self.live_heap_handles.contains(&obj) {
-                        self.live_heap_handles.push(obj);
-                    }
-                    return Some(Some(obj));
-                }
-                let lowered = self.lower_call_args(args).ok()?;
-                let repr = repr_of(&expr.ty).ok()?;
-                let obj = self.fresh_value();
-                self.ops.push(Op::CallFn {
-                    dst: Some(obj),
-                    name: name.as_str().to_string(),
-                    args: lowered,
-                    result: Some(repr),
-                });
-                self.live_heap_handles.push(obj);
-                Some(obj)
+                return self.lower_named_call_heap_field(expr, name.as_str(), args);
             }
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
                 let obj = self
@@ -187,6 +164,112 @@ impl LowerCtx {
             // drop, NOT the flat one-level mask), so no leak. The handle is pushed to
             // `live_heap_handles` so the caller's `Consume` (move-in) + `retain` balances it.
             IrExprKind::List { elements } => {
+                return self.lower_list_literal_heap_field(expr, elements);
+            }
+            // A `(<flat heap>, <flat heap>)` TUPLE element of a list literal (`[(k, v), …]` —
+            // the map.entries / str_str shape, `[Color{r,g,b}: "red"]`'s pairs): a fresh
+            // owned tuple block (try_lower_tuple_construct), tracked so the list builder's
+            // Consume + retain balances it. Widened from (String,String)/(String,List[
+            // scalar]) to ANY pair of ONE-LEVEL-EXACT heap types (String, List[scalar], a
+            // flat record, a flat variant) — `Op::DropListStrStr`'s render is purely
+            // handle-based (confirmed by reading it), so it frees the pair exactly
+            // regardless of which flat-heap kind sits in each slot. GATED so other tuples
+            // keep the scalar-only `Record | Tuple` arm below (a bare heap-field tuple
+            // still defers there — no leak regression).
+            IrExprKind::Tuple { elements } if self.is_flat_heap_pair_ty(&expr.ty) => {
+                self.build_tracked_tuple(elements)?
+            }
+            // A `(String, <Fn>)` TUPLE literal (`("a", () => …)` — the closure-valued
+            // map's from_list pair): String slot 0, closure-block slot 1 (the Lambda
+            // element lifts via this fn's own Lambda arm inside
+            // `try_lower_tuple_construct`). The enclosing pairs list frees it via
+            // `$__drop_list_str_clo` (key rc_dec + `__drop_closure` per value).
+            IrExprKind::Tuple { elements } if is_str_closure_pair_ty(&expr.ty) => {
+                self.build_tracked_tuple(elements)?
+            }
+            // A `(<flat heap>, <scalar>)` TUPLE literal (`("a", 1)` — the deep_eq tuple-eq
+            // operand / the gguf (key, pos) accumulator element / `[East: 90]`'s pairs):
+            // flat-heap slot 0 (@12), scalar slot 1 (@20). try_lower_tuple_construct builds
+            // it; the enclosing consumer (an eq operand's cond frame, a list's
+            // DropListStrInt) frees the heap slot exactly once.
+            IrExprKind::Tuple { elements } if self.is_flat_heap_scalar_pair_ty(&expr.ty) => {
+                self.build_tracked_tuple(elements)?
+            }
+            // A `(<scalar>, <flat heap>)` TUPLE element of a list literal (`[(i, line)]` —
+            // the list.enumerate shape): scalar slot 0 (@12), flat-heap slot 1 (@20).
+            // try_lower_tuple_construct builds it (heap mask [1]); it is moved into the
+            // enclosing list, whose `$__drop_list_int_str` frees each tuple's heap slot +
+            // block, so the tuple's own (harmless) mask never scope-end-fires.
+            IrExprKind::Tuple { elements } if self.is_scalar_flat_heap_pair_ty(&expr.ty) => {
+                self.build_tracked_tuple(elements)?
+            }
+            // brick 3: a (Value, scalar) TUPLE — the yaml/cm2 effect-fn tuple-RESULT shape
+            // `(value.object(pairs), pos)`. Slot 0 is a Value (heap, @12), slot 1 a scalar (@20).
+            // `try_lower_tuple_construct` builds it + records `record_masks[obj] = [0]`, but a FLAT
+            // per-slot rc_dec of the Value slot would LEAK the Value's nested Array/Object payload. So
+            // SWAP that for the recursive `$__drop_value_tuple` (value_core) by removing the flat mask
+            // and routing the drop through `variant_drop_handles="value_tuple"` (→ `DropVariant`).
+            IrExprKind::Tuple { elements } if is_value_scalar_pair_ty(&expr.ty) => {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                self.record_masks.remove(&obj);
+                self.variant_drop_handles.insert(obj, "value_tuple".to_string());
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
+            // An empty Map field — `attrs: [:]` (the svg `el` record). A v1 Map is a List block of
+            // paired slots; an EMPTY one is the same layout-agnostic 0-length block as an empty list.
+            // (A non-empty Map literal as a record field is a later brick.)
+            _ => return None,
+        })
+    }
+
+    /// The `Named`-callee field: a registered variant CONSTRUCTOR materializes its fresh
+    /// owned tag-block; any other name is a real user fn call whose heap result the
+    /// aggregate owns. Extracted verbatim from [`Self::lower_owned_heap_field_aggregate`]
+    /// (codopsy round-3 sweep, #852).
+    fn lower_named_call_heap_field(
+        &mut self,
+        expr: &IrExpr,
+        name: &str,
+        args: &[IrExpr],
+    ) -> Option<Option<ValueId>> {
+        Some({
+                // A variant CONSTRUCTOR element (`(IntV(p), p + 4)` — the gguf read_one
+                // tuple-return shape): `IntV` is a registered ctor, NOT a user fn — a plain
+                // CallFn would emit a dangling `(call $IntV)` (unlinked). Materialize the
+                // fresh OWNED tag-block via `try_lower_variant_ctor` (the same pre-check the
+                // list-element arm uses) and track it for the caller's move-in.
+                if self.variant_layouts.ctor_to_type.contains_key(name) {
+                    let obj = self.try_lower_variant_ctor(expr)?;
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    return Some(Some(obj));
+                }
+                let lowered = self.lower_call_args(args).ok()?;
+                let repr = repr_of(&expr.ty).ok()?;
+                let obj = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(obj),
+                    name: name.to_string(),
+                    args: lowered,
+                    result: Some(repr),
+                });
+                self.live_heap_handles.push(obj);
+                Some(obj)
+        })
+    }
+
+    /// The `List` LITERAL field. Extracted verbatim from
+    /// [`Self::lower_owned_heap_field_aggregate`] (codopsy round-3 sweep, #852).
+    fn lower_list_literal_heap_field(
+        &mut self,
+        expr: &IrExpr,
+        elements: &[IrExpr],
+    ) -> Option<Option<ValueId>> {
+        Some({
                 use almide_lang::types::constructor::TypeConstructorId;
                 let scalar_list = matches!(&expr.ty,
                     Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
@@ -211,102 +294,69 @@ impl LowerCtx {
                 let obj = self.try_lower_scalar_list_slots(elements)?;
                 self.live_heap_handles.push(obj);
                 Some(obj)
-            }
-            // A `(<flat heap>, <flat heap>)` TUPLE element of a list literal (`[(k, v), …]` —
-            // the map.entries / str_str shape, `[Color{r,g,b}: "red"]`'s pairs): a fresh
-            // owned tuple block (try_lower_tuple_construct), tracked so the list builder's
-            // Consume + retain balances it. Widened from (String,String)/(String,List[
-            // scalar]) to ANY pair of ONE-LEVEL-EXACT heap types (String, List[scalar], a
-            // flat record, a flat variant) — `Op::DropListStrStr`'s render is purely
-            // handle-based (confirmed by reading it), so it frees the pair exactly
-            // regardless of which flat-heap kind sits in each slot. GATED so other tuples
-            // keep the scalar-only `Record | Tuple` arm below (a bare heap-field tuple
-            // still defers there — no leak regression).
-            IrExprKind::Tuple { elements }
-                if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2
-                        && is_heap_ty(&tys[0]) && is_heap_ty(&tys[1])
-                        && self.is_flat_heap_tuple_slot(&tys[0])
-                        && self.is_flat_heap_tuple_slot(&tys[1])) =>
-            {
-                let obj = self.try_lower_tuple_construct(elements)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
-            }
-            // A `(String, <Fn>)` TUPLE literal (`("a", () => …)` — the closure-valued
-            // map's from_list pair): String slot 0, closure-block slot 1 (the Lambda
-            // element lifts via this fn's own Lambda arm inside
-            // `try_lower_tuple_construct`). The enclosing pairs list frees it via
-            // `$__drop_list_str_clo` (key rc_dec + `__drop_closure` per value).
-            IrExprKind::Tuple { elements }
-                if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2
-                        && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Fn { .. })) =>
-            {
-                let obj = self.try_lower_tuple_construct(elements)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
-            }
-            // A `(<flat heap>, <scalar>)` TUPLE literal (`("a", 1)` — the deep_eq tuple-eq
-            // operand / the gguf (key, pos) accumulator element / `[East: 90]`'s pairs):
-            // flat-heap slot 0 (@12), scalar slot 1 (@20). try_lower_tuple_construct builds
-            // it; the enclosing consumer (an eq operand's cond frame, a list's
-            // DropListStrInt) frees the heap slot exactly once.
-            IrExprKind::Tuple { elements }
-                if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && is_heap_ty(&tys[0]) && !is_heap_ty(&tys[1])
-                        && self.is_flat_heap_tuple_slot(&tys[0])) =>
-            {
-                let obj = self.try_lower_tuple_construct(elements)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
-            }
-            // A `(<scalar>, <flat heap>)` TUPLE element of a list literal (`[(i, line)]` —
-            // the list.enumerate shape): scalar slot 0 (@12), flat-heap slot 1 (@20).
-            // try_lower_tuple_construct builds it (heap mask [1]); it is moved into the
-            // enclosing list, whose `$__drop_list_int_str` frees each tuple's heap slot +
-            // block, so the tuple's own (harmless) mask never scope-end-fires.
-            IrExprKind::Tuple { elements }
-                if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && is_heap_ty(&tys[1])
-                        && self.is_flat_heap_tuple_slot(&tys[1])) =>
-            {
-                let obj = self.try_lower_tuple_construct(elements)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
-            }
-            // brick 3: a (Value, scalar) TUPLE — the yaml/cm2 effect-fn tuple-RESULT shape
-            // `(value.object(pairs), pos)`. Slot 0 is a Value (heap, @12), slot 1 a scalar (@20).
-            // `try_lower_tuple_construct` builds it + records `record_masks[obj] = [0]`, but a FLAT
-            // per-slot rc_dec of the Value slot would LEAK the Value's nested Array/Object payload. So
-            // SWAP that for the recursive `$__drop_value_tuple` (value_core) by removing the flat mask
-            // and routing the drop through `variant_drop_handles="value_tuple"` (→ `DropVariant`).
-            IrExprKind::Tuple { elements }
-                if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && crate::lower::is_value_ty(&tys[0]) && !is_heap_ty(&tys[1])) =>
-            {
-                let obj = self.try_lower_tuple_construct(elements)?;
-                self.record_masks.remove(&obj);
-                self.variant_drop_handles.insert(obj, "value_tuple".to_string());
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
-            }
-            // An empty Map field — `attrs: [:]` (the svg `el` record). A v1 Map is a List block of
-            // paired slots; an EMPTY one is the same layout-agnostic 0-length block as an empty list.
-            // (A non-empty Map literal as a record field is a later brick.)
-            _ => return None,
         })
     }
+
+    /// Build a TUPLE field's fresh owned block and track it for the caller's move-in (the
+    /// builder may already have tracked it — never push twice). The shared body of the
+    /// four flat-slot tuple arms. Extracted verbatim from
+    /// [`Self::lower_owned_heap_field_aggregate`] (codopsy round-3 sweep, #852).
+    fn build_tracked_tuple(&mut self, elements: &[IrExpr]) -> Option<Option<ValueId>> {
+        let obj = self.try_lower_tuple_construct(elements)?;
+        if !self.live_heap_handles.contains(&obj) {
+            self.live_heap_handles.push(obj);
+        }
+        Some(Some(obj))
+    }
+
+    /// A pair of ONE-LEVEL-EXACT heap slots — the `Op::DropListStrStr` handle-based free
+    /// covers either slot kind. Extracted verbatim from
+    /// [`Self::lower_owned_heap_field_aggregate`]'s arm guard (codopsy round-3 sweep, #852).
+    fn is_flat_heap_pair_ty(&self, ty: &Ty) -> bool {
+        matches!(ty,
+            Ty::Tuple(tys) if tys.len() == 2
+                && is_heap_ty(&tys[0]) && is_heap_ty(&tys[1])
+                && self.is_flat_heap_tuple_slot(&tys[0])
+                && self.is_flat_heap_tuple_slot(&tys[1]))
+    }
+
+    /// A `(<flat heap>, <scalar>)` pair: flat-heap slot 0 (@12), scalar slot 1 (@20).
+    /// Extracted verbatim from [`Self::lower_owned_heap_field_aggregate`]'s arm guard
+    /// (codopsy round-3 sweep, #852).
+    fn is_flat_heap_scalar_pair_ty(&self, ty: &Ty) -> bool {
+        matches!(ty,
+            Ty::Tuple(tys) if tys.len() == 2 && is_heap_ty(&tys[0]) && !is_heap_ty(&tys[1])
+                && self.is_flat_heap_tuple_slot(&tys[0]))
+    }
+
+    /// The `(<scalar>, <flat heap>)` mirror of [`Self::is_flat_heap_scalar_pair_ty`].
+    /// Extracted verbatim from [`Self::lower_owned_heap_field_aggregate`]'s arm guard
+    /// (codopsy round-3 sweep, #852).
+    fn is_scalar_flat_heap_pair_ty(&self, ty: &Ty) -> bool {
+        matches!(ty,
+            Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && is_heap_ty(&tys[1])
+                && self.is_flat_heap_tuple_slot(&tys[1]))
+    }
+}
+
+/// A `(String, <Fn>)` pair — String slot 0, closure block slot 1. Extracted verbatim from
+/// [`LowerCtx::lower_owned_heap_field_aggregate`]'s arm guard (codopsy round-3 sweep, #852).
+fn is_str_closure_pair_ty(ty: &Ty) -> bool {
+    matches!(ty,
+        Ty::Tuple(tys) if tys.len() == 2
+            && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Fn { .. }))
+}
+
+/// A `(Value, <scalar>)` pair — the heap Value @12 needs the recursive `$__drop_value_tuple`,
+/// not a flat per-slot dec. Extracted verbatim from
+/// [`LowerCtx::lower_owned_heap_field_aggregate`]'s arm guard (codopsy round-3 sweep, #852).
+fn is_value_scalar_pair_ty(ty: &Ty) -> bool {
+    matches!(ty,
+        Ty::Tuple(tys) if tys.len() == 2
+            && crate::lower::is_value_ty(&tys[0]) && !is_heap_ty(&tys[1]))
+}
+
+impl LowerCtx {
 
     /// Calls, member access and the operator forms.
     ///
