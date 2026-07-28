@@ -17,7 +17,15 @@
    operand stack and `RuntimeModel.Mem`. The residual trust shrinks from "a wasm
    engine runs the bytes correctly" to "this small, INSPECTABLE interpreter matches
    the wasm spec for these opcodes" (the full ISA / control flow is WasmCert-Coq).
-   Local 0 = the `$p` parameter; memarg offset is honoured (0 here). *)
+   Local 0 = the `$p` parameter; memarg offset is honoured (0 here).
+
+   PRECISION NOTE (#932): `run` below is SINGLE-LOCAL — its local.get arm pushes
+   `p` whatever the index says, which matches the spec only for byte strings whose
+   sole local IS local 0. That is exactly `rc_inc_bytes` (one param, no temps), so
+   the rc_inc theorems are sound as stated — but `run` must not be read as a
+   general local.get model. `run_g` below is the honest general model (an indexed
+   locals env), and the rc_dec theorems — which need a second local — are proven
+   over `run_g`, never `run`. *)
 
 From AlmideTrust Require Import RuntimeModel WasmEncode.
 From Stdlib Require Import ZArith List Lia.

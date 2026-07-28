@@ -374,8 +374,12 @@ The receipt's claims are scoped to exactly this:
   compute, not a token. The byte ENCODING is now bound too (A2 byte slice,
   `WasmEncode.rc_inc_bytes_encode_the_instruction_tree`): a Coq wasm-binary encoder
   produces EXACTLY the bytes `wat2wasm` emits for the renderer's `$rc_inc`, GROUNDED
-  per build by `proofs/check-wasm-bytes.sh` (re-assemble, compare — so the opcode
-  constants are the real wasm bytes, not a guess: non-circular). Composed with
+  per build by `proofs/check-wasm-bytes.sh` — and since #932 the gate is a closed
+  TRIANGLE with no hand-copied constant: the WAT it assembles is extracted from
+  the RENDERER'S own rendered output, and the byte lists it compares against are
+  parsed from the `.v` sources, so a renderer edit that drifts from the proof
+  fails the gate instead of orphaning the theorem (non-circular AND
+  renderer-anchored). Composed with
   `rc_inc_prog_realizes_rt_inc`, the emitted BYTES encode an instruction tree that
   computes `rt_inc`. And the EXECUTION is now bound too
   (`WasmExec.rc_inc_bytes_execute_to_rt_inc`): a minimal wasm STACK MACHINE runs
