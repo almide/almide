@@ -86,8 +86,19 @@ TSTART="<!-- tcb:generated:start — derived by scripts/gen-claims.sh; DO NOT ED
 TEND="<!-- tcb:generated:end -->"
 tcb_block() {
   local ml mli coqn leann
-  ml=$(wc -l < proofs/checker.ml | tr -d ' ')
-  mli=$(wc -l < proofs/checker.mli | tr -d ' ')
+  # proofs/checker.ml is EXTRACTED (build-checker.sh), not committed — the light
+  # CI jobs run --check on a fresh checkout where it does not exist. When absent,
+  # carry the RECORDED numbers forward (they re-derive on any machine that has
+  # run the extraction, e.g. make verify-trust); the theorem counts always
+  # re-derive, since the .v/.lean sources are committed.
+  if [ -f proofs/checker.ml ]; then
+    ml=$(wc -l < proofs/checker.ml | tr -d ' ')
+    mli=$(wc -l < proofs/checker.mli | tr -d ' ')
+  else
+    ml=$(grep -oE '`proofs/checker\.ml` = \*\*[0-9]+ lines\*\*' "$SPINE" | grep -oE '[0-9]+' | head -1)
+    mli=$(grep -oE '\(\+ [0-9]+' "$SPINE" | grep -oE '[0-9]+' | head -1)
+    [ -n "$ml" ] && [ -n "$mli" ] || { echo "::error::tcb block: proofs/checker.ml absent and no recorded size to carry forward"; exit 2; }
+  fi
   coqn=$(grep -hcE '^(Theorem|Lemma) ' proofs/*.v | paste -sd+ - | bc)
   leann=$(grep -hc '^theorem' crates/almide-perceus-belt/AlmidePerceusBelt/*.lean | paste -sd+ - | bc)
   printf '> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **%s lines** (+ %s\n' "$ml" "$mli"
