@@ -12,6 +12,12 @@
 set -euo pipefail
 
 if ! command -v wat2wasm >/dev/null 2>&1; then
+  # Locally an honest skip; in CI a FAILURE (#921) — a gate that exits 0
+  # without its instrument is not a gate.
+  if [ "${CI:-}" = "true" ]; then
+    echo "check-wasm-bytes: wat2wasm (wabt) not found — FAIL (CI must install it)"
+    exit 1
+  fi
   echo "check-wasm-bytes: wat2wasm (wabt) not found — SKIP (grounding not re-checked here)"
   exit 0
 fi

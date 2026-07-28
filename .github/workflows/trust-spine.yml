@@ -20,21 +20,36 @@ on:
   push:
     # develop is the working branch since the 0.28.0 reconciliation folded the
     # v1 line in; develop-v1 stays covered while it still receives pushes.
-    branches: [develop, develop-v1]
+    # main is the RELEASE branch (#921): every release merges develop→main, and
+    # before this trigger existed each release shipped without the proof spine,
+    # the PCC gate, or the corpus wall ever running on that ref.
+    branches: [develop, develop-v1, main]
     paths:
       - 'proofs/**'
-      - 'crates/almide-mir/**'
+      # The corpus wall drives the REAL frontend (parse→check→lower→optimize→
+      # mono→ir_link), so a change to ANY compiler crate can move the wall
+      # counts and witness contents — filtering to almide-mir alone let
+      # frontend/syntax/ir/optimize changes shift the gate's inputs without the
+      # gate running (#921). `crates/**` is the honest filter; the job is ~17
+      # min warm.
+      - 'crates/**'
       # The corpus classifier embeds stdlib sources (registry include_str!), so
       # a stdlib change can move the wall set without touching almide-mir.
       - 'stdlib/**'
+      # A release PR always bumps Cargo.toml, so the release path can never
+      # slip through the paths filter on a version-bump-only diff.
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'Makefile'
       - '.github/workflows/trust-spine.yml'
   pull_request:
-    branches: [develop, develop-v1]
+    branches: [develop, develop-v1, main]
     paths:
       - 'proofs/**'
-      - 'crates/almide-mir/**'
+      - 'crates/**'
       - 'stdlib/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'Makefile'
       - '.github/workflows/trust-spine.yml'
   workflow_dispatch:
@@ -91,6 +106,32 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends opam wabt
+
+      # check-wasm-exec.sh — the run_g ↔ real-engine differential TRUSTED_BASE
+      # cites as closing a residual — needs a real wasm engine. It skip-exit-0'd
+      # when wasmtime was absent, and this workflow never installed it, so the
+      # check had NEVER run in CI (#921); both wasm gate scripts now hard-fail
+      # under CI=true when their tool is missing, and this step is what makes
+      # that requirement satisfiable. Pinned + cached + retried exactly like
+      # ci.yml's install (the 429-storm lesson).
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v42.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v42.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v42.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
 
       - name: Build opam switch + Rocq (cache miss only)
         if: steps.opam-cache.outputs.cache-hit != 'true'
