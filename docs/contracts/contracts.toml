@@ -610,7 +610,7 @@ evidence  = [
 id        = "C-066"
 spec      = "ALS-I1"
 title     = "WASM heap is reclaimed by default (true Perceus)"
-statement = "Since 0.27.0 the wasm target frees by default: construct-and-drop churn reuses freed blocks (free-list) and loop iterations whose heap values do not escape reclaim wholesale (region reset incl. the free list), so steady-state churn runs in O(1) memory instead of the pre-0.27 bump-allocate-and-leak model. Observable values stay byte-identical native == wasm under churn. `ALMIDE_WASM_FREES=0` is the opt-out back to the leak model (env-conditional emission is declared behavior under the host-determinism gates). Known bounded exceptions, tracked in docs/roadmap/active/wasm-frees-ownership-discipline.md: TCO self-call loops leak per iteration until the Stage C redesign lands, and a stored-field over-count leaks one reference per construct-from-temp outside reclaimed regions."
+statement = "Since 0.27.0 the wasm target frees by default: construct-and-drop churn reuses freed blocks (free-list) and loop iterations whose heap values do not escape reclaim wholesale (region reset incl. the free list), so steady-state churn runs in O(1) memory instead of the pre-0.27 bump-allocate-and-leak model. Observable values stay byte-identical native == wasm under churn. `ALMIDE_WASM_FREES=0` is the opt-out back to the leak model (env-conditional emission is declared behavior under the host-determinism gates). Known bounded exception, tracked in docs/roadmap/active/wasm-frees-ownership-discipline.md: TCO self-call loops leak per iteration until the Stage C redesign lands. (The second exception this contract used to carry — the v0 emitter's stored-field over-count, one leaked reference per construct-from-temp — died with that emitter: the v1 MIR path decides ownership once under verify_ownership and the class did not re-derive, RSS flat at 200k/2M/10M iterations, #911; spec/churn/construct_from_temp_churn.almd pins the shape.)"
 since     = "0.27.0"
 status    = "active"
 evidence  = [
@@ -618,6 +618,7 @@ evidence  = [
   { path = "spec/wasm_cross/assign_alias_rc.almd", class = "fixture" },
   { path = "spec/wasm_cross/container_alias_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/loop_outer_inplace_mutate_rc.almd", class = "fixture" },
+  { path = "spec/churn/construct_from_temp_churn.almd", class = "by-construction" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },
   { path = "spec/churn/tco_loop_churn.almd", class = "by-construction" },
 ]
