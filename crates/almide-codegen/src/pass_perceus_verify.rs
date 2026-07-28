@@ -80,16 +80,17 @@ fn scan_env_loads(expr: &IrExpr, vars: &mut HashSet<VarId>) {
     }
 }
 
-pub(crate) fn is_heap_type(ty: &Ty) -> bool {
-    // `Ty::Named` is a DECLARED nominal record/variant (`type P = {...}`); its
-    // runtime repr is a heap pointer (emit's `ty_to_valtype`/`byte_size` already
-    // treat it as i32/4-byte). It must be classified heap so its locals get a
-    // scope-end Dec and its alias-binds get an Inc — without this every declared
-    // record/variant local leaks (anonymous `Ty::Record` was handled, the nominal
-    // `Ty::Named` was not). An opaque alias to a heap type (`type H = String`) is
-    // also a heap pointer; an alias to a scalar never reaches codegen as `Named`.
-    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Named(..) | Ty::Unknown | Ty::Fn { .. })
-}
+// The NATIVE-model heap classification is defined ONCE, in
+// `perceus_verified::is_heap_type` (the Lean-certified `Ty.isHeap` mirror) —
+// this module and every other Perceus-family pass read that definition (#926
+// ended the era of per-pass copies synced by comment; `pass_anf`'s copy had
+// drifted a `Ty::Named` behind and ANF stopped lifting exactly the nominal
+// record/variant allocations Perceus Dec's — the leak this module's own
+// docs recorded). `Ty::Named` IS heap here: a DECLARED nominal record/variant
+// (`type P = {...}`) is a heap pointer at runtime (emit's
+// `ty_to_valtype`/`byte_size` treat it as i32/4-byte), so its locals need the
+// scope-end Dec and its alias-binds the Inc.
+pub(crate) use crate::perceus_verified::is_heap_type;
 
 /// Does `e`, bound to a heap local, yield a BORROWED ALIAS of an existing owned
 /// heap value — as opposed to a freshly-owned allocation?

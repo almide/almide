@@ -58,7 +58,7 @@ thread_local! {
     static CURRENT_FN: RefCell<Option<String>> = RefCell::new(None);
     // Names of user-declared RECORD types (`type Tok = { … }`). A param of such a
     // type is `Ty::Named("Tok")` (not a structural `Ty::Record`), so without this
-    // set `is_heap_type`/`intrinsic_borrow_mode` treat it as Own and every reader
+    // set `is_borrow_eligible`/`intrinsic_borrow_mode` treat it as Own and every reader
     // deep-clones the whole record. Records get borrow inference like structural
     // records; user VARIANTs stay Own (conservative — variant borrowing is not
     // generalized here). #647
@@ -425,7 +425,7 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
     }
 
     func.params.iter().map(|param| {
-        if !is_heap_type(&param.ty) {
+        if !is_borrow_eligible(&param.ty) {
             return ParamBorrow::Own;
         }
 
@@ -599,12 +599,23 @@ fn intrinsic_borrow_mode(ty: &Ty) -> ParamBorrow {
     }
 }
 
-/// Eligible types for borrow inference. The Record case is the key
+/// Eligible types for borrow inference — a REFINEMENT over the heap
+/// classification, not another definition of it (#926): every type admitted
+/// here is heap, but not every heap type is admitted. The narrowing is the
+/// point and each exclusion is a reasoned one — `Fn` values ride the closure
+/// ABI (their ownership story is the env block's, not a `&`/`&mut` param),
+/// `Unknown` cannot be borrowed against a type the checker never resolved, and
+/// `Option`/`Result` params pass through the Own path their unwrap machinery
+/// expects. It was NAMED `is_heap_type`, which is how an audit read it as a
+/// sixth divergent copy of the classification; the name now says which
+/// question it answers.
+///
+/// The Record case is the key
 /// addition — without it, a `GGUFFile`-style record carried through a
 /// layer loop gets `.clone()` inserted on every iteration (observed on
 /// bonsai-almide at 72% inclusive time, cf.
 /// memory/feedback_almide_bytes_clone.md).
-fn is_heap_type(ty: &Ty) -> bool {
+fn is_borrow_eligible(ty: &Ty) -> bool {
     matches!(ty,
         Ty::String
         | Ty::Bytes

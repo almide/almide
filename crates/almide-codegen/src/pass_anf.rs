@@ -17,9 +17,14 @@ use almide_ir::visit::{IrVisitor, walk_expr};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, Postcondition, PassResult, Target};
 
-fn is_heap_type(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown | Ty::Fn { .. })
-}
+// The shared native-model heap classification (`perceus_verified::is_heap_type`,
+// the Lean-certified `Ty.isHeap` mirror). This file used to carry its own copy,
+// synced by comment, and the copy had drifted one variant behind: it lacked
+// `Ty::Named`, so a nominal record/variant allocation was never ANF-lifted into
+// a VDecl — while Perceus (reading the full definition) Dec's heap VDecls. The
+// gap between "what ANF lifts" and "what Perceus frees" is a leak by
+// construction, and closing it is the point of reading one definition (#926).
+use crate::perceus_verified::is_heap_type;
 
 /// Does this expression produce a new heap allocation that should be lifted?
 ///

@@ -290,7 +290,7 @@ fn check_needs_ownership_call_user_named(target: &CallTarget, args: &[IrExpr], v
         // ref_params (walker/mod.rs:146) + the `&t`→`t`
         // collapse (walker/expressions.rs:847) already work.
         let borrowed = borrows.get(i).map_or(false, |b| !matches!(b, ParamBorrow::Own))
-            && is_heap_type(&arg.ty);
+            && is_borrow_eligible(&arg.ty);
         if !borrowed && is_var(arg, var) { *needs = true; return true; }
     }
     for arg in args { check_needs_ownership(arg, var, needs); }
