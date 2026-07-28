@@ -91,3 +91,32 @@ test "annotated Result binding over an if stays a Result (#717)" {
   assert_eq(annotated(true), ok(7))
   assert_eq(annotated(false), err("x"))
 }
+
+// An UN-annotated binding over an `if`/`match` of ok/err constructors, RE-YIELDED
+// as the effect fn's tail. The checker's `effect_unwrap_rhs` strips Result from
+// any un-annotated `let` in an effect fn (type-driven) while `auto_try` only
+// inserts the compensating `?` for Call/ok()/err() VALUES (kind-driven), so an
+// if/match-of-constructors leaves a Result at runtime under a payload-typed var.
+// The tail wrap believed the node type and emitted `Ok::<T, E>(r)` over an
+// already-Result `r` — E0308 for every payload type, so the fn did not compile
+// at all. `annotated` above pinned only the annotated twin, which routes through
+// `annotated_result_vars` and never had the disagreement.
+effect fn unannotated_tail(cond: Bool) -> Result[Int, String] = {
+  let r = if cond then ok(7) else err("x")
+  r
+}
+
+test "un-annotated Result binding over an if, re-yielded as the tail (#717)" {
+  assert_eq(unannotated_tail(true), ok(7))
+  assert_eq(unannotated_tail(false), err("x"))
+}
+
+effect fn unannotated_tail_match(cond: Bool) -> Result[String, String] = {
+  let r = match cond { true => ok("hit"), _ => err("miss") }
+  r
+}
+
+test "un-annotated Result binding over a match, re-yielded as the tail (#717)" {
+  assert_eq(unannotated_tail_match(true), ok("hit"))
+  assert_eq(unannotated_tail_match(false), err("miss"))
+}

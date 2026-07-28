@@ -193,6 +193,43 @@ impl Checker {
     /// keeps the Result (declared Result annotation, Result-typed var, or a
     /// usage-skip like `match x { ok/err }`). One function so the positions
     /// can never diverge again (#485).
+    /// An `if`/`match` RHS whose branches are EXPLICIT `ok(..)`/`err(..)`
+    /// constructors is Result-TYPED, but nothing downstream unwraps it: the
+    /// per-branch auto-`?` only fires for branches that are effect CALLS (the
+    /// #717 family — `let v = if c then boom(x) else boom(y)`, which really does
+    /// short-circuit), and `auto_try::is_result_value` is kind-driven at the top
+    /// level (`Call` / `ok(..)` / `err(..)`), which an `if`/`match` is not. So a
+    /// constructor-armed branch stays a `Result` at runtime on every backend —
+    /// verified observable: `let r = if c then ok(..) else err(..)` does NOT
+    /// early-return on the err branch; a statement after the binding still runs,
+    /// identically on native and wasm.
+    ///
+    /// Unwrapping the TYPE here anyway made the checker the only party claiming
+    /// the payload: every occurrence of the var got a payload type over a Result
+    /// value, which the type system then could not catch — `int.to_string(r)`
+    /// type-checked and exploded in the generated Rust instead (E0308), and an
+    /// effect-fn tail re-yielding the var was double-`Ok`-wrapped, so the whole
+    /// function failed to compile for every payload type.
+    ///
+    /// Keeping the Result for exactly this shape makes the checker agree with
+    /// what the backends do. A CALL-armed branch keeps unwrapping (#717's
+    /// `via_if`/`pick_mixed`/`pick_both` pin that short-circuit), as does a
+    /// direct `let x = eff_call()`, and the annotation / match-subject escape
+    /// hatches are untouched. Pinned by `spec/lang/effect_if_value_test.almd`.
+    pub(crate) fn rhs_keeps_result_shape(value: &almide_lang::ast::Expr) -> bool {
+        use almide_lang::ast::ExprKind;
+        fn is_ctor(e: &almide_lang::ast::Expr) -> bool {
+            matches!(&e.kind, ExprKind::Ok { .. } | ExprKind::Err { .. })
+        }
+        match &value.kind {
+            ExprKind::If { then, else_, .. } => is_ctor(then) && is_ctor(else_),
+            ExprKind::Match { arms, .. } => {
+                !arms.is_empty() && arms.iter().all(|a| is_ctor(&a.body))
+            }
+            _ => false,
+        }
+    }
+
     fn effect_unwrap_rhs(&self, t: Ty, target_keeps_result: bool) -> Ty {
         if self.env.auto_unwrap && !target_keeps_result {
             match t {
