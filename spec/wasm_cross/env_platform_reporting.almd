@@ -16,6 +16,11 @@
 // Everything else in the process-environment surface stays byte-identical:
 // env.args (C-096), env.get (C-118), random.int's range (C-112). If a third
 // fn ever needs an exemption, it belongs in C-189's statement and here.
+//
+// The reference interpreter ABSTAINS on this fixture (ledgered alongside
+// env_args / env_get). It is a third leg that is neither native nor the WASI
+// sandbox, so "which platform is the interpreter" needs its own deliberate
+// answer rather than one inherited from whatever host it happens to run on.
 import env
 
 effect fn main() -> Unit = {
