@@ -305,32 +305,10 @@ fn render_op_range(
         }
         match op {
             Op::LoopStart => {
-                st.fuser.flush_all(body);
-                let is_region_root = region.is_some_and(|(root, _)| root == op_idx);
-                if !is_region_root {
-                    if let Some(plan) = ctx.bce.get(&op_idx) {
-                        // Versioned loop: guard once at entry, then the fast
-                        // (elided) copy or the byte-exact original. A nested
-                        // plan composes with the enclosing copy's elide set.
-                        let outer: Option<&BTreeSet<usize>> = region.map(|(_, e)| e);
-                        let fast: BTreeSet<usize> = match outer {
-                            Some(o) => o.union(&plan.elide).copied().collect(),
-                            None => plan.elide.clone(),
-                        };
-                        let slow: BTreeSet<usize> = outer.cloned().unwrap_or_default();
-                        body.push_str(&format!("    (if {}\n      (then\n", plan.guard));
-                        render_op_range(ctx, st, op_idx, plan.end_idx + 1, Some((op_idx, &fast)), body);
-                        body.push_str("      )\n      (else\n");
-                        render_op_range(ctx, st, op_idx, plan.end_idx + 1, Some((op_idx, &slow)), body);
-                        body.push_str("      ))\n");
-                        i = plan.end_idx + 1;
-                        continue;
-                    }
+                if let Some(resume) = render_loop_start(ctx, st, op_idx, region, body) {
+                    i = resume;
+                    continue;
                 }
-                let id = st.loop_ctr;
-                st.loop_ctr += 1;
-                st.loop_stack.push(id);
-                body.push_str(&format!("    (block $brk{id}\n    (loop $cont{id}\n"));
             }
             Op::LoopBreakUnless { cond } => {
                 st.fuser.flush_all(body);
@@ -380,87 +358,147 @@ fn render_op_range(
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
             _ => {
-                // #806 step 3c bookkeeping — see [`Fuser`]. Writes of this op:
-                let mut writes: Vec<ValueId> = Vec::new();
-                if let Some(d) = defined_value(op) {
-                    writes.push(d);
-                }
-                if let Op::SetLocal { local: l, .. } = op {
-                    writes.push(*l);
-                }
-                // The loop guard already discharged this access's range check.
-                let elided = region.is_some_and(|(_, e)| e.contains(&op_idx))
-                    && matches!(op, Op::ListGetScalar { .. } | Op::ListSetScalar { .. });
-                // A pending being REWRITTEN must materialize first (write order).
-                st.fuser.flush_values(&writes, body);
-                if splice_capable(op) {
-                    let consumed: Vec<ValueId> = match op {
-                        Op::IntBinOp { a, b, .. } => vec![*a, *b],
-                        Op::SetLocal { src, .. } => vec![*src],
-                        Op::Prim { args, .. } => args.clone(),
-                        _ => Vec::new(),
-                    }
-                    .into_iter()
-                    .filter(|v| st.fuser.pending.contains_key(v))
-                    .collect();
-                    st.fuser.flush_reading(&writes, &consumed, body);
-                    // Defer a single-use pure-scalar def (def + 1 use = 2 occurrences).
-                    // Guard-clause flattening of the former 4-deep nested-if (no `else`
-                    // anywhere: any unmet condition falls through to the `body.push_str`
-                    // below, unchanged — `break` exits the labeled block and resumes there;
-                    // `continue` (unlabeled) passes through the non-loop label to the
-                    // enclosing walk, exactly as the original inline `continue` did). No
-                    // behavior change — see docs/roadmap/active/code-health-codopsy.md.
-                    'try_defer: {
-                        let Some(d) = defined_value(op) else {
-                            break 'try_defer;
-                        };
-                        if ctx.occ.get(&d).copied() != Some(2) || ctx.func.ret == Some(d) {
-                            break 'try_defer;
-                        }
-                        let Some((dst, e, reads)) = fusable_expr(op, &mut st.fuser, ctx.floats)
-                        else {
-                            break 'try_defer;
-                        };
-                        st.fuser.pending.insert(dst, (e, reads));
-                        st.fuser.order.push(dst);
-                        continue 'op_loop;
-                    }
-                    body.push_str(&render_op(op, crate::render_wasm::OpTables {
-                        label_off: ctx.label_off,
-                        func_slots: ctx.func_slots,
-                        param_counts: ctx.param_counts,
-                        masks: &ctx.func.heap_slot_masks,
-                        reprs: ctx.reprs,
-                        floats: ctx.floats,
-                        tail_call: ctx.tail_calls.contains(&op_idx),
-                    }, &mut st.fuser));
-                } else {
-                    // A non-splicing op reads through plain `local.get`: any
-                    // pending it touches materializes first, as does any
-                    // pending reading a local it writes.
-                    let mut vals: Vec<ValueId> = Vec::new();
-                    op_values(op, &mut vals);
-                    st.fuser.flush_values(&vals, body);
-                    st.fuser.flush_reading(&writes, &[], body);
-                    if elided {
-                        body.push_str(&render_list_access_unchecked(op, ctx.floats));
-                    } else {
-                        body.push_str(&render_op(op, crate::render_wasm::OpTables {
-                        label_off: ctx.label_off,
-                        func_slots: ctx.func_slots,
-                        param_counts: ctx.param_counts,
-                        masks: &ctx.func.heap_slot_masks,
-                        reprs: ctx.reprs,
-                        floats: ctx.floats,
-                        tail_call: ctx.tail_calls.contains(&op_idx),
-                    }, &mut st.fuser));
-                    }
+                if render_fused_or_plain_op(ctx, st, op, op_idx, region, body) {
+                    continue 'op_loop;
                 }
             }
         }
     }
 }
+
+/// The `LoopStart` arm of [`render_op_range`]: a bounds-check-elision plan renders the
+/// VERSIONED loop (guard once at entry, then the elided fast copy or the byte-exact
+/// original) and returns where the caller resumes; otherwise the plain `block`/`loop`
+/// pair opens and `None` keeps the caller walking op by op. Extracted verbatim from
+/// [`render_op_range`] (codopsy round-3 sweep, #852).
+fn render_loop_start(
+    ctx: &RenderFnCtx,
+    st: &mut RenderFnState,
+    op_idx: usize,
+    region: Option<(usize, &BTreeSet<usize>)>,
+    body: &mut String,
+) -> Option<usize> {
+            st.fuser.flush_all(body);
+            let is_region_root = region.is_some_and(|(root, _)| root == op_idx);
+            if !is_region_root {
+                if let Some(plan) = ctx.bce.get(&op_idx) {
+                    // Versioned loop: guard once at entry, then the fast
+                    // (elided) copy or the byte-exact original. A nested
+                    // plan composes with the enclosing copy's elide set.
+                    let outer: Option<&BTreeSet<usize>> = region.map(|(_, e)| e);
+                    let fast: BTreeSet<usize> = match outer {
+                        Some(o) => o.union(&plan.elide).copied().collect(),
+                        None => plan.elide.clone(),
+                    };
+                    let slow: BTreeSet<usize> = outer.cloned().unwrap_or_default();
+                    body.push_str(&format!("    (if {}\n      (then\n", plan.guard));
+                    render_op_range(ctx, st, op_idx, plan.end_idx + 1, Some((op_idx, &fast)), body);
+                    body.push_str("      )\n      (else\n");
+                    render_op_range(ctx, st, op_idx, plan.end_idx + 1, Some((op_idx, &slow)), body);
+                    body.push_str("      ))\n");
+                    return Some(plan.end_idx + 1);
+                }
+            }
+            let id = st.loop_ctr;
+            st.loop_ctr += 1;
+            st.loop_stack.push(id);
+            body.push_str(&format!("    (block $brk{id}\n    (loop $cont{id}\n"));
+    None
+}
+
+/// The `_` (ordinary op) arm of [`render_op_range`]: the #806 step-3c fuser bookkeeping,
+/// then either DEFER a single-use pure-scalar def into the fuser or render the op (the
+/// splice-capable and non-splicing paths). Returns `true` when the op was DEFERRED — the
+/// caller's `continue 'op_loop`. Extracted verbatim from [`render_op_range`] (codopsy
+/// round-3 sweep, #852).
+fn render_fused_or_plain_op(
+    ctx: &RenderFnCtx,
+    st: &mut RenderFnState,
+    op: &Op,
+    op_idx: usize,
+    region: Option<(usize, &BTreeSet<usize>)>,
+    body: &mut String,
+) -> bool {
+            // #806 step 3c bookkeeping — see [`Fuser`]. Writes of this op:
+            let mut writes: Vec<ValueId> = Vec::new();
+            if let Some(d) = defined_value(op) {
+                writes.push(d);
+            }
+            if let Op::SetLocal { local: l, .. } = op {
+                writes.push(*l);
+            }
+            // The loop guard already discharged this access's range check.
+            let elided = region.is_some_and(|(_, e)| e.contains(&op_idx))
+                && matches!(op, Op::ListGetScalar { .. } | Op::ListSetScalar { .. });
+            // A pending being REWRITTEN must materialize first (write order).
+            st.fuser.flush_values(&writes, body);
+            if splice_capable(op) {
+                let consumed: Vec<ValueId> = match op {
+                    Op::IntBinOp { a, b, .. } => vec![*a, *b],
+                    Op::SetLocal { src, .. } => vec![*src],
+                    Op::Prim { args, .. } => args.clone(),
+                    _ => Vec::new(),
+                }
+                .into_iter()
+                .filter(|v| st.fuser.pending.contains_key(v))
+                .collect();
+                st.fuser.flush_reading(&writes, &consumed, body);
+                // Defer a single-use pure-scalar def (def + 1 use = 2 occurrences).
+                // Guard-clause flattening of the former 4-deep nested-if (no `else`
+                // anywhere: any unmet condition falls through to the `body.push_str`
+                // below, unchanged — `break` exits the labeled block and resumes there;
+                // `continue` (unlabeled) passes through the non-loop label to the
+                // enclosing walk, exactly as the original inline `continue` did). No
+                // behavior change — see docs/roadmap/active/code-health-codopsy.md.
+                'try_defer: {
+                    let Some(d) = defined_value(op) else {
+                        break 'try_defer;
+                    };
+                    if ctx.occ.get(&d).copied() != Some(2) || ctx.func.ret == Some(d) {
+                        break 'try_defer;
+                    }
+                    let Some((dst, e, reads)) = fusable_expr(op, &mut st.fuser, ctx.floats)
+                    else {
+                        break 'try_defer;
+                    };
+                    st.fuser.pending.insert(dst, (e, reads));
+                    st.fuser.order.push(dst);
+                    return true;
+                }
+                body.push_str(&render_op(op, crate::render_wasm::OpTables {
+                    label_off: ctx.label_off,
+                    func_slots: ctx.func_slots,
+                    param_counts: ctx.param_counts,
+                    masks: &ctx.func.heap_slot_masks,
+                    reprs: ctx.reprs,
+                    floats: ctx.floats,
+                    tail_call: ctx.tail_calls.contains(&op_idx),
+                }, &mut st.fuser));
+            } else {
+                // A non-splicing op reads through plain `local.get`: any
+                // pending it touches materializes first, as does any
+                // pending reading a local it writes.
+                let mut vals: Vec<ValueId> = Vec::new();
+                op_values(op, &mut vals);
+                st.fuser.flush_values(&vals, body);
+                st.fuser.flush_reading(&writes, &[], body);
+                if elided {
+                    body.push_str(&render_list_access_unchecked(op, ctx.floats));
+                } else {
+                    body.push_str(&render_op(op, crate::render_wasm::OpTables {
+                    label_off: ctx.label_off,
+                    func_slots: ctx.func_slots,
+                    param_counts: ctx.param_counts,
+                    masks: &ctx.func.heap_slot_masks,
+                    reprs: ctx.reprs,
+                    floats: ctx.floats,
+                    tail_call: ctx.tail_calls.contains(&op_idx),
+                }, &mut st.fuser));
+                }
+            }
+    false
+}
+
 
 /// FUNCTION-TAIL `CallFn` op indexes (#864): a call whose result flows
 /// UNMODIFIED through only `Else`/`EndIf` value merges (plus its own

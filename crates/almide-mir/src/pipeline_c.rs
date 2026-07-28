@@ -48,6 +48,22 @@ fn synthesize_and_link_runtime_fns(
     verbose: bool,
 ) -> Result<(), LowerError> {
     if !mutable_tls.is_empty() {
+        synthesize_mutable_global_init(functions, mutable_tls, layouts)?;
+    }
+    link_self_host_runtime_to_fixpoint(functions, layouts, verbose)?;
+    rewrite_impl_names_to_call_names(functions);
+    link_print_str_runtime(functions, layouts)?;
+    Ok(())
+}
+
+/// The `__mg_init` synthesis: every mutable module-level `var`'s initializer as one
+/// assignment body, lowered with the main region's globals. Extracted verbatim from
+/// [`synthesize_and_link_runtime_fns`] (codopsy round-3 sweep, #852).
+fn synthesize_mutable_global_init(
+    functions: &mut Vec<crate::MirFunction>,
+    mutable_tls: &[almide_ir::IrTopLet],
+    layouts: &PipelineLayouts,
+) -> Result<(), LowerError> {
         let stmts: Vec<almide_ir::IrStmt> = mutable_tls
             .iter()
             .map(|tl| almide_ir::IrStmt {
@@ -94,14 +110,19 @@ fn synthesize_and_link_runtime_fns(
                 )))
             }
         }
-    }
+    Ok(())
+}
 
-    // Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an entry is
-    // called but not defined, renaming its impl fn to the call name. A linked impl may call ANOTHER
-    // registry entry, so iterate to a FIXPOINT.
-    loop {
-        let before = functions.len();
-        for (rt_source, entries) in crate::render_wasm::self_host_runtime() {
+/// Whether ANY function calls something this registry entry defines. Beyond the plain
+/// call-name match, two op families force their helper source in without naming a
+/// registered call: a `Value` drop renders `(call $__drop_value …)` from value_core,
+/// and a `Map[String, <flat heap>]` drop renders `(call $__drop_map_hval …)` from
+/// map_hval. Extracted verbatim from [`synthesize_and_link_runtime_fns`] (codopsy
+/// round-3 sweep, #852).
+fn runtime_entry_is_called(
+    entries: &[(&str, &str)],
+    functions: &[crate::MirFunction],
+) -> bool {
             let mut any_called = entries.iter().any(|(_, call)| {
                 functions.iter().any(|f| {
                     f.ops.iter().any(|op| matches!(op, crate::Op::CallFn { name, .. } if name == call))
@@ -136,6 +157,22 @@ fn synthesize_and_link_runtime_fns(
                             crate::Op::DropVariant { ty, .. } if ty == "map_hval"))
                     });
             }
+    any_called
+}
+
+/// Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an
+/// entry is called but not defined, renaming its impl fn to the call name. A linked impl
+/// may call ANOTHER registry entry, so this iterates to a FIXPOINT. Extracted verbatim
+/// from [`synthesize_and_link_runtime_fns`] (codopsy round-3 sweep, #852).
+fn link_self_host_runtime_to_fixpoint(
+    functions: &mut Vec<crate::MirFunction>,
+    layouts: &PipelineLayouts,
+    verbose: bool,
+) -> Result<(), LowerError> {
+    loop {
+        let before = functions.len();
+        for (rt_source, entries) in crate::render_wasm::self_host_runtime() {
+            let any_called = runtime_entry_is_called(entries, functions);
             let any_defined =
                 entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
             if any_called && !any_defined {
@@ -152,9 +189,14 @@ fn synthesize_and_link_runtime_fns(
             break;
         }
     }
+    Ok(())
+}
 
-    // A self-hosted runtime fn may call ANOTHER registered impl by its IMPL name, but the auto-link
-    // RENAMED that def to its call_name. Rewrite those call sites to the call_name.
+/// A self-hosted runtime fn may call ANOTHER registered impl by its IMPL name, but the
+/// auto-link RENAMED that def to its call_name. Rewrite those call sites to the
+/// call_name. Extracted verbatim from [`synthesize_and_link_runtime_fns`] (codopsy
+/// round-3 sweep, #852).
+fn rewrite_impl_names_to_call_names(functions: &mut [crate::MirFunction]) {
     let impl_to_call: std::collections::HashMap<&str, &str> = crate::render_wasm::self_host_runtime()
         .iter()
         .flat_map(|(_, es)| es.iter().map(|(i, c)| (*i, *c)))
@@ -168,8 +210,15 @@ fn synthesize_and_link_runtime_fns(
             }
         }
     }
+}
 
-    // Auto-link the self-hosted runtime `print_str` (`println` → `PrintStr` → `(call $print_str)`).
+/// Auto-link the self-hosted runtime `print_str` (`println` → `PrintStr` → `(call
+/// $print_str)`). Extracted verbatim from [`synthesize_and_link_runtime_fns`] (codopsy
+/// round-3 sweep, #852).
+fn link_print_str_runtime(
+    functions: &mut Vec<crate::MirFunction>,
+    layouts: &PipelineLayouts,
+) -> Result<(), LowerError> {
     if !functions.iter().any(|f| f.name == "print_str") {
         let rt = source_to_ir(include_str!("../../../stdlib/print_str.almd"))?;
         for f in &rt.functions {
@@ -180,6 +229,7 @@ fn synthesize_and_link_runtime_fns(
     }
     Ok(())
 }
+
 
 fn try_render_wasm_source_impl_rest(
     ir: &mut almide_ir::IrProgram,

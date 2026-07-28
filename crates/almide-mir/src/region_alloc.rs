@@ -421,50 +421,16 @@ fn rewrite_region_windows(
             clones_needed.entry(n.clone()).or_insert_with(|| w.shapes.clone());
         }
         let func = &mut prog.functions[w.fi];
-        let mut max_id: u32 = 0;
-        let mut vals: Vec<ValueId> = Vec::new();
-        for op in &func.ops {
-            vals.clear();
-            crate::render_wasm::op_values(op, &mut vals);
-            for v in &vals {
-                max_id = max_id.max(v.0);
-            }
-        }
-        for p in &func.params {
-            max_id = max_id.max(p.value.0);
-        }
+        let mut max_id = max_value_id_in(func);
         let mut seq: Vec<Op> = Vec::new();
         max_id += 1;
         let sp = ValueId(max_id);
         seq.push(Op::Prim { kind: PrimKind::RegionSave, dst: Some(sp), args: vec![] });
         // Build each singleton ONCE inside the region; the clones receive its
         // handle as a trailing param and alias it per instance.
-        let mut singleton_ids: Vec<ValueId> = Vec::new();
-        for shape in &w.shapes {
-            let mut elem_ids = Vec::with_capacity(shape.len());
-            for value in shape {
-                max_id += 1;
-                let c = ValueId(max_id);
-                seq.push(Op::ConstInt { dst: c, value: *value });
-                elem_ids.push(c);
-            }
-            max_id += 1;
-            let s = ValueId(max_id);
-            seq.push(Op::ListLit { dst: s, elems: elem_ids });
-            singleton_ids.push(s);
-        }
-        let mut fc = func.ops[w.start].clone();
-        let mut gc = func.ops[w.start + 1].clone();
-        for call in [&mut fc, &mut gc] {
-            if let Op::CallFn { name, args, .. } = call {
-                *name = rgn_name(name);
-                for s in &singleton_ids {
-                    args.push(CallArg::Handle(*s));
-                }
-            }
-        }
-        seq.push(fc);
-        seq.push(gc);
+        let singleton_ids = emit_region_singletons(&w.shapes, &mut max_id, &mut seq);
+        seq.push(region_call_clone(&func.ops[w.start], &singleton_ids));
+        seq.push(region_call_clone(&func.ops[w.start + 1], &singleton_ids));
         seq.push(Op::Prim { kind: PrimKind::RegionRestore, dst: None, args: vec![sp] });
         // Keep the ops between the consumer and the (removed) drop — they
         // cannot reference `t` (occ == 3) and now run after the restore.
@@ -474,6 +440,66 @@ fn rewrite_region_windows(
         func.ops.splice(w.start..=w.drop_at, seq);
     }
     clones_needed
+}
+
+/// The highest `ValueId` this function already uses (its ops' operands and its params) —
+/// the seed the region rewrite mints fresh ids above. Extracted verbatim from
+/// [`rewrite_region_windows`] (codopsy round-3 sweep, #852).
+fn max_value_id_in(func: &crate::MirFunction) -> u32 {
+    let mut max_id: u32 = 0;
+    let mut vals: Vec<ValueId> = Vec::new();
+    for op in &func.ops {
+        vals.clear();
+        crate::render_wasm::op_values(op, &mut vals);
+        for v in &vals {
+            max_id = max_id.max(v.0);
+        }
+    }
+    for p in &func.params {
+        max_id = max_id.max(p.value.0);
+    }
+    max_id
+}
+
+/// Emit the ONE build of each singleton shape into `seq` (its element consts then the
+/// `ListLit`), minting ids above `max_id`, and return the block ids in shape order —
+/// the trailing handle args every region clone receives. Extracted verbatim from
+/// [`rewrite_region_windows`] (codopsy round-3 sweep, #852).
+fn emit_region_singletons(
+    shapes: &[Vec<i64>],
+    max_id: &mut u32,
+    seq: &mut Vec<Op>,
+) -> Vec<ValueId> {
+    let mut singleton_ids: Vec<ValueId> = Vec::new();
+    for shape in shapes {
+        let mut elem_ids = Vec::with_capacity(shape.len());
+        for value in shape {
+            *max_id += 1;
+            let c = ValueId(*max_id);
+            seq.push(Op::ConstInt { dst: c, value: *value });
+            elem_ids.push(c);
+        }
+        *max_id += 1;
+        let s = ValueId(*max_id);
+        seq.push(Op::ListLit { dst: s, elems: elem_ids });
+        singleton_ids.push(s);
+    }
+    singleton_ids
+}
+
+/// One window call re-pointed at its REGION clone (`rgn_name`) with the singleton
+/// handles appended as trailing args. A non-`CallFn` op clones through untouched — the
+/// window matcher only ever selects calls here. Extracted verbatim from
+/// [`rewrite_region_windows`] (codopsy round-3 sweep, #852).
+fn region_call_clone(op: &Op, singleton_ids: &[ValueId]) -> Op {
+    let mut call = op.clone();
+    if let Op::CallFn { name, args, .. } = &mut call {
+        *name = rgn_name(name);
+        for s in singleton_ids {
+            args.push(CallArg::Handle(*s));
+        }
+    }
+    call
 }
 
 /// Pass B2: append the clones.
