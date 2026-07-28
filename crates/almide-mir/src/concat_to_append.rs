@@ -108,24 +108,86 @@ fn match_window(
     Some((*e, *d, *x, drop_at))
 }
 
+/// The HEAP-ELEMENT self-append window (#939). The lowering of `list.push(x, e)`
+/// over owned-handle slots (`List[Value]`, `List[String]`, `List[(k,v)]`) does
+/// not produce the scalar window's `ListLit` — the 1-element temp is an
+/// `Alloc{DynListStr}` filled by stores, the callee is `__list_concat_rc`, and
+/// the drops are the recursive list-drop family — so `match_window` never fired
+/// and every heap-element push stayed a full-copy concat: O(n²), which is what
+/// took json.parse's array loop from 5 ms to minutes on a 103 KiB document.
+///
+/// The rewrite here is NAME-ONLY: `__list_concat_rc(x, t)` becomes
+/// `__list_append1_rc(x, t)` and every surrounding op stays — the temp is still
+/// built (the element lives in it) and still dropped (its recursive walk
+/// rc_decs the element once, balancing the append's acquire — the exact balance
+/// the concat left). What licenses it: the very next two ops drop `x` and
+/// rebind `x` to the result, so the caller relinquishes its handle either way,
+/// and the in-place arm fires only at `rc == 1` where no other owner can
+/// observe the mutation (the same dynamic argument as `__list_append1`).
+fn match_rc_window(
+    ops: &[Op],
+    i: usize,
+    occ: &BTreeMap<ValueId, usize>,
+    def_at: &BTreeMap<ValueId, usize>,
+) -> bool {
+    let Op::CallFn { dst: Some(d), name, args, .. } = &ops[i] else { return false };
+    if name != "__list_concat_rc" {
+        return false;
+    }
+    let [CallArg::Handle(x), CallArg::Handle(t)] = args.as_slice() else { return false };
+    // The next two ops: x's drop (any recursive list-drop flavor — the element
+    // family decides which) and the rebind of x to the result.
+    let dropped = match &ops[i + 1] {
+        Op::Drop { v }
+        | Op::DropListStr { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropListStrStr { v } => v,
+        _ => return false,
+    };
+    let Op::SetLocal { local: x3, src: d2 } = &ops[i + 2] else { return false };
+    if dropped != x || x3 != x || d2 != d {
+        return false;
+    }
+    // `t` must be the 1-ELEMENT temp: its defining Alloc's len feeds from a
+    // ConstInt 1. Anything else is a general `x = x + ys` concat, where an
+    // append-one callee would be simply wrong.
+    let Some(&ti) = def_at.get(t) else { return false };
+    let Op::Alloc { init: crate::Init::DynListStr { len }, .. } = &ops[ti] else { return false };
+    let Some(&li) = def_at.get(len) else { return false };
+    if !matches!(&ops[li], Op::ConstInt { value: 1, .. }) {
+        return false;
+    }
+    // Result used only by the rebind; the temp only by its build + this call +
+    // its trailing drop (Alloc def + Handle prim arg + call arg + drop = 4).
+    occ.get(d).copied() == Some(2) && occ.get(t).copied() == Some(4)
+}
+
 /// Rewrite every self-append concat window in `functions` to the amortized
-/// O(1) `__list_append1` form. Scalar-element lists only by construction:
-/// the window is keyed to `__list_concat` (the byte-copy flavor) — the
-/// rc-incrementing `__list_concat_rc` element families keep their shape.
+/// O(1) append form: the scalar `__list_concat` window is REPLACED (temp
+/// eliminated — see `match_window`) and the heap-element `__list_concat_rc`
+/// window is RENAMED in place (temp kept — see `match_rc_window`).
 pub fn rewrite_self_append(functions: &mut [MirFunction]) {
     let mut vals: Vec<ValueId> = Vec::new();
     for f in functions.iter_mut() {
         if !f.ops.iter().any(|op| matches!(op,
-            Op::CallFn { name, .. } if name == "__list_concat"))
+            Op::CallFn { name, .. } if name == "__list_concat" || name == "__list_concat_rc"))
         {
             continue;
         }
         let mut occ: BTreeMap<ValueId, usize> = BTreeMap::new();
-        for op in &f.ops {
+        let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
+        for (k, op) in f.ops.iter().enumerate() {
             vals.clear();
             crate::render_wasm::op_values(op, &mut vals);
             for v in &vals {
                 *occ.entry(*v).or_insert(0) += 1;
+            }
+            match op {
+                Op::Alloc { dst, .. } | Op::ConstInt { dst, .. } => {
+                    def_at.insert(*dst, k);
+                }
+                _ => {}
             }
         }
         let mut i = 0;
@@ -151,6 +213,21 @@ pub fn rewrite_self_append(functions: &mut [MirFunction]) {
                     i = drop_at + 1;
                     continue;
                 }
+            }
+            // The heap-element window: rename the callee in place, keep every
+            // other op (drop + rebind + the temp's build and trailing drop).
+            if i + 3 <= f.ops.len() && match_rc_window(&f.ops, i, &occ, &def_at) {
+                let Op::CallFn { dst, args, result, .. } = f.ops[i].clone() else {
+                    unreachable!("match_rc_window matched a non-CallFn head")
+                };
+                out.push(Op::CallFn {
+                    dst,
+                    name: "__list_append1_rc".to_string(),
+                    args,
+                    result,
+                });
+                i += 1;
+                continue;
             }
             out.push(f.ops[i].clone());
             i += 1;

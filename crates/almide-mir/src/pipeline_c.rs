@@ -177,9 +177,20 @@ fn link_self_host_runtime_to_fixpoint(
                 entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
             if any_called && !any_defined {
                 let rt = source_to_ir(rt_source)?;
+                let linked_from = functions.len();
                 for f in &rt.functions {
                     lower_and_link_one_runtime_fn(f, layouts, entries, verbose, functions);
                 }
+                // The self-append rewrite runs on USER functions before this
+                // linker (it has to — the fixpoint scan below is what links the
+                // append callees it introduces), so the registry bodies linked
+                // HERE never met it: json.parse's own `list.push` accumulator
+                // loops stayed full-copy concats — O(n²) inside the very stdlib,
+                // while identical user-written loops were amortized (#939).
+                // Rewriting each batch as it links closes that, and a callee the
+                // rewrite introduces (`__list_append1[_rc]`) is picked up by the
+                // NEXT fixpoint round's call scan like any other.
+                crate::concat_to_append::rewrite_self_append(&mut functions[linked_from..]);
             }
         }
         // Dedup by name (identical source ⇒ no-op merge).
@@ -776,6 +787,54 @@ mod tests {
     // decl survived. Before this fix, `source_to_ir_with` only checked the
     // `Result` and never inspected `Parser::errors`, so a source like this
     // would silently compile with the bare `println` call missing from the
+    /// #939: a heap-element `list.push` accumulator loop must render through the
+    /// amortized `__list_append1_rc`, not the full-copy `__list_concat_rc` — the
+    /// copy is O(len) per element, O(n²) for the loop, and it took json.parse
+    /// from 5 ms to minutes on a 103 KiB document. Pinned STRUCTURALLY (the
+    /// rendered module names its callees) rather than by wall-clock, in both
+    /// places the window has to fire: a user-written loop, and the REGISTRY-
+    /// LINKED stdlib body (`__jp_array` — linked after the user-function pass
+    /// ran, which is exactly how the parser's own loop was missed).
+    #[test]
+    fn a_heap_element_push_loop_renders_the_amortized_append() {
+        let user_loop = r#"
+fn build(n: Int) -> Int = {
+  var acc: List[String] = []
+  var i = 0
+  while i < n {
+    list.push(acc, int.to_string(i))
+    i = i + 1
+  }
+  list.len(acc)
+}
+fn main() -> Unit = println(int.to_string(build(5)))
+"#;
+        let wat = try_render_wasm_source(user_loop, &[], false)
+            .expect("the heap-element push loop renders");
+        assert!(
+            wat.contains("__list_append1_rc"),
+            "a user heap-element push loop must call the amortized append"
+        );
+
+        let parser_loop = r#"
+import json
+fn main() -> Unit = {
+  match json.parse("[1, 2, 3]") {
+    ok(v) => println(int.to_string(list.len(option.unwrap_or(json.as_array(v), []))))
+    err(e) => println(e)
+  }
+}
+"#;
+        let wat = try_render_wasm_source(parser_loop, &[], false)
+            .expect("the json.parse program renders");
+        assert!(
+            wat.contains("__list_append1_rc"),
+            "the registry-linked json parser's accumulator loops must be rewritten too — \
+             the fixpoint linker runs after the user-function pass, so the rewrite has to \
+             ride the linker batch"
+        );
+    }
+
     // output — a wall was expected instead.
     #[test]
     fn dropped_top_level_statement_walls_instead_of_silently_compiling() {

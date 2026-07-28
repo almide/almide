@@ -82,6 +82,34 @@ fn __list_concat_rc(a: List[Int], b: List[Int]) -> List[Int] = {
 //   __lc_cap's geometric blocks leave cap > len headroom on every grow.
 // - else: a fresh geometric-capacity copy (the concat path's exact physics);
 //   the caller's Drop releases the old reference as before.
+// SELF-APPEND, heap-element edition (`x = x + [e]` over OWNED-handle slots —
+// List[Value], List[String], List[(k,v)]; the v1 `list.push` desugar): the same
+// physics as __list_append1 plus the rc variant's reference arithmetic. `b` is
+// the 1-element temp the lowering built for `[e]`; its slot is COPIED with an
+// acquire (__lc_copy_rc's rc_inc), and the caller still drops the temp (the
+// recursive DropListValue/DropListStr walk rc_decs the element once) — net one
+// reference owned by `a`, exactly the balance __list_concat_rc leaves. Without
+// this fn the rc window had NO append fast path at all: every `list.push` on a
+// heap-element accumulator full-copied the list (O(n^2)) — json.parse's array
+// loop at 103 KiB went from 5 ms to minutes on exactly that (#939).
+fn __list_append1_rc(a: List[Int], b: List[Int]) -> List[Int] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  if prim.load32(ha) == 1 and la < prim.load32(ha + 8) then {
+    let _x = __lc_copy_rc(ha + 12 + la * 8, hb + 12, 1, 0)
+    prim.store32(ha + 4, la + 1)
+    a
+  } else {
+    let out = prim.alloc_list(la * 2 + 8)
+    let ho = prim.handle(out)
+    prim.store32(ho + 4, la + 1)
+    let _x = __lc_copy_rc(ho + 12, ha + 12, la, 0)
+    let _y = __lc_copy_rc(ho + 12 + la * 8, hb + 12, 1, 0)
+    out
+  }
+}
+
 fn __list_append1(a: List[Int], v: Int) -> List[Int] = {
   let ha = prim.handle(a)
   let la = prim.load32(ha + 4)

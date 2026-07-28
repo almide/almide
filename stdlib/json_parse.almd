@@ -344,35 +344,65 @@ fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
 // ── collections ──
 
 // p is at the first element (post-`[`, post-ws, non-`]`).
-fn __jp_array(base: Int, len: Int, p: Int, acc: List[Value]) -> Result[(Value, Int), String] =
-  match __jp_value(base, len, p) {
-    ok(r) => {
-      let (v, np) = r
-      let q = __jp_ws(base, len, np)
-      let b = if q < len then prim.load8(base + q) else 0
-      if b == 44 then __jp_array(base, len, q + 1, acc + [v])
-      else if b == 93 then ok((value.array(acc + [v]), q + 1))
-      else ok((value.array(acc + [v]), q))
+//
+// A LOOP with an in-place `list.push` accumulator, deliberately breaking the
+// stdlib's prefer-recursion idiom (#939) — the recursive form had two costs
+// that both scale with element COUNT, and real documents put six digits there:
+//   1. `acc + [v]` copies the whole accumulator per element — O(n^2) total.
+//      A 103 KiB glTF chunk that parsed in 5 ms took >11 minutes.
+//   2. One real call frame per element (the self-call sits under a `match` arm,
+//      outside the emitted return_call shapes), so ~8k elements overflow the
+//      wasm call stack — a trap, after the quadratic slowdown.
+// The loop is O(1) amortized per element and O(depth) stack (nesting only).
+fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value]) -> Result[(Value, Int), String] = {
+  var p = p0
+  var acc = acc0
+  var endp = 0 - 1
+  var error = ""
+  while endp < 0 and string.len(error) == 0 {
+    match __jp_value(base, len, p) {
+      ok(r) => {
+        let (v, np) = r
+        list.push(acc, v)
+        let q = __jp_ws(base, len, np)
+        let b = if q < len then prim.load8(base + q) else 0
+        if b == 44 then { p = q + 1 }
+        else if b == 93 then { endp = q + 1 }
+        else { endp = q }
+      }
+      err(e) => { error = e }
     }
-    err(e) => err(e)
   }
+  if string.len(error) > 0 then err(error) else ok((value.array(acc), endp))
+}
 
 // p is at the first key (post-`{`, post-ws, non-`}`). The oracle re-skips ws
 // at the loop head and consumes `:` only if present.
-fn __jp_object(base: Int, len: Int, p: Int, acc: List[(String, Value)]) -> Result[(Value, Int), String] = {
-  let q = __jp_ws(base, len, p)
-  let (k, kp) = __jp_string(base, len, q)
-  let q2 = __jp_ws(base, len, kp)
-  let q3 = if q2 < len and prim.load8(base + q2) == 58 then q2 + 1 else q2
-  match __jp_value(base, len, q3) {
-    ok(r) => {
-      let (v, np) = r
-      let q4 = __jp_ws(base, len, np)
-      let b = if q4 < len then prim.load8(base + q4) else 0
-      if b == 44 then __jp_object(base, len, q4 + 1, acc + [(k, v)])
-      else if b == 125 then ok((value.object(acc + [(k, v)]), q4 + 1))
-      else ok((value.object(acc + [(k, v)]), q4))
+// The same loop shape as `__jp_array`, for the same two reasons (#939): the
+// per-key `acc + [(k, v)]` copy was quadratic and the per-key call frame
+// overflowed the stack on wide objects.
+fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)]) -> Result[(Value, Int), String] = {
+  var p = p0
+  var acc = acc0
+  var endp = 0 - 1
+  var error = ""
+  while endp < 0 and string.len(error) == 0 {
+    let q = __jp_ws(base, len, p)
+    let (k, kp) = __jp_string(base, len, q)
+    let q2 = __jp_ws(base, len, kp)
+    let q3 = if q2 < len and prim.load8(base + q2) == 58 then q2 + 1 else q2
+    match __jp_value(base, len, q3) {
+      ok(r) => {
+        let (v, np) = r
+        let q4 = __jp_ws(base, len, np)
+        let b = if q4 < len then prim.load8(base + q4) else 0
+        list.push(acc, (k, v))
+        if b == 44 then { p = q4 + 1 }
+        else if b == 125 then { endp = q4 + 1 }
+        else { endp = q4 }
+      }
+      err(e) => { error = e }
     }
-    err(e) => err(e)
   }
+  if string.len(error) > 0 then err(error) else ok((value.object(acc), endp))
 }
