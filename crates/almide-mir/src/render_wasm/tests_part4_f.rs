@@ -398,7 +398,7 @@
         let src = "fn main() -> Unit = {\n  \
             println(int.to_string(float.to_int8(100.0)))\n  \
             println(int.to_string(float.to_int8(200.0)))\n  \
-            let nf = float.from_int(0 - 200)\n  let neg = float.to_int8(nf)\n  let nm = 0 - neg\n  println(int.to_string(nm))\n  \
+            let nf = float.from_int(0 - 200)\n  let neg = float.to_int8(nf)\n  let nm = 0 - int.from_int8(neg)\n  println(int.to_string(nm))\n  \
             let f16 = float.from_int(40000)\n  println(int.to_string(float.to_int16(f16)))\n  \
             let f32 = float.from_int(3000000000)\n  println(int.to_string(float.to_int32(f32)))\n  \
             println(int.to_string(float.to_uint8(200.0)))\n  \
@@ -411,6 +411,12 @@
         assert!(prog.functions.iter().any(|f| f.name == "float.to_uint32"));
         if let Some(out) = build_and_run("self_hosted_float_convert", &render_wasm_program(&prog)) {
             // 100; sat-high 127; sat-low -128 -> 128; 32767; 2147483647; 200; 255; neg->0; 65535; 4294967295
+            // The sat-low check WIDENS before negating: `0 - neg` at Int8 width wraps
+            // (+128 is outside the type), so it would print -128 and prove nothing about
+            // the saturation. `int.from_int8` makes the negation happen at Int width,
+            // which is what this line was always testing (#880: a canonical literal
+            // meeting a sized operand now yields the SIZED type, so the widening has to
+            // be written).
             assert_eq!(out, "100\n127\n128\n32767\n2147483647\n200\n255\n0\n65535\n4294967295");
         }
     }

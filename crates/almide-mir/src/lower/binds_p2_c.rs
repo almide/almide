@@ -408,6 +408,39 @@ impl LowerCtx {
             }
             return Ok(());
         }
+        // A VARIANT (Option/Result)-typed `match` RHS — the match twin of
+        // `lower_bind_heap_if`'s variant path (arc v1-join-completeness, J2a:
+        // fan.any's first-Ok chain binds through here once
+        // `desugar_let_bound_heap_branch` declines it instead of duplicating).
+        // EXECUTE via the same match-VALUE routers the tail position trusts —
+        // each arm materializes + Consumes its value, the merge is the ONE
+        // owned rc=1 block (released-merge-dst `i` credit) — then bind +
+        // scope-track it and SEED its variant read-shape so a following
+        // `match $r` / `$r!` takes the executing tag-read path.
+        if is_variant_ty(ty) {
+            let mark = self.ops.len();
+            let lhh_mark = self.live_heap_handles.len();
+            let mut dst = self.try_lower_custom_variant_match(subject, arms, ty);
+            if dst.is_none() && is_variant_ty(&subject.ty) {
+                dst = self.try_lower_variant_value_match(subject, arms, ty);
+            }
+            if dst.is_none() {
+                dst = self.try_lower_result_match_value(subject, arms, ty);
+            }
+            if dst.is_none() {
+                dst = self.try_lower_option_match_value(subject, arms, ty);
+            }
+            if let Some(obj) = dst {
+                self.value_of.insert(var, obj);
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                self.seed_variant_param(obj, ty);
+                return Ok(());
+            }
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh_mark);
+        }
         Err(LowerError::Unsupported(
             "heap-result `match` bound to a let/var cannot be faithfully \
              computed in this brick (would bind an empty deferred heap value); \
@@ -441,6 +474,21 @@ impl LowerCtx {
                 }
             }
         }
+        // ROUTING INVARIANT — READ BEFORE CHANGING WHAT REACHES THIS BIND (2026-07-28
+        // adversarial audit, arc v1-join-completeness): the fold below rebinds the ELSE
+        // arm's variable SLOT IN PLACE, which is sound ONLY when the binder SHADOWS that
+        // variable (the source name is rebound, so no later read can reach the old value).
+        // Nothing here checks that: the guard tests only that the else arm is an owned,
+        // scope-tracked Var. A NON-shadow bind — `let b = seed + "B"; let j = if c then
+        // "A" else b; b + "/" + j`, where `b` is read AFTER — silently corrupts `b`
+        // (native `sB/A` vs wasm `A/A`, exit 0 both, ownership cert ACCEPT). It is
+        // unreachable today ONLY because `desugar_let_bound_heap_branch` intercepts such
+        // binds first and tail-duplicates them; a J1 slice that declines that duplication
+        // to route binds into the merge join below DID expose it. If you change that
+        // routing, either gate this fold on real shadow/last-use liveness or let the join
+        // (which copies via `Op::Dup` — value semantics, always correct) run first.
+        // Pinned by `spec/wasm_cross/heap_result_if_bind_chain.almd::clobber`.
+        //
         // STRAIGHT-LINE identity-else shadow rebind `let acc = if cond then acc + [x] else acc`
         // (porta `serialize_opts`' 7 stacked optional-arg appends on one `args` slot). The ELSE
         // arm is EXACTLY the accumulator var — the PROVEN loop-carried `i(id)m` append slot,
@@ -541,23 +589,7 @@ impl LowerCtx {
             (pattern, &value.kind)
         {
             if pats.len() == vals.len() {
-                for (p, v) in pats.iter().zip(vals) {
-                    match p {
-                        IrPattern::Bind { var, ty } => self.lower_bind(*var, ty, v)?,
-                        IrPattern::Wildcard => {}
-                        // A NESTED tuple sub-pattern `(b, c)` binds against the
-                        // corresponding element value `v` — recurse (the same two sound
-                        // shapes: a same-arity tuple literal binds component-wise, a
-                        // tracked heap var aliases the container).
-                        IrPattern::Tuple { .. } => self.lower_destructure(p, v)?,
-                        _ => {
-                            return Err(LowerError::Unsupported(
-                                "destructure sub-pattern (only a bound var, `_`, or nested tuple) not in this brick"
-                                    .into(),
-                            ))
-                        }
-                    }
-                }
+                self.lower_tuple_literal_components(pats, vals)?;
                 return Ok(());
             }
         }
@@ -575,6 +607,56 @@ impl LowerCtx {
             self.record_elided_calls(value);
             None
         };
+        if self.try_lower_tuple_pattern_from_subject(pattern, subject, value) {
+            return Ok(());
+        }
+        if self.try_lower_record_pattern_from_subject(pattern, subject, value) {
+            return Ok(());
+        }
+        self.bind_pattern(pattern, subject)
+    }
+
+    /// Extracted verbatim from [`Self::lower_destructure`] (codopsy round-3 sweep, #852):
+    /// binds every component of a same-arity tuple LITERAL against its ACTUAL element value,
+    /// deciding per sub-pattern whether it is an ordinary bind, an ignored `_`, a nested
+    /// tuple to recurse into, or an out-of-brick shape that walls. Runs only after the caller
+    /// has matched the tuple-pattern/tuple-literal pair and checked the arities.
+    fn lower_tuple_literal_components(
+        &mut self,
+        pats: &[IrPattern],
+        vals: &[IrExpr],
+    ) -> Result<(), LowerError> {
+        for (p, v) in pats.iter().zip(vals) {
+            match p {
+                IrPattern::Bind { var, ty } => self.lower_bind(*var, ty, v)?,
+                IrPattern::Wildcard => {}
+                // A NESTED tuple sub-pattern `(b, c)` binds against the
+                // corresponding element value `v` — recurse (the same two sound
+                // shapes: a same-arity tuple literal binds component-wise, a
+                // tracked heap var aliases the container).
+                IrPattern::Tuple { .. } => self.lower_destructure(p, v)?,
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "destructure sub-pattern (only a bound var, `_`, or nested tuple) not in this brick"
+                            .into(),
+                    ))
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Extracted verbatim from [`Self::lower_destructure`] (codopsy round-3 sweep, #852):
+    /// decides whether a TUPLE pattern over a resolvable subject can be destructured
+    /// PER-SLOT (seeding the call-result mask first when the subject is a fresh owned block).
+    /// Returns whether the destructure landed; `false` falls through to the container-grain
+    /// `bind_pattern`, exactly as the inline `if let` chain did.
+    fn try_lower_tuple_pattern_from_subject(
+        &mut self,
+        pattern: &IrPattern,
+        subject: Option<ValueId>,
+        value: &IrExpr,
+    ) -> bool {
         // PRECISE tuple field extraction (the layout brick): a tuple value is a block
         // [rc][len][cap][f0@12, f1@20, ...]; a destructure (`let (a, b) = t`) loads each field at
         // its OWN slot instead of the container-grain alias. A SCALAR field is a value COPY; a HEAP
@@ -599,10 +681,24 @@ impl LowerCtx {
                     self.seed_call_result_tuple_mask(subj, elements, value);
                 }
                 if self.try_lower_tuple_destructure(elements, subj, Some(&value.ty)) {
-                    return Ok(());
+                    return true;
                 }
             }
         }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_destructure`] (codopsy round-3 sweep, #852):
+    /// decides whether a RECORD pattern over a resolvable subject can be destructured
+    /// PER-SLOT (seeding the call-result mask first when the subject is a fresh owned block).
+    /// Returns whether the destructure landed; `false` falls through to the container-grain
+    /// `bind_pattern`, exactly as the inline `if let` chain did.
+    fn try_lower_record_pattern_from_subject(
+        &mut self,
+        pattern: &IrPattern,
+        subject: Option<ValueId>,
+        value: &IrExpr,
+    ) -> bool {
         // PRECISE record field extraction (`let { x, y } = p`) — the record sibling of the tuple
         // path above. Load each field from its OWN layout slot instead of the container-grain alias
         // (`bind_pattern` bound every field to the record pointer → `i64.add` on two ptrs / NUL
@@ -623,10 +719,10 @@ impl LowerCtx {
                     }
                 }
                 if self.try_lower_record_destructure(fields, &value.ty, subj) {
-                    return Ok(());
+                    return true;
                 }
             }
         }
-        self.bind_pattern(pattern, subject)
+        false
     }
 }

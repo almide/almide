@@ -545,6 +545,26 @@ fn lower_function_all_impl(
     } else {
         func_body
     };
+    // A HEAP-result `if` in call-argument position → its let-decomposed
+    // form (see `desugar_heap_if_call_args`, #881) — same slot.
+    let heap_if_arg_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_heap_if_call_args(func_body) {
+        heap_if_arg_body = rewritten;
+        &heap_if_arg_body
+    } else {
+        func_body
+    };
+    // A call argument projecting a heap value out of a MUTABLE global
+    // (`s(cached_items[i].content)`) → its let-decomposed form (see
+    // `desugar_mutable_global_projection_args`, #881) — same slot.
+    let mg_projection_body;
+    let func_body: &IrExpr =
+        if let Some(rewritten) = desugar_mutable_global_projection_args(func_body) {
+            mg_projection_body = rewritten;
+            &mg_projection_body
+        } else {
+            func_body
+        };
     // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` (see
     // `desugar_bytes_index_assign`) — same desugar-before-both slot.
     let bytes_index_assign_body;
@@ -596,6 +616,12 @@ fn lower_function_all_impl(
     // so bind/read/write/capture all classify the same vars as cells. A pure scan —
     // no rewrite, so the counted tree is untouched.
     ctx.cell_vars = collect_cell_vars(final_body, &ctx.globals, &func.params);
+    // WHOLE-BODY read counts, over the SAME final tree — the liveness oracle the
+    // statement-at-a-time lowering cannot derive on its own. Its consumer is the
+    // in-place accumulator fold, which rebinds a variable's SLOT and is therefore
+    // sound only when the bind doing so is that variable's LAST reader. A pure
+    // scan; the counted tree is untouched.
+    ctx.var_read_counts = collect_var_read_counts(final_body);
     let ret = ctx.lower_body_into(final_body)?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
     // has one capability (Stdout); an `effect fn` declares it may reach the host, so
@@ -662,11 +688,17 @@ mod calls;
 // `classify_corpus` caps counter consults the SAME predicate the lowering uses (no count drift).
 pub use control::unwrap_or_operand_admitted;
 
+// The in-place `&mut` mutator surface (a free fn in the private `calls` module) — re-exported so
+// `inline_pure_call_globals`'s receiver fence tests the SAME predicate the receiver COW does, and
+// the two can never drift apart (#906).
+pub(crate) use calls::is_inplace_mutator;
+
 
 #[cfg(test)]
 mod tests;
 
 include!("drop_sources.rs");
+include!("variant_drop_field_frees.rs");
 include!("drop_sources_b.rs");
 include!("drop_sources_c.rs");
 include!("repr_sources.rs");
@@ -674,6 +706,7 @@ include!("repr_sources_b.rs");
 include!("repr_sources_c.rs");
 include!("repr_sources_d.rs");
 include!("newtype_erase.rs");
+include!("newtype_subst.rs");
 include!("record_defaults.rs");
 include!("desugar_guard.rs");
 include!("desugar_guard_b.rs");
@@ -698,6 +731,7 @@ include!("mod_p5_b.rs");
 // The desugar family (formerly one 4.8k-line mod_p6.rs), split by concern:
 include!("desugar.rs");
 include!("desugar_b.rs");
+include!("desugar_call_arg_anf.rs");
 include!("desugar_unwrap.rs");
 include!("desugar_unwrap_b.rs");
 include!("desugar_loop.rs");

@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-174 contracts
+190 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -68,7 +68,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-038 | Sized-integer literals narrow to the declared field width | 0.24.0 | active | fixture | 2 |
 | C-039 | Type-changing map.map / set.map yield a collection of the new type | 0.24.0 | active | fixture | 2 |
 | C-040 | Codegen emit is host-architecture deterministic | 0.24.0 | active | fixture | 3 |
-| C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 4 |
+| C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 5 |
 | C-042 | fs preopen-dir scan + path resolution is observable-equivalent | 0.24.0 | active | fixture | 1 |
 | C-043 | A user type named Box coexists with recursive-enum heap indirection | 0.24.0 | active | fixture | 1 |
 | C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 3 |
@@ -81,7 +81,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-051 | math.log_gamma is bit-identical (both targets use the vendored musl-libm log) | 0.24.0 | active | fixture | 1 |
 | C-052 | A fold over an empty collection requires the collection to carry an element type (no codegen defaulting) | 0.24.0 | active | fixture | 1 |
 | C-053 | list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm | 0.24.0 | active | fixture | 1 |
-| C-054 | List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB | 0.24.0 | active | fixture | 3 |
+| C-054 | List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB | 0.24.0 | active | fixture | 4 |
 | C-055 | list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets | 0.24.0 | active | fixture | 2 |
 | C-056 | list.product wraps on i64 overflow, consistent with list.sum and plain `*` | 0.24.0 | active | fixture | 1 |
 | C-057 | Assigning a Unit-returning in-place mutator's result is a checker error on both targets | 0.24.0 | active | fixture | 1 |
@@ -94,38 +94,38 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 1 |
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 2 |
 | C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 4 |
-| C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) |  | active | fixture | 4 |
-| C-068 | Auto-? is target-directed in construction positions |  | active | fixture | 2 |
-| C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets |  | active | fixture | 1 |
-| C-070 | Nested constructor patterns match and bind identically on both targets |  | active | fixture | 2 |
-| C-071 | Single-part interpolation RC balance |  | active | fixture | 1 |
-| C-072 | Inferred named-record repr parity |  | active | fixture | 1 |
-| C-073 | Tuple pattern testing a variant constructor |  | active | fixture | 1 |
-| C-074 | Iterative split/replace on large inputs |  | active | fixture | 1 |
-| C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough |  | active | fixture | 1 |
-| C-076 | Producer-side in-module variant construction is target-stable |  | active | fixture | 1 |
-| C-077 | Cross-module heap-global init order is dependency-respecting |  | active | fixture | 1 |
-| C-078 | Phantom record generic param is stripped on the Rust target |  | active | fixture | 1 |
-| C-079 | Variant cases with distinct anonymous-record payloads are target-stable |  | active | fixture | 1 |
-| C-080 | Empty map.from_list / set.from_list resolves its element from the result type |  | active | fixture | 1 |
-| C-081 | Generic fn in an inferred-param lambda resolves its type parameter |  | active | fixture | 1 |
-| C-082 | Calling a closure-typed lambda parameter yields the call result, not the closure |  | active | fixture | 1 |
-| C-083 | A negated i64::MIN literal is representable, not folded to zero |  | active | fixture | 1 |
-| C-084 | Codec/value decode error messages are byte-identical across targets |  | active | fixture | 1 |
-| C-085 | Float decode widens an integral JSON number to f64 |  | active | fixture | 1 |
-| C-086 | Pass-through stdlib combinators give their result its own reference |  | active | fixture | 1 |
-| C-087 | JSON number and \\u string decoding are byte-identical across targets |  | active | fixture | 1 |
-| C-088 | A Rust-keyword function name compiles on both targets |  | active | fixture | 1 |
-| C-089 | A default parameter referencing an earlier parameter is filled with its argument |  | active | fixture | 1 |
-| C-090 | bytes.from_list on a List[Int] parameter compiles on both targets |  | active | fixture | 1 |
-| C-091 | A nested sub-pattern in let-destructuring binds every leaf |  | active | fixture | 1 |
-| C-092 | A generic record field is sized by its instantiated type at construction |  | active | fixture | 1 |
-| C-093 | Mutually-recursive variant types compile on both targets |  | active | fixture | 1 |
-| C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type |  | active | fixture | 1 |
-| C-095 | json.stringify_pretty is byte-identical indented output across targets |  | active | fixture | 1 |
-| C-096 | process.args works on WASM and matches native |  | active | fixture | 1 |
-| C-097 | generic + on a type parameter concatenates strings/lists identically across targets |  | active | fixture | 1 |
-| C-098 | cross-module derived Codec methods dispatch on WASM and match native |  | active | fixture | 0 |
+| C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 4 |
+| C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 2 |
+| C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 1 |
+| C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 2 |
+| C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
+| C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 1 |
+| C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
+| C-074 | Iterative split/replace on large inputs | 0.27.6 | active | fixture | 1 |
+| C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough | 0.27.6 | active | fixture | 1 |
+| C-076 | Producer-side in-module variant construction is target-stable | 0.27.6 | active | fixture | 1 |
+| C-077 | Cross-module heap-global init order is dependency-respecting | 0.27.6 | active | fixture | 1 |
+| C-078 | Phantom record generic param is stripped on the Rust target | 0.27.6 | active | fixture | 1 |
+| C-079 | Variant cases with distinct anonymous-record payloads are target-stable | 0.27.6 | active | fixture | 1 |
+| C-080 | Empty map.from_list / set.from_list resolves its element from the result type | 0.27.6 | active | fixture | 1 |
+| C-081 | Generic fn in an inferred-param lambda resolves its type parameter | 0.27.6 | active | fixture | 1 |
+| C-082 | Calling a closure-typed lambda parameter yields the call result, not the closure | 0.27.6 | active | fixture | 1 |
+| C-083 | A negated i64::MIN literal is representable, not folded to zero | 0.27.6 | active | fixture | 1 |
+| C-084 | Codec/value decode error messages are byte-identical across targets | 0.27.6 | active | fixture | 1 |
+| C-085 | Float decode widens an integral JSON number to f64 | 0.27.6 | active | fixture | 1 |
+| C-086 | Pass-through stdlib combinators give their result its own reference | 0.27.6 | active | fixture | 1 |
+| C-087 | JSON number and \\u string decoding are byte-identical across targets | 0.27.6 | active | fixture | 2 |
+| C-088 | A Rust-keyword function name compiles on both targets | 0.27.6 | active | fixture | 1 |
+| C-089 | A default parameter referencing an earlier parameter is filled with its argument | 0.27.6 | active | fixture | 1 |
+| C-090 | bytes.from_list on a List[Int] parameter compiles on both targets | 0.27.6 | active | fixture | 1 |
+| C-091 | A nested sub-pattern in let-destructuring binds every leaf | 0.27.6 | active | fixture | 1 |
+| C-092 | A generic record field is sized by its instantiated type at construction | 0.27.6 | active | fixture | 1 |
+| C-093 | Mutually-recursive variant types compile on both targets | 0.27.6 | active | fixture | 1 |
+| C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type | 0.27.6 | active | fixture | 1 |
+| C-095 | json.stringify_pretty is byte-identical indented output across targets | 0.27.6 | active | fixture | 1 |
+| C-096 | process.args works on WASM and matches native | 0.27.6 | active | fixture | 1 |
+| C-097 | generic + on a type parameter concatenates strings/lists identically across targets | 0.27.6 | active | fixture | 1 |
+| C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
 | C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 9 |
 | C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
 | C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 11 |
@@ -133,7 +133,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 5 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
 | C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 5 |
-| C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 11 |
+| C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 12 |
 | C-107 | heap Result-of-tuple / Result-of-list Ok payloads round-trip and byte-match native | 0.27.6 | active | fixture | 4 |
 | C-108 | Unwrap `!` and let-unwrap desugaring byte-match native in every position | 0.27.6 | active | fixture | 6 |
 | C-109 | Self-hosted base64 encode byte-matches canonical / native on the v1 wasm path | 0.27.6 | active | fixture | 1 |
@@ -202,4 +202,20 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-172 | unwrap_or over any heap payload yields the same value on both targets | 0.36.0 | active | fixture | 1 |
 | C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 1 |
 | C-174 | A tail-recursive Map/Set accumulator keeps its seed on both targets, non-empty seeds included | 0.36.0 | active | fixture | 1 |
+| C-175 | A List literal of a variant type builds and drops identically on both targets, in bind and heap-result-if-arm position | 0.37.0 | active | fixture | 1 |
+| C-176 | some/ok around an inline tuple-returning call materializes the real payload on both targets | 0.37.0 | active | fixture | 1 |
+| C-177 | A mutable-global projection read in a loop-body call argument reads the CURRENT slot every iteration | 0.37.0 | active | fixture | 1 |
+| C-178 | A mutual tail-recursion chain runs at unbounded depth on the wasm target | 0.37.0 | active | fixture | 1 |
+| C-179 | UInt64 reaches its full declared domain, with every observer reading the slot unsigned | 0.37.0 | active | fixture | 2 |
+| C-180 | Sized-integer +, -, * and ^ wrap at the declared width on both targets | 0.37.0 | active | fixture | 1 |
+| C-181 | args.positional returns every non-flag argument, and the args surface agrees across targets | 0.37.0 | active | fixture | 1 |
+| C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 1 |
+| C-183 | A loop-carried append of a list-of-scalar-records executes on both targets | 0.37.0 | active | fixture | 1 |
+| C-184 | The integer `^` operator is the same total exponentiation as math.pow on both targets | 0.37.0 | active | fixture | 1 |
+| C-185 | fan.any returns the first Ok in list order on both targets, whatever position it is in | 0.37.0 | active | fixture | 1 |
+| C-186 | Appending an inline index read to a list accumulator lowers and runs on both targets | 0.37.0 | active | fixture | 1 |
+| C-187 | An in-place mutator writing through a module-level `var` buffer behaves identically on both targets | 0.37.0 | active | fixture | 2 |
+| C-188 | A scalar `if` arm executes its statement effects — global writes land and outer-var reassignments hit the stable local | 0.37.0 | active | fixture | 1 |
+| C-189 | env.os / env.temp_dir report the HOST — the equivalence law's only exemption, and it is closed | 0.37.0 | active | fixture | 1 |
+| C-190 | A closure captures any scalar, not just Int and Bool — Float and every sized int width included | 0.37.0 | active | fixture | 1 |
 

@@ -1,5 +1,6 @@
 // matrix_activations — SELF-HOSTED softmax/gelu/etc. over the v1 Matrix (List[List[Float]]).
-// The WASM oracle (emit_wasm/calls_matrix_p2.rs) computes these with SCALAR arithmetic and
+// The transcription oracle — v0's WASM emitter (emit_wasm/calls_matrix_p2.rs, retired in
+// c71eff7b) — computed these with SCALAR arithmetic and
 // `rt.math_exp` (= libm exp, the SAME musl exp `math.exp`/math_exp.almd transcribes), NOT the
 // native SIMD fast-exp. So a faithful transcription in the SAME op order (row-max subtract →
 // per-element exp → LEFT-TO-RIGHT sum → divide) byte-matches v0 `--target wasm`.

@@ -47,10 +47,21 @@ impl LowerCtx {
                 return Some(obj);
             }
         }
-        self.lower_heap_result_arm_literal(arm, result_ty)
+        let out = self
+            .lower_heap_result_arm_literal(arm, result_ty)
             .or_else(|| self.lower_heap_result_arm_option(arm, result_ty))
             .or_else(|| self.lower_heap_result_arm_result(arm, result_ty))
-            .or_else(|| self.lower_heap_result_arm_ctrl(arm, result_ty))
+            .or_else(|| self.lower_heap_result_arm_ctrl(arm, result_ty));
+        if out.is_none() {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!(
+                    "[heap-if-arm] declined arm kind {} (result ty {:?})",
+                    crate::lower::kind_name(&arm.kind),
+                    result_ty
+                )
+            });
+        }
+        out
     }
 
     /// Router for [`Self::lower_heap_result_arm`]'s four arm-kind groups (split out for

@@ -29,6 +29,17 @@ pub fn optimize_program(program: &mut IrProgram) {
     // Pass 3: constant propagation (replace vars bound to literals with the literal)
     propagate::constant_propagate(program);
 
+    // Pass 3b: RE-FOLD the unsigned 64-bit lane (#872). Propagation is what
+    // first puts two literals under a `UInt64` `/`/`%` (`let big: UInt64 =
+    // <u64::MAX>; big / 2`), and pass 1 ran before it — so the pair reached
+    // the emitters, where the native leg's own constant handling folded it
+    // SIGNED (`-1 / 2 = 0`, `-1 % 10 = -1`) while the wasm leg kept the
+    // runtime `i64.div_u` and printed the right answer: a cross-target
+    // divergence in the band the lane exists for. Folding it HERE, unsigned,
+    // settles the value before any emitter sees it. Scoped to `UInt64` so the
+    // signed corpus keeps byte-identical output.
+    refold_unsigned_lane(program);
+
     // Recompute after propagation may have reduced use-counts
     compute_use_counts(program);
 
@@ -67,8 +78,15 @@ fn constant_fold(program: &mut IrProgram) {
     // targets wrap at runtime; `fold_expr` already folds with wrapping ops).
     // Mutable `var` top-lets never substitute, and only Int/Float/Bool
     // literals do (a substituted String would clone its allocation site).
-    let mut env: std::collections::HashMap<VarId, IrExprKind> =
-        std::collections::HashMap::new();
+    // The env is PER REGION: the main program and each module are PRIVATE
+    // VarId numbering regions (each numbers from 0), so one shared env let a
+    // module's folded literal stand in for a SAME-NUMBERED unrelated var in a
+    // later region — ceangal's scroll `BOUNCING = 2` / `FRICTION = 0.035`
+    // replaced view's `_transparent` / `_white` Color refs inside `_default`
+    // (a silent wrong value; order-dependent on module link order). A
+    // cross-module top-let read goes through a synthesized ref in the
+    // READER's own region resolved by NAME later, never by a raw foreign id,
+    // so per-region scoping loses no legitimate #809 chain.
     let mut fold_top_let = |tl: &mut IrTopLet,
                             env: &mut std::collections::HashMap<VarId, IrExprKind>| {
         subst_const_vars(&mut tl.value, env);
@@ -84,10 +102,14 @@ fn constant_fold(program: &mut IrProgram) {
             env.insert(tl.var, tl.value.kind.clone());
         }
     };
+    let mut env: std::collections::HashMap<VarId, IrExprKind> =
+        std::collections::HashMap::new();
     for tl in &mut program.top_lets {
         fold_top_let(tl, &mut env);
     }
     for m in &mut program.modules {
+        let mut env: std::collections::HashMap<VarId, IrExprKind> =
+            std::collections::HashMap::new();
         for tl in &mut m.top_lets {
             fold_top_let(tl, &mut env);
         }
@@ -97,8 +119,9 @@ fn constant_fold(program: &mut IrProgram) {
 /// Replace every `Var` reference to an already-folded earlier top-let with its
 /// literal, bottom-up through `map_children` (the wildcard-free traversal
 /// primitive — a hand-rolled match would silently drop future node kinds).
-/// VarIds are globally unique post-lowering, so no shadowing can capture a
-/// substitution.
+/// VarIds are unique WITHIN a region (the caller scopes `env` per region —
+/// main vs each module — because regions each number from 0), so no
+/// shadowing can capture a substitution.
 fn subst_const_vars(slot: &mut IrExpr, env: &std::collections::HashMap<VarId, IrExprKind>) {
     if env.is_empty() {
         return;
@@ -272,7 +295,14 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
     match &expr.kind {
         // ── Arithmetic / string / bool on literals ──
         IrExprKind::BinOp { op, left, right } => {
-            let folded_kind = try_fold_binop(*op, &left.kind, &right.kind);
+            // The RESULT type anchors the unsigned lane, not the operand's:
+            // a literal operand carries the checker's default `Int` even when
+            // the binding is `UInt64`, so keying on `left.ty` silently missed
+            // the propagated-literal fold (#872 — `u64::MAX / 2` folded signed
+            // to 0 on the native path, where propagation runs before this).
+            let arith_ty =
+                if matches!(expr.ty, almide_lang::types::Ty::UInt64) { &expr.ty } else { &left.ty };
+            let folded_kind = try_fold_binop(*op, &left.kind, &right.kind, arith_ty);
             folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span, def_id: None })
         }
 
@@ -296,9 +326,55 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
 }
 
 /// Fold a `BinOp` whose operands are both literals of the same kind, per-operator.
-fn try_fold_binop(op: BinOp, left: &IrExprKind, right: &IrExprKind) -> Option<IrExprKind> {
+/// Fold `UInt64`-typed integer BinOps whose operands are BOTH literals, using
+/// the UNSIGNED reading of the i64 slot (#872). Runs after constant
+/// propagation, which is what creates such pairs.
+fn refold_unsigned_lane(program: &mut IrProgram) {
+    struct V;
+    impl almide_ir::IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            almide_ir::visit_mut::walk_expr_mut(self, expr);
+            if !matches!(expr.ty, almide_lang::types::Ty::UInt64) {
+                return;
+            }
+            let IrExprKind::BinOp { op, left, right } = &expr.kind else { return };
+            let (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) =
+                (&left.kind, &right.kind)
+            else {
+                return;
+            };
+            if let Some(k) = try_fold_binop_int(*op, *a, *b, &expr.ty) {
+                expr.kind = k;
+            }
+        }
+    }
+    use almide_ir::IrMutVisitor;
+    for f in &mut program.functions {
+        V.visit_expr_mut(&mut f.body);
+    }
+    for tl in &mut program.top_lets {
+        V.visit_expr_mut(&mut tl.value);
+    }
+    for m in &mut program.modules {
+        for f in &mut m.functions {
+            V.visit_expr_mut(&mut f.body);
+        }
+        for tl in &mut m.top_lets {
+            V.visit_expr_mut(&mut tl.value);
+        }
+    }
+}
+
+fn try_fold_binop(
+    op: BinOp,
+    left: &IrExprKind,
+    right: &IrExprKind,
+    left_ty: &almide_lang::types::Ty,
+) -> Option<IrExprKind> {
     match (left, right) {
-        (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) => try_fold_binop_int(op, *a, *b),
+        (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) => {
+            try_fold_binop_int(op, *a, *b, left_ty)
+        }
         (IrExprKind::LitFloat { value: a }, IrExprKind::LitFloat { value: b }) => try_fold_binop_float(op, *a, *b),
         (IrExprKind::LitStr { value: a }, IrExprKind::LitStr { value: b }) => try_fold_binop_str(op, a, b),
         (IrExprKind::LitBool { value: a }, IrExprKind::LitBool { value: b }) => try_fold_binop_bool(op, *a, *b),
@@ -306,14 +382,63 @@ fn try_fold_binop(op: BinOp, left: &IrExprKind, right: &IrExprKind) -> Option<Ir
     }
 }
 
-fn try_fold_binop_int(op: BinOp, a: i64, b: i64) -> Option<IrExprKind> {
+fn try_fold_binop_int(
+    op: BinOp,
+    a: i64,
+    b: i64,
+    left_ty: &almide_lang::types::Ty,
+) -> Option<IrExprKind> {
+    // The UNSIGNED 64-bit lane (#872): a `UInt64` operand's slot is a u64 BIT
+    // PATTERN, so the fold must divide/remainder unsigned — the signed fold
+    // turned `u64::MAX / 2` into `-1 / 2 = 0` and `u64::MAX % 10` into `-1`,
+    // a compile-time wrong value the runtime lane (`IntOp::DivU`) never sees
+    // because the fold fires first. Add/sub/mul wrap identically in two's
+    // complement, so they need no split.
+    if matches!(left_ty, almide_lang::types::Ty::UInt64) {
+        let (ua, ub) = (a as u64, b as u64);
+        return match op {
+            BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(b) }),
+            BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(b) }),
+            BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(b) }),
+            BinOp::DivInt if ub != 0 => Some(IrExprKind::LitInt { value: (ua / ub) as i64 }),
+            BinOp::ModInt if ub != 0 => Some(IrExprKind::LitInt { value: (ua % ub) as i64 }),
+            BinOp::Lt => Some(IrExprKind::LitBool { value: ua < ub }),
+            BinOp::Lte => Some(IrExprKind::LitBool { value: ua <= ub }),
+            BinOp::Gt => Some(IrExprKind::LitBool { value: ua > ub }),
+            BinOp::Gte => Some(IrExprKind::LitBool { value: ua >= ub }),
+            _ => None,
+        };
+    }
+    let wrap = |v: i64| IrExprKind::LitInt { value: narrow_to_width(v, left_ty) };
     match op {
-        BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(b) }),
-        BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(b) }),
-        BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(b) }),
-        BinOp::DivInt if b != 0 => Some(IrExprKind::LitInt { value: a / b }),
-        BinOp::ModInt if b != 0 => Some(IrExprKind::LitInt { value: a % b }),
+        BinOp::AddInt => Some(wrap(a.wrapping_add(b))),
+        BinOp::SubInt => Some(wrap(a.wrapping_sub(b))),
+        BinOp::MulInt => Some(wrap(a.wrapping_mul(b))),
+        BinOp::DivInt if b != 0 => Some(wrap(a / b)),
+        BinOp::ModInt if b != 0 => Some(wrap(a % b)),
         _ => None,
+    }
+}
+
+/// Wrap a folded value into the two's-complement range of `ty`.
+///
+/// The fold happens at i64 width, but the RESULT is emitted as a literal of the
+/// declared type: `let a: Int8 = 127; let b: Int8 = 1; a + b` folded to `128`
+/// and rendered `128i8`, which rustc rejects outright — a program that `check`
+/// accepted and could not build, while the wasm leg (which never sees a Rust
+/// literal) printed the correct `-128` (#901). The runtime path already wraps
+/// (#889); this is the same rule applied at fold time, so the two agree.
+/// Canonical `Int` is already i64-wide, so it is returned unchanged.
+fn narrow_to_width(v: i64, ty: &almide_lang::types::Ty) -> i64 {
+    use almide_lang::types::Ty;
+    match ty {
+        Ty::Int8 => v as i8 as i64,
+        Ty::Int16 => v as i16 as i64,
+        Ty::Int32 => v as i32 as i64,
+        Ty::UInt8 => v as u8 as i64,
+        Ty::UInt16 => v as u16 as i64,
+        Ty::UInt32 => v as u32 as i64,
+        _ => v,
     }
 }
 

@@ -10,9 +10,112 @@ struct PipelineLayouts {
     global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr>,
     main_globals: HashMap<almide_ir::VarId, almide_lang::types::Ty>,
     main_global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    /// Per-module globals for the MODULE-region lowering: the shared union plus that
+    /// module's own cross-module top-let references, bridged by name (#904). Keyed by
+    /// module name; a module with no such reference is absent and falls back to the
+    /// shared union. Two modules' reference ids can COLLIDE numerically (each region
+    /// numbers from 0), so this must stay per-module — one merged map would let one
+    /// module's `v.ROW` resolve another's unrelated id.
+    module_globals: HashMap<String, (HashMap<almide_ir::VarId, almide_lang::types::Ty>, HashMap<almide_ir::VarId, almide_ir::IrExpr>)>,
+    /// Mangled sibling fn name → owning module name, so the lowering picks that
+    /// module's `module_globals` entry.
+    fn_module: HashMap<String, String>,
     mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
     record_layouts: crate::lower::RecordLayouts,
     variant_layouts: crate::lower::VariantLayouts,
+}
+
+/// Rewrite every occurrence of the mapped VarIds in one region's exprs/stmts.
+/// A mutable module-level var is never REBOUND inside its region's fns (VarIds
+/// are unique within a region), so every occurrence of a mapped id IS the
+/// global — use sites only (`Var`, assign/insert targets); `Bind` binds fresh
+/// locals and is deliberately not remapped.
+struct MutGlobalIdRw<'a> {
+    map: &'a std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+}
+
+impl almide_ir::IrMutVisitor for MutGlobalIdRw<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
+        if let almide_ir::IrExprKind::Var { id } = &mut expr.kind {
+            if let Some(n) = self.map.get(id) {
+                *id = *n;
+            }
+        }
+        almide_ir::visit_mut::walk_expr_mut(self, expr);
+    }
+    fn visit_stmt_mut(&mut self, stmt: &mut almide_ir::IrStmt) {
+        use almide_ir::IrStmtKind as K;
+        let target = match &mut stmt.kind {
+            K::Assign { var, .. } => Some(var),
+            K::IndexAssign { target, .. }
+            | K::MapInsert { target, .. }
+            | K::FieldAssign { target, .. } => Some(target),
+            _ => None,
+        };
+        if let Some(t) = target {
+            if let Some(n) = self.map.get(t) {
+                *t = *n;
+            }
+        }
+        almide_ir::visit_mut::walk_stmt_mut(self, stmt);
+    }
+}
+
+/// Make ALL module-level top-let ids unique ACROSS regions (#881). Every unit
+/// numbers its VarIds from 0 — the main program and each module are PRIVATE
+/// numbering regions — but both the mutable-global slot map AND the shared
+/// globals/global-inits union ([`collect_pipeline_globals`]) are keyed by the
+/// RAW id, so `var cached_scene` (main, VarId 0) and `var _dirty` (a module,
+/// VarId 0) collided and the program walled — and an IMMUTABLE collision was
+/// worse: `let FRICTION = 0.035` (scroll) silently WON another module's
+/// same-numbered toplet in the union ("later module wins"), so that module's
+/// reader materialized 0.035 where a `view.Color` lived (a silent wrong value
+/// whenever the types happened to agree). Remap EVERY module top-let id
+/// (mutable and immutable alike) to fresh ids ABOVE every region's var-table
+/// length (disjoint from every real id by construction), rewriting the
+/// declaration and every use inside that module's own fns and top-let inits —
+/// and EXTEND the module's var table so the new id still indexes the var's
+/// info (the cross-module NAME bridge looks the top-let's name/mutability up
+/// BY INDEX; without the extension the bridge went blind and every
+/// cross-module mutable reference became an unbound var). Cross-module
+/// references resolve BY NAME afterwards (`bridge_cross_module_toplets`), so
+/// they see the remapped ids automatically.
+pub(crate) fn disambiguate_module_global_regions(ir: &mut almide_ir::IrProgram) {
+    let mut next: u32 = std::iter::once(ir.var_table.entries.len())
+        .chain(ir.modules.iter().map(|m| m.var_table.entries.len()))
+        .max()
+        .unwrap_or(0) as u32;
+    for m in &mut ir.modules {
+        let mut map: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
+            std::collections::HashMap::new();
+        for tl in &mut m.top_lets {
+            let old = tl.var;
+            let fresh = almide_ir::VarId(next);
+            next += 1;
+            // Keep the by-index var-table lookup alive for the fresh id: pad
+            // with clones up to the new index (the pad entries are never
+            // indexed — only the fresh id is) and place the var's own info
+            // there. A top-let whose old id had no entry keeps having none.
+            if let Some(info) = m.var_table.entries.get(old.0 as usize).cloned() {
+                while m.var_table.entries.len() < fresh.0 as usize {
+                    m.var_table.entries.push(info.clone());
+                }
+                m.var_table.entries.push(info);
+            }
+            map.insert(old, fresh);
+            tl.var = fresh;
+        }
+        if map.is_empty() {
+            continue;
+        }
+        let mut rw = MutGlobalIdRw { map: &map };
+        for f in &mut m.functions {
+            almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut f.body);
+        }
+        for tl in &mut m.top_lets {
+            almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut tl.value);
+        }
+    }
 }
 
 /// Phase 2: collect top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs
@@ -27,6 +130,7 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
     let (globals, global_inits) = collect_pipeline_globals(ir);
     let (main_globals, main_global_inits, mutable_toplet_aliases) =
         collect_pipeline_main_globals(ir, &globals, &global_inits);
+    let (module_globals, fn_module) = collect_pipeline_module_globals(ir, &globals, &global_inits);
     let record_layouts = collect_pipeline_record_layouts(ir);
     let variant_layouts = collect_pipeline_variant_layouts(ir);
 
@@ -35,10 +139,47 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
         global_inits,
         main_globals,
         main_global_inits,
+        module_globals,
+        fn_module,
         mutable_toplet_aliases,
         record_layouts,
         variant_layouts,
     }
+}
+
+/// Extracted from `collect_pipeline_layouts`: the MODULE-region globals — the shared
+/// union PLUS each module's own `mod.NAME` references bridged by name (see
+/// [`crate::lower::module_region_toplet_bridges`]). A module whose bridge adds nothing
+/// is left out of the map entirely so its fns keep using the shared union verbatim (no
+/// clone, no behavior change). The second return is the mangled-fn-name → module-name
+/// index the sibling lowering uses to pick the right map — the mangling
+/// (`user_module_fn_name`) is the same one `inline_and_classify_cross_module_fns`
+/// applies, and call targets are never renamed after it, so the key is stable.
+#[allow(clippy::type_complexity)]
+fn collect_pipeline_module_globals(
+    ir: &almide_ir::IrProgram,
+    globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) -> (
+    HashMap<String, (HashMap<almide_ir::VarId, almide_lang::types::Ty>, HashMap<almide_ir::VarId, almide_ir::IrExpr>)>,
+    HashMap<String, String>,
+) {
+    let bridges = crate::lower::module_region_toplet_bridges(ir, globals);
+    let mut module_globals = HashMap::new();
+    let mut fn_module = HashMap::new();
+    for m in &ir.modules {
+        let mname = m.name.as_str().to_string();
+        let Some((add_g, add_gi)) = bridges.get(&mname) else { continue };
+        let mut g = globals.clone();
+        let mut gi = global_inits.clone();
+        g.extend(add_g.iter().map(|(k, v)| (*k, v.clone())));
+        gi.extend(add_gi.iter().map(|(k, v)| (*k, v.clone())));
+        for f in &m.functions {
+            fn_module.insert(user_module_fn_name(&mname, f.name.as_str()), mname.clone());
+        }
+        module_globals.insert(mname, (g, gi));
+    }
+    (module_globals, fn_module)
 }
 
 /// Extracted from `collect_pipeline_layouts` (codopsy8 complexity sweep): an UNANNOTATED
@@ -393,243 +534,6 @@ fn bridge_cross_module_derived_methods(
     crate::lower::set_derived_type_owners(derived_owners);
 }
 
-/// Phase 5: MUTABLE module-level `var`s (program + modules) — assign each a
-/// linear-memory storage slot (declaration order = VarId order, the same ordering
-/// `__global_init` uses) and publish the VarId → (slot, Ty) map — reads/assigns then
-/// route through the slot (`Load`/`$__mg_get`/`$__mg_take`+`Store`). A VarId collision
-/// across regions or an over-cap count WALLS the program (honest, never a mis-routed
-/// slot). Returns the sorted mutable top-lets (their declaration order IS the slot
-/// order, needed again by `__mg_init` synthesis below).
-fn assign_mutable_global_slots(
-    ir: &almide_ir::IrProgram,
-    mutable_toplet_aliases: &std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
-) -> Result<Vec<almide_ir::IrTopLet>, LowerError> {
-    let mut mutable_tls: Vec<_> = ir
-        .top_lets
-        .iter()
-        .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
-        .filter(|tl| tl.mutable)
-        .cloned()
-        .collect();
-    mutable_tls.sort_by_key(|tl| tl.var.0);
-    if mutable_tls.len() > 64 {
-        return Err(LowerError::Unsupported(format!(
-            "{} mutable module-level vars exceed the 64-slot global region",
-            mutable_tls.len()
-        )));
-    }
-    {
-        let mut seen = std::collections::HashSet::new();
-        for tl in &mutable_tls {
-            if !seen.insert(tl.var.0) {
-                return Err(LowerError::Unsupported(format!(
-                    "mutable module-level var id collision across regions ({:?})",
-                    tl.var
-                )));
-            }
-        }
-    }
-    let mut mutable_global_map: std::collections::HashMap<u32, (u32, almide_lang::types::Ty)> = mutable_tls
-        .iter()
-        .enumerate()
-        .map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone())))
-        .collect();
-    // #782: alias each main-side synthesized ref onto its module var's slot —
-    // the retired v0 fallback used to absorb these as walls; now `m.count`
-    // reads and assigns route through the SAME storage the owning module uses.
-    for (main_id, mod_id) in mutable_toplet_aliases {
-        if let Some(entry) = mutable_global_map.get(&mod_id.0).cloned() {
-            mutable_global_map.insert(main_id.0, entry);
-        }
-    }
-    crate::lower::set_mutable_global_vars(mutable_global_map);
-    Ok(mutable_tls)
-}
-
-/// Phase 6: repair CROSS-MODULE global refs whose expr type the frontend never
-/// inferred (`v.white` — the ceangal theme class) from the bridged globals maps
-/// BEFORE lowering (or the AllTypesConcrete precondition walls the whole fn), then
-/// SUBSTITUTE every BRIDGED cross-module ref whose module-side init is a pure call
-/// or heap ctor (`v.black` → view's `let black = rgb(0,0,0)`) into the referencing fn
-/// bodies — a lowering-time CallFn there would break the classify `mir == ir` count,
-/// so the call must exist in the IR itself instead (the `inline_pure_call_globals`
-/// discipline, extended across the cross-module bridge). Purity gate: every call
-/// inside the init is a pure stdlib call or a RESOLVED user fn that is itself
-/// call-transitively clean (effect fns were mangled through the resolver and appear
-/// in no pure set). MAIN-region readers take the BIND form (a fn-top `let __g_init =
-/// …` plus a `Var` reference — a call spliced into an arbitrary position, e.g. a
-/// record field, would render as an invalid dst-less bare call); module siblings keep
-/// the raw substitution (their separate VarId region cannot carry a main-region bind
-/// id).
-fn repair_and_substitute_globals(
-    ir: &mut almide_ir::IrProgram,
-    inlined_fns: &mut [almide_ir::IrFunction],
-    module_fn_sibs: &mut [almide_ir::IrFunction],
-    layouts: &PipelineLayouts,
-    all_fns: &[almide_ir::IrFunction],
-) {
-    for f in inlined_fns.iter_mut() {
-        crate::lower::repair_unknown_global_ref_tys(f, &layouts.main_globals);
-        crate::lower::repair_member_field_tys(f, &layouts.record_layouts);
-    }
-    for f in module_fn_sibs.iter_mut() {
-        crate::lower::repair_unknown_global_ref_tys(f, &layouts.globals);
-        crate::lower::repair_member_field_tys(f, &layouts.record_layouts);
-    }
-
-    use almide_ir::visit::{walk_expr, IrVisitor};
-    struct HasImpure<'a> {
-        impure: bool,
-        effectish: &'a std::collections::HashSet<String>,
-    }
-    impl IrVisitor for HasImpure<'_> {
-        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-            match &e.kind {
-                almide_ir::IrExprKind::RuntimeCall { .. } => self.impure = true,
-                almide_ir::IrExprKind::Call { target, .. } => match target {
-                    almide_ir::CallTarget::Module { module, func, .. } => {
-                        if !crate::purity::is_pure(module.as_str(), func.as_str()) {
-                            self.impure = true;
-                        }
-                    }
-                    almide_ir::CallTarget::Named { name } => {
-                        if self.effectish.contains(name.as_str()) {
-                            self.impure = true;
-                        }
-                    }
-                    _ => self.impure = true,
-                },
-                _ => {}
-            }
-            walk_expr(self, e);
-        }
-    }
-    let effectish: std::collections::HashSet<String> = all_fns
-        .iter()
-        .filter(|f| f.is_effect)
-        .map(|f| f.name.as_str().to_string())
-        .collect();
-    let mut subs: Vec<(almide_ir::VarId, almide_ir::IrExpr)> = Vec::new();
-    for (i, info) in ir.var_table.entries.iter().enumerate() {
-        if info.module_origin.is_none() {
-            continue;
-        }
-        let id = almide_ir::VarId(i as u32);
-        let Some(init) = layouts.main_global_inits.get(&id) else { continue };
-        // #782: with the v0 fallback retired, a HEAP toplet whose init is a
-        // CTOR form (tuple/record/variant/some/ok — `let PAIR = ("a", 1)`,
-        // `let MOOD = Happy`) must ALSO substitute: value_or_global's CONST
-        // path only materializes flat literals (LitStr / all-literal List),
-        // and the old "computed init" wall used to fall back to v0. The
-        // bind-form substitution evaluates the pure ctor at fn-top — same
-        // discipline as the pure-call inits below.
-        let heap_ctor_init = crate::lower::is_heap_ty(&init.ty)
-            && !matches!(
-                &init.kind,
-                almide_ir::IrExprKind::LitStr { .. } | almide_ir::IrExprKind::List { .. }
-            );
-        if !crate::lower::expr_contains_call(init) && !heap_ctor_init {
-            continue;
-        }
-        let mut h = HasImpure { impure: false, effectish: &effectish };
-        h.visit_expr(init);
-        if !h.impure {
-            subs.push((id, init.clone()));
-        }
-    }
-    for (id, init) in &subs {
-        // MAIN-region readers take the BIND form instead of the raw expression
-        // substitution: `let __g_init = default_gap(); …Var(__g_init)…` — a call
-        // spliced into an arbitrary position (a record FIELD — the #785 shape)
-        // rendered as a dst-less bare call (invalid wasm), while a call in BIND
-        // position plus a Var reference is the proven single-file form. The bind
-        // goes at the fn-body top (the init is pure, so hoisting its evaluation
-        // is unobservable); fns that never reference the global are untouched.
-        for f in inlined_fns.iter_mut() {
-            fn references(e: &almide_ir::IrExpr, id: almide_ir::VarId) -> bool {
-                use almide_ir::visit::{walk_expr, IrVisitor};
-                struct V(almide_ir::VarId, bool);
-                impl IrVisitor for V {
-                    fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-                        if matches!(&e.kind, almide_ir::IrExprKind::Var { id } if *id == self.0)
-                        {
-                            self.1 = true;
-                        }
-                        walk_expr(self, e);
-                    }
-                }
-                let mut v = V(id, false);
-                v.visit_expr(e);
-                v.1
-            }
-            if !references(&f.body, *id) {
-                continue;
-            }
-            let nv = ir.var_table.alloc(
-                almide_lang::intern::sym("__g_init"),
-                init.ty.clone(),
-                almide_ir::Mutability::Let,
-                None,
-            );
-            let nv_ref = almide_ir::IrExpr {
-                kind: almide_ir::IrExprKind::Var { id: nv },
-                ty: init.ty.clone(),
-                span: None,
-                def_id: None,
-            };
-            f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, &nv_ref);
-            let bind_stmt = almide_ir::IrStmt {
-                kind: almide_ir::IrStmtKind::Bind {
-                    var: nv,
-                    mutability: almide_ir::Mutability::Let,
-                    ty: init.ty.clone(),
-                    value: init.clone(),
-                },
-                span: None,
-            };
-            if let almide_ir::IrExprKind::Block { stmts, .. } = &mut f.body.kind {
-                stmts.insert(0, bind_stmt);
-            } else {
-                // An EXPRESSION-form body (`effect fn main() -> Unit =
-                // println(m.CFG.name)`) has no statement list — wrap it in a
-                // Block so the fn-top bind exists. Without this the
-                // substitution left `Var(__g_init)` UNBOUND (#782, the
-                // record/variant toplet matrix cells).
-                let old_ty = f.body.ty.clone();
-                let old_span = f.body.span.clone();
-                let old = std::mem::replace(
-                    &mut f.body,
-                    almide_ir::IrExpr {
-                        kind: almide_ir::IrExprKind::Unit,
-                        ty: almide_lang::types::Ty::Unit,
-                        span: None,
-                        def_id: None,
-                    },
-                );
-                f.body = almide_ir::IrExpr {
-                    kind: almide_ir::IrExprKind::Block {
-                        stmts: vec![bind_stmt],
-                        expr: Some(Box::new(old)),
-                    },
-                    ty: old_ty,
-                    span: old_span,
-                    def_id: None,
-                };
-            }
-        }
-        // Module siblings keep the raw substitution (their separate VarId
-        // numbering region cannot carry a main-region bind id) — the ceangal
-        // in-module reader class this path has always served.
-        for f in module_fn_sibs.iter_mut() {
-            f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
-        }
-    }
-    if !subs.is_empty() {
-        for f in inlined_fns.iter_mut() {
-            crate::lower::repair_record_literal_field_tys(f);
-        }
-    }
-}
 
 /// Phase 7: lower every non-test MAIN fn to MIR (a fn that walls is silently skipped,
 /// listed to stderr under `verbose`), then lower every linked USER-module sibling the
@@ -640,13 +544,19 @@ fn repair_and_substitute_globals(
 /// the main-region tail-inlining pass) or one that itself walls is silently skipped
 /// (the caller then fails the unlinked-call render wall if it truly needed it — stdlib
 /// modules stay out, self-host-linked below).
+///
+/// `fn_walls` collects EVERY walled fn's own reason by name — not just `main`'s. The
+/// exported-`pub fn` decline one layer up reports the ENCLOSING construct, and without
+/// this map it had no inner cause to name; a reader then saw "the wasm module must carry
+/// its export" for a wall that was really a receiver-shape decline one level down, which
+/// is the exact mis-attribution that cost hours on #904 (#906).
 fn lower_main_and_sibling_fns(
     inlined_fns: &[almide_ir::IrFunction],
     module_fn_sibs: &[almide_ir::IrFunction],
     layouts: &PipelineLayouts,
     total_ir_fn_count: usize,
     verbose: bool,
-    main_wall: &mut Option<String>,
+    fn_walls: &mut std::collections::HashMap<String, String>,
 ) -> Vec<crate::MirFunction> {
     let mut functions = Vec::new();
     let mut walled = Vec::new();
@@ -665,14 +575,13 @@ fn lower_main_and_sibling_fns(
         ) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => {
-                // `main`'s own reason is the one worth reporting: when it walls
-                // there is no `$main`, and the whole module declines. Reporting
-                // only the absence turned every distinct cause into one
-                // unattributable bucket — a third of the fuzzer's wall
-                // histogram (#812).
-                if func.name.as_str() == "main" {
-                    *main_wall = Some(format!("{e:?}"));
-                }
+                // Every walled fn's own reason is worth keeping, `main`'s most of
+                // all: when `main` walls there is no `$main` and the whole module
+                // declines, and reporting only the absence turned every distinct
+                // cause into one unattributable bucket — a third of the fuzzer's
+                // wall histogram (#812). An exported `pub fn` declines the module
+                // the same way, so it reads its reason out of here too (#906).
+                fn_walls.insert(func.name.as_str().to_string(), format!("{e:?}"));
                 walled.push(format!("{}: {e:?}", func.name.as_str()));
             }
         }
@@ -697,14 +606,41 @@ fn lower_main_and_sibling_fns(
         if already.contains(func.name.as_str()) {
             continue;
         }
-        if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
+        // The OWNING module's globals when its cross-module `mod.NAME` references were
+        // bridged (#904), else the shared union. Per-module because two modules' synthesized
+        // reference ids collide numerically — see `collect_pipeline_module_globals`.
+        let (g, gi) = layouts
+            .fn_module
+            .get(func.name.as_str())
+            .and_then(|m| layouts.module_globals.get(m))
+            .map(|(g, gi)| (g, gi))
+            .unwrap_or((&layouts.globals, &layouts.global_inits));
+        match crate::lower::lower_function_all_with_globals(
             func,
-            &layouts.globals,
-            &layouts.global_inits,
+            g,
+            gi,
             &layouts.record_layouts,
             &layouts.variant_layouts,
         ) {
-            functions.extend(mirs);
+            Ok(mirs) => functions.extend(mirs),
+            // A walled module sibling is NOT fatal here — an unreferenced one
+            // simply isn't rendered; a referenced one is caught by the
+            // unlinked-call gate. But it must not wall SILENTLY: the gate's
+            // "no wasm definition" message is undiagnosable without the
+            // sibling's own reason (#881 — eight aliased-signature fns walled
+            // invisibly while their callers rendered).
+            //
+            // Recording the reason is what makes that possible. It used to be
+            // printed only under `verbose`, which the CLI never sets, so every
+            // user-visible occurrence was the bare "no wasm definition" text
+            // with the cause discarded one frame down — the same mis-attribution
+            // #906 fixed for exports and #904 for qualified type names (#943).
+            Err(e) => {
+                fn_walls.insert(func.name.as_str().to_string(), format!("{e:?}"));
+                if verbose {
+                    eprintln!("[v1-wall] module sibling {}: {e:?}", func.name.as_str());
+                }
+            }
         }
     }
     functions

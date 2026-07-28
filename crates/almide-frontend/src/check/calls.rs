@@ -131,6 +131,32 @@ impl Checker {
                 self.lambda_arg_hint = pinned;
                 let aty = self.infer_expr(a);
                 self.lambda_arg_hint = prev_hint;
+                // E025, call-arg edition: an Option/Result CONSTRUCTOR opens a
+                // fresh slot the surrounding context is supposed to pin, and in
+                // ARGUMENT position nothing does. `option.is_none(none)` and
+                // `result.is_err(err("fail"))` both passed `check` and then
+                // failed the build — the first as a rustc `E0282: type
+                // annotations needed` on the generated generic call, the second
+                // as the ConcretizeTypes COMPILER-BUG gate (#899). The
+                // call-RESULT enqueue in `infer_expr` cannot catch them: the
+                // call's own result is a concrete `Bool` and the undecidable
+                // slot lives in the argument.
+                //
+                // Scoped to argument position on purpose. The same constructor
+                // as a MATCH ARM body (`err(e) => err(e)` under an annotated
+                // binding) also keeps a loose slot the checker never pins and
+                // codegen resolves from the sibling arm — the "leave it alone"
+                // case the binding check already carves out.
+                if matches!(
+                    a.kind,
+                    ExprKind::None | ExprKind::Some { .. } | ExprKind::Ok { .. } | ExprKind::Err { .. }
+                ) {
+                    self.deferred_unresolved_binding_checks.push(crate::check::UnresolvedBindingSite {
+                        ty: aty.clone(),
+                        name: None,
+                        span: a.span,
+                    });
+                }
                 // E024, call-arg edition: a bare int literal flowing into a SIZED param must fit the declared width — `neg_one_i8(128)` passed check while native rustc rejected `128i8` (the check-vs-build gap, fuzz seed-20260718 index 92). Recording the param as the literal's context routes it through the post-solve E024 range check (non-integer/generic contexts fall back harmlessly).
                 if let Some(sig) = &call_sig {
                     if let Some((_, pty)) = sig.params.get(i) {
@@ -675,6 +701,6 @@ fn is_clean_fn_name(s: &str) -> bool {
         && !s.ends_with('.')
 }
 
-include!("calls_p2.rs");
+include!("calls_ufcs.rs");
 
 include!("calls_arg.rs");

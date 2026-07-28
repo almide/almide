@@ -28,16 +28,21 @@ fn int_to_int64(n: Int) -> Int = n
 // shape as to_int8 (the result value is exact; the sign interpretation is the caller's).
 fn int_to_uint64(n: Int) -> Int = n
 fn int_from_int64(n: Int64) -> Int = n
-fn int_from_uint64(n: UInt64) -> Int = n
+fn int_from_uint64(n: Int) -> Int = n
 
 // Widening sized -> Int: v1 stores every scalar as a (sign/zero-extended) i64, so the
 // widening is the identity — a sized value already IS the i64 v0 produces with `n as i64`.
-fn int_from_int8(n: Int8) -> Int = n
-fn int_from_int16(n: Int16) -> Int = n
-fn int_from_int32(n: Int32) -> Int = n
-fn int_from_uint8(n: UInt8) -> Int = n
-fn int_from_uint16(n: UInt16) -> Int = n
-fn int_from_uint32(n: UInt32) -> Int = n
+// The PARAMETER is spelled `Int` for the same reason `int_to_uint8` above returns `Int`:
+// this file types LANES, not the user-facing signature (which lives on the `@intrinsic`
+// declarations in int.almd and still reads `(UInt8) -> Int`). Spelling it `UInt8` made the
+// body a sized VALUE in a canonical return slot — the shape `check` now rejects in user
+// code, since native rustc does (#880); the lane spelling says what v1 actually does.
+fn int_from_int8(n: Int) -> Int = n
+fn int_from_int16(n: Int) -> Int = n
+fn int_from_int32(n: Int) -> Int = n
+fn int_from_uint8(n: Int) -> Int = n
+fn int_from_uint16(n: Int) -> Int = n
+fn int_from_uint32(n: Int) -> Int = n
 
 // Unsigned narrowing: the low N bits, ZERO-extended (v0's `n as u8/u16/u32`). The result
 // is in [0, 2^N) so it is non-negative and its decimal print matches v0. Same band masks

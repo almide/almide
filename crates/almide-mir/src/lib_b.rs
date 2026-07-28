@@ -376,6 +376,18 @@ pub enum IntOp {
     /// LOGICAL (zero-filling) shift right (`i64.shr_u`) — for unsigned/bit-width ops like
     /// int.rotate_* which shift the value as a u64. The shift amount is wasm-masked to 0..63.
     ShrU,
+    // UNSIGNED 64-bit lane (#872): a `UInt64` operand's i64 slot carries the u64
+    // BIT PATTERN; these ops interpret it unsigned (`i64.div_u`/`lt_u` on wasm,
+    // `as u64` casts on native/Rust). Selected by the LOWERING from the operand
+    // type — the signed ops above stay the default for every other integer.
+    /// Unsigned division — traps/aborts on divide-by-zero like `Div` (no MIN÷-1 case).
+    DivU,
+    /// Unsigned remainder — traps/aborts on divide-by-zero like `Mod`.
+    ModU,
+    LtU,
+    LeU,
+    GtU,
+    GeU,
 }
 
 /// A runtime function the MIR can call. An enum (not a string) so the renderer

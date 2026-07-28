@@ -220,229 +220,406 @@ struct ScanState<'a> {
     all_covs: &'a mut Vec<BTreeMap<usize, usize>>,
 }
 
+/// The per-member scan workspace: the value tables `chase_elem` resolves
+/// against, plus everything one function's scan accumulates for itself (the
+/// chase audit trail and the construction coverage) — as opposed to the
+/// family-wide `ScanState` it also extends.
+///
+/// Extracted from `scan_region_function` (codopsy r2, #852): these six values
+/// were the one-body scan's plain locals; the per-arm deciders below share
+/// them through this struct instead. (The old body also re-borrowed the
+/// `ScanState` fields into plain locals to keep its `*n_elems = Some(n)` /
+/// `*max_k` spellings; the deciders now read `st.` paths directly, so that
+/// re-borrow is retired.)
+struct MemberScan<'f> {
+    /// The family member under scan.
+    f: &'f MirFunction,
+    /// value → defining-op index (from `fn_tables`).
+    def: BTreeMap<ValueId, usize>,
+    /// value → const-int (from `fn_tables`).
+    consts: BTreeMap<ValueId, i64>,
+    /// Every op a chase traversed — exempt from the escape audit.
+    chain_ops: BTreeSet<usize>,
+    /// Every value a chase traversed — nothing outside the chains may use one.
+    chain_vals: BTreeSet<ValueId>,
+    /// dst → per-slot construction-store count (must end exactly-once each).
+    site_cov: BTreeMap<ValueId, BTreeMap<usize, usize>>,
+}
+
 /// Scan one function of a clone family.
 ///
 /// `None` rejects the whole family: the layouts must agree across it, so a
 /// single member that cannot be compacted disqualifies the rest.
+///
+/// Router only (codopsy r2, #852): the block-source pass, the four memory-op
+/// arms, and the escape audit each moved verbatim into the named deciders
+/// below. The op-kind dispatch keeps the ORIGINAL arm order — the two
+/// wrong-width `Load`/`Store` rejections must stay behind their 8-byte
+/// siblings.
 fn scan_region_function(
     prog: &MirProgram,
     fi: usize,
     st: &mut ScanState<'_>,
 ) -> Option<()> {
-    let ScanState { n_elems, tag, slot_map, rewrites, max_k, all_covs } = st;
-    // Re-borrow through the struct's references so the moved body, which was
-    // written against plain locals, keeps its `*n_elems = Some(n)` / `*max_k`
-    // spellings.
-    let (n_elems, tag, mut slot_map, mut rewrites, max_k, mut all_covs) =
-        (&mut **n_elems, &mut **tag, &mut **slot_map, &mut **rewrites, &mut **max_k, &mut **all_covs);
     let f = &prog.functions[fi];
     let (def, consts) = fn_tables(f);
-    let mut chain_ops: BTreeSet<usize> = BTreeSet::new();
-    let mut chain_vals: BTreeSet<ValueId> = BTreeSet::new();
-    // dst → per-slot construction-store count (must end exactly-once each).
-    let mut site_cov: BTreeMap<ValueId, BTreeMap<usize, usize>> = BTreeMap::new();
+    let mut ms = MemberScan {
+        f,
+        def,
+        consts,
+        chain_ops: BTreeSet::new(),
+        chain_vals: BTreeSet::new(),
+        site_cov: BTreeMap::new(),
+    };
 
-    // Block sources first: exactly the DynList-const shape, nothing else.
-    for (i, op) in f.ops.iter().enumerate() {
-        match op {
-            Op::Alloc { dst, init: Init::DynList { len }, .. } => {
-                let &n = consts.get(len)?;
-                let n = usize::try_from(n).ok().filter(|n| (1..=16).contains(n))?;
-                match n_elems {
-                    Some(prev) if *prev != n => return None,
-                    _ => *n_elems = Some(n),
-                }
-                site_cov.insert(*dst, BTreeMap::new());
-                rewrites.insert((fi, i), Rw::AllocC { dst: *dst });
-            }
-            Op::Alloc { .. } | Op::ListLit { .. } | Op::ListSetScalar { .. } => return None,
-            Op::Prim { kind: PrimKind::ElemAddr, .. } => return None,
-            _ => {}
-        }
-    }
+    scan_block_sources(&mut ms, st, fi)?;
 
     for (i, op) in f.ops.iter().enumerate() {
         match op {
             Op::ListGetScalar { dst, list, idx } => {
-                let &k = consts.get(idx)?;
-                let k = usize::try_from(k).ok()?;
-                if k == 0 {
-                    rewrites.insert((fi, i), Rw::TagRead { dst: *dst, base: *list });
-                } else {
-                    *max_k = (*max_k).max(k);
-                    unify_slot(&mut slot_map, k, false)?;
-                    rewrites.insert((fi, i), Rw::LoadS { dst: *dst, base: *list, k });
-                }
+                scan_list_get_scalar(&ms, st, (fi, i), *dst, *list, *idx)?;
             }
             Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } => {
-                let (base, k) =
-                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                if k == 0 {
-                    return None; // a tag is never a handle
-                }
-                *max_k = (*max_k).max(k);
-                unify_slot(&mut slot_map, k, true)?;
-                rewrites.insert((fi, i), Rw::LoadH { dst: *d, base, k });
+                scan_handle_load(&mut ms, st, (fi, i), *d, args)?;
             }
             Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(d), args } => {
-                let (base, k) =
-                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                if k == 0 {
-                    rewrites.insert((fi, i), Rw::TagRead { dst: *d, base });
-                } else {
-                    *max_k = (*max_k).max(k);
-                    unify_slot(&mut slot_map, k, false)?;
-                    rewrites.insert((fi, i), Rw::LoadS { dst: *d, base, k });
-                }
+                scan_scalar_load(&mut ms, st, (fi, i), *d, args)?;
             }
             Op::Prim { kind: PrimKind::Load { .. }, .. } => return None,
             Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } => {
-                let (base, k) =
-                    chase_elem(f, &def, &consts, args[0], &mut chain_ops, &mut chain_vals)?;
-                // Construction only: the root must be this family's own
-                // fresh Alloc (no writes into loaded/param blocks).
-                let cov = site_cov.get_mut(&base)?;
-                *cov.entry(k).or_insert(0) += 1;
-                if k == 0 {
-                    let &t = consts.get(&args[1])?;
-                    match tag {
-                        Some(prev) if *prev != t => return None,
-                        _ => *tag = Some(t),
-                    }
-                    rewrites.insert((fi, i), Rw::Delete);
-                } else if let Some(&hd) = def.get(&args[1]) {
-                    *max_k = (*max_k).max(k);
-                    if let Op::Prim { kind: PrimKind::Handle, args: hargs, .. } = &f.ops[hd] {
-                        // A handle bridged to i64 for the old 8-byte slot:
-                        // store the raw i32 pointer instead.
-                        chain_ops.insert(hd);
-                        chain_vals.insert(args[1]);
-                        unify_slot(&mut slot_map, k, true)?;
-                        rewrites
-                            .insert((fi, i), Rw::StoreH { base, val: hargs[0], k });
-                    } else {
-                        unify_slot(&mut slot_map, k, false)?;
-                        rewrites.insert((fi, i), Rw::StoreS { base, val: args[1], k });
-                    }
-                } else {
-                    *max_k = (*max_k).max(k);
-                    unify_slot(&mut slot_map, k, false)?;
-                    rewrites.insert((fi, i), Rw::StoreS { base, val: args[1], k });
-                }
+                scan_construction_store(&mut ms, st, (fi, i), args)?;
             }
             Op::Prim { kind: PrimKind::Store { .. }, .. } => return None,
             _ => {}
         }
     }
 
-    // Escape audit: a chased address (or bridged handle-int) may only be
-    // consumed by its own chain or by an op this pass rewrites away.
-    let mut vals: Vec<ValueId> = Vec::new();
+    audit_chain_escapes(&ms, st, fi)?;
+    st.all_covs.extend(ms.site_cov.into_values());
+    Some(())
+}
+
+/// Block sources first: exactly the DynList-const shape, nothing else.
+///
+/// Extracted from `scan_region_function` (codopsy r2, #852): decides the
+/// family's element count from each dynamic `Alloc` site (all sites must
+/// agree, 1..=16), opens the site's construction-coverage map, and plans the
+/// `RegionAllocC` rewrite; any other block source — another `Alloc` init, a
+/// surviving `ListLit`, `ListSetScalar`, or `ElemAddr` — rejects the family
+/// (soundness §1/§3). Verbatim.
+fn scan_block_sources(ms: &mut MemberScan<'_>, st: &mut ScanState<'_>, fi: usize) -> Option<()> {
+    let f = ms.f;
     for (i, op) in f.ops.iter().enumerate() {
-        if chain_ops.contains(&i) || rewrites.contains_key(&(fi, i)) {
+        match op {
+            Op::Alloc { dst, init: Init::DynList { len }, .. } => {
+                let &n = ms.consts.get(len)?;
+                let n = usize::try_from(n).ok().filter(|n| (1..=16).contains(n))?;
+                match st.n_elems {
+                    Some(prev) if *prev != n => return None,
+                    _ => *st.n_elems = Some(n),
+                }
+                ms.site_cov.insert(*dst, BTreeMap::new());
+                st.rewrites.insert((fi, i), Rw::AllocC { dst: *dst });
+            }
+            Op::Alloc { .. } | Op::ListLit { .. } | Op::ListSetScalar { .. } => return None,
+            Op::Prim { kind: PrimKind::ElemAddr, .. } => return None,
+            _ => {}
+        }
+    }
+    Some(())
+}
+
+/// Extracted from `scan_region_function` (codopsy r2, #852): the
+/// `ListGetScalar` arm — a const-index read is either the tag (`k == 0`,
+/// planned as the `RegionTagSel` chain) or a field load (`k ≥ 1`, unified as
+/// a scalar slot). A non-const index rejects the family. Verbatim.
+fn scan_list_get_scalar(
+    ms: &MemberScan<'_>,
+    st: &mut ScanState<'_>,
+    key: (usize, usize),
+    dst: ValueId,
+    list: ValueId,
+    idx: ValueId,
+) -> Option<()> {
+    let &k = ms.consts.get(&idx)?;
+    let k = usize::try_from(k).ok()?;
+    if k == 0 {
+        st.rewrites.insert(key, Rw::TagRead { dst, base: list });
+    } else {
+        *st.max_k = (*st.max_k).max(k);
+        unify_slot(st.slot_map, k, false)?;
+        st.rewrites.insert(key, Rw::LoadS { dst, base: list, k });
+    }
+    Some(())
+}
+
+/// Extracted from `scan_region_function` (codopsy r2, #852): the `LoadHandle`
+/// arm — chase the address to `(base, k)`, reject a tag-slot hit, unify slot
+/// `k` as a handle, and plan the `RegionLoadH` rewrite. Verbatim.
+fn scan_handle_load(
+    ms: &mut MemberScan<'_>,
+    st: &mut ScanState<'_>,
+    key: (usize, usize),
+    d: ValueId,
+    args: &[ValueId],
+) -> Option<()> {
+    let (base, k) =
+        chase_elem(ms.f, &ms.def, &ms.consts, args[0], &mut ms.chain_ops, &mut ms.chain_vals)?;
+    if k == 0 {
+        return None; // a tag is never a handle
+    }
+    *st.max_k = (*st.max_k).max(k);
+    unify_slot(st.slot_map, k, true)?;
+    st.rewrites.insert(key, Rw::LoadH { dst: d, base, k });
+    Some(())
+}
+
+/// Extracted from `scan_region_function` (codopsy r2, #852): the 8-byte `Load`
+/// arm — chase the address to `(base, k)`; elem 0 is a tag read, any other
+/// slot unifies as a scalar and plans the `RegionLoadS` rewrite. Verbatim.
+fn scan_scalar_load(
+    ms: &mut MemberScan<'_>,
+    st: &mut ScanState<'_>,
+    key: (usize, usize),
+    d: ValueId,
+    args: &[ValueId],
+) -> Option<()> {
+    let (base, k) =
+        chase_elem(ms.f, &ms.def, &ms.consts, args[0], &mut ms.chain_ops, &mut ms.chain_vals)?;
+    if k == 0 {
+        st.rewrites.insert(key, Rw::TagRead { dst: d, base });
+    } else {
+        *st.max_k = (*st.max_k).max(k);
+        unify_slot(st.slot_map, k, false)?;
+        st.rewrites.insert(key, Rw::LoadS { dst: d, base, k });
+    }
+    Some(())
+}
+
+/// Extracted from `scan_region_function` (codopsy r2, #852): the 8-byte
+/// `Store` arm — a construction store into the family's own fresh block. A
+/// tag-slot store (`k == 0`) must carry the family's one const tag and is
+/// planned away (`Rw::Delete`); a field store unifies the slot as handle or
+/// scalar depending on whether the stored value is a `Handle` bridge.
+/// Verbatim.
+fn scan_construction_store(
+    ms: &mut MemberScan<'_>,
+    st: &mut ScanState<'_>,
+    key: (usize, usize),
+    args: &[ValueId],
+) -> Option<()> {
+    let (base, k) =
+        chase_elem(ms.f, &ms.def, &ms.consts, args[0], &mut ms.chain_ops, &mut ms.chain_vals)?;
+    // Construction only: the root must be this family's own
+    // fresh Alloc (no writes into loaded/param blocks).
+    let cov = ms.site_cov.get_mut(&base)?;
+    *cov.entry(k).or_insert(0) += 1;
+    if k == 0 {
+        let &t = ms.consts.get(&args[1])?;
+        match st.tag {
+            Some(prev) if *prev != t => return None,
+            _ => *st.tag = Some(t),
+        }
+        st.rewrites.insert(key, Rw::Delete);
+    } else if let Some(&hd) = ms.def.get(&args[1]) {
+        *st.max_k = (*st.max_k).max(k);
+        if let Op::Prim { kind: PrimKind::Handle, args: hargs, .. } = &ms.f.ops[hd] {
+            // A handle bridged to i64 for the old 8-byte slot:
+            // store the raw i32 pointer instead.
+            ms.chain_ops.insert(hd);
+            ms.chain_vals.insert(args[1]);
+            unify_slot(st.slot_map, k, true)?;
+            st.rewrites
+                .insert(key, Rw::StoreH { base, val: hargs[0], k });
+        } else {
+            unify_slot(st.slot_map, k, false)?;
+            st.rewrites.insert(key, Rw::StoreS { base, val: args[1], k });
+        }
+    } else {
+        *st.max_k = (*st.max_k).max(k);
+        unify_slot(st.slot_map, k, false)?;
+        st.rewrites.insert(key, Rw::StoreS { base, val: args[1], k });
+    }
+    Some(())
+}
+
+/// Escape audit: a chased address (or bridged handle-int) may only be
+/// consumed by its own chain or by an op this pass rewrites away.
+///
+/// Extracted from `scan_region_function` (codopsy r2, #852): rejects the
+/// family (soundness §3) when any op outside the chains — or the function
+/// result — consumes a chained value. Verbatim.
+fn audit_chain_escapes(ms: &MemberScan<'_>, st: &ScanState<'_>, fi: usize) -> Option<()> {
+    let mut vals: Vec<ValueId> = Vec::new();
+    for (i, op) in ms.f.ops.iter().enumerate() {
+        if ms.chain_ops.contains(&i) || st.rewrites.contains_key(&(fi, i)) {
             continue;
         }
         vals.clear();
         op_values(op, &mut vals);
         let dst = defined_value(op);
-        if vals.iter().any(|v| Some(*v) != dst && chain_vals.contains(v)) {
+        if vals.iter().any(|v| Some(*v) != dst && ms.chain_vals.contains(v)) {
             return None;
         }
     }
-    if let Some(r) = f.ret {
-        if chain_vals.contains(&r) {
+    if let Some(r) = ms.f.ret {
+        if ms.chain_vals.contains(&r) {
             return None;
         }
     }
-    all_covs.extend(site_cov.into_values());
     Some(())
 }
 
+/// Everything one planned rewrite needs in order to become ops.
+///
+/// The first three fields are the family's compact layout (the packed field
+/// offsets, the block size, the one const tag); `shapes` are the family's
+/// singleton shapes and `sing` the singleton params of the member currently
+/// being rewritten. Bundling them is what keeps `compact_replacement` and
+/// `tag_select_chain` off a seven-value argument list (the `MemberScan`
+/// precedent above).
+struct CompactSite<'a> {
+    /// Packed byte offset of each FIELD slot (elem 1..n), from `field_offsets`.
+    offs: &'a [u32],
+    /// The compact block size in bytes, from `field_offsets`.
+    bytes: u32,
+    /// The family's one const tag — the dynamic-block answer of a tag read.
+    tag: i64,
+    /// The family's singleton shapes, in the order pass B2 appended them.
+    shapes: &'a [Vec<i64>],
+    /// This member's singleton params, positionally aligned with `shapes`.
+    sing: &'a [ValueId],
+}
+
+/// Rewrite one clone family's planned ops to the compact layout.
+///
+/// Router only (codopsy round-3 sweep, #852): the fresh-id watermark scan, the
+/// singleton param slice, the per-`Rw` op construction and the tag-select chain
+/// each moved verbatim into the named helpers below. The planned rewrites are
+/// still walked in REVERSE op order, so a splice never shifts an index that is
+/// still pending, and `max_id` still threads across the whole member so every
+/// tag chain in it mints distinct ids.
 fn apply(prog: &mut MirProgram, idxs: &[usize], plan: &Plan, shapes: &[Vec<i64>]) {
     let (offs, bytes) = field_offsets(&plan.slots);
     for &fi in idxs {
         let f = &mut prog.functions[fi];
         let m = shapes.len();
-        // Pass B2 appended the singleton params last, in shape order.
-        let sing: Vec<ValueId> =
-            f.params[f.params.len() - m..].iter().map(|p| p.value).collect();
-        let mut max_id: u32 = 0;
-        let mut vals: Vec<ValueId> = Vec::new();
-        for op in &f.ops {
-            vals.clear();
-            op_values(op, &mut vals);
-            for v in &vals {
-                max_id = max_id.max(v.0);
-            }
-        }
-        for p in &f.params {
-            max_id = max_id.max(p.value.0);
-        }
+        let sing = trailing_singleton_params(f, m);
+        let mut max_id: u32 = max_value_id(f);
 
         let items: Vec<(usize, Rw)> = plan
             .rewrites
             .range((fi, 0)..=(fi, usize::MAX))
             .map(|((_, i), rw)| (*i, rw.clone()))
             .collect();
+        let site = CompactSite { offs: &offs, bytes, tag: plan.tag, shapes, sing: &sing };
         for (i, rw) in items.into_iter().rev() {
-            let repl: Vec<Op> = match rw {
-                Rw::Delete => vec![],
-                Rw::AllocC { dst } => vec![Op::Prim {
-                    kind: PrimKind::RegionAllocC { bytes, zero: false },
-                    dst: Some(dst),
-                    args: vec![],
-                }],
-                Rw::StoreH { base, val, k } => vec![Op::Prim {
-                    kind: PrimKind::RegionStoreH { off: offs[k - 1] },
-                    dst: None,
-                    args: vec![base, val],
-                }],
-                Rw::StoreS { base, val, k } => vec![Op::Prim {
-                    kind: PrimKind::RegionStoreS { off: offs[k - 1] },
-                    dst: None,
-                    args: vec![base, val],
-                }],
-                Rw::LoadH { dst, base, k } => vec![Op::Prim {
-                    kind: PrimKind::RegionLoadH { off: offs[k - 1] },
-                    dst: Some(dst),
-                    args: vec![base],
-                }],
-                Rw::LoadS { dst, base, k } => vec![Op::Prim {
-                    kind: PrimKind::RegionLoadS { off: offs[k - 1] },
-                    dst: Some(dst),
-                    args: vec![base],
-                }],
-                Rw::TagRead { dst, base } => {
-                    if m == 0 {
-                        vec![Op::ConstInt { dst, value: plan.tag }]
-                    } else {
-                        // dst = (base==s0) ? tag0 : ((base==s1) ? tag1 : dyn)
-                        let mut seq = Vec::with_capacity(m + 1);
-                        max_id += 1;
-                        let mut cur = ValueId(max_id);
-                        seq.push(Op::ConstInt { dst: cur, value: plan.tag });
-                        for (j, s) in shapes.iter().enumerate().rev() {
-                            let d = if j == 0 {
-                                dst
-                            } else {
-                                max_id += 1;
-                                ValueId(max_id)
-                            };
-                            seq.push(Op::Prim {
-                                kind: PrimKind::RegionTagSel { tag: s[0] },
-                                dst: Some(d),
-                                args: vec![base, sing[j], cur],
-                            });
-                            cur = d;
-                        }
-                        seq
-                    }
-                }
-            };
+            let repl: Vec<Op> = compact_replacement(&site, rw, &mut max_id);
             f.ops.splice(i..=i, repl);
         }
         sweep_dead(f);
     }
+}
+
+/// Extracted verbatim from `apply` (codopsy round-3 sweep, #852): the member's
+/// own singleton parameter values, positionally aligned with the family's
+/// shape vector.
+fn trailing_singleton_params(f: &MirFunction, m: usize) -> Vec<ValueId> {
+    // Pass B2 appended the singleton params last, in shape order.
+    f.params[f.params.len() - m..].iter().map(|p| p.value).collect()
+}
+
+/// Extracted verbatim from `apply` (codopsy round-3 sweep, #852): the highest
+/// `ValueId` the function mentions, across its ops and its params — the
+/// watermark the tag-select chain mints fresh ids above.
+fn max_value_id(f: &MirFunction) -> u32 {
+    let mut max_id: u32 = 0;
+    let mut vals: Vec<ValueId> = Vec::new();
+    for op in &f.ops {
+        vals.clear();
+        op_values(op, &mut vals);
+        for v in &vals {
+            max_id = max_id.max(v.0);
+        }
+    }
+    for p in &f.params {
+        max_id = max_id.max(p.value.0);
+    }
+    max_id
+}
+
+/// Extracted verbatim from `apply` (codopsy round-3 sweep, #852): the ops one
+/// planned rewrite expands to. Arm order and every emitted op are unchanged;
+/// `max_id` is threaded through so the tag chain keeps handing out fresh ids in
+/// the same sequence as when this match sat inline.
+fn compact_replacement(site: &CompactSite<'_>, rw: Rw, max_id: &mut u32) -> Vec<Op> {
+    match rw {
+        Rw::Delete => vec![],
+        Rw::AllocC { dst } => vec![Op::Prim {
+            kind: PrimKind::RegionAllocC { bytes: site.bytes, zero: false },
+            dst: Some(dst),
+            args: vec![],
+        }],
+        Rw::StoreH { base, val, k } => vec![Op::Prim {
+            kind: PrimKind::RegionStoreH { off: site.offs[k - 1] },
+            dst: None,
+            args: vec![base, val],
+        }],
+        Rw::StoreS { base, val, k } => vec![Op::Prim {
+            kind: PrimKind::RegionStoreS { off: site.offs[k - 1] },
+            dst: None,
+            args: vec![base, val],
+        }],
+        Rw::LoadH { dst, base, k } => vec![Op::Prim {
+            kind: PrimKind::RegionLoadH { off: site.offs[k - 1] },
+            dst: Some(dst),
+            args: vec![base],
+        }],
+        Rw::LoadS { dst, base, k } => vec![Op::Prim {
+            kind: PrimKind::RegionLoadS { off: site.offs[k - 1] },
+            dst: Some(dst),
+            args: vec![base],
+        }],
+        Rw::TagRead { dst, base } => tag_select_chain(site, dst, base, max_id),
+    }
+}
+
+/// Extracted verbatim from `apply` (codopsy round-3 sweep, #852): an elem-0
+/// read becomes the `RegionTagSel` chain over the family's singletons. With no
+/// singletons the family's one const tag is the whole answer. Otherwise the
+/// chain is built innermost-first — the dynamic-block tag is the default and
+/// each shape wraps it in reverse shape order, so the LAST op emitted is the
+/// shape-0 test and it is the one that defines `dst`.
+fn tag_select_chain(
+    site: &CompactSite<'_>,
+    dst: ValueId,
+    base: ValueId,
+    max_id: &mut u32,
+) -> Vec<Op> {
+    let m = site.shapes.len();
+    if m == 0 {
+        return vec![Op::ConstInt { dst, value: site.tag }];
+    }
+    // dst = (base==s0) ? tag0 : ((base==s1) ? tag1 : dyn)
+    let mut seq = Vec::with_capacity(m + 1);
+    *max_id += 1;
+    let mut cur = ValueId(*max_id);
+    seq.push(Op::ConstInt { dst: cur, value: site.tag });
+    for (j, s) in site.shapes.iter().enumerate().rev() {
+        let d = if j == 0 {
+            dst
+        } else {
+            *max_id += 1;
+            ValueId(*max_id)
+        };
+        seq.push(Op::Prim {
+            kind: PrimKind::RegionTagSel { tag: s[0] },
+            dst: Some(d),
+            args: vec![base, site.sing[j], cur],
+        });
+        cur = d;
+    }
+    seq
 }
 
 /// Remove pure value ops (const / add-chain / Handle bridge) the rewrite left
@@ -477,6 +654,12 @@ fn sweep_dead(f: &mut MirFunction) {
 /// compact twins. The singleton dsts are exactly the trailing `m` Handle args
 /// of every `__rgn_` call into the family (pass B1 built them for those calls
 /// alone), so the scan is positional, not nominal.
+///
+/// Router only (codopsy round-3 sweep, #852): the call scan and the in-place
+/// `ListLit` rewrite moved verbatim into the two named helpers below. The
+/// per-host order is unchanged — collect the dsts over the WHOLE body first,
+/// then rewrite, then sweep, so a `ListLit` that precedes its `__rgn_` call is
+/// still caught.
 fn compact_host_singletons(
     prog: &mut MirProgram,
     hosts: &BTreeSet<usize>,
@@ -489,31 +672,48 @@ fn compact_host_singletons(
     }
     for &hf in hosts {
         let f = &mut prog.functions[hf];
-        let mut sdsts: BTreeSet<ValueId> = BTreeSet::new();
-        for op in &f.ops {
-            if let Op::CallFn { name, args, .. } = op {
-                let Some(orig) = name.strip_prefix("__rgn_") else { continue };
-                if names.contains(orig) && args.len() >= m {
-                    for a in &args[args.len() - m..] {
-                        if let crate::CallArg::Handle(v) = a {
-                            sdsts.insert(*v);
-                        }
+        let sdsts = host_singleton_dsts(f, names, m);
+        replace_singleton_list_lits(f, &sdsts, bytes);
+        sweep_dead(f);
+    }
+}
+
+/// Extracted verbatim from `compact_host_singletons` (codopsy round-3 sweep,
+/// #852): the host's singleton dsts — the trailing `m` `Handle` args of every
+/// `__rgn_` call whose ORIGINAL name belongs to the family. A call with fewer
+/// than `m` args, or a non-`Handle` arg in the trailing window, contributes
+/// nothing; the scan stays positional, not nominal.
+fn host_singleton_dsts(f: &MirFunction, names: &BTreeSet<String>, m: usize) -> BTreeSet<ValueId> {
+    let mut sdsts: BTreeSet<ValueId> = BTreeSet::new();
+    for op in &f.ops {
+        if let Op::CallFn { name, args, .. } = op {
+            let Some(orig) = name.strip_prefix("__rgn_") else { continue };
+            if names.contains(orig) && args.len() >= m {
+                for a in &args[args.len() - m..] {
+                    if let crate::CallArg::Handle(v) = a {
+                        sdsts.insert(*v);
                     }
                 }
             }
         }
-        for op in f.ops.iter_mut() {
-            if let Op::ListLit { dst, .. } = op {
-                if sdsts.contains(dst) {
-                    *op = Op::Prim {
-                        kind: PrimKind::RegionAllocC { bytes, zero: true },
-                        dst: Some(*dst),
-                        args: vec![],
-                    };
-                }
+    }
+    sdsts
+}
+
+/// Extracted verbatim from `compact_host_singletons` (codopsy round-3 sweep,
+/// #852): rewrites every `ListLit` whose dst is a singleton into its
+/// zero-filled compact twin, in place, leaving every other op untouched.
+fn replace_singleton_list_lits(f: &mut MirFunction, sdsts: &BTreeSet<ValueId>, bytes: u32) {
+    for op in f.ops.iter_mut() {
+        if let Op::ListLit { dst, .. } = op {
+            if sdsts.contains(dst) {
+                *op = Op::Prim {
+                    kind: PrimKind::RegionAllocC { bytes, zero: true },
+                    dst: Some(*dst),
+                    args: vec![],
+                };
             }
         }
-        sweep_dead(f);
     }
 }
 

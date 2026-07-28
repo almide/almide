@@ -16,8 +16,11 @@ From Stdlib Require Import String.
 (* A name-totality witness: the defined names and the used names. *)
 Record NameWitness := { defined : list nat; used : list nat }.
 
-(* THE CHECKER: every used name is defined. *)
-Definition check_names (w : NameWitness) : bool := subset_check (defined w) (used w).
+(* THE CHECKER: every used name is defined. Routed through the sorted fast
+   path (Subset.v, arc v1-join-completeness C3): the compiler emits sorted
+   witnesses, decided in Θ(n+m) by the merge; an unsorted witness falls back
+   to the original membership check — sound either way, no format change. *)
+Definition check_names (w : NameWitness) : bool := subset_check_fast (defined w) (used w).
 
 (* THE PROPERTY: no dangling reference. *)
 Definition no_dangling (w : NameWitness) : Prop := subset_prop (defined w) (used w).
@@ -25,7 +28,7 @@ Definition no_dangling (w : NameWitness) : Prop := subset_prop (defined w) (used
 (* SOUNDNESS: acceptance guarantees totality (the shared law, named). *)
 Theorem check_names_sound :
   forall w, check_names w = true -> no_dangling w.
-Proof. intros w. apply subset_check_sound. Qed.
+Proof. intros w. apply subset_check_fast_sound. Qed.
 
 (* non-vacuous: accepts resolved witnesses, rejects a dangling reference. *)
 Example accepts_resolved :

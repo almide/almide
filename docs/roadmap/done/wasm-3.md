@@ -13,14 +13,21 @@ Almide targets WebAssembly 3.0 — the first language to fully leverage the new 
 
 ## v1: Tail Calls + Multi-Memory (v0.12) ✅
 
-### Tail Calls — Done
+### Tail Calls — Done (re-ported to almide-mir, #864)
 
-`return_call` / `return_call_indirect` for all tail-position calls.
+`return_call` for function-tail calls; self tail-recursion is a TCO loop.
 
-- `TailCallMarkPass` marks tail-position calls in the IR
-- WASM emitter emits `return_call` instead of `call` for marked nodes
-- Applies to ALL tail calls (not just self-recursive) — mutual recursion included
-- Replaces loop-based `TailCallOptPass` in WASM pipeline
+- v0.12 shipped `TailCallMarkPass` + `return_call`/`return_call_indirect` in the
+  LEGACY almide-codegen emitter. When almide-mir became the default renderer the
+  port was missed — mutual tail recursion compiled to plain `call`s and
+  overflowed (#864, found fact-checking this very claim).
+- almide-mir now classifies a FUNCTION-TAIL `CallFn` at render time
+  (`tail_call_indexes`, render_wasm_b.rs): the call's result flows unmodified
+  through only if-merges to the function's return, with no drops or effects
+  after — and emits `return_call`. Contract C-178,
+  `spec/wasm_cross/mutual_tail_recursion.almd` (1,000,000-deep chains).
+- Self tail-recursion takes the upstream TCO loop rewrite (stack-free without
+  the proposal). `return_call_indirect` for closure tails is not yet ported.
 - **Runtime support**: Chrome 112, Firefox 121, Safari 18.2, Wasmtime 22, Wasmer 7.1 — universal
 
 ### Multi-Memory — Done

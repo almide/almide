@@ -19,6 +19,36 @@ pub(super) fn mangle_suffix(bindings: &HashMap<String, Ty>) -> String {
     entries.iter().map(|(_, ty)| mangle_ty(ty)).collect::<Vec<_>>().join("_")
 }
 
+/// The type component of a MODULE-level generic's mono key.
+///
+/// Discovery and the call-site rewriter must agree on this string exactly — it
+/// is the third component of the `(module, fn, suffix)` key that decides which
+/// call sites share one specialization — so both sides call this one function
+/// rather than each spelling the computation out.
+///
+/// Every bounded type variable contributes a component. An earlier form built
+/// the suffix with `filter_map(ty_to_name)`, and `ty_to_name` answers `None`
+/// for every compound type: a tuple, an `Applied` (so `Result[..]`, `List[..]`,
+/// `Map[..]`), a function type. Those bindings vanished from the key, so two
+/// call sites that differed ONLY in a compound binding collided on one
+/// specialization, and the winner's signature — closure parameter included —
+/// was emitted for both. `result.filter` at `Result[(Bool, String), String]`
+/// and at `Result[Result[Float, String], String]` both keyed `String`, giving
+/// one `result_filter__String` and a native build failure that `almide check`
+/// had already passed (#905). `mangle_ty` is total and injective, so no binding
+/// can drop out; a bounded variable with no binding at all gets an explicit
+/// marker rather than silently contributing nothing.
+pub(super) fn module_mono_suffix(bounds: &[BoundedParam], bindings: &HashMap<String, Ty>) -> String {
+    let mut names: Vec<String> =
+        bounds.iter().map(|b| b.type_var.clone()).collect::<std::collections::HashSet<_>>()
+            .into_iter().collect();
+    names.sort();
+    names.iter()
+        .map(|n| bindings.get(n).map_or_else(|| "NA".to_string(), mangle_ty))
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
 pub(super) fn mangle_ty(ty: &Ty) -> String {
     if let Some(name) = mangle_scalar_ty_name(ty) {
         return name.to_string();
@@ -31,7 +61,7 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
                 format!("{}_{}", name, arg_strs.join("_"))
             }
         }
-        Ty::Record { fields } => {
+        Ty::Record { fields } if !fields.is_empty() => {
             let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
             names.sort();
             names.join("_")
@@ -44,7 +74,41 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
                 format!("{}_{}", name, arg_strs.join("_"))
             }
         }
-        _ => "Unknown".into(),
+        // A TUPLE and a FN type carry their components in the key. Falling to the
+        // `Unknown` catch-all below made every compound-payload instantiation share
+        // ONE key, so two calls at different types collapsed into a single
+        // monomorphized function: `result.filter` at `Result[(Bool, String), String]`
+        // and at `Result[Result[Float, String], String]` both keyed
+        // `Result_Unknown_String`, and the survivor's whole signature — closure
+        // parameter included — was emitted for both call sites (#905). Two SCALAR
+        // instantiations never collided, because scalars have real names; it took a
+        // compound payload to expose the hole.
+        Ty::Tuple(elems) => {
+            let parts: Vec<String> = elems.iter().map(mangle_ty).collect();
+            format!("Tup{}_{}", elems.len(), parts.join("_"))
+        }
+        Ty::Fn { params, ret } => {
+            let ps: Vec<String> = params.iter().map(mangle_ty).collect();
+            format!("Fn{}_{}_to_{}", params.len(), ps.join("_"), mangle_ty(ret))
+        }
+        // A mono key's ONE invariant is that two DIFFERENT types never share it: the
+        // key decides whether two call sites reuse one specialization, so a collision
+        // emits a single function for both and the second call site's whole signature
+        // — closure parameter included — is wrong. Every arm above yields a distinct
+        // name for a distinct type; anything that reaches here (an empty structural
+        // record, an unhandled constructor) used to collapse to a shared literal
+        // (`"Unknown"`, or `""` for a field-less record — which is how
+        // `result.filter` at `Result[(Bool, String), String]` and at
+        // `Result[Result[Float, String], String]` both keyed `_String` and became one
+        // function, #905). A structural digest keeps the invariant without pretending
+        // to name the type: it is stable within a build, and distinct debug forms give
+        // distinct keys.
+        other => {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            format!("{other:?}").hash(&mut h);
+            format!("Ty{:x}", h.finish())
+        }
     }
 }
 
@@ -110,4 +174,79 @@ pub(super) fn has_typevar(ty: &Ty) -> bool {
         matches!(t, Ty::TypeVar(_))
             || matches!(t, Ty::Named(n, args) if args.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use almide_lang::types::TypeConstructorId;
+
+    fn bounds(vars: &[&str]) -> Vec<BoundedParam> {
+        vars.iter()
+            .enumerate()
+            .map(|(i, v)| BoundedParam { param_idx: i, type_var: (*v).to_string() })
+            .collect()
+    }
+
+    fn bind(pairs: &[(&str, Ty)]) -> HashMap<String, Ty> {
+        pairs.iter().map(|(k, t)| ((*k).to_string(), t.clone())).collect()
+    }
+
+    fn result_of(payload: Ty) -> Ty {
+        Ty::Applied(TypeConstructorId::Result, vec![payload, Ty::String])
+    }
+
+    /// The two `result.filter` call sites from #905. They differ ONLY in the
+    /// payload bound to `A`, and both payloads are compound — the exact pair
+    /// the old `filter_map(ty_to_name)` suffix collapsed onto one key.
+    #[test]
+    fn compound_bindings_do_not_share_a_key() {
+        let b = bounds(&["A", "E"]);
+        let tuple_site = module_mono_suffix(
+            &b,
+            &bind(&[("A", Ty::Tuple(vec![Ty::Bool, Ty::String])), ("E", Ty::String)]),
+        );
+        let nested_site = module_mono_suffix(
+            &b,
+            &bind(&[("A", result_of(Ty::Float)), ("E", Ty::String)]),
+        );
+        assert_ne!(tuple_site, nested_site, "two payload types shared one specialization");
+        for s in [&tuple_site, &nested_site] {
+            assert!(!s.starts_with('_'), "a binding dropped out of the key: {s:?}");
+        }
+    }
+
+    /// A function type is a binding like any other: `list.map`-shaped generics
+    /// bind a `Ty::Fn`, and two different function types must not collide.
+    #[test]
+    fn function_bindings_do_not_share_a_key() {
+        let b = bounds(&["F"]);
+        let to_bool = module_mono_suffix(
+            &b,
+            &bind(&[("F", Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) })]),
+        );
+        let to_string = module_mono_suffix(
+            &b,
+            &bind(&[("F", Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::String) })]),
+        );
+        assert_ne!(to_bool, to_string);
+    }
+
+    /// Scalar bindings keep the names they always had, so this fix does not
+    /// churn the symbols of every existing specialization.
+    #[test]
+    fn scalar_bindings_keep_their_plain_names() {
+        assert_eq!(
+            module_mono_suffix(&bounds(&["A", "E"]), &bind(&[("A", Ty::Int), ("E", Ty::String)])),
+            "Int_String"
+        );
+    }
+
+    /// A bounded variable with no binding gets an explicit marker: dropping it
+    /// silently is the same injectivity hole, one level up.
+    #[test]
+    fn an_unbound_variable_still_occupies_its_slot() {
+        let s = module_mono_suffix(&bounds(&["A", "E"]), &bind(&[("E", Ty::String)]));
+        assert_eq!(s, "NA_String");
+    }
 }

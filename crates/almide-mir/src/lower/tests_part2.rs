@@ -299,6 +299,12 @@
     fn lit_str(s: &str) -> IrExpr {
         ir_expr(IrExprKind::LitStr { value: s.into() }, Ty::String)
     }
+    fn bind_stmt(var: VarId, ty: Ty, value: IrExpr) -> IrStmt {
+        IrStmt {
+            kind: IrStmtKind::Bind { var, mutability: almide_ir::Mutability::Let, ty, value },
+            span: None,
+        }
+    }
 
     #[test]
     fn let_bound_heap_result_if_lowers_via_tail_duplication_and_is_balanced() {
@@ -530,4 +536,79 @@
             mir.ops
         );
         assert_eq!(verify_ownership(&mir), Ok(()), "every path drop-balanced — no UAF, no leak");
+    }
+
+    // ── the in-place accumulator fold's LAST-READER gate (arc v1-join-completeness) ──
+    //
+    // `try_lower_line_cond_acc` rebinds the else-arm variable's SLOT, which is sound
+    // only when the bind doing so is that variable's last reader — the source-level
+    // shadow rebind. Nothing checked it; the precondition held only because
+    // `desugar_let_bound_heap_branch` intercepts such binds first, and the J1
+    // join-admission work re-routes them past that interception. These pin the
+    // decision the gate makes, at the level the gate makes it (the lowering is
+    // statement-at-a-time and cannot see later reads, so the count comes from a
+    // whole-body pre-pass).
+
+    #[test]
+    fn read_counts_see_a_shadow_rebind_as_its_own_last_reader() {
+        // `{ let a0 = ""; let a1 = if c then a0 + "x" else a0; a1 }`
+        // a0 is read exactly twice, and BOTH reads are inside a1's bind value —
+        // so that bind is a0's last reader and the in-place fold is sound.
+        let a0 = VarId(0);
+        let a1 = VarId(1);
+        let a0_ref = || ir_expr(IrExprKind::Var { id: a0 }, Ty::String);
+        let value = iff_faithful(
+            ir_expr(
+                IrExprKind::BinOp {
+                    op: almide_ir::BinOp::ConcatStr,
+                    left: Box::new(a0_ref()),
+                    right: Box::new(lit_str("x")),
+                },
+                Ty::String,
+            ),
+            a0_ref(),
+            Ty::String,
+        );
+        let body = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![
+                    bind_stmt(a0, Ty::String, lit_str("")),
+                    bind_stmt(a1, Ty::String, value.clone()),
+                ],
+                expr: Some(Box::new(ir_expr(IrExprKind::Var { id: a1 }, Ty::String))),
+            },
+            Ty::String,
+        );
+        let counts = collect_var_read_counts(&body);
+        assert_eq!(counts.get(&a0).copied().unwrap_or(0), 2);
+        assert_eq!(collect_var_read_counts(&value).get(&a0).copied().unwrap_or(0), 2, "both reads are inside the bind value");
+    }
+
+    #[test]
+    fn read_counts_expose_a_non_shadow_binder_that_is_read_later() {
+        // `{ let b = ""; let j = if c then "A" else b; b }` — the clobber shape.
+        // b is read TWICE in the body but only ONCE inside j's bind value, so that
+        // bind is NOT b's last reader: folding would rebind a slot still read after.
+        let b = VarId(0);
+        let j = VarId(1);
+        let b_ref = || ir_expr(IrExprKind::Var { id: b }, Ty::String);
+        let value = iff_faithful(lit_str("A"), b_ref(), Ty::String);
+        let body = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![
+                    bind_stmt(b, Ty::String, lit_str("")),
+                    bind_stmt(j, Ty::String, value.clone()),
+                ],
+                expr: Some(Box::new(b_ref())),
+            },
+            Ty::String,
+        );
+        let counts = collect_var_read_counts(&body);
+        assert_eq!(counts.get(&b).copied().unwrap_or(0), 2);
+        assert_eq!(collect_var_read_counts(&value).get(&b).copied().unwrap_or(0), 1);
+        assert_ne!(
+            counts.get(&b).copied().unwrap_or(0),
+            collect_var_read_counts(&value).get(&b).copied().unwrap_or(0),
+            "the gate must decline: a later read of the else-arm var survives this bind"
+        );
     }

@@ -1,6 +1,6 @@
 // math_atan — SELF-HOSTED math.atan, a FAITHFUL transcription of
 // runtime/rs/src/libm_p4.rs::atan (vendored libm 0.2.16 = FreeBSD s_atan.c).
-// v0 uses the SAME vendored fn on native and the same algorithm in wasm
+// v0 used the SAME vendored fn on native and the same algorithm in wasm
 // (emit_wasm/rt_numeric.rs::compile_math_atan), so a transcription with
 // identical f64 ops in identical order is bit-identical across the whole
 // input range.

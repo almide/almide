@@ -48,6 +48,22 @@ fn synthesize_and_link_runtime_fns(
     verbose: bool,
 ) -> Result<(), LowerError> {
     if !mutable_tls.is_empty() {
+        synthesize_mutable_global_init(functions, mutable_tls, layouts)?;
+    }
+    link_self_host_runtime_to_fixpoint(functions, layouts, verbose)?;
+    rewrite_impl_names_to_call_names(functions);
+    link_print_str_runtime(functions, layouts)?;
+    Ok(())
+}
+
+/// The `__mg_init` synthesis: every mutable module-level `var`'s initializer as one
+/// assignment body, lowered with the main region's globals. Extracted verbatim from
+/// [`synthesize_and_link_runtime_fns`] (codopsy round-3 sweep, #852).
+fn synthesize_mutable_global_init(
+    functions: &mut Vec<crate::MirFunction>,
+    mutable_tls: &[almide_ir::IrTopLet],
+    layouts: &PipelineLayouts,
+) -> Result<(), LowerError> {
         let stmts: Vec<almide_ir::IrStmt> = mutable_tls
             .iter()
             .map(|tl| almide_ir::IrStmt {
@@ -94,14 +110,19 @@ fn synthesize_and_link_runtime_fns(
                 )))
             }
         }
-    }
+    Ok(())
+}
 
-    // Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an entry is
-    // called but not defined, renaming its impl fn to the call name. A linked impl may call ANOTHER
-    // registry entry, so iterate to a FIXPOINT.
-    loop {
-        let before = functions.len();
-        for (rt_source, entries) in crate::render_wasm::self_host_runtime() {
+/// Whether ANY function calls something this registry entry defines. Beyond the plain
+/// call-name match, two op families force their helper source in without naming a
+/// registered call: a `Value` drop renders `(call $__drop_value …)` from value_core,
+/// and a `Map[String, <flat heap>]` drop renders `(call $__drop_map_hval …)` from
+/// map_hval. Extracted verbatim from [`synthesize_and_link_runtime_fns`] (codopsy
+/// round-3 sweep, #852).
+fn runtime_entry_is_called(
+    entries: &[(&str, &str)],
+    functions: &[crate::MirFunction],
+) -> bool {
             let mut any_called = entries.iter().any(|(_, call)| {
                 functions.iter().any(|f| {
                     f.ops.iter().any(|op| matches!(op, crate::Op::CallFn { name, .. } if name == call))
@@ -136,6 +157,22 @@ fn synthesize_and_link_runtime_fns(
                             crate::Op::DropVariant { ty, .. } if ty == "map_hval"))
                     });
             }
+    any_called
+}
+
+/// Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an
+/// entry is called but not defined, renaming its impl fn to the call name. A linked impl
+/// may call ANOTHER registry entry, so this iterates to a FIXPOINT. Extracted verbatim
+/// from [`synthesize_and_link_runtime_fns`] (codopsy round-3 sweep, #852).
+fn link_self_host_runtime_to_fixpoint(
+    functions: &mut Vec<crate::MirFunction>,
+    layouts: &PipelineLayouts,
+    verbose: bool,
+) -> Result<(), LowerError> {
+    loop {
+        let before = functions.len();
+        for (rt_source, entries) in crate::render_wasm::self_host_runtime() {
+            let any_called = runtime_entry_is_called(entries, functions);
             let any_defined =
                 entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
             if any_called && !any_defined {
@@ -152,9 +189,14 @@ fn synthesize_and_link_runtime_fns(
             break;
         }
     }
+    Ok(())
+}
 
-    // A self-hosted runtime fn may call ANOTHER registered impl by its IMPL name, but the auto-link
-    // RENAMED that def to its call_name. Rewrite those call sites to the call_name.
+/// A self-hosted runtime fn may call ANOTHER registered impl by its IMPL name, but the
+/// auto-link RENAMED that def to its call_name. Rewrite those call sites to the
+/// call_name. Extracted verbatim from [`synthesize_and_link_runtime_fns`] (codopsy
+/// round-3 sweep, #852).
+fn rewrite_impl_names_to_call_names(functions: &mut [crate::MirFunction]) {
     let impl_to_call: std::collections::HashMap<&str, &str> = crate::render_wasm::self_host_runtime()
         .iter()
         .flat_map(|(_, es)| es.iter().map(|(i, c)| (*i, *c)))
@@ -168,8 +210,15 @@ fn synthesize_and_link_runtime_fns(
             }
         }
     }
+}
 
-    // Auto-link the self-hosted runtime `print_str` (`println` → `PrintStr` → `(call $print_str)`).
+/// Auto-link the self-hosted runtime `print_str` (`println` → `PrintStr` → `(call
+/// $print_str)`). Extracted verbatim from [`synthesize_and_link_runtime_fns`] (codopsy
+/// round-3 sweep, #852).
+fn link_print_str_runtime(
+    functions: &mut Vec<crate::MirFunction>,
+    layouts: &PipelineLayouts,
+) -> Result<(), LowerError> {
     if !functions.iter().any(|f| f.name == "print_str") {
         let rt = source_to_ir(include_str!("../../../stdlib/print_str.almd"))?;
         for f in &rt.functions {
@@ -181,10 +230,26 @@ fn synthesize_and_link_runtime_fns(
     Ok(())
 }
 
+
 fn try_render_wasm_source_impl_rest(
     ir: &mut almide_ir::IrProgram,
     verbose: bool,
 ) -> Result<String, LowerError> {
+    // This is where MIR lowering runs, so this is where STRICT value mode has to
+    // still be live. Asserting it here — rather than trusting the caller to hold
+    // the guard long enough — is the structural half of the fix: when the mode was
+    // a process-global that the IR phase set and never reset, lowering inherited it
+    // by leak, and scoping that flag to a guard silently moved the boundary so every
+    // deferred `Op::Const` ZERO rendered as an executable 0 (nightly fuzz: wasm
+    // printed 0 where native printed 100). Nothing in the types said the guard had
+    // to outlive the IR phase; this says it. It cannot fire on the permissive
+    // caps-counting path, which never reaches this function.
+    assert!(
+        crate::lower::strict_values(),
+        "wasm render reached MIR lowering with STRICT value mode off — a deferred \
+         Const-0 would render as an executable 0. The mode must be held for the \
+         WHOLE render, not just the IR phase (see try_render_wasm_source_impl)."
+    );
     let layouts = collect_pipeline_layouts(ir);
 
     let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
@@ -193,19 +258,27 @@ fn try_render_wasm_source_impl_rest(
     bridge_cross_module_derived_methods(ir, &mut inlined_fns, &mut module_fn_sibs);
 
     let mutable_tls = assign_mutable_global_slots(ir, &layouts.mutable_toplet_aliases)?;
+    crate::trace::trace("ALMIDE_MG_DEBUG", || {
+        format!(
+            "[mg] mutable_tls={:?} aliases={:?}",
+            mutable_tls.iter().map(|tl| tl.var).collect::<Vec<_>>(),
+            layouts.mutable_toplet_aliases,
+        )
+    });
     let mutable_global_count = mutable_tls.len() as u32;
 
     repair_and_substitute_globals(ir, &mut inlined_fns, &mut module_fn_sibs, &layouts, &all_fns);
 
-    let mut main_wall: Option<String> = None;
+    let mut fn_walls: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut functions = lower_main_and_sibling_fns(
         &inlined_fns,
         &module_fn_sibs,
         &layouts,
         ir.functions.len(),
         verbose,
-        &mut main_wall,
+        &mut fn_walls,
     );
+    let main_wall = fn_walls.get("main").cloned();
 
     // Self-append windows (`x = x + [e]`, incl. the `list.push` desugar) →
     // the amortized-O(1) `__list_append1` (self-hosted in list_concat.almd —
@@ -376,10 +449,24 @@ fn try_render_wasm_source_impl_rest(
                 };
                 exports.push((export_name, n.to_string(), param_floats, ret_float));
             } else {
-                return Err(LowerError::Unsupported(format!(
-                    "exported `pub fn {n}` is outside the MIR-lowering subset (the wasm module \
-                     must carry its export)"
-                )));
+                // Name the CAUSE, not just the enclosing construct. The bare
+                // "must carry its export" text described the CONSEQUENCE while the
+                // real decline sat one level down in the fn body, so every
+                // reconstruction of the reported shape compiled and the reader
+                // burned the search on the export machinery — the same
+                // mis-attribution class as #904, reported as #906. `main` has
+                // carried its inner reason since #812; an export now does too.
+                return Err(LowerError::Unsupported(match fn_walls.get(n) {
+                    Some(reason) => format!(
+                        "exported `pub fn {n}` is outside the MIR-lowering subset \
+                         (the wasm module must carry its export): {reason}"
+                    ),
+                    None => format!(
+                        "exported `pub fn {n}` is outside the MIR-lowering subset (the wasm \
+                         module must carry its export; no per-function wall was recorded — \
+                         it was dropped before lowering)"
+                    ),
+                }));
             }
         }
     }
@@ -400,6 +487,40 @@ fn try_render_wasm_source_impl_rest(
     // Any UNLINKED stdlib/runtime call would render a dangling `(call $name)` (invalid wasm) — the
     // renderer rejects it cleanly. Returns the WAT on success.
     try_render_wasm_program(&MirProgram { functions, exports, mutable_global_count })
+        .map_err(|e| attribute_unlinked_calls(e, &fn_walls))
+}
+
+/// Turn the unlinked-call gate's name list into the reasons those names are
+/// missing.
+///
+/// The gate can only report that a definition is absent. When the callee is a
+/// module sibling that WALLED during lowering, its own reason was recorded and
+/// is the actual diagnosis — without it the message names a mangled symbol
+/// (`almide_rt_lib_write_many`) and says to "add the callee to the self-host
+/// registry", which is advice for a stdlib gap and actively misleading for a
+/// user module that is sitting right there in the package (#943).
+fn attribute_unlinked_calls(
+    e: LowerError,
+    fn_walls: &std::collections::HashMap<String, String>,
+) -> LowerError {
+    let LowerError::Unsupported(msg) = &e else { return e };
+    let Some(rest) = msg.strip_prefix("unlinked stdlib/runtime call(s) with no wasm definition: ")
+    else {
+        return e;
+    };
+    let names: Vec<&str> = rest.split(" — ").next().unwrap_or("").split(", ").collect();
+    let attributed: Vec<String> = names
+        .iter()
+        .filter_map(|n| fn_walls.get(*n).map(|r| format!("`{n}` walled while lowering: {r}")))
+        .collect();
+    if attributed.is_empty() {
+        return e;
+    }
+    LowerError::Unsupported(format!(
+        "unlinked call(s) with no wasm definition — the callee is present in the package but \
+         did not survive lowering: {}",
+        attributed.join("; ")
+    ))
 }
 
 /// NATIVE leg of the trust spine (#764, rung 1): lower `.almd` source through the
@@ -411,7 +532,7 @@ fn try_render_wasm_source_impl_rest(
 /// Debug probe: dump the lowered MIR ops of every non-test fn (walls listed
 /// per fn). Used by examples/probe_native.rs during rung development.
 pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
-    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     let globals = std::collections::HashMap::new();
     let global_inits = std::collections::HashMap::new();
@@ -441,7 +562,7 @@ pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
 }
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
-    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
@@ -671,5 +792,112 @@ fn main() -> Unit = {
             result.is_err(),
             "a source with a dropped top-level statement must wall, not silently compile"
         );
+    }
+
+    #[test]
+    fn a_module_siblings_parameter_is_not_the_consumers_top_let() {
+        // #943: `cow_inplace_receiver` consulted `self.globals` BEFORE resolving the
+        // receiver locally, inverting the precedence `value_or_global` documents (a
+        // function-local — parameter included — is in `value_of`; only a MISS can be
+        // a global). The two are not in one numbering space: a module sibling lowers
+        // against whichever globals map its region resolves to while its own VarIds
+        // are numbered independently, so `VarId(0)` was this fn's first PARAMETER and
+        // the consumer's first top-let at once. The parameter was reported as an
+        // "IMMUTABLE module-level `let`", the sibling was dropped, and — because a
+        // dropped sibling is not fatal — the only thing the user saw was the caller's
+        // "unlinked call ... no wasm definition". ONE unrelated `let` in the consumer
+        // was the whole trigger; without it the same program built.
+        let lib = r#"
+pub fn write_many(m: Bytes, o: Int, v: Float) -> Unit = {
+  var i = 0
+  while i < 16 {
+    bytes.set_f32_le(m, o + i * 4, v + int.to_float(i))
+    i = i + 1
+  }
+}
+"#;
+        let consumer = r#"
+import self.lib as lib
+
+let UNRELATED = 1
+
+var g = bytes.new(256)
+
+@export(wasm, "u")
+fn u(v: Float) -> Unit = lib.write_many(g, 0, v)
+"#;
+        let tokens = almide_lang::lexer::Lexer::tokenize(lib);
+        let prog = almide_lang::parser::Parser::new(tokens).parse().expect("sibling parses");
+        let mods = vec![("lib".to_string(), prog, false)];
+        let out = try_render_wasm_source_library(consumer, &mods, false);
+        assert!(
+            out.is_ok(),
+            "a sibling writing through its own Bytes PARAMETER must link even when the \
+             consumer has a top-let occupying the same VarId: {out:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_immutable_top_let_receiver_still_walls() {
+        // The other side of the precedence fix: resolving locally first must not
+        // disarm the #906 diagnostic. A genuine module-level `let` buffer written in
+        // place has no storage slot, so the write would vanish — it must still decline,
+        // and still name the fix.
+        let source = r#"
+let g = bytes.new(64)
+
+@export(wasm, "u")
+fn u(v: Float) -> Unit = bytes.set_f32_le(g, 0, v)
+"#;
+        match try_render_wasm_source_library(source, &[], false) {
+            Err(LowerError::Unsupported(r)) => assert!(
+                r.contains("IMMUTABLE module-level") && r.contains("Declare the buffer `var`"),
+                "the immutable-top-let decline must survive and keep naming the fix, got: {r}"
+            ),
+            other => panic!("expected the immutable-top-let wall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_scalar_if_arm_admits_a_global_write_but_the_linearization_still_walls() {
+        // C-188 / #907: a SCALAR `if` arm runs under real IfThen/Else/EndIf markers —
+        // exactly one arm executes — so an in-place mutable-global write inside the
+        // ordinary early-return guard shape is a real conditional effect and must
+        // lower. `lower_scalar_arm` raised only `in_frame`, so C-187's modeled-frame
+        // fence misfired, the scalar-if rolled back, and the whole fn fell to the
+        // both-arms linearization wall naming the CONDITION as unresolvable (nendo's
+        // load_vrm_data — the cond had lowered fine; the arm's fence was the
+        // decliner). Needs the full pipeline: the mutable-global storage slots are
+        // assigned here, not in the render_wasm test feeder.
+        let guard = r#"
+var g = bytes.new(4)
+fn f(data: Bytes) -> Int = {
+  if bytes.len(data) < 12 then 0
+  else {
+    bytes.set_i32_le(g, 0, 7)
+    1
+  }
+}
+fn main() -> Unit = {
+  println(int.to_string(f(bytes.new(16))))
+  println(int.to_string(bytes.read_i32_le(g, 0)))
+}
+"#;
+        let ok = try_render_wasm_source(guard, &[], false);
+        assert!(
+            ok.is_ok(),
+            "the guard-shaped global write must lower (real markers, one arm runs): {:?}",
+            ok.err()
+        );
+        // The OTHER direction — a global write inside a genuinely LINEARIZED (both
+        // arms run) frame must keep walling — holds structurally rather than by a
+        // source-level pin: `lower_branch_arm` raises only `in_frame`, never
+        // `unit_arm_depth`, so any write reaching it still trips the fence. A source
+        // pin was attempted and abandoned: every natural call-free-armed shape
+        // (closure-param cond, `?? 0` MapAccess cond, effect-fn cond, nested-list
+        // eq cond) now real-branches and correctly ADMITS the write — the
+        // linearization is only reachable through conds with no executable lowering,
+        // which the fuzz corpus exercises (its call-bearing-arm walls), not stable
+        // hand-written source.
     }
 }

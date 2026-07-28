@@ -84,6 +84,37 @@ impl LowerCtx {
             self.value_of.insert(var, dst);
             return Ok(());
         }
+        if self.try_lower_bind_scalar_literal(var, value) {
+            return Ok(());
+        }
+        if self.try_lower_bind_scalar_operator_or_prim(var, value) {
+            return Ok(());
+        }
+        // A scalar `if`/`match` VALUE (`let step = if c then 0 else 1`) EXECUTES — only
+        // the taken arm runs — via the if-marker machinery; a non-literal `match` or a
+        // non-scalar subject falls through to the deferred `Const`.
+        if self.try_lower_bind_scalar_if_value(var, ty, value) {
+            return Ok(());
+        }
+        if self.try_lower_bind_scalar_match(var, ty, value)? {
+            return Ok(());
+        }
+        if self.try_lower_bind_scalar_unwrap_or(var, value)? {
+            return Ok(());
+        }
+        if self.try_lower_bind_scalar_var_alias(var, value) {
+            return Ok(());
+        }
+        if self.try_lower_bind_scalar_projection(var, value) {
+            return Ok(());
+        }
+        self.lower_bind_scalar_deferred_const(var, value)
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether an Int/Float/Bool LITERAL binds to its real materialized scalar value.
+    /// `true` means `var` is bound and the caller returns `Ok(())` immediately.
+    fn try_lower_bind_scalar_literal(&mut self, var: VarId, value: &IrExpr) -> bool {
         // An INT literal carries its real value (`ConstInt` → `(i64.const v)`),
         // the scalar-value foundation; other scalars stay the deferred `Const`. A FLOAT
         // literal carries its f64 BITS the same way (the float-floor render reinterprets).
@@ -95,9 +126,17 @@ impl LowerCtx {
         {
             if let Some(dst) = self.lower_scalar_value(value) {
                 self.value_of.insert(var, dst);
-                return Ok(());
+                return true;
             }
         }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether a BinOp/UnOp/prim-floor RuntimeCall computes inside the executable scalar
+    /// subset (rolling `ops` back to the entry mark when it does not). `true` means `var`
+    /// is bound and the caller returns `Ok(())` immediately.
+    fn try_lower_bind_scalar_operator_or_prim(&mut self, var: VarId, value: &IrExpr) -> bool {
         // A scalar Int Add/Sub/Mul computes its real value (IntBinOp), and a
         // scalar prim-floor call (`let n = prim.load32(a)`) becomes an Op::Prim —
         // both via lower_scalar_value; outside the subset it rolls back to `Const`.
@@ -111,116 +150,216 @@ impl LowerCtx {
             let mark = self.ops.len();
             if let Some(dst) = self.lower_scalar_value(value) {
                 self.value_of.insert(var, dst);
-                return Ok(());
+                return true;
             }
             self.ops.truncate(mark);
         }
-        // A scalar `if`/`match` VALUE (`let step = if c then 0 else 1`) EXECUTES — only
-        // the taken arm runs — via the if-marker machinery; a non-literal `match` or a
-        // non-scalar subject falls through to the deferred `Const`.
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether an `if`-VALUE runs through the if-marker machinery. `true` means `var` is
+    /// bound and the caller returns `Ok(())` immediately.
+    fn try_lower_bind_scalar_if_value(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> bool {
         if let IrExprKind::If { cond, then, else_ } = &value.kind {
             if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, ty) {
                 self.value_of.insert(var, dst);
-                return Ok(());
+                return true;
             }
         }
-        if let IrExprKind::Match { subject, arms } = &value.kind {
-            // A single-arm tuple-destructure `let n = match pair { (_, n) => n }` extracting a
-            // SCALAR component — semantically `let n = pair.<i>` (the non-tail tuple-accumulator
-            // `fold` cursor extraction). Load the real scalar slot value (a Copy — no ownership).
-            if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
-                if !is_heap_ty(&elem_ty) {
-                    let synth = Self::synth_tuple_index(subject, idx, elem_ty);
-                    let mark = self.ops.len();
-                    if let Some(dst) = self.lower_scalar_value(&synth) {
-                        self.value_of.insert(var, dst);
-                        return Ok(());
-                    }
-                    self.ops.truncate(mark);
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// the ordered `match`-VALUE strategy chain — tuple extract, custom variant, the
+    /// Option/Result variant match (which WALLS outside its subset), the single-arm
+    /// multi-bind tuple destructure, then the desugared-`if` arm. `Ok(true)` means `var`
+    /// is bound and the caller returns `Ok(())` immediately; `Ok(false)` falls through to
+    /// the next scalar strategy. Same check ORDER, same rollbacks, same wall.
+    fn try_lower_bind_scalar_match(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
+        let IrExprKind::Match { subject, arms } = &value.kind else {
+            return Ok(false);
+        };
+        if self.try_lower_bind_scalar_tuple_extract(var, subject, arms) {
+            return Ok(true);
+        }
+        // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
+        // `let v = match t { Num(n) => n, … }`. Without this the ctor-pattern match
+        // fell through to a deferred Const 0 (a silent miscompile).
+        if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, ty) {
+            self.value_of.insert(var, dst);
+            return Ok(true);
+        }
+        if self.try_lower_bind_scalar_variant_match(var, ty, subject, arms)? {
+            return Ok(true);
+        }
+        if self.try_lower_bind_scalar_tuple_destructure_arm(var, ty, subject, arms) {
+            return Ok(true);
+        }
+        if self.try_lower_bind_scalar_desugared_if_arm(var, ty, subject, arms) {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether a single-arm tuple-destructure `match` extracting ONE scalar component
+    /// loads that component's slot (rolling `ops` back on a miss). `true` means `var` is
+    /// bound and the caller returns `Ok(())` immediately.
+    fn try_lower_bind_scalar_tuple_extract(
+        &mut self,
+        var: VarId,
+        subject: &IrExpr,
+        arms: &[almide_ir::IrMatchArm],
+    ) -> bool {
+        // A single-arm tuple-destructure `let n = match pair { (_, n) => n }` extracting a
+        // SCALAR component — semantically `let n = pair.<i>` (the non-tail tuple-accumulator
+        // `fold` cursor extraction). Load the real scalar slot value (a Copy — no ownership).
+        if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
+            if !is_heap_ty(&elem_ty) {
+                let synth = Self::synth_tuple_index(subject, idx, elem_ty);
+                let mark = self.ops.len();
+                if let Some(dst) = self.lower_scalar_value(&synth) {
+                    self.value_of.insert(var, dst);
+                    return true;
                 }
+                self.ops.truncate(mark);
             }
-            // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
-            // `let v = match t { Num(n) => n, … }`. Without this the ctor-pattern match
-            // fell through to a deferred Const 0 (a silent miscompile).
-            if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, ty) {
+        }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether an Option/Result-subject `match` executes as a tag-read value-match — and
+    /// the WALL that a variant subject outside the executable subset takes instead of a
+    /// silently-wrong Const-0. `Ok(true)` means `var` is bound and the caller returns
+    /// `Ok(())` immediately; `Ok(false)` only for a NON-variant subject.
+    fn try_lower_bind_scalar_variant_match(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        subject: &IrExpr,
+        arms: &[almide_ir::IrMatchArm],
+    ) -> Result<bool, LowerError> {
+        // A VARIANT (Option/Result) subject — execute the tag-read value-match
+        // (only the taken arm runs, the scalar payload bound). A ctor pattern is not
+        // `subj == lit`, so it can't reach `desugar_match_to_if`; without this the
+        // result stayed an unset deferred Const (a silent 0).
+        if is_variant_ty(&subject.ty) {
+            if let Some(dst) = self.try_lower_variant_value_match(subject, arms, ty) {
                 self.value_of.insert(var, dst);
-                return Ok(());
+                return Ok(true);
             }
-            // A VARIANT (Option/Result) subject — execute the tag-read value-match
-            // (only the taken arm runs, the scalar payload bound). A ctor pattern is not
-            // `subj == lit`, so it can't reach `desugar_match_to_if`; without this the
-            // result stayed an unset deferred Const (a silent 0).
-            if is_variant_ty(&subject.ty) {
-                if let Some(dst) = self.try_lower_variant_value_match(subject, arms, ty) {
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
-                // Outside the executable subset a Const-0 would silently pick a wrong
-                // arm — WALL (the discipline: an unfaithful variant match rejects, never
-                // emits a deferred 0).
-                return Err(LowerError::Unsupported(
-                    "variant (Option/Result) match bound to a let/var outside the \
-                     executable subset cannot be faithfully computed (a Const-0 would \
-                     silently pick a wrong arm) not in this brick"
-                        .into(),
-                ));
-            }
-            // A single-arm tuple-destructure `let r = match t { (a, b) => <body> }` binding
-            // MULTIPLE components (not the single-extract case above): bind each component from its
-            // tuple SLOT (the layout-aware loader), then lower the arm body as the bound value.
-            // WITHOUT this the multi-bind tuple match fell to the deferred `Const 0` below (a, b
-            // read 0). SCALAR result only (a heap arm value needs the merged-result path); rolls
-            // back to the Const on a miss.
-            if matches!(subject.ty, Ty::Tuple(_))
-                && arms.len() == 1
-                && arms[0].guard.is_none()
-                && matches!(&arms[0].pattern, almide_ir::IrPattern::Tuple { .. })
-                && !is_heap_ty(ty)
-            {
-                // Guard-clause flattening (codopsy7 max-depth sweep): the original nested
-                // `if let`/`if` chain is rewritten as `let-else` guards inside a labeled block —
-                // any failure `break`s straight to the SAME rollback (`ops`/`live_heap_handles`
-                // truncate) the original chain's implicit fall-through reached, then falls
-                // through to the next match strategy below. Same check order, same rollback,
-                // same success path (`return Ok(())`); pure control-flow rewrite.
-                let almide_ir::IrPattern::Tuple { elements } = &arms[0].pattern else {
-                    unreachable!("matches! above already proved this arm's pattern is Tuple")
-                };
-                let mark = self.ops.len();
-                let lhh = self.live_heap_handles.len();
-                'single_arm_tuple: {
-                    // Materialize the tuple subject as a borrowed handle (its slots are real).
-                    let Ok(Some(CallArg::Handle(subj))) = self
-                        .lower_call_args(std::slice::from_ref(subject))
-                        .map(|v| v.into_iter().next())
-                    else {
-                        break 'single_arm_tuple;
-                    };
-                    if !self.try_lower_tuple_destructure(elements, subj, Some(&subject.ty)) {
-                        break 'single_arm_tuple;
-                    }
-                    let Some(dst) = self.lower_scalar_value(&arms[0].body) else {
-                        break 'single_arm_tuple;
-                    };
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
-                self.ops.truncate(mark);
-                self.live_heap_handles.truncate(lhh);
-            }
-            if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
-                // `If` (literal arms) OR `Block` (`{ let x = subj; if … }` for a
-                // binder/guarded arm) — `lower_scalar_arm` runs both; roll back on a miss.
-                let mark = self.ops.len();
-                let lhh = self.live_heap_handles.len();
-                if let Some(dst) = self.lower_scalar_arm(&if_expr) {
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
-                self.ops.truncate(mark);
-                self.live_heap_handles.truncate(lhh);
-            }
+            // Outside the executable subset a Const-0 would silently pick a wrong
+            // arm — WALL (the discipline: an unfaithful variant match rejects, never
+            // emits a deferred 0).
+            return Err(LowerError::Unsupported(
+                "variant (Option/Result) match bound to a let/var outside the \
+                 executable subset cannot be faithfully computed (a Const-0 would \
+                 silently pick a wrong arm) not in this brick"
+                    .into(),
+            ));
         }
+        Ok(false)
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether a single-arm tuple `match` binding MULTIPLE components lowers each from its
+    /// layout slot and then the arm body (rolling `ops`/`live_heap_handles` back on a
+    /// miss). `true` means `var` is bound and the caller returns `Ok(())` immediately.
+    fn try_lower_bind_scalar_tuple_destructure_arm(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        subject: &IrExpr,
+        arms: &[almide_ir::IrMatchArm],
+    ) -> bool {
+        // A single-arm tuple-destructure `let r = match t { (a, b) => <body> }` binding
+        // MULTIPLE components (not the single-extract case above): bind each component from its
+        // tuple SLOT (the layout-aware loader), then lower the arm body as the bound value.
+        // WITHOUT this the multi-bind tuple match fell to the deferred `Const 0` below (a, b
+        // read 0). SCALAR result only (a heap arm value needs the merged-result path); rolls
+        // back to the Const on a miss.
+        if matches!(subject.ty, Ty::Tuple(_))
+            && arms.len() == 1
+            && arms[0].guard.is_none()
+            && matches!(&arms[0].pattern, almide_ir::IrPattern::Tuple { .. })
+            && !is_heap_ty(ty)
+        {
+            // Guard-clause flattening (codopsy7 max-depth sweep): the original nested
+            // `if let`/`if` chain is rewritten as `let-else` guards inside a labeled block —
+            // any failure `break`s straight to the SAME rollback (`ops`/`live_heap_handles`
+            // truncate) the original chain's implicit fall-through reached, then falls
+            // through to the next match strategy below. Same check order, same rollback,
+            // same success path (`return Ok(())`); pure control-flow rewrite.
+            let almide_ir::IrPattern::Tuple { elements } = &arms[0].pattern else {
+                unreachable!("matches! above already proved this arm's pattern is Tuple")
+            };
+            let mark = self.ops.len();
+            let lhh = self.live_heap_handles.len();
+            'single_arm_tuple: {
+                // Materialize the tuple subject as a borrowed handle (its slots are real).
+                let Ok(Some(CallArg::Handle(subj))) = self
+                    .lower_call_args(std::slice::from_ref(subject))
+                    .map(|v| v.into_iter().next())
+                else {
+                    break 'single_arm_tuple;
+                };
+                if !self.try_lower_tuple_destructure(elements, subj, Some(&subject.ty)) {
+                    break 'single_arm_tuple;
+                }
+                let Some(dst) = self.lower_scalar_value(&arms[0].body) else {
+                    break 'single_arm_tuple;
+                };
+                self.value_of.insert(var, dst);
+                return true;
+            }
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh);
+        }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether the `match` desugars to a literal-arm `if` (or binder/guard `Block`) that
+    /// `lower_scalar_arm` runs, rolling `ops`/`live_heap_handles` back on a miss. `true`
+    /// means `var` is bound and the caller returns `Ok(())` immediately.
+    fn try_lower_bind_scalar_desugared_if_arm(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        subject: &IrExpr,
+        arms: &[almide_ir::IrMatchArm],
+    ) -> bool {
+        if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
+            // `If` (literal arms) OR `Block` (`{ let x = subj; if … }` for a
+            // binder/guarded arm) — `lower_scalar_arm` runs both; roll back on a miss.
+            let mark = self.ops.len();
+            let lhh = self.live_heap_handles.len();
+            if let Some(dst) = self.lower_scalar_arm(&if_expr) {
+                self.value_of.insert(var, dst);
+                return true;
+            }
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh);
+        }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether a scalar `??` executes as a tag read + payload/fallback — and the WALL a
+    /// VARIANT operand outside that subset takes instead of a silently-wrong Const-0.
+    /// `Ok(true)` means `var` is bound and the caller returns `Ok(())` immediately.
+    fn try_lower_bind_scalar_unwrap_or(
+        &mut self,
+        var: VarId,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
         // `let idx = string.index_of(s, x) ?? -1` — a `??` over a materialized Option
         // EXECUTES to a scalar (tag read + payload/fallback), unwrapping the self-host
         // Option[Int] fns; outside the subset a `??` over a VARIANT operand can't read
@@ -229,7 +368,7 @@ impl LowerCtx {
         if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
             if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
                 self.value_of.insert(var, dst);
-                return Ok(());
+                return Ok(true);
             }
             if is_variant_ty(&expr.ty) {
                 return Err(LowerError::Unsupported(
@@ -240,6 +379,14 @@ impl LowerCtx {
                 ));
             }
         }
+        Ok(false)
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether a bare-`Var` scalar RHS aliases its source value — and whether a MUTABLE
+    /// binding instead gets its OWN local via the `+ 0` identity copy. `true` means `var`
+    /// is bound and the caller returns `Ok(())` immediately.
+    fn try_lower_bind_scalar_var_alias(&mut self, var: VarId, value: &IrExpr) -> bool {
         // `let v = w` aliasing a SCALAR var — v denotes the SAME value (a scalar is freely
         // duplicable: no copy, no ownership). Without this, a bare-Var scalar RHS fell to the
         // deferred `Const` below and silently became 0 (the param-alias zeroing trap).
@@ -266,9 +413,17 @@ impl LowerCtx {
                 } else {
                     self.value_of.insert(var, src);
                 }
-                return Ok(());
+                return true;
             }
         }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// whether a SCALAR field/element/global projection loads its real slot value
+    /// (rolling `ops` back on a miss). `true` means `var` is bound and the caller returns
+    /// `Ok(())` immediately.
+    fn try_lower_bind_scalar_projection(&mut self, var: VarId, value: &IrExpr) -> bool {
         // `let d = r.x` / `let d = t.0` / `let d = xs[i]` — a SCALAR field / element
         // projection LOADS the real value from the materialized aggregate's layout slot
         // (the VALUE MODEL); `xs[i]` is a bounds-checked `$elem_addr` load. Outside the
@@ -286,10 +441,22 @@ impl LowerCtx {
             let mark = self.ops.len();
             if let Some(dst) = self.lower_scalar_value(value) {
                 self.value_of.insert(var, dst);
-                return Ok(());
+                return true;
             }
             self.ops.truncate(mark);
         }
+        false
+    }
+
+    /// Extracted verbatim from [`Self::lower_bind_scalar`] (codopsy round-3 sweep, #852):
+    /// the TERMINAL deferred `Const` — the value every scalar strategy above declined.
+    /// Strict value mode walls it instead; the permissive caps-counting path defers and
+    /// still folds the elided calls for capabilities.
+    fn lower_bind_scalar_deferred_const(
+        &mut self,
+        var: VarId,
+        value: &IrExpr,
+    ) -> Result<(), LowerError> {
         let dst = self.fresh_value();
         self.value_of.insert(var, dst);
         if crate::lower::strict_values() {
@@ -486,10 +653,15 @@ impl LowerCtx {
                 }
                 self.lower_bind(var, ty, tail)
             }
-            other => Err(LowerError::Unsupported(format!(
-                "heap bind from {} not in this brick",
-                kind_name(other)
-            ))),
+            other => {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                    format!("[heap-bind] declined value (ty {ty:?}): {other:#?}")
+                });
+                Err(LowerError::Unsupported(format!(
+                    "heap bind from {} not in this brick",
+                    kind_name(other)
+                )))
+            }
         }
     }
 

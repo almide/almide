@@ -29,12 +29,36 @@ fn __take_h_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int =
 fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let k0 = if n < len then n else len
-  let k = if k0 > 0 then k0 else 0
+  // n<0 → the native `take(n as usize)` wraps huge → takes ALL (the
+  // list_take_drop __clamp_len convention); the old max(n,0) diverged
+  // (native take(-1) = whole list, wasm = empty).
+  let k = if n < 0 then len else if n > len then len else n
   let out: List[List[Int]] = prim.alloc_list_str(k)
   let _x = __take_h_fill(prim.handle(out), h, k, 0)
   out
 }
+
+// list.drop over SHARED heap elements — the take_hshare mirror (#877): the kept
+// tail's elements are rc_inc-SHARED into a fresh block; n<0 → the native
+// `skip(n as usize)` wraps huge → drops ALL (empty result), n>len → empty.
+fn list_drop_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = if n < 0 then len else if n > len then len else n
+  let k = len - start
+  let out: List[List[Int]] = prim.alloc_list_str(k)
+  let _x = __drop_h_fill(prim.handle(out), h, start, k, 0)
+  out
+}
+
+fn __drop_h_fill(dh: Int, sh: Int, start: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(sh + 12 + (start + i) * 8)
+    prim.rc_inc(e)
+    prim.store64(dh + 12 + i * 8, e)
+    __drop_h_fill(dh, sh, start, n, i + 1)
+  }
 
 
 // list.unique / list.dedup over FLAT-BLOCK heap elements (List[List[Int]] /

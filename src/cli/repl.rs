@@ -40,7 +40,7 @@ enum Kind { TopLevel, Body, Expr }
 
 /// `classify`'s top-level-declaration prefix check. Converted to a data
 /// table + linear scan (same technique as `lookup_keyword_info` in
-/// lsp_p2.rs) — cyclomatic complexity counts each `||` branch, so a flat
+/// lsp_hover_definition.rs) — cyclomatic complexity counts each `||` branch, so a flat
 /// table genuinely lowers it rather than just moving it around.
 fn is_top_level_prefix(t: &str) -> bool {
     const PREFIXES: &[&str] = &["fn ", "effect fn ", "type ", "mod type ", "import "];

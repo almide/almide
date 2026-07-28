@@ -600,3 +600,63 @@ fn fmt_output_typechecks_multi_module_specs() {
         failures.len(), tested, failures.join("\n\n"));
     assert!(tested > 10, "gate coverage collapsed: only {} files tested", tested);
 }
+
+/// `almide fmt --check` is a GATE: it must report which files are not formatted and
+/// exit NON-ZERO, so a CI job written against it can actually fail. It used to print the
+/// formatted text and exit 0 unconditionally — indistinguishable from success, which made
+/// every gate written against it a no-op (#919). A DIRECTORY argument must recurse; it
+/// used to reach the file reader as-is, print "Is a directory", and still exit 0.
+/// `--dry-run` stays the SHOW mode from `docs/specs/cli.md`: print, never fail.
+#[test]
+fn fmt_check_exits_nonzero_on_unformatted_input_and_recurses_directories() {
+    let bin = {
+        if let Ok(b) = std::env::var("ALMIDE_BIN") { b } else {
+            let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide");
+            if !p.exists() { return; } // debug-only invocation: covered in CI by the release run
+            p.to_str().unwrap().to_string()
+        }
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+
+    // Deliberately unformatted: the formatter re-indents this body.
+    let messy = nested.join("messy.almd");
+    std::fs::write(&messy, "module app\nfn add(a: Int,b: Int) -> Int =\n        a+b\n").unwrap();
+
+    let run = |args: &[&str]| {
+        std::process::Command::new(&bin).args(args).output().expect("almide fmt")
+    };
+
+    let one = run(&["fmt", "--check", messy.to_str().unwrap()]);
+    assert!(!one.status.success(), "fmt --check on an unformatted file must exit non-zero");
+    let one_err = String::from_utf8_lossy(&one.stderr);
+    assert!(one_err.contains("not formatted"), "it must NAME the file; got:\n{one_err}");
+
+    // The same file reached through its DIRECTORY: the walk must find it.
+    let recursed = run(&["fmt", "--check", dir.path().to_str().unwrap()]);
+    assert!(!recursed.status.success(), "fmt --check on a directory must recurse and fail");
+    assert!(
+        String::from_utf8_lossy(&recursed.stderr).contains("messy.almd"),
+        "the directory walk must reach nested files"
+    );
+
+    // Formatting it makes the same check pass — the gate tracks the file, not a constant.
+    let wrote = run(&["fmt", messy.to_str().unwrap()]);
+    assert!(wrote.status.success(), "plain fmt must write the file back");
+    let after = run(&["fmt", "--check", dir.path().to_str().unwrap()]);
+    assert!(
+        after.status.success(),
+        "a formatted tree must pass --check; stderr:\n{}",
+        String::from_utf8_lossy(&after.stderr)
+    );
+
+    // `--dry-run` prints the formatted text and never fails, even unformatted.
+    std::fs::write(&messy, "module app\nfn add(a: Int,b: Int) -> Int =\n        a+b\n").unwrap();
+    let dry = run(&["fmt", "--dry-run", messy.to_str().unwrap()]);
+    assert!(dry.status.success(), "--dry-run must not fail on unformatted input");
+    assert!(
+        String::from_utf8_lossy(&dry.stdout).contains("fn add"),
+        "--dry-run must print the formatted text"
+    );
+}

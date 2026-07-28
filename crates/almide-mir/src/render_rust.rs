@@ -223,6 +223,14 @@ Op::DropListStrInt { .. } | Op::DropResultListValue { .. } | Op::DropResultValue
                 IntOp::Shl => format!("{a} << {b}"),
                 IntOp::Shr => format!("{a} >> {b}"),
                 IntOp::ShrU => format!("(({a} as u64) >> {b}) as i64"),
+                // The unsigned 64-bit lane (#872): the i64 slot carries the
+                // u64 bit pattern; interpret it unsigned for div/rem/ordering.
+                IntOp::DivU => format!("(({a} as u64) / ({b} as u64)) as i64"),
+                IntOp::ModU => format!("(({a} as u64) % ({b} as u64)) as i64"),
+                IntOp::LtU => format!("(({a} as u64) < ({b} as u64)) as i64"),
+                IntOp::LeU => format!("(({a} as u64) <= ({b} as u64)) as i64"),
+                IntOp::GtU => format!("(({a} as u64) > ({b} as u64)) as i64"),
+                IntOp::GeU => format!("(({a} as u64) >= ({b} as u64)) as i64"),
             };
             Some(format!("let {d}: i64 = {rhs};"))
         }

@@ -35,11 +35,33 @@ impl LowerCtx {
     /// is later invoked. The lambda is named `__lambda_<fn_name>_<n>` — file-unique (the
     /// harness keys the in-profile map by name), with nested lifts flattened into this
     /// function's set.
+    /// Lift an inline lambda to a top-level MIR function plus a closure BLOCK, in the
+    /// five sequential phases below — each a named decider so the one that declines is
+    /// the one the trace names. `None` at ANY phase is an honest defer: nothing has been
+    /// emitted into `self` yet (the sub-context is separate, and the block is only
+    /// materialized once every phase has succeeded), so the caller's deferred fallback
+    /// stays sound. Extracted from the one body (codopsy round-3 sweep, #852); every
+    /// phase moved verbatim.
     pub(crate) fn lift_lambda(
         &mut self,
         params: &[(VarId, Ty)],
         body: &IrExpr,
     ) -> Option<ValueId> {
+        let captured = self.collect_lambda_captures(params, body)?;
+        let layout = self.partition_capture_drop_classes(captured)?;
+        let cap_vals = self.resolve_capture_values(&layout)?;
+        let name = self.lower_lifted_lambda_body(params, body, &layout)?;
+        Some(self.materialize_closure_block(name, &layout, cap_vals))
+    }
+
+    /// Phase 1 of [`Self::lift_lambda`]: the lambda's CAPTURES, with their types, in
+    /// first-occurrence order — and the two honest-wall gates that refuse a lift whose
+    /// captures are MUTATED without a shared cell. Verbatim.
+    fn collect_lambda_captures(
+        &self,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+    ) -> Option<Vec<(VarId, Ty)>> {
         // free_vars over the lambda's own params reports exactly its captures (a `Var` node
         // denotes only locals). Collect them WITH their types (from the body's Var nodes) in
         // first-occurrence order — the deterministic env slot layout both sides share.
@@ -134,6 +156,16 @@ impl LowerCtx {
                 return None;
             }
         }
+        Some(cc.out)
+    }
+
+    /// Phase 2 of [`Self::lift_lambda`]: partition the captures by DROP CLASS and lay
+    /// them out in the slot order `$__drop_closure` walks. `None` = a capture outside
+    /// the admitted classes (the honest defer). Verbatim.
+    fn partition_capture_drop_classes(
+        &self,
+        captured: Vec<(VarId, Ty)>,
+    ) -> Option<CaptureLayout> {
         // Partition the captures by DROP CLASS — the env layout is self-describing so the
         // uniform `$__drop_closure` runtime can free ANY closure block without lowering-time
         // mask knowledge (a call-result closure's captures are unknowable at the drop site):
@@ -152,11 +184,19 @@ impl LowerCtx {
         // variant / heap-field-record capture (or a `Float`, f64↔i64 reinterpret not in the
         // prim vocabulary) still defers — honest wall, recorded in the goal file.
         use almide_lang::types::constructor::TypeConstructorId;
-        let one_level_exact = |ty: &Ty| -> bool {
-            matches!(ty, Ty::String)
-                || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
-                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float))
-        };
+        // `is_flat_scalar_block_ty` IS this predicate — the crate's canonical name for
+        // "every slot is a raw i64, so one rc_dec is the full free", which is exactly
+        // what the FLAT env class promises. This used to be spelled out again here, and
+        // more narrowly (`List[Int|Float]` only), so shapes with identical physics were
+        // refused: an all-scalar TUPLE, a `List[Bool]` or `List[Int32]`, an
+        // `Option[<scalar>]`. A refused capture is not merely a missing feature — it
+        // leaves the lambda deferred, and `map.fold(m, acc, (a, k, v) => acc)` over a
+        // `(Int, Bool)` accumulator walls on exactly that (#905). Reading the one
+        // definition instead of restating a subset of it keeps the two from drifting
+        // again. `String` stays a separate clause: it is flat under rc_dec too, but it
+        // is a byte buffer rather than a slot block, so it is not that predicate's job.
+        let one_level_exact =
+            |ty: &Ty| -> bool { matches!(ty, Ty::String) || crate::lower::is_flat_scalar_block_ty(ty) };
         let is_nested_list_str = |ty: &Ty| -> bool {
             matches!(ty, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && matches!(a[0], Ty::String))
@@ -178,7 +218,7 @@ impl LowerCtx {
         let mut nested_heap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut cellmap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut scalar_caps: Vec<(VarId, Ty)> = Vec::new();
-        for (v, ty) in cc.out {
+        for (v, ty) in captured {
             // A SHARED-CELL capture (cells.rs): the env slot holds the CELL handle,
             // not a value copy — reads/writes inside the body go through the shared
             // slot (`sub.cell_of`, seeded in the prologue). Drop-class placement
@@ -214,7 +254,19 @@ impl LowerCtx {
                 nested_heap_caps.push((v, ty));
                 continue;
             }
-            if matches!(ty, Ty::Int | Ty::Bool) {
+            // `!is_heap_ty` IS this bucket's promise — the crate's canonical name for
+            // "one raw i64 slot, no refcount", which is exactly what the scalar region
+            // of the env stores and what `ListGetScalar` reads back. This used to
+            // restate a SUBSET of it (`Int | Bool`), so every other scalar was refused
+            // for no physical reason: a `Float` capture in particular, on the belief
+            // that its slot needed an f64↔i64 reinterpret the prim vocabulary lacked.
+            // It does not — a MIR float local ALREADY holds its bits in an i64 and
+            // every float op reinterprets around itself, so the bits round-trip through
+            // the slot untouched. `(s) => d` over `let d: Float` walled on that
+            // misreading (#954, surfaced by the nightly fuzz), and so did captures of
+            // every sized int width. Reading the one definition instead of restating
+            // part of it is the same fix `one_level_exact` above already took.
+            if !is_heap_ty(&ty) {
                 scalar_caps.push((v, ty));
                 continue;
             }
@@ -241,21 +293,40 @@ impl LowerCtx {
             .chain(cellmap_caps)
             .chain(scalar_caps)
             .collect();
+        Some(CaptureLayout { captures, n_closure, n_heap, n_nested_heap, n_cellmap })
+    }
+
+    /// Phase 3 of [`Self::lift_lambda`]: resolve every capture to a lowered local value
+    /// (a cell capture to its CELL BLOCK). Verbatim.
+    fn resolve_capture_values(&self, layout: &CaptureLayout) -> Option<Vec<ValueId>> {
         // Every capture must resolve to a lowered local value HERE (a capture of a
         // deferred/opaque binding has no readable value). A captured Fn var must be a
         // KNOWN closure block (closure_values), or its slot would hold a non-block.
         let mut cap_vals: Vec<ValueId> = Vec::new();
-        for (i, (v, _)) in captures.iter().enumerate() {
+        for (i, (v, _)) in layout.captures.iter().enumerate() {
             // A cell capture resolves to its CELL BLOCK (shared storage), not a value.
             let cv = match self.cell_of.get(v) {
                 Some(&c) => c,
                 None => *self.value_of.get(v)?,
             };
-            if i < n_closure && !self.closure_values.contains(&cv) {
+            if i < layout.n_closure && !self.closure_values.contains(&cv) {
                 return None;
             }
             cap_vals.push(cv);
         }
+        Some(cap_vals)
+    }
+
+    /// Phase 4 of [`Self::lift_lambda`]: lower the body in a FRESH sub-context (its own
+    /// value space, the globals/layout registries shared), emit the env prologue that
+    /// reads each capture back out of the block, and push the lifted fn — returning its
+    /// name for the block's funcref slot. Verbatim.
+    fn lower_lifted_lambda_body(
+        &mut self,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        layout: &CaptureLayout,
+    ) -> Option<String> {
         // Lower the body in a FRESH sub-context sharing only the globals (its own value
         // space + params). A failure (a body outside the subset) aborts the lift cleanly —
         // nothing is emitted into `self`, so the caller's deferred fallback stays sound.
@@ -329,9 +400,9 @@ impl LowerCtx {
         // handle also joins the sub-context's `closure_values` so `g(x)` inside the body
         // dispatches (the `compose` shape). A scalar capture is a raw 64-bit load. All
         // Prim reads — no ownership events (the block is the caller's).
-        for (i, (v, ty)) in captures.iter().enumerate() {
+        for (i, (v, ty)) in layout.captures.iter().enumerate() {
             let val = sub.fresh_value();
-            if i < n_closure + n_heap + n_nested_heap + n_cellmap {
+            if i < layout.handle_slots() {
                 let h = sub.fresh_value();
                 sub.ops
                     .push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![env_pv] });
@@ -346,7 +417,7 @@ impl LowerCtx {
                     args: vec![addr],
                 });
                 sub.param_values.insert(val);
-                if i < n_closure {
+                if i < layout.n_closure {
                     sub.closure_values.insert(val);
                 }
                 // A SHARED-CELL capture: the loaded handle IS the cell block — map the
@@ -392,6 +463,18 @@ impl LowerCtx {
         };
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
+        Some(name)
+    }
+
+    /// Phase 5 of [`Self::lift_lambda`]: materialize the CLOSURE BLOCK itself — the
+    /// all-scalar-capture `ListLit` fast path, else the prim alloc + per-capture
+    /// Dup/Store/Consume co-own. Verbatim.
+    fn materialize_closure_block(
+        &mut self,
+        name: String,
+        layout: &CaptureLayout,
+        cap_vals: Vec<ValueId>,
+    ) -> ValueId {
         // Materialize the CLOSURE BLOCK: a DynList of 2 + k slots — slot 0 the funcref
         // table index, slot 1 the SELF-DESCRIBING drop header (n_heap | n_nested_heap<<16
         // | n_closure<<32 — three 16-bit counts, what lets the uniform `$__drop_closure`
@@ -402,7 +485,7 @@ impl LowerCtx {
         // builds it on both legs — same cert `i`, same block bytes on wasm, a
         // `Vec<i64>` on native. Heap/closure captures keep the prim path below
         // (their Dup/Consume co-own dance needs the address stores).
-        if n_closure == 0 && n_heap == 0 && n_nested_heap == 0 && n_cellmap == 0 {
+        if layout.handle_slots() == 0 {
             let fr = self.fresh_value();
             self.ops.push(Op::FuncRef { dst: fr, name });
             let hdr = self.fresh_value();
@@ -416,7 +499,7 @@ impl LowerCtx {
             // EXACT tracking mirror of the prim path below.
             self.live_heap_handles.push(blk);
             self.closure_values.insert(blk);
-            return Some(blk);
+            return blk;
         }
         let len_c = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len_c, value: (2 + cap_vals.len()) as i64 });
@@ -431,10 +514,10 @@ impl LowerCtx {
         let hdr = self.fresh_value();
         self.ops.push(Op::ConstInt {
             dst: hdr,
-            value: (n_heap as i64)
-                | ((n_nested_heap as i64) << 16)
-                | ((n_closure as i64) << 32)
-                | ((n_cellmap as i64) << 48),
+            value: (layout.n_heap as i64)
+                | ((layout.n_nested_heap as i64) << 16)
+                | ((layout.n_closure as i64) << 32)
+                | ((layout.n_cellmap as i64) << 48),
         });
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
@@ -449,7 +532,7 @@ impl LowerCtx {
             // the block (cert `a` + `m`; the original var's scope-end drop is untouched).
             // The fnidx/header/scalar slots store the raw value.
             let cap_index = i as i64 - 2; // captures start at slot 2
-            if cap_index >= 0 && (cap_index as usize) < n_closure + n_heap + n_nested_heap + n_cellmap {
+            if cap_index >= 0 && (cap_index as usize) < layout.handle_slots() {
                 let owned = self.fresh_value();
                 self.ops.push(Op::Dup { dst: owned, src: v });
                 let handle = self.fresh_value();
@@ -475,8 +558,32 @@ impl LowerCtx {
         // to the recursive `$__drop_closure` (`drop_op_for`).
         self.live_heap_handles.push(blk);
         self.closure_values.insert(blk);
-        Some(blk)
+        blk
     }
 }
+
+/// The env-block layout ONE lift decided: the captures in SLOT ORDER
+/// (`[closures][nested heap][flat heap][cell-map][scalars]`) plus the per-class counts
+/// the self-describing drop header carries. Bundled so the phases after the partition
+/// read one value instead of five positional `usize`s that could be transposed — and a
+/// transposition here mis-frees the block.
+struct CaptureLayout {
+    captures: Vec<(VarId, Ty)>,
+    n_closure: usize,
+    n_heap: usize,
+    n_nested_heap: usize,
+    n_cellmap: usize,
+}
+
+impl CaptureLayout {
+    /// Slots `2..2 + handle_slots()` hold HANDLES (closure, nested-heap, flat-heap and
+    /// cell-map captures); everything after them is a raw scalar slot. The prologue's
+    /// `LoadHandle`-vs-`ListGetScalar` split, the header's zero test and the block
+    /// store's co-own test all key on this same boundary.
+    fn handle_slots(&self) -> usize {
+        self.n_closure + self.n_heap + self.n_nested_heap + self.n_cellmap
+    }
+}
+
 
 include!("binds_b.rs");

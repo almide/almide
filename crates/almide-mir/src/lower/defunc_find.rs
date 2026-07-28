@@ -322,7 +322,7 @@ impl LowerCtx {
 
     /// `base + offset` as a fresh value (the address-arithmetic half of `load_at_offset`,
     /// without the load — used when the loaded address feeds further arithmetic).
-    fn load_addr(&mut self, base: ValueId, offset: i64) -> ValueId {
+    pub(crate) fn load_addr(&mut self, base: ValueId, offset: i64) -> ValueId {
         let off = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: off, value: offset });
         let addr = self.fresh_value();

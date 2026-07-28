@@ -37,17 +37,45 @@ fn uint64_to_uint32(x: UInt64) -> UInt32 = {
   int.to_uint32(i)
 }
 
+// The UPPER HALF of the domain (`x > i64::MAX`) reads NEGATIVE through the
+// `int.from_uint64` bit-reinterpret, so the three observers below cannot pivot
+// through `Int` there (#872): a signed print gave `-1` for `u64::MAX`, a signed
+// widen gave `-1.0`. Split the value with the UNSIGNED `/` and `%` the UInt64
+// lane now lowers (`IntOp::DivU`/`ModU`), whose quotients land back in the
+// signed-safe band by construction — `x / 10 <= 1844674407370955161` and
+// `x / 2 <= 9223372036854775807`, both below `i64::MAX` — so ONE split is
+// enough and each half pivots exactly.
+
 fn uint64_to_float32(x: UInt64) -> Float32 = {
   let i = int.from_uint64(x)
-  int.to_float32(i)
+  if i >= 0 then int.to_float32(i)
+  else {
+    let h: UInt64 = x / 2
+    let l: UInt64 = x % 2
+    let hf = int.to_float(int.from_uint64(h))
+    let lf = int.to_float(int.from_uint64(l))
+    float.to_float32(hf + hf + lf)
+  }
 }
 
 fn uint64_to_float64(x: UInt64) -> Float64 = {
   let i = int.from_uint64(x)
-  int.to_float64(i)
+  if i >= 0 then int.to_float64(i)
+  else {
+    let h: UInt64 = x / 2
+    let l: UInt64 = x % 2
+    let hf = int.to_float(int.from_uint64(h))
+    let lf = int.to_float(int.from_uint64(l))
+    float.to_float64(hf + hf + lf)
+  }
 }
 
 fn uint64_to_string(x: UInt64) -> String = {
   let i = int.from_uint64(x)
-  int.to_string(i)
+  if i >= 0 then int.to_string(i)
+  else {
+    let q: UInt64 = x / 10
+    let r: UInt64 = x % 10
+    int.to_string(int.from_uint64(q)) + int.to_string(int.from_uint64(r))
+  }
 }

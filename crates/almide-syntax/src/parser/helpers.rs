@@ -38,9 +38,22 @@ impl Parser {
     }
 
     /// Peek ahead: current is Ident, next is `.`, then TypeName → module-qualified type.
+    /// True when the current `Ident` heads a module-qualified type name:
+    /// one or more `ident '.'` segments ending in a `TypeName` —
+    /// `binary.Instr`, and the package-submodule form `snaidhm.ttf.CubicBez`
+    /// the drop/repr generators render for cross-package types (#881).
     pub(crate) fn peek_dot_type_name(&self) -> bool {
-        self.peek_at(1).map(|t| t.token_type == TokenType::Dot).unwrap_or(false)
-            && self.peek_at(2).map(|t| t.token_type == TokenType::TypeName).unwrap_or(false)
+        let mut i = 1;
+        loop {
+            if !self.peek_at(i).map(|t| t.token_type == TokenType::Dot).unwrap_or(false) {
+                return false;
+            }
+            match self.peek_at(i + 1).map(|t| t.token_type) {
+                Some(TokenType::TypeName) => return true,
+                Some(TokenType::Ident) => i += 2,
+                _ => return false,
+            }
+        }
     }
 
     pub(crate) fn peek_type_args_call(&self) -> bool {

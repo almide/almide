@@ -64,7 +64,7 @@ impl Checker {
         }
         // Behavior-preserving split: the giant match is partitioned into three
         // DISJOINT groups over `&mut expr.kind`. Groups 2 and 3 live in
-        // `infer_p2.rs` / `infer_p3.rs` (sub-methods returning `Option<Ty>`,
+        // `infer_control_ops.rs` / `infer_calls_closures.rs` (sub-methods returning `Option<Ty>`,
         // `Some(_)` exactly for their own variants). The chain is order-
         // independent — every `ExprKind` variant matches exactly one group — so
         // dispatching to them first, then the group-1 arms below, is identical
@@ -648,8 +648,8 @@ impl Checker {
 
 }
 
-include!("infer_p2.rs");
-include!("infer_p3.rs");
-include!("infer_p4.rs");
-include!("infer_p5.rs");
-include!("infer_p6.rs");
+include!("infer_control_ops.rs");
+include!("infer_calls_closures.rs");
+include!("infer_statements.rs");
+include!("infer_ident_collection.rs");
+include!("infer_loops_records.rs");

@@ -188,6 +188,7 @@ pub fn render_wasm(func: &MirFunction) -> String {
             masks: &func.heap_slot_masks,
             reprs: &reprs,
             floats: &no_floats,
+            tail_call: false,
         }, &mut no_fuser));
     }
 
@@ -252,16 +253,72 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
     let mut missing = BTreeSet::new();
     for f in &prog.functions {
         for op in &f.ops {
-            if let Op::CallFn { name, .. } = op {
-                if !resolvable.contains(name) {
-                    crate::trace::trace("ALMIDE_DBG_UNLINKED", || format!(
-                        "[unlinked] {} references {}", f.name, name));
-                    missing.insert(name.clone());
-                }
+            let name = match op {
+                Op::CallFn { name, .. } => name.clone(),
+                // Generated-drop targets render as literal `(call $__drop_…)`
+                // text, not `CallFn` ops — an unresolved one used to sail past
+                // this gate and produce an INVALID module instead of a wall
+                // (the #881 bare-vs-qualified record-drop mismatch).
+                Op::DropVariant { ty, .. } => drop_target_name(ty),
+                Op::DropWrapperRec { drop_fn, .. } => drop_target_name(drop_fn),
+                _ => continue,
+            };
+            if !resolvable.contains(&name) {
+                crate::trace::trace("ALMIDE_DBG_UNLINKED", || format!(
+                    "[unlinked] {} references {}", f.name, name));
+                missing.insert(name);
             }
         }
     }
     missing
+}
+
+/// The `$__drop_<…>` symbol a drop op's type/fn string renders as (the same
+/// dot-sanitization the WAT arms apply).
+fn drop_target_name(ty: &str) -> String {
+    format!("__drop_{}", ty.replace('.', "_"))
+}
+
+/// Resolve an unresolvable generated-drop target to its UNIQUE
+/// module-qualified twin. Intra-module code reaches a record type by its BARE
+/// name (`View`) while the drop generator keys the QUALIFIED one
+/// (`palette.View` → `__drop_palette_View`); without this remap the render
+/// emitted a dangling `(call $__drop_View)` — an invalid module, not a wall
+/// (#881). An ambiguous bare name (two modules declaring `View`) stays
+/// unresolved and walls through `unlinked_call_names` instead of guessing.
+fn resolve_drop_alias(target: &str, resolvable: &BTreeSet<String>) -> Option<String> {
+    // A candidate twin must keep the SAME family chain (`list_`, `opt_`, …)
+    // as the target and differ only by a module qualifier before the type's
+    // final segment: `__drop_View` → `__drop_palette_View`,
+    // `__drop_list_View` → `__drop_list_palette_View`. A family-crossing
+    // match would free a DIFFERENT layout, so the qualifier segment must not
+    // itself look like a family marker.
+    const FAMILY_MARKERS: &[&str] =
+        &["list_", "opt_", "tup_", "map_", "res", "closure", "value"];
+    let t = target.strip_prefix("__drop_")?;
+    let bare = t.rsplit('_').next()?;
+    if bare.is_empty() {
+        return None;
+    }
+    let fam = &t[..t.len() - bare.len()];
+    let suffix = format!("_{bare}");
+    let mut hit: Option<&String> = None;
+    for cand in resolvable {
+        let Some(c) = cand.strip_prefix("__drop_") else { continue };
+        if c == t {
+            continue;
+        }
+        let Some(rest) = c.strip_prefix(fam) else { continue };
+        let Some(middle) = rest.strip_suffix(suffix.as_str()) else { continue };
+        if middle.is_empty() || FAMILY_MARKERS.iter().any(|m| middle.starts_with(m)) {
+            continue;
+        }
+        if hit.is_some() {
+            return None;
+        }
+        hit = Some(cand);
+    }
+    hit.and_then(|c| c.strip_prefix("__drop_")).map(str::to_string)
 }
 
 /// Render a whole MIR program to a WAT module, WALLING any unlinked stdlib/runtime call.
@@ -290,164 +347,15 @@ fn resolve_rt_alias(name: &str, resolvable: &BTreeSet<String>) -> Option<String>
     resolvable.contains(&cand).then_some(cand)
 }
 
-/// Drop every `MirFunction` unreachable from `main` / a declared export, so the
-/// wasm renderer never has to emit it (nor put it in the closure-dispatch
-/// function table, nor carry its `@extern` import).
-///
-/// Reachability is computed the SAME way [`filter_unreachable_preamble`] computes
-/// it for the fixed runtime: render every function ONCE with the full,
-/// UNPRUNED `func_slots`/`label_off` (reachability doesn't depend on final
-/// slot numbers, only on which names get referenced — those are recomputed
-/// fresh, self-consistently, when [`render_wasm_program`] renders the pruned
-/// result), then text-scan each rendered body for `$name` references via
-/// [`reference_tokens`]. This is deliberately NOT a hand-enumerated match over
-/// `Op` variants: an early version of this pass matched only `CallFn`/
-/// `FuncRef`/`DropVariant`/`DropWrapperRec` and missed BOTH `Op::Call{RtFn::
-/// PrintStr}` (a runtime-boundary call to the auto-linked `print_str` fn,
-/// outside `CallFn`) and the `DropListStrValue`-family ops that ALSO hardcode
-/// a `(call $__drop_..)` outside those four — each one only surfaced as a
-/// `wat::parse_str` "undefined function" error on a DIFFERENT spec file.
-/// Scanning the ACTUAL RENDERED TEXT can't have a fourth such gap: whatever
-/// `Op` produced a call, by the time this runs it's already literal `$name`
-/// text, the same text `wat::parse_str` itself resolves names from.
-///
-/// ONE edge kind can't be recovered from text: `Op::FuncRef` (a lifted
-/// lambda's VALUE, used as a `CallIndirect`'s dispatch index) renders to a
-/// bare `(i64.const {slot})`, not a `$name` — the closure's identity IS the
-/// numeric slot. A missed `FuncRef` edge doesn't fail to parse (no dangling
-/// name — the SLOT still exists, just pointing at whatever ELSE the pruned
-/// list's reindexing put there), so it can silently mis-dispatch at runtime
-/// instead of erroring at build time (caught via `codegen_functional_test`'s
-/// "multi-fn HOF" trapping after this pass, not via a build failure) — this
-/// is read from the STRUCTURED `Op::FuncRef` list below, never from text.
-///
-/// SOUNDNESS: this can only ever REMOVE a function nothing calls — dropping
-/// something still truly needed can only manifest as `wat::parse_str`
-/// rejecting a dangling `(call $name)` at build time, a loud failure, never a
-/// silent miscompile (see `cli/build.rs`'s `render_wasm_module`). Iterated to
-/// a fixpoint (a dead function referenced only by another dead function
-/// prunes in a later round).
-pub(crate) fn prune_unreachable_functions(prog: &MirProgram) -> MirProgram {
-    let mut label_off: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-    let mut cursor = LABELS_ADDR;
-    for func in &prog.functions {
-        for op in &func.ops {
-            let Op::Call { args, .. } = op else { continue };
-            for a in args {
-                let CallArg::Label(label) = a else { continue };
-                if label_off.contains_key(label) {
-                    continue;
-                }
-                let len = label.len() as u32;
-                label_off.insert(label.clone(), (cursor, len));
-                cursor += len;
-            }
-        }
-    }
-    let func_slots: BTreeMap<String, u32> =
-        prog.functions.iter().enumerate().map(|(i, f)| (f.name.clone(), i as u32)).collect();
-    let param_counts: BTreeMap<String, usize> =
-        prog.functions.iter().map(|f| (f.name.clone(), f.params.len())).collect();
-    let bodies: BTreeMap<String, String> = prog
-        .functions
-        .iter()
-        .map(|f| (f.name.clone(), render_wasm_fn(f, &label_off, &func_slots, &param_counts)))
-        .collect();
-    // `Op::FuncRef { name, .. }` — "the function-table slot of the lifted
-    // function `name`" — renders to a bare `(i64.const {slot})`, NOT a `$name`
-    // token (see its arm in `render_wasm_p2_b.rs`): the closure value IS the
-    // numeric slot, materialized once the table's final layout is known. A
-    // text scan of the rendered body therefore can't see this edge at all —
-    // read it from the STRUCTURED `Op` instead, the one edge kind that can't
-    // be recovered from rendered text.
-    let func_ref_edges: BTreeMap<String, Vec<String>> = prog
-        .functions
-        .iter()
-        .map(|f| {
-            let targets = f
-                .ops
-                .iter()
-                .filter_map(|op| match op {
-                    Op::FuncRef { name, .. } => Some(name.clone()),
-                    _ => None,
-                })
-                .collect();
-            (f.name.clone(), targets)
-        })
-        .collect();
-
-    // `__mg_init` (mutable-global slot init) and `__global_init` (abortable
-    // top-let init) are called from the SYNTHESIZED `_start` wrapper
-    // (`render_wasm_program`'s `ginit`/`mg_init` locals), never from any
-    // `MirFunction`'s own ops — so neither text-scanning nor `FuncRef`
-    // tracking can ever find a reference to them. `render_wasm_program`
-    // itself decides whether to emit the call by NAME EXISTENCE in
-    // `prog.functions` (`prog.functions.iter().any(|f| f.name == "...")`);
-    // mirror that exact condition here as an extra root, or the ONLY thing
-    // that decides whether these run becomes "did this pass happen to keep
-    // them" instead of "does the program need them" — which is how
-    // `module_var_test.almd`'s mutable globals silently stayed at their
-    // zero-init default (a runtime wrong-answer, not a build failure).
-    let roots: BTreeSet<String> = std::iter::once("main".to_string())
-        .chain(prog.exports.iter().map(|(_, internal, _, _)| internal.clone()))
-        .chain(
-            prog.functions
-                .iter()
-                .map(|f| f.name.as_str())
-                .filter(|n| *n == "__mg_init" || *n == "__global_init")
-                .map(String::from),
-        )
-        .collect();
-    let mut reachable: BTreeSet<String> = roots.clone();
-    let mut frontier: Vec<String> = roots.into_iter().collect();
-    while let Some(name) = frontier.pop() {
-        let mut targets: Vec<String> = Vec::new();
-        if let Some(body) = bodies.get(&name) {
-            targets.extend(reference_tokens(body).into_iter().filter(|t| bodies.contains_key(t)));
-        }
-        if let Some(refs) = func_ref_edges.get(&name) {
-            targets.extend(refs.iter().cloned());
-        }
-        for token in targets {
-            if bodies.contains_key(&token) && reachable.insert(token.clone()) {
-                frontier.push(token);
-            }
-        }
-    }
-
-    let kept: Vec<MirFunction> =
-        prog.functions.iter().filter(|f| reachable.contains(&f.name)).cloned().collect();
-    MirProgram {
-        functions: kept,
-        exports: prog.exports.clone(),
-        mutable_global_count: prog.mutable_global_count,
-    }
-}
 
 pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower::LowerError> {
     // Remap aliasable burned names BEFORE the unlinked check (clone only when an
     // alias actually applies — the common path stays zero-copy).
     let resolvable = resolvable_call_names(prog);
-    let needs_alias = prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| {
-        matches!(op, Op::CallFn { name, .. }
-            if !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some())
-    });
     let remapped;
-    let prog = if needs_alias {
+    let prog = if any_call_needs_alias(prog, &resolvable) {
         let mut p = prog.clone();
-        for f in &mut p.functions {
-            for op in &mut f.ops {
-                let Op::CallFn { name, .. } = op else {
-                    continue;
-                };
-                if resolvable.contains(name) {
-                    continue;
-                }
-                if let Some(alias) = resolve_rt_alias(name, &resolvable) {
-                    *name = alias;
-                }
-            }
-        }
+        remap_burned_names_to_aliases(&mut p, &resolvable);
         remapped = p;
         &remapped
     } else {
@@ -480,6 +388,65 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
         )));
     }
     Ok(render_wasm_program(&pruned))
+}
+
+/// Whether ANY op names a burned callee/drop target that is unresolvable as spelled but
+/// DOES resolve through an alias — the zero-copy test that decides whether the program
+/// must be cloned for the remap at all. Extracted verbatim from
+/// [`try_render_wasm_program`] (codopsy round-3 sweep, #852).
+fn any_call_needs_alias(prog: &MirProgram, resolvable: &BTreeSet<String>) -> bool {
+    prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| match op {
+        Op::CallFn { name, .. } => {
+            !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some()
+        }
+        Op::DropVariant { ty, .. } => {
+            !resolvable.contains(&drop_target_name(ty))
+                && resolve_drop_alias(&drop_target_name(ty), &resolvable).is_some()
+        }
+        Op::DropWrapperRec { drop_fn, .. } => {
+            !resolvable.contains(&drop_target_name(drop_fn))
+                && resolve_drop_alias(&drop_target_name(drop_fn), &resolvable).is_some()
+        }
+        _ => false,
+    })
+}
+
+/// Rewrite every unresolvable-as-spelled call / drop target that HAS an alias to that
+/// alias, in place. Extracted verbatim from [`try_render_wasm_program`] (codopsy
+/// round-3 sweep, #852).
+fn remap_burned_names_to_aliases(p: &mut MirProgram, resolvable: &BTreeSet<String>) {
+        for f in &mut p.functions {
+            for op in &mut f.ops {
+                match op {
+                    Op::CallFn { name, .. } => {
+                        if !resolvable.contains(name) {
+                            if let Some(alias) = resolve_rt_alias(name, &resolvable) {
+                                *name = alias;
+                            }
+                        }
+                    }
+                    Op::DropVariant { ty, .. } => {
+                        if !resolvable.contains(&drop_target_name(ty)) {
+                            if let Some(alias) =
+                                resolve_drop_alias(&drop_target_name(ty), &resolvable)
+                            {
+                                *ty = alias;
+                            }
+                        }
+                    }
+                    Op::DropWrapperRec { drop_fn, .. } => {
+                        if !resolvable.contains(&drop_target_name(drop_fn)) {
+                            if let Some(alias) =
+                                resolve_drop_alias(&drop_target_name(drop_fn), &resolvable)
+                            {
+                                *drop_fn = alias;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
 }
 
 /// Render a whole MIR program (functions + `_start` → `main`) to a WAT module.
@@ -778,6 +745,7 @@ include!("render_wasm_bce.rs");
 include!("render_wasm_c.rs");
 include!("render_wasm_dce.rs");
 include!("render_wasm_peephole.rs");
+include!("render_wasm_switch.rs");
 
 /// The self-hosted stdlib runtime registry: `(call name, impl fn name, Almide source)`.
 /// The v1 linker auto-includes an entry when its `call name` is invoked but undefined,
@@ -785,14 +753,13 @@ include!("render_wasm_peephole.rs");
 /// `(call $module.func)` resolves AND the caps gate reads it as a known-pure stdlib
 /// `module.func`. The single source of truth for the stdlib self-host campaign (§4.1:
 /// the runtime self-hosts into Almide; the trusted floor stays the prim ops + checker).
-/// (mod declarations kept in THIS physical file — not include!'d — because Rust
-/// resolves `mod X;`'s implicit file path from the physical file's own directory,
-/// not the logical include! chain: this file is `src/render_wasm.rs`, backing
-/// `pub mod render_wasm;`, so `mod registry;` correctly finds `render_wasm/registry.rs`.)
-/// `pub(crate)` so the pipeline's link gate can ask which `module.fn` names the
-/// registry already serves (a bundled module's own Almide body must not shadow one).
-pub(crate) mod registry;
-pub use registry::self_host_runtime;
+/// The registry itself moved to `almide_types::self_host_registry`, beside the
+/// embedded sources it names: the interp oracle reads the SAME table to evaluate
+/// the same bodies as the third cross-target vote, and a table owned by one
+/// backend would have forced it to either depend on this backend or restate the
+/// mapping (the hand-mirrored-bridge drift class). Re-exported here so every
+/// in-crate consumer (`crate::render_wasm::self_host_runtime`) is unchanged.
+pub use almide_lang::self_host_registry::self_host_runtime;
 
 #[cfg(test)]
 mod tests;

@@ -243,6 +243,16 @@ impl LowerCtx {
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
             )));
         }
+        // OUR OWN verdict, kept in a LOCAL. The flag on `self` is reset by every
+        // nested `lower_pure_module_call_args`, and an argument can contain one:
+        // `map.fold(if result.is_ok(t) then … else …, acc, (a, k, v) => acc)` lowers
+        // `result.is_ok` while walking arg0, which cleared a decline recorded for a
+        // SIBLING argument. The caller then read `false`, skipped the honest wall, and
+        // emitted the combinator call with the closure slot filled by an EMPTY block —
+        // the callee's `call_indirect` read past it and aborted (#905). Publishing the
+        // local AFTER the loop makes the flag describe THIS call's arguments, which is
+        // the only thing its reader asks about.
+        let mut dropped_closure = false;
         self.last_call_had_unlifted_closure = false;
         let mut out: Vec<CallArg> = Vec::with_capacity(args.len());
         for a in args {
@@ -265,7 +275,7 @@ impl LowerCtx {
                         // A lambda outside the liftable subset — no closure form. The
                         // self-host combinator runs with a missing closure slot → an
                         // empty/garbage result.
-                        self.last_call_had_unlifted_closure = true;
+                        dropped_closure = true;
                         self.record_elided_calls(body);
                     }
                 },
@@ -290,9 +300,33 @@ impl LowerCtx {
                 // typing — an effectful closure is not a plain `(A) -> B` value), so the
                 // callback contributes no host capability of its own; a lifted lambda's
                 // caps were already folded at its creation site.
+                //
+                // `closure_values` membership is the WHOLE test, not a formality: a
+                // Fn-typed `Var` resolves through `value_of` whether or not its binding
+                // ever produced a callable block. When the bound lambda fell OUTSIDE the
+                // liftable subset, its `let` left a DEFERRED block behind —
+                // `list_new(0, 8)`, a list with no slots at all, not even the fnidx a
+                // real closure carries at slot 0 — and handing that to a self-host
+                // combinator makes its `call_indirect` read past the block (#905:
+                // `Error: index out of bounds` on wasm, correct on native). The same
+                // lambda written INLINE walls honestly, because the `Lambda` arm above
+                // sees `lift_lambda` decline; the two forms differ only by an ANF hoist,
+                // which a SIBLING argument can force —
+                // `map.fold(if c then m1 else m2, acc, (a, k, v) => acc)` hoists the
+                // lambda that `map.fold(m1, acc, (a, k, v) => acc)` leaves inline. Same
+                // program, same unliftable capture, opposite verdicts. `lift_lambda`
+                // already applies exactly this test to a CAPTURED Fn var; the argument
+                // position was the hole.
                 IrExprKind::Var { id } if matches!(a.ty, Ty::Fn { .. }) => {
                     match self.value_for(*id) {
-                        Ok(v) => out.push(CallArg::Handle(v)),
+                        Ok(v) if self.closure_values.contains(&v) => out.push(CallArg::Handle(v)),
+                        Ok(_) => {
+                            return Err(LowerError::Unsupported(format!(
+                                "Module call {module}.{func} with a function-value argument that never \
+                                 became a closure block (its lambda was outside the liftable subset) \
+                                 not in this brick"
+                            )))
+                        }
                         Err(_) => {
                             return Err(LowerError::Unsupported(format!(
                                 "Module call {module}.{func} with an unresolved function-value argument not in this brick"
@@ -300,6 +334,11 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A Fn-TYPED argument that matched none of the closure arms above — not
+                // a Lambda, not a ClosureCreate/FnRef, not a first-class fn VALUE the
+                // closure machinery recognises. The generic path would materialize it as
+                // a plain heap arg, i.e. the same empty block described above, so this
+                // walls rather than lowering it.
                 _ if matches!(a.ty, Ty::Fn { .. }) => {
                     return Err(LowerError::Unsupported(format!(
                         "Module call {module}.{func} with an opaque function-value argument (capabilities unanalyzable) not in this brick"
@@ -310,6 +349,9 @@ impl LowerCtx {
                 _ => out.extend(self.lower_call_args(std::slice::from_ref(a))?),
             }
         }
+        // Publish OUR verdict last, so a nested call inside an argument cannot have
+        // cleared it (#905 — see the local's declaration above).
+        self.last_call_had_unlifted_closure = dropped_closure;
         Ok(out)
     }
 
@@ -354,15 +396,12 @@ impl LowerCtx {
         //     caller-visible (var_in_if_skinning's blend writes its non-mut
         //     `verts` param and the caller reads the results) — the bare
         //     write-through CallFn is exactly right, no COW.
-        //   - anything else (a record FIELD needs the two-level record+field COW;
-        //     a mutable GLOBAL receiver would mutate a local copy): WALL — a
-        //     possibly-shared write is a silent aliasing miscompile, never emitted.
-        if (module == "bytes"
-            && (func.starts_with("set_")
-                || func.starts_with("write_")
-                || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
-            || (module == "list" && func == "pop")
-        {
+        //   - a mutable module-level `var`: the block is owned by the global's
+        //     STORAGE SLOT, so the COW is the slot's — see `mutable_global_cow`.
+        //   - anything else (a record FIELD needs the two-level record+field COW):
+        //     WALL — a possibly-shared write is a silent aliasing miscompile,
+        //     never emitted.
+        if is_inplace_mutator(module, func) {
             self.cow_inplace_receiver(module, func, args)?;
         }
         let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
@@ -402,9 +441,16 @@ impl LowerCtx {
     /// The #794 in-place-mutator RECEIVER discipline shared by the bytes mutators and
     /// `list.pop`: a LOCAL var receiver gets `Op::MakeUnique` (COW — an alias must keep
     /// the pre-mutation value: `var b = a; list.pop(a)` leaves `b` intact), a BORROWED
-    /// PARAM writes through bare (the caller sees the mutation — the &mut protocol),
-    /// and any other receiver shape (a record field, a fresh temp) WALLS — the write
-    /// would land in a materialized copy and vanish, or alias a shared field.
+    /// PARAM writes through bare (the caller sees the mutation — the &mut protocol), a
+    /// mutable module-level `var` COWs its STORAGE SLOT ([`Self::mutable_global_cow`]),
+    /// a record field takes the two-level record+field COW, and anything else WALLS —
+    /// the write would land in a materialized copy and vanish, or alias a shared field.
+    ///
+    /// Every decline here names the ACTUAL receiver shape (#906). The old text said
+    /// "over a non-var receiver … the two-level record+field COW" for EVERY shape,
+    /// including a plain `var` module-level buffer where neither clause was true —
+    /// so the one action it implied ("make it a `var`") did not lift the wall and the
+    /// reader had nothing to act on.
     pub(crate) fn cow_inplace_receiver(
         &mut self,
         module: &str,
@@ -413,6 +459,48 @@ impl LowerCtx {
     ) -> Result<(), LowerError> {
         match args.first().map(|a| &a.kind) {
             Some(IrExprKind::Var { id }) => {
+                // A MUTABLE module-level `var` is NOT in `value_of` (it is read fresh
+                // from its slot on every reference) — it must be recognized BEFORE
+                // `value_for`, which would report it as an unbound var.
+                if let Some((index, gty)) = crate::lower::mutable_global_info(*id) {
+                    return self.mutable_global_cow(module, func, *id, index, &gty);
+                }
+                // Resolve LOCALLY first. `value_or_global` states the invariant this
+                // relies on: a function-local var — parameter or `let` — is in
+                // `value_of`, and the frontend guarantees every non-global reference is
+                // bound by a preceding local form, so only a MISS can be a global.
+                //
+                // Consulting `self.globals` before that got the precedence backwards,
+                // and the two are not in the same numbering space. A module sibling is
+                // lowered against whichever globals map its region resolves to, while
+                // its own VarIds are numbered independently — so `VarId(0)` can be this
+                // function's first PARAMETER and, simultaneously, an unrelated top-let
+                // in the map. A `pub fn f(m: Bytes, …)` that writes through `m` was then
+                // reported as an "IMMUTABLE module-level `let`" and dropped, and because
+                // a dropped sibling is not fatal the only user-visible symptom was the
+                // caller's "unlinked call, no wasm definition" (#943). Adding one
+                // unrelated `let` to the consumer was enough to trigger it.
+                if let Ok(v) = self.value_for(*id) {
+                    if !self.param_values.contains(&v) {
+                        self.ops.push(Op::MakeUnique { v });
+                    }
+                    return Ok(());
+                }
+                // An IMMUTABLE module-level `let` has no storage slot: every reference
+                // materializes a fresh per-use copy (a computed init is inlined at the
+                // use site outright), so the write would land in a temporary and vanish.
+                // Native does not accept this shape either — it renders the top-let as a
+                // non-writable Rust `static` and the generated crate fails to build — so
+                // there is nothing to be faithful TO. Say what actually fixes it.
+                if self.globals.contains_key(id) {
+                    return Err(LowerError::Unsupported(format!(
+                        "in-place mutator {module}.{func} over the IMMUTABLE module-level \
+                         `let` {id:?} — a module-level `let` has no storage slot (each \
+                         reference is a fresh per-use copy), so the write would vanish. \
+                         Declare the buffer `var` to give it one"
+                    )));
+                }
+                // Neither locally bound nor a declared global — a genuine gap.
                 let v = self.value_for(*id)?;
                 if !self.param_values.contains(&v) {
                     self.ops.push(Op::MakeUnique { v });
@@ -424,19 +512,101 @@ impl LowerCtx {
             Some(IrExprKind::Member { object, field }) => {
                 self.two_level_field_cow(object, *field).ok_or_else(|| {
                     LowerError::Unsupported(format!(
-                        "in-place mutator {module}.{func} over a non-var receiver \
-                         (a shared record field would alias the write — the two-level \
-                         record+field COW) not in this brick"
+                        "in-place mutator {module}.{func} over the record field `.{}` of a \
+                         receiver that is not a local var bound to a materialized record \
+                         with a resolvable layout — the two-level record+field COW (#794) \
+                         has nothing to make unique",
+                        field.as_str()
                     ))
                 })
             }
-            _ => Err(LowerError::Unsupported(format!(
-                "in-place mutator {module}.{func} over a non-var receiver \
-                 (a shared record field would alias the write — the two-level \
-                 record+field COW) not in this brick"
+            other => Err(LowerError::Unsupported(format!(
+                "in-place mutator {module}.{func} over a {} receiver — a writable receiver \
+                 is a local var, a borrowed param, a module-level `var`, or a record field. \
+                 A temporary (a call result, a literal) has no owner to write back to",
+                other.map(kind_name).unwrap_or("missing"),
             ))),
         }
     }
+
+    /// #906: COW the STORAGE SLOT of a mutable module-level `var` before an in-place
+    /// mutator writes through it — nendo's module-level scratch arena
+    /// (`var g_pool = bytes.new(N)` + `bytes.set_f32_le(g_pool, …)`), which walled with
+    /// "use of unbound var" because a mutable global never enters `value_of`.
+    ///
+    /// The slot owns the block, so this is the two-level COW with the RECORD level
+    /// replaced by the slot (which is real storage — nothing to copy): borrow the slot's
+    /// handle, `Op::MakeUnique` it (at rc > 1 the render's `rc_dec` releases the SLOT's
+    /// reference and a fresh uniquely-owned copy takes its place; at rc == 1 it is a
+    /// no-op), and store the unique handle BACK into the slot. The mutator's own receiver
+    /// arg then re-reads the slot (`value_or_global` never caches a mutable global) and
+    /// writes the uniquely-owned block, so every later read of the global sees the write.
+    ///
+    /// This is the native oracle's semantics exactly: there the global is an `RcCow` and
+    /// the mutator's `make_mut` COWs a shared block, so `let snap = g; bytes.set_at(g, …)`
+    /// leaves `snap` at the pre-write value — verified against the native leg.
+    fn mutable_global_cow(
+        &mut self,
+        module: &str,
+        func: &str,
+        var: almide_ir::VarId,
+        index: u32,
+        gty: &Ty,
+    ) -> Result<(), LowerError> {
+        use crate::PrimKind;
+        // Same fence as `lower_mutable_global_assign`: a MODELED (non-executable) frame
+        // must not carry a global write — both eliding and emitting one diverge from the
+        // native leg, because the write is an EFFECT and the frame never runs.
+        if self.in_frame > 0 && self.unit_arm_depth == 0 && self.scalar_loop_depth == 0 {
+            return Err(LowerError::Unsupported(format!(
+                "in-place mutator {module}.{func} over mutable module-level var {var:?} \
+                 inside a modeled (non-executable) frame — the global write is an effect \
+                 the model would elide"
+            )));
+        }
+        // A SCALAR global holds its value inline, not a block handle: there is no block
+        // to make unique and no in-place mutator takes a scalar receiver anyway.
+        if !is_heap_ty(gty) {
+            return Err(LowerError::Unsupported(format!(
+                "in-place mutator {module}.{func} over the SCALAR module-level var \
+                 {var:?} — its slot holds a value, not a block to write through"
+            )));
+        }
+        let addr = self.fresh_value();
+        self.ops
+            .push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+        let buf = self.fresh_value();
+        self.ops
+            .push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(buf), args: vec![addr] });
+        self.ops.push(Op::MakeUnique { v: buf });
+        // Recompute the address (the store must not depend on the load's operand
+        // staying live across the COW) and write the — possibly new — handle back.
+        let addr2 = self.fresh_value();
+        self.ops
+            .push(Op::ConstInt { dst: addr2, value: crate::mg_slot_addr(index) as i64 });
+        let handle = self.fresh_value();
+        self.ops
+            .push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![buf] });
+        self.ops.push(Op::Prim {
+            kind: PrimKind::Store { width: 8 },
+            dst: None,
+            args: vec![addr2, handle],
+        });
+        Ok(())
+    }
+}
+
+/// The IN-PLACE `&mut` mutator surface: the bytes writers (set_*/write_*/fill/clear/
+/// copy_within/copy_from — their self-host bodies store through args[0]'s block) and
+/// the in-place `list.pop` (the same &mut protocol over a list receiver). Shared with
+/// `inline_pure_call_globals`, which must not substitute a global's initializer into a
+/// RECEIVER position: the write would land in a fresh temporary (#906).
+pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
+    (module == "bytes"
+        && (func.starts_with("set_")
+            || func.starts_with("write_")
+            || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
+        || (module == "list" && func == "pop")
 }
 
 /// Extracted from `LowerCtx::lower_pure_module_call_args` (codopsy8 complexity sweep): the
@@ -542,6 +712,11 @@ fn is_admitted_effectful_io(module: &str, func: &str) -> bool {
         // (io_write.almd → prim.fd_write), so their prims are in the program map and the
         // transitive cap_witness counts Stdout. Both return Unit.
         || (module == "io" && matches!(func, "write" | "write_bytes"))
+        // `io.read_all` READS standard input to EOF — REUSES Capability::Stdin. Self-hosted
+        // as a chunked `io.read_n_bytes` loop (io_read_all.almd, #876), so its transitive
+        // cap_witness reaches the same prim.read_n_bytes floor and counts Stdin. Returns an
+        // owned String (flat Drop).
+        || (module == "io" && func == "read_all")
 }
 
 include!("calls_b.rs");

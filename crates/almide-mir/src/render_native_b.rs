@@ -189,138 +189,233 @@ pub(crate) struct NativeSink<'a, 'f> {
 fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), LowerError> {
     let NativeCall { dst, name, args, result } = call;
     let NativeSink { user_fns, sigs, tys, out, indent, used_shims } = sink;
+    if let Some(callee) = user_fns.get(name.as_str()) {
+        render_user_fn_call(dst, name, args, result, callee, sigs, tys, out, indent)
+    } else if let Some((param_tys, ret_ty, shim_src)) = shim(name) {
+        render_closed_shim_call(
+            dst, name, args, param_tys, ret_ty, shim_src, tys, out, indent, used_shims,
+        )
+    } else {
+        Err(wall(format!(
+            "native: call to `{name}` — not a lowered user fn and not in the \
+             native runtime floor"
+        )))
+    }
+}
+
+/// A user fn call (by declared sig table): each arg rendered in the callee's
+/// declared param mode, then the result bound from the declared return.
+/// Extracted verbatim from `render_call_fn` (codopsy r2, #852).
+#[allow(clippy::too_many_arguments)]
+fn render_user_fn_call(
+    dst: &Option<ValueId>,
+    name: &String,
+    args: &Vec<CallArg>,
+    result: &Option<Repr>,
+    callee: &MirFunction,
+    sigs: &NativeSigs,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+) -> Result<(), LowerError> {
+    if args.len() != callee.params.len() {
+        return Err(wall(format!("native: call to `{name}` arity mismatch")));
+    }
+    let callee_sig = sigs.get(name.as_str());
+    let mut rendered_args = Vec::new();
+    for (i, (a, p)) in args.iter().zip(&callee.params).enumerate() {
+        let want = declared_param_want(callee_sig, i, p)?;
+        let (code, got) = call_arg(a, tys)?;
+        rendered_args.push(user_arg_in_declared_mode(name, want, code, got)?);
+    }
+    let call = format!("{}({})", mangle(name), rendered_args.join(", "));
+    bind_user_fn_result(dst, result, callee_sig, &call, tys, out, indent)
+}
+
+/// Decides the NTy a user-fn param WANTS its arg rendered as.
+/// The DECLARED kind (sig table) disambiguates a heap param:
+/// `&str` vs `&[i64]`; absent (a synthesized helper) the repr
+/// fallback keeps the string convention.
+/// Extracted verbatim from `render_call_fn` (codopsy r2, #852).
+fn declared_param_want(
+    callee_sig: Option<&(Vec<NativeSigKind>, Option<NativeSigKind>)>,
+    i: usize,
+    p: &crate::MirParam,
+) -> Result<NTy, LowerError> {
+    Ok(match callee_sig.and_then(|(ps, _)| ps.get(i)) {
+        Some(NativeSigKind::I64) => NTy::I64,
+        Some(NativeSigKind::Str) => NTy::StrRef,
+        Some(NativeSigKind::ListI64) => NTy::VecRef,
+        Some(NativeSigKind::F64) => NTy::F64,
+        None => repr_nty(&p.repr, true)?,
+    })
+}
+
+/// Renders ONE user-fn call arg in the param's wanted mode: f64 through the
+/// bits boundary, scalars must already be i64, an owned vec is borrowed for a
+/// list param, and everything else follows the string convention — walling on
+/// any kind mismatch. Extracted verbatim from `render_call_fn`
+/// (codopsy r2, #852).
+fn user_arg_in_declared_mode(
+    name: &str,
+    want: NTy,
+    code: String,
+    got: NTy,
+) -> Result<String, LowerError> {
+    match want {
+        NTy::F64 => as_f64_arg(&code, got),
+        NTy::I64 => {
+            if got != NTy::I64 {
+                return Err(wall(format!(
+                    "native: heap arg to scalar param of `{name}`"
+                )));
+            }
+            Ok(code)
+        }
+        NTy::VecRef | NTy::Vec => {
+            if !got.is_veccy() {
+                return Err(wall(format!(
+                    "native: non-list arg to list param of `{name}`"
+                )));
+            }
+            Ok(match got {
+                NTy::Vec => format!("&{code}"),
+                _ => code,
+            })
+        }
+        _ => {
+            if !got.is_stringy() {
+                return Err(wall(format!(
+                    "native: scalar arg to heap param of `{name}`"
+                )));
+            }
+            Ok(as_str_arg(&code, got))
+        }
+    }
+}
+
+/// Binds a user-fn call's result: the dst's NTy comes from the callee's
+/// declared return (repr fallback otherwise), a dst-less call is a bare
+/// statement, and an absent result repr defaults to scalar. Extracted verbatim
+/// from `render_call_fn` (codopsy r2, #852).
+fn bind_user_fn_result(
+    dst: &Option<ValueId>,
+    result: &Option<Repr>,
+    callee_sig: Option<&(Vec<NativeSigKind>, Option<NativeSigKind>)>,
+    call: &str,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+) -> Result<(), LowerError> {
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    if let Some(callee) = user_fns.get(name.as_str()) {
-        if args.len() != callee.params.len() {
-            return Err(wall(format!("native: call to `{name}` arity mismatch")));
-        }
-        let callee_sig = sigs.get(name.as_str());
-        let mut rendered_args = Vec::new();
-        for (i, (a, p)) in args.iter().zip(&callee.params).enumerate() {
-            // The DECLARED kind (sig table) disambiguates a heap param:
-            // `&str` vs `&[i64]`; absent (a synthesized helper) the repr
-            // fallback keeps the string convention.
-            let want = match callee_sig.and_then(|(ps, _)| ps.get(i)) {
+    match (dst, result) {
+        (Some(d), Some(r)) => {
+            // A heap result is FRESH OWNED (the callee moved it out).
+            // Its KIND comes from the callee's declared return.
+            let t = match callee_sig.and_then(|(_, r)| *r) {
+                Some(NativeSigKind::ListI64) => NTy::Vec,
+                Some(NativeSigKind::Str) => NTy::Str,
                 Some(NativeSigKind::I64) => NTy::I64,
-                Some(NativeSigKind::Str) => NTy::StrRef,
-                Some(NativeSigKind::ListI64) => NTy::VecRef,
                 Some(NativeSigKind::F64) => NTy::F64,
-                None => repr_nty(&p.repr, true)?,
+                None => repr_nty(r, false)?,
             };
-            let (code, got) = call_arg(a, tys)?;
-            match want {
-                NTy::F64 => {
-                    rendered_args.push(as_f64_arg(&code, got)?);
-                }
-                NTy::I64 => {
-                    if got != NTy::I64 {
-                        return Err(wall(format!(
-                            "native: heap arg to scalar param of `{name}`"
-                        )));
-                    }
-                    rendered_args.push(code);
-                }
-                NTy::VecRef | NTy::Vec => {
-                    if !got.is_veccy() {
-                        return Err(wall(format!(
-                            "native: non-list arg to list param of `{name}`"
-                        )));
-                    }
-                    rendered_args.push(match got {
-                        NTy::Vec => format!("&{code}"),
-                        _ => code,
-                    });
-                }
-                _ => {
-                    if !got.is_stringy() {
-                        return Err(wall(format!(
-                            "native: scalar arg to heap param of `{name}`"
-                        )));
-                    }
-                    rendered_args.push(as_str_arg(&code, got));
-                }
-            }
+            tys.insert(*d, t);
+            let ty_name = match t {
+                NTy::Str => "String",
+                NTy::Vec => "Vec<i64>",
+                NTy::F64 => "f64",
+                _ => "i64",
+            };
+            line!("let mut {}: {} = {};", var(*d), ty_name, call);
         }
-        let call = format!("{}({})", mangle(name), rendered_args.join(", "));
-        match (dst, result) {
-            (Some(d), Some(r)) => {
-                // A heap result is FRESH OWNED (the callee moved it out).
-                // Its KIND comes from the callee's declared return.
-                let t = match callee_sig.and_then(|(_, r)| *r) {
-                    Some(NativeSigKind::ListI64) => NTy::Vec,
-                    Some(NativeSigKind::Str) => NTy::Str,
-                    Some(NativeSigKind::I64) => NTy::I64,
-                    Some(NativeSigKind::F64) => NTy::F64,
-                    None => repr_nty(r, false)?,
-                };
-                tys.insert(*d, t);
-                let ty_name = match t {
-                    NTy::Str => "String",
-                    NTy::Vec => "Vec<i64>",
-                    NTy::F64 => "f64",
-                    _ => "i64",
-                };
-                line!("let mut {}: {} = {};", var(*d), ty_name, call);
-            }
-            (None, _) => line!("{call};"),
-            (Some(d), None) => {
-                // Result repr unknown: scalar by convention.
-                tys.insert(*d, NTy::I64);
-                line!("let mut {}: i64 = {};", var(*d), call);
-            }
+        (None, _) => line!("{call};"),
+        (Some(d), None) => {
+            // Result repr unknown: scalar by convention.
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = {};", var(*d), call);
         }
-    } else if let Some((param_tys, ret_ty, shim_src)) = shim(name) {
-        if args.len() != param_tys.len() {
-            return Err(wall(format!("native: shim `{name}` arity mismatch")));
-        }
-        let mut rendered_args = Vec::new();
-        for (a, want) in args.iter().zip(param_tys) {
-            let (code, got) = call_arg(a, tys)?;
-            match want {
-                NTy::F64 => {
-                    rendered_args.push(as_f64_arg(&code, got)?);
-                }
-                NTy::I64 => {
-                    if got != NTy::I64 {
-                        return Err(wall(format!("native: shim `{name}` arg type mismatch")));
-                    }
-                    rendered_args.push(code);
-                }
-                _ => {
-                    if !got.is_stringy() {
-                        return Err(wall(format!("native: shim `{name}` arg type mismatch")));
-                    }
-                    // Heap args are BORROWED at the MIR level — by reference.
-                    rendered_args.push(as_str_arg(&code, got));
-                }
-            }
-        }
-        used_shims.push(shim_src);
-        let call = format!("{}({})", shim_rust_name(name), rendered_args.join(", "));
-        match (dst, ret_ty) {
-            (Some(d), Some(t)) => {
-                tys.insert(*d, t);
-                let ty_name = if t == NTy::Str { "String" } else { "i64" };
-                line!("let mut {}: {} = {};", var(*d), ty_name, call);
-            }
-            (None, _) => line!("{call};"),
-            (Some(_), None) => {
-                return Err(wall(format!("native: shim `{name}` has no result")))
-            }
-        }
-        let _ = result;
-    } else {
-        return Err(wall(format!(
-            "native: call to `{name}` — not a lowered user fn and not in the \
-             native runtime floor"
-        )));
     }
     Ok(())
+}
+
+/// A CLOSED runtime shim call (the native runtime floor): the shim's fixed
+/// param list gates each arg, its source is pulled into `used_shims`, and the
+/// result binds by the shim's declared return. Extracted verbatim from
+/// `render_call_fn` (codopsy r2, #852).
+#[allow(clippy::too_many_arguments)]
+fn render_closed_shim_call(
+    dst: &Option<ValueId>,
+    name: &String,
+    args: &Vec<CallArg>,
+    param_tys: &'static [NTy],
+    ret_ty: Option<NTy>,
+    shim_src: &'static str,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+    used_shims: &mut Vec<&'static str>,
+) -> Result<(), LowerError> {
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    if args.len() != param_tys.len() {
+        return Err(wall(format!("native: shim `{name}` arity mismatch")));
+    }
+    let mut rendered_args = Vec::new();
+    for (a, want) in args.iter().zip(param_tys) {
+        let (code, got) = call_arg(a, tys)?;
+        rendered_args.push(shim_arg_in_declared_mode(name, *want, code, got)?);
+    }
+    used_shims.push(shim_src);
+    let call = format!("{}({})", shim_rust_name(name), rendered_args.join(", "));
+    match (dst, ret_ty) {
+        (Some(d), Some(t)) => {
+            tys.insert(*d, t);
+            let ty_name = if t == NTy::Str { "String" } else { "i64" };
+            line!("let mut {}: {} = {};", var(*d), ty_name, call);
+        }
+        (None, _) => line!("{call};"),
+        (Some(_), None) => {
+            return Err(wall(format!("native: shim `{name}` has no result")))
+        }
+    }
+    Ok(())
+}
+
+/// Renders ONE shim call arg against the shim's declared NTy: f64 through the
+/// bits boundary, i64 must match exactly, heap args by the string convention —
+/// walling on any mismatch. Extracted verbatim from `render_call_fn`
+/// (codopsy r2, #852).
+fn shim_arg_in_declared_mode(
+    name: &str,
+    want: NTy,
+    code: String,
+    got: NTy,
+) -> Result<String, LowerError> {
+    match want {
+        NTy::F64 => as_f64_arg(&code, got),
+        NTy::I64 => {
+            if got != NTy::I64 {
+                return Err(wall(format!("native: shim `{name}` arg type mismatch")));
+            }
+            Ok(code)
+        }
+        _ => {
+            if !got.is_stringy() {
+                return Err(wall(format!("native: shim `{name}` arg type mismatch")));
+            }
+            // Heap args are BORROWED at the MIR level — by reference.
+            Ok(as_str_arg(&code, got))
+        }
+    }
 }
 
 /// `Op::Prim { kind: FloatBin(op), .. }` — a binary float op.
@@ -622,6 +717,22 @@ fn render_int_binop(
             used_shims.push(shim("__chk_mod").expect("\"__chk_mod\" is a literal shim() match arm, always Some").2);
             format!("rt_chk_mod({l}, {r})")
         }
+        // The unsigned 64-bit lane (#872): the i64 local carries the u64 bit
+        // pattern — cast both sides for div/rem/ordering. Divide-by-zero
+        // aborts through the same checked shim family as the signed pair
+        // (identical stderr bytes); there is no MIN÷-1 case unsigned.
+        IntOp::DivU => {
+            used_shims.push(shim("__chk_div_u").expect("\"__chk_div_u\" is a literal shim() match arm, always Some").2);
+            format!("rt_chk_div_u({l}, {r})")
+        }
+        IntOp::ModU => {
+            used_shims.push(shim("__chk_mod_u").expect("\"__chk_mod_u\" is a literal shim() match arm, always Some").2);
+            format!("rt_chk_mod_u({l}, {r})")
+        }
+        IntOp::LtU => format!("(({l} as u64) < ({r} as u64)) as i64"),
+        IntOp::LeU => format!("(({l} as u64) <= ({r} as u64)) as i64"),
+        IntOp::GtU => format!("(({l} as u64) > ({r} as u64)) as i64"),
+        IntOp::GeU => format!("(({l} as u64) >= ({r} as u64)) as i64"),
         IntOp::Eq => format!("({l} == {r}) as i64"),
         IntOp::Ne => format!("({l} != {r}) as i64"),
         IntOp::Lt => format!("({l} < {r}) as i64"),

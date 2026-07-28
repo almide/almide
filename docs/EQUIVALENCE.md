@@ -11,6 +11,7 @@ The guarantee is **continuous, with an explicit scope** — held by gates that r
 - **In scope**: everything the program lets you observe — stdout, stderr, exit code — on every program that compiles for both targets.
 - **Inherently nondeterministic sources** are ledger-managed, not waved away: their contracts certify the *deterministic invariant* (e.g. every `random.int(lo, hi)` draw stays in range — C-112) instead of exact bytes, and the sole wall-clock stdlib surface was removed outright (C-006) rather than documented around.
 - **APIs not yet implemented on wasm** are compile- or run-time *refusals*: the program never runs far enough to emit wrong bytes — an honest wall, not a silent divergence.
+- **Platform-reporting fns are the one exemption, and it is closed**: `env.os()` and `env.temp_dir()` report the host they run on, so native answers the real OS name and temp directory while the wasm leg answers the WASI sandbox. Making them agree would be the defect. C-189 bounds the carve-out to exactly those two and certifies the invariant that *is* identical (the platform set is closed; the temp path is non-empty and absolute), so a third exempt fn cannot appear without amending the contract and its fixture.
 
 ## The contract ledger
 

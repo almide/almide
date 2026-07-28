@@ -1,0 +1,15 @@
+// @contract: C-176
+// The #871 inline ctor-over-call shapes: `some(<tuple-returning call>)` and
+// `ok(<tuple-returning call>)` — the payload is a desugared MATCH by bind
+// time, so the ctor's ANF net must catch it (Call|Tuple|If|Match) and the
+// scalar-tuple Module-call payload must materialize (a fresh owned flat
+// block), never defer to an EMPTY Opaque the program reads as `none`/OOB.
+fn main() -> Unit = {
+  let b: Option[(Int, Int)] = some(option.unwrap_or(some((2, 3)), (2, 4)))
+  println("${b}")
+  let r: Result[(Int, Int), String] = ok(option.unwrap_or(some((2, 3)), (2, 4)))
+  let c: (Int, Int) = option.unwrap_or(result.to_option(r), (7, 8))
+  println("${c}")
+  let n: Option[(Int, Int)] = some(option.unwrap_or(none, (5, 6)))
+  println("${n}")
+}

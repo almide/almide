@@ -497,3 +497,99 @@
             "a triply-nested list literal must still wall as a unit"
         );
     }
+
+    #[test]
+    fn an_anf_hoisted_lambda_gets_the_same_verdict_as_its_inline_twin() {
+        // A combinator's closure argument reaches the lowerer in one of two shapes,
+        // and which one is not the program's choice: written INLINE it stays an
+        // `IrExprKind::Lambda`, but a SIBLING argument that needs ANF hoisting takes
+        // the lambda with it into a `let`, so the call sees an `IrExprKind::Var`. In
+        // each pair below the only difference is that `if c then m1 else m2` in the
+        // map position forces that hoist.
+        //
+        // The two shapes must reach the SAME verdict. They did not: the `Var` arm
+        // passed `value_of`'s block through unchecked, and when the lift had failed
+        // that block was a deferred `list_new(0, 8)` — no slots, not even the fnidx a
+        // real closure carries at slot 0 — so `map.fold`'s `call_indirect` read past
+        // it and wasm printed `Error: index out of bounds` where native printed
+        // `(2, false)` (#905). Agreement is the invariant, in whichever direction the
+        // liftable subset happens to draw its line; the wrong value is what is
+        // forbidden.
+        //
+        // Both directions are pinned, so widening the subset cannot quietly retire
+        // half the test: a `(Int, Bool)` capture is a flat scalar block and LIFTS, a
+        // `List[List[Int]]` capture is not in the env classes at all and WALLS.
+        //
+        // The walling type is chosen for a STRUCTURAL reason, not an incidental one —
+        // it has to keep walling for as long as the test is meant to say something.
+        // Each element of a `List[List[Int]]` is itself owned heap, so the env has no
+        // class that frees it: a flat rc_dec of the outer block leaks every inner list,
+        // and the nested walk `__drop_list_str` is a String walk. This slot used to
+        // hold `Float`, which walled for a much weaker reason — a belief that its slot
+        // needed a reinterpret the prims lacked — and it lifts now (#954), so it moved
+        // to the LIFTING side below rather than being deleted.
+        let capture_of = |ty: &str, init: &str, m: &str| {
+            format!(
+                "fn main() -> Unit = {{\n  \
+                 let acc: {ty} = {init}\n  \
+                 let c: Bool = false\n  \
+                 let r: {ty} = map.fold({m}, acc, (a, k, v) => acc)\n  \
+                 println(\"${{r}}\") }}\n"
+            )
+        };
+        let liftable = |m: &str| capture_of("(Int, Bool)", "(2, false)", m);
+        // A MIR float local already holds its bits in an i64, so the scalar env slot
+        // carries it unchanged — same physics as the `Int` beside it.
+        let liftable_float = |m: &str| capture_of("Float", "2.5", m);
+        let unliftable = |m: &str| capture_of("List[List[Int]]", "[[1, 2]]", m);
+        const INLINE: &str = "[\"k0\": 1]";
+        const HOISTED: &str = "(if c then [\"k0\": 1] else [\"k0\": 127, \"k1\": 2])";
+        let lowers = |src: String| lower_source(&src).functions.iter().any(|f| f.name == "main");
+
+        assert!(lowers(liftable(INLINE)), "a flat-scalar-block capture must lift inline");
+        assert!(
+            lowers(liftable(HOISTED)),
+            "the ANF hoist must not change the verdict — same program, same capture"
+        );
+        assert!(lowers(liftable_float(INLINE)), "a Float capture is a scalar env slot");
+        assert!(
+            lowers(liftable_float(HOISTED)),
+            "the ANF hoist must not change the Float verdict either"
+        );
+        assert!(
+            !lowers(unliftable(INLINE)),
+            "a List[List[Int]] capture is outside the env classes"
+        );
+        assert!(
+            !lowers(unliftable(HOISTED)),
+            "the hoisted twin must wall too, not call through an empty block"
+        );
+    }
+
+    #[test]
+    fn an_outer_var_reassigned_in_a_scalar_if_arm_hits_its_stable_local() {
+        // A SCALAR `if`'s arms execute under real IfThen/Else/EndIf markers — exactly
+        // one arm runs — so a scalar reassignment of an OUTER var inside one must
+        // `SetLocal` the var's stable local. `lower_scalar_arm` raised only
+        // `in_frame`, not `unit_arm_depth`, so the assign rebound `value_of` to a
+        // fresh frame-local instead — frame-local rebinds are last-writer-wins, and a
+        // read after the branch saw only the LAST-LOWERED arm's local: `h(9)` printed
+        // 1 (the then-arm's `r = 100` lost) against native's 1001 — a silent wrong
+        // value, not a wall (#907's C-188 reassign half; the mutable-global half
+        // needs the pipeline's global slots, pinned in pipeline_c.rs's test).
+        let src = "fn h(n: Int) -> Int = {\n  \
+              var r = 0\n  \
+              let x = if n > 5 then { r = 100; 1 } else { r = 7; 2 }\n  \
+              r * 10 + x\n}\n\
+            fn main() -> Unit = {\n  \
+              println(int.to_string(h(9)))\n  \
+              println(int.to_string(h(1))) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "main"),
+            "the reassigning scalar-if must lower (real markers, one arm runs)"
+        );
+        if let Some(out) = build_and_run("scalar_if_arm_reassign", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1001\n72");
+        }
+    }

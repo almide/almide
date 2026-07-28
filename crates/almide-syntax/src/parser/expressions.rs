@@ -156,6 +156,23 @@ impl Parser {
                     ));
                 }
             }
+
+            // ── Reject chained ranges: 0..1..2 ──
+            // `..` is non-associative for the same reason `<` is: there is no
+            // reading of `0..1..2` that means anything. It used to parse (`..`
+            // binds right, so as `0..(1..2)`), pass `almide check`, and only
+            // fall over in codegen as a rustc type error in generated code
+            // (#899). Inspecting the built node rather than the next token
+            // catches it whichever way the operator associates.
+            if let ExprKind::Range { start, end, .. } = &left.kind {
+                if matches!(start.kind, ExprKind::Range { .. }) || matches!(end.kind, ExprKind::Range { .. }) {
+                    let (line, col) = left.span.map(|s| (s.line, s.col)).unwrap_or((0, 0));
+                    return Err(format!(
+                        "Chained range operators are not allowed at line {}:{}\n  Hint: A range has one start and one end. Write: 0..2",
+                        line, col
+                    ));
+                }
+            }
         }
 
         Ok(left)

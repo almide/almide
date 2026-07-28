@@ -209,6 +209,18 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
             // div share the message — the C-002 oracle text); keep byte parity.
             "fn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a % b\n}",
         )),
+        // The unsigned 64-bit lane (#872): the i64 slot carries the u64 bit
+        // pattern. Same divide-by-zero message bytes; no MIN÷-1 case unsigned.
+        "__chk_div_u" => Some((
+            &[NTy::I64, NTy::I64],
+            Some(NTy::I64),
+            "fn rt_chk_div_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) / (b as u64)) as i64\n}",
+        )),
+        "__chk_mod_u" => Some((
+            &[NTy::I64, NTy::I64],
+            Some(NTy::I64),
+            "fn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) % (b as u64)) as i64\n}",
+        )),
         _ => None,
     }
 }

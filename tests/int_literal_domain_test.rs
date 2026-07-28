@@ -1,24 +1,24 @@
-//! E024 must distinguish WHY a literal is out of range, because the three
-//! deviations take three different fixes and the wrong hint sends the reader
+//! E024 must distinguish WHY a literal is out of range, because the two
+//! deviations take different fixes and the wrong hint sends the reader
 //! somewhere there is nothing.
 //!
 //! - **magnitude** — too large for the width. A smaller literal, or a wider
 //!   type, fixes it.
 //! - **sign** — negated in an unsigned context. No magnitude fixes it; an
 //!   unsigned type has no negative values at all. `-0` is exempt: it is `0`.
-//! - **carrier** — inside `UInt64`'s *declared* domain but above the `i64` the
-//!   IR carries every integer in. Neither a smaller literal nor a wider type
-//!   fixes it, because there is no wider type (#872).
 //!
 //! The sign case was a real acceptance gap: `let k: UInt64 = -5` passed
 //! `almide check` — 5 is in range for UInt64 — and native rustc then rejected
 //! the emitted `-5u64` with `error[E0600]: cannot apply unary operator '-' to
-//! type 'u64'` (differential fuzz). The carrier case was worse: it was accepted
-//! and *ran*, printing the same wrong answer on both targets, which is exactly
-//! why the cross-target differential fuzzer never surfaced it.
+//! type 'u64'` (differential fuzz).
 //!
-//! This pins the classification at the diagnostic's surface. The three hints
-//! are distinguishable strings on purpose — merging them would pass a test that
+//! A THIRD deviation existed while `UInt64`'s upper half had no lane: the
+//! interim CARRIER rejection (C-173). The lane landed (#872, C-179), so that
+//! band is ACCEPTED again — pinned below among the accepted boundaries, and
+//! its runtime behaviour by `spec/wasm_cross/uint64_upper_half.almd`.
+//!
+//! This pins the classification at the diagnostic's surface. The hints are
+//! distinguishable strings on purpose — merging them would pass a test that
 //! only asserted "E024 fires".
 
 use std::process::Command;
@@ -77,19 +77,39 @@ const REJECTED: &[(&str, &str)] = &[
     // A negated literal that would be in range as a MAGNITUDE is still a sign
     // error — the distinction the unsigned branch used to miss entirely.
     ("let a: UInt8 = -200", "has no negative values at all"),
-    // ── carrier ──────────────────────────────────────────────────────────
-    ("let a: UInt64 = 9223372036854775808", "above the i64 the compiler carries"),
-    ("let a: UInt64 = 18446744073709551615", "above the i64 the compiler carries"),
+    // ── magnitude, unsigned edge ─────────────────────────────────────────
+    // One PAST the declared domain of the widest unsigned type.
+    ("let a: UInt64 = 18446744073709551616", "would silently fold to 0 here"),
+    // ── through a paren / minus chain ────────────────────────────────────
+    // The annotation has to reach the literal through however many `Paren` and
+    // `Unary` nodes the source parks above it. A walk that stopped at the first
+    // one left these with no range context at all: `check` accepted them and
+    // rustc then rejected the emitted `-300i8` (differential fuzz, seed
+    // 1785217538023450905 index 535).
+    ("let a: Int8 = -(300)", "would silently fold to 0"),
+    ("let a: Int8 = --300", "would silently fold to 0"),
+    ("let a: Int8 = -(-300)", "would silently fold to 0"),
+    // Parity, not presence. `--9223372036854775808` is +2^63 — the magnitude
+    // that only the NEGATED bound admits, so reading "there was a minus" instead
+    // of counting them would call this valid and fold it silently.
+    ("let a: Int = --9223372036854775808", "would silently fold to 0"),
+    // Parity decides the SIGN deviation too: an odd count is still negative.
+    ("let a: UInt8 = ---5", "has no negative values at all"),
 ];
 
 /// Bindings that must keep compiling. Each one sits on a boundary that a
 /// careless bound would take out with the real errors.
 const ACCEPTED: &[&str] = &[
-    // Every unsigned width's maximum that the carrier reaches.
+    // Every unsigned width's DECLARED maximum — `UInt64` included: the i64
+    // slot carries its upper half as a bit pattern and the unsigned lane
+    // reads it back (#872, C-179).
     "let a: UInt8 = 255",
     "let a: UInt16 = 65535",
     "let a: UInt32 = 4294967295",
     "let a: UInt64 = 9223372036854775807",
+    "let a: UInt64 = 9223372036854775808",
+    "let a: UInt64 = 18446744073709551615",
+    "let a: UInt64 = 0x8000000000000000",
     // `-0` is `0`, which every unsigned type represents. The sign rule must not
     // eat it.
     "let a: UInt8 = -0",
@@ -115,6 +135,15 @@ const ACCEPTED: &[&str] = &[
     "let a: UInt64 = 0x7FFF_FFFF_FFFF_FFFF",
     // A separator-only tail must not read as an empty digit run.
     "let a: Int = 1_000",
+    // The same paren/minus chains, on the representable side. Reaching further
+    // must not start rejecting what the source actually denotes: an EVEN count
+    // of minuses is a positive value, and `-(128)` is the ordinary `Int8`
+    // minimum with a paren in the way.
+    "let a: Int8 = -(128)",
+    "let a: Int8 = --127",
+    "let a: Int8 = ---128",
+    "let a: UInt8 = --5",
+    "let a: Int = --9223372036854775807",
 ];
 
 /// The whole point of E024: a literal must never quietly become a different
@@ -122,10 +151,9 @@ const ACCEPTED: &[&str] = &[
 const MUST_NOT_SILENTLY_COMPILE: &[&str] = &[
     // Past the classifier's own u128 intermediate.
     "let a: Int = 99999999999999999999999999999999999999999999",
-    // A radix prefix with no digits. The lexer emits `0x` as one token and
-    // `int_value` parses it with `unwrap_or(0)`; the classifier now rejects it
-    // before that. The lexer should decline the prefix instead (#873) — this
-    // pins the LOUDNESS, not the wording.
+    // A radix prefix with no digits. The lexer declines the prefix (#873), so
+    // `0` lexes alone and `x` becomes an undefined identifier (E003) — this
+    // pins the LOUDNESS, not the wording or the layer that catches it.
     "let a: Int = 0x",
 ];
 
@@ -163,7 +191,7 @@ fn nothing_folds_to_zero_in_silence() {
     for binding in MUST_NOT_SILENTLY_COMPILE {
         let out = check(dir.path(), &body(binding));
         assert!(
-            out.contains("E024"),
+            out.contains("error["),
             "`{binding}` must be rejected, not folded to 0 in silence, got:\n{out}"
         );
     }
@@ -181,15 +209,46 @@ fn representable_boundaries_still_compile() {
     }
 }
 
-/// A radix literal past the carrier must be caught too — the classifier splits
+/// The sign the range check uses is the NET sign of the whole paren/minus
+/// chain, and the two spellings of `2^63` are where that is load-bearing:
+/// `-9223372036854775808` is `i64::MIN` and valid, while `--9223372036854775808`
+/// is +2^63 and no signed type holds it. They differ by one character and by
+/// nothing else, so a check that recorded "negated somewhere" rather than the
+/// parity would accept both — and the second would fold silently, which is the
+/// one outcome E024 exists to prevent.
+#[test]
+fn the_sign_is_the_net_of_the_whole_chain() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = check(dir.path(), &body("let a: Int = -9223372036854775808"));
+    assert!(
+        !out.contains("E024"),
+        "one minus reaches i64::MIN and must be accepted, got:\n{out}"
+    );
+    let out = check(dir.path(), &body("let a: Int = --9223372036854775808"));
+    assert!(
+        out.contains("E024"),
+        "two minuses are +2^63, which no signed type holds, got:\n{out}"
+    );
+    // The diagnostic quotes what the chain DENOTES, not what its innermost node
+    // said: reporting `-9223372036854775808` for a value that is positive would
+    // name a literal that is in range and read as a compiler bug.
+    assert!(
+        out.contains("integer literal '9223372036854775808' is out of range"),
+        "the net-positive value must be quoted without a sign, got:\n{out}"
+    );
+}
+
+/// A radix literal past the DOMAIN must be caught too — the classifier splits
 /// the prefix before comparing, so a hex form cannot slip past a decimal bound.
+/// (Its counterpart, a hex literal in `UInt64`'s upper half, is ACCEPTED — see
+/// the accepted list; the classifier reads both radices at the same width.)
 #[test]
 fn radix_forms_are_classified_the_same() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let out = check(dir.path(), &body("let a: UInt64 = 0x8000000000000000"));
+    let out = check(dir.path(), &body("let a: UInt64 = 0x10000000000000000"));
     assert!(
-        out.contains("E024") && out.contains("above the i64 the compiler carries"),
-        "hex one past the carrier must be the carrier deviation, got:\n{out}"
+        out.contains("E024") && out.contains("would silently fold to 0 here"),
+        "hex one past the declared domain must be the magnitude deviation, got:\n{out}"
     );
     let out = check(dir.path(), &body("let a: UInt8 = -0x1"));
     assert!(

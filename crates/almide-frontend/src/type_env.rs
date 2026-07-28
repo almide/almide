@@ -47,6 +47,14 @@ pub struct TypeEnv {
     pub alias_owner_module: Option<Sym>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<Sym>,
+    /// PACKAGE roots imported as external dependencies (`import snaidhm`,
+    /// `import extlib` — any non-`self`, non-stdlib import root seen in the
+    /// main program or ANY module). Visibility's project identity (#870):
+    /// a DOTTED module name belongs to its first segment's package; a BARE
+    /// name is a dep package iff it is in this set, else the SELF package
+    /// (self submodules load under bare names, dep submodules under
+    /// `dep.sub` dotted names).
+    pub dep_root_modules: std::collections::HashSet<Sym>,
     /// The package's own module name (set when `register_module` is called with `is_self: true`).
     /// Used to resolve `import self` in the main file.
     pub self_module_name: Option<Sym>,
@@ -149,6 +157,7 @@ impl TypeEnv {
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
+            dep_root_modules: std::collections::HashSet::new(),
             self_module_name: None,
             import_table: ImportTable::new(),
             fn_visibility: std::collections::HashMap::new(),

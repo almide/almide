@@ -25,6 +25,10 @@ enum ListElemDrop {
     StrClosure,
 }
 
+// The interned field NAME type of a record literal / an aggregate's declared field list —
+// named here so the record-construct helpers can spell their `(name, expr)` slices.
+use almide_lang::intern::Sym;
+
 impl LowerCtx {
     /// Construct a SCALAR-field tuple `(a, b, …)`: alloc an n-slot block (Init::DynList) and store
     /// each field's computed scalar value at its slot via `Prim::Store`. Returns `None` (caller
@@ -293,14 +297,60 @@ impl LowerCtx {
     }
 
     pub(crate) fn try_lower_variant_ctor(&mut self, value: &IrExpr) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
-        // The ctor NAME + its supplied field exprs in DECLARED case order — from a
-        // positional ctor CALL (`IntV(p)`) or a RECORD-ctor literal (`Data { payload: …,
-        // seq: … }`, whose IR is a NAMED Record; field order follows the case, and a
-        // missing field walls — a defaulted variant-record slot would be garbage).
-        let (ctor_name, args): (String, Vec<IrExpr>) = match &value.kind {
+        let (ctor_name, args) = self.variant_ctor_name_and_ordered_args(value)?;
+        // Resolve the ctor's tag + the type's uniform block width + the OWNING TYPE NAME from the
+        // registry. Cloned out of the immutable borrow so the lowering below can mutate `self`.
+        let (tag, slot_count, arity, type_name) = {
+            let (ty, layout, case) = self.variant_layouts.lookup_ctor(&ctor_name)?;
+            (case.tag as i64, layout.slot_count, case.fields.len(), ty.to_string())
+        };
+        if args.len() != arity {
+            return None;
+        }
+        // Does this TYPE need the recursive DropVariant (a nested-variant OR nested-record field)? If
+        // so, its heap fields are freed by the generated `$__drop_<T>`, NOT the masked DropListStr.
+        // The record predicate mirrors the drop generator's `variant_needs_recursive_drop` widening.
+        let needs_rec = self
+            .variant_layouts
+            .needs_recursive_drop(&type_name, &|rn| {
+                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+            });
+        // Lower every field value FIRST (before the alloc) so a field expr that itself allocates
+        // does not interleave with our store sequence. A SCALAR field is a value copy; a leaf
+        // `String` field is a fresh OWNED handle (lower_owned_heap_field) moved in; a NESTED
+        // VARIANT field is recursively constructed (a ctor call → try_lower_variant_ctor) or
+        // `Dup`'d (a var → lower_owned_heap_field) and moved in — its recursive free is the
+        // generated `$__drop_<T>`. A List/other heap field is still ADT-brick-5+ → WALL.
+        let mut field_vals: Vec<(ValueId, bool /* is_heap */)> = Vec::with_capacity(args.len());
+        for arg in &args {
+            field_vals.push(self.lower_variant_ctor_field(arg)?);
+        }
+        // Rung-5 variants slab: an ALL-SCALAR ctor block is a plain slot list
+        // (tag@slot0, fields@1+, zero-filled to the type's uniform width), so
+        // the TARGET-NEUTRAL `Op::ListLit` builds it on both legs — same cert
+        // `i`, same block bytes. Heap-field ctors keep the prim path below.
+        if field_vals.iter().all(|(_, is_heap)| !is_heap) {
+            return Some(self.emit_all_scalar_variant_ctor_block(
+                tag, slot_count, &field_vals, needs_rec, type_name,
+            ));
+        }
+        Some(self.emit_heap_field_variant_ctor_block(tag, slot_count, field_vals, needs_rec, type_name))
+    }
+
+    /// The ctor NAME + its supplied field exprs in DECLARED case order — from a
+    /// positional ctor CALL (`IntV(p)`) or a RECORD-ctor literal (`Data { payload: …,
+    /// seq: … }`, whose IR is a NAMED Record; field order follows the case, and a
+    /// missing field walls — a defaulted variant-record slot would be garbage).
+    /// Extracted verbatim from `try_lower_variant_ctor` (codopsy round-2 complexity
+    /// sweep, phase 1 of 4): decides WHICH registered constructor the expr names and
+    /// builds the case-ordered argument list; emits no ops.
+    fn variant_ctor_name_and_ordered_args(
+        &self,
+        value: &IrExpr,
+    ) -> Option<(String, Vec<IrExpr>)> {
+        match &value.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                (name.as_str().to_string(), args.clone())
+                Some((name.as_str().to_string(), args.clone()))
             }
             IrExprKind::Record { name: Some(ctor), fields }
                 if self.variant_layouts.ctor_to_type.contains_key(ctor.as_str()) =>
@@ -333,152 +383,152 @@ impl LowerCtx {
                     };
                     ordered.push(e);
                 }
-                (ctor_s, ordered)
+                Some((ctor_s, ordered))
             }
-            _ => return None,
-        };
-        // Resolve the ctor's tag + the type's uniform block width + the OWNING TYPE NAME from the
-        // registry. Cloned out of the immutable borrow so the lowering below can mutate `self`.
-        let (tag, slot_count, arity, type_name) = {
-            let (ty, layout, case) = self.variant_layouts.lookup_ctor(&ctor_name)?;
-            (case.tag as i64, layout.slot_count, case.fields.len(), ty.to_string())
-        };
-        if args.len() != arity {
-            return None;
+            _ => None,
         }
-        // Does this TYPE need the recursive DropVariant (a nested-variant OR nested-record field)? If
-        // so, its heap fields are freed by the generated `$__drop_<T>`, NOT the masked DropListStr.
-        // The record predicate mirrors the drop generator's `variant_needs_recursive_drop` widening.
-        let needs_rec = self
-            .variant_layouts
-            .needs_recursive_drop(&type_name, &|rn| {
-                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
-            });
-        // Lower every field value FIRST (before the alloc) so a field expr that itself allocates
-        // does not interleave with our store sequence. A SCALAR field is a value copy; a leaf
-        // `String` field is a fresh OWNED handle (lower_owned_heap_field) moved in; a NESTED
-        // VARIANT field is recursively constructed (a ctor call → try_lower_variant_ctor) or
-        // `Dup`'d (a var → lower_owned_heap_field) and moved in — its recursive free is the
-        // generated `$__drop_<T>`. A List/other heap field is still ADT-brick-5+ → WALL.
-        let mut field_vals: Vec<(ValueId, bool /* is_heap */)> = Vec::with_capacity(args.len());
-        for arg in &args {
-            if self.variant_layouts.field_is_variant(&arg.ty) {
-                // A nested ctor field — positional (`Leaf(1)`) OR a record-ctor literal
-                // (`right: Node { … }`) — recurses into this same builder.
-                let is_ctor_call = matches!(
-                    &arg.kind,
-                    IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                        if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
-                ) || matches!(
-                    &arg.kind,
-                    IrExprKind::Record { name: Some(n), .. }
-                        if self.variant_layouts.ctor_to_type.contains_key(n.as_str())
-                );
-                let v = if is_ctor_call {
-                    self.try_lower_variant_ctor(arg)?
-                } else {
-                    self.lower_owned_heap_field(arg)?
-                };
-                field_vals.push((v, true));
-                continue;
-            }
-            if matches!(arg.ty, Ty::String) {
-                let obj = self.lower_owned_heap_field(arg)?;
-                field_vals.push((obj, true));
-                continue;
-            }
-            if self.ctor_list_field_drop_freeable(&arg.ty) {
-                // A `List[scalar]` / `List[<rich variant>]` ctor field (ADT brick 5:
-                // `ValArray(items)` — the gguf read_array accumulator): admitted EXACTLY when
-                // the generated `$__drop_<T>` body frees it (flat `rc_dec` / `__drop_list_<E>`
-                // — see `generate_variant_drop_sources`' field loop), so construction and drop
-                // can never disagree. A Var arg is `Dup`'d (co-owned, rc-aware on both drop
-                // paths); a `List[String]` / `List[<flat variant>]` / `Map` field stays walled
-                // (the generator emits no free for those — admitting one would leak).
-                let obj = self.lower_owned_heap_field(arg)?;
-                field_vals.push((obj, true));
-                continue;
-            }
-            if matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
-                && self.aggregate_field_tys(&arg.ty).is_some()
-            {
-                // A RECORD-type ctor field (`Wrap(Color)`, `Box(Inner)`): materialize the record (a
-                // `Record` literal via `try_lower_record_construct` / the scalar builder; a decoded Var /
-                // call via `lower_owned_heap_field`) and store its handle. Because the variant now counts
-                // a record field in `needs_recursive_drop`, its scope-end drop is the generated
-                // `$__drop_<V>` — which frees the field via `$__drop_<R>` (a nested-heap record) or a flat
-                // `rc_dec` (a scalar-only record), so the record's nested heap is never leaked.
-                let obj = match &arg.kind {
-                    IrExprKind::Record { .. } => self
-                        .try_lower_record_construct(arg)
-                        .or_else(|| self.try_lower_scalar_record_construct(arg))?,
-                    _ => self.lower_owned_heap_field(arg)?,
-                };
-                field_vals.push((obj, true));
-                continue;
-            }
-            if matches!(&arg.ty,
-                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
-                    if a.len() == 1 && !is_heap_ty(&a[0]))
-            {
-                // An Option[scalar] ctor field (`Box(Some(8))`, `Box(None)`): the 0-or-1-element
-                // len-tag block owns NO children, so its free is one flat rc_dec — emitted by the
-                // generated `$__drop_<T>` (the Option arm in the drop generator's field loop; the
-                // widened `needs_recursive_drop` makes this type recursive-drop) or the masked
-                // DropListStr. A ctor expr builds the fresh block (`try_lower_option_ctor`); a
-                // Var is Dup'd/moved via `lower_owned_heap_field`. Option[heap] / Result payloads
-                // own children a flat free would leak — they stay walled (a later brick).
-                let obj = self
-                    .try_lower_option_ctor(arg, &arg.ty)
-                    .or_else(|| self.lower_owned_heap_field(arg))?;
-                field_vals.push((obj, true));
-                continue;
-            }
-            if matches!(&arg.ty, Ty::Fn { .. }) {
-                // A CLOSURE ctor field (`Run(() => …)` / `Thunk((x) => x * x)` — the
-                // variant-stored closure class): a Lambda arg LIFTS to its closure
-                // block, a Var arg Dups the tracked block (both via
-                // `lower_owned_heap_field`'s existing arms); the ctor then owns the
-                // block and the generated `$__drop_<T>`'s Fn arm frees it via
-                // `__drop_closure` (the classifier + generator admit Fn fields in
-                // the same change — construction and drop agree).
-                let obj = self.lower_owned_heap_field(arg)?;
-                field_vals.push((obj, true));
-                continue;
-            }
-            if is_heap_ty(&arg.ty) {
-                return None; // List[String] / Map / other heap ctor field — a later brick
-            }
-            let v = self.lower_scalar_value(arg)?;
-            field_vals.push((v, false));
+    }
+
+    /// Extracted verbatim from `try_lower_variant_ctor` (codopsy round-2 complexity
+    /// sweep, phase 2 of 4): decides ONE ctor field's ownership class and lowers it to
+    /// its slot value — `Some((value, is_heap))`, or `None` to wall the whole ctor.
+    /// Every branch keeps its condition, order, and lowering exactly as it stood in the
+    /// inline field loop (the loop's push-and-`continue`s became `return Some(..)`).
+    fn lower_variant_ctor_field(&mut self, arg: &IrExpr) -> Option<(ValueId, bool)> {
+        if self.variant_layouts.field_is_variant(&arg.ty) {
+            // A nested ctor field — positional (`Leaf(1)`) OR a record-ctor literal
+            // (`right: Node { … }`) — recurses into this same builder.
+            let is_ctor_call = matches!(
+                &arg.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
+            ) || matches!(
+                &arg.kind,
+                IrExprKind::Record { name: Some(n), .. }
+                    if self.variant_layouts.ctor_to_type.contains_key(n.as_str())
+            );
+            let v = if is_ctor_call {
+                self.try_lower_variant_ctor(arg)?
+            } else {
+                self.lower_owned_heap_field(arg)?
+            };
+            return Some((v, true));
         }
-        // Rung-5 variants slab: an ALL-SCALAR ctor block is a plain slot list
-        // (tag@slot0, fields@1+, zero-filled to the type's uniform width), so
-        // the TARGET-NEUTRAL `Op::ListLit` builds it on both legs — same cert
-        // `i`, same block bytes. Heap-field ctors keep the prim path below.
-        if field_vals.iter().all(|(_, is_heap)| !is_heap) {
-            let tagv = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: tagv, value: tag });
-            let mut slot_vals: Vec<ValueId> = Vec::with_capacity(slot_count);
-            slot_vals.push(tagv);
-            for (v, _) in &field_vals {
-                slot_vals.push(*v);
-            }
-            while slot_vals.len() < slot_count {
-                let z = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst: z, value: 0 });
-                slot_vals.push(z);
-            }
-            let dst = self.fresh_value();
-            self.ops.push(Op::ListLit { dst, elems: slot_vals });
-            // EXACT tracking mirror of the prim path below (heap_slots is empty
-            // here, so only the needs_rec branch and the aggregate mark apply).
-            if needs_rec {
-                self.variant_drop_handles.insert(dst, type_name);
-            }
-            self.materialized_aggregates.insert(dst);
-            return Some(dst);
+        if matches!(arg.ty, Ty::String) {
+            let obj = self.lower_owned_heap_field(arg)?;
+            return Some((obj, true));
         }
+        if self.ctor_list_field_drop_freeable(&arg.ty) {
+            // A `List[scalar]` / `List[<rich variant>]` ctor field (ADT brick 5:
+            // `ValArray(items)` — the gguf read_array accumulator): admitted EXACTLY when
+            // the generated `$__drop_<T>` body frees it (flat `rc_dec` / `__drop_list_<E>`
+            // — see `generate_variant_drop_sources`' field loop), so construction and drop
+            // can never disagree. A Var arg is `Dup`'d (co-owned, rc-aware on both drop
+            // paths); a `List[String]` / `List[<flat variant>]` / `Map` field stays walled
+            // (the generator emits no free for those — admitting one would leak).
+            let obj = self.lower_owned_heap_field(arg)?;
+            return Some((obj, true));
+        }
+        if matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
+            && self.aggregate_field_tys(&arg.ty).is_some()
+        {
+            // A RECORD-type ctor field (`Wrap(Color)`, `Box(Inner)`): materialize the record (a
+            // `Record` literal via `try_lower_record_construct` / the scalar builder; a decoded Var /
+            // call via `lower_owned_heap_field`) and store its handle. Because the variant now counts
+            // a record field in `needs_recursive_drop`, its scope-end drop is the generated
+            // `$__drop_<V>` — which frees the field via `$__drop_<R>` (a nested-heap record) or a flat
+            // `rc_dec` (a scalar-only record), so the record's nested heap is never leaked.
+            let obj = match &arg.kind {
+                IrExprKind::Record { .. } => self
+                    .try_lower_record_construct(arg)
+                    .or_else(|| self.try_lower_scalar_record_construct(arg))?,
+                _ => self.lower_owned_heap_field(arg)?,
+            };
+            return Some((obj, true));
+        }
+        if matches!(&arg.ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+                if a.len() == 1 && !is_heap_ty(&a[0]))
+        {
+            // An Option[scalar] ctor field (`Box(Some(8))`, `Box(None)`): the 0-or-1-element
+            // len-tag block owns NO children, so its free is one flat rc_dec — emitted by the
+            // generated `$__drop_<T>` (the Option arm in the drop generator's field loop; the
+            // widened `needs_recursive_drop` makes this type recursive-drop) or the masked
+            // DropListStr. A ctor expr builds the fresh block (`try_lower_option_ctor`); a
+            // Var is Dup'd/moved via `lower_owned_heap_field`. Option[heap] / Result payloads
+            // own children a flat free would leak — they stay walled (a later brick).
+            let obj = self
+                .try_lower_option_ctor(arg, &arg.ty)
+                .or_else(|| self.lower_owned_heap_field(arg))?;
+            return Some((obj, true));
+        }
+        if matches!(&arg.ty, Ty::Fn { .. }) {
+            // A CLOSURE ctor field (`Run(() => …)` / `Thunk((x) => x * x)` — the
+            // variant-stored closure class): a Lambda arg LIFTS to its closure
+            // block, a Var arg Dups the tracked block (both via
+            // `lower_owned_heap_field`'s existing arms); the ctor then owns the
+            // block and the generated `$__drop_<T>`'s Fn arm frees it via
+            // `__drop_closure` (the classifier + generator admit Fn fields in
+            // the same change — construction and drop agree).
+            let obj = self.lower_owned_heap_field(arg)?;
+            return Some((obj, true));
+        }
+        if is_heap_ty(&arg.ty) {
+            return None; // List[String] / Map / other heap ctor field — a later brick
+        }
+        let v = self.lower_scalar_value(arg)?;
+        Some((v, false))
+    }
+
+    /// Extracted verbatim from `try_lower_variant_ctor` (codopsy round-2 complexity
+    /// sweep, phase 3 of 4): builds the ALL-SCALAR ctor block — tag@slot0, fields@1+,
+    /// zero-filled to the type's uniform `slot_count` — as one target-neutral
+    /// `Op::ListLit`, then applies the same drop/aggregate tracking as the prim path.
+    fn emit_all_scalar_variant_ctor_block(
+        &mut self,
+        tag: i64,
+        slot_count: usize,
+        field_vals: &[(ValueId, bool)],
+        needs_rec: bool,
+        type_name: String,
+    ) -> ValueId {
+        let tagv = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tagv, value: tag });
+        let mut slot_vals: Vec<ValueId> = Vec::with_capacity(slot_count);
+        slot_vals.push(tagv);
+        for (v, _) in field_vals {
+            slot_vals.push(*v);
+        }
+        while slot_vals.len() < slot_count {
+            let z = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: z, value: 0 });
+            slot_vals.push(z);
+        }
+        let dst = self.fresh_value();
+        self.ops.push(Op::ListLit { dst, elems: slot_vals });
+        // EXACT tracking mirror of the prim path (`emit_heap_field_variant_ctor_block` —
+        // heap_slots is empty here, so only the needs_rec branch and the aggregate mark apply).
+        if needs_rec {
+            self.variant_drop_handles.insert(dst, type_name);
+        }
+        self.materialized_aggregates.insert(dst);
+        dst
+    }
+
+    /// Extracted verbatim from `try_lower_variant_ctor` (codopsy round-2 complexity
+    /// sweep, phase 4 of 4): builds the HEAP-FIELD ctor block on the prim path —
+    /// allocate the `slot_count`-wide block, store the tag then every field slot (heap
+    /// fields moved in), then select the drop route (the recursive `$__drop_<T>` vs
+    /// the masked DropListStr).
+    fn emit_heap_field_variant_ctor_block(
+        &mut self,
+        tag: i64,
+        slot_count: usize,
+        field_vals: Vec<(ValueId, bool)>,
+        needs_rec: bool,
+        type_name: String,
+    ) -> ValueId {
+        use crate::{IntOp, PrimKind};
         // Allocate the `slot_count`-wide block.
         let len = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len, value: slot_count as i64 });
@@ -530,7 +580,7 @@ impl LowerCtx {
             self.record_masks.insert(dst, heap_slots);
         }
         self.materialized_aggregates.insert(dst);
-        Some(dst)
+        dst
     }
 
     /// Construct a record/tuple with one or more HEAP FIELDS (a `String`/`List`/nested
@@ -551,7 +601,6 @@ impl LowerCtx {
     /// field (a defaulted heap slot would be a garbage handle the drop frees — unsound), or
     /// a field value not lowerable to an owned handle / scalar.
     pub(crate) fn try_lower_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
         let IrExprKind::Record { fields, .. } = &value.kind else {
             return None;
         };
@@ -563,24 +612,47 @@ impl LowerCtx {
                 return self.try_lower_variant_ctor(value);
             }
         }
-        let (names, tys) = self.aggregate_field_tys(&value.ty)?;
+        let Some((names, tys)) = self.aggregate_field_tys(&value.ty) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!("[rec-construct] no aggregate layout for ty {:?}", value.ty)
+            });
+            return None;
+        };
         if tys.is_empty() {
             return None;
         }
+        let fields = self.record_fields_with_declared_defaults(&value.ty, &names, fields);
+        let n = tys.len();
+        let heap_slots = self.record_heap_slot_mask(&names, &tys, &fields)?;
+        let slots = self.lower_record_field_slots(&names, &fields)?;
+        let dst = self.emit_record_slot_block(n, slots);
+        self.record_masks.insert(dst, heap_slots);
+        self.materialized_aggregates.insert(dst);
+        if let Some(name) = self.record_drop_type_name(&value.ty) {
+            self.variant_drop_handles.insert(dst, name);
+        }
+        Some(dst)
+    }
+
+    /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,
+    /// #852): decides which OMITTED slots a DECLARED default synthesizes as a supplied field.
+    fn record_fields_with_declared_defaults(
+        &self, value_ty: &Ty, names: &[Sym], fields: &[(Sym, IrExpr)],
+    ) -> Vec<(Sym, IrExpr)> {
         // DEFAULT FILL: an omitted slot with a DECLARED default (`type AllDefault = {
         // host: String = "localhost", port: Int = 8080 }`; `AllDefault()`) synthesizes
         // the default as a supplied field — CALL-FREE defaults only (a call default
         // would inject an uncounted CallFn, breaching the caps mir == ir gate; it
         // keeps walling via the omitted-heap check below).
-        let mut fields = fields.clone();
-        if let Ty::Named(rec_name, _) = &value.ty {
+        let mut fields = fields.to_vec();
+        if let Ty::Named(rec_name, _) = value_ty {
             if let Some(defs) = self
                 .variant_layouts
                 .ctor_field_defaults
                 .get(rec_name.as_str())
                 .cloned()
             {
-                for nm in &names {
+                for nm in names {
                     if fields.iter().any(|(fname, _)| fname == nm) {
                         continue;
                     }
@@ -592,7 +664,15 @@ impl LowerCtx {
                 }
             }
         }
-        let fields = &fields;
+        fields
+    }
+
+    /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,
+    /// #852): decides WHICH declared slots hold heap fields — the drop mask — and walls
+    /// (`None`) on an unknown field name, an omitted heap slot, or an all-scalar record.
+    fn record_heap_slot_mask(
+        &self, names: &[Sym], tys: &[Ty], fields: &[(Sym, IrExpr)],
+    ) -> Option<Vec<usize>> {
         let n = tys.len();
         // Per-slot heap-ness from the SUPPLIED field's CONCRETE type (`expr.ty`), NOT the
         // declared field type — a generic field (`first: A` in `Pair[A,B]`) may leave the
@@ -618,6 +698,15 @@ impl LowerCtx {
         if heap_slots.is_empty() {
             return None; // no heap field — `try_lower_scalar_record_construct` owns it.
         }
+        Some(heap_slots)
+    }
+
+    /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,
+    /// #852): lowers every supplied field to its `(declared-index, slot-value, is-heap)`
+    /// triple ahead of the alloc, walling (`None`) on a value it cannot own or copy.
+    fn lower_record_field_slots(
+        &mut self, names: &[Sym], fields: &[(Sym, IrExpr)],
+    ) -> Option<Vec<(usize, ValueId, bool)>> {
         // Lower each supplied field to (declared-index, slot-value, is-heap). Heap fields
         // become a fresh OWNED handle (the same kinds `try_lower_str_list_literal` admits);
         // scalar fields a plain value. All lowered BEFORE the alloc (a field expr that
@@ -627,13 +716,39 @@ impl LowerCtx {
             let idx = names.iter().position(|n| n == name)?;
             let is_heap = is_heap_ty(&expr.ty);
             if is_heap {
-                let obj = self.lower_owned_heap_field(expr)?;
+                let Some(obj) = self.lower_owned_heap_field(expr) else {
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!(
+                            "[rec-construct] heap field {} ({}) declined",
+                            name.as_str(),
+                            crate::lower::kind_name(&expr.kind)
+                        )
+                    });
+                    return None;
+                };
                 slots.push((idx, obj, true));
             } else {
-                let v = self.lower_scalar_value(expr)?;
+                let Some(v) = self.lower_scalar_value(expr) else {
+                    crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                        format!(
+                            "[rec-construct] scalar field {} ({}) declined",
+                            name.as_str(),
+                            crate::lower::kind_name(&expr.kind)
+                        )
+                    });
+                    return None;
+                };
                 slots.push((idx, v, false));
             }
         }
+        Some(slots)
+    }
+
+    /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,
+    /// #852): emits the `n`-slot block — the alloc plus one `Prim::Store` per slot, each
+    /// heap field's handle stored then `Consume`d (moved in).
+    fn emit_record_slot_block(&mut self, n: usize, slots: Vec<(usize, ValueId, bool)>) -> ValueId {
+        use crate::{IntOp, PrimKind};
         let len = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
         let dst = self.fresh_value();
@@ -668,12 +783,7 @@ impl LowerCtx {
                 self.live_heap_handles.retain(|x| *x != v);
             }
         }
-        self.record_masks.insert(dst, heap_slots);
-        self.materialized_aggregates.insert(dst);
-        if let Some(name) = self.record_drop_type_name(&value.ty) {
-            self.variant_drop_handles.insert(dst, name);
-        }
-        Some(dst)
+        dst
     }
 
     /// Materialize a `List[Record]` LITERAL (`group([rect(…), circle(…)])`, `[el("a"), el("b")]`) — a

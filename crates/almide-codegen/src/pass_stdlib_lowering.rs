@@ -753,4 +753,4 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
     IrExpr { kind, ty, span, def_id: None }
 }
 
-include!("pass_stdlib_lowering_p2.rs");
+include!("pass_stdlib_lowering_ufcs.rs");

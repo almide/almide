@@ -68,17 +68,67 @@ impl LowerCtx {
         init: &IrExpr,
         result_ty: &Ty,
     ) -> Option<ValueId> {
-        use almide_lang::types::constructor::TypeConstructorId;
-        use almide_ir::IrStmtKind;
-        use crate::PrimKind;
-
         if params.len() != 2 {
             return None;
         }
         let state_param = params[0].0;
         let elem_param = params[1].0;
 
-        // GATE — a 2-field record acc: one List[scalar|String] field + one scalar field.
+        let (list_idx, scalar_idx, list_elem_str, list_fname, scalar_fname) =
+            self.parse_record_acc_fold_tys(result_ty)?;
+        let scalar_init_v = parse_record_acc_init(init, list_fname, scalar_fname)?;
+
+        // SUBSTITUTE the state-param MEMBER projections with two synthetic vars; any OTHER
+        // use of the state param declines (a bare `st` / spread would need the record block).
+        let acc_var = VarId(crate::lower::max_var_id(body) + 1);
+        let n_var = VarId(acc_var.0 + 1);
+        let body = substitute_state_members(body, state_param, list_fname, acc_var, scalar_fname, n_var)?;
+        let (stmts, tail_list, tail_scalar) = parse_record_fold_body(&body, list_fname, scalar_fname)?;
+
+        // ----- Lowering (the tuple path's skeleton) -----
+        let (list_slot, scalar_slot, i_v, one_v) = self.emit_record_fold_loop_prologue(
+            xs,
+            &params[1].1,
+            elem_param,
+            list_elem_str,
+            scalar_init_v,
+        )?;
+        self.value_of.insert(acc_var, list_slot);
+        self.value_of.insert(n_var, scalar_slot);
+        self.materialized_lists.insert(list_slot);
+
+        let (new_list, new_scalar) =
+            self.lower_record_fold_body_and_tail(stmts, tail_list, tail_scalar)?;
+
+        if list_elem_str {
+            self.heap_elem_lists.insert(new_list);
+        }
+        let drop_old = self.drop_op_for(list_slot);
+        self.ops.push(drop_old);
+        self.ops.push(Op::SetLocal { local: list_slot, src: new_list });
+        self.ops.push(Op::SetLocal { local: scalar_slot, src: new_scalar });
+
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
+        self.ops.push(Op::LoopEnd);
+
+        if !self.live_heap_handles.contains(&list_slot) {
+            self.live_heap_handles.push(list_slot);
+        }
+        self.build_record_acc_result(list_slot, scalar_slot, list_idx, scalar_idx, result_ty)
+    }
+
+    /// GATE — a 2-field record acc: one List[scalar|String] field + one scalar field.
+    /// Decides the two fields' DECLARED layout indices, whether the list's element is a
+    /// `String` (the recursive-drop `heap_elem_lists` lane), and the two field names the
+    /// init/substitution/body gates key on. Extracted verbatim from
+    /// `try_lower_defunc_record_acc_fold` (codopsy r2, #852, phase 1 of 5).
+    fn parse_record_acc_fold_tys(
+        &self,
+        result_ty: &Ty,
+    ) -> Option<(usize, usize, bool, almide_lang::intern::Sym, almide_lang::intern::Sym)> {
+        use almide_lang::types::constructor::TypeConstructorId;
         let (fnames, ftys) = self.aggregate_field_tys(result_ty)?;
         if fnames.len() != 2 || ftys.len() != 2 {
             return None;
@@ -100,54 +150,28 @@ impl LowerCtx {
         }
         let list_fname = fnames[list_idx];
         let scalar_fname = fnames[scalar_idx];
+        Some((list_idx, scalar_idx, list_elem_str, list_fname, scalar_fname))
+    }
 
-        // GATE — the INIT is a record literal `{ <list>: [], <scalar>: <Int/Bool literal> }`.
-        let init_fields = match &init.kind {
-            IrExprKind::Record { fields, .. } if fields.len() == 2 => fields,
-            _ => return None,
-        };
-        let init_by = |n: almide_lang::intern::Sym| init_fields.iter().find(|(fn_, _)| *fn_ == n);
-        match &init_by(list_fname)?.1.kind {
-            IrExprKind::List { elements } if elements.is_empty() => {}
-            _ => return None,
-        }
-        let scalar_init_v = match &init_by(scalar_fname)?.1.kind {
-            IrExprKind::LitInt { value } => *value,
-            IrExprKind::LitBool { value } => *value as i64,
-            _ => return None,
-        };
+    /// The record-acc fold's loop PROLOGUE: borrow the source list (evaluated once), seed
+    /// the two loop-carried accumulator slots (the fresh empty list + the scalar init),
+    /// open the counted loop, and read the current source element. Binds the element param
+    /// for the body lowering (the CALLER binds the two synthetic slot vars to the returned
+    /// slots, immediately after — the same side-effect order as before the extraction) and
+    /// returns `(list_slot, scalar_slot, i_v, one_v)` — the values the loop tail and the
+    /// result block still need. Extracted verbatim from `try_lower_defunc_record_acc_fold`
+    /// (codopsy r2, #852, phase 4 of 5).
+    fn emit_record_fold_loop_prologue(
+        &mut self,
+        xs: &IrExpr,
+        elem_ty: &Ty,
+        elem_param: VarId,
+        list_elem_str: bool,
+        scalar_init_v: i64,
+    ) -> Option<(ValueId, ValueId, ValueId, ValueId)> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use crate::PrimKind;
 
-        // SUBSTITUTE the state-param MEMBER projections with two synthetic vars; any OTHER
-        // use of the state param declines (a bare `st` / spread would need the record block).
-        let acc_var = VarId(crate::lower::max_var_id(body) + 1);
-        let n_var = VarId(acc_var.0 + 1);
-        let body = substitute_state_members(body, state_param, list_fname, acc_var, scalar_fname, n_var)?;
-        let body = &body;
-
-        // GATE — the BODY is `{ <interior lets…>; { <list>: <l> + […], <scalar>: <s> } }`.
-        let (stmts, tail) = match &body.kind {
-            IrExprKind::Block { stmts, expr: Some(tail) } => (stmts.as_slice(), tail.as_ref()),
-            // A stmt-less lambda body IS the record literal (`(st, b) => { out: …, in_ul: … }`
-            // parses as the record, not a block).
-            IrExprKind::Record { .. } => (&[][..], body),
-            _ => return None,
-        };
-        let tail_fields = match &tail.kind {
-            IrExprKind::Record { fields, .. } if fields.len() == 2 => fields,
-            _ => return None,
-        };
-        let tail_by = |n: almide_lang::intern::Sym| tail_fields.iter().find(|(fn_, _)| *fn_ == n);
-        let tail_list = &tail_by(list_fname)?.1;
-        let tail_scalar = &tail_by(scalar_fname)?.1;
-        match &tail_list.kind {
-            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {}
-            _ => return None,
-        }
-        if is_heap_ty(&tail_scalar.ty) {
-            return None;
-        }
-
-        // ----- Lowering (the tuple path's skeleton) -----
         let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
             CallArg::Handle(v) => v,
             _ => return None,
@@ -203,62 +227,31 @@ impl LowerCtx {
             // A user-VARIANT source element (`b: Block`) is a real tagged block the body
             // matches on (`match b { Bullet(_) => … }`) — seed its read shape like a fn
             // param so the scalar match executes on the tag.
-            self.seed_variant_param(elem, &params[1].1);
+            self.seed_variant_param(elem, elem_ty);
         }
-        self.value_of.insert(acc_var, list_slot);
-        self.value_of.insert(n_var, scalar_slot);
-        self.materialized_lists.insert(list_slot);
+        Some((list_slot, scalar_slot, i_v, one_v))
+    }
 
+    /// The record-acc fold's per-iteration BODY: lower the interior statements and the
+    /// tail record's two components inside the defunc frame (`in_frame` /
+    /// `in_defunc_body` / `scalar_loop_depth`), then free the iteration's arm locals.
+    /// Decides whether the whole body is lowerable — `None` restores the frame counters
+    /// first and declines (the fold walls). Returns the iteration's
+    /// `(new_list, new_scalar)` pair. Extracted verbatim from
+    /// `try_lower_defunc_record_acc_fold` (codopsy r2, #852, phase 5 of 5).
+    fn lower_record_fold_body_and_tail(
+        &mut self,
+        stmts: &[IrStmt],
+        tail_list: &IrExpr,
+        tail_scalar: &IrExpr,
+    ) -> Option<(ValueId, ValueId)> {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.in_defunc_body += 1;
         self.scalar_loop_depth += 1;
         let mut stmts_ok = true;
         for s in stmts {
-            if let IrStmtKind::Bind { var, ty: bty, value, .. } = &s.kind {
-                if is_heap_ty(bty)
-                    && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
-                {
-                    let merged = match &value.kind {
-                        IrExprKind::If { cond, then, else_ } => {
-                            self.try_lower_heap_result_if(cond, then, else_, bty)
-                        }
-                        IrExprKind::Match { subject, arms } => self
-                            .desugar_match_to_if(subject, arms, bty)
-                            .and_then(|if_e| match &if_e.kind {
-                                IrExprKind::If { cond, then, else_ } => {
-                                    self.try_lower_heap_result_if(cond, then, else_, bty)
-                                }
-                                _ => None,
-                            }),
-                        _ => None,
-                    };
-                    match merged {
-                        Some(dst) => {
-                            self.value_of.insert(*var, dst);
-                            if !self.live_heap_handles.contains(&dst) {
-                                self.live_heap_handles.push(dst);
-                            }
-                            // An interior `List[String]` binding (`opened`) must READ as a
-                            // tracked list (the tail concat borrows it) and DROP recursively
-                            // (its element Strings are owned refs; a flat free would leak
-                            // them each iteration).
-                            if matches!(bty, Ty::Applied(TypeConstructorId::List, a)
-                                if a.len() == 1 && matches!(a[0], Ty::String))
-                            {
-                                self.materialized_lists.insert(dst);
-                                self.heap_elem_lists.insert(dst);
-                            }
-                            continue;
-                        }
-                        None => {
-                            stmts_ok = false;
-                            break;
-                        }
-                    }
-                }
-            }
-            if self.lower_stmt(s).is_err() {
+            if !self.lower_record_fold_interior_stmt(s) {
                 stmts_ok = false;
                 break;
             }
@@ -273,24 +266,62 @@ impl LowerCtx {
             _ => return None,
         };
         self.drop_arm_locals(body_mark);
+        Some((new_list, new_scalar))
+    }
 
-        if list_elem_str {
-            self.heap_elem_lists.insert(new_list);
+    /// One INTERIOR statement of the record-acc fold body — the tuple path's
+    /// [`Self::lower_tuple_fold_interior_stmt`] discipline (a heap-result `if`/`match`
+    /// bind materializes the merged owned `dst`, pushed to `live_heap_handles` so the
+    /// PER-ITERATION `drop_arm_locals(body_mark)` frees it once; other stmts use the
+    /// normal `lower_stmt`), PLUS the record shape's interior `List[String]` binding
+    /// registration (the comment inside — kept a separate verbatim twin of the tuple
+    /// helper precisely because of that extra registration). `false` ⇒ out of subset
+    /// (the caller declines and the whole HOF walls). Extracted verbatim from
+    /// `try_lower_defunc_record_acc_fold`'s body-statement loop (codopsy r2, #852).
+    fn lower_record_fold_interior_stmt(&mut self, s: &IrStmt) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use almide_ir::IrStmtKind;
+        if let IrStmtKind::Bind { var, ty: bty, value, .. } = &s.kind {
+            if is_heap_ty(bty)
+                && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+            {
+                let merged = match &value.kind {
+                    IrExprKind::If { cond, then, else_ } => {
+                        self.try_lower_heap_result_if(cond, then, else_, bty)
+                    }
+                    IrExprKind::Match { subject, arms } => self
+                        .desugar_match_to_if(subject, arms, bty)
+                        .and_then(|if_e| match &if_e.kind {
+                            IrExprKind::If { cond, then, else_ } => {
+                                self.try_lower_heap_result_if(cond, then, else_, bty)
+                            }
+                            _ => None,
+                        }),
+                    _ => None,
+                };
+                return match merged {
+                    Some(dst) => {
+                        self.value_of.insert(*var, dst);
+                        if !self.live_heap_handles.contains(&dst) {
+                            self.live_heap_handles.push(dst);
+                        }
+                        // An interior `List[String]` binding (`opened`) must READ as a
+                        // tracked list (the tail concat borrows it) and DROP recursively
+                        // (its element Strings are owned refs; a flat free would leak
+                        // them each iteration).
+                        if matches!(bty, Ty::Applied(TypeConstructorId::List, a)
+                            if a.len() == 1 && matches!(a[0], Ty::String))
+                        {
+                            self.materialized_lists.insert(dst);
+                            self.heap_elem_lists.insert(dst);
+                        }
+                        true
+                    }
+                    None => false,
+                };
+            }
         }
-        let drop_old = self.drop_op_for(list_slot);
-        self.ops.push(drop_old);
-        self.ops.push(Op::SetLocal { local: list_slot, src: new_list });
-        self.ops.push(Op::SetLocal { local: scalar_slot, src: new_scalar });
-
-        let next_v = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
-        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
-        self.ops.push(Op::LoopEnd);
-
-        if !self.live_heap_handles.contains(&list_slot) {
-            self.live_heap_handles.push(list_slot);
-        }
-        self.build_record_acc_result(list_slot, scalar_slot, list_idx, scalar_idx, result_ty)
+        self.lower_stmt(s).is_ok()
     }
 
     /// Build the record-accumulator fold's result block — [`Self::build_tuple_acc_result`]
@@ -349,6 +380,65 @@ impl LowerCtx {
         self.materialized_aggregates.insert(dst);
         Some(dst)
     }
+}
+
+/// GATE — the INIT is a record literal `{ <list>: [], <scalar>: <Int/Bool literal> }`.
+/// Decides the scalar slot's initial value (a Bool init widens to its 0/1 i64). Extracted
+/// verbatim from `LowerCtx::try_lower_defunc_record_acc_fold` (codopsy r2, #852,
+/// phase 2 of 5).
+fn parse_record_acc_init(
+    init: &IrExpr,
+    list_fname: almide_lang::intern::Sym,
+    scalar_fname: almide_lang::intern::Sym,
+) -> Option<i64> {
+    let init_fields = match &init.kind {
+        IrExprKind::Record { fields, .. } if fields.len() == 2 => fields,
+        _ => return None,
+    };
+    let init_by = |n: almide_lang::intern::Sym| init_fields.iter().find(|(fn_, _)| *fn_ == n);
+    match &init_by(list_fname)?.1.kind {
+        IrExprKind::List { elements } if elements.is_empty() => {}
+        _ => return None,
+    }
+    match &init_by(scalar_fname)?.1.kind {
+        IrExprKind::LitInt { value } => Some(*value),
+        IrExprKind::LitBool { value } => Some(*value as i64),
+        _ => None,
+    }
+}
+
+/// GATE — the BODY is `{ <interior lets…>; { <list>: <l> + […], <scalar>: <s> } }` (after
+/// the member substitution). Decides the interior statements and the tail record's two
+/// component exprs: the list component MUST be a list concat, the scalar component MUST
+/// be scalar-typed. Extracted verbatim from
+/// `LowerCtx::try_lower_defunc_record_acc_fold` (codopsy r2, #852, phase 3 of 5).
+fn parse_record_fold_body<'a>(
+    body: &'a IrExpr,
+    list_fname: almide_lang::intern::Sym,
+    scalar_fname: almide_lang::intern::Sym,
+) -> Option<(&'a [IrStmt], &'a IrExpr, &'a IrExpr)> {
+    let (stmts, tail) = match &body.kind {
+        IrExprKind::Block { stmts, expr: Some(tail) } => (stmts.as_slice(), tail.as_ref()),
+        // A stmt-less lambda body IS the record literal (`(st, b) => { out: …, in_ul: … }`
+        // parses as the record, not a block).
+        IrExprKind::Record { .. } => (&[][..], body),
+        _ => return None,
+    };
+    let tail_fields = match &tail.kind {
+        IrExprKind::Record { fields, .. } if fields.len() == 2 => fields,
+        _ => return None,
+    };
+    let tail_by = |n: almide_lang::intern::Sym| tail_fields.iter().find(|(fn_, _)| *fn_ == n);
+    let tail_list = &tail_by(list_fname)?.1;
+    let tail_scalar = &tail_by(scalar_fname)?.1;
+    match &tail_list.kind {
+        IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {}
+        _ => return None,
+    }
+    if is_heap_ty(&tail_scalar.ty) {
+        return None;
+    }
+    Some((stmts, tail_list, tail_scalar))
 }
 
 /// Substitute `st.<list_field>` / `st.<scalar_field>` (Member projections of the fold's state

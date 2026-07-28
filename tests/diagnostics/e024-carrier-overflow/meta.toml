@@ -1,3 +1,0 @@
-expects_code = "E024"
-expects_error = "'18446744073709551615' is out of range for UInt64"
-hint_substring = "above the i64 the compiler carries every integer in"

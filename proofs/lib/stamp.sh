@@ -35,3 +35,42 @@ stamp_toolchain() {
     echo "  tree:     $(git -C "$root" rev-parse --short HEAD 2>/dev/null) $(git -C "$root" status --porcelain 2>/dev/null | wc -l | tr -d ' ') dirty file(s)"
     echo "─────────────────────"
 }
+
+# A MACHINE-COMPARABLE identity of "the tree + toolchain this evidence describes"
+# — the same question `stamp_toolchain` answers for a human reader, as one hash.
+#
+# Consumer: receipt.sh, which re-uses a verification `make verify-trust` just
+# performed instead of repeating it (the two ran the SAME three scripts back to
+# back — 232s of the CI job re-deriving what the previous step had already
+# derived). Re-use is sound ONLY if the evidence describes the identical tree,
+# so this covers everything that could change a verdict: the compiler binary,
+# every toolchain the gates invoke, the commit, the exact content of tracked
+# modifications, and every untracked file (`-uall` lists them individually — a
+# bare `??  dir/` would otherwise let a whole new directory of fixtures slip in
+# without moving the hash). Any difference at all → different fingerprint →
+# receipt.sh re-verifies from scratch, which is the standalone third-party path.
+toolchain_fingerprint() {
+    local root="${1:?toolchain_fingerprint: pass ROOT}"
+    {
+        local alm; alm="$(command -v almide || true)"
+        [ -n "$alm" ] && shasum -a 256 "$alm" 2>/dev/null
+        rustc --version 2>/dev/null
+        coqc --version 2>/dev/null | head -1
+        coqchk --version 2>/dev/null | head -1
+        wasmtime --version 2>/dev/null
+        git -C "$root" rev-parse HEAD 2>/dev/null
+        git -C "$root" status --porcelain -uall 2>/dev/null
+        git -C "$root" diff HEAD 2>/dev/null
+        # `cut -f1`: shasum PRINTS THE PATH it hashed, and callers pass `root`
+        # differently (the Makefile recipe passes `.`, receipt.sh an absolute
+        # path) — leaving the path in made the fingerprint depend on the
+        # caller's spelling, so the same tree hashed differently the moment a
+        # single untracked file existed. The path still contributes through the
+        # porcelain listing above; only the digest is taken from here.
+        git -C "$root" status --porcelain -uall 2>/dev/null \
+            | awk '$1=="??"{ $1=""; sub(/^ /,""); print }' \
+            | while IFS= read -r f; do
+                shasum -a 256 "$root/$f" 2>/dev/null | cut -d' ' -f1
+            done
+    } | shasum -a 256 | cut -d' ' -f1
+}

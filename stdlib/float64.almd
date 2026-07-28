@@ -1,0 +1,21 @@
+// float64 — bundled-Almide sized-numeric conversion module.
+//
+// Routed through canonical `float` (= f64), exactly as `float32.almd` is. The
+// `float.from_float64` pivot is a no-op at the codegen level; it exists so the
+// sized type has the same surface as every other width.
+//
+// `Float64` and the canonical `Float` share a representation but not a type,
+// so without this module `float64.to_string` did not exist and a caller had to
+// know the `float.to_string(float.from_float64(x))` pivot (#894). There is no
+// `to_float64` — that is the identity on this type.
+
+fn to_int8(x: Float64) -> Int8 = float.to_int8(float.from_float64(x))
+fn to_int16(x: Float64) -> Int16 = float.to_int16(float.from_float64(x))
+fn to_int32(x: Float64) -> Int32 = float.to_int32(float.from_float64(x))
+fn to_int64(x: Float64) -> Int64 = float.to_int64(float.from_float64(x))
+fn to_uint8(x: Float64) -> UInt8 = float.to_uint8(float.from_float64(x))
+fn to_uint16(x: Float64) -> UInt16 = float.to_uint16(float.from_float64(x))
+fn to_uint32(x: Float64) -> UInt32 = float.to_uint32(float.from_float64(x))
+fn to_uint64(x: Float64) -> UInt64 = float.to_uint64(float.from_float64(x))
+fn to_float32(x: Float64) -> Float32 = float.to_float32(float.from_float64(x))
+fn to_string(x: Float64) -> String = float.to_string(float.from_float64(x))

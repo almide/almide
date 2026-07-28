@@ -734,3 +734,4 @@ pub(crate) fn desugar_hof_chain_anf(body: &IrExpr) -> Option<IrExpr> {
     }
     changed.then_some(out)
 }
+

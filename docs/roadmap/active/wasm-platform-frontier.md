@@ -16,8 +16,8 @@
 
 | 機能 | 実装 |
 |------|------|
-| tail calls | `pass_tail_call_mark.rs` が末尾位置を検出。ユーザー関数 `return_call` / クロージャ `return_call_indirect` (`emit_wasm/calls.rs` `emit_tail_call`) |
-| SIMD (v128) | list map 系に 4× v128 アンロール fast path (`calls_list_closure2.rs`)。※v128 自体は 2.0 機能。適用拡大は [wasm-optimization-roadmap](wasm-optimization-roadmap.md) |
+| tail calls | almide-mir の `tail_call_indexes`（render_wasm_b.rs）が関数末尾 CallFn を分類し `return_call` を出力（#864 で再移植、C-178）。self 再帰は上流 TCO ループ。`return_call_indirect`（クロージャ末尾）は未移植 |
+| SIMD (v128) | 旧 almide-codegen 時代の 4× v128 アンロールは almide-mir 未移植（デフォルト出力に v128 なし、#864 調査で確認）。適用拡大は [wasm-optimization-roadmap](wasm-optimization-roadmap.md) |
 | 厳格検証 | wasmtime 45+ / V8 strict validator 前提 (StackBalancePass) |
 
 ### 取る (小さくてミッション直結)

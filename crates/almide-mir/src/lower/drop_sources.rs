@@ -7,20 +7,53 @@
 /// the create+drop LEAK LOOP's burden, exactly like `__drop_value`). The slot offsets match the
 /// v1 construct (`[rc@0][len@4][cap@8][tag=slot0@12][field i @ 12+(1+i)*8]`).
 pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> String {
-    use almide_ir::{IrTypeDeclKind, IrVariantKind};
-    let names = variant_type_names(type_decls);
-    // A variant FIELD that is itself a FLAT variant (e.g. `BlockType.BlockVal(ValType)`) is a single
-    // owned tag-block with no inner handle: it must be freed by a flat `rc_dec`, NOT a recursive
-    // `__drop_<flatvariant>` (which is never generated for a flat variant — it has no heap field — and
-    // would render a DANGLING call). Mirrors the record-drop generator's `is_flat_variant_elem` treatment.
+    let sets = collect_variant_drop_name_sets(type_decls);
+    let mut out = String::new();
+    for decl in type_decls {
+        if let Some(src) = variant_drop_fn_source(decl, &sets) {
+            out.push_str(&src);
+        }
+    }
+    out.push_str(&variant_list_drop_sources(&sets.rec_variant_names));
+    out.push_str(&variant_map_drop_sources(type_decls, &sets.rec_variant_names));
+    out
+}
+
+/// The five NAME SETS every drop-generation decision below reads, built once from the
+/// program's `type_decls`. Extracted verbatim — the five locals AND the comment that
+/// explains each, now riding the field it explains — from `generate_variant_drop_sources`
+/// (codopsy round-2 complexity sweep, phase 1 of 5). One bundle instead of five parameters,
+/// so the per-decl / per-ctor / per-field renderers stay inside the 6-parameter cap. Decides
+/// nothing on its own: it is the read-only vocabulary those renderers consult.
+struct VariantDropNameSets {
+    /// Every user-variant type name in the program — the `variant_field_name` lookup set.
+    variant_names: std::collections::HashSet<String>,
+    /// A variant FIELD that is itself a FLAT variant (e.g. `BlockType.BlockVal(ValType)`) is a single
+    /// owned tag-block with no inner handle: it must be freed by a flat `rc_dec`, NOT a recursive
+    /// `__drop_<flatvariant>` (which is never generated for a flat variant — it has no heap field — and
+    /// would render a DANGLING call). Mirrors the record-drop generator's `is_flat_variant_elem` treatment.
+    flat_names: std::collections::HashSet<String>,
+    /// A ctor field that is itself a RECORD: freed via `$__drop_<R>` (recursive-drop record — a
+    /// nested String/heap field) or a flat `rc_dec` (scalar-only record). `all_record_names` gates the
+    /// detection + the `needs_recursive_drop` widening, `rec_record_names` selects the free.
+    all_record_names: std::collections::HashSet<String>,
+    /// The recursive-drop half of the record pair — see `all_record_names` above.
+    rec_record_names: std::collections::HashSet<String>,
+    /// The RICH (recursive-drop) variant type names — those for which `$__drop_<V>` is generated below.
+    /// A `List[<rich variant>]` ctor field (the wasm `Instr.Block(BlockType, List[Instr])` shape) is
+    /// freed RECURSIVELY via `$__drop_list_<V>` (each element → `$__drop_<V>`, mutually recursive); a
+    /// flat one-level `rc_dec` of the list block would leak every element's nested children.
+    rec_variant_names: std::collections::HashSet<String>,
+}
+
+/// Extracted verbatim from `generate_variant_drop_sources` (codopsy round-2 complexity
+/// sweep, phase 1 of 5): the five name-set locals the generator opened with, computed by the
+/// same calls in the same order (`rec_variant_names` still reads the already-built
+/// `variant_names` + `all_record_names`). Decides nothing — it only collects.
+fn collect_variant_drop_name_sets(type_decls: &[almide_ir::IrTypeDecl]) -> VariantDropNameSets {
+    use almide_ir::IrTypeDeclKind;
+    let variant_names = variant_type_names(type_decls);
     let flat_names = flat_variant_type_names(type_decls);
-    // The RICH (recursive-drop) variant type names — those for which `$__drop_<V>` is generated below.
-    // A `List[<rich variant>]` ctor field (the wasm `Instr.Block(BlockType, List[Instr])` shape) is
-    // freed RECURSIVELY via `$__drop_list_<V>` (each element → `$__drop_<V>`, mutually recursive); a
-    // flat one-level `rc_dec` of the list block would leak every element's nested children.
-    // A ctor field that is itself a RECORD: freed via `$__drop_<R>` (recursive-drop record — a
-    // nested String/heap field) or a flat `rc_dec` (scalar-only record). `all_record_names` gates the
-    // detection + the `needs_recursive_drop` widening, `rec_record_names` selects the free.
     let all_record_names: std::collections::HashSet<String> = type_decls
         .iter()
         .filter(|d| matches!(&d.kind, IrTypeDeclKind::Record { .. }))
@@ -29,176 +62,76 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
     let rec_record_names = recursive_record_drop_names(type_decls);
     let rec_variant_names: std::collections::HashSet<String> = type_decls
         .iter()
-        .filter(|d| variant_needs_recursive_drop(d, &names, &all_record_names))
+        .filter(|d| variant_needs_recursive_drop(d, &variant_names, &all_record_names))
         .map(|d| d.name.as_str().to_string())
         .collect();
-    let mut out = String::new();
-    for decl in type_decls {
-        if !variant_needs_recursive_drop(decl, &names, &all_record_names) {
-            continue;
-        }
-        let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
-        let tname = decl.name.as_str();
-        // The fn NAME sanitizes the module prefix (`types.RunResult` → `types_RunResult`); the param
-        // TYPE annotation keeps the dotted module-qualified name (a valid Almide type reference).
-        let fname = drop_fn_ident(tname);
-        out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
-        out.push_str("  let h = prim.handle(e)\n");
-        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
-        out.push_str(&format!("    let t = prim.load64(h + {})\n", layout::slot_offset(0)));
-        // One tag branch per ctor that has a heap field; chained `if t == k then {..} else ..`.
-        let mut branch = String::new();
-        let mut first = true;
-        for (tag, case) in cases.iter().enumerate() {
-            let tys: Vec<Ty> = match &case.kind {
-                IrVariantKind::Unit => vec![],
-                IrVariantKind::Tuple { fields } => fields.clone(),
-                IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
-            };
-            // Per-field free statements (variant → recurse, String → rc_dec, scalar → skip).
-            let mut frees = String::new();
-            let mut idx = 0usize;
-            for (i, ty) in tys.iter().enumerate() {
-                let off = layout::slot_offset(1 + i);
-                if let Some(fv) = variant_field_name(ty, &names) {
-                    if flat_names.contains(&fv) {
-                        // A flat-variant field — a single owned block, freed by one `rc_dec` (no
-                        // recursive `__drop_<fv>` exists for a flat variant). No `let` binding needed.
-                        frees.push_str(&format!(
-                            "        prim.rc_dec(prim.load64(h + {off}))\n"
-                        ));
-                    } else {
-                        let fv_fn = drop_fn_ident(&fv);
-                        frees.push_str(&format!(
-                            "        let f{idx}: {fv} = prim.load_handle(h + {off})\n        __drop_{fv_fn}(f{idx})\n"
-                        ));
-                        idx += 1;
-                    }
-                    continue;
-                }
-                if matches!(ty, Ty::String) {
-                    frees.push_str(&format!(
-                        "        prim.rc_dec(prim.load64(h + {off}))\n"
-                    ));
-                    continue;
-                }
-                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                    if a.len() == 1 && !is_heap_ty(&a[0]))
-                {
-                    // A List[scalar] ctor field — a FLAT block, one rc_dec is its full free.
-                    frees.push_str(&format!(
-                        "        prim.rc_dec(prim.load64(h + {off}))
-"
-                    ));
-                    continue;
-                }
-                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                    if a.len() == 1 && matches!(a[0], Ty::String))
-                {
-                    // A `List[String]` ctor field (`Node(String, List[String])`): each element is
-                    // an OWNED String handle — the generic `__drop_list_str` (shared with the
-                    // record-drop generator via `LIST_STR_DROP_SRC`, gated once at the pipeline
-                    // top level so both generators' identical references never double-define it)
-                    // frees every element then the list block. A flat `rc_dec` of just the list
-                    // block would leak each String.
-                    frees.push_str(&format!(
-                        "        let f{idx}: List[String] = prim.load_handle(h + {off})\n        __drop_list_str(f{idx})\n"
-                    ));
-                    idx += 1;
-                    continue;
-                }
-                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                    if a.len() == 1 && is_flat_variant_elem(&a[0], &flat_names))
-                {
-                    // A `List[<flat variant>]` ctor field (`Wrapped(List[Policy])` — #484): each
-                    // element is a single owned FLAT block (no inner handles), so `__drop_list_str`'s
-                    // per-element `rc_dec` sweep is its exact free — the record-drop generator's
-                    // List[flat-variant] precedent mirrored (incl. its `List[String]` binding type,
-                    // the handle-level reinterpretation that precedent already uses).
-                    frees.push_str(&format!(
-                        "        let f{idx}: List[String] = prim.load_handle(h + {off})\n        __drop_list_str(f{idx})\n"
-                    ));
-                    idx += 1;
-                    continue;
-                }
-                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
-                    if a.len() == 1 && !is_heap_ty(&a[0]))
-                {
-                    // An Option[scalar] ctor field (`Box(Option[Int])`) — the 0-or-1-element
-                    // len-tag block owns NO children (a Some payload is a scalar slot), so one
-                    // rc_dec is its full free. Mirrored in BOTH `needs_recursive_drop` gates and
-                    // `try_lower_variant_ctor`'s field admission — construction and drop agree.
-                    frees.push_str(&format!(
-                        "        prim.rc_dec(prim.load64(h + {off}))
-"
-                    ));
-                    continue;
-                }
-                if matches!(ty, Ty::Fn { .. }) {
-                    // A CLOSURE ctor field (`Run(() -> Unit)` — the variant-stored closure
-                    // class): the slot holds a self-describing closure block whose captured
-                    // heap env a flat rc_dec would LEAK — free it via `__drop_closure`, the
-                    // SAME routine the record-drop generator's Fn arm uses (CLOSURE_DROP_SRC
-                    // is linked whenever the program creates closures, which a populated Fn
-                    // payload requires). The binding type is the block's List[Int] rep.
-                    frees.push_str(&format!(
-                        "        let f{idx}: List[Int] = prim.load_handle(h + {off})\n        __drop_closure(f{idx})\n"
-                    ));
-                    idx += 1;
-                    continue;
-                }
-                if let Some(ev) = list_rich_variant_elem(ty, &rec_variant_names) {
-                    // A `List[<rich variant>]` ctor field (`Block(_, List[Instr])`): each element is a
-                    // recursive-drop variant block, freed per-element by the generated `$__drop_list_<ev>`
-                    // (→ `$__drop_<ev>`). A flat `rc_dec` of the list block would leak every element.
-                    let ev_fn = drop_fn_ident(&ev);
-                    frees.push_str(&format!(
-                        "        let f{idx}: List[{ev}] = prim.load_handle(h + {off})\n        __drop_list_{ev_fn}(f{idx})\n"
-                    ));
-                    idx += 1;
-                    continue;
-                }
-                let Ty::Named(rn, _) = ty else {
-                    continue;
-                };
-                if !all_record_names.contains(rn.as_str()) {
-                    continue;
-                }
-                // A RECORD-type ctor field (`Wrap(Color)` / `Box(Inner)`). A recursive-drop
-                // record (a String / nested-heap field) recurses via `$__drop_<R>`; a
-                // scalar-only record block is a single owned allocation, one `rc_dec` its full
-                // free. Either way the ctor stored its HANDLE at this slot.
-                if rec_record_names.contains(rn.as_str()) {
-                    let rn_fn = drop_fn_ident(rn.as_str());
-                    let rn_s = rn.as_str();
-                    frees.push_str(&format!(
-                        "        let f{idx}: {rn_s} = prim.load_handle(h + {off})\n        __drop_{rn_fn}(f{idx})\n"
-                    ));
-                    idx += 1;
-                } else {
-                    frees.push_str(&format!(
-                        "        prim.rc_dec(prim.load64(h + {off}))\n"
-                    ));
-                }
-            }
-            if frees.is_empty() {
-                continue; // scalar/Unit ctor — nothing to free
-            }
-            let kw = if first { "if" } else { "else if" };
-            branch.push_str(&format!("    {kw} t == {tag} then {{\n{frees}      }}\n"));
-            first = false;
-        }
-        if branch.is_empty() {
-            // No heap-field ctor (shouldn't happen — needs_recursive_drop was true), guard anyway.
-            out.push_str("    ()\n");
-        } else {
-            out.push_str(&branch);
-            out.push_str("    else ()\n");
-        }
-        out.push_str("  } else ()\n");
-        out.push_str("  prim.rc_dec(h)\n");
-        out.push_str("}\n");
+    VariantDropNameSets {
+        variant_names,
+        flat_names,
+        all_record_names,
+        rec_record_names,
+        rec_variant_names,
     }
+}
+
+/// Extracted verbatim from `generate_variant_drop_sources` (codopsy round-2 complexity
+/// sweep, phase 2 of 5): ONE variant decl's `$__drop_<T>` source text — the rc==1 guard, the
+/// tag read, the per-ctor `if t == <tag> then { <frees> }` chain (arm bodies from
+/// [`variant_ctor_field_frees`]), the `else ()` tail and the final block release. `None`
+/// reproduces the original loop's two `continue`s, in the same order: a decl that does not
+/// need a recursive drop, then a decl whose kind is not a variant.
+fn variant_drop_fn_source(
+    decl: &almide_ir::IrTypeDecl,
+    sets: &VariantDropNameSets,
+) -> Option<String> {
+    use almide_ir::IrTypeDeclKind;
+    if !variant_needs_recursive_drop(decl, &sets.variant_names, &sets.all_record_names) {
+        return None;
+    }
+    let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { return None };
+    let tname = decl.name.as_str();
+    // The fn NAME sanitizes the module prefix (`types.RunResult` → `types_RunResult`); the param
+    // TYPE annotation keeps the dotted module-qualified name (a valid Almide type reference).
+    let fname = drop_fn_ident(tname);
+    let mut out = String::new();
+    out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
+    out.push_str("  let h = prim.handle(e)\n");
+    out.push_str("  if prim.load32(h + 0) == 1 then {\n");
+    out.push_str(&format!("    let t = prim.load64(h + {})\n", layout::slot_offset(0)));
+    // One tag branch per ctor that has a heap field; chained `if t == k then {..} else ..`.
+    let mut branch = String::new();
+    let mut first = true;
+    for (tag, case) in cases.iter().enumerate() {
+        let frees = variant_ctor_field_frees(&case.kind, sets);
+        if frees.is_empty() {
+            continue; // scalar/Unit ctor — nothing to free
+        }
+        let kw = if first { "if" } else { "else if" };
+        branch.push_str(&format!("    {kw} t == {tag} then {{\n{frees}      }}\n"));
+        first = false;
+    }
+    if branch.is_empty() {
+        // No heap-field ctor (shouldn't happen — needs_recursive_drop was true), guard anyway.
+        out.push_str("    ()\n");
+    } else {
+        out.push_str(&branch);
+        out.push_str("    else ()\n");
+    }
+    out.push_str("  } else ()\n");
+    out.push_str("  prim.rc_dec(h)\n");
+    out.push_str("}\n");
+    Some(out)
+}
+
+/// Extracted verbatim from `generate_variant_drop_sources` (codopsy round-2 complexity
+/// sweep, phase 4 of 5): the three per-rich-variant LIST/RESULT wrapper drops
+/// (`$__drop_list_<V>` + its loop, `$__drop_res_<V>`, `$__drop_list_str_<V>` + its loop),
+/// emitted in the same sorted order for the same set. Decides nothing per program — it is
+/// pure emission driven by `rec_variant_names`.
+fn variant_list_drop_sources(
+    rec_variant_names: &std::collections::HashSet<String>,
+) -> String {
+    let mut out = String::new();
     // A per-element-recursive `$__drop_list_<V>` for EVERY rich variant V — so a `List[V]` value (the
     // wasm `read_instrs` accumulator) AND a `List[V]` FIELD of a record (`Global.init`, freed via
     // `record_drop_field_frees` → `__drop_list_<V>`) reclaim each element through `$__drop_<V>`. Mirrors
@@ -261,69 +194,80 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
         ));
         // (moved below — the map-value sweep now covers ALL variants, split layout)
     }
-    // A `Map[String, <variant>]` value (`["a": Circle(3.0)]` — the shape_map class), the
-    // map_hobj SPLIT layout (@4 = n entries; keys 0..n-1, values n..2n-1): the exact free
-    // is `rc_dec` of each deep-copied key + the value free — RECURSIVE `$__drop_<V>` for a
-    // recursive-drop variant, a flat `rc_dec` for a flat one (its block owns no children).
-    // Generated for EVERY variant so the bind-side `map_<V>` admission never outruns
-    // generation. Records with all-scalar fields get the same sweep with a flat value
-    // `rc_dec` (`__drop_map_rec_<R>`).
-    {
-        let mut all_variant_names: Vec<&str> = type_decls
-            .iter()
-            .filter(|d| matches!(&d.kind, IrTypeDeclKind::Variant { .. }))
-            .map(|d| d.name.as_str())
-            .collect();
-        all_variant_names.sort_unstable();
-        for vn in all_variant_names {
-            let vn_fn = drop_fn_ident(vn);
-            let free_v = if rec_variant_names.contains(vn) {
-                format!("let v: {vn} = prim.load_handle(h + 12 + (n + i) * 8)\n    __drop_{vn_fn}(v)")
-            } else {
-                "prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))".to_string()
-            };
-            out.push_str(&format!(
-                "fn __drop_map_{vn_fn}_go(h: Int, n: Int, i: Int) -> Unit =\n  \
-                   if i >= n then ()\n  \
-                   else {{\n    \
-                     prim.rc_dec(prim.load64(h + 12 + i * 8))\n    \
-                     {free_v}\n    \
-                     __drop_map_{vn_fn}_go(h, n, i + 1)\n  \
-                   }}\n\
-                 fn __drop_map_{vn_fn}(m: Map[String, {vn}]) -> Unit = {{\n  \
-                   let h = prim.handle(m)\n  \
-                   if prim.load32(h + 0) == 1 then __drop_map_{vn_fn}_go(h, prim.load32(h + 4), 0) else ()\n  \
-                   prim.rc_dec(h)\n}}\n"
-            ));
-        }
-        let mut scalar_recs: Vec<&str> = type_decls
-            .iter()
-            .filter_map(|d| match &d.kind {
-                IrTypeDeclKind::Record { fields }
-                    if fields.iter().all(|f| !is_heap_ty(&f.ty)) =>
-                {
-                    Some(d.name.as_str())
-                }
-                _ => None,
-            })
-            .collect();
-        scalar_recs.sort_unstable();
-        for rn in scalar_recs {
-            let rn_fn = drop_fn_ident(rn);
-            out.push_str(&format!(
-                "fn __drop_map_rec_{rn_fn}_go(h: Int, n: Int, i: Int) -> Unit =\n  \
-                   if i >= n then ()\n  \
-                   else {{\n    \
-                     prim.rc_dec(prim.load64(h + 12 + i * 8))\n    \
-                     prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))\n    \
-                     __drop_map_rec_{rn_fn}_go(h, n, i + 1)\n  \
-                   }}\n\
-                 fn __drop_map_rec_{rn_fn}(m: Map[String, {rn}]) -> Unit = {{\n  \
-                   let h = prim.handle(m)\n  \
-                   if prim.load32(h + 0) == 1 then __drop_map_rec_{rn_fn}_go(h, prim.load32(h + 4), 0) else ()\n  \
-                   prim.rc_dec(h)\n}}\n"
-            ));
-        }
+    out
+}
+
+/// Extracted verbatim from `generate_variant_drop_sources` (codopsy round-2 complexity
+/// sweep, phase 5 of 5): the `Map[String, _]`-valued sweeps — `$__drop_map_<V>` for every
+/// variant (the value free chosen per variant) and `$__drop_map_rec_<R>` for every
+/// all-scalar-field record. Both loops keep their original order and their original
+/// `sort_unstable` determinism.
+///
+/// A `Map[String, <variant>]` value (`["a": Circle(3.0)]` — the shape_map class), the
+/// map_hobj SPLIT layout (@4 = n entries; keys 0..n-1, values n..2n-1): the exact free
+/// is `rc_dec` of each deep-copied key + the value free — RECURSIVE `$__drop_<V>` for a
+/// recursive-drop variant, a flat `rc_dec` for a flat one (its block owns no children).
+/// Generated for EVERY variant so the bind-side `map_<V>` admission never outruns
+/// generation. Records with all-scalar fields get the same sweep with a flat value
+/// `rc_dec` (`__drop_map_rec_<R>`).
+fn variant_map_drop_sources(
+    type_decls: &[almide_ir::IrTypeDecl],
+    rec_variant_names: &std::collections::HashSet<String>,
+) -> String {
+    use almide_ir::IrTypeDeclKind;
+    let mut out = String::new();
+    let mut all_variant_names: Vec<&str> = type_decls
+        .iter()
+        .filter(|d| matches!(&d.kind, IrTypeDeclKind::Variant { .. }))
+        .map(|d| d.name.as_str())
+        .collect();
+    all_variant_names.sort_unstable();
+    for vn in all_variant_names {
+        let vn_fn = drop_fn_ident(vn);
+        let free_v = if rec_variant_names.contains(vn) {
+            format!("let v: {vn} = prim.load_handle(h + 12 + (n + i) * 8)\n    __drop_{vn_fn}(v)")
+        } else {
+            "prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))".to_string()
+        };
+        out.push_str(&format!(
+            "fn __drop_map_{vn_fn}_go(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{\n    \
+                 prim.rc_dec(prim.load64(h + 12 + i * 8))\n    \
+                 {free_v}\n    \
+                 __drop_map_{vn_fn}_go(h, n, i + 1)\n  \
+               }}\n\
+             fn __drop_map_{vn_fn}(m: Map[String, {vn}]) -> Unit = {{\n  \
+               let h = prim.handle(m)\n  \
+               if prim.load32(h + 0) == 1 then __drop_map_{vn_fn}_go(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n"
+        ));
+    }
+    let mut scalar_recs: Vec<&str> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields } if fields.iter().all(|f| !is_heap_ty(&f.ty)) => {
+                Some(d.name.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    scalar_recs.sort_unstable();
+    for rn in scalar_recs {
+        let rn_fn = drop_fn_ident(rn);
+        out.push_str(&format!(
+            "fn __drop_map_rec_{rn_fn}_go(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{\n    \
+                 prim.rc_dec(prim.load64(h + 12 + i * 8))\n    \
+                 prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))\n    \
+                 __drop_map_rec_{rn_fn}_go(h, n, i + 1)\n  \
+               }}\n\
+             fn __drop_map_rec_{rn_fn}(m: Map[String, {rn}]) -> Unit = {{\n  \
+               let h = prim.handle(m)\n  \
+               if prim.load32(h + 0) == 1 then __drop_map_rec_{rn_fn}_go(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n"
+        ));
     }
     out
 }
@@ -706,3 +650,58 @@ pub(crate) fn anon_record_drop_name(fields: &[(almide_lang::intern::Sym, Ty)]) -
     }
     format!("anonrec_{h:016x}")
 }
+
+// The Option[(String, _)] payload drops moved here from drop_sources_c.rs
+// (max-lines, #852): `map.find`'s Some((key, value)) result release — verbatim.
+/// The ALMIDE SOURCE of `__drop_opt_str_int` — the recursive release of an
+/// `Option[(String, Int)]` (`map.find`'s predicate-search result: `Some((key,
+/// value))` on a hit). Wrapper `[rc][len@4=0-or-1 (Option's tag)][cap@8][@12
+/// payload]`: at the wrapper's last ref (rc==1), IFF len==1 (Some) the @12
+/// payload is the `(String, Int)` tuple's handle — at the TUPLE's own last ref,
+/// `rc_dec` its String slot0 @12 (the Int slot1 @20 is scalar), then the tuple
+/// block; len==0 (None) frees nothing at the payload. THEN the wrapper block,
+/// always. A blind flat `rc_dec` of the @12 payload slot (the generic
+/// `heap_elem_lists`/`DropListStr` route every OTHER self-host Option call
+/// uses) would only decrement the TUPLE's own refcount, leaking its String —
+/// the exact class of bug this session's `_str`-dispatch fix caught elsewhere.
+/// Named for the (String, Int) shape specifically; a (String, Bool)/(String,
+/// Float) `map.find` result reuses the SAME generated fn (the render never
+/// reads the Int slot's bits, only rc_decs the String slot — the established
+/// type-stand-in convention, e.g. `list_hshare.almd`'s `List[Int]` stand-in).
+pub const OPT_STR_INT_DROP_SRC: &str = "\
+fn __drop_opt_str_int(o: List[Int]) -> Unit = {
+  let h = prim.handle(o)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 4) == 1 then {
+      let th = prim.load64(h + 12)
+      if prim.load32(th + 0) == 1 then prim.rc_dec(prim.load64(th + 12)) else ()
+      prim.rc_dec(th)
+    } else ()
+  } else ()
+  prim.rc_dec(h)
+}
+";
+
+/// The ALMIDE SOURCE of `__drop_opt_str_str` — the recursive release of an
+/// `Option[(String, String)]` (the if-merged `some((s1, s2))` ctor the fuzz
+/// index-374 divergence exposed): at the wrapper's last ref, IFF Some the @12
+/// payload tuple owns TWO Strings (@12 and @20 — both rc_dec'd at the tuple's
+/// last ref), then the tuple block, then the wrapper. The `__drop_opt_str_int`
+/// twin with the second slot's dec added.
+pub const OPT_STR_STR_DROP_SRC: &str = "\
+fn __drop_opt_str_str(o: List[Int]) -> Unit = {
+  let h = prim.handle(o)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 4) == 1 then {
+      let th = prim.load64(h + 12)
+      if prim.load32(th + 0) == 1 then {
+        prim.rc_dec(prim.load64(th + 12))
+        prim.rc_dec(prim.load64(th + 20))
+      }
+      else ()
+      prim.rc_dec(th)
+    } else ()
+  } else ()
+  prim.rc_dec(h)
+}
+";

@@ -4,7 +4,10 @@
 // Signatures (including any generic type params) match the legacy
 // TOML definitions byte-for-byte; the Rust runtime in
 // `runtime/rs/src/math.rs` stays as the implementation target.
-// WASM dispatch continues through `emit_wasm/calls_math.rs`.
+// On WASM the math fns are SELF-HOSTED (`stdlib/math_trig.almd`,
+// `math_exp.almd`, `math_log.almd`, `math_atan.almd`, `math_tanh.almd`, …),
+// registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
+// dispatched through `emit_wasm/calls_math.rs`, retired in c71eff7b.)
 
 @intrinsic("almide_rt_math_abs")
 fn abs(n: Int) -> Int = _

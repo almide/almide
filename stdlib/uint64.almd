@@ -10,6 +10,22 @@ fn to_int64(x: UInt64) -> Int64 = int.to_int64(int.from_uint64(x))
 fn to_uint8(x: UInt64) -> UInt8 = int.to_uint8(int.from_uint64(x))
 fn to_uint16(x: UInt64) -> UInt16 = int.to_uint16(int.from_uint64(x))
 fn to_uint32(x: UInt64) -> UInt32 = int.to_uint32(int.from_uint64(x))
-fn to_float32(x: UInt64) -> Float32 = int.to_float32(int.from_uint64(x))
-fn to_float64(x: UInt64) -> Float64 = int.to_float64(int.from_uint64(x))
-fn to_string(x: UInt64) -> String = int.to_string(int.from_uint64(x))
+// The upper half (`x > i64::MAX`) cannot pivot through the signed `Int`
+// reinterpret — see stdlib/uint64_convert.almd for the split (#872).
+fn to_float32(x: UInt64) -> Float32 =
+  if int.from_uint64(x) >= 0 then int.to_float32(int.from_uint64(x))
+  else {
+    let hf = int.to_float(int.from_uint64(x / 2))
+    float.to_float32(hf + hf + int.to_float(int.from_uint64(x % 2)))
+  }
+
+fn to_float64(x: UInt64) -> Float64 =
+  if int.from_uint64(x) >= 0 then int.to_float64(int.from_uint64(x))
+  else {
+    let hf = int.to_float(int.from_uint64(x / 2))
+    float.to_float64(hf + hf + int.to_float(int.from_uint64(x % 2)))
+  }
+
+fn to_string(x: UInt64) -> String =
+  if int.from_uint64(x) >= 0 then int.to_string(int.from_uint64(x))
+  else int.to_string(int.from_uint64(x / 10)) + int.to_string(int.from_uint64(x % 10))

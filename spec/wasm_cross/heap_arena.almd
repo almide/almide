@@ -1,14 +1,16 @@
 // @contract: C-041
-// Cross-target drain fixture for the arena checkpoint primitives in
-// emit_wasm/runtime.rs: compile_heap_save, compile_heap_restore.
+// Cross-target drain fixture for the arena checkpoint surface
+// (stdlib/bytes_core.almd: bytes_heap_save, bytes_heap_restore).
 //
 // Exposed as bytes.heap_save() -> Int (an OPAQUE checkpoint) and
 // bytes.heap_restore(checkpoint) -> Unit. On native these are intentionally
 // trivial (runtime/rs/src/bytes.rs: heap_save() = 0, heap_restore() = no-op,
-// since the Rust allocator manages memory); on WASM they save/reset the bump
-// pointer to reclaim everything allocated since the checkpoint. The CONTRACT is
-// the same on both: take a checkpoint, allocate scratch, restore, and subsequent
-// work must produce identical results.
+// since the Rust allocator manages memory). v0's WASM leg saved/reset a bump
+// pointer to reclaim everything allocated since the checkpoint; v1's RC
+// discipline reclaims scratch deterministically at scope end, so the self-host
+// is trivial on BOTH legs. The CONTRACT is unchanged either way: take a
+// checkpoint, allocate scratch, restore, and subsequent work must produce
+// identical results.
 //
 // The checkpoint value itself is target-specific (0 vs a real pointer) and is
 // NEVER printed — only the post-restore observable results, which must match.

@@ -76,7 +76,7 @@ fn registry_served_names() -> &'static std::collections::HashSet<&'static str> {
     use std::sync::OnceLock;
     static NAMES: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
     NAMES.get_or_init(|| {
-        crate::render_wasm::registry::self_host_runtime()
+        crate::render_wasm::self_host_runtime()
             .iter()
             .flat_map(|(_, pairs)| pairs.iter().map(|(_, call_name)| *call_name))
             .collect()
@@ -114,6 +114,31 @@ pub fn linkable_module_fns(m: &almide_ir::IrModule) -> std::collections::HashSet
         .collect()
 }
 
+/// The package a resolved sibling module belongs to, if it is a DEPENDENCY's
+/// submodule.
+///
+/// The MIR pipeline re-runs the frontend from source, so it has to re-derive
+/// what the CLI driver knows from the resolver: a dependency's modules are
+/// registered under package-qualified names (`ceangal.render`), and inside such
+/// a module `import self.layout` must resolve against the PACKAGE, not against
+/// the module itself. Without that, `resolve_import_canonical` built the fqn
+/// `ceangal.render.layout`, found it unregistered, fell back to the bare leaf
+/// `layout`, and the sibling call's signature was never found — the call typed
+/// `Unknown` and the function walled with "Unknown type reached MIR lowering",
+/// which the consumer then saw as an unlinked
+/// `almide_rt_ceangal_render_render_at` (#904). The package's OWN build never
+/// hit this: standalone, its modules are named bare, so the leaf fallback
+/// happened to be right.
+///
+/// A `self` module (the project's own `src/*.almd`) keeps its leaf-name
+/// registration and needs no package scope.
+fn dependency_package_of(name: &str, is_self: bool) -> Option<&str> {
+    if is_self {
+        return None;
+    }
+    name.split_once('.').map(|(pkg, _)| pkg)
+}
+
 fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     use almide_ir::{walk_expr_mut, CallTarget, IrExprKind, IrMutVisitor};
     use almide_lang::intern::sym;
@@ -129,6 +154,31 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     struct Rw<'a> {
         user_mods: &'a std::collections::HashMap<String, std::collections::HashSet<String>>,
         root_fns: std::collections::HashSet<String>,
+        /// The module whose body is being rewritten, if any. A dependency's
+        /// modules are registered under their PACKAGE-QUALIFIED names
+        /// (`ceangal.layout`), but a call BETWEEN them still names the sibling
+        /// the way that package's own source does — bare `layout.layout`. With
+        /// no enclosing scope the bare name matched no user module, the call
+        /// stayed a `CallTarget::Module`, and the MIR walled it as an
+        /// "effectful/impure stdlib Module call layout.layout" (#904).
+        enclosing: Option<String>,
+    }
+    impl Rw<'_> {
+        /// The user module a call's `module` segment refers to: an exact match,
+        /// or — inside a package — the sibling under the enclosing module's own
+        /// package prefix.
+        fn resolve_module<'m>(&'m self, m: &'m str, f: &str) -> Option<&'m str> {
+            if self.user_mods.get(m).is_some_and(|fs| fs.contains(f)) {
+                return Some(m);
+            }
+            let prefix = self.enclosing.as_deref()?.rsplit_once('.')?.0;
+            let qualified = format!("{prefix}.{m}");
+            let (k, _) = self
+                .user_mods
+                .get_key_value(&qualified)
+                .filter(|(_, fs)| fs.contains(f))?;
+            Some(k.as_str())
+        }
     }
     impl IrMutVisitor for Rw<'_> {
         fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
@@ -136,8 +186,8 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
             if let IrExprKind::Call { target, .. } = &mut e.kind {
                 if let CallTarget::Module { module, func, .. } = target {
                     let (m, f) = (module.as_str(), func.as_str());
-                    if self.user_mods.get(m).is_some_and(|fs| fs.contains(f)) {
-                        *target = CallTarget::Named { name: sym(&user_module_fn_name(m, f)) };
+                    if let Some(owner) = self.resolve_module(m, f) {
+                        *target = CallTarget::Named { name: sym(&user_module_fn_name(owner, f)) };
                     }
                 } else if let CallTarget::Named { name } = target {
                     // A BARE Named call to a fn that lives in exactly ONE linked user module: the
@@ -158,7 +208,7 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     }
     let root_fns: std::collections::HashSet<String> =
         ir.functions.iter().map(|f| f.name.as_str().to_string()).collect();
-    let mut rw = Rw { user_mods: &user_mods, root_fns };
+    let mut rw = Rw { user_mods: &user_mods, root_fns, enclosing: None };
     for func in &mut ir.functions {
         rw.visit_expr_mut(&mut func.body);
     }
@@ -166,6 +216,7 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
         rw.visit_expr_mut(&mut tl.value);
     }
     for m in &mut ir.modules {
+        rw.enclosing = Some(m.name.as_str().to_string());
         for func in &mut m.functions {
             rw.visit_expr_mut(&mut func.body);
         }
@@ -211,13 +262,17 @@ fn source_to_ir_with(
     // cross-module reader of a generic-ctor top-let (`let MAYBE = some(Cfg
     // {…})`) sees the registration seed `Option[Unknown]`, the match payload
     // binding stays Unknown, and the whole program walls.
-    for (name, mod_prog, _) in modules {
+    for (name, mod_prog, is_self_mod) in modules {
         if almide_lang::stdlib_info::is_stdlib_module(name)
             && !almide_lang::stdlib_info::is_bundled_module(name)
         {
             continue;
         }
+        let saved_self = checker.env.self_module_name;
+        checker.env.self_module_name =
+            dependency_package_of(name, *is_self_mod).map(almide_lang::intern::sym);
         checker.refresh_module_top_lets(mod_prog, name);
+        checker.env.self_module_name = saved_self;
     }
     let diags = checker.infer_program(&mut prog);
     let errors: Vec<_> = diags
@@ -241,7 +296,12 @@ fn source_to_ir_with(
             continue;
         }
         let mut mod_prog = mod_prog.clone();
-        let _ = is_self;
+        // Scope the module to its PACKAGE while it is inferred and lowered, so
+        // `import self.<sibling>` inside a dependency resolves to the
+        // package-qualified sibling the resolver registered (#904).
+        let saved_self = checker.env.self_module_name;
+        checker.env.self_module_name =
+            dependency_package_of(name, *is_self).map(almide_lang::intern::sym);
         checker.infer_module(&mut mod_prog, name);
         let self_name = checker.env.self_module_name.map(|s| s.to_string());
         let import_table_name = self_name.as_deref().unwrap_or(name.as_str());
@@ -259,6 +319,7 @@ fn source_to_ir_with(
             None,
         );
         checker.env.import_table = saved_table;
+        checker.env.self_module_name = saved_self;
         ir.modules.push(mod_ir);
     }
 
@@ -316,273 +377,6 @@ fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
     source_to_ir_with(source, &[])
 }
 
-/// Render a `.almd` **source** program to a COMPLETE wasm module (WAT text) via the v1 MIR renderer.
-///
-/// `self_modules` are the caller-resolved `import self.<submodule>` siblings (empty ⇒ single file).
-/// Promote a NO-`main` test file's `test` fns to ordinary effect fns and synthesize the
-/// runner `main` (v0 `__test_runner` protocol). See [`try_render_wasm_source_tests`].
-fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), LowerError> {
-    use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
-    use almide_lang::intern::sym;
-    use almide_lang::types::Ty;
-    let has_tests = ir.functions.iter().any(|f| f.is_test);
-    if let Some(main_idx) =
-        ir.functions.iter().position(|f| !f.is_test && f.name.as_str() == "main")
-    {
-        if !has_tests {
-            // main-mode: both legs run main only (v0's `__main_runner` protocol).
-            return Ok(());
-        }
-        // main + test blocks. NATIVE test mode compiles `main` but never calls it —
-        // cargo's harness runs the `#[test]` fns alone. Mirror that: drop the user
-        // `main` so the synthesized runner is the entry and the TESTS run. The old
-        // behaviour kept `main` as the entry and left the tests unlowered, so the
-        // harness skipped the file to native ("wasm test-mode runs main only") —
-        // 17 of the 32 fallbacks in `almide test` were this one harness gap, not a
-        // v1 subset wall (#813). These fixtures' `main` is separately exercised in
-        // MAIN mode by the cross-target parity gate, so nothing loses coverage.
-        ir.functions.remove(main_idx);
-    }
-    if !has_tests {
-        return Err(LowerError::Unsupported(
-            "test mode: no `main` and no test blocks — nothing to run".into(),
-        ));
-    }
-    // v0's `__test_runner` re-initializes module globals before EVERY test (native
-    // thread-isolation parity). The v1 `_start` runs `__global_init`/`__mg_init` ONCE —
-    // so the runner main re-ASSIGNS every MUTABLE main-region top-let to its
-    // initializer before each test (the ordinary `lower_mutable_global_assign` path:
-    // take + drop-old + store — no leak, no new runtime). An IMMUTABLE top-let cannot
-    // change between tests and needs no re-init. MODULE top-lets stay walled: their
-    // VarIds live in a different numbering region than the main-region runner, so a
-    // synthesized Assign could collide with an unrelated main-side id (the per-region
-    // globals discipline) — that bridge is the remaining piece of this brick.
-    if ir.modules.iter().any(|m| m.top_lets.iter().any(|tl| tl.mutable)) {
-        // MUTABLE module top-lets stay walled in test mode: the per-test re-init
-        // Assign would have to cross the VarId numbering-region bridge (a
-        // synthesized main-region Assign could collide with an unrelated module
-        // id — the per-region globals discipline). IMMUTABLE literal-init
-        // top-lets cannot change between tests and need no re-init — they lower
-        // through the const-bridge.
-        return Err(LowerError::Unsupported(
-            "test mode: MUTABLE module top-lets need the per-test region bridge, \
-             not in this brick"
-                .into(),
-        ));
-    }
-    // A referenced IMPURE-call-initialized module top-let walls the file: the
-    // const-bridge drops a call init (mod.rs's expr_has_call), a PURE one is
-    // substituted into the reader bodies later (the ceangal/#785 substitution +
-    // the record-field hoist), but an IMPURE one has no faithful route — and an
-    // unbound reference TRAPS at runtime (index OOB) instead of walling.
-    // Referenced = a frontend-synthesized cross-module ref entry names it.
-    {
-        use almide_ir::visit::{walk_expr, IrVisitor};
-        struct C {
-            has_call: bool,
-            impure: bool,
-        }
-        impl IrVisitor for C {
-            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-                match &e.kind {
-                    almide_ir::IrExprKind::RuntimeCall { .. } => {
-                        self.has_call = true;
-                        self.impure = true;
-                    }
-                    almide_ir::IrExprKind::Call { target, .. } => {
-                        self.has_call = true;
-                        match target {
-                            almide_ir::CallTarget::Module { module, func, .. } => {
-                                if !crate::purity::is_pure(module.as_str(), func.as_str()) {
-                                    self.impure = true;
-                                }
-                            }
-                            almide_ir::CallTarget::Named { .. } => {}
-                            _ => self.impure = true,
-                        }
-                    }
-                    _ => {}
-                }
-                walk_expr(self, e);
-            }
-        }
-        let effectish: std::collections::HashSet<&str> = ir
-            .functions
-            .iter()
-            .chain(ir.modules.iter().flat_map(|m| m.functions.iter()))
-            .filter(|f| f.is_effect)
-            .map(|f| f.name.as_str())
-            .collect();
-        let impure_call_inits: std::collections::HashSet<(String, String)> = ir
-            .modules
-            .iter()
-            .flat_map(|m| {
-                let effectish = &effectish;
-                m.top_lets.iter().filter_map(move |tl| {
-                    let mut c = C { has_call: false, impure: false };
-                    c.visit_expr(&tl.value);
-                    // A Named callee that is an EFFECT fn is impure too.
-                    let named_effect = {
-                        use almide_ir::visit::{walk_expr, IrVisitor};
-                        struct N<'a> {
-                            hit: bool,
-                            effectish: &'a std::collections::HashSet<&'a str>,
-                        }
-                        impl IrVisitor for N<'_> {
-                            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-                                if let almide_ir::IrExprKind::Call {
-                                    target: almide_ir::CallTarget::Named { name },
-                                    ..
-                                } = &e.kind
-                                {
-                                    if self.effectish.contains(name.as_str()) {
-                                        self.hit = true;
-                                    }
-                                }
-                                walk_expr(self, e);
-                            }
-                        }
-                        let mut n = N { hit: false, effectish };
-                        n.visit_expr(&tl.value);
-                        n.hit
-                    };
-                    // PURE call inits PASS: the bind-form substitution places
-                    // the init at the fn top, and repair_record_literal_field_tys
-                    // heals the Unknown declared-field type the linked literal
-                    // carried (#785) — the full single-file-proven form. IMPURE
-                    // inits have no faithful route and stay walled.
-                    if !(c.has_call && (c.impure || named_effect)) {
-                        return None;
-                    }
-                    m.var_table
-                        .entries
-                        .get(tl.var.0 as usize)
-                        .map(|e| (m.name.as_str().to_string(), e.name.as_str().to_uppercase()))
-                })
-            })
-            .collect();
-        if !impure_call_inits.is_empty()
-            && ir.var_table.entries.iter().any(|e| {
-                e.module_origin.as_ref().is_some_and(|mo| {
-                    impure_call_inits.contains(&(mo.clone(), e.name.as_str().to_uppercase()))
-                })
-            })
-        {
-            return Err(LowerError::Unsupported(
-                "test mode: a referenced impure-call-initialized module top-let \
-                 needs the slot-routed bridge, not in this brick"
-                    .into(),
-            ));
-        }
-    }
-    let reinit_stmts: Vec<IrStmt> = ir
-        .top_lets
-        .iter()
-        .filter(|tl| tl.mutable)
-        .map(|tl| IrStmt {
-            kind: IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
-            span: None,
-        })
-        .collect();
-    let unit_expr =
-        || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
-    let println_stmt = |text: String| IrStmt {
-        kind: IrStmtKind::Expr {
-            expr: IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: sym("println") },
-                    args: vec![IrExpr {
-                        kind: IrExprKind::LitStr { value: text },
-                        ty: Ty::String,
-                        span: None,
-                        def_id: None,
-                    }],
-                    type_args: Vec::new(),
-                },
-                ty: Ty::Unit,
-                span: None,
-                def_id: None,
-            },
-        },
-        span: None,
-    };
-    let mut stmts: Vec<IrStmt> = Vec::new();
-    let mut idx = 0usize;
-    for f in ir.functions.iter_mut() {
-        if !f.is_test {
-            continue;
-        }
-        let display = f
-            .name
-            .as_str()
-            .strip_prefix(almide_ir::TEST_NAME_PREFIX)
-            .unwrap_or(f.name.as_str())
-            .to_string();
-        // Raw test names carry spaces/parens/unicode no WAT identifier admits — rename
-        // to a mechanical id and drop `is_test` so the render loop lowers it like any
-        // other effect fn (nothing else references a test fn by name).
-        let mangled = format!("__almd_test_{idx}");
-        idx += 1;
-        f.name = sym(&mangled);
-        f.is_test = false;
-        // v0 isolation parity: reset every mutable top-let to its initializer
-        // before the test body runs (see the reinit_stmts derivation above).
-        stmts.extend(reinit_stmts.iter().cloned());
-        stmts.push(println_stmt(format!("test: {display} ... ")));
-        // The stmt-position effect call, in the SAME shape the frontend gives user
-        // code: `Try { call }` with the LIFTED `Result[Unit, String]` call type — the
-        // never-err strips / can-err propagation then classify it exactly like any
-        // other caller (the C-135 def/callsite agreement).
-        let call = IrExpr {
-            kind: IrExprKind::Call {
-                target: CallTarget::Named { name: sym(&mangled) },
-                args: Vec::new(),
-                type_args: Vec::new(),
-            },
-            ty: Ty::result(Ty::Unit, Ty::String),
-            span: None,
-            def_id: None,
-        };
-        stmts.push(IrStmt {
-            kind: IrStmtKind::Expr {
-                expr: IrExpr {
-                    kind: IrExprKind::Try { expr: Box::new(call) },
-                    ty: Ty::Unit,
-                    span: None,
-                    def_id: None,
-                },
-            },
-            span: None,
-        });
-        stmts.push(println_stmt("ok".to_string()));
-    }
-    let body = IrExpr {
-        kind: IrExprKind::Block { stmts, expr: Some(Box::new(unit_expr())) },
-        ty: Ty::Unit,
-        span: None,
-        def_id: None,
-    };
-    ir.functions.push(almide_ir::IrFunction {
-        name: sym("main"),
-        params: vec![],
-        ret_ty: Ty::Unit,
-        body,
-        is_effect: true,
-        is_async: false,
-        is_test: false,
-        generics: None,
-        extern_attrs: vec![],
-        export_attrs: vec![],
-        attrs: vec![],
-        visibility: almide_ir::IrVisibility::Public,
-        doc: None,
-        blank_lines_before: 0,
-        def_id: None,
-        mutated_params: vec![],
-        module_origin: None,
-    });
-    Ok(())
-}
 
 /// `verbose` gates the honest per-function "outside the lowering subset" diagnostics to stderr.
 ///
@@ -645,7 +439,22 @@ pub fn try_render_wasm_source(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
 ) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, false)
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Run)
+}
+
+/// LIBRARY-mode variant for `almide build --target wasm` (#881): a module with
+/// `pub fn` exports and NO `main` renders with a SYNTHESIZED empty `main`, so
+/// `_start` runs the global-init chain and nothing else — the v0 export ABI
+/// (`_start` + `memory` + one named export per public fn) that web hosts like
+/// ceangal's runtime call. `almide run` keeps the wall: running a main-less
+/// module natively is a compile error (rustc E0601), and the wasm leg must
+/// fail the same way rather than silently succeeding at nothing.
+pub fn try_render_wasm_source_library(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+    verbose: bool,
+) -> Result<String, LowerError> {
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Library)
 }
 
 /// TEST-mode variant for the `almide test` wasm harness: when the file has NO `main`,
@@ -662,17 +471,88 @@ pub fn try_render_wasm_source_tests(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
 ) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, true)
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Tests)
+}
+
+/// How the caller intends to use the rendered module — decides main synthesis.
+#[derive(Clone, Copy, PartialEq)]
+enum RenderMode {
+    /// `almide run` / the cross-target gates: the program must carry `main`.
+    Run,
+    /// `almide test`: test fns promoted, a runner `main` synthesized.
+    Tests,
+    /// `almide build`: a main-less module with `pub fn` exports gets an empty
+    /// synthesized `main` (the v0 library ABI — #881).
+    Library,
 }
 
 fn try_render_wasm_source_impl(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
-    test_mode: bool,
+    mode: RenderMode,
 ) -> Result<String, LowerError> {
-    let mut ir = build_ir_with_drops(source, self_modules, test_mode)?;
+    // STRICT VALUE MODE spans the WHOLE render, not just the IR phase. `strict_values()`
+    // is read by MIR *lowering*, which runs in `try_render_wasm_source_impl_rest` below —
+    // so a guard scoped to `build_ir_with_drops` would be restored before the only code
+    // that consults it ever runs, and every deferred `Op::Const` ZERO would render as an
+    // executable 0 instead of walling. That is exactly what happened: the flag used to be
+    // a process-global the IR phase `store(true)`d and never reset, so lowering inherited
+    // strict mode by leak; converting it to a scoped guard silently moved the boundary and
+    // re-opened the silently-wrong-value class F2 closed (`result.unwrap_or_else(err(…),
+    // (_) => captured_float)` printed 0 on wasm against 100 on native — nightly fuzz
+    // finding, seed 1785217538023450905). Own it here, at the entrypoint that spans both
+    // phases, so the scope matches what the mode actually protects.
+    let _strict = crate::lower::StrictValuesGuard::set(true);
+    let mut ir = build_ir_with_drops(source, self_modules, mode == RenderMode::Tests)?;
+    if mode == RenderMode::Library {
+        synthesize_library_main(&mut ir);
+    }
     try_render_wasm_source_impl_rest(&mut ir, verbose)
+}
+
+/// LIBRARY mode (#881): a module with `pub fn` exports and no `main` gets an
+/// EMPTY `fn main() -> Unit` so `_start` exists and runs only the global-init
+/// chain — the v0 export-module ABI web hosts call (`_start`, `memory`, one
+/// named export per public fn). A module with NEITHER a main NOR any public
+/// fn is left alone: the honest "no main in the IR" wall downstream is the
+/// right answer for a program with nothing to run and nothing to export.
+fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
+    if ir.functions.iter().any(|f| f.name.as_str() == "main") {
+        return;
+    }
+    let has_exports = ir.functions.iter().any(|f| {
+        !f.is_test
+            && !f.generics.as_ref().map_or(false, |g| !g.is_empty())
+            && matches!(f.visibility, almide_ir::IrVisibility::Public)
+    });
+    if !has_exports {
+        return;
+    }
+    ir.functions.push(almide_ir::IrFunction {
+        name: almide_lang::intern::sym("main"),
+        params: vec![],
+        ret_ty: almide_lang::types::Ty::Unit,
+        body: almide_ir::IrExpr {
+            kind: almide_ir::IrExprKind::Unit,
+            ty: almide_lang::types::Ty::Unit,
+            span: Default::default(),
+            def_id: None,
+        },
+        is_effect: false,
+        is_async: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: almide_ir::IrVisibility::Private,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        module_origin: None,
+        mutated_params: vec![],
+    });
 }
 
 /// Phase 1: synthesize the recursive-drop / repr source text this program's linked
@@ -685,10 +565,10 @@ fn build_ir_with_drops(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     test_mode: bool,
 ) -> Result<almide_ir::IrProgram, LowerError> {
-    // STRICT VALUE MODE: this is an OUTPUT path — a deferred Const-0 must never be executable
-    // (flight-evidence-gaps F2, the prim.handle literal address-0 class).
-    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
-
+    // STRICT VALUE MODE is owned by the caller, not by this phase. Nothing between here
+    // and the return reads `strict_values()`: this builds the linked IR, and the mode
+    // gates MIR *op* lowering, which runs after. A guard here would look like the
+    // protection and be none.
     let ir = source_to_ir_with(source, self_modules)?;
     // ADT brick 5b: GENERATE the recursive-drop fns (`__drop_<T>`) for nested-variant types and
     // re-lower with them in scope. v1-trust-spine-only — v0 manages its own memory. Two-pass.
@@ -842,8 +722,14 @@ fn build_ir_with_drops(
     if test_mode {
         synthesize_test_runner_main(&mut ir)?;
     }
+    // #881: module-level top-let ids are per-region — make them globally
+    // unique BEFORE any layout/slot phase keys a map by the raw id (the
+    // globals union and the mutable-slot map both key raw ids).
+    disambiguate_module_global_regions(&mut ir);
     Ok(ir)
 }
 
+include!("pipeline_test_runner.rs");
+include!("pipeline_global_slots.rs");
 include!("pipeline_b.rs");
 include!("pipeline_c.rs");

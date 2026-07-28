@@ -76,150 +76,6 @@ fn seed_selfhost_newtype_reps(
     }
 }
 
-/// The `Ty`-substitution core [`erase_transparent_newtypes`] and
-/// [`erase_newtypes_in_type_decls`] both recurse with — module-level (was a
-/// nested fn; hoisted so the type_decls-erasure loop below can share it
-/// without either duplicating it or threading it as a closure param).
-fn subst(ty: &almide_lang::types::Ty, map: &std::collections::HashMap<String, almide_lang::types::Ty>) -> almide_lang::types::Ty {
-    use almide_lang::types::Ty;
-    match ty {
-        Ty::Named(name, args) => subst_named(name, args, map),
-        Ty::Applied(id, args) => {
-            Ty::Applied(id.clone(), args.iter().map(|a| subst(a, map)).collect())
-        }
-        Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|a| subst(a, map)).collect()),
-        Ty::Union(ts) => Ty::Union(ts.iter().map(|a| subst(a, map)).collect()),
-        Ty::Record { fields } => Ty::Record { fields: subst_ty_fields(fields, map) },
-        Ty::OpenRecord { fields } => Ty::OpenRecord { fields: subst_ty_fields(fields, map) },
-        Ty::Fn { params, ret } => Ty::Fn {
-            params: params.iter().map(|a| subst(a, map)).collect(),
-            ret: Box::new(subst(ret, map)),
-        },
-        Ty::Variant { name, cases } => subst_variant(*name, cases, map),
-        Ty::ConstParam { name, ty } => {
-            Ty::ConstParam { name: *name, ty: Box::new(subst(ty, map)) }
-        }
-        Ty::ConstValue { ty, value } => {
-            Ty::ConstValue { ty: Box::new(subst(ty, map)), value: *value }
-        }
-        _ => ty.clone(),
-    }
-}
-
-/// The `Ty::Named` arm of [`subst`] — extracted (uniform, self-contained
-/// match arms, no shared state; same as [`erase_newtypes_in_type_decls`]'s
-/// split above). The nominal replaces itself wholesale when it's a
-/// zero-arg alias target; otherwise recurse into its type args.
-fn subst_named(
-    name: &almide_lang::intern::Sym,
-    args: &[almide_lang::types::Ty],
-    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
-) -> almide_lang::types::Ty {
-    use almide_lang::types::Ty;
-    if args.is_empty() {
-        if let Some(t) = map.get(name.as_str()) {
-            return t.clone();
-        }
-    }
-    Ty::Named(*name, args.iter().map(|a| subst(a, map)).collect())
-}
-
-/// The `(Sym, Ty)` field-list substitution shared by `Ty::Record` and
-/// `Ty::OpenRecord` in [`subst`] — was duplicated inline in both arms.
-fn subst_ty_fields(
-    fields: &[(almide_lang::intern::Sym, almide_lang::types::Ty)],
-    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
-) -> Vec<(almide_lang::intern::Sym, almide_lang::types::Ty)> {
-    fields.iter().map(|(n, t)| (*n, subst(t, map))).collect()
-}
-
-/// The `Ty::Variant` arm of [`subst`] — extracted for the same reason as
-/// [`subst_named`].
-fn subst_variant(
-    name: almide_lang::intern::Sym,
-    cases: &[almide_lang::types::VariantCase],
-    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
-) -> almide_lang::types::Ty {
-    use almide_lang::types::Ty;
-    Ty::Variant {
-        name,
-        cases: cases.iter().map(|c| subst_variant_case(c, map)).collect(),
-    }
-}
-
-/// The per-case payload substitution inside [`subst_variant`] — a uniform,
-/// self-contained match over `VariantPayload` (each arm reads only its own
-/// payload, no cross-arm state).
-fn subst_variant_case(
-    c: &almide_lang::types::VariantCase,
-    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
-) -> almide_lang::types::VariantCase {
-    use almide_lang::types::VariantPayload;
-    almide_lang::types::VariantCase {
-        name: c.name,
-        payload: match &c.payload {
-            VariantPayload::Unit => VariantPayload::Unit,
-            VariantPayload::Tuple(ts) => {
-                VariantPayload::Tuple(ts.iter().map(|a| subst(a, map)).collect())
-            }
-            VariantPayload::Record(fs) => VariantPayload::Record(subst_ty_fields(fs, map)),
-        },
-    }
-}
-
-/// Other type decls may carry alias-typed fields (a record holding a
-/// SafeHtml) — the tail loop of [`erase_transparent_newtypes`], verbatim move.
-fn erase_newtypes_in_type_decls(
-    type_decls: &mut [almide_ir::IrTypeDecl],
-    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
-) {
-    for td in type_decls.iter_mut() {
-        erase_newtypes_in_one_type_decl(td, map);
-    }
-}
-
-/// One `td.kind` arm of [`erase_newtypes_in_type_decls`] — extracted, each
-/// arm is self-contained (reads only its own `td`, writes only its own
-/// fields), so this is a pure name-router split, no behavior change.
-fn erase_newtypes_in_one_type_decl(
-    td: &mut almide_ir::IrTypeDecl,
-    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
-) {
-    match &mut td.kind {
-        almide_ir::IrTypeDeclKind::Record { fields } => {
-            for f in fields.iter_mut() {
-                f.ty = subst(&f.ty, map);
-            }
-        }
-        almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
-            for c in cases.iter_mut() {
-                erase_newtypes_in_variant_case(c, map);
-            }
-        }
-        almide_ir::IrTypeDeclKind::Alias { .. } => {}
-    }
-}
-
-/// The `c.kind` arm of [`erase_newtypes_in_one_type_decl`]'s `Variant` case —
-/// extracted for the same reason (uniform, self-contained match arms).
-fn erase_newtypes_in_variant_case(
-    c: &mut almide_ir::IrVariantDecl,
-    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
-) {
-    match &mut c.kind {
-        almide_ir::IrVariantKind::Unit => {}
-        almide_ir::IrVariantKind::Tuple { fields } => {
-            for t in fields.iter_mut() {
-                *t = subst(t, map);
-            }
-        }
-        almide_ir::IrVariantKind::Record { fields } => {
-            for f in fields.iter_mut() {
-                f.ty = subst(&f.ty, map);
-            }
-        }
-    }
-}
 
 /// The eraser's read-only substitution context — hoisted to module scope (was
 /// a local `struct`/`impl` nested in [`erase_transparent_newtypes`]) so the
@@ -629,6 +485,7 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
         fn_bodies: &mut [almide_ir::IrFunction],
         fns: &HashMap<String, IrExpr>,
         effects: &HashSet<String>,
+        mutated: &HashSet<almide_ir::VarId>,
     ) {
         let qualifying: Vec<(almide_ir::VarId, IrExpr)> = top_lets
             .iter()
@@ -636,6 +493,15 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
             // site freezes the read at the init value (writes through the global slot
             // become invisible — `speeds[i]` read `list.repeat(0.0, 4)[i]` = 0.0 forever).
             .filter(|tl| !tl.mutable)
+            // Nor may an IN-PLACE MUTATOR's receiver (#906): substituting `bytes.new(64)`
+            // into `bytes.set_f32_le(g_pool, …)` turns the receiver into a fresh temporary,
+            // and the wall that catches it names the SUBSTITUTED shape ("a non-var
+            // receiver") instead of the global the user wrote. Keeping the `Var` lets the
+            // receiver check report the real cause and the real fix (declare it `var`).
+            // Costs nothing: such a program cannot lower on EITHER leg today — the wasm
+            // receiver check walls it and native renders the top-let as a non-writable
+            // Rust `static`, so the generated crate does not build.
+            .filter(|tl| !mutated.contains(&tl.var))
             .filter(|tl| crate::lower::expr_contains_call(&tl.value))
             .filter(|tl| {
                 let mut visiting = HashSet::new();
@@ -699,15 +565,150 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
 
     let fns_snapshot = fns_by_name;
     let effects_snapshot = effect_fns;
+    // Program-wide (both regions + every module body), so a global mutated in ONE
+    // module is fenced everywhere it is referenced.
+    let mutated = collect_inplace_mutator_receivers(program);
     run_region(
         &mut program.top_lets,
         &mut program.functions,
         &fns_snapshot,
         &effects_snapshot,
+        &mutated,
     );
     let mut modules = std::mem::take(&mut program.modules);
     for m in modules.iter_mut() {
-        run_region(&mut m.top_lets, &mut m.functions, &fns_snapshot, &effects_snapshot);
+        run_region(&mut m.top_lets, &mut m.functions, &fns_snapshot, &effects_snapshot, &mutated);
     }
     program.modules = modules;
+
+    // CROSS-REGION step (#881): a module fn reading ANOTHER module's
+    // pure-call-init top-let (`theme`'s `v.color(v.white)` where `white =
+    // rgb(1.0, …)` lives in the view module) references it through its OWN
+    // region's synthesized ref id — the per-region loops above cannot see the
+    // pairing, and the const-init machinery later declines the call-bearing
+    // init ("would inject an uncounted call"). Resolve each such ref BY NAME
+    // and substitute the referent's init at the use sites — the same
+    // lazy-static value semantics as the per-region inline. Fenced to
+    // IMMUTABLE referents whose init is VAR-FREE (an init referencing its
+    // region's locals would capture unrelated ids in the reader's region) and
+    // pure by the same registry the per-region pass uses.
+    let mut plan: Vec<(usize, almide_ir::VarId, IrExpr)> = Vec::new();
+    {
+        let (by_name, by_bare) = crate::lower::bridge_cross_module_toplets_build_lookup(program);
+        for (mi, m) in program.modules.iter().enumerate() {
+            for (i, info) in m.var_table.entries.iter().enumerate() {
+                let Some(mo) = &info.module_origin else { continue };
+                // A ref pointing at its OWN module is the per-region pass's job.
+                // The comparison must use the origin SPELLING (`ceangal_view`),
+                // not the dotted module name — with the dotted form this guard
+                // never fired, which was harmless only because the by_name lookup
+                // below never hit either (#904). Both are keyed consistently now.
+                if *mo == crate::lower::module_origin_key(m) {
+                    continue;
+                }
+                let looked_up = by_name
+                    .get(&(mo.clone(), info.name.as_str().to_uppercase()))
+                    .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
+                let Some(Some((rty, init, mutable, _))) = looked_up else { continue };
+                // EVERY immutable, Var-free, pure referent substitutes —
+                // scalar consts included. The alternative (registering the
+                // referent in the SHARED globals union under the reader's
+                // region-local ref id) was tried and is UNSOUND: region ids
+                // collide, so a reader's id could pick up an UNRELATED
+                // module's init — observed as scroll's `FRICTION = 0.035`
+                // standing in for a `view.Color` reference; a same-typed
+                // collision would have been a silently wrong VALUE.
+                // Substitution is region-scoped by construction.
+                if *mutable || expr_contains_var(init) {
+                    continue;
+                }
+                // by_bare has no module qualifier — a same-bare-name toplet in
+                // an unrelated module could match; refuse a concrete ty
+                // mismatch (same fence as the main-region bridge).
+                if !crate::lower::bridged_ref_ty_agrees(rty, &info.ty) {
+                    continue;
+                }
+                let mut visiting = HashSet::new();
+                if !expr_is_pure(init, &fns_snapshot, &effects_snapshot, &mut visiting) {
+                    continue;
+                }
+                plan.push((mi, almide_ir::VarId(i as u32), (*init).clone()));
+            }
+        }
+    }
+    for (mi, id, init) in plan {
+        let m = &mut program.modules[mi];
+        for f in &mut m.functions {
+            f.body = almide_ir::substitute_var_in_expr(&f.body, id, &init);
+        }
+    }
+}
+
+/// Every var used as the RECEIVER (args[0]) of an in-place `&mut` mutator anywhere in
+/// the program — the [`inline_pure_call_globals`] fence (#906). A receiver position is
+/// a WRITE target, so substituting a global's initializer there produces a temporary
+/// nobody owns; keeping the `Var` lets the receiver check name the global and the fix.
+/// Over-approximating by ignoring VarId regions is harmless: an id that is a local in
+/// one region and a top-let in another only loses an inlining opportunity.
+fn collect_inplace_mutator_receivers(
+    program: &almide_ir::IrProgram,
+) -> std::collections::HashSet<almide_ir::VarId> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    use almide_ir::{CallTarget, IrExprKind};
+    struct V(std::collections::HashSet<almide_ir::VarId>);
+    impl IrVisitor for V {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            | IrExprKind::TailCall {
+                target: CallTarget::Module { module, func, .. }, args, ..
+            } = &e.kind
+            {
+                if crate::lower::is_inplace_mutator(module.as_str(), func.as_str()) {
+                    if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                        self.0.insert(*id);
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut v = V(std::collections::HashSet::new());
+    for f in &program.functions {
+        v.visit_expr(&f.body);
+    }
+    for tl in &program.top_lets {
+        v.visit_expr(&tl.value);
+    }
+    for m in &program.modules {
+        for f in &m.functions {
+            v.visit_expr(&f.body);
+        }
+        for tl in &m.top_lets {
+            v.visit_expr(&tl.value);
+        }
+    }
+    v.0
+}
+
+/// True when the expression tree contains ANY `Var` node — the cross-region
+/// substitution fence: a region-local id spliced into another region would
+/// resolve to an unrelated variable.
+fn expr_contains_var(e: &almide_ir::IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct V(bool);
+    impl IrVisitor for V {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if self.0 {
+                return;
+            }
+            if matches!(e.kind, almide_ir::IrExprKind::Var { .. }) {
+                self.0 = true;
+                return;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut v = V(false);
+    v.visit_expr(e);
+    v.0
 }

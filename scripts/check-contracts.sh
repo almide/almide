@@ -27,13 +27,16 @@
 #   (d) a fixture<->contract link is not symmetric (header names a contract that
 #       does not list the fixture as evidence, or vice-versa);
 #   (e) a schema violation (bad id / duplicate id / bad status / bad class /
-#       fuzz without n / missing doc file);
+#       fuzz without n / missing doc file / a missing REQUIRED scalar —
+#       title, statement, or since — or a since that is not MAJOR.MINOR.PATCH);
 #   (f) a coverage gap (C-001..C-NNN must be contiguous) or the flagged-contract
 #       ratchet ceiling is exceeded;
 #   (g) the README claims block (equivalence-claim numbers + exceptions clause)
 #       is stale relative to the ledger (scripts/gen-claims.sh --check, #766);
 #   (h) docs/contracts/README.md — the generated index — is stale relative to
-#       the ledger (the same diff CI's "Emit & Format" job runs).
+#       the ledger (the same diff CI's "Emit & Format" job runs);
+#   (j) a source path cited in a contract statement or a fixture header lives
+#       under a directory that no longer exists (a retired subsystem — #941).
 set -uo pipefail
 cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 
@@ -67,20 +70,31 @@ err() { fail=1; echo "::error::$*"; }
 # side can group by id. The `statement` field uses ''' triple-quote when multi-
 # line; a sentinel skips its body. Single-line scalars parse exactly like the
 # registry's awk. Output schema (one per line, TAB-delimited):
-#   META<TAB>id<TAB>status<TAB>doc
+#   META<TAB>id<TAB>status<TAB>doc<TAB>title<TAB>statement<TAB>since
 #   EV<TAB>id<TAB>path<TAB>class<TAB>name<TAB>n
-# (empty name/n render as the literal "-")
+# (empty name/n render as the literal "-"; title/statement are presence flags
+# 0|1, since is the literal value or "" when the key is absent)
 parse_ledger() {
   awk '
-    function emit_meta() { if (id != "") print "META\t" id "\t" status "\t" doc }
-    BEGIN { id=""; status=""; doc=""; in_stmt=0 }
-    # triple-quote sentinel: toggle, and swallow everything between
-    /'"'"''"'"''"'"'/ { in_stmt = !in_stmt; next }
+    # Empty optional scalars render as "-": TAB is IFS whitespace, so bash `read`
+    # COLLAPSES adjacent tabs and an empty field would shift every later column.
+    function emit_meta() {
+      if (id != "") print "META\t" id "\t" status "\t" (doc == "" ? "-" : doc) "\t" title "\t" stmt "\t" (since == "" ? "-" : since)
+    }
+    function reset() { id=""; status=""; doc=""; title=0; stmt=0; since="" }
+    BEGIN { reset(); in_stmt=0 }
+    # triple-quote sentinel: toggle, and swallow everything between. A
+    # `statement = ""..."` opening line is consumed HERE, so the presence flag
+    # has to be set on the opening toggle — the /^statement/ rule never sees it.
+    /'"'"''"'"''"'"'/ { in_stmt = !in_stmt; if (in_stmt) stmt=1; next }
     in_stmt { next }
-    /^\[\[contract\]\]/ { emit_meta(); id=""; status=""; doc=""; next }
+    /^\[\[contract\]\]/ { emit_meta(); reset(); next }
     /^id[ \t]*=/      { v=$0; sub(/^id[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); id=v; next }
     /^status[ \t]*=/  { v=$0; sub(/^status[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); status=v; next }
     /^doc[ \t]*=/     { v=$0; sub(/^doc[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); doc=v; next }
+    /^title[ \t]*=/     { title=1; next }
+    /^statement[ \t]*=/ { stmt=1; next }
+    /^since[ \t]*=/   { v=$0; sub(/^since[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); since=v; next }
     # an evidence inline-table line: { path = "...", class = "...", name = "...", n = N }
     /path[ \t]*=[ \t]*"/ {
       line=$0
@@ -102,13 +116,26 @@ EV="$(printf '%s\n' "$LEDGER_RECORDS" | grep '^EV' || true)"
 ALL_IDS="$(printf '%s\n' "$META" | cut -f2 | grep . || true)"
 
 # ── (e) SCHEMA: id shape + uniqueness, status enum, doc file exists ──────────
-while IFS=$'\t' read -r _tag id status doc; do
+# Every REQUIRED scalar is checked here. `since` used to be documented REQUIRED
+# but unenforced, so 32 contracts (C-067..C-098) shipped without it and the
+# generated README published 32 blank Since cells (#938). A field the schema
+# calls required and the gate never reads is a field that silently goes missing.
+while IFS=$'\t' read -r _tag id status doc title stmt since; do
   [ -z "$id" ] && continue
+  [ "$doc" = "-" ] && doc=""
+  [ "$since" = "-" ] && since=""
   printf '%s\n' "$id" | grep -qE '^C-[0-9]{3}$' || err "bad contract id '$id' (must match ^C-[0-9]{3}\$)"
   case "$status" in
     active|flagged-for-revision) ;;
     *) err "$id: status '$status' is not one of {active, flagged-for-revision}" ;;
   esac
+  [ "$title" = "1" ] || err "$id: REQUIRED key 'title' is missing"
+  [ "$stmt"  = "1" ] || err "$id: REQUIRED key 'statement' is missing"
+  if [ -z "$since" ]; then
+    err "$id: REQUIRED key 'since' is missing (the version the contract became normative)"
+  elif ! printf '%s\n' "$since" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    err "$id: since='$since' is not a MAJOR.MINOR.PATCH version"
+  fi
   if [ "$doc" != "" ] && [ ! -f "$DOC_DIR/$doc" ]; then
     err "$id: doc='$doc' does not exist under $DOC_DIR/"
   fi
@@ -225,6 +252,33 @@ if [ -n "$only_rev" ]; then
     err "$base declares $id but $id does not list $base as evidence (link must be symmetric)"
   done <<< "$only_rev"
 fi
+
+# ── (j) CITED SOURCE PATHS MUST NOT NAME A RETIRED SUBSYSTEM ────────────────
+# `evidence.path` is already checked to exist. But contract STATEMENTS and
+# fixture HEADERS also point the reader at the implementation ("the WASM runtime
+# `emit_wasm/rt_dragon.rs` must match it"), and nothing read those. When the v0
+# wasm emitter was retired (c71eff7b deleted 115 files under
+# crates/almide-codegen/src/emit_wasm/), 16 such citations rotted in place and
+# the ledger kept sending readers to code that no longer existed (#941).
+#
+# The rule is deliberately narrow: flag a cited path only when its PARENT
+# DIRECTORY is gone. That is exactly the retired-subsystem signature, and it
+# cannot fire on an illustrative filename inside a live directory — statements
+# legitimately contain examples like `fs.stat("spec/x.almd")`. A single deleted
+# file inside a surviving directory is NOT caught; that is the price of zero
+# false positives, and the evidence-path check above covers the paths that
+# actually certify a contract.
+dead_paths=0
+while IFS= read -r cited; do
+  [ -z "$cited" ] && continue
+  [ -e "$cited" ] && continue
+  parent="$(dirname "$cited")"
+  [ -d "$parent" ] && continue
+  err "cited path '$cited' lives under '$parent', which does not exist (retired subsystem?)"
+  dead_paths=$((dead_paths + 1))
+done <<< "$(grep -rhoE '(crates|runtime|stdlib|spec|tests|scripts|proofs)/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.(rs|almd|lean|toml|sh)' \
+              "$LEDGER" "$FIXTURE_DIR"/*.almd 2>/dev/null | sort -u)"
+[ "$dead_paths" -eq 0 ] && echo "cited-paths: every source path named in a statement or fixture header resolves to a live directory."
 
 # ── (f) COVERAGE: ids must be contiguous C-001..C-NNN, no gaps ──────────────
 sorted_ids="$(printf '%s\n' "$ALL_IDS" | sort -u)"
@@ -355,3 +409,7 @@ echo "  fixtures: $n_with_header/$n_fixtures carry a // @contract: header; bidir
 #   (7) hand-edit a number inside README's claims markers  -> (g) stale-claims.
 #   (8) add a contract without regenerating the index      -> (h) stale-index.
 #   (9) cite a new section without regenerating conformance -> (i) stale-report.
+#  (10) delete a `since = ` line from any contract         -> (e) missing-required.
+#  (11) point a fixture header back at emit_wasm/rt_*.rs   -> (j) dead-path.
+# (10) and (11) were verified by hand against C-067 and spec/wasm_cross/
+# float_parse.almd: each flips the gate red alone and green again on restore.

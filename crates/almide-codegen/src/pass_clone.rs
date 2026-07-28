@@ -197,7 +197,7 @@ fn reset_remaining(remaining: &mut HashMap<VarId, u32>, eligible: &HashSet<VarId
 /// in `insert_clones_live` / `insert_clone_stmts_live` (and their arm
 /// helpers), so each fn stays at or under the `max-params` limit. `in_loop`
 /// flips to `true` for a nested loop body/cond — built as a fresh `CloneCtx`
-/// reborrowing `remaining` (same shape as `HoistCtx` in pass_licm_p2.rs).
+/// reborrowing `remaining` (same shape as `HoistCtx` in pass_licm_hoist.rs).
 struct CloneCtx<'a> {
     always: &'a HashSet<VarId>,
     eligible: &'a HashSet<VarId>,
@@ -221,6 +221,15 @@ fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
 /// childless node.
 fn insert_clones_var(id: VarId, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
     if ctx.always.contains(&id) {
+        // Still a syntactic use: an id here may be an ELIGIBLE var only
+        // temporarily forced into `always` by the E0505 call guard (its
+        // borrow/move occurrences inside one call). Without the decrement,
+        // the occurrence is invisible to the last-use count and every LATER
+        // use of the var stops qualifying as a move — a spurious clone on
+        // the next statement's genuinely-final use.
+        if let Some(r) = ctx.remaining.get_mut(&id) {
+            *r = r.saturating_sub(1);
+        }
         return make_clone(id, ty, span);
     }
     if ctx.eligible.contains(&id) {
@@ -302,33 +311,60 @@ fn insert_clones_while(cond: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> I
     IrExprKind::While { cond: Box::new(new_cond), body: new_body }
 }
 
-/// `Call { target, args, type_args }` arm of [`insert_clones_live`].
-fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>, ctx: &mut CloneCtx) -> IrExprKind {
-    // E0505 guard (#809): a var passed BY BORROW as one argument stays borrowed
-    // until the call itself executes, so a MOVE of the same var anywhere in a
-    // SIBLING argument — a `__cap` capture bind, a nested call's arg — conflicts
-    // (`map.fold(acc, acc, (…) => acc)` moved `acc` into the closure's capture
-    // bind while `&acc` from the first argument was still live). Rustc's borrow
-    // live-range, not the flat last-use count, is the authority INSIDE one call:
-    // force-clone every var borrowed at the top level of an argument (or the
-    // method receiver) for the duration of this call's transform. The Borrow arm
-    // strips any clone inserted directly under it, so the borrowed occurrence
-    // itself stays a plain `&x`.
+/// The E0505 guard's borrow scan (#809/#866): the vars passed BY BORROW at
+/// the top level of a call's arguments (or its method receiver). Such a var
+/// stays borrowed until the call itself executes, so a MOVE of it anywhere in
+/// a SIBLING argument conflicts — rustc's borrow live-range, not the flat
+/// last-use count, is the authority INSIDE one call.
+fn call_borrowed_vars(args: &[IrExpr], target: Option<&CallTarget>) -> HashSet<VarId> {
     let mut borrowed: HashSet<VarId> = HashSet::new();
-    for a in &args {
+    for a in args {
         if let IrExprKind::Borrow { expr, .. } = &a.kind {
             if let IrExprKind::Var { id } = &expr.kind {
                 borrowed.insert(*id);
             }
         }
     }
-    if let CallTarget::Method { object, .. } = &target {
+    if let Some(CallTarget::Method { object, .. }) = target {
         if let IrExprKind::Borrow { expr, .. } = &object.kind {
             if let IrExprKind::Var { id } = &expr.kind {
                 borrowed.insert(*id);
             }
         }
     }
+    borrowed
+}
+
+/// `RuntimeCall { symbol, args }` arm of [`insert_clones_live`]: the same
+/// E0505 guard as [`insert_clones_call`]. An intrinsic-lowered stdlib call
+/// (`map.fold` → `almide_rt_map_fold`) reaches this pass as a `RuntimeCall`,
+/// and its borrowed subject conflicts with a sibling-arg move exactly the
+/// same way — `map.fold(acc, (if … else acc), λ)` moved `acc` in the seed
+/// while `&acc` from the subject argument was still live (#866).
+fn insert_clones_runtime_call(args: Vec<IrExpr>, ctx: &mut CloneCtx) -> Vec<IrExpr> {
+    let borrowed = call_borrowed_vars(&args, None);
+    if borrowed.is_empty() {
+        return args.into_iter().map(|a| insert_clones_live(a, ctx)).collect();
+    }
+    let merged: HashSet<VarId> = ctx.always.union(&borrowed).copied().collect();
+    let mut call_ctx = CloneCtx {
+        always: &merged,
+        eligible: ctx.eligible,
+        remaining: ctx.remaining,
+        in_loop: ctx.in_loop,
+    };
+    args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect()
+}
+
+/// `Call { target, args, type_args }` arm of [`insert_clones_live`].
+fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>, ctx: &mut CloneCtx) -> IrExprKind {
+    // E0505 guard (#809): see `call_borrowed_vars`. Force-clone every var
+    // borrowed at the top level of an argument (or the method receiver) for
+    // the duration of this call's transform (`map.fold(acc, acc, (…) => acc)`
+    // moved `acc` into the closure's capture bind while `&acc` from the first
+    // argument was still live). The Borrow arm strips any clone inserted
+    // directly under it, so the borrowed occurrence itself stays a plain `&x`.
+    let borrowed = call_borrowed_vars(&args, Some(&target));
     if !borrowed.is_empty() {
         let merged: HashSet<VarId> = ctx.always.union(&borrowed).copied().collect();
         let mut call_ctx = CloneCtx {
@@ -454,7 +490,7 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
 
         IrExprKind::Call { target, args, type_args } => insert_clones_call(target, args, type_args, ctx),
         IrExprKind::RuntimeCall { symbol, args } => {
-            let args = args.into_iter().map(|a| insert_clones_live(a, ctx)).collect();
+            let args = insert_clones_runtime_call(args, ctx);
             IrExprKind::RuntimeCall { symbol, args }
         }
 

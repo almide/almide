@@ -22,8 +22,12 @@ fn fusable_expr(
                 IntOp::Add => "i64.add",
                 IntOp::Sub => "i64.sub",
                 IntOp::Mul => "i64.mul",
-                IntOp::Div | IntOp::Mod => return None,
+                IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU => return None,
                 IntOp::Lt => "i64.lt_s",
+                IntOp::LtU => "i64.lt_u",
+                IntOp::LeU => "i64.le_u",
+                IntOp::GtU => "i64.gt_u",
+                IntOp::GeU => "i64.ge_u",
                 IntOp::Le => "i64.le_s",
                 IntOp::Gt => "i64.gt_s",
                 IntOp::Ge => "i64.ge_s",
@@ -41,7 +45,19 @@ fn fusable_expr(
             let core = format!("({instr} {ea} {eb})");
             let e = if matches!(
                 iop,
-                IntOp::Lt | IntOp::Le | IntOp::Gt | IntOp::Ge | IntOp::Eq | IntOp::Ne
+                IntOp::Lt
+                    | IntOp::Le
+                    | IntOp::Gt
+                    | IntOp::Ge
+                    | IntOp::Eq
+                    | IntOp::Ne
+                    // The unsigned lane's comparisons yield an i32 too (#872) —
+                    // omitting them here spliced a raw i32 where the i64 scalar
+                    // model was expected (an INVALID module, not a wrong value).
+                    | IntOp::LtU
+                    | IntOp::LeU
+                    | IntOp::GtU
+                    | IntOp::GeU
             ) {
                 format!("(i64.extend_i32_u {core})")
             } else {
@@ -277,11 +293,136 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
     m
 }
 
+/// Record EVERY operand of one op in `set` — the verbatim `for a in args {
+/// set.insert(*a) }` body every operand-classifying arm of [`classify_f64_op`]
+/// ran inline. Extracted from `classify_f64_op` (codopsy round-2 complexity
+/// sweep, shared leaf 1 of 2): the arm keeps the whole decision, namely WHICH
+/// accumulator (`hard` or `poison`) it hands in.
+fn record_f64_operands(values: &[ValueId], set: &mut BTreeSet<ValueId>) {
+    for v in values {
+        set.insert(*v);
+    }
+}
+
+/// Record an op's OPTIONAL result value (a `dst`, or an `Else`/`EndIf` arm
+/// value) in `set` — the verbatim `if let Some(d) = dst { set.insert(*d) }`
+/// body; a result-less op records nothing, exactly as before. Extracted from
+/// `classify_f64_op` (codopsy round-2 complexity sweep, shared leaf 2 of 2).
+fn record_f64_result(value: &Option<ValueId>, set: &mut BTreeSet<ValueId>) {
+    if let Some(v) = value {
+        set.insert(*v);
+    }
+}
+
+/// The [`Op::Prim`] family of [`classify_f64_op`] — the five `Op::Prim` arms
+/// moved verbatim, in their original order (the catch-all still comes last, so
+/// the four float kinds keep winning). Decides, per prim kind, whether the
+/// operands and the result are pulled toward f64 (`hard`) or frozen into the
+/// i64-uniform slot (`poison`). Extracted from `classify_f64_op` (codopsy
+/// round-2 complexity sweep, group 1 of 3).
+fn classify_f64_prim(
+    kind: &PrimKind,
+    dst: &Option<ValueId>,
+    args: &[ValueId],
+    hard: &mut BTreeSet<ValueId>,
+    poison: &mut BTreeSet<ValueId>,
+) {
+    match kind {
+        PrimKind::FloatUn(_) | PrimKind::FloatBin(_) => {
+            record_f64_operands(args, hard);
+            record_f64_result(dst, hard);
+        }
+        PrimKind::FloatCmp(_) => {
+            record_f64_operands(args, hard);
+            record_f64_result(dst, poison);
+        }
+        PrimKind::F64FromInt | PrimKind::IntToFloat => {
+            record_f64_operands(args, poison);
+            record_f64_result(dst, hard);
+        }
+        PrimKind::FloatToInt => {
+            record_f64_operands(args, hard);
+            record_f64_result(dst, poison);
+        }
+        // FloatBits / the f32 family are BIT-level (identity pass-throughs, low-32
+        // patterns) — they need the i64-uniform slot. Every other prim borrows
+        // addresses/handles or produces non-float scalars.
+        _ => {
+            record_f64_operands(args, poison);
+            record_f64_result(dst, poison);
+        }
+    }
+}
+
+/// The [`Init`] half of [`classify_f64_op`]'s `Op::Alloc` arm: a DYNAMICALLY
+/// sized block poisons its length operand and an `OptSome` its payload; every
+/// statically sized init names no value at all. Extracted from
+/// `classify_f64_op` (codopsy round-2 complexity sweep, group 2 of 3):
+/// verbatim, and still exhaustive on `Init` so a new init form is a compile
+/// error here rather than a silently unpoisoned operand.
+fn poison_alloc_init_operands(init: &Init, poison: &mut BTreeSet<ValueId>) {
+    match init {
+        Init::DynStr { len }
+        | Init::DynList { len }
+        | Init::DynListStr { len } => {
+            poison.insert(*len);
+        }
+        Init::OptSome { payload } => {
+            poison.insert(*payload);
+        }
+        Init::Opaque
+        | Init::Empty
+        | Init::OptNone
+        | Init::IntList(_)
+        | Init::Bytes(_)
+        | Init::Str(_) => {}
+    }
+}
+
+/// The call arms of [`classify_f64_op`] — verbatim, `table_idx` being the one
+/// operand only `Op::CallIndirect` carries (passed `None` by the direct-call
+/// arm), inserted in the original dst → table_idx → handle-args order.
+///
+/// A SCALAR call argument is FLEXIBLE (like a ListLit element): the
+/// render crosses the i64-uniform ABI with ONE boundary reinterpret at
+/// the call site, so an f64-classified value keeps its real-f64 local.
+/// Poisoning args froze every local a call ever touched into i64 for
+/// its WHOLE lifetime — nbody's two 34-arg `energy(...)` calls forced
+/// the entire advance loop onto reinterpret round-trips. Handle args
+/// (heap pointers) and the RESULT (the callee returns raw i64 bits)
+/// stay poisoned.
+///
+/// Extracted from `classify_f64_op` (codopsy round-2 complexity sweep, group 3
+/// of 3).
+fn poison_call_operands(
+    dst: &Option<ValueId>,
+    table_idx: Option<&ValueId>,
+    args: &[CallArg],
+    poison: &mut BTreeSet<ValueId>,
+) {
+    record_f64_result(dst, poison);
+    if let Some(t) = table_idx {
+        poison.insert(*t);
+    }
+    for a in args {
+        if let CallArg::Handle(v) = a {
+            poison.insert(*v);
+        }
+    }
+}
+
 /// The per-`Op` classification arm of [`classify_f64_locals`]'s scan loop —
 /// verbatim move. `hard`/`poison`/`edges` are the loop's accumulators,
 /// write-only from every arm (a genuine fold): threading them as `&mut`
 /// out-params called once per op preserves the exact original mutation
 /// order, so this is safe despite the match having 20+ arms.
+///
+/// The arms are GROUPED by what they decide — patterns whose bodies were
+/// byte-identical share one arm (they bind the same operand names), and the
+/// `Op::Prim` family, an `Alloc`'s `Init` and the call operands each moved to a
+/// helper. The match stays EXHAUSTIVE on `Op`: a new variant falling into a
+/// `_ => {}` would be classified "poisons nothing", which is the direction that
+/// RETYPES a value to f64 — i.e. a miscompile, not a missed optimization.
 fn classify_f64_op(
     op: &Op,
     hard: &mut BTreeSet<ValueId>,
@@ -289,61 +430,22 @@ fn classify_f64_op(
     edges: &mut Vec<(ValueId, ValueId)>,
 ) {
     match op {
-        Op::Prim { kind: PrimKind::FloatUn(_) | PrimKind::FloatBin(_), dst, args } => {
-            for a in args {
-                hard.insert(*a);
-            }
-            if let Some(d) = dst {
-                hard.insert(*d);
-            }
-        }
-        Op::Prim { kind: PrimKind::FloatCmp(_), dst, args } => {
-            for a in args {
-                hard.insert(*a);
-            }
-            if let Some(d) = dst {
-                poison.insert(*d);
-            }
-        }
-        Op::Prim { kind: PrimKind::F64FromInt | PrimKind::IntToFloat, dst, args } => {
-            for a in args {
-                poison.insert(*a);
-            }
-            if let Some(d) = dst {
-                hard.insert(*d);
-            }
-        }
-        Op::Prim { kind: PrimKind::FloatToInt, dst, args } => {
-            for a in args {
-                hard.insert(*a);
-            }
-            if let Some(d) = dst {
-                poison.insert(*d);
-            }
-        }
-        // FloatBits / the f32 family are BIT-level (identity pass-throughs, low-32
-        // patterns) — they need the i64-uniform slot. Every other prim borrows
-        // addresses/handles or produces non-float scalars.
-        Op::Prim { dst, args, .. } => {
-            for a in args {
-                poison.insert(*a);
-            }
-            if let Some(d) = dst {
-                poison.insert(*d);
-            }
-        }
+        Op::Prim { kind, dst, args } => classify_f64_prim(kind, dst, args, hard, poison),
         Op::ConstInt { .. } | Op::Const { .. } => {}
         Op::SetLocal { local, src } => edges.push((*local, *src)),
-        Op::ListGetScalar { dst: _, list, idx } => {
+        // A list ELEMENT slot is flexible either way (`f64.load`/`f64.store`);
+        // it is the list HANDLE and the INDEX that can never be an f64.
+        Op::ListGetScalar { dst: _, list, idx } | Op::ListSetScalar { list, idx, val: _ } => {
             poison.insert(*list);
             poison.insert(*idx);
         }
-        Op::ListSetScalar { list, idx, val: _ } => {
-            poison.insert(*list);
-            poison.insert(*idx);
-        }
-        Op::ListLit { dst, elems: _ } => {
-            poison.insert(*dst);
+        // The ops that name exactly ONE non-float value: a `ListLit`'s fresh
+        // heap block (its `elems` stay flexible — one boundary reinterpret), a
+        // loop-exit Bool, and a function-table index.
+        Op::ListLit { dst: v, elems: _ }
+        | Op::LoopBreakUnless { cond: v }
+        | Op::FuncRef { dst: v, .. } => {
+            poison.insert(*v);
         }
         Op::IntBinOp { dst, a, b, .. } => {
             poison.insert(*dst);
@@ -352,37 +454,15 @@ fn classify_f64_op(
         }
         Op::IfThen { cond, dst } => {
             poison.insert(*cond);
-            if let Some(d) = dst {
-                poison.insert(*d);
-            }
+            record_f64_result(dst, poison);
         }
         Op::Else { val } | Op::EndIf { val } => {
-            if let Some(v) = val {
-                poison.insert(*v);
-            }
-        }
-        Op::LoopBreakUnless { cond } => {
-            poison.insert(*cond);
+            record_f64_result(val, poison);
         }
         Op::LoopStart | Op::LoopEnd => {}
         Op::Alloc { dst, init, .. } => {
             poison.insert(*dst);
-            match init {
-                Init::DynStr { len }
-                | Init::DynList { len }
-                | Init::DynListStr { len } => {
-                    poison.insert(*len);
-                }
-                Init::OptSome { payload } => {
-                    poison.insert(*payload);
-                }
-                Init::Opaque
-                | Init::Empty
-                | Init::OptNone
-                | Init::IntList(_)
-                | Init::Bytes(_)
-                | Init::Str(_) => {}
-            }
+            poison_alloc_init_operands(init, poison);
         }
         Op::Dup { dst, src } => {
             poison.insert(*dst);
@@ -413,41 +493,15 @@ fn classify_f64_op(
         }
         Op::Pure { dst, uses } => {
             poison.insert(*dst);
-            for u in uses {
-                poison.insert(*u);
-            }
+            record_f64_operands(uses, poison);
         }
-        // A SCALAR call argument is FLEXIBLE (like a ListLit element): the
-        // render crosses the i64-uniform ABI with ONE boundary reinterpret at
-        // the call site, so an f64-classified value keeps its real-f64 local.
-        // Poisoning args froze every local a call ever touched into i64 for
-        // its WHOLE lifetime — nbody's two 34-arg `energy(...)` calls forced
-        // the entire advance loop onto reinterpret round-trips. Handle args
-        // (heap pointers) and the RESULT (the callee returns raw i64 bits)
-        // stay poisoned.
+        // A SCALAR call argument is FLEXIBLE (like a ListLit element) — see
+        // [`poison_call_operands`], which carries that rule for both call arms.
         Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
-            if let Some(d) = dst {
-                poison.insert(*d);
-            }
-            for a in args {
-                if let CallArg::Handle(v) = a {
-                    poison.insert(*v);
-                }
-            }
+            poison_call_operands(dst, None, args, poison);
         }
         Op::CallIndirect { dst, table_idx, args, .. } => {
-            if let Some(d) = dst {
-                poison.insert(*d);
-            }
-            poison.insert(*table_idx);
-            for a in args {
-                if let CallArg::Handle(v) = a {
-                    poison.insert(*v);
-                }
-            }
-        }
-        Op::FuncRef { dst, .. } => {
-            poison.insert(*dst);
+            poison_call_operands(dst, Some(table_idx), args, poison);
         }
     }
 }

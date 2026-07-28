@@ -8,7 +8,12 @@ pub use almide_syntax::parser;
 pub use almide_syntax::parse_cached;
 
 pub use almide_types::types;
+/// The comment-blanked embedded stdlib (#878) — see `almide_types::embedded`.
+pub use almide_types::embedded;
 pub use almide_types::stdlib_info;
+/// The self-hosted stdlib runtime registry (call name -> impl fn + embedded
+/// source) — one table read by the wasm renderer AND the interp oracle.
+pub use almide_types::self_host_registry;
 
 // Re-export almide-base for convenience
 pub use almide_base;

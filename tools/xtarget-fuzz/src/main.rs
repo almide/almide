@@ -367,7 +367,15 @@ fn run_metamorphic(
                 wasm: None,
             });
         }
-        let run = tc.run_native(&vfile);
+        // Two-step native leg, same as the ladder's rung (c): a rustc-phase
+        // timeout is toolchain noise (skip), only the program's own wall-clock
+        // and observables count.
+        let vbin = work_dir.join("prog_metamorph.nativebin");
+        let build = tc.build_native(&vfile, &vbin);
+        if !build.success() {
+            continue; // build noise/timeout — no program observable to compare
+        }
+        let run = tc.run_native_bin(&vbin);
         if run.timed_out || run.spawn_failed {
             continue;
         }

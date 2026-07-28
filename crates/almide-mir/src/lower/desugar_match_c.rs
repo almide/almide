@@ -160,6 +160,16 @@ pub fn desugar_tuple_empty_list_match(body: &IrExpr) -> Option<IrExpr> {
     let mut v = V { next: max_var_id(body) + 1, changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
+    // GROWTH CAP (arc v1-join-completeness, J0): this rewrite duplicates a
+    // catch-all body per specialization branch and runs OUTSIDE the
+    // desugar_heap_branches fixpoint, so MAX_DESUGARED_NODES never sees its
+    // output — it was one of the two UNCAPPED duplicators of the 2026-07-27
+    // incident class. Growth-based so a big-but-undupped body is not punished;
+    // past the cap the rewrite is DISCARDED and the un-desugared match walls
+    // honestly (the desugar_heap_branches discard precedent, one level out).
+    if v.changed && count_expr_nodes(&out) > count_expr_nodes(body) + 50_000 {
+        return None;
+    }
     v.changed.then_some(out)
 }
 
@@ -259,6 +269,320 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_ir::{BinOp, IrPattern};
     use almide_lang::types::constructor::TypeConstructorId;
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852): decides SUBJECT admission — a `List[T]` whose single
+    /// element type is scalar (non-heap) — and returns that element type.
+    fn scalar_list_elem_ty(subject_ty: &Ty) -> Option<Ty> {
+        match subject_ty {
+            Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && !is_heap_ty(&a[0]) =>
+            {
+                Some(a[0].clone())
+            }
+            _ => None,
+        }
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852): decides ARM admission and groups the non-terminal arms
+    /// by pattern length. Admit only list patterns of Bind/Wildcard/Literal
+    /// elements; at least one arm must need this desugar (a length > 0 or a
+    /// guard/literal — the plain 2-arm `[] / bind` forms already lower elsewhere)
+    /// — that requirement is the returned "interesting" flag.
+    #[allow(clippy::type_complexity)]
+    fn group_arms_by_pattern_len<'a>(
+        init: &'a [almide_ir::IrMatchArm],
+    ) -> Option<(Vec<(usize, Vec<&'a almide_ir::IrMatchArm>)>, bool)> {
+        let mut groups: Vec<(usize, Vec<&almide_ir::IrMatchArm>)> = Vec::new();
+        let mut interesting = false;
+        for a in init {
+            let IrPattern::List { elements } = &a.pattern else { return None };
+            for p in elements {
+                match p {
+                    IrPattern::Bind { .. } | IrPattern::Wildcard | IrPattern::Literal { .. } => {}
+                    _ => return None,
+                }
+            }
+            if !elements.is_empty() || a.guard.is_some() {
+                interesting = true;
+            }
+            let k = elements.len();
+            match groups.iter_mut().find(|(gk, _)| *gk == k) {
+                Some((_, v)) => v.push(a),
+                None => groups.push((k, vec![a])),
+            }
+        }
+        Some((groups, interesting))
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852): decides whether the catch-all body will be DUPLICATED —
+    /// a group without an unconditional terminal (a no-guard arm whose elements are
+    /// all Bind/Wildcard) falls through to its own copy of the final else, in
+    /// addition to the chain's final else.
+    fn catch_all_duplication_needed(groups: &[(usize, Vec<&almide_ir::IrMatchArm>)]) -> bool {
+        groups.iter().any(|(_, gas)| {
+            !gas.iter().any(|a| {
+                a.guard.is_none()
+                    && matches!(&a.pattern, IrPattern::List { elements }
+                        if elements.iter().all(|p| matches!(p,
+                            IrPattern::Bind { .. } | IrPattern::Wildcard)))
+            })
+        })
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852, was the `mk_int` closure): an Int literal node.
+    fn mk_int(v: i64, span: &Option<almide_lang::span::Span>) -> IrExpr {
+        IrExpr {
+            kind: IrExprKind::LitInt { value: v },
+            ty: Ty::Int,
+            span: span.clone(),
+            def_id: None,
+        }
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852, was the `mk_eq` closure): a Bool `==` node.
+    fn mk_eq(l: IrExpr, r: IrExpr, span: &Option<almide_lang::span::Span>) -> IrExpr {
+        IrExpr {
+            kind: IrExprKind::BinOp { op: BinOp::Eq, left: Box::new(l), right: Box::new(r) },
+            ty: Ty::Bool,
+            span: span.clone(),
+            def_id: None,
+        }
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852): hoists the SUBJECT — a Var subject is referenced
+    /// directly; anything else binds to a fresh temp so the list evaluates once.
+    fn hoist_subject_var(
+        next: &mut u32,
+        stmts: &mut Vec<IrStmt>,
+        subject: &IrExpr,
+        span: &Option<almide_lang::span::Span>,
+    ) -> IrExpr {
+        if matches!(subject.kind, IrExprKind::Var { .. }) {
+            subject.clone()
+        } else {
+            let t = VarId(*next);
+            *next += 1;
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: t,
+                    ty: subject.ty.clone(),
+                    value: subject.clone(),
+                    mutability: almide_ir::Mutability::Let,
+                },
+                span: span.clone(),
+            });
+            IrExpr {
+                kind: IrExprKind::Var { id: t },
+                ty: subject.ty.clone(),
+                span: span.clone(),
+                def_id: None,
+            }
+        }
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852): binds `$len = list.len($t)` to a fresh temp and returns
+    /// the Var reference the length tests compare against.
+    fn bind_list_len(
+        next: &mut u32,
+        stmts: &mut Vec<IrStmt>,
+        t_ref: &IrExpr,
+        span: &Option<almide_lang::span::Span>,
+    ) -> IrExpr {
+        let len_var = VarId(*next);
+        *next += 1;
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind {
+                var: len_var,
+                ty: Ty::Int,
+                value: IrExpr {
+                    kind: IrExprKind::Call {
+                        target: almide_ir::CallTarget::Module {
+                            module: almide_lang::intern::sym("list"),
+                            func: almide_lang::intern::sym("len"),
+                            def_id: None,
+                        },
+                        args: vec![t_ref.clone()],
+                        type_args: Vec::new(),
+                    },
+                    ty: Ty::Int,
+                    span: span.clone(),
+                    def_id: None,
+                },
+                mutability: almide_ir::Mutability::Let,
+            },
+            span: span.clone(),
+        });
+        IrExpr {
+            kind: IrExprKind::Var { id: len_var },
+            ty: Ty::Int,
+            span: span.clone(),
+            def_id: None,
+        }
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852): binds one fresh temp per element (`$ei = $t[i]`) —
+    /// element loads sit UNDER their length test (no out-of-range read) — and
+    /// returns the group statements plus the Var references to the element temps.
+    fn bind_group_element_temps(
+        next: &mut u32,
+        k: usize,
+        elem_ty: &Ty,
+        t_ref: &IrExpr,
+        span: &Option<almide_lang::span::Span>,
+    ) -> (Vec<IrStmt>, Vec<IrExpr>) {
+        let mut gstmts: Vec<IrStmt> = Vec::new();
+        let mut elem_refs: Vec<IrExpr> = Vec::new();
+        for i in 0..k {
+            let ev = VarId(*next);
+            *next += 1;
+            gstmts.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: ev,
+                    ty: elem_ty.clone(),
+                    value: IrExpr {
+                        kind: IrExprKind::IndexAccess {
+                            object: Box::new(t_ref.clone()),
+                            index: Box::new(mk_int(i as i64, span)),
+                        },
+                        ty: elem_ty.clone(),
+                        span: span.clone(),
+                        def_id: None,
+                    },
+                    mutability: almide_ir::Mutability::Let,
+                },
+                span: span.clone(),
+            });
+            elem_refs.push(IrExpr {
+                kind: IrExprKind::Var { id: ev },
+                ty: elem_ty.clone(),
+                span: span.clone(),
+                def_id: None,
+            });
+        }
+        (gstmts, elem_refs)
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852): per-arm — hoist binds (aliases of element temps) at the
+    /// group top, then the cond chain (literal eqs AND the guard); a group's first
+    /// unconditional arm terminates it, else the catch-all body fills in.
+    fn build_group_arm_chain(
+        gas: &[&almide_ir::IrMatchArm],
+        elem_refs: &[IrExpr],
+        gstmts: &mut Vec<IrStmt>,
+        last_body: &IrExpr,
+        out_ty: &Ty,
+        span: &Option<almide_lang::span::Span>,
+    ) -> IrExpr {
+        let mut inner = last_body.clone();
+        let mut terminated = false;
+        for a in gas.iter().rev() {
+            let IrPattern::List { elements } = &a.pattern else { unreachable!() };
+            let mut cond: Option<IrExpr> = Option::None;
+            for (i, p) in elements.iter().enumerate() {
+                match p {
+                    IrPattern::Literal { expr } => {
+                        let eqc = mk_eq(elem_refs[i].clone(), expr.clone(), span);
+                        cond = Some(match cond.take() {
+                            Some(c) => IrExpr {
+                                kind: IrExprKind::BinOp {
+                                    op: BinOp::And,
+                                    left: Box::new(c),
+                                    right: Box::new(eqc),
+                                },
+                                ty: Ty::Bool,
+                                span: span.clone(),
+                                def_id: None,
+                            },
+                            Option::None => eqc,
+                        });
+                    }
+                    IrPattern::Bind { var, ty } => gstmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            ty: ty.clone(),
+                            value: elem_refs[i].clone(),
+                            mutability: almide_ir::Mutability::Let,
+                        },
+                        span: span.clone(),
+                    }),
+                    IrPattern::Wildcard => {}
+                    _ => unreachable!(),
+                }
+            }
+            if let Some(g) = &a.guard {
+                cond = Some(match cond.take() {
+                    Some(c) => IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: BinOp::And,
+                            left: Box::new(c),
+                            right: Box::new(g.clone()),
+                        },
+                        ty: Ty::Bool,
+                        span: span.clone(),
+                        def_id: None,
+                    },
+                    Option::None => g.clone(),
+                });
+            }
+            inner = match cond {
+                Some(c) => IrExpr {
+                    kind: IrExprKind::If {
+                        cond: Box::new(c),
+                        then: Box::new(a.body.clone()),
+                        else_: Box::new(inner),
+                    },
+                    ty: out_ty.clone(),
+                    span: span.clone(),
+                    def_id: None,
+                },
+                Option::None => {
+                    terminated = true;
+                    a.body.clone()
+                }
+            };
+        }
+        let _ = terminated;
+        inner
+    }
+    /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
+    /// (codopsy r2, #852): builds each group's body (element temps, per-arm conds,
+    /// terminal) and chains the groups on `$len == k` tests, innermost group first,
+    /// with the catch-all body as the final else. Lengths are mutually exclusive,
+    /// so grouping preserves first-match.
+    fn build_length_dispatch_chain(
+        next: &mut u32,
+        groups: &[(usize, Vec<&almide_ir::IrMatchArm>)],
+        last_body: &IrExpr,
+        elem_ty: &Ty,
+        t_ref: &IrExpr,
+        len_ref: &IrExpr,
+        out_ty: &Ty,
+        span: &Option<almide_lang::span::Span>,
+    ) -> IrExpr {
+        let mut chain = last_body.clone();
+        for (k, gas) in groups.iter().rev() {
+            let (mut gstmts, elem_refs) = bind_group_element_temps(next, *k, elem_ty, t_ref, span);
+            let inner = build_group_arm_chain(gas, &elem_refs, &mut gstmts, last_body, out_ty, span);
+            let group_body = IrExpr {
+                kind: IrExprKind::Block { stmts: gstmts, expr: Some(Box::new(inner)) },
+                ty: out_ty.clone(),
+                span: span.clone(),
+                def_id: None,
+            };
+            let len_cond = mk_eq(len_ref.clone(), mk_int(*k as i64, span), span);
+            chain = IrExpr {
+                kind: IrExprKind::If {
+                    cond: Box::new(len_cond),
+                    then: Box::new(group_body),
+                    else_: Box::new(chain),
+                },
+                ty: out_ty.clone(),
+                span: span.clone(),
+                def_id: None,
+            };
+        }
+        chain
+    }
     struct V {
         next: u32,
         changed: bool,
@@ -267,14 +591,7 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             let IrExprKind::Match { subject, arms } = &e.kind else { return };
-            let elem_ty = match &subject.ty {
-                Ty::Applied(TypeConstructorId::List, a)
-                    if a.len() == 1 && !is_heap_ty(&a[0]) =>
-                {
-                    a[0].clone()
-                }
-                _ => return,
-            };
+            let Some(elem_ty) = scalar_list_elem_ty(&subject.ty) else { return };
             if arms.len() < 2 {
                 return;
             }
@@ -282,233 +599,32 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
             if last.guard.is_some() || !matches!(last.pattern, IrPattern::Wildcard) {
                 return;
             }
-            // Admit only list patterns of Bind/Wildcard/Literal elements; at least
-            // one arm must need this desugar (a length > 0 or a guard/literal —
-            // the plain 2-arm `[] / bind` forms already lower elsewhere).
-            #[allow(clippy::type_complexity)]
-            let mut groups: Vec<(usize, Vec<&almide_ir::IrMatchArm>)> = Vec::new();
-            let mut interesting = false;
-            for a in init {
-                let IrPattern::List { elements } = &a.pattern else { return };
-                for p in elements {
-                    match p {
-                        IrPattern::Bind { .. } | IrPattern::Wildcard | IrPattern::Literal { .. } => {}
-                        _ => return,
-                    }
-                }
-                if !elements.is_empty() || a.guard.is_some() {
-                    interesting = true;
-                }
-                let k = elements.len();
-                match groups.iter_mut().find(|(gk, _)| *gk == k) {
-                    Some((_, v)) => v.push(a),
-                    None => groups.push((k, vec![a])),
-                }
-            }
+            let Some((groups, interesting)) = group_arms_by_pattern_len(init) else { return };
             if !interesting {
                 return;
             }
             // A duplicated catch-all (a group without an unconditional terminal, plus
             // the final else) must not introduce binders.
-            let dup_needed = groups.iter().any(|(_, gas)| {
-                !gas.iter().any(|a| {
-                    a.guard.is_none()
-                        && matches!(&a.pattern, IrPattern::List { elements }
-                            if elements.iter().all(|p| matches!(p,
-                                IrPattern::Bind { .. } | IrPattern::Wildcard)))
-                })
-            });
-            if dup_needed && introduces_binder(&last.body) {
+            if catch_all_duplication_needed(&groups) && introduces_binder(&last.body) {
                 return;
             }
             let span = e.span.clone();
             let out_ty = e.ty.clone();
             // Hoist the subject (Var direct) and its length.
             let mut stmts: Vec<IrStmt> = Vec::new();
-            let t_ref = if matches!(subject.kind, IrExprKind::Var { .. }) {
-                (**subject).clone()
-            } else {
-                let t = VarId(self.next);
-                self.next += 1;
-                stmts.push(IrStmt {
-                    kind: IrStmtKind::Bind {
-                        var: t,
-                        ty: subject.ty.clone(),
-                        value: (**subject).clone(),
-                        mutability: almide_ir::Mutability::Let,
-                    },
-                    span: span.clone(),
-                });
-                IrExpr {
-                    kind: IrExprKind::Var { id: t },
-                    ty: subject.ty.clone(),
-                    span: span.clone(),
-                    def_id: None,
-                }
-            };
-            let len_var = VarId(self.next);
-            self.next += 1;
-            stmts.push(IrStmt {
-                kind: IrStmtKind::Bind {
-                    var: len_var,
-                    ty: Ty::Int,
-                    value: IrExpr {
-                        kind: IrExprKind::Call {
-                            target: almide_ir::CallTarget::Module {
-                                module: almide_lang::intern::sym("list"),
-                                func: almide_lang::intern::sym("len"),
-                                def_id: None,
-                            },
-                            args: vec![t_ref.clone()],
-                            type_args: Vec::new(),
-                        },
-                        ty: Ty::Int,
-                        span: span.clone(),
-                        def_id: None,
-                    },
-                    mutability: almide_ir::Mutability::Let,
-                },
-                span: span.clone(),
-            });
-            let len_ref = IrExpr {
-                kind: IrExprKind::Var { id: len_var },
-                ty: Ty::Int,
-                span: span.clone(),
-                def_id: None,
-            };
-            let mk_int = |v: i64| IrExpr {
-                kind: IrExprKind::LitInt { value: v },
-                ty: Ty::Int,
-                span: span.clone(),
-                def_id: None,
-            };
-            let mk_eq = |l: IrExpr, r: IrExpr| IrExpr {
-                kind: IrExprKind::BinOp { op: BinOp::Eq, left: Box::new(l), right: Box::new(r) },
-                ty: Ty::Bool,
-                span: span.clone(),
-                def_id: None,
-            };
+            let t_ref = hoist_subject_var(&mut self.next, &mut stmts, subject, &span);
+            let len_ref = bind_list_len(&mut self.next, &mut stmts, &t_ref, &span);
             // Build each group's body: element temps, per-arm conds, terminal.
-            let mut chain = last.body.clone();
-            for (k, gas) in groups.iter().rev() {
-                let mut gstmts: Vec<IrStmt> = Vec::new();
-                let mut elem_refs: Vec<IrExpr> = Vec::new();
-                for i in 0..*k {
-                    let ev = VarId(self.next);
-                    self.next += 1;
-                    gstmts.push(IrStmt {
-                        kind: IrStmtKind::Bind {
-                            var: ev,
-                            ty: elem_ty.clone(),
-                            value: IrExpr {
-                                kind: IrExprKind::IndexAccess {
-                                    object: Box::new(t_ref.clone()),
-                                    index: Box::new(mk_int(i as i64)),
-                                },
-                                ty: elem_ty.clone(),
-                                span: span.clone(),
-                                def_id: None,
-                            },
-                            mutability: almide_ir::Mutability::Let,
-                        },
-                        span: span.clone(),
-                    });
-                    elem_refs.push(IrExpr {
-                        kind: IrExprKind::Var { id: ev },
-                        ty: elem_ty.clone(),
-                        span: span.clone(),
-                        def_id: None,
-                    });
-                }
-                // Per-arm: hoist binds (aliases of element temps) at the group top,
-                // then the cond chain (literal eqs AND the guard).
-                let mut inner = last.body.clone();
-                let mut terminated = false;
-                for a in gas.iter().rev() {
-                    let IrPattern::List { elements } = &a.pattern else { unreachable!() };
-                    let mut cond: Option<IrExpr> = Option::None;
-                    for (i, p) in elements.iter().enumerate() {
-                        match p {
-                            IrPattern::Literal { expr } => {
-                                let eqc = mk_eq(elem_refs[i].clone(), expr.clone());
-                                cond = Some(match cond.take() {
-                                    Some(c) => IrExpr {
-                                        kind: IrExprKind::BinOp {
-                                            op: BinOp::And,
-                                            left: Box::new(c),
-                                            right: Box::new(eqc),
-                                        },
-                                        ty: Ty::Bool,
-                                        span: span.clone(),
-                                        def_id: None,
-                                    },
-                                    Option::None => eqc,
-                                });
-                            }
-                            IrPattern::Bind { var, ty } => gstmts.push(IrStmt {
-                                kind: IrStmtKind::Bind {
-                                    var: *var,
-                                    ty: ty.clone(),
-                                    value: elem_refs[i].clone(),
-                                    mutability: almide_ir::Mutability::Let,
-                                },
-                                span: span.clone(),
-                            }),
-                            IrPattern::Wildcard => {}
-                            _ => unreachable!(),
-                        }
-                    }
-                    if let Some(g) = &a.guard {
-                        cond = Some(match cond.take() {
-                            Some(c) => IrExpr {
-                                kind: IrExprKind::BinOp {
-                                    op: BinOp::And,
-                                    left: Box::new(c),
-                                    right: Box::new(g.clone()),
-                                },
-                                ty: Ty::Bool,
-                                span: span.clone(),
-                                def_id: None,
-                            },
-                            Option::None => g.clone(),
-                        });
-                    }
-                    inner = match cond {
-                        Some(c) => IrExpr {
-                            kind: IrExprKind::If {
-                                cond: Box::new(c),
-                                then: Box::new(a.body.clone()),
-                                else_: Box::new(inner),
-                            },
-                            ty: out_ty.clone(),
-                            span: span.clone(),
-                            def_id: None,
-                        },
-                        Option::None => {
-                            terminated = true;
-                            a.body.clone()
-                        }
-                    };
-                }
-                let _ = terminated;
-                let group_body = IrExpr {
-                    kind: IrExprKind::Block { stmts: gstmts, expr: Some(Box::new(inner)) },
-                    ty: out_ty.clone(),
-                    span: span.clone(),
-                    def_id: None,
-                };
-                let len_cond = mk_eq(len_ref.clone(), mk_int(*k as i64));
-                chain = IrExpr {
-                    kind: IrExprKind::If {
-                        cond: Box::new(len_cond),
-                        then: Box::new(group_body),
-                        else_: Box::new(chain),
-                    },
-                    ty: out_ty.clone(),
-                    span: span.clone(),
-                    def_id: None,
-                };
-            }
+            let chain = build_length_dispatch_chain(
+                &mut self.next,
+                &groups,
+                &last.body,
+                &elem_ty,
+                &t_ref,
+                &len_ref,
+                &out_ty,
+                &span,
+            );
             *e = IrExpr {
                 kind: IrExprKind::Block { stmts, expr: Some(Box::new(chain)) },
                 ty: out_ty,
@@ -521,5 +637,15 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
     let mut v = V { next: max_var_id(body) + 1, changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
+    // GROWTH CAP (arc v1-join-completeness, J0): this rewrite duplicates a
+    // catch-all body per specialization branch and runs OUTSIDE the
+    // desugar_heap_branches fixpoint, so MAX_DESUGARED_NODES never sees its
+    // output — it was one of the two UNCAPPED duplicators of the 2026-07-27
+    // incident class. Growth-based so a big-but-undupped body is not punished;
+    // past the cap the rewrite is DISCARDED and the un-desugared match walls
+    // honestly (the desugar_heap_branches discard precedent, one level out).
+    if v.changed && count_expr_nodes(&out) > count_expr_nodes(body) + 50_000 {
+        return None;
+    }
     v.changed.then_some(out)
 }

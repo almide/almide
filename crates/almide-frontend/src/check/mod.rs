@@ -182,6 +182,14 @@ pub struct Checker {
     /// defaulted. Without it the value passed `check` and then tripped the
     /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
     pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
+    /// Annotated `let`/`var` bindings, re-checked post-solve for the numeric
+    /// narrowing direction (#867). The solver joins numeric widths
+    /// symmetrically — peer sites like list elements and `assert_eq` args
+    /// must not depend on visit order — so the one-way rule (a sized value
+    /// does not flow into an `Int`/`Float` slot; write `.to_int64()`) is
+    /// enforced at the sites where expected/actual is real: call arguments
+    /// (`types_mismatch`) and these annotation sites.
+    pub(crate) deferred_numeric_narrowing_checks: Vec<NumericNarrowingSite>,
     /// Top-let `env.top_lets` writes awaiting the post-solve upgrade. The
     /// `TopLet` branch resolves its initializer type BEFORE `solve_constraints`
     /// runs, so a generic-ctor initializer (`let MAYBE = some(Cfg {…})`) stores
@@ -211,6 +219,19 @@ pub(crate) struct IntOverflowSite {
     /// value of `let x: T = …` / `var x: T = …`. `None` ⇒ a default `Int` (i64)
     /// context. A wider `T` (e.g. `UInt64`) makes a >i64 literal valid.
     pub context_ty: Option<Ty>,
+    pub span: Option<crate::ast::Span>,
+}
+
+/// An annotated `let`/`var` binding, pending the post-solve numeric-narrowing
+/// direction check (#867). See `deferred_numeric_narrowing_checks`.
+#[derive(Debug, Clone)]
+pub(crate) struct NumericNarrowingSite {
+    /// The declared annotation type.
+    pub expected: Ty,
+    /// The initializer's inferred type, inference vars intact.
+    pub actual: Ty,
+    /// The binding, for the diagnostic ("let 'x'").
+    pub context: String,
     pub span: Option<crate::ast::Span>,
 }
 
@@ -257,21 +278,57 @@ pub(crate) enum LiteralFit {
     /// type has no negative values at ANY magnitude. `-0` is not this — it is
     /// `0`, which every unsigned type represents.
     Sign,
-    /// Inside the type's DECLARED domain but above the `i64` the IR carries
-    /// every integer in (#872) — so only ever `UInt64`, whose declared domain
-    /// is the one that runs past the carrier.
-    Carrier,
+}
+
+/// The int literal `value` ultimately denotes, seen through any chain of parens
+/// and unary minus: its `ExprId`, its raw text, and the NET sign the source
+/// applies to it. `None` when `value` is not such a chain.
+///
+/// The chain has to be walked to the END, and both facts this returns are why.
+///
+/// REACH: one level is not enough, because a literal is routinely written with
+/// more than one node above it. `-(300)` parks a `Paren` between the minus and
+/// the digits; `--300` parks a second `Unary`. Stopping at the first node left
+/// those forms with no range context at all, so `let m: Int8 = -(300)` passed
+/// `check` and rustc then rejected the emitted `-300i8` — the check-vs-build
+/// gap E024 exists to close (differential fuzz, seed 1785217538023450905).
+///
+/// PARITY: the count matters as much as the reach, and in the opposite
+/// direction. `-9223372036854775808` is `i64::MIN` and valid; `--9223372036854775808`
+/// is +2^63, which NO signed type represents. A walk that recorded "there was a
+/// minus somewhere" rather than how many would call the second one valid and let
+/// it fold silently — the failure the negated bound was introduced to prevent.
+///
+/// Derived once, here, because two callers need it: the `Unary` inference marks
+/// the site's sign, and the annotated-binding hook pins the site's declared type.
+/// They used to peel separately and agree only on the single-minus case.
+pub(crate) fn int_literal_chain(
+    value: &crate::ast::Expr,
+) -> Option<(crate::ast::ExprId, String, bool)> {
+    use crate::ast::ExprKind;
+    let mut cur = value;
+    let mut negated = false;
+    loop {
+        match &cur.kind {
+            ExprKind::Int { raw, .. } => return Some((cur.id, raw.clone(), negated)),
+            ExprKind::Paren { expr } => cur = expr,
+            ExprKind::Unary { op, operand, .. } if op.as_str() == "-" => {
+                negated = !negated;
+                cur = operand;
+            }
+            _ => return None,
+        }
+    }
 }
 
 /// Classify `raw` against the range `ty` can represent in this position.
 ///
 /// For a SIGNED type the magnitude bound is `MAX` (or `MAX+1` when `negated`,
-/// reaching `MIN`). For an unsigned type it is the unsigned `MAX`, capped at
-/// the `i64` carrier: MIR — the default path for both targets — knows only
-/// `NTy::I64`, so above the carrier `/` is a signed divide and `to_string`
-/// prints signed, identically wrong on both legs. Capping turns that silent
-/// wrong answer into an E024 and lifts cleanly once the lane exists. Narrower
-/// unsigned widths are untouched: `u32::MAX` < `i64::MAX`.
+/// reaching `MIN`). For an unsigned type it is the unsigned `MAX` — the FULL
+/// declared domain: the i64 slot is a 64-bit PATTERN and the `UInt64` upper
+/// half is carried in it, with `IntOp::DivU`/`ModU`/`LtU`… reading it
+/// unsigned on both targets (#872). (The interim carrier cap that rejected
+/// that band is gone with the lane that replaced it.)
 ///
 /// A non-integer type `Fits` — the literal does not belong there, and saying so
 /// is the normal type checker's job, not this diagnostic's.
@@ -296,14 +353,6 @@ pub(crate) fn classify_int_literal(raw: &str, ty: &Ty, negated: bool) -> Literal
     match () {
         _ if !signed && negated && mag != 0 => LiteralFit::Sign,
         _ if mag > declared => LiteralFit::Magnitude,
-        // Carrier is an UNSIGNED-only deviation. A signed type's own domain
-        // already stops at the carrier in the positive direction, and in the
-        // negative direction `i64::MIN`'s magnitude is 2^63 — one PAST
-        // `i64::MAX` and perfectly representable, since the `-` is what makes
-        // it so. Testing the magnitude without that guard rejects `let lo: Int
-        // = -9223372036854775808`, which is the very literal E024 was taught to
-        // accept in #626.
-        _ if !signed && mag > i64::MAX as u128 => LiteralFit::Carrier,
         _ => LiteralFit::Fits,
     }
 }
@@ -319,10 +368,7 @@ pub(crate) fn int_type_range(ty: &Ty) -> Option<String> {
     Some(if signed {
         format!("-{}..={}", 1u128 << (bits - 1), (1u128 << (bits - 1)) - 1)
     } else {
-        // The stated ceiling is the one actually enforced, carrier cap and all
-        // (#872) — a range in a diagnostic that the compiler does not honour is
-        // worse than no range.
-        format!("0..={}", ((1u128 << bits) - 1).min(i64::MAX as u128))
+        format!("0..={}", (1u128 << bits) - 1)
     })
 }
 
@@ -397,6 +443,7 @@ impl Checker {
             deferred_ord_elem_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
+            deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_unknown_type_checks: Vec::new(),
             pending_toplet_tys: Vec::new(),
@@ -480,6 +527,146 @@ impl Checker {
 
     pub(crate) fn constrain(&mut self, expected: Ty, actual: Ty, context: impl Into<String>) {
         self.constrain_with_hint(expected, actual, context, None);
+    }
+
+    /// Reject arithmetic that mixes a SIZED numeric type with a canonical
+    /// `Int` / `Float` VALUE, and return the sized type so inference carries on.
+    ///
+    /// The mixed-width rule (`Int32 + Int16`) was enforced on the sized types
+    /// only, which let the same mistake through whenever the wide side was
+    /// spelled `Int`: `fn add32(a: Int32, b: Int) -> Int32 = a + b` passed
+    /// `check`, failed the native build with a rustc E0308, and on wasm — where
+    /// every scalar rides one i64 — computed a value outside the declared width
+    /// (#902). Spelling the same parameter `Int64` WAS caught, so the rule was
+    /// really enforcing a spelling rather than a type.
+    ///
+    /// The canonical side is exempt only when it is a LITERAL-ONLY expression,
+    /// which is the case the permissive pair exists for: `let x: Int32 = 1;
+    /// x + 2` must keep working, because the literal adopts the sized width at
+    /// lowering. A literal-only tree is the same shape lowering retypes whole —
+    /// literals, negation, and arithmetic over them, nothing that could have
+    /// chosen a width of its own.
+    pub(crate) fn check_mixed_canonical_width(
+        &mut self,
+        op: &str,
+        lc: &Ty,
+        rc: &Ty,
+        left: &ast::Expr,
+        right: &ast::Expr,
+    ) -> Option<Ty> {
+        let canonical_peer = |sized: &Ty, canon: &Ty| match (sized, canon) {
+            (s, Ty::Int) if is_sized_int(s) => true,
+            (s, Ty::Float) if matches!(s, Ty::Float32 | Ty::Float64) => true,
+            _ => false,
+        };
+        let (sized, canon_ty, canon_expr) = if canonical_peer(lc, rc) {
+            (lc, rc, right)
+        } else if canonical_peer(rc, lc) {
+            (rc, lc, left)
+        } else {
+            return None;
+        };
+        // A LITERAL canonical side is the case the permissive pair exists for: it
+        // adopts the sized width at lowering, so it is not an error. But the
+        // RESULT is still the SIZED type — returning `None` here let the caller
+        // fall through to its `lt.clone()` default and type `0 - int8v` as
+        // canonical `Int`, while lowering had already stamped the whole
+        // literal-only tree Int8. The checker then said `i64` over an `i8`
+        // expression and the generated Rust would not build (the
+        // `self_hosted_float_convert` shape: `let nm = 0 - float.to_int8(f)`).
+        // Same rule as the peer join below — the sized member wins.
+        if is_literal_numeric_ast(canon_expr) {
+            return Some(sized.clone());
+        }
+        self.emit(err(
+            format!(
+                "operator '{}' mixes sized numeric type {} with a canonical {} value — \
+                 explicit conversion required (e.g. `.to_{}()`)",
+                op,
+                sized.display(),
+                canon_ty.display(),
+                sized.display().to_lowercase()
+            ),
+            "Convert one side with `.to_intN()` / `.to_floatN()` before the op. A literal \
+             adopts the sized width automatically; a VALUE does not.",
+            format!("operator {}", op),
+        ));
+        Some(sized.clone())
+    }
+
+    /// The PEER-JOIN half of the same width rule (#880).
+    ///
+    /// `check_mixed_canonical_width` above governs the operator sites, where the
+    /// two operands really are symmetric. A peer join — list elements, `if` /
+    /// `match` arms — is not: it took the FIRST peer's type as the join, so
+    /// `[1, u8v]` typed the whole literal `List[Int]` while `[u8v, 1]` typed it
+    /// `List[UInt8]`. The same program, elements swapped, two different types;
+    /// the `Int` reading then emitted `vec![1i64, 3u8]`, which rustc rejects.
+    ///
+    /// The SIZED peer is the only one that ever chose a width, so it wins the
+    /// join and the canonical peers coerce into it — but a canonical peer may
+    /// coerce only when it is a LITERAL (the same exemption as the operator
+    /// rule: lowering retypes a literal-only tree whole, and nothing else).
+    /// A canonical VALUE keeps its own i64/f64 width and is an error.
+    ///
+    /// `peers` is `(type, span, is_literal_only)` per member, already inferred —
+    /// the caller owns the AST walk, which keeps this free of the borrow that
+    /// holding `&ast::Expr` across `&mut self` would need. Returns the joined
+    /// (sized) type, or `None` when the peers are not a canonical/sized mix.
+    pub(crate) fn join_sized_peers(
+        &mut self,
+        peers: &[(Ty, Option<ast::Span>, bool)],
+        context: &str,
+    ) -> Option<Ty> {
+        let resolved: Vec<Ty> = peers.iter().map(|(t, _, _)| resolve_ty(t, &self.uf)).collect();
+        let sized = resolved.iter().find(|t| is_narrow_sized(t))?.clone();
+        let saved = self.current_span;
+        for (i, t) in resolved.iter().enumerate() {
+            if !is_canonical_peer_of(&sized, t) || peers[i].2 {
+                continue;
+            }
+            self.current_span = peers[i].1.or(saved);
+            self.emit(err(
+                format!(
+                    "{} mixes sized numeric type {} with a canonical {} value — \
+                     explicit conversion required (e.g. `.to_{}()`)",
+                    context,
+                    sized.display(),
+                    t.display(),
+                    sized.display().to_lowercase()
+                ),
+                "Convert the value with `.to_intN()` / `.to_floatN()` so every peer has \
+                 the same width. A literal adopts the sized width automatically; a VALUE \
+                 does not.",
+                context.to_string(),
+            ).with_code("E001"));
+        }
+        self.current_span = saved;
+        Some(sized)
+    }
+
+    /// `if` / `while` take a `Bool` condition, full stop — Almide has no
+    /// truthiness, and until this constraint existed the checker accepted every
+    /// condition type (#896). `if 1 then …` ran with C-style truthiness and
+    /// `if "s" then …` passed `check` and then died in codegen as an ICE; both
+    /// are now the ordinary E001 the language always claimed they were.
+    ///
+    /// In an effect fn a condition may still be wearing its `Result[Bool, E]`
+    /// wrapper (the same auto-unwrap asymmetry the if-branch comparison below
+    /// handles), so compare at the unwrapped level when `auto_unwrap` is on.
+    pub(crate) fn constrain_condition(&mut self, cond: &ast::Expr, cond_ty: Ty, keyword: &str) {
+        let actual = if self.env.auto_unwrap {
+            match resolve_ty(&cond_ty, &self.uf) {
+                Ty::Applied(crate::types::TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
+                _ => cond_ty,
+            }
+        } else {
+            cond_ty
+        };
+        let saved = self.current_span;
+        self.current_span = cond.span.or(saved);
+        self.constrain(Ty::Bool, actual, format!("{keyword} condition"));
+        self.current_span = saved;
     }
 
     pub(crate) fn constrain_with_hint(
@@ -635,6 +822,7 @@ impl Checker {
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
+        self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
         // Unused import warnings
         for imp in &program.imports {
@@ -775,5 +963,56 @@ impl Checker {
 
 }
 
-include!("mod_p2.rs");
-include!("mod_p3.rs");
+/// The sized INT widths (the sized floats are matched separately, since their
+/// canonical peer is `Float`, not `Int`).
+fn is_sized_int(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+    )
+}
+
+/// The sized widths that are NOT the canonical runtime type. `Int64` and
+/// `Float64` are deliberately absent: they are `Int` / `Float` at runtime and
+/// `compatible` bridges them in BOTH directions, so a join that mixes them can
+/// neither lose a width nor emit a rustc mismatch — rejecting it would be a
+/// false rejection. Everything here is reachable only through the one-way
+/// literal coercion, which is what #880 makes conditional on being a literal.
+pub(crate) fn is_narrow_sized(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int8 | Ty::Int16 | Ty::Int32
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32
+    )
+}
+
+/// Whether `other` is the canonical type whose values coerce into `sized`
+/// (`Int` / `Int64` for the integer widths, `Float` / `Float64` for `Float32`) —
+/// the exact pairs `compatible_numeric_coerce` accepts one-way.
+pub(crate) fn is_canonical_peer_of(sized: &Ty, other: &Ty) -> bool {
+    match sized {
+        Ty::Float32 => matches!(other, Ty::Float | Ty::Float64),
+        s if is_narrow_sized(s) => matches!(other, Ty::Int | Ty::Int64),
+        _ => false,
+    }
+}
+
+/// Whether this expression is built ONLY from numeric literals — literals,
+/// parentheses, negation, and arithmetic over them. Such an expression chose no
+/// width of its own, so it adopts its context's; anything else is a value with a
+/// width already, and mixing it with a different width is an error.
+pub(crate) fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
+    match &e.kind {
+        ast::ExprKind::Int { .. } | ast::ExprKind::Float { .. } => true,
+        ast::ExprKind::Paren { expr } => is_literal_numeric_ast(expr),
+        ast::ExprKind::Unary { op, operand } if op.as_str() == "-" => is_literal_numeric_ast(operand),
+        ast::ExprKind::Binary { op, left, right } if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") => {
+            is_literal_numeric_ast(left) && is_literal_numeric_ast(right)
+        }
+        _ => false,
+    }
+}
+
+include!("post_solve_validation.rs");
+include!("module_inference.rs");

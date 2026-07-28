@@ -375,3 +375,22 @@ impl LowerCtx {
         }
     }
 }
+
+/// Read counts for EVERY variable in a body — the whole-body half of the fold's
+/// liveness test (see `LowerCtx::var_read_counts`). One pass.
+pub(crate) fn collect_var_read_counts(body: &IrExpr) -> HashMap<VarId, u32> {
+    struct C {
+        counts: HashMap<VarId, u32>,
+    }
+    impl almide_ir::visit::IrVisitor for C {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Var { id } = &e.kind {
+                *self.counts.entry(*id).or_insert(0) += 1;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut c = C { counts: HashMap::new() };
+    almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
+    c.counts
+}

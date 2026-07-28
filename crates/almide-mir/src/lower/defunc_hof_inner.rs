@@ -73,19 +73,55 @@ impl LowerCtx {
         let DefuncLambda { params, body } = lambda;
         let DefuncFusion { index: fuse_index, second: fuse_second } = fuse;
         use crate::PrimKind;
-        let shape = self.classify_defunc_result_shape(func, init, &result_elem)?;
-        // Borrow the source list (evaluated once). A Var is borrowed; a fresh literal is
-        // materialized into an owned temp dropped at the OUTER scope (it stays in
-        // live_heap_handles). A non-handle iterable (a Range / scalar) is out of subset.
-        let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
-            CallArg::Handle(v) => v,
-            _ => return None,
+        let Some(shape) = self.classify_defunc_result_shape(func, init, &result_elem) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!("[defunc] {func} result shape declined (elem {result_elem:?})")
+            });
+            return None;
         };
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
-        let mut len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        // The source: a borrowed LIST handle (evaluated once — a Var is borrowed, a
+        // fresh literal is materialized into an owned temp dropped at the OUTER scope,
+        // staying in live_heap_handles), or an Int RANGE iterated DIRECTLY (`0..n |>
+        // list.map(f)` — snaidhm's flatten_cubic, #881: `len = end - start` (+1
+        // inclusive), `elem = start + i`, no list ever materialized). Any other
+        // iterable is out of subset.
+        let (src_h, range_start_v, mut len_v) = if let IrExprKind::Range { start, end, inclusive } =
+            &xs.kind
+        {
+            if !matches!(start.ty, Ty::Int) || !matches!(end.ty, Ty::Int) {
+                return None;
+            }
+            let start_v = self.lower_scalar_value(start)?;
+            let end_v = self.lower_scalar_value(end)?;
+            let mut len = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: len, op: IntOp::Sub, a: end_v, b: start_v });
+            if *inclusive {
+                let one = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                let len_inc = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: len_inc, op: IntOp::Add, a: len, b: one });
+                len = len_inc;
+            }
+            (None, Some(start_v), len)
+        } else {
+            let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
+                CallArg::Handle(v) => v,
+                _ => return None,
+            };
+            let h = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
+            let len = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+            (Some(h), None, len)
+        };
         let second = match fuse_second {
+            // Fusion pairs a LIST primary with a second list — a Range primary
+            // never fuses (detect_defunc_fusion only matches list-shaped
+            // wrappers, so this arm is unreachable for a Range; the guard is
+            // belt-and-braces).
             Some(pair) => {
+                if src_h.is_none() {
+                    return None;
+                }
                 let (s, min_len) = self.defunc_second_source(pair, len_v)?;
                 len_v = min_len;
                 Some(s)
@@ -106,22 +142,33 @@ impl LowerCtx {
         self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
         self.ops.push(Op::LoopBreakUnless { cond: cond_v });
 
-        // Load element[i] from the SOURCE list: addr = src_h + 12 + i*8, then load64.
+        // The per-iteration byte offset `i*8` (the RESULT list's slot addressing
+        // uses it too, so it is computed for BOTH source kinds).
         let i8_v = self.fresh_value();
         let eight = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: eight, value: 8 });
         self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
-        let src_base = self.load_addr(h, 12);
-        let src_addr = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
         // A HEAP source element is the slot's HANDLE (`LoadHandle` = i32 Ptr — the inlined body reads
         // it as a BORROWED heap value, e.g. `value.get(row, …)`); a SCALAR element is the i64 value.
+        // A RANGE source's element is simply `start + i` (always scalar Int).
         let src_heap = matches!(&xs.ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
                 if a.len() == 1 && is_heap_ty(&a[0]));
         let elem = self.fresh_value();
-        let read_kind = if src_heap { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
-        self.ops.push(Op::Prim { kind: read_kind, dst: Some(elem), args: vec![src_addr] });
+        match (src_h, range_start_v) {
+            (Some(h), _) => {
+                // Load element[i] from the SOURCE list: addr = src_h + 12 + i*8, then load64.
+                let src_base = self.load_addr(h, 12);
+                let src_addr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
+                let read_kind = if src_heap { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
+                self.ops.push(Op::Prim { kind: read_kind, dst: Some(elem), args: vec![src_addr] });
+            }
+            (None, Some(start_v)) => {
+                self.ops.push(Op::IntBinOp { dst: elem, op: IntOp::Add, a: start_v, b: i_v });
+            }
+            (None, None) => unreachable!("source is a list handle or a range"),
+        }
 
         let st = DefuncLoopSt {
             acc_local,
@@ -185,8 +232,20 @@ impl LowerCtx {
         // is registered for the RECURSIVE `$__drop_list_<R>` below (NOT the flat DropListStr that leaks the
         // record's nested String fields — HOLE-1). A record WITHOUT a generated `$__drop_<R>` (e.g. an
         // anonymous structural record) keeps walling — no leaky flat drop.
+        // Anon-inclusive: a STRUCTURAL record element (the checker often leaves a
+        // module record structural — snaidhm's `Seg` reached here as `Record {
+        // p0: Vec2, … }`) routes to its synthesized `$__drop_list_anonrec_<hash>`
+        // wrapper via the same registry the concat/list-literal paths use.
         let record_drop: Option<String> =
-            result_elem.as_ref().and_then(|t| self.record_drop_type_name(t));
+            result_elem.as_ref().and_then(|t| self.record_or_anon_drop_type_name(t));
+        // A SCALAR-ONLY record element (named or anon — ttf's `{x, y, on_curve}`):
+        // the element block is FLAT, so the result list's per-slot rc_dec IS each
+        // element's full free — route through the flat `heap_elem_lists` below
+        // (record_drop stays None; ownership-identical to a String element).
+        let scalar_record = result_elem.as_ref().is_some_and(|t| {
+            self.aggregate_field_tys(t)
+                .is_some_and(|(_, tys)| !tys.is_empty() && tys.iter().all(|ft| !is_heap_ty(ft)))
+        });
         // A `List[scalar]` result element (`list.map(rows, (row) => list.slice(row, s, e))`
         // — the nn Matrix row ops): the inner list is a FLAT block whose rc_dec is its
         // full free, so the result list's per-slot DropListStr reclaims everything —
@@ -213,8 +272,12 @@ impl LowerCtx {
                 && !value
                 && !scalar_list
                 && !matrix
+                && !scalar_record
                 && record_drop.is_none()
             {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                    format!("[defunc] result element shape declined: {elem:?}")
+                });
                 return None;
             }
         }

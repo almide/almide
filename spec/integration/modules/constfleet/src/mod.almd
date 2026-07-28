@@ -1,0 +1,18 @@
+// A fleet of scalar consts at LOW VarIds. Linked FIRST, these seeded the
+// shared const-fold env; a later module's SAME-NUMBERED private ids then
+// read THESE values (the ceangal scroll/view corruption — see
+// cross_module_const_fold_region_test.almd).
+let C0 = 2
+let C1 = 0.035
+let C2 = 3
+let C3 = 4.5
+let C4 = 5
+let C5 = 6.5
+let C6 = 7
+let C7 = 8.5
+let C8 = 9
+let C9 = 10.5
+let C10 = 11
+let C11 = 12.5
+
+fn speed() -> Int = C0

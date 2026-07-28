@@ -310,7 +310,11 @@
 
     #[test]
     fn self_hosted_uint_conversions_match_v0() {
-        // uint8/16/32/64 → int/uint/float/string, the two-hop int composition (byte-identical to v0).
+        // uint8/16/32/64 → int/uint/float/string, the two-hop int composition.
+        // `int.to_uint64(0 - 1)` is `u64::MAX`: it prints UNSIGNED now (#872,
+        // C-179 — the lane), where v0 and the pre-lane self-host both pivoted
+        // through the signed `Int` and printed `-1`. Every narrower width is
+        // unchanged (their whole domain is below `i64::MAX`).
         let src = "fn main() -> Unit = {\n\
             println(uint8.to_string(int.to_uint8(200)))\n\
             println(uint16.to_string(int.to_uint16(60000)))\n\
@@ -323,7 +327,10 @@
             println(int.to_string(float.to_bits(uint8.to_float64(int.to_uint8(200))))) }\n";
         let prog = lower_source(src);
         if let Some(out) = build_and_run("self_hosted_uint_conversions_match_v0", &render_wasm_program(&prog)) {
-            assert_eq!(out, "200\n60000\n4000000000\n-1\n200\n44\n-56\n123456789\n4641240890982006784");
+            assert_eq!(
+                out,
+                "200\n60000\n4000000000\n18446744073709551615\n200\n44\n-56\n123456789\n4641240890982006784"
+            );
         }
     }
 

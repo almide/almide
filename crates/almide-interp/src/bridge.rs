@@ -28,8 +28,51 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
         "bool" => bool_fn(func, args),
         "path" => path_fn(func, args),
         "bytes" => bytes_fn(func, args),
+        "uint64" => uint64_fn(func, args),
+        "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
+        | "float32" | "float64" => sized_numeric_fn(module, func, args),
+        // The scalar prim floor — consumed by the self-hosted stdlib bodies the
+        // `stdlib_pool` evaluates, not by fixture code directly.
+        "prim" => prim_fn(func, args),
         _ => None,
     }
+}
+
+/// The SIZED-numeric observers (`int8.to_string`, `uint16.to_string`, …).
+/// Every one of these widths fits the interpreter's `i64`/`f64` carrier
+/// exactly — the values arriving here were already wrapped to the declared
+/// width by the arithmetic that produced them (C-180) — so printing is the
+/// canonical print of the carrier. Bridged so a fixture that merely NAMES a
+/// sized width still evaluates in the third oracle instead of abstaining.
+fn sized_numeric_fn(module: &str, func: &str, args: &[Value]) -> Option<Flow> {
+    match func {
+        "to_string" => {
+            if module.starts_with("float") {
+                let f = as_float(args.first())?;
+                Some(Flow::val(Value::str(float_to_string(f))))
+            } else {
+                let n = as_int(args.first())?;
+                Some(Flow::val(Value::str(n.to_string())))
+            }
+        }
+        _ => None,
+    }
+}
+
+/// `uint64.*` — the UNSIGNED 64-bit observers (#872, C-179). The interpreter
+/// carries integers in the same `i64` slot the IR does, so the upper half of
+/// `UInt64` arrives here as a NEGATIVE `i64` bit pattern: read it back as
+/// `u64` rather than pivoting through the signed value (which printed `-1`
+/// for `u64::MAX`). Bridged so the third oracle EVALUATES the lane instead of
+/// abstaining — an abstention is a hole in the executable spec.
+fn uint64_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let n = as_int(args.first())? as u64;
+    let f = match func {
+        "to_string" => Flow::val(Value::str(n.to_string())),
+        "to_float32" | "to_float64" => Flow::val(Value::Float(n as f64)),
+        _ => return None,
+    };
+    Some(f)
 }
 
 /// `path.*` — pure path-STRING manipulation, so the third oracle can evaluate it
@@ -129,6 +172,81 @@ fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
         .or_else(|| int_fn_b(func, args))
 }
 
+/// The SCALAR prim floor — the whole prim vocabulary a self-hosted stdlib body
+/// (`stdlib_pool`) may consume in this oracle. Everything here is a total,
+/// deterministic scalar→scalar op with one exact Rust spelling, cited against
+/// the MIR op docs (`almide-mir/src/lib_b.rs`) the two backends render from.
+///
+/// Deliberately NOT here, and why `None` is the right answer for them: the heap
+/// and effect prims (`prim.handle`, `prim.load*`/`store*`, `prim.alloc_*`,
+/// `prim.rc_*`, `prim.fd_write`, `prim.random_get`…). The interp models a container
+/// as a `Value`, not linear memory, so a handle has no faithful value — bridging
+/// `prim.handle` as the identity would let `prim.handle(b) + 12` add 12 to a
+/// list and vote WRONG, which is worse than the honest abstain the `None`
+/// produces (the caller's fixture skips with the prim named). `prim.die` rides
+/// out with them: its argument is always `prim.handle(<message>)`, so the eval
+/// abstains on the handle before die is reached.
+fn prim_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    // Bitwise / shifts: i64-uniform; wasm's `i64.shl` family masks the count
+    // to 6 bits, so the floor does too (a Rust bare `<<` would panic instead).
+    let int2 = |f: fn(i64, i64) -> i64| -> Option<Flow> {
+        Some(Flow::val(Value::Int(f(as_int(args.first())?, as_int(args.get(1))?))))
+    };
+    // f64 arithmetic / comparison: real f64s in the interp carrier.
+    let float2 = |f: fn(f64, f64) -> f64| -> Option<Flow> {
+        Some(Flow::val(Value::Float(f(as_float(args.first())?, as_float(args.get(1))?))))
+    };
+    let fcmp = |f: fn(&f64, &f64) -> bool| -> Option<Flow> {
+        Some(Flow::val(Value::Bool(f(&as_float(args.first())?, &as_float(args.get(1))?))))
+    };
+    match func {
+        "band" => int2(|a, b| a & b),
+        "bor" => int2(|a, b| a | b),
+        "bxor" => int2(|a, b| a ^ b),
+        "bshl" => int2(|a, b| a.wrapping_shl(b as u32 & 63)),
+        "bshr" => int2(|a, b| a.wrapping_shr(b as u32 & 63)),
+        "bshr_u" => int2(|a, b| ((a as u64).wrapping_shr(b as u32 & 63)) as i64),
+        // Int ⇄ Float: `f64.convert_i64_s` / saturating `i64.trunc_sat_f64_s`
+        // (Rust's float→int `as` is exactly the saturating truncate).
+        "i2f" => Some(Flow::val(Value::Float(as_int(args.first())? as f64))),
+        "f2i" => Some(Flow::val(Value::Int(as_float(args.first())? as i64))),
+        // The raw f64 ⇄ i64 BIT reinterpret (`float.to_bits` / `int.bits_to_float`).
+        "fbits" => Some(Flow::val(Value::Int(as_float(args.first())?.to_bits() as i64))),
+        "ffrombits" => {
+            Some(Flow::val(Value::Float(f64::from_bits(as_int(args.first())? as u64))))
+        }
+        // The f32 conventions: the language-level Float32 is CARRIED widened (one
+        // f64 in this oracle, the widened bits in the backends), the narrowing
+        // rounds to nearest, and the pattern lives in the low 32 bits.
+        "f2f32" => Some(Flow::val(Value::Float((as_float(args.first())? as f32) as f64))),
+        "f32_2f" => Some(Flow::val(Value::Float(as_float(args.first())?))),
+        "i2f32" => Some(Flow::val(Value::Float((as_int(args.first())? as f32) as f64))),
+        "f32bits" => Some(Flow::val(Value::Int(
+            ((as_float(args.first())? as f32).to_bits()) as i64,
+        ))),
+        "bits_to_f32" => Some(Flow::val(Value::Float(
+            f32::from_bits(as_int(args.first())? as u32) as f64,
+        ))),
+        "fadd" => float2(|a, b| a + b),
+        "fsub" => float2(|a, b| a - b),
+        "fmul" => float2(|a, b| a * b),
+        "fdiv" => float2(|a, b| a / b),
+        "fcopysign" => float2(f64::copysign),
+        "fneg" => Some(Flow::val(Value::Float(-as_float(args.first())?))),
+        "fabs" => Some(Flow::val(Value::Float(as_float(args.first())?.abs()))),
+        "fsqrt" => Some(Flow::val(Value::Float(as_float(args.first())?.sqrt()))),
+        "fceil" => Some(Flow::val(Value::Float(as_float(args.first())?.ceil()))),
+        "ffloor" => Some(Flow::val(Value::Float(as_float(args.first())?.floor()))),
+        "feq" => fcmp(|a, b| a == b),
+        "fne" => fcmp(|a, b| a != b),
+        "flt" => fcmp(|a, b| a < b),
+        "fgt" => fcmp(|a, b| a > b),
+        "fge" => fcmp(|a, b| a >= b),
+        "fle" => fcmp(|a, b| a <= b),
+        _ => None,
+    }
+}
+
 /// The first half of the `int.*` arm table.
 ///
 /// Extracted from `int_fn` (arm-table halving): arms verbatim and in
@@ -191,7 +309,27 @@ fn int_fn_b(func: &str, args: &[Value]) -> Option<Flow> {
 
 // ── float ───────────────────────────────────────────────────────
 
+/// The sized-float CONVERSIONS (`float.to_float32`/`to_float64`/
+/// `from_float32`/`from_float64`): the interpreter carries every float in one
+/// `f64`, and `Float32`/`Float64` are the SAME carrier at the language level
+/// (the narrowing to f32 precision is the emitters' concern), so each of these
+/// is the identity here. Bridged so a fixture that merely NAMES a sized float
+/// still evaluates in the third oracle instead of abstaining.
+fn float_sized_conv(func: &str, args: &[Value]) -> Option<Flow> {
+    let n = as_float(args.first())?;
+    match func {
+        "to_float64" | "from_float64" => Some(Flow::val(Value::Float(n))),
+        // f32 round-trips through the narrower precision, exactly as both
+        // emitters do — the value a `Float32` can actually hold.
+        "to_float32" | "from_float32" => Some(Flow::val(Value::Float(n as f32 as f64))),
+        _ => None,
+    }
+}
+
 fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    if let Some(f) = float_sized_conv(func, args) {
+        return Some(f);
+    }
     float_fn_core(func, args).or_else(|| float_fn_convert(func, args))
 }
 
@@ -382,10 +520,21 @@ fn string_fn_whole(func: &str, args: &[Value]) -> Option<Flow> {
             as_str(args.first())?
                 .replace(as_str(args.get(1))?, as_str(args.get(2))?),
         )),
-        "repeat" => Flow::val(Value::str(
-            // Negative counts clamp to 0 (C-054; mirrors runtime/rs string.rs).
-            as_str(args.first())?.repeat(as_int(args.get(1))?.max(0) as usize),
-        )),
+        "repeat" => {
+            // Negative counts clamp to 0 (C-054) and a result past the shared
+            // 2^31-byte ceiling aborts in the T6 form (C-169) — both mirror
+            // runtime/rs almide_rt_string_repeat exactly; without the ceiling
+            // the interp materialized multi-GB strings and dissented from the
+            // two backends' identical abort (nightly-fuzz OutputDivergence,
+            // seed 1785045556318379299 index 11).
+            let s = as_str(args.first())?;
+            let n = as_int(args.get(1))?.max(0);
+            if (s.len() as i64).saturating_mul(n) > (1_i64 << 31) {
+                Flow::Abort("repeat result too large".to_string())
+            } else {
+                Flow::val(Value::str(s.repeat(n as usize)))
+            }
+        }
         // Codepoint-count take, the C-054 unsigned discipline (mirrors
         // runtime/rs almide_rt_string_take: `chars().take(n as usize)` — a
         // negative n is enormous as usize, so take(-1) keeps the whole string).

@@ -27,28 +27,41 @@ env:
   RUST_TOOLCHAIN: "1.89.0"
   # Default budget for the scheduled run; the dispatch input overrides it.
   #
-  # 25 minutes is ~5,000 programs at the throughput this job sees, which matches
-  # the campaign size the wall histogram in #812 was measured at — so this is the
-  # established coverage, not a reduced one. The previous 60 was overshooting
-  # into runner-preemption territory: the 2026-07-25 run was killed by a
-  # shutdown signal at 18 minutes (`exit 143`), which no `set +e` or
-  # `timeout-minutes` can catch, and which reports as a plain job failure
-  # indistinguishable from a real finding. Deep runs stay available through the
-  # `minutes` dispatch input.
-  FUZZ_MINUTES: "25"
+  # Sized to the runner lifetime this job actually GETS, measured rather than
+  # assumed. The 2026-07-27 night is the clean measurement: the runner was
+  # reclaimed 7m44s after the job started ("The runner has received a shutdown
+  # signal", exit 143) — and 4m48s of that had gone to building, so the campaign
+  # got 2m39s of its 10-minute budget. The five nights before it died the same
+  # way at 8, 25, 65, 23 and 13 minutes.
+  #
+  # `exit 143` from a runner shutdown is a JOB-level kill: no `set +e`, no
+  # `timeout-minutes`, no later step can catch it, so it reports exactly like a
+  # real finding. That is why NONE of the last six nights could be scored green
+  # regardless of what the fuzzer found (#796 asks for two consecutive green
+  # nights).
+  #
+  # The fix is structural — the build moved to its own job, so this job spends
+  # its whole lifetime fuzzing instead of ~62% of it compiling — and this budget
+  # is then set to fit comfortably inside even the SHORTEST lifetime observed.
+  # 5 minutes is ~1,000 programs at this job's measured 210 prog/min. Less
+  # coverage per night, deliberately: a campaign that FINISHES produces a
+  # verdict, and a verdict every night beats a larger campaign truncated at
+  # random. Deep runs stay available through the `minutes` dispatch input, which
+  # is where the #812-scale histograms should come from.
+  FUZZ_MINUTES: "5"
 
 jobs:
-  fuzz:
+  # The build is its OWN job so the fuzz job spends its whole runner lifetime
+  # fuzzing. When both lived in one job, a cold build took 4m48s of the 7m44s
+  # the runner granted before reclaiming it — the campaign got 2m39s of a
+  # 10-minute budget and the night died `exit 143` (#796). Two jobs means two
+  # independent lifetimes, and the fuzz job's non-campaign overhead is an
+  # artifact download instead of a compile.
+  build:
     if: github.server_url == 'https://github.com'
-    name: Generative differential fuzz
+    name: Build compiler + fuzzer
     runs-on: ubuntu-latest
-    # Hard ceiling well above the fuzz budget so a hung child can never
-    # wedge the runner indefinitely, with room for a dispatch run that raises
-    # `minutes`.
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      issues: write
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -62,17 +75,55 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+            tools/xtarget-fuzz/target
           key: fuzz-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: fuzz-cargo-${{ env.RUST_TOOLCHAIN }}-
 
-      # Build the compiler once — the fuzzer shells out to this binary.
+      # The compiler the fuzzer shells out to.
       - name: Build almide
         run: cargo build --release --bin almide
 
-      # Build the fuzzer (its own workspace; path-deps the compiler crate).
+      # The fuzzer is its OWN workspace (it path-deps the compiler crates), so
+      # its target dir is cached separately above — otherwise every night
+      # recompiles the whole compiler a second time.
       - name: Build fuzzer
         working-directory: tools/xtarget-fuzz
         run: cargo build --release
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-binaries-${{ github.run_id }}
+          path: |
+            target/release/almide
+            tools/xtarget-fuzz/target/release/xtarget-fuzz
+          retention-days: 1
+
+  fuzz:
+    if: github.server_url == 'https://github.com'
+    name: Generative differential fuzz
+    needs: build
+    runs-on: ubuntu-latest
+    # Hard ceiling well above the fuzz budget so a hung child can never
+    # wedge the runner indefinitely, with room for a dispatch run that raises
+    # `minutes`.
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: fuzz-binaries-${{ github.run_id }}
+
+      - name: Restore the executable bit
+        # `upload-artifact` does not preserve the mode.
+        run: |
+          chmod +x target/release/almide tools/xtarget-fuzz/target/release/xtarget-fuzz
+          ./target/release/almide --version
 
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
@@ -125,6 +176,31 @@ jobs:
           fi
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
 
+      # ALWAYS report what the campaign saw, including when the runner is
+      # reclaimed mid-run. A `exit 143` kill skips every conditional step, so
+      # before this the only trace of a truncated night was a red X with no
+      # numbers — indistinguishable from a real finding, and #796's "two
+      # consecutive green nights" had nothing to read. The last progress line
+      # the fuzzer printed is the verdict: it carries generated / clean /
+      # findings / walls, so a truncated night still says whether it found
+      # anything in the time it got.
+      - name: Campaign verdict
+        if: always()
+        run: |
+          echo "## Nightly fuzz verdict" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s fuzz-output.txt ]; then
+            LAST=$(grep -E "^ *\[ *[0-9]+s\]" fuzz-output.txt | tail -1 || true)
+            SEED=$(grep -oE "seed = [0-9]+" fuzz-output.txt | head -1 || true)
+            echo "Last progress line: ${LAST:-<none>}" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Campaign ${SEED:-seed unknown} — replay a finding with" >> "$GITHUB_STEP_SUMMARY"
+            echo "xtarget-fuzz replay --seed S --index I" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The campaign produced no output — it was killed before it started." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit 0
+
       - name: Upload findings
         if: steps.campaign.outputs.findings != '0'
         uses: actions/upload-artifact@v7
@@ -171,6 +247,20 @@ jobs:
             gh label create fuzz --color B60205 --description "Found by the nightly differential fuzzer" 2>/dev/null || true
             gh issue create --title "$TITLE" --body "$BODY" --label fuzz
           fi
+
+      # A night with findings is NOT a green night. Before this the campaign's
+      # status was captured with `set +e` and never re-raised, so a run that
+      # found real divergences still reported green — the only thing that ever
+      # turned this workflow red was the runner being reclaimed (#796). With the
+      # build split out the campaign now completes, so its verdict is the thing
+      # worth reporting: fail iff it recorded a finding. The findings are already
+      # uploaded and filed as an issue by the steps above, so failing here loses
+      # nothing and makes "two consecutive green nights" mean what it says.
+      - name: Fail the night on findings
+        if: steps.campaign.outputs.findings != '0'
+        run: |
+          echo "::error::the campaign recorded ${{ steps.campaign.outputs.findings }} finding(s) — see the uploaded artifacts and the tracking issue"
+          exit 1
 
   coverage-ratchet:
     name: Compiler structural coverage ratchet (#566)

@@ -21,6 +21,11 @@ fn bytes_from_string(s: String) -> Bytes = {
 
 fn bytes_len(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
 
+// bytes.data_ptr(b) -> the address of b's first data byte (header + 12) — the wasm twin of
+// native's `as_ptr` (#907: nendo hands `data_ptr(buf) + off` to the webgl host, which reads
+// the texture bytes straight out of linear memory at that address).
+fn bytes_data_ptr(b: Bytes) -> Int = prim.handle(b) + 12
+
 fn bytes_is_empty(b: Bytes) -> Bool = {
   let n = prim.load32(prim.handle(b) + 4)
   n == 0

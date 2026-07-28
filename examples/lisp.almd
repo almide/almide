@@ -70,22 +70,24 @@ fn parse_program(toks: List[String], i: Int, acc: List[Value]) -> List[Value] =
 // chain; extension merges new bindings over a child object.
 fn scope_new() -> Value = value.object([])
 
-// Bind params to args one merge at a time (an index recursion instead of
-// `list.zip`: zip over two Value lists routes to the not-yet-registered
-// deep-heap `list.zip_h` on the wasm leg — the wall told us so honestly).
-// Each step is let-bound: the wasm subset executes bound call chains where a
-// deeply NESTED call-in-arg tree would decline.
-fn scope_bind(env2: Value, names: List[Value], vals: List[Value], i: Int) -> Value =
-  if i >= list.len(names) then env2
-  else {
-    let n = sym_name(list_get_or_v(names, i))
-    let v = list_get_or_v(vals, i)
-    let e2 = value.merge(env2, value.object([(n, v)]))
-    scope_bind(e2, names, vals, i + 1)
+// Bind params to args by recursing over the ZIPPED pairs — `list.zip` over
+// two Value lists routes to the deep-heap `list.zip_h` self-host, and the
+// `list.first`/`list.drop` steps to their `_hshare` twins (#877): the
+// consumer fixture this example exists to exercise. (A `list.fold` over a
+// Value accumulator routes to a `fold_hacc` with no registered self-host
+// yet — the wall named it; the recursion is the registered-combinator form.)
+fn scope_bind(env2: Value, pairs: List[(Value, Value)]) -> Value =
+  match list.first(pairs) {
+    none => env2,
+    some(pair) => {
+      let (n, v) = pair
+      let e2 = value.merge(env2, value.object([(sym_name(n), v)]))
+      scope_bind(e2, list.drop(pairs, 1))
+    },
   }
 
 fn scope_child(parent: Value, names: List[Value], vals: List[Value]) -> Value =
-  scope_bind(value.object([("#parent", parent)]), names, vals, 0)
+  scope_bind(value.object([("#parent", parent)]), list.zip(names, vals))
 
 fn scope_chain_get(env: Value, name: String) -> Result[Value, String] =
   match value.get(env, name) {
@@ -139,12 +141,11 @@ fn eval(e: Value, env: Value, genv: Value) -> Value =
     },
   }
 
-// (`list.tail` and not `list.drop(xs, 1)`: over Value elements `drop` routes
-// to the not-yet-registered deep-heap `drop_hshare` on the wasm leg, while
-// `tail` has its heap-element twin registered — the wall named it honestly.)
 fn eval_form(items: List[Value], env: Value, genv: Value) -> Value = {
   let head = head_or_null(items)
-  if is_sym(head, "quote") then head_or_null(list.tail(items))
+  // `list.drop` over Value elements routes to the deep-heap `drop_hshare`
+  // self-host (#877) — the drop half of this example's consumer fixture.
+  if is_sym(head, "quote") then head_or_null(list.drop(items, 1))
   else if is_sym(head, "if") then {
     let c = eval(list_get_or_v(items, 1), env, genv)
     if truthy(c) then eval(list_get_or_v(items, 2), env, genv)

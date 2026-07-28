@@ -91,6 +91,19 @@ fn lower_literal(expr: &ast::Expr) -> Pat {
         ast::ExprKind::String { value, .. } => {
             Pat::Ctor(CtorId::Lit(format!("\"{value}\"")), vec![])
         }
+        // A NEGATIVE literal pattern is `Unary { op: "-", operand: Int|Float }`,
+        // not an `Int` node — the parser has no negative-literal token. Falling
+        // through to `Pat::Wild` here made `-1 => …` read as a catch-all, so it
+        // swallowed every later arm and reported the real `_` arm as unreachable
+        // (#897). Prefixing the operand's own literal keeps distinct negatives
+        // distinct and keeps `-1` from colliding with `1`.
+        ast::ExprKind::Unary { op, operand } if op.as_str() == "-" => {
+            match lower_literal(operand) {
+                Pat::Ctor(CtorId::Lit(text), args) => Pat::Ctor(CtorId::Lit(format!("-{text}")), args),
+                other => other,
+            }
+        }
+        ast::ExprKind::Paren { expr, .. } => lower_literal(expr),
         _ => Pat::Wild,
     }
 }

@@ -9,7 +9,7 @@ use almide_base::intern::Sym;
 
 // Escapes a raw string for emission inside a double-quoted literal. `Decl::Test`
 // names are stored (post-parse) as the raw, already-unescaped description text —
-// unlike `ExprKind::String` (see fmt_p2.rs), which fmt_expr escapes correctly,
+// unlike `ExprKind::String` (see fmt_expr.rs), which fmt_expr escapes correctly,
 // this had no escaping at all, so a test name containing a literal `"` (e.g.
 // `test "decide_pick(\"big\") ..."`) round-tripped through fmt into a broken,
 // prematurely-closed string literal — not idempotent, and not even valid on
@@ -389,7 +389,13 @@ pub fn format_program(program: &Program) -> String {
         out.push('\n');
     }
     for decl in &program.decls {
-        out.push('\n');
+        // The blank line SEPARATES declarations — so it belongs before every one except the
+        // first thing in the file. Emitting it unconditionally opened every import-less file
+        // with a blank line (#919: the leading-blank diff on every such spec fixture), which
+        // is also not idempotent-looking output for a file that starts with a doc comment.
+        if !out.is_empty() {
+            out.push('\n');
+        }
         emit_comments(&mut out, &mut ci);
         fmt_decl(&mut out, decl, 0);
         out.push('\n');
@@ -674,5 +680,5 @@ fn fmt_field_type(out: &mut String, f: &FieldType, depth: usize) {
     if let Some(d) = &f.default { out.push_str(" = "); fmt_expr(out, d, depth); }
 }
 
-include!("fmt_p2.rs");
-include!("fmt_p3.rs");
+include!("fmt_expr.rs");
+include!("fmt_tests.rs");

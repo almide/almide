@@ -106,7 +106,16 @@ impl Checker {
         if let Some(out) = self.unify_record_like(a, b) { return out; }
         if let Some(out) = self.unify_nominal(a, b) { return out; }
         if let Some(out) = self.unify_const_carrier(a, b) { return out; }
+        // `compatible` is DIRECTIONAL for the numeric widths (#867: a sized
+        // value does not flow into an `Int` slot). Constraints reaching here
+        // are PEER joins as often as expected/actual pairs — list elements,
+        // if branches, `assert_eq` args — where which side got picked as
+        // "expected" is an accident of visit order (`[1, u8v]` must join the
+        // same as `[u8v, 1]`). So numeric scalar pairs unify if EITHER
+        // direction coerces; the one-way discipline is enforced where the
+        // direction is real — `types_mismatch` (call args, annotations).
         a.compatible(b)
+            || (is_numeric_scalar(a) && is_numeric_scalar(b) && b.compatible(a))
     }
 
     /// Applied constructors, tuples and function types: same shape, same arity,
@@ -205,6 +214,20 @@ impl Checker {
             _ => return None,
         })
     }
+}
+
+/// The numeric scalar widths whose `compatible` rules are directional
+/// (#867) — the set the symmetric peer-join fallback in `unify_structural`
+/// applies to, and no other types. Also used by
+/// `validate_numeric_narrowing` (post_solve_validation.rs) to scope the annotation-site check.
+pub(crate) fn is_numeric_scalar(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int | Ty::Float
+            | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64
+    )
 }
 
 /// The actionable half of an E001 hint, chosen by the constraint's context.

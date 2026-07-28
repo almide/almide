@@ -256,8 +256,45 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
         if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
             continue;
         }
-        let funcs: std::collections::HashSet<String> = m.functions.iter().map(|f| f.name.to_string()).collect();
-        known_module_functions.insert(m.name.to_string(), funcs);
+        let mut funcs: std::collections::HashSet<String> =
+            m.functions.iter().map(|f| f.name.to_string()).collect();
+        // MONOMORPHIZATION renames a generic module fn to its specialized
+        // instances (`get` → `get__Int`, …) and the ORIGINAL disappears from
+        // `m.functions`, while a call site that mono did not rewrite still
+        // names the generic (#884: `ceangal.cell.get` reported unknown while
+        // the non-generic `is_dirty` in the same module verified fine — and
+        // only when the module was reached through a consumer's import graph,
+        // which is what made it look import-order dependent). Credit the
+        // generic BASE name of every specialized instance: an instance is
+        // `<base>__<suffix>`, so the base is what a not-yet-rewritten call
+        // spells. This keeps the gate on genuinely-absent names.
+        let bases: Vec<String> = funcs
+            .iter()
+            .filter_map(|n| n.split_once("__").map(|(b, _)| b.to_string()))
+            .filter(|b| !b.is_empty())
+            .collect();
+        funcs.extend(bases);
+        // The module's EXPORTS are its DECLARED surface, captured at lowering
+        // — before monomorphization, which drops a generic fn that no
+        // reachable call instantiated. A dependency module linked but never
+        // reached from the consumer's entry still has its body verified, and
+        // its calls into a sibling's generic fn then named something mono had
+        // removed (#884: `ceangal.cell.get`, while the non-generic
+        // `is_dirty` in the same module verified fine). The declared surface
+        // is the right question for "does this function exist".
+        funcs.extend(m.exports.iter().filter_map(|e| match e {
+            crate::IrExport::Function { name, .. } => Some(name.to_string()),
+            _ => None,
+        }));
+        // A duplicate module NAME must not silently overwrite: two IrModules
+        // sharing a name (a dependency's root and a sibling, #884) would leave
+        // the map holding whichever came last, and every call into the other
+        // would report unknown. Merge instead — the union is the honest
+        // surface, and the gate still catches a genuinely absent name.
+        known_module_functions
+            .entry(m.name.to_string())
+            .or_default()
+            .extend(funcs);
     }
 
     // Verify type declarations
@@ -486,4 +523,4 @@ fn ty_matches(actual: &Ty, expected: &Ty) -> bool {
     std::mem::discriminant(actual) == std::mem::discriminant(expected)
 }
 
-include!("verify_p2.rs");
+include!("verify_tests.rs");

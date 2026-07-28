@@ -79,6 +79,31 @@ fn spec_dir() -> PathBuf {
 }
 
 // ── Leg 1: native backend (compile to a binary, then run it) ──
+/// ONE build scratch for the whole test process.
+///
+/// `almide build` (native) compiles the generated Rust inside
+/// `$TMPDIR/almide-build` and reuses that Cargo target dir across builds. This
+/// harness used to hand every fixture a FRESH `TMPDIR`, which made the scratch
+/// cold every time — all ~318 fixtures paid a full dependency build instead of
+/// an incremental one. Measured on a 5-build loop: 0.97s shared vs 14.71s
+/// isolated, a 15x cliff, and it is why this gate ran ~4x longer than the 2-way
+/// `wasm_cross_target_spec` that does the SAME native+wasm builds (595s vs 140s)
+/// despite the interp leg itself being cheap.
+///
+/// Isolation from OTHER test processes still has to hold, and it does: the
+/// system-temp `almide-build` is shared and guarded only by an advisory flock
+/// held through build+copy, so a concurrently-running gate cross-contaminated
+/// `src/main.rs` + `target/` (observed: `inff64`, `Box<Tree>` leaking between
+/// fixtures). A per-PROCESS root keeps this harness off that shared dir while
+/// letting its own fixtures share one warm scratch — the isolation was never
+/// needed per fixture, only per process.
+fn build_scratch() -> &'static std::path::Path {
+    static SCRATCH: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    SCRATCH
+        .get_or_init(|| tempfile::tempdir().expect("failed to create build scratch"))
+        .path()
+}
+
 // Identical shape to wasm_runtime_test.rs::run_native_capture: build to a binary
 // FIRST (compiler diagnostics discarded), then run it, so the captured stderr is
 // the PROGRAM's runtime stderr — not the compiler's warnings — matching the wasm
@@ -90,17 +115,10 @@ fn run_native_capture(source: &str) -> (i32, String, String) {
     let bin_path = dir.path().join("test_native_bin");
     std::fs::write(&src_path, source).unwrap();
     let build = Command::new(almide_bin())
-        // ISOLATE the native build scratch dir. `almide build` (native) compiles
-        // generated Rust inside `std::env::temp_dir().join("almide-build")` — a
-        // SHARED dir guarded only by a cross-process flock held through
-        // build+copy. When other test processes (e.g. the 2-way
-        // `wasm_cross_target_spec` gate) run `almide build` in parallel, the
-        // shared `src/main.rs`+`target/` can get cross-contaminated and a fixture
-        // spuriously fails to compile with another fixture's types (observed:
-        // `inff64`, `Box<Tree>` leaking across fixtures). Pointing `TMPDIR` at a
-        // unique per-invocation dir gives this build its own scratch, removing
-        // the race so the third judge is deterministic.
-        .env("TMPDIR", dir.path())
+        // Keep this build off the shared system-temp scratch that other test
+        // processes race on — but on ONE dir for the whole process, so the Cargo
+        // target dir stays warm across fixtures. See `build_scratch`.
+        .env("TMPDIR", build_scratch())
         .args([
             "build",
             src_path.to_str().unwrap(),
@@ -135,10 +153,10 @@ fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
     let wasm_path = dir.path().join("test.wasm");
     std::fs::write(&src_path, source).unwrap();
     let build = Command::new(almide_bin())
-        // Isolate scratch (see run_native_capture). The wasm path uses bare
-        // rustc into the output dir, but pinning TMPDIR keeps any incidental
-        // temp use off the shared dir too.
-        .env("TMPDIR", dir.path())
+        // Isolate scratch (see run_native_capture / build_scratch). The wasm
+        // path uses bare rustc into the output dir, but pinning TMPDIR keeps any
+        // incidental temp use off the shared dir too.
+        .env("TMPDIR", build_scratch())
         .args([
             "build",
             src_path.to_str().unwrap(),

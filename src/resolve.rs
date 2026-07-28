@@ -158,6 +158,20 @@ fn resolve_self_import(
 
 /// `resolve_imports_with_deps`'s non-`self` import branch (`import X` /
 /// `import pkg.submodule`). Extracted verbatim.
+/// Load what a NON-`self` import names — the single rule for every import
+/// position (the entry program, a module's imports, a sub-namespace's imports,
+/// a dependency submodule's imports).
+///
+/// `import pkg` loads the package entry point and, through it, the package's
+/// sibling sub-namespaces. `import pkg.sub` loads ONLY that sub-module and its
+/// transitive imports. Keeping those apart matters: the non-entry positions used
+/// to route a dotted import through `load_module(path[0])`, which loaded the
+/// dependency's ROOT module and every sibling in its `src/` — a consumer that
+/// imported `ceangal.view` from a `self.` submodule got ceangal's demo app and
+/// its internal modules linked in, and their calls (into modules the consumer
+/// never imports, whose generics monomorphization had dropped as unreachable)
+/// failed IR verification (#884). The entry program's own imports always took
+/// the correct path, which is why the same import from the ROOT module built.
 fn resolve_named_import(path: &[crate::intern::Sym], ctx: &mut ResolveCtx) -> Result<(), String> {
     if path.len() == 1 {
         let name = &path[0];
@@ -281,20 +295,15 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
             load_self_module(sub_mod_name, sub_mod_path, src_dir, ctx, false)?;
         }
     } else {
-        let dep_name = &path[0];
-        // Bundled .almd stdlib modules (fs, process, http, json, ...)
-        // must be loaded from embedded source so their type_decls and
-        // @inline_rust fns reach codegen. Without this, a submodule's
-        // `import fs` is silently skipped because is_stdlib_module is
-        // true — the top-level resolver has this branch; recursive
-        // self-module loading needs it too.
-        if let Some(source) = stdlib::get_bundled_source(dep_name) {
-            if !ctx.loaded_names.contains(dep_name.as_str()) {
-                load_bundled_module(dep_name, source, ctx)?;
-            }
-        } else if !stdlib::is_stdlib_module(dep_name) {
-            load_module(dep_name, ctx)?;
-        }
+        // The SAME rule the entry program uses: `import pkg` loads the package,
+        // `import pkg.sub` loads only that sub-module. This position used to
+        // load `path[0]` whole, so a `self.` submodule's `import ceangal.view`
+        // dragged in ceangal's root module and every sibling in its `src/`
+        // (#884) — while the identical import from the consumer's ROOT module,
+        // which goes through `resolve_named_import`, did not. Bundled stdlib
+        // handling comes along with it (a submodule's `import fs` must load the
+        // embedded source, not be skipped as "stdlib").
+        resolve_named_import(path, ctx)?;
     }
     Ok(())
 }
@@ -396,11 +405,26 @@ fn load_module(name: &str, ctx: &mut ResolveCtx) -> Result<(), String> {
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
-            // `import self` in a dependency root module is self-referential — skip
-            if dep_name.as_str() == "self" { continue; }
-            if !stdlib::is_stdlib_module(dep_name) {
-                load_module(dep_name, ctx)?;
+            if dep_name.as_str() == "self" {
+                // A bare `import self` IS self-referential — skip. But
+                // `import self.<X>` names this package's own SIBLING (#884):
+                // skipping it left every call through the alias unresolved
+                // (`<pkg>.<X>.<fn>` unknown at IR verify) whenever a consumer
+                // pulled this module in. Load it under the dotted name this
+                // package's modules are registered by.
+                if path.len() >= 2 {
+                    let sub = &path[1..];
+                    let dotted = std::iter::once(name)
+                        .chain(sub.iter().map(|s| s.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    if !ctx.loaded_names.contains(&dotted) {
+                        load_submodule(name, sub, &dotted, ctx)?;
+                    }
+                }
+                continue;
             }
+            resolve_named_import(path, ctx)?;
         }
     }
 
@@ -422,16 +446,35 @@ fn parse_almd_file(file_path: &Path, display_name: &str) -> Result<(ast::Program
 
 /// Resolve imports within a sub-module's program. `import self` / `import
 /// self as pkg` is skipped — the root module is already loaded.
-fn resolve_submodule_imports(program: &ast::Program, ctx: &mut ResolveCtx) -> Result<(), String> {
+fn resolve_submodule_imports(
+    program: &ast::Program,
+    pkg_name: &str,
+    ctx: &mut ResolveCtx,
+) -> Result<(), String> {
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let first = path[0].as_str();
             if first == "self" {
+                // `import self.<X>` inside a sub-namespace of PKG names PKG's
+                // own sibling (#884/#885). Skipped, the sibling never loaded
+                // and every call through the alias failed IR verify as
+                // `<pkg>.<X>.<fn>` — visible only when the consumer's import
+                // graph happened to reach the module. Load it under the same
+                // dotted `<pkg>.<X>` name this loader registers everything by.
+                if path.len() >= 2 {
+                    let sub = &path[1..];
+                    let dotted = std::iter::once(pkg_name)
+                        .chain(sub.iter().map(|s| s.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    if !ctx.loaded_names.contains(&dotted) {
+                        load_submodule(pkg_name, sub, &dotted, ctx)?;
+                    }
+                }
                 continue;
             }
-            if !stdlib::is_stdlib_module(first) {
-                load_module(first, ctx)?;
-            }
+            let _ = first;
+            resolve_named_import(path, ctx)?;
         }
     }
     Ok(())
@@ -447,7 +490,7 @@ fn load_sub_namespace_file(pkg_name: &str, file_path: &Path, pkg_id: &Option<pro
     }
     let (program, mod_source) = parse_almd_file(file_path, &sub_name)?;
     record_module_source(ctx, &sub_name, file_path, mod_source);
-    resolve_submodule_imports(&program, ctx)?;
+    resolve_submodule_imports(&program, pkg_name, ctx)?;
     ctx.loaded_names.insert(sub_name.clone());
     ctx.loaded.push((sub_name, program, pkg_id.clone(), false));
     Ok(())
@@ -464,7 +507,7 @@ fn load_sub_namespace_dir(pkg_name: &str, subdir: &Path, pkg_id: &Option<project
         if sub_mod.exists() {
             let (program, mod_source) = parse_almd_file(&sub_mod, &sub_name)?;
             record_module_source(ctx, &sub_name, &sub_mod, mod_source);
-            resolve_submodule_imports(&program, ctx)?;
+            resolve_submodule_imports(&program, pkg_name, ctx)?;
             ctx.loaded_names.insert(sub_name.clone());
             ctx.loaded.push((sub_name.clone(), program, pkg_id.clone(), false));
         }
@@ -481,8 +524,20 @@ fn load_sub_namespaces(pkg_name: &str, src_dir: &Path, pkg_id: &Option<project::
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| {
+                // `*_test.almd` is a TEST module: its `test` blocks lower to
+                // synthesized `__test_almd_*` fns that call the package's own
+                // modules. Linking it into a CONSUMER's build pulls in code the
+                // consumer never imports and cannot resolve (#884 — 25 IR-verify
+                // errors, all inside `<dep>.<x>_test.__test_almd_*`). A package's
+                // own `almide test` finds them by walking the tree, not through
+                // this sub-namespace loader, so excluding them here costs no
+                // coverage.
+                let name = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
                 p.extension().map_or(false, |ext| ext == "almd")
-                    && p.file_name().map_or(false, |f| f != "mod.almd" && f != "lib.almd" && f != "main.almd")
+                    && name != "mod.almd"
+                    && name != "lib.almd"
+                    && name != "main.almd"
+                    && !name.ends_with("_test.almd")
             })
             .collect(),
         Err(_) => return Ok(()),
@@ -548,14 +603,35 @@ fn load_submodule(pkg_name: &str, sub_path: &[crate::intern::Sym], mod_name: &st
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
-            if dep_name.as_str() == "self" { continue; }
-            if let Some(source) = stdlib::get_bundled_source(dep_name) {
-                if !ctx.loaded_names.contains(dep_name.as_str()) {
-                    load_bundled_module(dep_name, source, ctx)?;
+            if dep_name.as_str() == "self" {
+                // `import self.<X>` INSIDE a dependency names a SIBLING module
+                // of that dependency, not of the consumer (#885). Skipping it
+                // left the sibling unresolved, so the alias reported
+                // `undefined variable '<alias>'` in the dependency's own
+                // source — and WHICH modules happened to be loaded (by the
+                // consumer's unrelated imports) decided how many errors
+                // appeared. Resolve it against the DEPENDENCY's package, under
+                // its canonical bare name, exactly as the package's own build
+                // would.
+                if path.len() >= 2 {
+                    let sub = &path[1..];
+                    // Registered under the DOTTED package-qualified name, the
+                    // convention every other dependency submodule uses
+                    // (`ceangal.cell`) — the bare name is what the package's
+                    // OWN build uses, and mixing the two left the dependency's
+                    // internal calls pointing at a name nothing registered.
+                    let dotted = std::iter::once(pkg_name)
+                        .chain(sub.iter().map(|s| s.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    if !ctx.loaded_names.contains(&dotted) {
+                        load_submodule(pkg_name, sub, &dotted, ctx)?;
+                    }
                 }
-            } else if !stdlib::is_stdlib_module(dep_name) {
-                load_module(dep_name, ctx)?;
+                continue;
             }
+            let _ = dep_name;
+            resolve_named_import(path, ctx)?;
         }
     }
 

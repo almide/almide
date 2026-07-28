@@ -4,8 +4,10 @@
 // by default; `encode_upper` for uppercase. Decoder accepts both cases
 // and rejects non-hex / odd-length inputs with `err`.
 //
-// Templates route the Rust target to `runtime/rs/src/hex.rs`; WASM
-// continues through `emit_wasm/calls_hex.rs` until a later arc.
+// Templates route the Rust target to `runtime/rs/src/hex.rs`; on WASM
+// encode and decode are SELF-HOSTED in `stdlib/hex_encode.almd`,
+// registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
+// dispatched through `emit_wasm/calls_hex.rs`, retired in c71eff7b.)
 
 @intrinsic("almide_rt_hex_encode")
 fn encode(b: Bytes) -> String = _

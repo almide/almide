@@ -316,11 +316,26 @@ fn sized_literal_coercion_ok() {
 }
 
 #[test]
-fn sized_canonical_int_plus_sized_ok() {
-    // `Int` / `Float` canonical types stay permissive to preserve the
-    // literal-coercion story. `Int + Int32` is therefore accepted (the
-    // right-hand side collapses to the sized variant at emit time).
-    has_no_errors("fn f(a: Int, b: Int32) -> Int32 = a + b");
+fn sized_canonical_int_plus_sized_rejected() {
+    // A canonical `Int` VALUE meeting a sized operand is the mixed-width
+    // mistake with the wide side spelled differently, and it does NOT collapse
+    // at emit time: native rustc rejected the generated code and the wasm leg —
+    // where every scalar rides one i64 — computed a value outside the declared
+    // width (#902). The permissive pair survives only for a LITERAL, which is
+    // what it exists for; `sized_canonical_int_literal_ok` pins that half.
+    let errs = errors("fn f(a: Int, b: Int32) -> Int32 = a + b");
+    assert!(
+        errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "expected a mixed-width rejection, got {errs:?}"
+    );
+}
+
+#[test]
+fn sized_canonical_int_literal_ok() {
+    // The literal-coercion story the permissive pair exists for: a literal
+    // adopts the sized width at lowering, so it stays accepted.
+    has_no_errors("fn f(b: Int32) -> Int32 = b + 1");
+    has_no_errors("fn g(b: Int32) -> Int32 = b + 2 * 3");
 }
 
 #[test]

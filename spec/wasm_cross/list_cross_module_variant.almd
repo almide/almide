@@ -1,0 +1,44 @@
+// @contract: C-175
+// A `List` literal of a (cross-module) VARIANT type builds and behaves
+// byte-identically on both targets (#875/#881). A FLAT variant element
+// (all-scalar payloads — `Circle(Float)`) frees with a per-element rc_dec
+// (the CtorFlat class); the same literal in a heap-result `if` ARM (`if n
+// <= 0 then [] else [leaf(n)]` — ceangal's kids_of) routes through the
+// bind-position record-list builder, with the EMPTY arm materialized as the
+// zero-length block of the same layout.
+
+type Figure =
+  | Circle(Float)
+  | Rect(Float, Float)
+
+type Node = { tag: Int, kids: List[Node] }
+
+fn circle(r: Float) -> Figure = Circle(r)
+
+fn area(f: Figure) -> Float =
+  match f {
+    Circle(r) => 3.14 * r * r
+    Rect(w, h) => w * h
+  }
+
+fn leaf(t: Int) -> Node = Node(tag: t, kids: [])
+
+fn kids_of(n: Int) -> List[Node] =
+  if n <= 0 then [] else [leaf(n)]
+
+fn main() -> Unit = {
+  let figures = [circle(1.0), circle(2.0), Rect(2.0, 3.0)]
+  println(int.to_string(list.len(figures)))
+  var total = 0.0
+  for f in figures {
+    total = total + area(f)
+  }
+  println(float.to_string(total))
+
+  println(int.to_string(list.len(kids_of(0))))
+  let ks = kids_of(7)
+  println(int.to_string(list.len(ks)))
+  for k in ks {
+    println(int.to_string(k.tag))
+  }
+}

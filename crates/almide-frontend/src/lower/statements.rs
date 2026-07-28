@@ -213,6 +213,25 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
         coerce_literal_to_sized(tail, declared, env);
         return;
     }
+    // #880: an `if` / `match` carries no literal of its own — its ARMS are the
+    // peers that do. The slot's width belongs to each arm the same way it
+    // belongs to a block tail, so descend and let every arm coerce on its own
+    // (`let v: UInt8 = if b then 1 else u8v` emitted `if … { 1i64 } else { 3u8 }`
+    // into a `u8` binding — one arm retyped by the peer join, the other not).
+    match &mut ir_val.kind {
+        IrExprKind::If { then, else_, .. } => {
+            coerce_literal_to_sized(then, declared, env);
+            coerce_literal_to_sized(else_, declared, env);
+            return;
+        }
+        IrExprKind::Match { arms, .. } => {
+            for arm in arms.iter_mut() {
+                coerce_literal_to_sized(&mut arm.body, declared, env);
+            }
+            return;
+        }
+        _ => {}
+    }
     // Resolve a named type alias to its structural form so a record / sized
     // alias declared via `type Rec = { b: Int8, .. }` (a `Ty::Named`) becomes
     // its `Ty::Record { .. }` / `Ty::Int8` / etc. before the match below.
@@ -245,26 +264,68 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
 
 /// Retype a bare default-typed literal to a sized numeric slot.
 ///
-/// Only a literal is retyped. A non-literal expression already has whatever
-/// width its own operands gave it, and silently widening or narrowing that would
-/// change the arithmetic rather than just record the annotation.
+/// Only a LITERAL-ONLY expression is retyped. A tree with a non-literal leaf
+/// already has whatever width its own operands gave it, and silently widening or
+/// narrowing that would change the arithmetic rather than just record the
+/// annotation — that half is the checker's to reject (#880).
 ///
-/// The `NegInt` arm reaches through the negation because the parser produces
-/// `-(1)`, not a signed literal: both the operand and the negation node have to
-/// carry the sized type or codegen emits a width mismatch between them.
+/// "Literal-only" reaches through negation and int arithmetic, not just a bare
+/// literal: `let b: Int32 = 5 - 3` has no operand that could have supplied a
+/// width, so every node in it is still the default `Int` and the emitted value
+/// landed in the `i32` slot as `2i64` — invalid Rust that `check` accepted
+/// (#895 follow-on, the fourth shape of #899). The negation case matters for the
+/// same reason: the parser produces `-(1)`, not a signed literal, so both the
+/// operand and the negation node have to carry the sized type or codegen emits a
+/// width mismatch between them.
 fn retype_scalar_literal(ir_val: &mut IrExpr, declared: &Ty) {
-    match &mut ir_val.kind {
-        IrExprKind::LitInt { .. } if ir_val.ty == Ty::Int => {
-            ir_val.ty = declared.clone();
+    let default = match declared {
+        Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => Ty::Int,
+        Ty::Float32 | Ty::Float64 => Ty::Float,
+        _ => return,
+    };
+    if is_default_numeric_tree(ir_val, &default) {
+        stamp_numeric_tree(ir_val, declared);
+    }
+}
+
+/// Whether every node of this expression is still the `default` numeric type
+/// and every leaf is a literal of it — i.e. nothing in the tree chose a width.
+fn is_default_numeric_tree(e: &IrExpr, default: &Ty) -> bool {
+    if e.ty != *default {
+        return false;
+    }
+    let (neg_op, ops): (almide_ir::UnOp, &[BinOp]) = match (default, &e.kind) {
+        (Ty::Int, IrExprKind::LitInt { .. }) | (Ty::Float, IrExprKind::LitFloat { .. }) => return true,
+        (Ty::Int, _) => (
+            almide_ir::UnOp::NegInt,
+            &[BinOp::AddInt, BinOp::SubInt, BinOp::MulInt, BinOp::DivInt, BinOp::ModInt, BinOp::PowInt],
+        ),
+        (Ty::Float, _) => (
+            almide_ir::UnOp::NegFloat,
+            &[BinOp::AddFloat, BinOp::SubFloat, BinOp::MulFloat, BinOp::DivFloat, BinOp::ModFloat, BinOp::PowFloat],
+        ),
+        _ => return false,
+    };
+    match &e.kind {
+        IrExprKind::UnOp { op, operand } if *op == neg_op => is_default_numeric_tree(operand, default),
+        IrExprKind::BinOp { op, left, right } => {
+            ops.contains(op)
+                && is_default_numeric_tree(left, default)
+                && is_default_numeric_tree(right, default)
         }
-        IrExprKind::LitFloat { .. } if ir_val.ty == Ty::Float => {
-            ir_val.ty = declared.clone();
-        }
-        IrExprKind::UnOp { op: almide_ir::UnOp::NegInt, operand } => {
-            if matches!(&operand.kind, IrExprKind::LitInt { .. }) && operand.ty == Ty::Int {
-                operand.ty = declared.clone();
-                ir_val.ty = declared.clone();
-            }
+        _ => false,
+    }
+}
+
+/// Stamp `declared` on every node of a tree `is_default_numeric_tree` accepted.
+/// Whole-tree, because an operator node and its operands must agree on width.
+fn stamp_numeric_tree(e: &mut IrExpr, declared: &Ty) {
+    e.ty = declared.clone();
+    match &mut e.kind {
+        IrExprKind::UnOp { operand, .. } => stamp_numeric_tree(operand, declared),
+        IrExprKind::BinOp { left, right, .. } => {
+            stamp_numeric_tree(left, declared);
+            stamp_numeric_tree(right, declared);
         }
         _ => {}
     }
@@ -409,15 +470,36 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
 /// type instead of asking the `TypeMap`. Anything else is an expression that
 /// happens to appear in pattern position and does go through `lower_expr`.
 fn lower_pattern_literal(ctx: &mut LowerCtx, value: &ast::Expr) -> IrPattern {
-    let (kind, ty) = match &value.kind {
-        ast::ExprKind::Int { raw, .. } =>
-            (IrExprKind::LitInt { value: crate::literals::int_value(raw) }, Ty::Int),
-        ast::ExprKind::Float { value: v, .. } => (IrExprKind::LitFloat { value: *v }, Ty::Float),
-        ast::ExprKind::String { value: v, .. } => (IrExprKind::LitStr { value: v.clone() }, Ty::String),
-        ast::ExprKind::Bool { value: v, .. } => (IrExprKind::LitBool { value: *v }, Ty::Bool),
-        _ => return IrPattern::Literal { expr: lower_expr(ctx, value) },
+    let Some((kind, ty)) = scalar_pattern_literal(value) else {
+        return IrPattern::Literal { expr: lower_expr(ctx, value) };
     };
     IrPattern::Literal { expr: ctx.mk(kind, ty, value.span) }
+}
+
+/// The scalar forms a literal pattern can take, folded to IR with their type
+/// known outright. `None` means "not a scalar literal" — an expression that
+/// happens to sit in pattern position, which does go through `lower_expr`.
+///
+/// A NEGATIVE literal is `Unary { op: "-", .. }`, not an `Int`/`Float` node, so
+/// it used to take the `lower_expr` path — where the TypeMap has no entry for a
+/// pattern expression and the literal came out `ty=Unknown`, failing the
+/// pre-codegen resolution check with `unresolved LitInt` (#897). Folding the
+/// sign in here keeps it on the known-type path with the other scalars.
+fn scalar_pattern_literal(value: &ast::Expr) -> Option<(IrExprKind, Ty)> {
+    match &value.kind {
+        ast::ExprKind::Int { raw, .. } =>
+            Some((IrExprKind::LitInt { value: crate::literals::int_value(raw) }, Ty::Int)),
+        ast::ExprKind::Float { value: v, .. } => Some((IrExprKind::LitFloat { value: *v }, Ty::Float)),
+        ast::ExprKind::String { value: v, .. } => Some((IrExprKind::LitStr { value: v.clone() }, Ty::String)),
+        ast::ExprKind::Bool { value: v, .. } => Some((IrExprKind::LitBool { value: *v }, Ty::Bool)),
+        ast::ExprKind::Paren { expr } => scalar_pattern_literal(expr),
+        ast::ExprKind::Unary { op, operand } if op.as_str() == "-" => match scalar_pattern_literal(operand)? {
+            (IrExprKind::LitInt { value: v }, ty) => Some((IrExprKind::LitInt { value: -v }, ty)),
+            (IrExprKind::LitFloat { value: v }, ty) => Some((IrExprKind::LitFloat { value: -v }, ty)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Lower a record-variant pattern.

@@ -98,19 +98,16 @@ fn source_to_ir(source: &str) -> almide_ir::IrProgram {
     ir
 }
 
-fn main() {
-    let mut args = std::env::args().skip(1);
-    let path = args.next().unwrap_or_else(|| {
-        die("usage: emit_cert_from_source <file.almd> [function] [ownership|names|caps] [manifest.toml]".into())
-    });
-    let func_name = args.next().unwrap_or_else(|| "main".to_string());
-    let property = args.next().unwrap_or_else(|| "ownership".to_string());
-    let manifest_allow: Option<Vec<String>> = args.next().map(|p| read_manifest_allow(&p));
-
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| die(format!("cannot read {path}: {e}")));
-    let ir = source_to_ir(&source);
-
+/// Extracted verbatim from `main` (codopsy round-3 sweep, #852): collect the
+/// program's top-level `let` globals — their declared types AND their
+/// initializers — as the two maps every lowering entry point below is threaded
+/// with.
+fn collect_top_level_globals(
+    ir: &almide_ir::IrProgram,
+) -> (
+    std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) {
     // Top-level `let` globals (VarId -> declared Ty), union of program- and
     // module-level top_lets — the declared set the lowering uses to admit a global
     // reference instead of walling it.
@@ -130,6 +127,103 @@ fn main() {
             global_inits.insert(tl.var, tl.value.clone());
         }
     }
+    (globals, global_inits)
+}
+
+/// Extracted verbatim from `main` (codopsy round-3 sweep, #852): print, on
+/// stderr, every name-matching function's ownership cert and numbered MIR ops
+/// (or its wall) — the body of the `mir` debug property.
+fn dump_mir_ops(
+    ir: &almide_ir::IrProgram,
+    func_name: &str,
+    globals: &std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: &std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) {
+    let mut record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
+    let mut variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
+    for m in &ir.modules {
+        record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
+        let vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
+        variant_layouts.by_type.extend(vl.by_type);
+        variant_layouts.ctor_to_type.extend(vl.ctor_to_type);
+    }
+    for f in &ir.functions {
+        if !f.name.as_str().contains(func_name) {
+            continue;
+        }
+        match almide_mir::lower::lower_function_all_with_globals(
+            f, globals, global_inits, &record_layouts, &variant_layouts,
+        ) {
+            Ok(mirs) => {
+                for mir in &mirs {
+                    eprintln!("=== {} ===", mir.name);
+                    eprintln!("ownership cert: {}", ownership_certificate(mir));
+                    for (i, op) in mir.ops.iter().enumerate() {
+                        eprintln!("  [{i}] {op:?}");
+                    }
+                }
+            }
+            Err(e) => eprintln!("=== {} WALL: {e:?} ===", f.name.as_str()),
+        }
+    }
+}
+
+/// Extracted verbatim from `main` (codopsy round-3 sweep, #852): lower every
+/// program function to MIR under its IR name, silently dropping the ones that
+/// fall outside the subset — the whole-program map the transitive capability
+/// witness folds a callee's reachable caps over.
+fn lower_program_functions(
+    ir: &almide_ir::IrProgram,
+    globals: &std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+) -> BTreeMap<String, almide_mir::MirFunction> {
+    let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
+    for f in &ir.functions {
+        if let Ok(m) = almide_mir::lower::lower_function(f, globals) {
+            program.insert(f.name.as_str().to_string(), m);
+        }
+    }
+    program
+}
+
+/// Extracted verbatim from `main` (codopsy round-3 sweep, #852): the same
+/// whole-program lowering, but keeping EVERY variant the all-variant entry
+/// produces — the lifted `__lambda_*` auxiliaries included, since those are the
+/// FuncRef table targets an indirect site's possible-callee set is computed
+/// from. Keyed by the MIR name (not the IR name) so the auxiliaries land too.
+fn lower_program_with_lifted_lambdas(
+    ir: &almide_ir::IrProgram,
+    globals: &std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: &std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) -> BTreeMap<String, almide_mir::MirFunction> {
+    let record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
+    let variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
+    let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
+    for f in &ir.functions {
+        if let Ok(mirs) = almide_mir::lower::lower_function_all_with_globals(
+            f, globals, global_inits, &record_layouts, &variant_layouts,
+        ) {
+            for m in mirs {
+                program.insert(m.name.clone(), m);
+            }
+        }
+    }
+    program
+}
+
+fn main() {
+    let mut args = std::env::args().skip(1);
+    let path = args.next().unwrap_or_else(|| {
+        die("usage: emit_cert_from_source <file.almd> [function] [ownership|names|caps] [manifest.toml]".into())
+    });
+    let func_name = args.next().unwrap_or_else(|| "main".to_string());
+    let property = args.next().unwrap_or_else(|| "ownership".to_string());
+    let manifest_allow: Option<Vec<String>> = args.next().map(|p| read_manifest_allow(&p));
+
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| die(format!("cannot read {path}: {e}")));
+    let ir = source_to_ir(&source);
+
+    let (globals, global_inits) = collect_top_level_globals(&ir);
 
     let func = ir
         .functions
@@ -155,33 +249,7 @@ fn main() {
     if property == "mir" {
         // Debug aid: dump the MIR ops the variant-aware lowering produces (for ALL functions
         // whose name contains `func_name`, since mono specializes generics like `unbox$String`).
-        let mut record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
-        let mut variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
-        for m in &ir.modules {
-            record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
-            let vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
-            variant_layouts.by_type.extend(vl.by_type);
-            variant_layouts.ctor_to_type.extend(vl.ctor_to_type);
-        }
-        for f in &ir.functions {
-            if !f.name.as_str().contains(func_name.as_str()) {
-                continue;
-            }
-            match almide_mir::lower::lower_function_all_with_globals(
-                f, &globals, &global_inits, &record_layouts, &variant_layouts,
-            ) {
-                Ok(mirs) => {
-                    for mir in &mirs {
-                        eprintln!("=== {} ===", mir.name);
-                        eprintln!("ownership cert: {}", ownership_certificate(mir));
-                        for (i, op) in mir.ops.iter().enumerate() {
-                            eprintln!("  [{i}] {op:?}");
-                        }
-                    }
-                }
-                Err(e) => eprintln!("=== {} WALL: {e:?} ===", f.name.as_str()),
-            }
-        }
+        dump_mir_ops(&ir, func_name.as_str(), &globals, &global_inits);
         return;
     }
 
@@ -203,12 +271,7 @@ fn main() {
         // Transitive capability witness: needs the WHOLE program, so a callee's
         // reachable caps are accounted at the call site (per-call-site rule).
         "tcaps" => {
-            let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
-            for f in &ir.functions {
-                if let Ok(m) = almide_mir::lower::lower_function(f, &globals) {
-                    program.insert(f.name.as_str().to_string(), m);
-                }
-            }
+            let program = lower_program_functions(&ir, &globals);
             print!("{}", transitive_cap_witness_string(&mir, &program));
         }
         // Call-mode signature witness (brick 2c): whole-program — every function's
@@ -220,18 +283,7 @@ fn main() {
         // (closure) sites' possible-callee sets are computed from (brick 5c) —
         // without them every CallIndirect would be unknowable (sentinel REJECT).
         "modes" => {
-            let record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
-            let variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
-            let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
-            for f in &ir.functions {
-                if let Ok(mirs) = almide_mir::lower::lower_function_all_with_globals(
-                    f, &globals, &global_inits, &record_layouts, &variant_layouts,
-                ) {
-                    for m in mirs {
-                        program.insert(m.name.clone(), m);
-                    }
-                }
-            }
+            let program = lower_program_with_lifted_lambdas(&ir, &globals, &global_inits);
             // Dotted callees are self-hosted stdlib calls, and `__`-prefixed
             // OUT-OF-PROGRAM callees are the render-linked runtime helpers
             // (`__str_concat` / `__list_concat` — the greeter-lambda class):

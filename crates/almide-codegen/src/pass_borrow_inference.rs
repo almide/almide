@@ -621,5 +621,5 @@ fn is_heap_type(ty: &Ty) -> bool {
     ) || matches!(ty, Ty::Named(n, _) if is_record_type_name(n.as_str()))
 }
 
-include!("pass_borrow_inference_p2.rs");
-include!("pass_borrow_inference_p3.rs");
+include!("pass_borrow_inference_ownership.rs");
+include!("pass_borrow_inference_call_sites.rs");

@@ -60,7 +60,22 @@ pub fn canonicalize_program<'a>(
     }
 
     // 2. Register user modules (with prefix)
+    let mut collect_dep_roots = |env: &mut TypeEnv, prog: &ast::Program| {
+        for imp in &prog.imports {
+            if let ast::Decl::Import { path, .. } = imp {
+                if let Some(root) = path.first() {
+                    if root.as_str() != "self"
+                        && !almide_lang::stdlib_info::is_stdlib_module(root.as_str())
+                    {
+                        env.dep_root_modules.insert(*root);
+                    }
+                }
+            }
+        }
+    };
+    collect_dep_roots(&mut env, program);
     for (name, mod_prog, is_self) in modules {
+        collect_dep_roots(&mut env, mod_prog);
         register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
     }
 

@@ -168,9 +168,46 @@ fn generate_named_record_reprs(
         .filter(|(n, _)| rec_emittable.contains(*n))
         .collect();
     rec_sorted.sort_by_key(|(n, _)| *n);
+    let need_list =
+        records_needing_list_repr(&record_decls, &rec_names, rec_emittable, interp_containers);
+    for (tname, fields) in rec_sorted.iter() {
+        let fname = drop_fn_ident(tname);
+        out.push_str(&format!("fn __repr_rec_{fname}(e: {tname}) -> String = {{
+"));
+        out.push_str("  let h = prim.handle(e)
+");
+        let mut concat = format!("\"{tname} {{ \"");
+        for (i, (fld, ty)) in fields.iter().enumerate() {
+            if i > 0 {
+                concat.push_str(" + \", \"");
+            }
+            concat.push_str(&format!(" + \"{fld}: \""));
+            emit_record_field_read(out, i, ty, &rec_names, names);
+            concat.push_str(&format!(" + f{i}"));
+        }
+        concat.push_str(" + \" }\"");
+        out.push_str(&format!("  {concat}
+}}
+"));
+    }
+    for r in &need_list {
+        emit_record_list_repr(out, r);
+    }
+}
+
+/// Which emittable records need the LIST loop — referenced as a `List[R]` FIELD anywhere,
+/// or as a `${List[R]}` INTERP PART anywhere (compound_repr_records' `points=${pts}`, whose
+/// container display composes the same element loop). Extracted verbatim from
+/// [`generate_named_record_reprs`] (codopsy round-3 sweep, #852).
+fn records_needing_list_repr(
+    record_decls: &[(&str, Vec<(String, Ty)>)],
+    rec_names: &std::collections::HashSet<String>,
+    rec_emittable: &std::collections::HashSet<String>,
+    interp_containers: &InterpReprContainers,
+) -> std::collections::BTreeSet<String> {
     // Which emittable records need the LIST loop (referenced as a List[R] field anywhere)?
     let mut need_list: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for (n, fields) in &record_decls {
+    for (n, fields) in record_decls {
         if !rec_emittable.contains(*n) {
             continue;
         }
@@ -189,19 +226,21 @@ fn generate_named_record_reprs(
             need_list.insert(r.clone());
         }
     }
-    for (tname, fields) in rec_sorted.iter() {
-        let fname = drop_fn_ident(tname);
-        out.push_str(&format!("fn __repr_rec_{fname}(e: {tname}) -> String = {{
-"));
-        out.push_str("  let h = prim.handle(e)
-");
-        let mut concat = format!("\"{tname} {{ \"");
-        for (i, (fld, ty)) in fields.iter().enumerate() {
-            let off = layout::slot_offset(i);
-            if i > 0 {
-                concat.push_str(" + \", \"");
-            }
-            concat.push_str(&format!(" + \"{fld}: \""));
+    need_list
+}
+
+/// ONE record field's read into `f{i}`, dispatched on the field type: an int-repr slot,
+/// a Bool, a String (quoted), a `Value` (JSON-serialized, C-060), else a nested variant /
+/// record / `List[record]` handle load recursing into that type's own repr fn. Extracted
+/// verbatim from [`generate_named_record_reprs`] (codopsy round-3 sweep, #852).
+fn emit_record_field_read(
+    out: &mut String,
+    i: usize,
+    ty: &Ty,
+    rec_names: &std::collections::HashSet<String>,
+    names: &std::collections::HashSet<String>,
+) {
+    let off = layout::slot_offset(i);
             match ty {
                 t if repr_int_field(t) => out.push_str(&format!(
                     "  let f{i} = int.to_string(prim.load64(h + {off}))
@@ -247,14 +286,12 @@ fn generate_named_record_reprs(
                     }
                 }
             }
-            concat.push_str(&format!(" + f{i}"));
-        }
-        concat.push_str(" + \" }\"");
-        out.push_str(&format!("  {concat}
-}}
-"));
-    }
-    for r in &need_list {
+}
+
+/// The `List[R]` display pair for one record: the tail-recursive element loop and its
+/// entry point. Extracted verbatim from [`generate_named_record_reprs`] (codopsy round-3
+/// sweep, #852).
+fn emit_record_list_repr(out: &mut String, r: &str) {
         let r_fn = drop_fn_ident(r);
         out.push_str(&format!(
             "fn __repr_list_rec_{r_fn}_go(h: Int, n: Int, i: Int, acc: String) -> String =
@@ -272,7 +309,6 @@ fn generate_named_record_reprs(
 }}
 "
         ));
-    }
 }
 
 /// The container interp parts: `${Option[R]}`, `${Option[V]}`, `${List[V]}` and

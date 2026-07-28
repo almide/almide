@@ -31,7 +31,7 @@ test: build
 	$(BIN) test
 
 test-rust:
-	cargo test
+	cargo test --workspace
 
 test-wasm: build
 	$(BIN) test --target wasm
@@ -61,6 +61,13 @@ verify-trust:
 	proofs/gate.sh
 	proofs/corpus-wall.sh
 	cargo test -p almide-mir
+	@## Record WHICH tree+toolchain this verification describes, so a `make
+	@## receipt` on the identical tree can fold these verdicts into the receipt
+	@## instead of re-deriving them (it runs the same three scripts — 232s of the
+	@## CI job). Written only after every step above succeeded; any difference in
+	@## the tree or the toolchain yields a different fingerprint and receipt.sh
+	@## re-verifies from scratch. See proofs/lib/stamp.sh::toolchain_fingerprint.
+	@. proofs/lib/stamp.sh && toolchain_fingerprint . > proofs/.verified-fingerprint
 
 receipt:
 	proofs/receipt.sh

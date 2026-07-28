@@ -8,8 +8,9 @@
 // whose last-ULP result is platform-specific (glibc vs macOS vs musl differ), so
 // there is no stable oracle. Following the Java `StrictMath`/fdlibm decision, we
 // REPLACE the native implementation with a fixed reference algorithm so the same
-// bits come out everywhere — and the WASM port (`emit_wasm/rt_libm.rs`) mirrors
-// THIS file function-for-function.
+// bits come out everywhere — and the self-hosted WASM port (`stdlib/math_trig.almd`,
+// `math_exp.almd`, `math_log.almd`) mirrors THIS file function-for-function.
+// (v0's port was `emit_wasm/rt_libm.rs`, retired in c71eff7b.)
 //
 // PROVENANCE
 // ----------

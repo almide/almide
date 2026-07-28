@@ -64,7 +64,10 @@ impl LowerCtx {
         self.scalar_loop_depth += 1;
         let mut ok = true;
         for stmt in body {
-            if self.lower_while_body_stmt(stmt).is_err() {
+            if let Err(e) = self.lower_while_body_stmt(stmt) {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                    format!("[for-range] body stmt declined: {e:?}")
+                });
                 ok = false;
                 break;
             }

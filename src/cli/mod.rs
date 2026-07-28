@@ -26,7 +26,7 @@ pub use build::{cmd_build, BuildArgs};
 pub use compile::cmd_compile;
 pub use emit::{cmd_emit, EmitArgs};
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
-pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_wasm, cmd_fmt, cmd_clean};
+pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_wasm, cmd_fmt, cmd_clean, FmtMode};
 pub use install::cmd_install;
 pub use selfupdate::cmd_self_update;
 pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
@@ -164,7 +164,15 @@ pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::Nativ
         .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
-    let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir) } else { None };
+    // A `native/` DIRECTORY is itself something to inject (#886): a package
+    // whose only native requirement is a `native/*.rs` module — no
+    // [native-deps], no [dependencies] — got `None` here, so the module was
+    // never copied into the generated crate and the build failed with an
+    // opaque `E0433: could not find <mod> in the crate root` pointing at
+    // generated code the user cannot see.
+    let has_native_dir = toml_dir.join("native").is_dir();
+    let source_root =
+        if !native_deps.is_empty() || has_deps || has_native_dir { Some(toml_dir) } else { None };
     (native_deps, source_root)
 }
 

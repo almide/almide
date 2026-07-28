@@ -12,9 +12,9 @@ pub const STDLIB_MODULES: &[&str] = &[
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
     // so users never need `import int32`.
-    "int8", "int16", "int32",
+    "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
-    "float32",
+    "float32", "float64",
 ];
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
@@ -24,9 +24,9 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "mem", "net", "zlib",
-    "int8", "int16", "int32",
+    "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
-    "float32",
+    "float32", "float64",
     // The v1 primitive floor (raw memory + fd_write); v1 maps `prim.*` to MIR ops.
     "prim",
 ];
@@ -45,9 +45,9 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     // provided.
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
-    "int8", "int16", "int32",
+    "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
-    "float32",
+    "float32", "float64",
     // env / io / random / regex / testing are NOT auto-imported —
     // users still need `import env` / `import io` etc. These bundled
     // modules exist so `@inline_rust` templates are discoverable when
@@ -92,66 +92,68 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
 
 fn bundled_source_core(name: &str) -> Option<&'static str> {
     match name {
-        "args" => Some(include_str!("../../../stdlib/args.almd")),
-        "path" => Some(include_str!("../../../stdlib/path.almd")),
-        "list" => Some(include_str!("../../../stdlib/list.almd")),
-        "int" => Some(include_str!("../../../stdlib/int.almd")),
-        "base64" => Some(include_str!("../../../stdlib/base64.almd")),
-        "hex" => Some(include_str!("../../../stdlib/hex.almd")),
-        "float" => Some(include_str!("../../../stdlib/float.almd")),
-        "bytes" => Some(include_str!("../../../stdlib/bytes.almd")),
-        "error" => Some(include_str!("../../../stdlib/error.almd")),
-        "value" => Some(include_str!("../../../stdlib/value.almd")),
+        "args" => Some(crate::embedded::SRC_ARGS),
+        "path" => Some(crate::embedded::SRC_PATH),
+        "list" => Some(crate::embedded::SRC_LIST),
+        "int" => Some(crate::embedded::SRC_INT),
+        "base64" => Some(crate::embedded::SRC_BASE64),
+        "hex" => Some(crate::embedded::SRC_HEX),
+        "float" => Some(crate::embedded::SRC_FLOAT),
+        "bytes" => Some(crate::embedded::SRC_BYTES),
+        "error" => Some(crate::embedded::SRC_ERROR),
+        "value" => Some(crate::embedded::SRC_VALUE),
         _ => None,
     }
 }
 
 fn bundled_source_collections(name: &str) -> Option<&'static str> {
     match name {
-        "option" => Some(include_str!("../../../stdlib/option.almd")),
-        "result" => Some(include_str!("../../../stdlib/result.almd")),
-        "map" => Some(include_str!("../../../stdlib/map.almd")),
-        "set" => Some(include_str!("../../../stdlib/set.almd")),
-        "string" => Some(include_str!("../../../stdlib/string.almd")),
-        "env" => Some(include_str!("../../../stdlib/env.almd")),
-        "io" => Some(include_str!("../../../stdlib/io.almd")),
-        "random" => Some(include_str!("../../../stdlib/random.almd")),
-        "regex" => Some(include_str!("../../../stdlib/regex.almd")),
-        "testing" => Some(include_str!("../../../stdlib/testing.almd")),
+        "option" => Some(crate::embedded::SRC_OPTION),
+        "result" => Some(crate::embedded::SRC_RESULT),
+        "map" => Some(crate::embedded::SRC_MAP),
+        "set" => Some(crate::embedded::SRC_SET),
+        "string" => Some(crate::embedded::SRC_STRING),
+        "env" => Some(crate::embedded::SRC_ENV),
+        "io" => Some(crate::embedded::SRC_IO),
+        "random" => Some(crate::embedded::SRC_RANDOM),
+        "regex" => Some(crate::embedded::SRC_REGEX),
+        "testing" => Some(crate::embedded::SRC_TESTING),
         _ => None,
     }
 }
 
 fn bundled_source_io(name: &str) -> Option<&'static str> {
     match name {
-        "process" => Some(include_str!("../../../stdlib/process.almd")),
-        "fs" => Some(include_str!("../../../stdlib/fs.almd")),
-        "http" => Some(include_str!("../../../stdlib/http.almd")),
-        "html" => Some(include_str!("../../../stdlib/html.almd")),
-        "json" => Some(include_str!("../../../stdlib/json.almd")),
-        "matrix" => Some(include_str!("../../../stdlib/matrix.almd")),
-        "mem" => Some(include_str!("../../../stdlib/mem.almd")),
-        "math" => Some(include_str!("../../../stdlib/math.almd")),
-        "datetime" => Some(include_str!("../../../stdlib/datetime.almd")),
+        "process" => Some(crate::embedded::SRC_PROCESS),
+        "fs" => Some(crate::embedded::SRC_FS),
+        "http" => Some(crate::embedded::SRC_HTTP),
+        "html" => Some(crate::embedded::SRC_HTML),
+        "json" => Some(crate::embedded::SRC_JSON),
+        "matrix" => Some(crate::embedded::SRC_MATRIX),
+        "mem" => Some(crate::embedded::SRC_MEM),
+        "math" => Some(crate::embedded::SRC_MATH),
+        "datetime" => Some(crate::embedded::SRC_DATETIME),
         _ => None,
     }
 }
 
 fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
     match name {
-        "int8" => Some(include_str!("../../../stdlib/int8.almd")),
-        "int16" => Some(include_str!("../../../stdlib/int16.almd")),
-        "int32" => Some(include_str!("../../../stdlib/int32.almd")),
-        "uint8" => Some(include_str!("../../../stdlib/uint8.almd")),
-        "uint16" => Some(include_str!("../../../stdlib/uint16.almd")),
-        "uint32" => Some(include_str!("../../../stdlib/uint32.almd")),
-        "uint64" => Some(include_str!("../../../stdlib/uint64.almd")),
-        "float32" => Some(include_str!("../../../stdlib/float32.almd")),
-        "net" => Some(include_str!("../../../stdlib/net.almd")),
-        "zlib" => Some(include_str!("../../../stdlib/zlib.almd")),
+        "int8" => Some(crate::embedded::SRC_INT8),
+        "int16" => Some(crate::embedded::SRC_INT16),
+        "int32" => Some(crate::embedded::SRC_INT32),
+        "int64" => Some(crate::embedded::SRC_INT64),
+        "uint8" => Some(crate::embedded::SRC_UINT8),
+        "uint16" => Some(crate::embedded::SRC_UINT16),
+        "uint32" => Some(crate::embedded::SRC_UINT32),
+        "uint64" => Some(crate::embedded::SRC_UINT64),
+        "float32" => Some(crate::embedded::SRC_FLOAT32),
+        "float64" => Some(crate::embedded::SRC_FLOAT64),
+        "net" => Some(crate::embedded::SRC_NET),
+        "zlib" => Some(crate::embedded::SRC_ZLIB),
         // The v1 primitive floor (raw memory + fd_write). v1 maps `prim.*` to MIR
         // primitive ops by module name; the @intrinsic symbols are v0 placeholders.
-        "prim" => Some(include_str!("../../../stdlib/prim.almd")),
+        "prim" => Some(crate::embedded::SRC_PRIM),
         _ => None,
     }
 }
@@ -239,7 +241,9 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         | "is_subset" | "is_disjoint" => vec!["set"],
 
         // ── int-only ──
-        "to_string" | "to_hex"
+        // (`to_string` is NOT here: every sized-numeric module declares one,
+        // so it belongs to the sized-numeric table below — see #893.)
+        "to_hex"
         | "band" | "bor" | "bxor" | "bnot" | "bshl" | "bshr"
         | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left"
         | "to_u32" | "to_u8" => vec!["int"],
@@ -343,11 +347,21 @@ fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
     match method {
         "to_int8" | "to_int16" | "to_int32" | "to_int64"
         | "to_uint8" | "to_uint16" | "to_uint32" | "to_uint64"
-        | "to_float32" | "to_float64" => vec![
+        | "to_float32" | "to_float64"
+        // `to_string` too (#893): every sized-numeric module declares one, and
+        // the UFCS resolver reaches this table when `env.functions` has no
+        // entry — which is the case for an embedder that hands the renderer a
+        // bare source (no resolved bundled modules), so `big.to_string()`
+        // reported "undefined method" through the API while the CLI, whose
+        // resolver HAD registered the bundled signatures, accepted it. The
+        // candidate list is only consulted after `builtin_module_for_type`
+        // has already picked the ONE module for the receiver's type, so
+        // listing them together cannot make a call ambiguous.
+        | "to_string" => vec![
             "int", "float",
-            "int8", "int16", "int32",
+            "int8", "int16", "int32", "int64",
             "uint8", "uint16", "uint32", "uint64",
-            "float32",
+            "float32", "float64",
         ],
 
         _ => vec![],

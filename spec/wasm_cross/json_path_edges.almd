@@ -2,7 +2,8 @@
 // Cross-target differential fixture: json get/set/remove_path edge cases.
 //
 // Native `runtime/rs/src/json.rs` path ops are the INFALLIBLE oracle. The WASM
-// `emit_wasm/rt_value.rs` path walkers had 8 divergences this locks down:
+// path walkers (v0's `emit_wasm/rt_value.rs`, now self-hosted in
+// `stdlib/json_path.almd`) had 8 divergences this locks down:
 //   1. get_path negative Index normalizes (len + i); WASM returned None.
 //   2. set_path negative Index normalizes (top + nested); WASM left unchanged.
 //   3. set_path Index over an OBJECT → no-op; WASM read pairs as an array (garbage).

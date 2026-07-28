@@ -333,11 +333,19 @@ fn heap_fold_call_name_map_str_acc(module: &str, arg_tys: &[Ty], result_ty: &Ty)
 /// fails `is_heap_ty` and keeps the wall. Verbatim.
 fn heap_fold_call_name_hrec(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
-    let is_named_heap =
-        |t: &Ty| matches!(t, Ty::Named(..) | Ty::Record { .. }) && is_heap_ty(t);
-    let elem_is_named = matches!(arg_tys.first(),
-        Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 && is_named_heap(&e[0]));
-    if module == "list" && elem_is_named && is_named_heap(result_ty) {
+    // ANY heap element with ANY heap accumulator (#883). `list_fold_hrec` is
+    // fully TYPE-ERASED — both sides are uniform handles, the element is read
+    // with `prim.load_handle` and the acc moves through the closure — so the
+    // Named/Record spelling of its gate was narrower than its implementation.
+    // A `(Value, Value)` tuple element with a `Value` acc (the lisp
+    // `list.zip(names, vals) |> list.fold(env, …)` shape) fell past it to the
+    // unregistered catch-all `list.fold_hacc` and walled. SCALAR elements stay
+    // out: their i64 slots are values, not handles, and reading one as a
+    // handle would be a wrong pointer (Int/Bool have their own `_hsca` twin
+    // below; Float keeps walling, since an f64 closure param would ABI-mismatch).
+    let elem_is_heap = matches!(arg_tys.first(),
+        Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 && is_heap_ty(&e[0]));
+    if module == "list" && elem_is_heap && is_heap_ty(result_ty) {
         return Some("list.fold_hrec".to_string());
     }
     None

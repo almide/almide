@@ -1,0 +1,49 @@
+// int64 / float64 — the two sized-numeric widths that had no module (#894).
+//
+// Every other width (`int8`, `int16`, `int32`, `uint8`, `uint16`, `uint32`,
+// `uint64`, `float32`) shipped one; `Int64` and `Float64` did not, so the only
+// route was the canonical pivot `int.to_string(int.from_int64(x))` — which a
+// reader who has used `int32.to_string` has no reason to look for. UFCS did not
+// cover them either: `n.to_float64()` reported `expected Int64 but got
+// fn() -> Float64` because the receiver-type table had no entry.
+
+test "int64 conversions match the canonical pivot" {
+  let n: Int64 = 7;
+  assert_eq(int64.to_string(n), "7");
+  assert_eq(int64.to_string(n), int.to_string(int.from_int64(n)));
+  assert_eq(int64.to_int32(n), int.to_int32(int.from_int64(n)));
+  assert_eq(int64.to_float64(n), int.to_float64(int.from_int64(n)))
+}
+
+test "float64 conversions match the canonical pivot" {
+  let x: Float64 = 2.5;
+  assert_eq(float64.to_string(x), "2.5");
+  assert_eq(float64.to_string(x), float.to_string(float.from_float64(x)));
+  assert_eq(float64.to_int32(x), float.to_int32(float.from_float64(x)));
+  assert_eq(float64.to_float32(x), float.to_float32(float.from_float64(x)))
+}
+
+test "int64 and float64 dispatch through UFCS" {
+  let n: Int64 = 7;
+  let x: Float64 = 2.5;
+  assert_eq(n.to_string(), "7");
+  assert_eq(x.to_string(), "2.5");
+  assert_eq(n.to_float64(), 7.0);
+  assert_eq(x.to_int64(), 2)
+}
+
+test "negative values keep their sign through both modules" {
+  let n: Int64 = 0 - 7;
+  let x: Float64 = 0.0 - 2.5;
+  assert_eq(int64.to_string(n), "-7");
+  assert_eq(float64.to_string(x), "-2.5");
+  // Float → int is a saturating TRUNCATION toward zero, not a round.
+  assert_eq(float64.to_int32(x), 0 - 2);
+  assert_eq(int64.to_float64(n), 0.0 - 7.0)
+}
+
+test "narrowing wraps rather than trapping, as in every other width" {
+  let big: Int64 = 300;
+  assert_eq(int64.to_int8(big), int.to_int8(300));
+  assert_eq(int64.to_uint8(big), int.to_uint8(300))
+}

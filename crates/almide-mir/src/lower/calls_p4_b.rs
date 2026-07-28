@@ -367,12 +367,19 @@ impl LowerCtx {
     /// is TOTAL once matched (no internal failure after a guard commits), so unlike
     /// the guard-then-possibly-fail routers elsewhere, chaining via `.or_else()` is
     /// safe: neither half can partially match and fall through wrongly.
-    fn scalar_binop_int_arith_op(op: &almide_ir::BinOp) -> Option<crate::IntOp> {
+    fn scalar_binop_int_arith_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
         use almide_ir::BinOp;
+        // The unsigned 64-bit lane (#872): a `UInt64` operand's i64 slot
+        // carries the u64 bit pattern — add/sub/mul wrap identically in
+        // two's complement, but division/remainder must interpret it
+        // unsigned (the signed op computed `u64::MAX / 2` as `-1 / 2 = 0`).
+        let u64_lane = matches!(left_ty, Ty::UInt64);
         Some(match op {
             BinOp::AddInt => crate::IntOp::Add,
             BinOp::SubInt => crate::IntOp::Sub,
             BinOp::MulInt => crate::IntOp::Mul,
+            BinOp::DivInt if u64_lane => crate::IntOp::DivU,
+            BinOp::ModInt if u64_lane => crate::IntOp::ModU,
             BinOp::DivInt => crate::IntOp::Div,
             BinOp::ModInt => crate::IntOp::Mod,
             _ => return None,
@@ -386,6 +393,17 @@ impl LowerCtx {
     // `scalar_binop_int_cmp_op` below.
     fn scalar_binop_int_ord_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
         use almide_ir::BinOp;
+        // `UInt64` ordering is unsigned (#872): the signed compare put the
+        // upper half of the domain below zero.
+        if matches!(left_ty, Ty::UInt64) {
+            return Some(match op {
+                BinOp::Lt => crate::IntOp::LtU,
+                BinOp::Lte => crate::IntOp::LeU,
+                BinOp::Gt => crate::IntOp::GtU,
+                BinOp::Gte => crate::IntOp::GeU,
+                _ => return None,
+            });
+        }
         Some(match op {
             BinOp::Lt if Self::int_ord_operand_ty(left_ty) => crate::IntOp::Lt,
             BinOp::Lte if Self::int_ord_operand_ty(left_ty) => crate::IntOp::Le,
@@ -420,7 +438,8 @@ impl LowerCtx {
     // eager `IntBinOp` path. Native + interp evaluate the RHS lazily. Pow, Float, concat,
     // non-Int/Bool compares: defer — neither half above matches, so `None` falls through.)
     fn scalar_binop_int_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
-        Self::scalar_binop_int_arith_op(op).or_else(|| Self::scalar_binop_int_cmp_op(op, left_ty))
+        Self::scalar_binop_int_arith_op(op, left_ty)
+            .or_else(|| Self::scalar_binop_int_cmp_op(op, left_ty))
     }
 
     fn lower_scalar_binop_int_fallback(
@@ -429,13 +448,79 @@ impl LowerCtx {
         left: &IrExpr,
         right: &IrExpr,
     ) -> Option<ValueId> {
-        let iop = Self::scalar_binop_int_op(op, &left.ty)?;
+        // Either operand may be the one carrying the declared `UInt64` — a
+        // literal operand records the checker's default `Int` (#872), so
+        // asking only the left one missed `u64::MAX / 2`.
+        let lane_ty = if matches!(right.ty, Ty::UInt64) { &right.ty } else { &left.ty };
+        let iop = Self::scalar_binop_int_op(op, lane_ty)?;
         let a = self.lower_scalar_value(left)?;
         let b = self.lower_scalar_value(right)?;
         self.emit_narrow_div_overflow_guard(iop, &left.ty, a, b);
         let dst = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
-        Some(dst)
+        Some(self.narrow_wrap(dst, lane_ty, iop))
+    }
+
+    /// Re-wrap an arithmetic result to its DECLARED narrow width (#889).
+    ///
+    /// The MIR carries every integer in one i64, so `Int8 127 + 1` computes
+    /// `128` in the lane; native emits real `i8` arithmetic and wraps to
+    /// `-128`, so the wasm leg printed a value OUTSIDE the type's range and
+    /// the two targets disagreed. Wrapping at the declared width is the
+    /// documented semantics ("narrowing wraps rather than trapping",
+    /// stdlib/int8.almd), so re-apply it here for the ops that can leave the
+    /// range: signed → shift left then ARITHMETIC shift right (sign-extends
+    /// the truncated value), unsigned → mask. Comparisons and Int/Int64
+    /// (already the carrier's own width) are untouched, and `/`/`%` cannot
+    /// leave the range once their operands are in it — the one exception,
+    /// `MIN / -1`, already aborts via `emit_narrow_div_overflow_guard`.
+    fn narrow_wrap(&mut self, v: ValueId, ty: &Ty, iop: crate::IntOp) -> ValueId {
+        if !matches!(
+            iop,
+            crate::IntOp::Add | crate::IntOp::Sub | crate::IntOp::Mul
+        ) {
+            return v;
+        }
+        self.wrap_to_declared_width(v, ty)
+    }
+
+    /// Wrap `v` to `ty`'s declared width — [`Self::narrow_wrap`] without the
+    /// which-operator gate, for a producer that is not an `IntBinOp`.
+    ///
+    /// The `^` OPERATOR needs it: on wasm it lowers to a `math.pow` CALL, so it
+    /// never passed through the `IntBinOp` path that wraps, and `Int32 999997 ^ 2`
+    /// printed the full i64 `999994000009` while native — which computes at the
+    /// base's own width — printed the wrapped `-733379959`. `*` and `+` at the same
+    /// type already agreed, so the divergence was the operator's, not the type's.
+    /// Wrapping once at the end is exactly wrapping at each step: two's-complement
+    /// multiplication is congruent mod 2^bits, so a product of wrapped factors and
+    /// the wrap of the full product are the same value.
+    pub(crate) fn wrap_to_declared_width(&mut self, v: ValueId, ty: &Ty) -> ValueId {
+        let (bits, signed) = match ty {
+            Ty::Int8 => (8u32, true),
+            Ty::Int16 => (16, true),
+            Ty::Int32 => (32, true),
+            Ty::UInt8 => (8, false),
+            Ty::UInt16 => (16, false),
+            Ty::UInt32 => (32, false),
+            _ => return v,
+        };
+        if signed {
+            let shift = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: shift, value: (64 - bits) as i64 });
+            let up = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: up, op: crate::IntOp::Shl, a: v, b: shift });
+            let down = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: down, op: crate::IntOp::Shr, a: up, b: shift });
+            down
+        } else {
+            let mask = self.fresh_value();
+            let m = if bits == 64 { -1i64 } else { ((1u64 << bits) - 1) as i64 };
+            self.ops.push(Op::ConstInt { dst: mask, value: m });
+            let out = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: out, op: crate::IntOp::And, a: v, b: mask });
+            out
+        }
     }
 
     /// Extracted from `Self::lower_scalar_binop_int_fallback` (ninth-round split, cog

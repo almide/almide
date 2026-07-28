@@ -107,7 +107,28 @@ fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps:
                     let _ = std::fs::create_dir_all(parent);
                 }
             }
-            if let Err(e) = std::fs::copy(&bin_path, output) {
+            // Stage-and-RENAME, never copy onto an existing executable. A bare
+            // `fs::copy` rewrites the destination IN PLACE (same inode), and on
+            // macOS the kernel's code-signature cache is keyed by vnode: a
+            // binary overwritten at the same inode after its previous content
+            // was executed gets SIGKILLed on the next exec — no exit code, no
+            // stderr, nothing to debug. `almide build app.almd -o app` twice in
+            // a row then `./app` reproduced it sporadically, and the fuzzer's
+            // per-worker reused output path hit it reliably deep into a
+            // campaign (seed 1785165458340124000 index 572: a phantom
+            // "native run failed while wasm succeeded"). The rename gives the
+            // destination a fresh inode atomically; the staging temp lives in
+            // the SAME directory so the rename cannot cross a filesystem.
+            let staged = {
+                let out_path = std::path::Path::new(&output);
+                let file_name = out_path.file_name().map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| output.to_string());
+                out_path.with_file_name(format!(".{}.staged-{}", file_name, std::process::id()))
+            };
+            let copy_then_rename = std::fs::copy(&bin_path, &staged)
+                .and_then(|_| std::fs::rename(&staged, output));
+            if let Err(e) = copy_then_rename {
+                let _ = std::fs::remove_file(&staged);
                 err(&format!("Failed to copy binary to {}: {}", output, e));
                 std::process::exit(1);
             }
@@ -221,7 +242,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, _produced_by_v1) = match compile_to_wasm_bytes(file, allow_unverified, verified) {
+    let (bytes, _produced_by_v1) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
@@ -460,8 +481,16 @@ fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(),
 /// codegen: a program that compiles is verified, a program the renderer
 /// cannot verify is refused with the wall reason (refusal over risk — the
 /// medical-grade bar). Extracted verbatim.
-fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang::ast::Program, bool)]) -> Result<(Vec<u8>, bool), ()> {
-    match almide_mir::pipeline::try_render_wasm_source(
+fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang::ast::Program, bool)], library_ok: bool) -> Result<(Vec<u8>, bool), ()> {
+    // `almide build` may produce a main-less LIBRARY module (pub-fn exports,
+    // synthesized empty `_start` — #881); `almide run` must keep the no-main
+    // wall so the wasm leg fails exactly where native compilation does.
+    let render = if library_ok {
+        almide_mir::pipeline::try_render_wasm_source_library
+    } else {
+        almide_mir::pipeline::try_render_wasm_source
+    };
+    match render(
         source_text,
         v1_self_modules,
         std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok(),
@@ -496,7 +525,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
     }
 }
 
-pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool) -> Result<(Vec<u8>, bool), ()> {
+pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool) -> Result<(Vec<u8>, bool), ()> {
     let (mut program, source_text, mut resolved) = parse_and_resolve_wasm(file)?;
 
     // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
@@ -517,7 +546,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
     // exactly as without `--verified`.
     let _ = (&mut ir_program, allow_unverified, verified);
-    render_wasm_module(&source_text, &v1_self_modules)
+    render_wasm_module(&source_text, &v1_self_modules, library_ok)
 }
 
 /// Trim every "name"-id custom section down to its function-names

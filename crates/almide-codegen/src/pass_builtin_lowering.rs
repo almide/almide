@@ -292,8 +292,13 @@ fn rewrite_call_named(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, 
             return rewrite_call_option_codec(name, type_name.to_string(), args, type_args, ty, span);
         }
     }
-    // Other __ prefixed → almide_rt_
-    if name.starts_with("__") {
+    // Remaining generated codec helpers (primitive `__encode_option_*` /
+    // `__decode_option_*`, `__decode_default_*`) → their `almide_rt___`
+    // prelude definitions. Only the generated `__encode_`/`__decode_`
+    // families are rewritten: a USER fn merely named with a `__` prefix must
+    // link like any other user fn — the old blanket `__` rewrite renamed its
+    // call sites but never its definition, so it failed with E0425 (#868).
+    if name.starts_with("__encode_") || name.starts_with("__decode_") {
         return IrExpr { kind: IrExprKind::Call {
             target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
             args, type_args,

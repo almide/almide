@@ -63,6 +63,16 @@ hand-written.
 - Collections: `List[T]`, `Map[K, V]`, `Set[T]`
 - Error: `Result[T, E]` (`ok(v)` / `err(e)`), `Option[T]` (`some(v)` / `none`)
 
+### Integer literals
+```
+255  1_000_000       // decimal, `_` separators anywhere between digits
+0xFF  0x1_00         // hex     (0x / 0X)
+0b1010  0b1111_0000  // binary  (0b / 0B)
+0o17                 // octal   (0o / 0O)
+```
+All radixes are plain `Int` values — same arithmetic, both targets identical.
+A bare prefix (`0x` with no digits) is a compile error, never a silent `0`.
+
 ## Functions
 ```
 fn name(x: Type, y: Type) -> RetType = expr

@@ -28,12 +28,20 @@ impl Parser {
             return self.parse_fn_type_body();
         }
         if self.check(TokenType::LParen) { return self.parse_tuple_type(); }
-        // Module-qualified type: module.TypeName (e.g. binary.Instr)
+        // Module-qualified type: one or more lowercase segments ending in the
+        // type name — `binary.Instr`, or the package-submodule form
+        // `snaidhm.ttf.CubicBez` the drop/repr generators render for
+        // cross-package types (#881).
         if self.check(TokenType::Ident) && self.peek_dot_type_name() {
-            let module = self.advance_and_get_sym();
+            let mut path = self.advance_and_get_sym().to_string();
             self.advance(); // skip '.'
+            while self.check(TokenType::Ident) {
+                path.push('.');
+                path.push_str(&self.advance_and_get_sym());
+                self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
+            }
             let type_name = self.expect_type_name()?;
-            let qualified = sym(&format!("{}.{}", module, type_name));
+            let qualified = sym(&format!("{}.{}", path, type_name));
             return self.parse_type_name_suffix(qualified);
         }
         let name = self.expect_type_name()?;

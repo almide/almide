@@ -481,6 +481,17 @@ fn desugar_all_try_match_branch_passes(
         .or_else(|| desugar_sort_by_cached_keys(cur))
         .or_else(|| desugar_to_option_calls(cur))
         .or_else(|| desugar_offtype_testing_asserts(cur))
+        // The heap-if call-arg hoist and the mutable-global projection-arg
+        // hoist run in the LOWERING's pre-slots (mod_c.rs) — they must run on
+        // the COUNTED tree too, and BEFORE `desugar_heap_branches`: the hoist
+        // creates the statement-position `let t = if <heap>` bind whose
+        // continuation the branch desugar then DUPLICATES into both arms.
+        // Without them here the lowering counted the duplicated calls while
+        // this tree kept the originals → a false `mir > ir` caps breach
+        // (block_line_collect, the #881 hoist; desugar-before-both must mean
+        // BOTH — the assert-rewrite precedent above).
+        .or_else(|| crate::lower::desugar_heap_if_call_args(cur))
+        .or_else(|| crate::lower::desugar_mutable_global_projection_args(cur))
         .or_else(|| desugar_heap_branches(cur, layouts))
         .or_else(|| desugar_scalar_tuple_literal_match(cur))
         .or_else(|| desugar_scalar_guard_match(cur))

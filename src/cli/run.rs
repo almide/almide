@@ -89,6 +89,36 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
 /// previously gated on a per-source-path side file, so path-unstable callers
 /// like the 268-fixture cross-target gate paid a full rustc per fixture per
 /// run even when the generated code was byte-identical.)
+/// A content digest of every file under `<root>/native/` (recursively — asset
+/// subdirectories travel with the modules and are `include_str!`d by them, so
+/// they shape the binary too). Sorted by path so the digest is deterministic.
+/// Empty when there is no `native/` directory.
+fn native_sources_key(root: &std::path::Path) -> String {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if let Ok(bytes) = std::fs::read(&p) {
+                out.push((p, bytes));
+            }
+        }
+    }
+    let native = root.join("native");
+    if !native.is_dir() {
+        return String::new();
+    }
+    let mut files = Vec::new();
+    walk(&native, &mut files);
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut acc = String::new();
+    for (path, bytes) in files {
+        acc.push_str(&format!("{}:{:016x};", path.display(), hash64(&bytes)));
+    }
+    acc
+}
+
 pub(crate) fn build_native_cached(
     rs_code: &str,
     use_test_harness: bool,
@@ -114,9 +144,15 @@ pub(crate) fn build_native_cached(
         .map(|d| format!("{}={}", d.name, d.spec))
         .collect::<Vec<_>>()
         .join(",");
+    // The `native/*.rs` modules are compiled INTO the binary, so their
+    // CONTENTS are part of its identity (#887). Keyed only by the source_root
+    // PATH, editing a native module was a cache hit: nothing recompiled and
+    // `almide build` reported success while shipping the previous binary —
+    // exit 0 even with syntactically invalid Rust in the module.
+    let native_key = source_root.map(native_sources_key).unwrap_or_default();
     let hash_input = format!(
-        "{}:test={}:release={}:deps={}:root={:?}",
-        &rs_code, use_test_harness, release, dep_key, source_root
+        "{}:test={}:release={}:deps={}:root={:?}:native={}",
+        &rs_code, use_test_harness, release, dep_key, source_root, native_key
     );
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let profile_dir = if release { "release" } else { "debug" };
@@ -186,6 +222,18 @@ pub(crate) fn build_native_cached(
     }
 }
 
+/// The launcher's own working directory, exported to the child as
+/// `ALMIDE_CWD` on BOTH targets. The wasm guest resolves relative fs paths
+/// against it (the `PWD` env var can be STALE when a parent process sets the
+/// child cwd without updating it — Node `execFileSync(..., {cwd})`, IDE run
+/// configs — #874); the native child gets the same variable so `env.get`
+/// observes an identical environment across targets.
+pub fn almide_cwd() -> Option<String> {
+    std::env::current_dir()
+        .ok()
+        .and_then(|d| d.to_str().map(|s| s.to_string()))
+}
+
 /// Run a compiled binary with the given args, returning exit code.
 pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
     // Belt for the parallel-test ETXTBSY race (the staging rename above is the
@@ -193,8 +241,12 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
     // back off briefly and retry instead of failing the whole suite.
     let mut delay = std::time::Duration::from_millis(20);
     for _ in 0..6 {
-        match Command::new(bin)
-            .env("RUST_MIN_STACK", "8388608")
+        let mut cmd = Command::new(bin);
+        cmd.env("RUST_MIN_STACK", "8388608");
+        if let Some(cwd) = almide_cwd() {
+            cmd.env("ALMIDE_CWD", cwd);
+        }
+        match cmd
             .args(program_args)
             .status()
         {
@@ -271,7 +323,7 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
     // build-only (you opt into shipping a known-bad artifact, not into running it).
-    let (bytes, _produced_by_v1) = match super::build::compile_to_wasm_bytes(file, false, verified) {
+    let (bytes, _produced_by_v1) = match super::build::compile_to_wasm_bytes(file, false, verified, false) {
         Ok(b) => b,
         Err(()) => return 1,
     };
@@ -291,10 +343,15 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     // variables native `std::env::var` does (without it every guest lookup is
     // none — a silent cross-target divergence). Program args go after the module
     // path; wasmtime forwards them to the guest as argv.
-    let status = Command::new("wasmtime")
-        .arg("--dir=/")
-        .arg("-S")
-        .arg("inherit-env=y")
+    let mut cmd = Command::new("wasmtime");
+    cmd.arg("--dir=/").arg("-S").arg("inherit-env=y");
+    // The guest resolves relative fs paths against ALMIDE_CWD (in preference
+    // to a possibly-stale inherited PWD — #874); `--env` overrides win over
+    // `inherit-env`, so this pins the real launcher cwd either way.
+    if let Some(cwd) = almide_cwd() {
+        cmd.arg(format!("--env=ALMIDE_CWD={}", cwd));
+    }
+    let status = cmd
         .arg(&wasm_path)
         .args(program_args)
         .status();

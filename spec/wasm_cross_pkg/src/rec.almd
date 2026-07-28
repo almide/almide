@@ -84,6 +84,7 @@ fn tick(tw: Tween, dt_ms: Float) -> Tween = {
         let overflow = active_time - tw.duration
         Tween { from: tw.from, to: tw.to, duration: tw.duration, delay: tw.delay, easing: tw.easing, direction: tw.direction, loop_count: tw.loop_count,
           elapsed: tw.delay + overflow,
+          state: tw.state,
           current_loop: tw.current_loop + 1,
         }
       } else {

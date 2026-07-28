@@ -142,38 +142,41 @@ impl Ty {
     /// `compatible_numeric` sub-case: Int64/Float64 bridging to the
     /// canonical `Int`/`Float` slots, and literal coercion of `Int`/`Int64`
     /// (resp. `Float`/`Float64`) into any narrower sized width.
-    fn compatible_numeric_coerce(a: &Ty, b: &Ty) -> Option<bool> {
-        Some(match (a, b) {
+    ///
+    /// DIRECTIONAL, like the Matrix bridge above: `self` is the expected
+    /// (parameter/annotation) side, the argument value must be assignable to
+    /// it (`types_mismatch` preserves this order). Coercion runs one way —
+    /// INTO a sized slot, where the canonical-typed side is a literal being
+    /// contextually typed (`let x: Int32 = 42`). The reverse pair is a real
+    /// sized VALUE flowing into a canonical slot; accepting it emitted Rust
+    /// that rustc rejects (i32 where i64 expected, E0308 — #867), so it is
+    /// rejected here and the explicit `x.to_int64()` / `x.to_float64()`
+    /// stays the one idiom. Only same-width `Int64`/`Float64` bridge freely.
+    fn compatible_numeric_coerce(expected: &Ty, actual: &Ty) -> Option<bool> {
+        Some(match (expected, actual) {
             // `Int` (canonical, literal slot) ↔ `Int64` (explicit
             // width). Same 64-bit runtime repr so they freely interop.
             // The binop `is_sized_scalar` rule still catches
             // `Int32 + Int64` because `Int64` is *sized*; `Int` is not.
             (Ty::Int, Ty::Int64) | (Ty::Int64, Ty::Int) => true,
             (Ty::Float, Ty::Float64) | (Ty::Float64, Ty::Float) => true,
-            // Int64 / Float64 literal-coerce to narrower sized widths,
-            // same as `Int` / `Float`.
-            (Ty::Int64, Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
-            | (Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int64) => true,
-            (Ty::Float64, Ty::Float32) | (Ty::Float32, Ty::Float64) => true,
-            // Literal coercion (Sized Numeric Types Stage 1b): an
-            // integer literal inferred as `Ty::Int` is accepted in a
-            // context that expects any sized integer type. Same for
-            // `Ty::Float` ↔ `Ty::Float32`. The coercion is symmetric
-            // in `compatible` because this pass runs before range
-            // checking; the subsequent arithmetic-dispatch sub-phase
-            // will enforce same-type binary ops, and an explicit
-            // range-check pass (Stage 1b polish) catches `UInt8 = 300`.
-            // Keeping it here (rather than threading an "expected
-            // type" through infer) is a deliberate minimum-viable
-            // choice: it gets `let x: Int32 = 42` working today with
-            // a tight, auditable one-line rule per pairing.
-            (Ty::Int, Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
-            | (Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int) => true,
-            (Ty::Float, Ty::Float32) | (Ty::Float32, Ty::Float) => true,
+            // Literal coercion (Sized Numeric Types Stage 1b): an integer
+            // literal inferred as the canonical `Ty::Int` (or explicit
+            // `Int64`) is accepted where a sized integer type is expected.
+            // Same for `Float`/`Float64` into `Float32`. This runs before
+            // range checking; E024 catches `UInt8 = 300` afterwards.
+            (Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64,
+             Ty::Int | Ty::Int64) => true,
+            (Ty::Float32, Ty::Float | Ty::Float64) => true,
+            // A narrow sized VALUE where the canonical/64-bit type is
+            // expected: rejected — no literal ever types this direction,
+            // so it is always a real value that needs `.to_int64()` /
+            // `.to_float64()` (#867).
+            (Ty::Int | Ty::Int64,
+             Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64) => false,
+            (Ty::Float | Ty::Float64, Ty::Float32) => false,
             _ => return None,
         })
     }

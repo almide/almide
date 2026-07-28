@@ -1,9 +1,11 @@
 // testing — bundled-Almide stdlib module.
 //
-// Pure assertion helpers dispatched via `@intrinsic`. WASM routing
-// lives in `emit_wasm/calls.rs::dispatch_runtime_fallback` (routes
-// `testing.*` to the Named dispatcher, where the hardcoded
-// assert_contains / assert_approx / etc. implementations live).
+// Pure assertion helpers dispatched via `@intrinsic`. On WASM the
+// assertions are SELF-HOSTED in `stdlib/testing_assert.almd`, registered
+// in `crates/almide-mir/src/render_wasm/registry.rs`. (v0 routed
+// `testing.*` through `emit_wasm/calls.rs::dispatch_runtime_fallback` to a
+// Named dispatcher holding hardcoded assert_contains / assert_approx /
+// etc. implementations; that tree was retired in c71eff7b.)
 
 @intrinsic("almide_rt_test_assert_throws")
 fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
