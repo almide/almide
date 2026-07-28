@@ -2381,7 +2381,7 @@ id        = "C-190"
 spec      = "ALS-M4"
 title     = "A closure captures any scalar, not just Int and Bool — Float and every sized int width included"
 statement = "A lifted lambda's closure env holds its non-heap captures in the SCALAR region: raw 64-bit slots that `$__drop_closure` never touches, written by `Op::ListLit` and read back by `Op::ListGetScalar`. The class test for that region restated a SUBSET of `is_heap_ty`'s negation (`Int | Bool`) instead of reading it, so every other scalar was refused for no physical reason and the whole lift walled — `(s) => d` over a `let d: Float`, and equally over `Int8`/`Int16`/`Int32`/`Int64`/`UInt8`/`UInt16`/`UInt32`/`UInt64`. `Float` carried a specific misreading: that its slot needed an f64↔i64 reinterpret the prim vocabulary lacked. It needs none — a MIR float local ALREADY holds its bits in an i64 and every float op reinterprets around ITSELF (`PrimKind::FloatBin` and the F32 family), so the bits round-trip through a scalar slot untouched, exactly as an `Int` does. The refusal was not merely a missing feature: a lambda outside the liftable subset in a call-argument position walls its enclosing function, so `apply((s) => d)`, `result.unwrap_or_else(v, (s) => d)` and `list.map((x) => x * scale)` over a Float local all failed to render while their Int twins rendered — an acceptance split with no runtime difference behind it. Captures whose slot is genuinely NOT one raw i64 keep their honest wall: a `List[List[Int]]` capture has owned heap in every element, which neither the flat `rc_dec` nor the nested `__drop_list_str` walk frees."
-since     = "0.37.1"
+since     = "0.37.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_scalar_captures.almd", class = "fixture" },
