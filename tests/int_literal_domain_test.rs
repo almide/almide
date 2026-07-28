@@ -80,6 +80,21 @@ const REJECTED: &[(&str, &str)] = &[
     // ── magnitude, unsigned edge ─────────────────────────────────────────
     // One PAST the declared domain of the widest unsigned type.
     ("let a: UInt64 = 18446744073709551616", "would silently fold to 0 here"),
+    // ── through a paren / minus chain ────────────────────────────────────
+    // The annotation has to reach the literal through however many `Paren` and
+    // `Unary` nodes the source parks above it. A walk that stopped at the first
+    // one left these with no range context at all: `check` accepted them and
+    // rustc then rejected the emitted `-300i8` (differential fuzz, seed
+    // 1785217538023450905 index 535).
+    ("let a: Int8 = -(300)", "would silently fold to 0"),
+    ("let a: Int8 = --300", "would silently fold to 0"),
+    ("let a: Int8 = -(-300)", "would silently fold to 0"),
+    // Parity, not presence. `--9223372036854775808` is +2^63 — the magnitude
+    // that only the NEGATED bound admits, so reading "there was a minus" instead
+    // of counting them would call this valid and fold it silently.
+    ("let a: Int = --9223372036854775808", "would silently fold to 0"),
+    // Parity decides the SIGN deviation too: an odd count is still negative.
+    ("let a: UInt8 = ---5", "has no negative values at all"),
 ];
 
 /// Bindings that must keep compiling. Each one sits on a boundary that a
@@ -120,6 +135,15 @@ const ACCEPTED: &[&str] = &[
     "let a: UInt64 = 0x7FFF_FFFF_FFFF_FFFF",
     // A separator-only tail must not read as an empty digit run.
     "let a: Int = 1_000",
+    // The same paren/minus chains, on the representable side. Reaching further
+    // must not start rejecting what the source actually denotes: an EVEN count
+    // of minuses is a positive value, and `-(128)` is the ordinary `Int8`
+    // minimum with a paren in the way.
+    "let a: Int8 = -(128)",
+    "let a: Int8 = --127",
+    "let a: Int8 = ---128",
+    "let a: UInt8 = --5",
+    "let a: Int = --9223372036854775807",
 ];
 
 /// The whole point of E024: a literal must never quietly become a different
@@ -183,6 +207,35 @@ fn representable_boundaries_still_compile() {
             "`{binding}` is representable and must not be E024, got:\n{out}"
         );
     }
+}
+
+/// The sign the range check uses is the NET sign of the whole paren/minus
+/// chain, and the two spellings of `2^63` are where that is load-bearing:
+/// `-9223372036854775808` is `i64::MIN` and valid, while `--9223372036854775808`
+/// is +2^63 and no signed type holds it. They differ by one character and by
+/// nothing else, so a check that recorded "negated somewhere" rather than the
+/// parity would accept both — and the second would fold silently, which is the
+/// one outcome E024 exists to prevent.
+#[test]
+fn the_sign_is_the_net_of_the_whole_chain() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = check(dir.path(), &body("let a: Int = -9223372036854775808"));
+    assert!(
+        !out.contains("E024"),
+        "one minus reaches i64::MIN and must be accepted, got:\n{out}"
+    );
+    let out = check(dir.path(), &body("let a: Int = --9223372036854775808"));
+    assert!(
+        out.contains("E024"),
+        "two minuses are +2^63, which no signed type holds, got:\n{out}"
+    );
+    // The diagnostic quotes what the chain DENOTES, not what its innermost node
+    // said: reporting `-9223372036854775808` for a value that is positive would
+    // name a literal that is in range and read as a compiler bug.
+    assert!(
+        out.contains("integer literal '9223372036854775808' is out of range"),
+        "the net-positive value must be quoted without a sign, got:\n{out}"
+    );
 }
 
 /// A radix literal past the DOMAIN must be caught too — the classifier splits

@@ -304,27 +304,6 @@ impl Checker {
         }
     }
 
-    /// Identify the underlying `Int` literal site (id, raw text, negated) of
-    /// `value` — either a bare literal, a `-<literal>` unary, or a
-    /// parenthesized literal. Verbatim text move out of
-    /// [`Self::record_int_literal_context`].
-    fn int_literal_context_site(value: &ast::Expr) -> (Option<almide_lang::ast::ExprId>, Option<String>, bool) {
-        match &value.kind {
-            ExprKind::Int { raw, .. } => (Some(value.id), Some(raw.clone()), false),
-            ExprKind::Unary { op, operand, .. } if op.as_str() == "-"
-                && matches!(&operand.kind, ExprKind::Int { .. }) =>
-            {
-                let raw = if let ExprKind::Int { raw, .. } = &operand.kind { Some(raw.clone()) } else { None };
-                (Some(operand.id), raw, true)
-            }
-            ExprKind::Paren { expr } if matches!(&expr.kind, ExprKind::Int { .. }) => {
-                let raw = if let ExprKind::Int { raw, .. } = &expr.kind { Some(raw.clone()) } else { None };
-                (Some(expr.id), raw, false)
-            }
-            _ => (None, None, false),
-        }
-    }
-
     pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
         // A COLLECTION literal against an annotated element type pins each
         // ELEMENT: `let bs: List[Int8] = [1, 256]` narrows every element to i8 in
@@ -361,28 +340,29 @@ impl Checker {
             }
             return;
         }
-        let (lit_id, raw, negated) = Self::int_literal_context_site(value);
-        if let Some(id) = lit_id {
-            if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
-                site.context_ty = Some(declared.clone());
-                return;
-            }
-            // A literal that fits i64 was never enqueued — but a SIZED context
-            // can still overflow it (`neg_one_i8(128)`: check accepted, native
-            // rustc rejected `128i8` — the check-vs-build gap, fuzz
-            // seed-20260718 index 92). Enqueue a site so the post-solve E024
-            // range check runs against the sized context.
-            if let Some(raw) = raw {
-                if !matches!(declared, Ty::Int | Ty::Unknown | Ty::TypeVar(_)) {
-                    self.deferred_int_overflow_checks.push(super::IntOverflowSite {
-                        expr_id: id,
-                        raw,
-                        negated,
-                        context_ty: Some(declared.clone()),
-                        span: value.span,
-                    });
-                }
-            }
+        // Reaches through any paren/unary-minus chain, so `let m: Int8 = -(300)`
+        // and `let m: Int8 = --300` face the same range check `-300` does. The
+        // NET sign comes from the same walk; the `Unary` inference writes it onto
+        // the site independently, and this branch keeps it in step for the site
+        // it has to enqueue itself.
+        let Some((id, raw, negated)) = super::int_literal_chain(value) else { return };
+        if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
+            site.context_ty = Some(declared.clone());
+            return;
+        }
+        // A literal that fits i64 was never enqueued — but a SIZED context
+        // can still overflow it (`neg_one_i8(128)`: check accepted, native
+        // rustc rejected `128i8` — the check-vs-build gap, fuzz
+        // seed-20260718 index 92). Enqueue a site so the post-solve E024
+        // range check runs against the sized context.
+        if !matches!(declared, Ty::Int | Ty::Unknown | Ty::TypeVar(_)) {
+            self.deferred_int_overflow_checks.push(super::IntOverflowSite {
+                expr_id: id,
+                raw,
+                negated,
+                context_ty: Some(declared.clone()),
+                span: value.span,
+            });
         }
     }
     /// Resolve a module.func Member expression to a qualified call key.

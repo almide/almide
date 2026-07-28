@@ -305,16 +305,25 @@ impl Checker {
 
     fn infer_expr_g2_unary(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Unary { op, operand, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_unary called on the wrong ExprKind") };
-                let is_neg_lit = op.as_str() == "-" && matches!(&operand.kind, ExprKind::Int { .. });
-                let oid = operand.id;
-                let t = self.infer_expr(operand);
                 // #626: `-<int literal>` lets the negation reach i64::MIN, whose
                 // magnitude (2^63) overflows a bare positive literal but is a
                 // valid i64. Mark the candidate (registered while inferring the
                 // operand) so its post-solve range check uses the signed MIN bound.
-                if is_neg_lit {
-                    if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == oid) {
-                        site.negated = true;
+                //
+                // The sign recorded is the NET sign of this node's WHOLE operand
+                // chain, not "this node is a minus": `--300` is +300 and
+                // `--9223372036854775808` is +2^63, which no signed type holds.
+                // Each `Unary` on the way up writes the parity of its own subtree
+                // and the operand is inferred first, so the OUTERMOST minus writes
+                // last and its answer — the one the source actually states — wins.
+                let chain = (op.as_str() == "-")
+                    .then(|| super::int_literal_chain(operand))
+                    .flatten()
+                    .map(|(lit_id, _, inner_negated)| (lit_id, !inner_negated));
+                let t = self.infer_expr(operand);
+                if let Some((lit_id, negated)) = chain {
+                    if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == lit_id) {
+                        site.negated = negated;
                     }
                 }
                 match op.as_str() { "not" => Ty::Bool, _ => t }

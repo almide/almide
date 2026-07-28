@@ -280,6 +280,47 @@ pub(crate) enum LiteralFit {
     Sign,
 }
 
+/// The int literal `value` ultimately denotes, seen through any chain of parens
+/// and unary minus: its `ExprId`, its raw text, and the NET sign the source
+/// applies to it. `None` when `value` is not such a chain.
+///
+/// The chain has to be walked to the END, and both facts this returns are why.
+///
+/// REACH: one level is not enough, because a literal is routinely written with
+/// more than one node above it. `-(300)` parks a `Paren` between the minus and
+/// the digits; `--300` parks a second `Unary`. Stopping at the first node left
+/// those forms with no range context at all, so `let m: Int8 = -(300)` passed
+/// `check` and rustc then rejected the emitted `-300i8` — the check-vs-build
+/// gap E024 exists to close (differential fuzz, seed 1785217538023450905).
+///
+/// PARITY: the count matters as much as the reach, and in the opposite
+/// direction. `-9223372036854775808` is `i64::MIN` and valid; `--9223372036854775808`
+/// is +2^63, which NO signed type represents. A walk that recorded "there was a
+/// minus somewhere" rather than how many would call the second one valid and let
+/// it fold silently — the failure the negated bound was introduced to prevent.
+///
+/// Derived once, here, because two callers need it: the `Unary` inference marks
+/// the site's sign, and the annotated-binding hook pins the site's declared type.
+/// They used to peel separately and agree only on the single-minus case.
+pub(crate) fn int_literal_chain(
+    value: &crate::ast::Expr,
+) -> Option<(crate::ast::ExprId, String, bool)> {
+    use crate::ast::ExprKind;
+    let mut cur = value;
+    let mut negated = false;
+    loop {
+        match &cur.kind {
+            ExprKind::Int { raw, .. } => return Some((cur.id, raw.clone(), negated)),
+            ExprKind::Paren { expr } => cur = expr,
+            ExprKind::Unary { op, operand, .. } if op.as_str() == "-" => {
+                negated = !negated;
+                cur = operand;
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// Classify `raw` against the range `ty` can represent in this position.
 ///
 /// For a SIGNED type the magnitude bound is `MAX` (or `MAX+1` when `negated`,
