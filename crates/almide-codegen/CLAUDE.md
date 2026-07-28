@@ -37,9 +37,11 @@ decisions made in passes + templates.
 
 - **Walker must stay target-agnostic.** If you need target-specific behavior, add a nanopass or a template guard.
 - **Nanopass passes are independent.** Each pass reads and rewrites the IrProgram. Passes must not assume ordering except through declared `Postcondition`s.
-- **`Target::Wasm` is a tombstone.** Its codegen arm is `unreachable!` — wasm
-  requests are routed to `almide-mir` before ever reaching this crate. Do not
-  add wasm emission logic here.
+- **There is no `Target::Wasm` here.** The variant, its 26-pass pipeline, the
+  wasm-only passes (a full second Perceus among them) and the
+  `Verified`/`Canonical` certificate chain were deleted in #930 — the tombstone
+  era's `unreachable!` arm included. Wasm requests are routed to `almide-mir`
+  before ever reaching this crate; do not add wasm emission logic here.
 
 ## History note: the rt-oracle registry
 

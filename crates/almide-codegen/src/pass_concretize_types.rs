@@ -110,10 +110,8 @@ fn erase_wasm_type_aliases(program: &mut IrProgram, target: Target) {
             aliases.insert(td.name.to_string(), alias_target.clone());
         }
     }
-    if !aliases.is_empty() && target == Target::Wasm {
-        erase_type_aliases(program, &aliases);
+    // (The Target::Wasm alias-check branch left with the retired pipeline, #930.)
     }
-}
 
 /// Concretize a single top-let's value, then push its type into the
 /// declared `ty` and VarTable entry if both were still unresolved.

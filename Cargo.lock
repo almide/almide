@@ -46,7 +46,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
- "wasm-encoder 0.254.0",
  "wasmparser 0.254.0",
  "wat",
 ]
@@ -72,7 +71,6 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
- "wasm-encoder 0.253.0",
  "wasmparser 0.254.0",
 ]
 
@@ -1274,16 +1272,6 @@ checksum = "59972d6cd272259de647b7c1f1912e45e289c75ffd4be04e10695507cd7e1b59"
 dependencies = [
  "leb128fmt",
  "wasmparser 0.253.0",
-]
-
-[[package]]
-name = "wasm-encoder"
-version = "0.254.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09480d646178e5fdd12bb06e812d0af9a3a191dbc9cd697fdc86687beade7393"
-dependencies = [
- "leb128fmt",
- "wasmparser 0.254.0",
 ]
 
 [[package]]

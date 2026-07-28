@@ -32,7 +32,6 @@ pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
 pub mod pass_capture_clone;
 pub mod pass_clone;
-pub mod pass_alias_cow;
 pub mod pass_top_let_storage;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
@@ -44,14 +43,8 @@ pub mod pass_normalize_runtime_calls;
 pub mod pass_stdlib_lowering;
 pub mod pass_effect_inference;
 pub mod pass_tco;
-pub mod pass_tail_call_mark;
 pub mod pass_licm;
 pub mod pass_peephole;
-pub mod pass_anf;
-pub mod pass_stack_balance;
-pub mod pass_perceus;
-pub mod pass_globalize_closure_ids;
-pub mod pass_canonicalize;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
@@ -60,8 +53,6 @@ pub mod pass_rust_lowering;
 pub mod pass_lambda_type_resolve;
 pub mod pass_concretize_types;
 pub mod pass_resolve_calls;
-pub mod pass_closure_conversion;
-pub mod pass_mut_param_lowering;
 pub mod pass_unify_var_tables;
 pub mod pass_ir_link_flatten;
 pub mod template;
@@ -226,98 +217,11 @@ pub fn program_uses_native_only_matrix_on_wasm(program: &IrProgram) -> Option<&'
     None
 }
 
-/// AlmidePerceusBelt: type-state verified program.
-///
-/// Construction requires passing Perceus RC verification (Lean 4 certified).
-/// WASM emit accepts only Verified — unverified programs cannot reach emission.
-/// This is the type-level enforcement of RC correctness, analogous to how
-/// Rust's borrow checker prevents use-after-free at the type level.
-pub struct Verified<'a>(pub(crate) &'a IrProgram);
-
-impl<'a> Verified<'a> {
-    /// Verify Perceus RC balance and construct the `Verified` gate.
-    ///
-    /// A violation is a bug in the compiler's *own* inserted RC ops (the callee,
-    /// not user code), so the receiver who can act on it is the compiler author,
-    /// not the user — the diagnostic class is therefore ICE, and the default is a
-    /// hard refusal to emit (controlled `process::exit`, mirroring
-    /// [`pass_concretize_types::assert_types_concretized`], NOT a `panic!`
-    /// backtrace). "leaks, not unsoundness" sets the message's tone, not whether
-    /// the gate opens. `allow_unverified` (`--emit-unverified`) is the explicit
-    /// waiver: emit despite a known leak, with a warning, for deliberate use.
-    fn verify(program: &'a IrProgram, allow_unverified: bool) -> Self {
-        let mut total_violations = 0usize;
-        for func in &program.functions {
-            if func.is_test { continue; }
-            let violations = pass_perceus::perceus_verify_function(func, &program.var_table);
-            total_violations += violations;
-        }
-        if total_violations > 0 {
-            if allow_unverified {
-                eprintln!(
-                    "[Perceus] warning: {total_violations} RC violation(s) emitted unverified \
-                     (--emit-unverified) — the WASM artifact may leak memory"
-                );
-            } else {
-                // ICE convention: same shape as `assert_types_concretized` — a
-                // `[COMPILER BUG]` diagnostic + controlled `process::exit`, NOT a
-                // numeric E-code (those collide with the rustc `E060x` space the
-                // diagnostics registry reserves) and NOT a `panic!` backtrace.
-                eprintln!(
-                    "error: [COMPILER BUG] Perceus RC verification failed\n  \
-                     {total_violations} function-internal RC violation(s) (see the [perceus-belt] \
-                     lines above) would emit a WASM artifact that leaks or double-frees memory, so \
-                     the build is refused.\n  \
-                     This is a bug in the compiler's inserted reference counting, NOT an error in \
-                     your program — you cannot fix it in source.\n  \
-                     hint: please report this at https://github.com/almide/almide/issues with the \
-                     source above; to ship the leaky artifact anyway, re-run with --emit-unverified."
-                );
-                std::process::exit(1);
-            }
-        }
-        Self(program)
-    }
-}
-
-/// AlmidePerceusBelt — determinism layer (L3). Sibling of [`Verified`].
-///
-/// A function's WASM index is its position in `program.functions` /
-/// `module.functions`. `Canonical` certifies those Vecs are in a
-/// content-derived canonical order (the [`pass_canonicalize`] postcondition), so
-/// the emitted module order is a pure function of the program — not of a host's
-/// `HashMap` iteration or a pass's append order. WASM emit accepts only
-/// `Canonical`, so a program reaches byte emission only after canonicalization:
-/// the type-level guarantee that the in-browser (wasm32) compiler cannot emit a
-/// module that diverges from the native one. This is the order-determinism
-/// analogue of how `Verified` gates emit on RC balance.
-///
-/// `certify` consumes a [`Verified`], so "RC-verified" is a prerequisite of
-/// "canonical" — you cannot mint this certificate for an unverified program.
-pub struct Canonical<'a>(pub(crate) &'a IrProgram);
-
-impl<'a> Canonical<'a> {
-    /// Refine `Verified` → `Canonical`, asserting the canonical-order
-    /// postcondition `CanonicalizePass` establishes. A violation means
-    /// `CanonicalizePass` was removed from the pipeline or a later pass reordered
-    /// functions — a compiler bug: debug builds panic, release builds warn and
-    /// proceed (determinism may regress; correctness does not).
-    pub(crate) fn certify(verified: Verified<'a>) -> Self {
-        let program = verified.0;
-        if !pass_canonicalize::is_canonical(program) {
-            debug_assert!(
-                false,
-                "Canonical::certify: program is not in canonical function order — \
-                 CanonicalizePass must run as the terminal WASM pass"
-            );
-            eprintln!(
-                "[Determinism] WASM emit reached without canonical function order — \
-                 output may be host-nondeterministic"
-            );
-        }
-        Self(program)
-    }
-}
+// The `Verified`/`Canonical` type-state certificates and their Perceus/canonical
+// checks were retired with the wasm pipeline they gated (#930): the v0 wasm
+// emitter they guarded was deleted in #782, and the live equivalents are
+// almide-mir's per-build ownership certificate (`verify_ownership` + the PCC
+// gate) and its deterministic render order.
 
 pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
@@ -360,21 +264,6 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
 
     // Layer 3: Target-specific emit
     match target {
-        Target::Wasm => {
-            // AlmidePerceusBelt: a program reaches WASM emit only after passing
-            // two type-state gates, in this order:
-            //   Verified  — Perceus RC balance (Lean 4-certified check)
-            //   Canonical — functions are in canonical emit order, so the wasm32
-            //               (browser) compiler can't diverge from native.
-            // `CanonicalizePass` (terminal pipeline pass) establishes the order;
-            // `Canonical::certify` consumes `Verified` and asserts it.
-            // #782: the v0 wasm emitter is RETIRED. The v1 trust-spine renderer
-            // (almide-mir) is the only wasm path; a v1 wall is a hard error at
-            // the CLI layer, never a fallback into unverified codegen.
-            unreachable!(
-                "Target::Wasm reached the retired v0 emitter — the CLI must route                  wasm builds through the v1 trust-spine renderer (#782)"
-            );
-        }
         Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
         _ => CodegenOutput::Source(emit_source(program, target, &config, options)),
     }

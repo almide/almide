@@ -658,7 +658,7 @@ fn try_render_numeric_cast(ctx: &RenderContext, symbol: &almide_base::intern::Sy
 /// early `return`, `None` falls through to the default owned-args render.
 fn try_render_mutating_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> Option<String> {
     if args.is_empty() { return None; }
-    if !crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) { return None; }
+    if !crate::pass_licm::is_inplace_mutator(symbol.as_str()) { return None; }
     let (IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner }) = &args[0].kind else { return None; };
     let IrExprKind::Var { id } = &inner.kind else { return None; };
     let name = ctx.var_name(*id).to_string();

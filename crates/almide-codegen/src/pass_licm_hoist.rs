@@ -254,7 +254,7 @@ fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, pure_fns: &HashSet
     // blow-up that OOM'd the merge sort (each `list.push` re-copied the whole
     // container). The hoist saves one allocation per iteration; the
     // correctness structure it demands costs O(n²). Scalars keep hoisting.
-    if super::pass_alias_cow::is_heap_aliasable(&expr.ty) {
+    if is_heap_aliasable(&expr.ty) {
         return false;
     }
     refs_are_outside_loop(expr, loop_defined)
@@ -424,4 +424,22 @@ fn is_trivial(expr: &IrExpr) -> bool {
         | IrExprKind::Lambda { .. }
         | IrExprKind::Range { .. }
     )
+}
+
+/// Heap types whose value can be ALIASED by a bind — the hoist-safety question.
+/// Moved here from the retired wasm-only alias-cow pass (#930): this file is
+/// its only live consumer.
+pub(crate) fn is_heap_aliasable(ty: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::Ty;
+    use almide_lang::types::TypeConstructorId;
+    match ty {
+        Ty::String | Ty::Bytes | Ty::Matrix
+        | Ty::Record { .. } | Ty::OpenRecord { .. }
+        | Ty::Named(_, _) | Ty::Variant { .. } => true,
+        Ty::Applied(ctor, _) => matches!(
+            ctor,
+            TypeConstructorId::List | TypeConstructorId::Map | TypeConstructorId::Set
+        ),
+        _ => false,
+    }
 }

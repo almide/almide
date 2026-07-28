@@ -6,7 +6,7 @@ A tree-walking interpreter over the **pre-codegen** `IrProgram` — the third le
 
 The cross-target gate (`spec/wasm_cross/*.almd`, enforced by `tests/wasm_runtime_test.rs::wasm_cross_target_spec`) compares the **native** and **WASM** backends and requires byte-identical `(stdout, stderr, exit)`. That 2-way vote is structurally blind to a *both-wrong-the-same-way* bug: if codegen and the WASM emitter share a lowering pass that is wrong, both agree and the gate stays green while the behaviour is wrong.
 
-This crate adds a third, independent judge. It evaluates the IR at the cut point **after** `lower → optimize → mono → ir_link` but **before** any of `almide-codegen`'s target-lowering passes (`ClosureConversion` / `Perceus` / `StdlibLowering` / `IterChain` / …). So it shares *none* of codegen's target passes with either backend. The ~22 codegen-inserted `IrExprKind` variants are unreachable here and `eval.rs` asserts them `unreachable!` to guard the boundary.
+This crate adds a third, independent judge. It evaluates the IR at the cut point **after** `lower → optimize → mono → ir_link` but **before** any target lowering — almide-codegen's Rust passes (`Clone` / `StdlibLowering` / `BoxDeref` / …) and almide-mir's wasm lowering alike (the codegen wasm passes named here previously — ClosureConversion, Perceus — were dead code retired in #930). So it shares *none* of either backend's target passes. The ~22 codegen-inserted `IrExprKind` variants are unreachable here and `eval.rs` asserts them `unreachable!` to guard the boundary.
 
 `tests/interp_cross_target_test.rs::interp_cross_target_spec` is the 3-way harness:
 - `interp == native == wasm` → corroborated by a spec that cannot share a codegen bug.
