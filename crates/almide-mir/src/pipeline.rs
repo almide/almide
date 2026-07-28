@@ -555,7 +555,7 @@ fn build_ir_with_drops(
 ) -> Result<almide_ir::IrProgram, LowerError> {
     // STRICT VALUE MODE: this is an OUTPUT path — a deferred Const-0 must never be executable
     // (flight-evidence-gaps F2, the prim.handle literal address-0 class).
-    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _strict = crate::lower::StrictValuesGuard::set(true);
 
     let ir = source_to_ir_with(source, self_modules)?;
     // ADT brick 5b: GENERATE the recursive-drop fns (`__drop_<T>`) for nested-variant types and

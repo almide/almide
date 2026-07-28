@@ -483,7 +483,7 @@ fn try_render_wasm_source_impl_rest(
 /// Debug probe: dump the lowered MIR ops of every non-test fn (walls listed
 /// per fn). Used by examples/probe_native.rs during rung development.
 pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
-    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     let globals = std::collections::HashMap::new();
     let global_inits = std::collections::HashMap::new();
@@ -513,7 +513,7 @@ pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
 }
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
-    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
