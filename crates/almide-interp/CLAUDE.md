@@ -8,7 +8,7 @@ The cross-target gate (`spec/wasm_cross/*.almd`, enforced by `tests/wasm_runtime
 
 This crate adds a third, independent judge. It evaluates the IR at the cut point **after** `lower → optimize → mono → ir_link` but **before** any target lowering — almide-codegen's Rust passes (`Clone` / `StdlibLowering` / `BoxDeref` / …) and almide-mir's wasm lowering alike (the codegen wasm passes named here previously — ClosureConversion, Perceus — were dead code retired in #930). So it shares *none* of either backend's target passes. The ~22 codegen-inserted `IrExprKind` variants are unreachable here and `eval.rs` asserts them `unreachable!` to guard the boundary.
 
-`tests/interp_cross_target_test.rs::interp_cross_target_spec` is the 3-way harness:
+`tests/wasm_runtime_test.rs::interp_cross_target_spec` (root binary — it shares one build of each fixture with the equivalence and wasm-opt gates) is the 3-way harness:
 - `interp == native == wasm` → corroborated by a spec that cannot share a codegen bug.
 - `native != wasm` → a backend split **owned by the 2-way `@xt-allow` gate**; this harness only logs which backend the interp sides with (tie-break diagnostic), it does NOT fail.
 - `native == wasm` but interp dissents → **LOUD failure** (`BOTH-BACKENDS-WRONG` banner). Diagnose: fix the interpreter, or you just found a both-backends bug the 2-way gate is blind to.

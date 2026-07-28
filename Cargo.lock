@@ -113,7 +113,6 @@ dependencies = [
  "almide-ir",
  "almide-lang",
  "almide-optimize",
- "tempfile",
 ]
 
 [[package]]

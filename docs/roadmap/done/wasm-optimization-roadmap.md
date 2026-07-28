@@ -222,7 +222,7 @@ Kept strictly opt-in and default-off: the trust-spine ships the exact bytes
 its own certified rendering process produced, and `wasm-opt` is an external,
 unverified transform on that output. `--wasm-opt`'s own safety claim (that it
 never changes observable behavior on Almide's generated wasm) is backed by a
-dedicated differential gate — `tests/wasm_opt_parity_test.rs`, run in CI
+dedicated differential gate — `tests/wasm_runtime_test.rs::wasm_opt_parity_spec`, run in CI
 (`.github/workflows/ci.yml`) — not just asserted. Full writeup:
 [docs/WASM-OUTPUT.md](../../WASM-OUTPUT.md).
 

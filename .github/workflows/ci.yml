@@ -145,7 +145,7 @@ jobs:
           wasmtime --version
 
       - name: Install wasm-opt (binaryen)
-        # Required by the wasm-opt parity gate (wasm_opt_parity_test) — without
+        # Required by the wasm-opt parity gate (wasm_runtime_test::wasm_opt_parity_spec) — without
         # it the test silently early-returns as a pass, so `--wasm-opt`'s
         # differential-equivalence claim would never actually be checked here.
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
