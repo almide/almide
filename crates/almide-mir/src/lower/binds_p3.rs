@@ -25,6 +25,10 @@ enum ListElemDrop {
     StrClosure,
 }
 
+// The interned field NAME type of a record literal / an aggregate's declared field list —
+// named here so the record-construct helpers can spell their `(name, expr)` slices.
+use almide_lang::intern::Sym;
+
 impl LowerCtx {
     /// Construct a SCALAR-field tuple `(a, b, …)`: alloc an n-slot block (Init::DynList) and store
     /// each field's computed scalar value at its slot via `Prim::Store`. Returns `None` (caller
@@ -597,7 +601,6 @@ impl LowerCtx {
     /// field (a defaulted heap slot would be a garbage handle the drop frees — unsound), or
     /// a field value not lowerable to an owned handle / scalar.
     pub(crate) fn try_lower_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
         let IrExprKind::Record { fields, .. } = &value.kind else {
             return None;
         };
@@ -618,20 +621,38 @@ impl LowerCtx {
         if tys.is_empty() {
             return None;
         }
+        let fields = self.record_fields_with_declared_defaults(&value.ty, &names, fields);
+        let n = tys.len();
+        let heap_slots = self.record_heap_slot_mask(&names, &tys, &fields)?;
+        let slots = self.lower_record_field_slots(&names, &fields)?;
+        let dst = self.emit_record_slot_block(n, slots);
+        self.record_masks.insert(dst, heap_slots);
+        self.materialized_aggregates.insert(dst);
+        if let Some(name) = self.record_drop_type_name(&value.ty) {
+            self.variant_drop_handles.insert(dst, name);
+        }
+        Some(dst)
+    }
+
+    /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,
+    /// #852): decides which OMITTED slots a DECLARED default synthesizes as a supplied field.
+    fn record_fields_with_declared_defaults(
+        &self, value_ty: &Ty, names: &[Sym], fields: &[(Sym, IrExpr)],
+    ) -> Vec<(Sym, IrExpr)> {
         // DEFAULT FILL: an omitted slot with a DECLARED default (`type AllDefault = {
         // host: String = "localhost", port: Int = 8080 }`; `AllDefault()`) synthesizes
         // the default as a supplied field — CALL-FREE defaults only (a call default
         // would inject an uncounted CallFn, breaching the caps mir == ir gate; it
         // keeps walling via the omitted-heap check below).
-        let mut fields = fields.clone();
-        if let Ty::Named(rec_name, _) = &value.ty {
+        let mut fields = fields.to_vec();
+        if let Ty::Named(rec_name, _) = value_ty {
             if let Some(defs) = self
                 .variant_layouts
                 .ctor_field_defaults
                 .get(rec_name.as_str())
                 .cloned()
             {
-                for nm in &names {
+                for nm in names {
                     if fields.iter().any(|(fname, _)| fname == nm) {
                         continue;
                     }
@@ -643,7 +664,15 @@ impl LowerCtx {
                 }
             }
         }
-        let fields = &fields;
+        fields
+    }
+
+    /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,
+    /// #852): decides WHICH declared slots hold heap fields — the drop mask — and walls
+    /// (`None`) on an unknown field name, an omitted heap slot, or an all-scalar record.
+    fn record_heap_slot_mask(
+        &self, names: &[Sym], tys: &[Ty], fields: &[(Sym, IrExpr)],
+    ) -> Option<Vec<usize>> {
         let n = tys.len();
         // Per-slot heap-ness from the SUPPLIED field's CONCRETE type (`expr.ty`), NOT the
         // declared field type — a generic field (`first: A` in `Pair[A,B]`) may leave the
@@ -669,6 +698,15 @@ impl LowerCtx {
         if heap_slots.is_empty() {
             return None; // no heap field — `try_lower_scalar_record_construct` owns it.
         }
+        Some(heap_slots)
+    }
+
+    /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,
+    /// #852): lowers every supplied field to its `(declared-index, slot-value, is-heap)`
+    /// triple ahead of the alloc, walling (`None`) on a value it cannot own or copy.
+    fn lower_record_field_slots(
+        &mut self, names: &[Sym], fields: &[(Sym, IrExpr)],
+    ) -> Option<Vec<(usize, ValueId, bool)>> {
         // Lower each supplied field to (declared-index, slot-value, is-heap). Heap fields
         // become a fresh OWNED handle (the same kinds `try_lower_str_list_literal` admits);
         // scalar fields a plain value. All lowered BEFORE the alloc (a field expr that
@@ -703,6 +741,14 @@ impl LowerCtx {
                 slots.push((idx, v, false));
             }
         }
+        Some(slots)
+    }
+
+    /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,
+    /// #852): emits the `n`-slot block — the alloc plus one `Prim::Store` per slot, each
+    /// heap field's handle stored then `Consume`d (moved in).
+    fn emit_record_slot_block(&mut self, n: usize, slots: Vec<(usize, ValueId, bool)>) -> ValueId {
+        use crate::{IntOp, PrimKind};
         let len = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
         let dst = self.fresh_value();
@@ -737,12 +783,7 @@ impl LowerCtx {
                 self.live_heap_handles.retain(|x| *x != v);
             }
         }
-        self.record_masks.insert(dst, heap_slots);
-        self.materialized_aggregates.insert(dst);
-        if let Some(name) = self.record_drop_type_name(&value.ty) {
-            self.variant_drop_handles.insert(dst, name);
-        }
-        Some(dst)
+        dst
     }
 
     /// Materialize a `List[Record]` LITERAL (`group([rect(…), circle(…)])`, `[el("a"), el("b")]`) — a
