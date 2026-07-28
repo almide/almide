@@ -849,6 +849,28 @@ fn main() -> Unit = println(int.to_string(build(5)))
             "a user heap-element push loop must call the amortized append"
         );
 
+        // The STRING accumulator (#910): `acc = acc + "x"` must render through
+        // `__str_append1` — the whole-copy concat peaked at 1.27 GB over 100k
+        // appends and 400k died, while the amortized form runs flat at ~20 MB
+        // over 4M.
+        let string_loop = r#"
+fn main() -> Unit = {
+  var acc = ""
+  var i = 0
+  while i < 5 {
+    acc = acc + "x"
+    i = i + 1
+  }
+  println(int.to_string(string.len(acc)))
+}
+"#;
+        let wat = try_render_wasm_source(string_loop, &[], false)
+            .expect("the string accumulator loop renders");
+        assert!(
+            wat.contains("__str_append1"),
+            "a string self-append loop must call the amortized append"
+        );
+
         let parser_loop = r#"
 import json
 fn main() -> Unit = {

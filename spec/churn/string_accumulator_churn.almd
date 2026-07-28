@@ -1,0 +1,22 @@
+// string-accumulator churn — the #519/#910 string half. `acc = acc + "x"` (and
+// the TCO twin `grow(acc + "x", …)`) whole-copied the accumulator per append:
+// 100k iterations peaked at 1.27 GB and 400k died outright, while the LIST
+// accumulator ran flat — the string self-append window and `__str_append1`
+// (rc == 1 + byte-cap headroom in place, geometric growth else) did not exist.
+// Byte-identical output native == wasm; the gate's wall-clock kill catches a
+// regression to the quadratic copy as a hang.
+
+fn grow_tco(acc: String, i: Int, n: Int) -> String =
+  if i >= n then acc
+  else grow_tco(acc + "x", i + 1, n)
+
+fn main() -> Unit = {
+  var acc = ""
+  var i = 0
+  while i < 200000 {
+    acc = acc + "y"
+    i = i + 1
+  }
+  println(int.to_string(string.len(acc)))
+  println(int.to_string(string.len(grow_tco("", 0, 200000))))
+}

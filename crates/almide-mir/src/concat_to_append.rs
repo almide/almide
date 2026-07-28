@@ -163,6 +163,33 @@ fn match_rc_window(
     occ.get(d).copied() == Some(2) && occ.get(t).copied() == Some(4)
 }
 
+/// The STRING self-append window (#910): `x = x + s` lowers as
+/// `Alloc t ← Str(..)` (or any suffix build), `d ← __str_concat(x, t)`,
+/// `Drop x`, `SetLocal x ← d` — and unlike the list windows there is no
+/// element-count condition: ANY suffix appends. The rewrite is name-only,
+/// exactly the rc window's shape: the temp stays (its bytes are the suffix)
+/// and the callee becomes `__str_append1`, whose rc == 1 + byte-cap-headroom
+/// fast path appends in place. Without this the canonical string accumulator
+/// whole-copied per append: a 100k-iteration `acc = acc + "x"` loop peaked at
+/// 1.27 GB and 400k died — while the LIST twin (closed by the same machinery)
+/// ran flat at 20 MB.
+fn match_str_window(ops: &[Op], i: usize, occ: &BTreeMap<ValueId, usize>) -> bool {
+    let Op::CallFn { dst: Some(d), name, args, .. } = &ops[i] else { return false };
+    if name != "__str_concat" {
+        return false;
+    }
+    let [CallArg::Handle(x), CallArg::Handle(_t)] = args.as_slice() else { return false };
+    let Op::Drop { v: x2 } = &ops[i + 1] else { return false };
+    let Op::SetLocal { local: x3, src: d2 } = &ops[i + 2] else { return false };
+    if x2 != x || x3 != x || d2 != d {
+        return false;
+    }
+    // The result is used only by the rebind. (The suffix temp needs no occ
+    // constraint: __str_append1 only READS it, exactly as __str_concat did,
+    // and its ownership events — build + arg + trailing drop — are untouched.)
+    occ.get(d).copied() == Some(2)
+}
+
 /// Rewrite every self-append concat window in `functions` to the amortized
 /// O(1) append form: the scalar `__list_concat` window is REPLACED (temp
 /// eliminated — see `match_window`) and the heap-element `__list_concat_rc`
@@ -171,7 +198,7 @@ pub fn rewrite_self_append(functions: &mut [MirFunction]) {
     let mut vals: Vec<ValueId> = Vec::new();
     for f in functions.iter_mut() {
         if !f.ops.iter().any(|op| matches!(op,
-            Op::CallFn { name, .. } if name == "__list_concat" || name == "__list_concat_rc"))
+            Op::CallFn { name, .. } if name == "__list_concat" || name == "__list_concat_rc" || name == "__str_concat"))
         {
             continue;
         }
@@ -213,6 +240,20 @@ pub fn rewrite_self_append(functions: &mut [MirFunction]) {
                     i = drop_at + 1;
                     continue;
                 }
+            }
+            // The string window: rename in place (see match_str_window).
+            if i + 3 <= f.ops.len() && match_str_window(&f.ops, i, &occ) {
+                let Op::CallFn { dst, args, result, .. } = f.ops[i].clone() else {
+                    unreachable!("match_str_window matched a non-CallFn head")
+                };
+                out.push(Op::CallFn {
+                    dst,
+                    name: "__str_append1".to_string(),
+                    args,
+                    result,
+                });
+                i += 1;
+                continue;
             }
             // The heap-element window: rename the callee in place, keep every
             // other op (drop + rebind + the temp's build and trailing drop).
