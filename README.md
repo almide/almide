@@ -95,15 +95,17 @@ almide run hello.almd
 
 **Every program that compiles for both targets produces byte-identical observable output — stdout, stderr, exit code — whether it runs as a native binary or as WebAssembly.** Native is the oracle; `native == wasm` is a hard invariant, not a "target difference" to be documented around.
 
-The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; and APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes.
+The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes; and exactly two fns are exempt because their job is to report the host — `env.os()` and `env.temp_dir()`, bounded by C-189, since making them agree across targets would be the defect rather than the guarantee.
 
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 188 contracts — 188 active, 0 flagged-for-revision.**
+> **Ledger: 189 contracts — 189 active, 0 flagged-for-revision.**
 >
-> **Exceptions: none.** Every contract in the ledger is `active`, carrying
-> executable evidence of class ≥ `fixture`.
+> **Divergences awaiting a fix: none.** Every contract in the ledger is
+> `active`, carrying executable evidence of class >= `fixture`. The one
+> by-design carve-out in the law — the platform-reporting fns `env.os`
+> and `env.temp_dir` — is bounded by C-189.
 <!-- claims:generated:end -->
 
 Full scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/EQUIVALENCE.md](./docs/EQUIVALENCE.md)**.

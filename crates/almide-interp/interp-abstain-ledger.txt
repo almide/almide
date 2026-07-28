@@ -35,6 +35,7 @@ empty_from_list_mono  out-of-interp-scope capability: map.from_list
 encoding_base64  out-of-interp-scope capability: base64.encode
 env_args  out-of-interp-scope capability: env.args
 env_get  out-of-interp-scope capability: env.get
+env_platform_reporting  out-of-interp-scope capability: env.os
 fan_any_allfail  out-of-interp-scope capability: fan.any
 fan_any_early_winner  out-of-interp-scope capability: fan.any
 fan_deterministic  out-of-interp-scope capability: fan.map

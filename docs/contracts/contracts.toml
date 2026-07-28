@@ -5,9 +5,11 @@
 # Each [[contract]] is a NORMATIVE, observable promise the compiler keeps on
 # BOTH backends (native Rust and wasm32). "Observable" = stdout, stderr, exit
 # code. Native is the oracle; native == wasm is a hard invariant, NOT a "target
-# difference". This ledger is the human-readable + machine-checkable index of
-# every such promise, with a TRACEABLE link to the executable evidence that
-# certifies it.
+# difference". The ONE exemption is the platform-reporting pair `env.os` /
+# `env.temp_dir`, which must report the host they run on and are bounded by
+# C-189; a divergence anywhere else is a compiler bug. This ledger is the
+# human-readable + machine-checkable index of every such promise, with a
+# TRACEABLE link to the executable evidence that certifies it.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -33,7 +35,15 @@
 #   statement (string, REQUIRED)  the normative behaviour, <= 3 sentences. When a
 #                                 table / longer prose is needed, the statement is
 #                                 a 1-line summary and `doc` points at the prose.
-#   since     (string, REQUIRED)  version the contract became normative.
+#   since     (string, REQUIRED)  the release in which the BEHAVIOUR became
+#                                 normative — the first version a user can rely
+#                                 on it. When a contract is written RETROACTIVELY
+#                                 over behaviour that already shipped (C-099..C-115
+#                                 documented fixtures that had accumulated since
+#                                 0.27.6), `since` is the behaviour's release, NOT
+#                                 the release the ledger entry landed in. Those two
+#                                 coincide whenever the contract ships alongside the
+#                                 change it certifies, which is the normal case.
 #   status    (enum,   REQUIRED)  "active" | "flagged-for-revision".
 #   doc       (string, OPTIONAL)  basename of a docs/contracts/*.md prose file.
 #   evidence  (array,  REQUIRED)  >= 1 inline-table entries; each:
@@ -131,7 +141,7 @@ evidence  = [
 id        = "C-006"
 spec      = "ALS-R3"
 title     = "fan.timeout does not exist — wall-clock deadlines live at the host boundary"
-statement = "`fan.timeout` was removed in 0.29.0: a wall-clock timeout has no portable cross-target meaning (wasm has no clock, scheduler, or threads), and it was the sole stdlib surface whose result was not a function of the program + its inputs — the deadline firing depended on machine load, even native-to-native. Referencing it is a check-time tombstone error (E027) with a host-boundary migration hint, identical on both targets since type check precedes the target split. This retired the ledger's LAST flagged-for-revision entry — the equivalence claim carries no exceptions clause."
+statement = "`fan.timeout` was removed in 0.29.0: a wall-clock timeout has no portable cross-target meaning (wasm has no clock, scheduler, or threads), and it was the sole stdlib surface whose result was not a function of the program + its inputs — the deadline firing depended on machine load, even native-to-native. Referencing it is a check-time tombstone error (E027) with a host-boundary migration hint, identical on both targets since type check precedes the target split. This retired the ledger's LAST flagged-for-revision entry: the ratchet stands at zero, so the equivalence claim carries no clause for divergences awaiting a fix. It is not exception-free in the absolute sense — the platform-reporting fns `env.os` / `env.temp_dir` differ by design and are exempt under C-189, which bounds that carve-out to exactly those two."
 since     = "0.29.0"
 status    = "active"
 doc       = "C-006-fan-timeout-removed.md"
@@ -2352,4 +2362,16 @@ since     = "0.37.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/scalar_if_arm_effects.almd", class = "fixture" },
+]
+
+# ── PLATFORM-REPORTING EXEMPTION (the equivalence law's ONLY carve-out) ─
+[[contract]]
+id        = "C-189"
+spec      = "ALS-R5"
+title     = "env.os / env.temp_dir report the HOST — the equivalence law's only exemption, and it is closed"
+statement = "`env.os()` and `env.temp_dir()` are the ONLY stdlib observables whose bytes may differ between native and wasm, and they differ BY DESIGN: both report the host they are running on, so native answers the real OS name and the real temp directory while the wasm leg answers the WASI sandbox (\"wasi\", \"/tmp\"). Agreeing across targets would be the defect — a program asking which platform it is on must be told the truth. The exemption is bounded, not open: the certified observable is the deterministic INVARIANT that holds identically on both legs (os is a member of the closed platform set {macos, linux, windows, wasi}; temp_dir is non-empty and absolute on every posix host), the same technique C-112 uses for random.int's nondeterministic draw. Every other fn in the process-environment surface stays byte-identical — env.args (C-096), env.get (C-118), random.int's range (C-112) — and `env.cwd` is not an exemption but a diagnosed wall on wasm. Adding a third exempt fn REQUIRES amending this statement and its fixture, which is what keeps the carve-out from widening silently."
+since     = "0.37.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_platform_reporting.almd", class = "fixture" },
 ]
