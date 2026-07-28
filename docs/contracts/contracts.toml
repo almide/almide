@@ -2386,3 +2386,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_scalar_captures.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-191"
+spec      = "ALS-M4"
+title     = "A module-level global reads its true value on every branch path — the materialization memo is scoped to straight-line context"
+statement = "A module-level `let`'s reference is materialized per function and MEMOIZED so repeated references share one copy. The memo was sound under both-arms linearization — every op executed whatever the condition — and became silently unsound as real branching spread: a global first referenced inside a REAL branch arm cached a ValueId whose defining op sits in that arm's block, and a reader in the SIBLING arm (or after a zero-iteration loop) referenced a local that never initialized on its path, which wasm reads as 0. `let CAP = 2097152` compared in both arms of an `if` made the else arm compare against 0 and take the wrong side with no diagnostic (#945 — aivarium's glTF loader rejected every primitive against a capacity of 0, loading a 52849-vertex model as zero geometry); the heap edition read `s == TAG` as false for TAG's own bytes. Two fixes, one discipline: (1) all nine global-materialization memo sites route through ONE chokepoint (`memo_global`) that caches only in straight-line context (`in_frame == 0 && unit_arm_depth == 0 && scalar_loop_depth == 0`) — inside any arm, loop, or frame each reference re-materializes locally, which costs a ConstInt or a fresh arm-local alloc and can never dangle; (2) `lower_heap_result_arm` now raises `in_frame`+`unit_arm_depth` for its extent, the same C-188 discipline `lower_scalar_arm` carries, since every caller emits it under real `IfThen`/`Else`/`EndIf` markers — without that the chokepoint read heap-result arms as straight-line code and the heap twin stayed wrong."
+since     = "0.37.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/global_in_both_arms.almd", class = "fixture" },
+]
