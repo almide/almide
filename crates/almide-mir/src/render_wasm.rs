@@ -753,14 +753,13 @@ include!("render_wasm_switch.rs");
 /// `(call $module.func)` resolves AND the caps gate reads it as a known-pure stdlib
 /// `module.func`. The single source of truth for the stdlib self-host campaign (§4.1:
 /// the runtime self-hosts into Almide; the trusted floor stays the prim ops + checker).
-/// (mod declarations kept in THIS physical file — not include!'d — because Rust
-/// resolves `mod X;`'s implicit file path from the physical file's own directory,
-/// not the logical include! chain: this file is `src/render_wasm.rs`, backing
-/// `pub mod render_wasm;`, so `mod registry;` correctly finds `render_wasm/registry.rs`.)
-/// `pub(crate)` so the pipeline's link gate can ask which `module.fn` names the
-/// registry already serves (a bundled module's own Almide body must not shadow one).
-pub(crate) mod registry;
-pub use registry::self_host_runtime;
+/// The registry itself moved to `almide_types::self_host_registry`, beside the
+/// embedded sources it names: the interp oracle reads the SAME table to evaluate
+/// the same bodies as the third cross-target vote, and a table owned by one
+/// backend would have forced it to either depend on this backend or restate the
+/// mapping (the hand-mirrored-bridge drift class). Re-exported here so every
+/// in-crate consumer (`crate::render_wasm::self_host_runtime`) is unchanged.
+pub use almide_lang::self_host_registry::self_host_runtime;
 
 #[cfg(test)]
 mod tests;

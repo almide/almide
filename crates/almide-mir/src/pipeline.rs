@@ -76,7 +76,7 @@ fn registry_served_names() -> &'static std::collections::HashSet<&'static str> {
     use std::sync::OnceLock;
     static NAMES: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
     NAMES.get_or_init(|| {
-        crate::render_wasm::registry::self_host_runtime()
+        crate::render_wasm::self_host_runtime()
             .iter()
             .flat_map(|(_, pairs)| pairs.iter().map(|(_, call_name)| *call_name))
             .collect()
