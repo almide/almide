@@ -2397,3 +2397,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/global_in_both_arms.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-192"
+spec      = "ALS-M4"
+title     = "An auto-unwrapped effect call inside a string interpolation lifts and propagates like a call argument"
+statement = "The effect-`!`/auto-`?` desugar handles an unwrap in statement, bind, tail and call-argument position by ANF-lifting it into a fresh `let tmp = e!` whose early-return machinery already lowers. The lift's extractor walked Call arguments, operators, tuples, ctors, conditions and access objects — but not STRING-INTERPOLATION parts, so `println(\"a=${fetch()}\")` (an effect call returning Result, auto-unwrapped, interpolated, in a call-argument position) reached the interp lowering with the Unwrap intact and the whole wasm render walled with \"non-lowerable string interpolation in a call-argument position\" while native ran (#950). The hoisted twin (`let v = fetch(); println(\"a=${v}\")`) building on both targets was the tell that only the LIFT was missing, not the propagation machinery. Interpolation parts are evaluated unconditionally, left to right, which is exactly the soundness condition the extractor's other arms rely on — an arm for `StringInterp` parts closes the gap, multiple unwraps in one interpolation lift one per fixpoint round, and the err path early-returns before any later part or the enclosing call runs."
+since     = "0.37.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/interp_effect_unwrap_arg.almd", class = "fixture" },
+]
