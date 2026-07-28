@@ -286,6 +286,21 @@ impl<'a> Interpreter<'a> {
             }
         }
 
+        // The self-hosted stdlib body from the shared registry (stdlib_pool):
+        // the SAME source the wasm leg links for this call name, lowered once and
+        // layered into `self.fns` at construction. Consulted LAST so the
+        // interp-native surfaces above keep their vote provenance; what the body
+        // itself cannot evaluate (a heap/effect prim outside the scalar floor)
+        // abstains from inside with that prim named — a skip, never a guess.
+        if let Some(impl_name) = crate::stdlib_pool::impl_fn(module, func) {
+            if let Some(func_def) = self.fns.get(&impl_name).copied() {
+                if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
+                    let root = self.root_scope();
+                    return self.call_function(func_def, args, &root);
+                }
+            }
+        }
+
         Flow::Unsupported(format!("{}.{}", module, func))
     }
 

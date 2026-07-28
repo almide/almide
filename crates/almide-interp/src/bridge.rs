@@ -31,6 +31,9 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
         "uint64" => uint64_fn(func, args),
         "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
         | "float32" | "float64" => sized_numeric_fn(module, func, args),
+        // The scalar prim floor — consumed by the self-hosted stdlib bodies the
+        // `stdlib_pool` evaluates, not by fixture code directly.
+        "prim" => prim_fn(func, args),
         _ => None,
     }
 }
@@ -167,6 +170,81 @@ fn abort_args(module: &str, func: &str) -> Flow {
 fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
     int_fn_a(func, args)
         .or_else(|| int_fn_b(func, args))
+}
+
+/// The SCALAR prim floor — the whole prim vocabulary a self-hosted stdlib body
+/// (`stdlib_pool`) may consume in this oracle. Everything here is a total,
+/// deterministic scalar→scalar op with one exact Rust spelling, cited against
+/// the MIR op docs (`almide-mir/src/lib_b.rs`) the two backends render from.
+///
+/// Deliberately NOT here, and why `None` is the right answer for them: the heap
+/// and effect prims (`prim.handle`, `prim.load*`/`store*`, `prim.alloc_*`,
+/// `prim.rc_*`, `prim.fd_write`, `prim.random_get`…). The interp models a container
+/// as a `Value`, not linear memory, so a handle has no faithful value — bridging
+/// `prim.handle` as the identity would let `prim.handle(b) + 12` add 12 to a
+/// list and vote WRONG, which is worse than the honest abstain the `None`
+/// produces (the caller's fixture skips with the prim named). `prim.die` rides
+/// out with them: its argument is always `prim.handle(<message>)`, so the eval
+/// abstains on the handle before die is reached.
+fn prim_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    // Bitwise / shifts: i64-uniform; wasm's `i64.shl` family masks the count
+    // to 6 bits, so the floor does too (a Rust bare `<<` would panic instead).
+    let int2 = |f: fn(i64, i64) -> i64| -> Option<Flow> {
+        Some(Flow::val(Value::Int(f(as_int(args.first())?, as_int(args.get(1))?))))
+    };
+    // f64 arithmetic / comparison: real f64s in the interp carrier.
+    let float2 = |f: fn(f64, f64) -> f64| -> Option<Flow> {
+        Some(Flow::val(Value::Float(f(as_float(args.first())?, as_float(args.get(1))?))))
+    };
+    let fcmp = |f: fn(&f64, &f64) -> bool| -> Option<Flow> {
+        Some(Flow::val(Value::Bool(f(&as_float(args.first())?, &as_float(args.get(1))?))))
+    };
+    match func {
+        "band" => int2(|a, b| a & b),
+        "bor" => int2(|a, b| a | b),
+        "bxor" => int2(|a, b| a ^ b),
+        "bshl" => int2(|a, b| a.wrapping_shl(b as u32 & 63)),
+        "bshr" => int2(|a, b| a.wrapping_shr(b as u32 & 63)),
+        "bshr_u" => int2(|a, b| ((a as u64).wrapping_shr(b as u32 & 63)) as i64),
+        // Int ⇄ Float: `f64.convert_i64_s` / saturating `i64.trunc_sat_f64_s`
+        // (Rust's float→int `as` is exactly the saturating truncate).
+        "i2f" => Some(Flow::val(Value::Float(as_int(args.first())? as f64))),
+        "f2i" => Some(Flow::val(Value::Int(as_float(args.first())? as i64))),
+        // The raw f64 ⇄ i64 BIT reinterpret (`float.to_bits` / `int.bits_to_float`).
+        "fbits" => Some(Flow::val(Value::Int(as_float(args.first())?.to_bits() as i64))),
+        "ffrombits" => {
+            Some(Flow::val(Value::Float(f64::from_bits(as_int(args.first())? as u64))))
+        }
+        // The f32 conventions: the language-level Float32 is CARRIED widened (one
+        // f64 in this oracle, the widened bits in the backends), the narrowing
+        // rounds to nearest, and the pattern lives in the low 32 bits.
+        "f2f32" => Some(Flow::val(Value::Float((as_float(args.first())? as f32) as f64))),
+        "f32_2f" => Some(Flow::val(Value::Float(as_float(args.first())?))),
+        "i2f32" => Some(Flow::val(Value::Float((as_int(args.first())? as f32) as f64))),
+        "f32bits" => Some(Flow::val(Value::Int(
+            ((as_float(args.first())? as f32).to_bits()) as i64,
+        ))),
+        "bits_to_f32" => Some(Flow::val(Value::Float(
+            f32::from_bits(as_int(args.first())? as u32) as f64,
+        ))),
+        "fadd" => float2(|a, b| a + b),
+        "fsub" => float2(|a, b| a - b),
+        "fmul" => float2(|a, b| a * b),
+        "fdiv" => float2(|a, b| a / b),
+        "fcopysign" => float2(f64::copysign),
+        "fneg" => Some(Flow::val(Value::Float(-as_float(args.first())?))),
+        "fabs" => Some(Flow::val(Value::Float(as_float(args.first())?.abs()))),
+        "fsqrt" => Some(Flow::val(Value::Float(as_float(args.first())?.sqrt()))),
+        "fceil" => Some(Flow::val(Value::Float(as_float(args.first())?.ceil()))),
+        "ffloor" => Some(Flow::val(Value::Float(as_float(args.first())?.floor()))),
+        "feq" => fcmp(|a, b| a == b),
+        "fne" => fcmp(|a, b| a != b),
+        "flt" => fcmp(|a, b| a < b),
+        "fgt" => fcmp(|a, b| a > b),
+        "fge" => fcmp(|a, b| a >= b),
+        "fle" => fcmp(|a, b| a <= b),
+        _ => None,
+    }
 }
 
 /// The first half of the `int.*` arm table.

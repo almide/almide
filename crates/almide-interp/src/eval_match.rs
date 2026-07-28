@@ -249,6 +249,18 @@ impl<'a> Interpreter<'a> {
                 return f;
             }
         }
+        // C-002, the width trap: a signed NARROW `MIN / -1` (Int8's `-128 / -1`)
+        // has no representable result at its declared width, and BOTH backends
+        // abort — native's `i8::checked_div` returns None, and the wasm guard
+        // compares against the TRUE per-width MIN precisely because `i32.div_s`
+        // itself would happily return 128. The interpreter's i64 `checked_div`
+        // is that i32.div_s in disguise: it computed 128 and voted `exit=0
+        // stdout=128` against a correct two-target abort consensus, the first
+        // dissent the stdlib-pool coverage surfaced (int8_div_overflow began
+        // voting the moment `int.from_int8` gained a body).
+        if let Some(flow) = Self::narrow_div_overflow(op, &l, &r, &left.ty, &right.ty) {
+            return flow;
+        }
         let out = self.apply_binop(op, l, r);
         // Arithmetic on a NARROW sized integer wraps at its declared width on
         // both backends (C-180, #889) — the interpreter carries every integer
@@ -258,10 +270,35 @@ impl<'a> Interpreter<'a> {
         Self::narrow_wrap_flow(out, op, &left.ty, &right.ty)
     }
 
+    /// The one way `/` and `%` DO leave a narrow signed range: `MIN / -1`
+    /// (see the C-002 caller comment). Unsigned widths cannot reach it (no
+    /// negative operands) and the 64-bit case is already the i64
+    /// `checked_div`/`checked_rem` None. `%` takes the same guard: native's
+    /// `i8::checked_rem(-128, -1)` is None too, the same overflow question
+    /// asked of the remainder machinery.
+    fn narrow_div_overflow(op: BinOp, l: &Value, r: &Value, lt: &Ty, rt: &Ty) -> Option<Flow> {
+        use BinOp::*;
+        if !matches!(op, DivInt | ModInt) {
+            return None;
+        }
+        let width = |t: &Ty| match t {
+            Ty::Int8 => Some(8u32),
+            Ty::Int16 => Some(16),
+            Ty::Int32 => Some(32),
+            _ => None,
+        };
+        let bits = width(lt).or_else(|| width(rt))?;
+        let (Value::Int(a), Value::Int(b)) = (l, r) else { return None };
+        let min = -(1i64 << (bits - 1));
+        (*a == min && *b == -1).then(|| Flow::Abort("integer overflow".to_string()))
+    }
+
     /// Re-wrap an arithmetic result to the DECLARED narrow width of whichever
     /// operand carries it (a literal operand records the canonical `Int`).
     /// Comparisons cannot leave the range, and `/`/`%` cannot either once the
-    /// operands are in it, so `+`/`-`/`*` are wrapped — and `^`, which is
+    /// operands are in it — save for the signed `MIN / -1`, which
+    /// [`Self::narrow_div_overflow`] aborts before the op runs — so `+`/`-`/`*`
+    /// are wrapped — and `^`, which is
     /// repeated multiplication and wraps like it (congruent mod 2^bits, so
     /// wrapping the final value equals wrapping every step). `^` was missing
     /// from this gate exactly as it was missing from the renderers' (C-180's

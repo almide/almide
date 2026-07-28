@@ -23,6 +23,7 @@ mod dispatch;
 mod env;
 mod eval;
 mod hofs;
+mod stdlib_pool;
 mod value;
 
 pub use value::{Closure, Value, VariantPayload};
@@ -181,6 +182,16 @@ impl<'a> Interpreter<'a> {
         let mut fns = HashMap::new();
         for f in &program.functions {
             fns.insert(f.name, f);
+        }
+        // Layer in the self-hosted stdlib bodies (lowered once, process-wide) so
+        // a stdlib call the interp-native surfaces don't cover evaluates the SAME
+        // definition both backends run — see `stdlib_pool`. Program fns are
+        // inserted first and `or_insert` keeps them authoritative, so a fixture
+        // fn can never be shadowed by a pool body; the pool's own intra-source
+        // helper calls (`__sext`) resolve through this same table, and `__`
+        // names cannot collide with user code (#868 rejects the prefix).
+        for f in stdlib_pool::pool().fns.values() {
+            fns.entry(f.name).or_insert(f);
         }
         let mut module_fns = HashMap::new();
         for m in &program.modules {
