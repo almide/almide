@@ -492,6 +492,18 @@ fn try_render_wasm_source_impl(
     verbose: bool,
     mode: RenderMode,
 ) -> Result<String, LowerError> {
+    // STRICT VALUE MODE spans the WHOLE render, not just the IR phase. `strict_values()`
+    // is read by MIR *lowering*, which runs in `try_render_wasm_source_impl_rest` below —
+    // so a guard scoped to `build_ir_with_drops` would be restored before the only code
+    // that consults it ever runs, and every deferred `Op::Const` ZERO would render as an
+    // executable 0 instead of walling. That is exactly what happened: the flag used to be
+    // a process-global the IR phase `store(true)`d and never reset, so lowering inherited
+    // strict mode by leak; converting it to a scoped guard silently moved the boundary and
+    // re-opened the silently-wrong-value class F2 closed (`result.unwrap_or_else(err(…),
+    // (_) => captured_float)` printed 0 on wasm against 100 on native — nightly fuzz
+    // finding, seed 1785217538023450905). Own it here, at the entrypoint that spans both
+    // phases, so the scope matches what the mode actually protects.
+    let _strict = crate::lower::StrictValuesGuard::set(true);
     let mut ir = build_ir_with_drops(source, self_modules, mode == RenderMode::Tests)?;
     if mode == RenderMode::Library {
         synthesize_library_main(&mut ir);
@@ -553,10 +565,10 @@ fn build_ir_with_drops(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     test_mode: bool,
 ) -> Result<almide_ir::IrProgram, LowerError> {
-    // STRICT VALUE MODE: this is an OUTPUT path — a deferred Const-0 must never be executable
-    // (flight-evidence-gaps F2, the prim.handle literal address-0 class).
-    let _strict = crate::lower::StrictValuesGuard::set(true);
-
+    // STRICT VALUE MODE is owned by the caller, not by this phase. Nothing between here
+    // and the return reads `strict_values()`: this builds the linked IR, and the mode
+    // gates MIR *op* lowering, which runs after. A guard here would look like the
+    // protection and be none.
     let ir = source_to_ir_with(source, self_modules)?;
     // ADT brick 5b: GENERATE the recursive-drop fns (`__drop_<T>`) for nested-variant types and
     // re-lower with them in scope. v1-trust-spine-only — v0 manages its own memory. Two-pass.

@@ -235,6 +235,21 @@ fn try_render_wasm_source_impl_rest(
     ir: &mut almide_ir::IrProgram,
     verbose: bool,
 ) -> Result<String, LowerError> {
+    // This is where MIR lowering runs, so this is where STRICT value mode has to
+    // still be live. Asserting it here — rather than trusting the caller to hold
+    // the guard long enough — is the structural half of the fix: when the mode was
+    // a process-global that the IR phase set and never reset, lowering inherited it
+    // by leak, and scoping that flag to a guard silently moved the boundary so every
+    // deferred `Op::Const` ZERO rendered as an executable 0 (nightly fuzz: wasm
+    // printed 0 where native printed 100). Nothing in the types said the guard had
+    // to outlive the IR phase; this says it. It cannot fire on the permissive
+    // caps-counting path, which never reaches this function.
+    assert!(
+        crate::lower::strict_values(),
+        "wasm render reached MIR lowering with STRICT value mode off — a deferred \
+         Const-0 would render as an executable 0. The mode must be held for the \
+         WHOLE render, not just the IR phase (see try_render_wasm_source_impl)."
+    );
     let layouts = collect_pipeline_layouts(ir);
 
     let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
