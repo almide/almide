@@ -96,6 +96,50 @@ fn main() -> Unit = println(shape.described(v.text("hi"), 2))
     assert!(wat.contains("almide_rt_depp_shape_described"));
 }
 
+/// #943's remaining half: a LIST LITERAL in a sibling-call argument position —
+/// aivarium's `v.col([v.text(..), ..])` view-tree shape. The first cause (a
+/// top-let VarId colliding with a sibling's parameter, PR #944) was fixed and
+/// pinned separately; this pins the argument-materialization half, which walled
+/// as "List argument cannot be faithfully materialized in this brick" on the
+/// module-sibling path while the same expression inlined into main lowered
+/// fine. Nested literals and call-result elements are the load-bearing part.
+const TREE: &str = r#"
+type Node =
+  | Leaf(String)
+  | Branch(List[Node])
+
+fn leaf(s: String) -> Node = Leaf(s)
+fn branch(kids: List[Node]) -> Node = Branch(kids)
+
+fn render(n: Node) -> String =
+  match n {
+    Leaf(s) => s,
+    Branch(kids) => "[" + (list.map(kids, (k) => render(k)) |> list.join(",")) + "]",
+  }
+"#;
+
+#[test]
+fn a_list_literal_argument_to_a_sibling_call_lowers() {
+    let modules = vec![("tree".to_string(), parse(TREE), true)];
+    let root = r#"
+import self.tree as tree
+
+let unrelated = 1
+
+fn app() -> String =
+  tree.render(tree.branch([tree.leaf("a"), tree.branch([tree.leaf("b")]), tree.leaf("c")]))
+
+fn main() -> Unit = println(app())
+"#;
+    let wat = render(root, modules).expect(
+        "a list literal (nested, call-result elements) as a sibling-call argument lowers",
+    );
+    assert!(
+        wat.contains("almide_rt_tree_render") || wat.contains("almide_rt_self_tree_render"),
+        "the sibling must be DEFINED, not walled into an unlinked call"
+    );
+}
+
 #[test]
 fn the_same_source_as_local_modules_still_lowers() {
     // The other half of the report's A/B: leaf-named `self` modules, which
