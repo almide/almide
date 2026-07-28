@@ -16,7 +16,7 @@ This rests on an asymmetry the whole field stands on: **building is hard, checki
 
 > *If the checker accepts, the artifact has the property* — and this theorem never mentions the compiler's internals.
 
-That single move collapses the **trusted base from ~100,000 lines to a few hundred.** The big compiler becomes *untrusted* — free to be as large and buggy as it likes, because nothing trusts it.
+That single move collapses the **trusted base from ~100,000 lines to the extracted checker** — ~1,400 lines of OCaml, machine-derived from the proofs (the exact, regenerated number is below). The big compiler becomes *untrusted* — free to be as large and buggy as it likes, because nothing trusts it.
 
 ## The pipeline (proof-carrying code)
 
@@ -32,7 +32,7 @@ flowchart TB
 
     subgraph T["TRUSTED — a few hundred lines, machine-proven sound in Rocq"]
         K["K property checker<br/>K(c, a) accepts ⟹ a satisfies property P"]
-        V["V translation checker<br/>V(a, ALS) accepts ⟹ a refines ALS(s)"]
+        V["V translation checker<br/>V(a, M) accepts ⟹ a realizes the certified MIR<br/>(structure + release counts)"]
     end
 
     ALS -->|refine| P
@@ -42,11 +42,17 @@ flowchart TB
     ALS -->|refine| V
 ```
 
-- **K (property checker)** verifies the certificate: memory safety, name totality, capability upper bound, stack balance, termination behavior.
-- **V (translation checker)** verifies — *on every build* — that the emitted wasm actually refines the language semantics. This is the answer to the reviewer's killer question: *"You proved a model — but does the thing that actually runs match it?"*
-- **ALS** (Almide Language Specification) is the normative semantics, in Rocq (formerly Coq). The compiler and both backends don't define meaning; they *refine* ALS. So byte-for-byte agreement between targets isn't an afterthought — it falls out of the design.
+- **K (property checker)** — the extracted, kernel-proven checker — re-verifies the certificate on every build: memory safety (RC balance), name totality, and the capability upper bound. (Stack balance and termination are *proven in the Rocq spine* but not yet extracted into K or witnessed per build — [`Extract.v`](../proofs/Extract.v) is the extraction boundary.)
+- **V (translation checker)** checks — *on every build* — that the emitted wasm **realizes** the certified MIR: every op's required instruction pattern is present in the emitted module, and the release count matches the certificate's drops (leak-freedom — an under-freeing renderer fails; see `translation_validation.rs`'s own contract). It is a structural realization check, **not** a semantic refinement proof: the answer to *"does the running thing match the model?"* is V's structure check **plus** the differential evidence below.
+- **ALS** (Almide Language Specification) names the normative semantics. What exists in Rocq today is the RC-discipline model ([`proofs/ALS.v`](../proofs/ALS.v)) — there is no mechanized evaluation relation for Almide source yet, and no theorem of the shape `⟦s⟧ ≈ ⟦compile(s)⟧`. **Byte-for-byte agreement between targets is established empirically**, and heavily: the [contract ledger](contracts/README.md)'s cross-target fixture gate, `proofs/output-parity.sh`, the nightly differential fuzz, and the 3-way `almide-interp` oracle. The design *aims* the pipeline at a single semantics; the agreement itself is measured, not derived.
 
-The **trusted base is a single Rocq kernel** (plus CompCert/CertiCoq, the hardware, and the assumption that ALS says what we intend). Everything else is either proven against it or untrusted. There is no third category.
+The **trusted base is the Rocq kernel plus the extracted checker** (~1,400 lines of OCaml derived from the proofs — the exact number is in the block below), plus the hardware and the assumption that the spec says what we intend. Verified extraction (CertiRocq) is a *future ratchet*, not a present fact — see [`proofs/TRUSTED_BASE.md`](../proofs/TRUSTED_BASE.md) for the full ledger. Everything else is either proven against the kernel or untrusted. The stage-by-stage boundary — which rows are proven, which are trusted, and what every gate does and does not claim — is **[proven-vs-trusted.md](contracts/proven-vs-trusted.md)**.
+
+<!-- tcb:generated:start — derived by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
+> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **1144 lines** (+ 293
+> `.mli`); Rocq spine = **96 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
+> Lean Perceus belt = **41 theorems**, 0 sorry (CI-gated).
+<!-- tcb:generated:end -->
 
 ## Receipts — verify it yourself
 
@@ -59,7 +65,7 @@ Each build folds its certificates into claims, each with a published refutation 
 | **C-FAITHFUL** | Observable behavior refines the language semantics |
 | **C-PROVEN** | Kernel-checked universal properties (RC balance, stack balance, …) |
 
-Run `make verify-trust` and you re-derive every claim **on your own machine.** CI is a courtesy pre-run, deliberately *outside* the trusted base — you never have to trust our infrastructure to trust the artifact.
+Run `make verify-trust` **on your own machine** and you re-derive the proof spine (kernel + `coqchk` + the asserted axiom audit), the PCC gate (the extracted checker re-verifying real witnesses), and the corpus wall. The remaining receipts (cross-target parity, the differential fuzz, the contract gate) have their own commands, listed per claim in [`proofs/TRUSTED_BASE.md`](../proofs/TRUSTED_BASE.md). CI is a courtesy pre-run, deliberately *outside* the trusted base — you never have to trust our infrastructure to trust the artifact.
 
 ## Why it's slower — on purpose
 
