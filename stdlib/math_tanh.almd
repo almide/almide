@@ -1,6 +1,6 @@
 // math_tanh — SELF-HOSTED math.tanh + its expm1 kernel, a FAITHFUL
 // transcription of runtime/rs/src/libm_p4.rs::{expm1, tanh} (vendored libm
-// 0.2.16 = FreeBSD s_expm1.c / s_tanh.c). v0 uses the SAME vendored fns on
+// 0.2.16 = FreeBSD s_expm1.c / s_tanh.c). v0 used the SAME vendored fns on
 // native and the same algorithm in wasm (emit_wasm/rt_libm_p4.rs::compile_expm1
 // + rt_numeric.rs::compile_math_tanh), so a transcription with identical f64
 // ops in identical order is bit-identical across the whole input range.

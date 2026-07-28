@@ -6,9 +6,10 @@
 // characters with `err`.
 //
 // Each fn routes the Rust target to the existing runtime in
-// `runtime/rs/src/base64.rs` via `@inline_rust(template)`. On WASM
-// dispatch continues through `emit_wasm/calls_base64.rs` (pending a
-// separate `@wasm_intrinsic` migration).
+// `runtime/rs/src/base64.rs` via `@inline_rust(template)`. On WASM both
+// encode and decode are SELF-HOSTED in `stdlib/base64_encode.almd`,
+// registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
+// dispatched through `emit_wasm/calls_base64.rs`, retired in c71eff7b.)
 
 @intrinsic("almide_rt_base64_encode")
 fn encode(b: Bytes) -> String = _

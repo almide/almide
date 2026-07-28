@@ -9,9 +9,11 @@
 // `walker/mod.rs::render_function`'s `@inline_rust` skip) and exists
 // only so the signature type-checks.
 //
-// On WASM the bundled fns are skipped at register time; dispatch
-// continues through `emit_wasm/calls_int.rs` until a later arc adds
-// `@wasm_intrinsic` attributes.
+// On WASM the int fns are SELF-HOSTED (`stdlib/int_to_string.almd`,
+// `int_hex.almd`, `int_bits.almd`, …), registered in
+// `crates/almide-mir/src/render_wasm/registry.rs`. (v0 skipped the bundled
+// fns at register time and dispatched through `emit_wasm/calls_int.rs`,
+// retired in c71eff7b.)
 //
 // Deleting `stdlib/defs/int.toml`: the signatures and dispatch for
 // int are now authoritative here. The handwritten `almide_rt_int_*`
