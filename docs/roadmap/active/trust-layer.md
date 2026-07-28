@@ -57,7 +57,7 @@ load 前に manifest を policy と突き合わせられる — これが「レ�
 | L3 | [almide-perceus-belt](almide-perceus-belt.md) | Phase A (Lean 証明) |
 | L4 | almide-dojo (別リポジトリ) | MSR の公開形式・第三者再現手順 |
 | L2/L3 の認証級硬化 | [certification-grade](certification-grade.md) | CG-1〜CG-5 (ALS + 規範意味論 / coverage / Critical profile / translation validation / dossier) |
-| 性能税ゼロ | [wasm-optimization-roadmap](wasm-optimization-roadmap.md) | 4 losses burndown → 11/11 |
+| 性能税ゼロ | [wasm-optimization-roadmap](../done/wasm-optimization-roadmap.md) | 4 losses burndown → 11/11 |
 
 性能の位置づけ: 性能はレベルではなく**前提条件の除去**。「信頼を取ると遅くなる」
 というトレードオフが存在しない (11/11 vs Rust+LLVM) ことで、レベル表の claim が

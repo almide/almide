@@ -64,7 +64,7 @@ The Lean 4 theorems prove the algorithm correct, but the Rust implementation was
 
 ### Gap 1: WASM emitter -> WasmIR migration
 
-Tracked in: [wasm-engine-redesign.md](wasm-engine-redesign.md)
+Tracked in: [wasm-engine-redesign.md](../done/wasm-engine-redesign.md)
 
 | Step | Description | Deliverable | Depends on |
 |------|-------------|-------------|------------|

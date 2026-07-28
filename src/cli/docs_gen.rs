@@ -44,9 +44,10 @@ pub fn cmd_docs_gen(check: bool) {
     drifts.extend(check_diagnostic_codes(&llms));
     drifts.extend(check_auto_imported(&llms));
     drifts.extend(check_diagnostic_registry_bijection());
+    drifts.extend(check_stdlib_fn_count());
 
     if drifts.is_empty() {
-        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection)"));
+        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count)"));
         return;
     }
 
@@ -224,4 +225,66 @@ mod tests {
         assert!(!looks_like_diag_code("E01"));
         assert!(!looks_like_diag_code(""));
     }
+}
+
+/// The "N functions across M modules" claim, DERIVED from the compiler's own
+/// module interfaces (#918). The number had forked three ways — README said
+/// 847, SPEC and WASM-OUTPUT said 834, the real surface was 869 — because it
+/// was hand-written in five places and its old derivation (`stdlib/defs/*.toml`)
+/// died with the self-hosting migration. This computes the truth the same way
+/// `almide compile <module> --json` does — one interface extraction per module
+/// documented under docs/stdlib/ — and asserts every claim site quotes exactly
+/// that pair. Runs in-process, so the CI job that runs `docs-gen --check`
+/// enforces it wherever the binary exists.
+fn check_stdlib_fn_count() -> Vec<String> {
+    let mut drifts = Vec::new();
+    let mut modules: Vec<String> = match std::fs::read_dir("docs/stdlib") {
+        Ok(rd) => rd
+            .filter_map(|e| {
+                let p = e.ok()?.path();
+                (p.extension()? == "md").then(|| p.file_stem()?.to_str().map(str::to_string))?
+            })
+            .collect(),
+        Err(e) => return vec![format!("cannot read docs/stdlib: {e}")],
+    };
+    modules.sort();
+    let mut total = 0usize;
+    for m in &modules {
+        let (file, lenient) = super::compile::resolve_module_to_file(m);
+        let (program, source_text, checker) =
+            super::compile::parse_and_typecheck_for_compile(&file, lenient);
+        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+        let iface = almide::interface::extract(&ir, m, Some(&source_text));
+        total += iface.functions.len();
+    }
+    let want = format!("{} functions across {} modules", total, modules.len());
+    for doc in ["README.md", "docs/SPEC.md", "docs/WASM-OUTPUT.md"] {
+        let Ok(text) = std::fs::read_to_string(doc) else {
+            drifts.push(format!("cannot read {doc}"));
+            continue;
+        };
+        for line in text.lines() {
+            if let Some(idx) = line.find(" functions across ") {
+                // Reconstruct the claimed "<n> functions across <m> modules" span.
+                let head = &line[..idx];
+                let n_start = head.rfind(|c: char| !c.is_ascii_digit()).map_or(0, |i| i + 1);
+                let tail = &line[idx + " functions across ".len()..];
+                let m_end = tail.find(|c: char| !c.is_ascii_digit()).unwrap_or(tail.len());
+                if !tail[..m_end].is_empty() && !tail[m_end..].trim_start().starts_with("modules") {
+                    continue; // "functions across targets" or similar — not this claim
+                }
+                let claimed = format!(
+                    "{} functions across {} modules",
+                    &head[n_start..],
+                    &tail[..m_end]
+                );
+                if claimed != want {
+                    drifts.push(format!(
+                        "{doc} claims `{claimed}` but the module interfaces total `{want}`"
+                    ));
+                }
+            }
+        }
+    }
+    drifts
 }

@@ -3,7 +3,7 @@ use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, out, 
 /// Resolve a module name to a source file path.
 /// If the input looks like a file path (ends with .almd), use it directly.
 /// If it's a module name (e.g., "json", "parser"), resolve via the module system.
-fn resolve_module_to_file(module: &str) -> (String, bool) {
+pub(crate) fn resolve_module_to_file(module: &str) -> (String, bool) {
     if module.ends_with(".almd") {
         return (module.to_string(), false);
     }
@@ -100,7 +100,7 @@ fn resolve_module_name(module: Option<&str>) -> String {
 /// `cmd_compile`'s parse + resolve + type-check phase. Exits the process on
 /// any parse/resolve/type error, matching the original inline behavior.
 /// Extracted verbatim.
-fn parse_and_typecheck_for_compile(file: &str, lenient: bool) -> (almide::ast::Program, String, check::Checker) {
+pub(crate) fn parse_and_typecheck_for_compile(file: &str, lenient: bool) -> (almide::ast::Program, String, check::Checker) {
     let (mut program, source_text, parse_errors) = parse_file(file);
     if !parse_errors.is_empty() {
         for e in &parse_errors {

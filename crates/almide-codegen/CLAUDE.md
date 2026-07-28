@@ -4,7 +4,7 @@ IR → source code: Rust (primary) and WGSL (`emit_wgsl/`). The wasm binary path
 does NOT live here — it is the v1 MIR trust-spine in `crates/almide-mir`
 (the v0 direct emitter `emit_wasm/` was retired in #782).
 
-> **理想形リファクタのロードマップ**: [docs/roadmap/active/codegen-ideal-form.md](../../docs/roadmap/active/codegen-ideal-form.md)
+> **理想形リファクタのロードマップ**: [docs/roadmap/done/codegen-ideal-form.md](../../docs/roadmap/done/codegen-ideal-form.md)
 > 新しい codegen の修正を入れる前に、そこに挙げられた「場当たり修正を避けるべきポイント」を確認すること。特に: 関数解決は独立パスに、stdlib emit は宣言駆動、`emit_stub_call` による実行時 trap は避ける。
 
 ## Three-Layer Architecture
