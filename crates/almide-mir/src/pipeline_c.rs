@@ -787,6 +787,39 @@ mod tests {
     // decl survived. Before this fix, `source_to_ir_with` only checked the
     // `Result` and never inspected `Parser::errors`, so a source like this
     // would silently compile with the bare `println` call missing from the
+    /// #946: the RECEIVER of an in-place mutator over a mutable global borrows the
+    /// post-COW handle — it must NOT `Dup` the slot's handle, because that owned
+    /// reference (released only at scope end) is what made every SECOND write in a
+    /// body see rc == 2 at its COW and full-copy the buffer (O(|dst|) per write —
+    /// 23 s for nendo's VRM loop). Pinned structurally: the rendered `$main` of a
+    /// two-write body contains NO `$rc_inc` call at all (the writes' args are
+    /// scalars; the only rc_inc candidate was the receiver Dup).
+    #[test]
+    fn an_inplace_mutator_receiver_does_not_dup_the_global_slot() {
+        let source = r#"
+var g = bytes.new(8)
+fn main() -> Unit = {
+  bytes.set_at(g, 0, 1)
+  bytes.set_at(g, 1, 2)
+  println(int.to_string(bytes.get_or(g, 1, 0 - 1)))
+}
+"#;
+        let wat = try_render_wasm_source(source, &[], false).expect("two-write body renders");
+        let main_start = wat.find("(func $main").expect("main present");
+        let main_end = wat[main_start + 1..].find("\n  (func ").map(|i| main_start + 1 + i).unwrap_or(wat.len());
+        let main_body = &wat[main_start..main_end];
+        // `bytes.get_or` READS the global — that path legitimately Dups, and its
+        // argument ops (the Dup included) precede its call text. Assert on the two
+        // writes' region only: everything up to the LAST `$bytes.set_at` call.
+        let writes_end = main_body.rfind("(call $bytes.set_at").unwrap_or(main_body.len());
+        let writes_region = &main_body[..writes_end];
+        assert!(
+            !writes_region.contains("(call $rc_inc"),
+            "the in-place writes must not Dup the slot handle — an owned receiver \
+             reference makes the next write's MakeUnique copy the whole buffer:\n{writes_region}"
+        );
+    }
+
     /// #939: a heap-element `list.push` accumulator loop must render through the
     /// amortized `__list_append1_rc`, not the full-copy `__list_concat_rc` — the
     /// copy is O(len) per element, O(n²) for the loop, and it took json.parse

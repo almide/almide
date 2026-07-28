@@ -153,6 +153,18 @@ impl LowerCtx {
         // by construction (only real constructions are ever stored through `__mg_take`/
         // `Store`), so member reads and spreads work on it.
         if let Some((index, ty)) = crate::lower::mutable_global_info(var) {
+            // The in-place mutator's receiver (#946): the COW that just ran staged
+            // its post-MakeUnique handle — hand it over as a BORROW (the slot owns
+            // the block and nothing between the COW and the call can release it)
+            // instead of re-loading and `Dup`ing. Consumed once; a SECOND read of
+            // the same var in the same statement (`bytes.copy_from(dst, dst, …)`'s
+            // source position) takes the normal owned-Dup path below.
+            if let Some((pv, pval)) = self.pending_inplace_receiver {
+                if pv == var {
+                    self.pending_inplace_receiver = None;
+                    return Ok(pval);
+                }
+            }
             return self.read_mutable_global_slot(index, &ty);
         }
         let ty = self

@@ -2350,6 +2350,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mutable_global_bytes_arena.almd", class = "fixture" },
   { path = "spec/wasm_cross/scalar_if_arm_effects.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutable_global_repeat_writes.almd", class = "fixture" },
 ]
 
 # ── STATEMENT EFFECTS INSIDE A REAL SCALAR-`if` ARM ─
@@ -2407,4 +2408,15 @@ since     = "0.37.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/interp_effect_unwrap_arg.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-193"
+spec      = "ALS-M4"
+title     = "Repeated in-place writes through a mutable global stay in place — the receiver borrows the post-COW handle"
+statement = "An in-place mutator over a mutable module-level buffer COWs the STORAGE SLOT (C-187) and then passes the receiver argument. The receiver used to be read back through the generic global-read path, which `Dup`s the slot's handle as an owned value-semantics reference released only at scope end — so within one body the SECOND write's `MakeUnique` always saw rc == 2 and paid a full O(|buffer|) copy, EVERY iteration of a loop. One `bytes.copy_from` per iteration ran at 0.1 µs; two ran at ~5 ms each against a 16 MiB destination (#946 — nendo's three-copies-per-vertex VRM loop took 23 s where three single-copy loops took 2 ms; the cost scaled with the DESTINATION size, the tell that the copy was the COW's, not the write's). The fix: `mutable_global_cow` stages its own post-MakeUnique handle and the receiver argument consumes it as a BORROW — the slot owns the block, nothing between the COW and the call can release it, and the callee's &mut protocol writes through it — so the block stays at rc == 1 across every write in the body. Consumed once per statement and cleared at every statement boundary, so a rolled-back attempt can never leak an un-Dup'd alias into a later read; a second read of the same var in the same statement (`bytes.copy_from(dst, dst, …)`'s source position) takes the normal owned-Dup path. The aliasing semantics are unchanged and pinned observably: a snapshot taken between writes keeps its pre-write bytes on both targets."
+since     = "0.37.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mutable_global_repeat_writes.almd", class = "fixture" },
 ]
