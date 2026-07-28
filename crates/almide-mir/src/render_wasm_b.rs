@@ -514,72 +514,102 @@ fn render_fused_or_plain_op(
 fn tail_call_indexes(func: &MirFunction) -> BTreeSet<usize> {
     let Some(ret) = func.ret else { return BTreeSet::new() };
     let mut out = BTreeSet::new();
-    'cand: for (i, op) in func.ops.iter().enumerate() {
+    for (i, op) in func.ops.iter().enumerate() {
         let Op::CallFn { dst: Some(d), .. } = op else { continue };
-        // The enclosing IfThen dst stack at op i (prescan).
-        let mut if_stack: Vec<Option<ValueId>> = Vec::new();
-        for k in 0..i {
-            match &func.ops[k] {
-                Op::IfThen { dst, .. } => if_stack.push(*dst),
-                Op::EndIf { .. } => {
-                    if_stack.pop();
-                }
-                _ => {}
-            }
-        }
-        let mut carried = *d;
-        let mut j = i + 1;
-        while j < func.ops.len() {
-            match &func.ops[j] {
-                // Our arm ends here (we were the THEN arm): the else arm's
-                // ops belong to the OTHER path — skip to the matching EndIf,
-                // whose enclosing IfThen dst becomes the carried value.
-                Op::Else { val } => {
-                    if *val != Some(carried) {
-                        continue 'cand;
-                    }
-                    let mut depth = 0usize;
-                    j += 1;
-                    loop {
-                        if j >= func.ops.len() {
-                            continue 'cand;
-                        }
-                        match &func.ops[j] {
-                            Op::IfThen { .. } => depth += 1,
-                            Op::EndIf { .. } if depth == 0 => break,
-                            Op::EndIf { .. } => depth -= 1,
-                            _ => {}
-                        }
-                        j += 1;
-                    }
-                    let Some(Some(dst)) = if_stack.pop() else { continue 'cand };
-                    carried = dst;
-                    j += 1;
-                }
-                // We were the ELSE arm (or a merge closes around us): the
-                // carried value must be this arm's value; the IfThen dst
-                // becomes the new carried value.
-                Op::EndIf { val } => {
-                    if *val != Some(carried) {
-                        continue 'cand;
-                    }
-                    let Some(Some(dst)) = if_stack.pop() else { continue 'cand };
-                    carried = dst;
-                    j += 1;
-                }
-                // The tail move-out marker of our own result — pure
-                // accounting, no rendered code.
-                Op::Consume { v } if *v == carried => {
-                    j += 1;
-                }
-                _ => continue 'cand,
-            }
-        }
-        if carried == ret {
+        if call_result_reaches_ret_unmodified(func, i, *d, ret) {
             out.insert(i);
         }
     }
     out
+}
+
+/// The enclosing `IfThen` dst stack at op `i` — a prescan, since the marker stream is
+/// flat and carries no nesting of its own. Extracted verbatim from
+/// [`tail_call_indexes`] (codopsy round-3 sweep, #852).
+fn enclosing_if_dsts(func: &MirFunction, i: usize) -> Vec<Option<ValueId>> {
+    let mut if_stack: Vec<Option<ValueId>> = Vec::new();
+    for k in 0..i {
+        match &func.ops[k] {
+            Op::IfThen { dst, .. } => if_stack.push(*dst),
+            Op::EndIf { .. } => {
+                if_stack.pop();
+            }
+            _ => {}
+        }
+    }
+    if_stack
+}
+
+/// Index of the `EndIf` that closes the arm `j` opens into — nested `IfThen`/`EndIf`
+/// pairs inside it are skipped by depth. `None` if the stream ends first (a malformed
+/// marker run, which declines the candidate). Extracted verbatim from
+/// [`tail_call_indexes`] (codopsy round-3 sweep, #852).
+fn matching_end_if(func: &MirFunction, mut j: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    loop {
+        if j >= func.ops.len() {
+            return None;
+        }
+        match &func.ops[j] {
+            Op::IfThen { .. } => depth += 1,
+            Op::EndIf { .. } if depth == 0 => return Some(j),
+            Op::EndIf { .. } => depth -= 1,
+            _ => {}
+        }
+        j += 1;
+    }
+}
+
+/// Whether the call at `i` with result `d` flows UNMODIFIED to the function's `ret` —
+/// through `Else`/`EndIf` value merges and its own `Consume` move-out marker, and
+/// nothing else. `false` is the decline (plain `call`). Extracted verbatim from
+/// [`tail_call_indexes`] (codopsy round-3 sweep, #852): the former `'cand` walk, whose
+/// every `continue 'cand` is a `return false` here.
+fn call_result_reaches_ret_unmodified(
+    func: &MirFunction,
+    i: usize,
+    d: ValueId,
+    ret: ValueId,
+) -> bool {
+    // The enclosing IfThen dst stack at op i (prescan).
+    let mut if_stack = enclosing_if_dsts(func, i);
+    let mut carried = d;
+    let mut j = i + 1;
+    while j < func.ops.len() {
+        match &func.ops[j] {
+            // Our arm ends here (we were the THEN arm): the else arm's
+            // ops belong to the OTHER path — skip to the matching EndIf,
+            // whose enclosing IfThen dst becomes the carried value.
+            Op::Else { val } => {
+                if *val != Some(carried) {
+                    return false;
+                }
+                let Some(end) = matching_end_if(func, j + 1) else { return false };
+                j = end;
+                let Some(Some(dst)) = if_stack.pop() else { return false };
+                carried = dst;
+                j += 1;
+            }
+            // We were the ELSE arm (or a merge closes around us): the
+            // carried value must be this arm's value; the IfThen dst
+            // becomes the new carried value.
+            Op::EndIf { val } => {
+                if *val != Some(carried) {
+                    return false;
+                }
+                let Some(Some(dst)) = if_stack.pop() else { return false };
+                carried = dst;
+                j += 1;
+            }
+            // The tail move-out marker of our own result — pure
+            // accounting, no rendered code.
+            Op::Consume { v } if *v == carried => {
+                j += 1;
+            }
+            _ => return false,
+        }
+    }
+    carried == ret
 }
 
 const SCALAR_REPR: Repr = Repr::Scalar { width: crate::ScalarWidth::Double };
