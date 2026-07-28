@@ -120,12 +120,17 @@ custom-variant / variant-value / Result / Option merges), bind + scope-track +
 `seed_variant_param`. No new cert surface (existing tail-trusted routers).
 
 > **ATTEMPT 1 REFUTED (2026-07-28) — do not retry without the two fixes below.**
-> A full widening (`is_heap_ty` in both bind sites + a `bind_join_lowerable`
-> decline predicate admitting LitStr / heap Var / ConcatStr / nested-if arms
-> under a scalar cond) was implemented and killed by the mandatory adversarial
+> A full widening was implemented and killed by the mandatory adversarial
 > pass: 2 of 3 independent auditors returned REFUTED with distinct defects, and
-> 5 lowering unit tests that pin the duplication route failed. The patch is
-> archived at `scratchpad/j1_attempt_REFUTED.patch` (not committed).
+> 5 lowering unit tests pinning the duplication route failed. The attempt was
+> exactly: drop the `is_variant_ty` gate at both bind sites (`lower_bind_heap_if`
+> ran the general merge join for any heap type; `lower_bind_heap_match` gained
+> `try_lower_list_match_value` + a `desugar_match_to_if` → `try_lower_heap_result_if`
+> fallback), plus a `bind_join_lowerable` predicate in `desugar_branch_b.rs`
+> admitting arms drawn from {LitStr, heap Var, ConcatStr, nested such if} under a
+> scalar cond, wired into `desugar_let_bound_heap_branch`'s trigger and its
+> `rest_branch_binds` counter so those binds stop being duplicated. Nothing of it
+> was committed; re-derive from this paragraph plus the two fixes below.
 >
 > **Defect 1 — live-variable clobber (LATENT, exposed by the rerouting).**
 > Admitting a bare-Var else arm let non-shadow binds (`let b = …; let j = if c
