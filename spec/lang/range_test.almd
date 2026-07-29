@@ -2,7 +2,7 @@
 // range_test — Range expressions and iteration
 test "basic range in for" {
   var sum = 0;
-  for i in 0..5 {
+  for i in 0..<5 {
     sum = sum + i;
   };
   assert_eq(sum, 10)
@@ -10,7 +10,7 @@ test "basic range in for" {
 
 test "range starts at non-zero" {
   var sum = 0;
-  for i in 3..6 {
+  for i in 3..<6 {
     sum = sum + i;
   };
   assert_eq(sum, 12)
@@ -18,7 +18,7 @@ test "range starts at non-zero" {
 
 test "inclusive range" {
   var count = 0;
-  for _ in 0..=5 {
+  for _ in 0...5 {
     count = count + 1;
   };
   assert_eq(count, 6)
@@ -26,7 +26,7 @@ test "inclusive range" {
 
 test "range zero iterations" {
   var count = 0;
-  for _ in 5..5 {
+  for _ in 5..<5 {
     count = count + 1;
   };
   assert_eq(count, 0)
@@ -34,7 +34,7 @@ test "range zero iterations" {
 
 test "range single iteration" {
   var count = 0;
-  for _ in 0..1 {
+  for _ in 0..<1 {
     count = count + 1;
   };
   assert_eq(count, 1)
@@ -44,7 +44,7 @@ test "range with variable bounds" {
   let start = 2;
   let end = 7;
   var sum = 0;
-  for i in start..end {
+  for i in start..<end {
     sum = sum + i;
   };
   assert_eq(sum, 20)
@@ -52,7 +52,7 @@ test "range with variable bounds" {
 
 test "range collecting to list" {
   var result: List[Int] = [];
-  for i in 0..4 {
+  for i in 0..<4 {
     result = result + [i];
   };
   assert_eq(result, [0, 1, 2, 3])
@@ -60,8 +60,8 @@ test "range collecting to list" {
 
 test "range in nested loop" {
   var count = 0;
-  for _ in 0..3 {
-    for _ in 0..4 {
+  for _ in 0..<3 {
+    for _ in 0..<4 {
       count = count + 1;
     };
   };
@@ -70,7 +70,7 @@ test "range in nested loop" {
 
 test "inclusive range boundary" {
   var last = -1;
-  for i in 0..=0 {
+  for i in 0...0 {
     last = i;
   };
   assert_eq(last, 0)
@@ -78,7 +78,7 @@ test "inclusive range boundary" {
 
 test "range with large step accumulator" {
   var sum = 0;
-  for i in 0..100 {
+  for i in 0..<100 {
     sum = sum + i;
   };
   assert_eq(sum, 4950)

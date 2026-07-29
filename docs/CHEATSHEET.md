@@ -212,10 +212,10 @@ while i < 10 {
 
 ### Range
 ```
-0..5            // [0, 1, 2, 3, 4]  (exclusive end)
-1..=5           // [1, 2, 3, 4, 5]  (inclusive end)
+0..<5           // [0, 1, 2, 3, 4]  (exclusive end)
+1...5           // [1, 2, 3, 4, 5]  (inclusive end)
 for i in 0..n { ... }    // optimized: no list allocation
-let xs = list.map(0..10, (i) => i * i)   // range as List[Int]
+let xs = list.map(0..<10, (i) => i * i)  // range as List[Int]
 ```
 
 ### Pipe
@@ -383,7 +383,7 @@ effect fn main() -> Unit = {
 Command-line arguments are accessed via `process.args()` (not main parameters).
 
 ## Operators (precedence high→low)
-`. () [] ! ? ?. ??` (postfix) > `not -` (prefix) > `>>` > `^` (power) > `* / %` > `+ -` > `.. ..=` > `|>` > `== != < > <= >=` (non-assoc) > `and` > `or`
+`. () [] ! ? ?. ??` (postfix) > `not -` (prefix) > `>>` > `^` (power) > `* / %` > `+ -` > `..< ...` > `|>` > `== != < > <= >=` (non-assoc) > `and` > `or`
 
 `^` is exponentiation (right-associative, `**` also accepted). `+` is concatenation for strings and lists (overloaded with addition). XOR is available as `int.bxor(a, b)`.
 

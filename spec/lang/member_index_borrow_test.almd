@@ -33,7 +33,7 @@ test "member-container index borrow direct" {
 
 fn pass2(node: Node, line: Line, n: Int) -> Float = {
   var t = 0.0
-  for ii in 0..n {
+  for ii in 0..<n {
     let child = node.children[line.items[ii].idx]
     t = t + child.grow * line.items[ii].basis
   }
@@ -48,7 +48,7 @@ test "chained index-member scalar reads" {
 
 fn sum_items(line: Line, n: Int) -> Float = {
   var t = 0.0
-  for ii in 0..n {
+  for ii in 0..<n {
     t = t + line.items[ii].basis
   }
   t
@@ -61,12 +61,12 @@ test "scalar index through a member-field list" {
 
 fn rebind_read(n: Int) -> Float = {
   var a: List[Float] = []
-  for i in 0..n { a = a + [int.to_float(i) + 1.0] }
+  for i in 0..<n { a = a + [int.to_float(i) + 1.0] }
   var b: List[Float] = []
-  for i in 0..n { b = b + [a[i] * 3.0] }
+  for i in 0..<n { b = b + [a[i] * 3.0] }
   a = b
   var t = 0.0
-  for i in 0..n { t = t + a[i] }
+  for i in 0..<n { t = t + a[i] }
   t
 }
 

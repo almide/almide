@@ -7,7 +7,7 @@
 import random
 effect fn main() -> Unit = {
   var hits = 0
-  for i in 0..50 {
+  for i in 0..<50 {
     let r = random.int(10, 20)
     if r >= 10 and r <= 20 then hits = hits + 1 else hits = hits
   }

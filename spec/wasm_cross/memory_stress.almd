@@ -3,7 +3,7 @@
 
 fn count_matches(xs: List[Int], expected: (Int) -> Int, n: Int) -> Int = {
   var pass = 0
-  for i in 0..n {
+  for i in 0..<n {
     pass = if xs[i] == expected(i) then pass + 1 else pass
   }
   pass
@@ -11,21 +11,21 @@ fn count_matches(xs: List[Int], expected: (Int) -> Int, n: Int) -> Int = {
 
 fn test_push_verify_all() -> String = {
   var xs: List[Int] = []
-  for i in 0..100 { list.push(xs, i * 7 + 3) }
+  for i in 0..<100 { list.push(xs, i * 7 + 3) }
   let pass = count_matches(xs, (i) => i * 7 + 3, 100)
   int.to_string(pass)
 }
 
 fn test_repeat_index_assign_all() -> String = {
   var xs = list.repeat(0, 50)
-  for i in 0..50 { xs[i] = (i + 1) * 11 }
+  for i in 0..<50 { xs[i] = (i + 1) * 11 }
   let pass = count_matches(xs, (i) => (i + 1) * 11, 50)
   int.to_string(pass)
 }
 
 fn test_nested_list() -> String = {
   var outer: List[List[Int]] = []
-  for i in 0..10 {
+  for i in 0..<10 {
     outer = outer + [[i * 100, i * 100 + 1, i * 100 + 2]]
   }
   let v = outer[5]
@@ -34,9 +34,9 @@ fn test_nested_list() -> String = {
 
 fn test_push_pop_integrity() -> String = {
   var xs: List[Int] = []
-  for i in 0..20 { list.push(xs, i) }
-  for _ in 0..10 { list.pop(xs) }
-  for i in 0..10 { list.push(xs, 100 + i) }
+  for i in 0..<20 { list.push(xs, i) }
+  for _ in 0..<10 { list.pop(xs) }
+  for i in 0..<10 { list.push(xs, 100 + i) }
   let a = int.to_string(xs[0]) + " " + int.to_string(xs[9])
   let b = int.to_string(xs[10]) + " " + int.to_string(xs[19])
   a + " " + b
@@ -66,7 +66,7 @@ fn test_forin_with_parallel_push() -> String = {
 
 fn test_many_small_lists() -> String = {
   var lists: List[List[Int]] = []
-  for i in 0..100 {
+  for i in 0..<100 {
     lists = lists + [[i, i + 1, i + 2]]
   }
   let first = lists[0]
@@ -77,13 +77,13 @@ fn test_many_small_lists() -> String = {
 
 fn test_large_string_list() -> String = {
   var xs: List[String] = []
-  for i in 0..30 { list.push(xs, "item_" + int.to_string(i)) }
+  for i in 0..<30 { list.push(xs, "item_" + int.to_string(i)) }
   xs[0] + " " + xs[15] + " " + xs[29] + " " + int.to_string(list.len(xs))
 }
 
 fn test_filter_map_chain() -> String = {
   var ys: List[Int] = []
-  for i in 0..50 { ys = ys + [i] }
+  for i in 0..<50 { ys = ys + [i] }
   let result = ys
     |> list.filter((x) => x % 3 == 0)
     |> list.map((x) => x * x)
@@ -104,7 +104,7 @@ fn test_concurrent_push_11_lists() -> String = {
   var l8: List[Int] = []
   var l9: List[Int] = []
   var l10: List[Int] = []
-  for i in 0..25 {
+  for i in 0..<25 {
     list.push(l0, i)
     list.push(l1, i + 100)
     list.push(l2, i + 200)

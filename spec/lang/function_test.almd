@@ -269,7 +269,7 @@ test "function call in if condition" {
 
 fn repeat_(f: fn(Int) -> Int, n: Int, x: Int) -> Int = {
   var result = x;
-  for _i in 0..n {
+  for _i in 0..<n {
     result = f(result);
   };
   result

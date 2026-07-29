@@ -31,6 +31,7 @@ struct FixReport<'a> {
     imports_added: Vec<String>,
     letin_removed: usize,
     operator_rewrites: usize,
+    range_rewrites: usize,
     return_removed: usize,
     manual_pending: Vec<ManualDiag>,
     /// True if the file was written (or would be, in --dry-run). Harness can
@@ -58,6 +59,7 @@ struct FixOutcome<'a> {
     import_messages: &'a [String],
     imports_added: Vec<String>,
     operator_count: usize,
+    range_count: usize,
     letin_count: usize,
     return_count: usize,
     manual: Vec<ManualDiag>,
@@ -73,6 +75,12 @@ fn print_fix_detail_lines(outcome: &FixOutcome, print: fn(&str)) {
         print(&format!(
             "  Rewrote {} comparison function call(s) to operator form (int.gt/lt/eq/... → > < == ...)",
             outcome.operator_count
+        ));
+    }
+    if outcome.range_count > 0 {
+        print(&format!(
+            "  Migrated {} retired range spelling(s) (`..` -> `..<`, `..=` -> `...`)",
+            outcome.range_count
         ));
     }
     if outcome.letin_count > 0 {
@@ -135,6 +143,7 @@ fn report_fix_result(outcome: FixOutcome, dry_run: bool, json: bool) {
             imports_added: outcome.imports_added,
             letin_removed: outcome.letin_count,
             operator_rewrites: outcome.operator_count,
+            range_rewrites: outcome.range_count,
             return_removed: outcome.return_count,
             manual_pending: outcome.manual,
             changed: outcome.any_change,
@@ -159,10 +168,42 @@ fn report_fix_result(outcome: FixOutcome, dry_run: bool, json: bool) {
     }
 }
 
+/// #966: migrate the retired range spellings (`..` → `..<`, `..=` → `...`)
+/// from the parser's E031 fix-its. Applied textually and span-surgically —
+/// in reverse span order, so earlier spans stay valid as later ones grow the
+/// line by one char — which migrates ONLY the operators and leaves the rest
+/// of the file byte-identical (no reformat). Returns the migrated source and
+/// the number of operators rewritten.
+fn migrate_range_spellings(source: &str, parse_errors: &[crate::diagnostic::Diagnostic]) -> (String, usize) {
+    let mut fixes: Vec<&crate::diagnostic::Diagnostic> = parse_errors.iter()
+        .filter(|d| d.code.as_deref() == Some("E031") && d.try_replace_span.is_some())
+        .collect();
+    fixes.sort_by_key(|d| std::cmp::Reverse(d.try_replace_span.unwrap()));
+    let mut working = source.to_string();
+    let mut n = 0;
+    for d in fixes {
+        if let Some(rewritten) = d.apply_try_to(&working) {
+            working = rewritten;
+            n += 1;
+        }
+    }
+    (working, n)
+}
+
 pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
-    // `parse_errors` is consumed inside the rule engine (per-rule
-    // re-parse) so we discard it here.
-    let (mut program, source_text, _parse_errors) = parse_file(file);
+    let (parsed_program, disk_source, parse_errors) = parse_file(file);
+
+    // Range migration runs FIRST, on the raw text, so everything after —
+    // auto-imports, the comparison-call rewrite, the formatter — sees the
+    // migrated program instead of tripping on E031's parse errors.
+    let (source_text, range_count) = migrate_range_spellings(&disk_source, &parse_errors);
+    let mut program = if range_count > 0 {
+        let tokens = almide::lexer::Lexer::tokenize(&source_text);
+        let mut parser = almide::parser::Parser::new(tokens);
+        parser.parse().unwrap_or(parsed_program)
+    } else {
+        parsed_program
+    };
 
     let (dep_names, dep_submodules): (Vec<String>, std::collections::HashMap<String, String>) =
         if std::path::Path::new("almide.toml").exists() {
@@ -207,7 +248,7 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
     let letin_count = LETIN_REMOVAL.apply(&mut working);
     let return_count = RETURN_REMOVAL.apply(&mut working);
 
-    let any_change = has_import_changes || operator_count > 0 || letin_count > 0 || return_count > 0;
+    let any_change = has_import_changes || operator_count > 0 || letin_count > 0 || return_count > 0 || range_count > 0;
 
     // Extract "Added `import X`" → bare module names for JSON.
     let imports_added: Vec<String> = import_messages.iter()
@@ -226,7 +267,7 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
 
     report_fix_result(FixOutcome {
         file, working: &working, import_messages: &import_messages, imports_added,
-        operator_count, letin_count, return_count, manual, any_change,
+        operator_count, range_count, letin_count, return_count, manual, any_change,
     }, dry_run, json);
 }
 

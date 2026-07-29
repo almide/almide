@@ -7,7 +7,7 @@ fn add(a: Int, b: Int) -> Int = a + b
 test "list.len hoisted" {
   let xs = [1, 2, 3, 4, 5]
   var total = 0
-  for i in 0..100 {
+  for i in 0..<100 {
     if i < list.len(xs) then total = total + 1
     else total = total
   }
@@ -18,7 +18,7 @@ test "list.len hoisted" {
 test "pure user fn hoisted" {
   let n = 7
   var total = 0
-  for i in 0..10 {
+  for i in 0..<10 {
     total = total + square(n)
   }
   assert_eq(total, 490)
@@ -27,7 +27,7 @@ test "pure user fn hoisted" {
 // Impure: list.push must NOT be hoisted
 test "list.push not hoisted" {
   var xs: List[Int] = []
-  for i in 0..5 {
+  for i in 0..<5 {
     list.push(xs, i)
   }
   assert_eq(list.len(xs), 5)
@@ -38,7 +38,7 @@ test "list.push not hoisted" {
 // Impure: bytes.push must NOT be hoisted
 test "bytes.push not hoisted" {
   var buf = bytes.new(0)
-  for i in 0..3 {
+  for i in 0..<3 {
     bytes.push(buf, 65 + i)
   }
   assert_eq(bytes.len(buf), 3)
@@ -80,7 +80,7 @@ test "nested for loops" {
 test "list.len with loop-modified list" {
   var xs: List[Int] = []
   var lengths: List[Int] = []
-  for i in 0..3 {
+  for i in 0..<3 {
     list.push(xs, i)
     lengths = lengths + [list.len(xs)]
   }

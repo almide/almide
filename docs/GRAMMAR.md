@@ -95,7 +95,7 @@ lparam      = (IDENT | "_") (":" type)?
             | "(" (IDENT | "_") ("," (IDENT | "_"))* ")"   (* tuple-destructuring param *)
 
 pipe        = expr "|>" expr                               (* also: expr |> match { arms } *)
-range       = expr ".." expr | expr "..=" expr             (* exclusive / inclusive *)
+range       = expr "..<" expr | expr "..." expr            (* exclusive / inclusive *)
 postfix     = primary ( "(" args ")"                       (* call *)
                       | "[" type_args "]" "(" args ")"     (* explicit type args: f[Int](x) *)
                       | "[" expr "]"                       (* index *)
@@ -156,7 +156,7 @@ a parse error (use `and`).
 | 2 | `and` | left |
 | 3 | `==` `!=` `<` `>` `<=` `>=` | non-assoc |
 | 4 | `\|>` | left (asymmetric — see below) |
-| 5 | `..` `..=` | — |
+| 5 | `..<` `...` | — |
 | 6 | `+` `-` | left |
 | 7 | `*` `/` `%` | left |
 | 8 | `^` (alias `**`) power | right |

@@ -57,7 +57,7 @@ test "do block find smallest factor" {
 
 test "for with guard continue filtering" {
   var odds: List[Int] = []
-  for i in 1..=20 {
+  for i in 1...20 {
     guard i % 2 != 0 else continue
     guard i <= 15 else break
     odds = odds + [i]
@@ -72,7 +72,7 @@ test "do block containing for with guard" {
   var total = 0
   while batch < 3 {
     var batch_sum = 0
-    for i in 1..=5 {
+    for i in 1...5 {
       guard i != 3 else continue
       batch_sum = batch_sum + i
     }
@@ -116,7 +116,7 @@ effect fn power_mod(base: Int, exp: Int, modulus: Int) -> Result[Int, String] = 
   guard modulus > 0 else err("modulus must be positive")
   guard exp >= 0 else err("exponent must be non-negative")
   var result = 1
-  for _i in 0..exp {
+  for _i in 0..<exp {
     result = (result * base) % modulus
   }
   ok(result % modulus)

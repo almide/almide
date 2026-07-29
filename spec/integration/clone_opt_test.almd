@@ -21,7 +21,7 @@ test "tree check no clone" {
 test "list index int (no clone needed)" {
   let xs = [10, 20, 30, 40, 50]
   var sum = 0
-  for i in 0..5 { sum = sum + xs[i] }
+  for i in 0..<5 { sum = sum + xs[i] }
   assert_eq(sum, 150)
 }
 
@@ -34,7 +34,7 @@ test "list index string (element clone)" {
 // push optimization: xs = xs + [v] → xs.push(v)
 test "push optimization" {
   var xs: List[Int] = []
-  for i in 0..100 {
+  for i in 0..<100 {
     xs = xs + [i]
   }
   assert_eq(list.len(xs), 100)

@@ -15,14 +15,14 @@ fn bump(r: Rec, d: Float) -> Rec = { a: r.a + d, b: r.b }
 fn init() -> Unit = {
   count = 3
   items = []
-  for i in 0..count {
+  for i in 0..<count {
     items = items + [{ a: int.to_float(i), b: int.to_float(i) * 2.0 }]
   }
 }
 
 fn tick_a(d: Float) -> Unit = {
   var out: List[Rec] = []
-  for i in 0..count {
+  for i in 0..<count {
     out = out + [bump(items[i], d)]
   }
   items = out
@@ -30,7 +30,7 @@ fn tick_a(d: Float) -> Unit = {
 
 fn tick_b(d: Float) -> Unit = {
   var out: List[Rec] = []
-  for i in 0..count {
+  for i in 0..<count {
     out = out + [bump(items[i], d)]
   }
   items = out

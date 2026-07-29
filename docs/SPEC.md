@@ -103,7 +103,7 @@ local   mod     fan
 ### 1.6 Operators and Delimiters
 
 ```
-Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  >>  ..  ..=
+Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  >>  ..<  ...
 Postfix:     !  ?  ?.  ??
 Unary:       -  not
 Logical:     and  or
@@ -114,7 +114,7 @@ Delimiters:  (  )  {  }  [  ]  ,  .  :  ;  |  _  @  ...
 
 - `^` is exponentiation (right-associative). `**` is accepted as an alias
 - `+` is overloaded: addition for numbers, concatenation for strings and lists
-- `..` is exclusive range, `..=` is inclusive range
+- `..<` is exclusive range, `...` is inclusive range (the Rust-style `..`/`..=` are a diagnosed E031 with a mechanical fix-it)
 - `...` is spread (in records)
 - `_` is wildcard (in match patterns) or placeholder (in pipe arguments)
 - `@` is used for extern annotations
@@ -718,7 +718,7 @@ for (k, v) in map.entries(config) {
   println(k + " = " + v)
 }
 
-for i in 0..10 {
+for i in 0..<10 {
   println(int.to_string(i))
 }
 ```
@@ -797,8 +797,8 @@ Resolution: when `x.f(args...)` is called, the compiler looks for `f(x, args...)
 ### 9.12 Range
 
 ```
-0..5            // [0, 1, 2, 3, 4]    exclusive end
-1..=5           // [1, 2, 3, 4, 5]    inclusive end
+0..<5           // [0, 1, 2, 3, 4]    exclusive end
+1...5           // [1, 2, 3, 4, 5]    inclusive end
 for i in 0..n { ... }   // no list allocation (optimized)
 ```
 
@@ -868,7 +868,7 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 | 2 | `and` | left |
 | 3 | `==` `!=` `<` `<=` `>` `>=` | non-assoc (chaining is an error) |
 | 4 | `\|>` (pipe) | left, asymmetric (see below) |
-| 5 | `..` `..=` (range) | none |
+| 5 | `..<` `...` (range) | none |
 | 6 | `+` `-` (additive) | left |
 | 7 | `*` `/` `%` (multiplicative) | left |
 | 8 | `^` (power; `**` is an alias) | right |
@@ -897,7 +897,7 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 | `and` `or` `not` | Boolean logic |
 | `\|>` | Pipe |
 | `>>` | Function composition |
-| `..` `..=` | Range (exclusive / inclusive) |
+| `..<` `...` | Range (exclusive / inclusive) |
 | `!` `?` `?.` `??` (postfix) | Unwrap / to-Option / optional chain / fallback |
 
 In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equality. In WASM codegen, they emit byte-level comparison.
