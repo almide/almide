@@ -180,6 +180,17 @@ fn bytes_copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit =
 // bytes.copy_from — copy src[src_off..][..len] into dst[dst_off..], borrow both + store (fixed size).
 // v0 gates dst_off/src_off >= len → no-op (usize cast: negatives become huge → out of range), and
 // clamps len to the available space in BOTH buffers (a negative len → huge → clamps to that space).
+//
+// SNAPSHOT SEMANTICS on a self-copy (#963): when dst and src are the SAME block
+// (dh == sh — the only way two Bytes can overlap; every block is its own
+// allocation), the copy reads as if src were snapshotted before the first
+// write. Native gets this for free (the aliasing hoist clones the src arg —
+// safe Rust cannot alias `&mut` and `&`); this leg gets it by routing the
+// aliased case through `__cw_move`, copy_within's direction-switching memmove
+// (forward when d <= s, backward when d > s — as-if-through-a-temp, which IS
+// snapshot semantics). The plain forward loop stays for the disjoint-block
+// case. Before this, a forward-overlapping self-copy observed its own writes
+// and propagated src[soff] down the range: native [42,0] vs wasm [42,42].
 fn __cf_copy(dh: Int, sh: Int, doff: Int, soff: Int, i: Int, n: Int) -> Int =
   if i >= n then 0
   else { prim.store8(dh + 12 + doff + i, prim.load8(sh + 12 + soff + i)); __cf_copy(dh, sh, doff, soff, i + 1, n) }
@@ -198,7 +209,8 @@ fn bytes_copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int)
             let avail_s = sn - src_off
             let avail = if avail_d < avail_s then avail_d else avail_s
             let n = if len >= 0 then (if len < avail then len else avail) else avail
-            __cf_copy(dh, sh, dst_off, src_off, 0, n)
+            if dh == sh then __cw_move(dh + 12, src_off, dst_off, n)
+            else __cf_copy(dh, sh, dst_off, src_off, 0, n)
           } else 0)
         else 0)
       else 0)
