@@ -115,12 +115,14 @@ fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
         ));
     }
     match Command::new("wasmtime").arg("--dir=/").arg(wasm_path.to_str().unwrap()).output() {
-        Ok(o) if o.status.code() != Some(127) => Some((
+        // A 127 guest exit is a comparable observable, not wasmtime-absence
+        // (#991) — only a spawn error means the tool is missing.
+        Ok(o) => Some((
             o.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&o.stdout).trim().to_string(),
             String::from_utf8_lossy(&o.stderr).trim().to_string(),
         )),
-        _ => None, // wasmtime not installed → skip the wasm leg
+        Err(_) => None, // wasmtime not installed → skip the wasm leg
     }
 }
 
