@@ -8,9 +8,9 @@
 // the indirection as `std::boxed::Box` everywhere the recursive-enum pass emits
 // it, so the user `Box` and the std indirection no longer collide. This file
 // uses BOTH a user `Box` type and a recursive enum in one program.
-
 type Box = { width: Int, height: Int }
-type Tree = Leaf(Int) | Node(Tree, Tree)
+
+type Tree = | Leaf(Int) | Node(Tree, Tree)
 
 fn depth(t: Tree) -> Int = match t {
   Leaf(_) => 1,
@@ -20,12 +20,13 @@ fn depth(t: Tree) -> Int = match t {
 fn main() -> Unit = {
   let b = Box { width: 3, height: 4 }
   println("box=${b.width}x${b.height}")
-
   let t = Node(Leaf(1), Node(Leaf(2), Leaf(3)))
   println("tree=${t}")
   println("depth=${depth(t)}")
-
   // A list of user Boxes alongside a recursive tree — both representations live.
-  let boxes: List[Box] = [Box { width: 1, height: 2 }, Box { width: 5, height: 6 }]
+  let boxes: List[Box] = [
+    Box { width: 1, height: 2 },
+    Box { width: 5, height: 6 }
+  ]
   println("boxes=${boxes}")
 }

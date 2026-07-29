@@ -7,7 +7,6 @@
 // family that replaces the combinatorial `_le` / `_be` suffixes with
 // a parameterized `Endian` arg. The old named fns stay for now; this
 // test locks the new shape against regression.
-
 import bytes
 
 test "read_uint16 LE round-trip" {
@@ -78,7 +77,6 @@ test "Endian variant used as binding target" {
 }
 
 // ── write/set typed API ───────────────────────────────────────────────
-
 test "write_uint16 round-trip LE" {
   var b: Bytes = bytes.new(0)
   bytes.write_uint16(b, 0xABCD.to_uint16(), LittleEndian)

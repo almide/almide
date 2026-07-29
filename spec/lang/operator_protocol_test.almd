@@ -1,4 +1,3 @@
-
 type Color: Eq, Repr = | Red | Green | Blue
 
 fn Color.eq(a: Color, b: Color) -> Bool = match a {
@@ -24,14 +23,14 @@ fn Color.repr(c: Color) -> String = match c {
 
 test "operator protocol: == dispatch" {
   // == dispatches to Color.eq
-  assert(Red == Red);
-  assert(not (Red == Blue));
+  assert(Red == Red)
+  assert(not (Red == Blue))
   // != dispatches to not(Color.eq)
   assert(Red != Blue)
 }
 
 test "operator protocol: string interpolation dispatch" {
   // "${c}" dispatches to Color.repr
-  let c = Green;
+  let c = Green
   assert_eq("color: ${c}", "color: Green")
 }

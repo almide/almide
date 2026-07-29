@@ -2,10 +2,12 @@
 // Locks in `${Option[Option[Int]]}` — a NESTED Option interp, v0's `some(some(5))` / `some(none)` /
 // `none`. The nested `some(some(..))` / `some(none)` construction (OptionSome over an inner Option
 // ctor) already materializes; the self-host `option.to_string_oi` renders it. Byte-identical to v0.
-
 fn depth(o: Option[Option[Int]]) -> Int = match o {
-  some(v) => match v { some(w) => w, none => 0 }
-  none => 0 - 1
+  some(v) => match v {
+    some(w) => w,
+    none => 0,
+  },
+  none => 0 - 1,
 }
 
 effect fn main() -> Unit = {

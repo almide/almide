@@ -1,5 +1,4 @@
 // bytes.read_*_le_array — bulk readers for typed arrays.
-
 test "read_i32_le_array" {
   var b = bytes.new(0)
   bytes.append_i32_le(b, 1)

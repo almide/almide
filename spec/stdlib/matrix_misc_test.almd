@@ -1,7 +1,6 @@
 // matrix.{split_cols_even, concat_cols, concat_cols_many, conv1d,
 //         gather_rows, dot_row, row_dot, from_bytes_f16_le}
 // — auxiliary ops regression tests.
-
 fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
   let d = if a > b then a - b else b - a
   d < tol
@@ -9,8 +8,22 @@ fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
 
 test "split_cols_even splits (2,6) into three (2,2) chunks" {
   let m = matrix.from_lists([
-    [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-    [7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+    [
+      1.0,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0
+    ],
+    [
+      7.0,
+      8.0,
+      9.0,
+      10.0,
+      11.0,
+      12.0
+    ]
   ])
   let chunks = matrix.split_cols_even(m, 3)
   assert_eq(list.len(chunks), 3)
@@ -24,7 +37,10 @@ test "split_cols_even splits (2,6) into three (2,2) chunks" {
 }
 
 test "concat_cols is the inverse of split_cols_even" {
-  let m = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
+  let m = matrix.from_lists([
+    [1.0, 2.0, 3.0, 4.0],
+    [5.0, 6.0, 7.0, 8.0]
+  ])
   let chunks = matrix.split_cols_even(m, 2)
   let rebuilt = matrix.concat_cols(chunks)
   let (r, c) = matrix.shape(rebuilt)
@@ -36,8 +52,14 @@ test "concat_cols is the inverse of split_cols_even" {
 }
 
 test "concat_cols_many (deprecated alias) works the same" {
-  let a = matrix.from_lists([[1.0], [2.0]])
-  let b = matrix.from_lists([[3.0], [4.0]])
+  let a = matrix.from_lists([
+    [1.0],
+    [2.0]
+  ])
+  let b = matrix.from_lists([
+    [3.0],
+    [4.0]
+  ])
   let r = matrix.concat_cols_many([a, b])
   let (rows, cols) = matrix.shape(r)
   assert_eq(rows, 2)
@@ -49,26 +71,40 @@ test "concat_cols_many (deprecated alias) works the same" {
 
 test "gather_rows builds a matrix from selected row indices" {
   let m = matrix.from_lists([
-    [10.0, 20.0], [30.0, 40.0], [50.0, 60.0], [70.0, 80.0],
+    [10.0, 20.0],
+    [30.0, 40.0],
+    [50.0, 60.0],
+    [70.0, 80.0]
   ])
   let picked = matrix.gather_rows(m, [3, 0, 2])
   let (r, c) = matrix.shape(picked)
   assert_eq(r, 3)
   assert_eq(c, 2)
-  assert_eq(matrix.get(picked, 0, 0), 70.0)   // row 3
-  assert_eq(matrix.get(picked, 1, 0), 10.0)   // row 0
-  assert_eq(matrix.get(picked, 2, 1), 60.0)   // row 2
+  assert_eq(matrix.get(picked, 0, 0), 70.0)
+  // row 3
+  assert_eq(matrix.get(picked, 1, 0), 10.0)
+  // row 0
+  // row 2
+  assert_eq(matrix.get(picked, 2, 1), 60.0)
 }
 
 test "dot_row computes dot product of a matrix row with a vector" {
-  let m = matrix.from_lists([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+  let m = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
   let v = [10.0, 20.0, 30.0]
-  assert_eq(matrix.dot_row(m, 0, v), 140.0)   // 1*10 + 2*20 + 3*30
-  assert_eq(matrix.dot_row(m, 1, v), 320.0)   // 4*10 + 5*20 + 6*30
+  assert_eq(matrix.dot_row(m, 0, v), 140.0)
+  // 1*10 + 2*20 + 3*30
+  // 4*10 + 5*20 + 6*30
+  assert_eq(matrix.dot_row(m, 1, v), 320.0)
 }
 
 test "row_dot (deprecated alias) matches dot_row" {
-  let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let m = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
   let v = [1.0, 1.0]
   assert_eq(matrix.row_dot(m, 0, v), matrix.dot_row(m, 0, v))
   assert_eq(matrix.row_dot(m, 1, v), 7.0)
@@ -77,8 +113,14 @@ test "row_dot (deprecated alias) matches dot_row" {
 test "conv1d 1-channel identity kernel (k=1) returns input" {
   // input: (3, 1), weight: (1, 1*1) = (1, 1), bias: [0]
   // out_t = 3 with stride=1, kernel=1, padding=0
-  let input = matrix.from_lists([[2.0], [5.0], [7.0]])
-  let weight = matrix.from_lists([[1.0]])
+  let input = matrix.from_lists([
+    [2.0],
+    [5.0],
+    [7.0]
+  ])
+  let weight = matrix.from_lists([
+    [1.0]
+  ])
   let out = matrix.conv1d(input, weight, [0.0], 1, 1, 0)
   let (t, ch) = matrix.shape(out)
   assert_eq(t, 3)
@@ -89,8 +131,14 @@ test "conv1d 1-channel identity kernel (k=1) returns input" {
 }
 
 test "conv1d with bias adds to every output step" {
-  let input = matrix.from_lists([[1.0], [1.0], [1.0]])
-  let weight = matrix.from_lists([[1.0]])
+  let input = matrix.from_lists([
+    [1.0],
+    [1.0],
+    [1.0]
+  ])
+  let weight = matrix.from_lists([
+    [1.0]
+  ])
   let out = matrix.conv1d(input, weight, [10.0], 1, 1, 0)
   assert_eq(matrix.get(out, 0, 0), 11.0)
   assert_eq(matrix.get(out, 2, 0), 11.0)
@@ -103,10 +151,14 @@ test "from_bytes_f16_le decodes IEEE-754 half values" {
   // -1.0  = 0xBC00
   // 2.0   = 0x4000
   let data = bytes.from_list([
-    0x00, 0x00,
-    0x00, 0x3C,
-    0x00, 0xBC,
-    0x00, 0x40,
+    0x00,
+    0x00,
+    0x00,
+    0x3C,
+    0x00,
+    0xBC,
+    0x00,
+    0x40
   ])
   let m = matrix.from_bytes_f16_le(data, 0, 1, 4)
   let (r, c) = matrix.shape(m)

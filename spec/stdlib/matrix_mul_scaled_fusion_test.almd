@@ -2,7 +2,6 @@
 // → `mul_scaled(a, s, b)`. Both produce `s * (a @ b)` at the BLAS level,
 // so we can verify fusion correctness by comparing against the unfused
 // computation path.
-
 fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
   let d = if a > b then a - b else b - a
   d < tol
@@ -11,10 +10,8 @@ fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
 test "mul(a, scale(b, s)) == mul_scaled: nested form" {
   let a = matrix.ones(3, 3)
   let b = matrix.ones(3, 3)
-
   let expected = matrix.mul_scaled(a, 0.5, b)
   let actual = matrix.mul(a, matrix.scale(b, 0.5))
-
   // Each element of ones(3,3) @ ones(3,3) = 3, scaled by 0.5 → 1.5
   assert(approx_eq(matrix.get(expected, 0, 0), 1.5, 0.00001))
   assert(approx_eq(matrix.get(actual, 0, 0), 1.5, 0.00001))

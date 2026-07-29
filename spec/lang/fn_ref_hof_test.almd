@@ -2,8 +2,7 @@ fn double(x: Int) -> Int = x * 2
 
 fn is_positive(x: Int) -> Bool = x > 0
 
-fn parse_opt(s: String) -> Option[Int] =
-  if s == "yes" then Some(1) else None
+fn parse_opt(s: String) -> Option[Int] = if s == "yes" then some(1) else none
 
 test "function reference in map" {
   let xs = [1, 2, 3]
@@ -35,9 +34,10 @@ test "multi-arg function reference in fold" {
   assert_eq(result, 10)
 }
 
-fn transform_pair(pair: (String, Int)) -> String =
+fn transform_pair(pair: (String, Int)) -> String = {
   let (s, n) = pair
   "${s}:${int.to_string(n)}"
+}
 
 test "function reference with tuple param in map" {
   let pairs = [("a", 1), ("b", 2)]

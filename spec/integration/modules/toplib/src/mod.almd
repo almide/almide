@@ -1,4 +1,3 @@
-
 // Cross-module top-lets WITHOUT annotations: the #486 / record-literal
 // canonicalization shapes. Annotations would mask both bugs (annotated
 // types resolve through the qualified path), so these stay bare.

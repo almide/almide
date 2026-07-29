@@ -14,7 +14,14 @@ import io
 
 effect fn main() -> Unit = {
   println("line-1")
-  io.write(bytes.from_list([66, 89, 84, 69, 83, 10]))
+  io.write(bytes.from_list([
+    66,
+    89,
+    84,
+    69,
+    83,
+    10
+  ]))
   println("line-2")
   io.write_bytes([82, 65, 87, 10])
   println("line-3")

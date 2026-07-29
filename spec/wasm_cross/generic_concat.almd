@@ -8,7 +8,7 @@
 // byte-identical native == wasm.
 fn dup[T](x: T) -> T = x + x
 
-effect fn main() -> () = {
+effect fn main() -> Unit = {
   println(dup("ab"))
   println(int.to_string(dup(3)))
   println(dup([1, 2]) |> list.map((n) => int.to_string(n)) |> list.join(","))

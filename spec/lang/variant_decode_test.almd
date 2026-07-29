@@ -10,12 +10,12 @@ fn decode_color(text: String) -> Result[Color, String] = match json.parse(text) 
 }
 
 test "variant roundtrip" {
-  let text = encode_color(Red);
-  println(text);
+  let text = encode_color(Red)
+  println(text)
   match decode_color(text) {
     ok(c) => assert_eq(encode_color(c), encode_color(Red)),
     err(e) => {
-      println(e);
+      println(e)
       assert(false)
     },
   }
@@ -25,7 +25,7 @@ test "variant decode all" {
   match decode_color('{"Green": null}') {
     ok(c) => assert_eq(encode_color(c), encode_color(Green)),
     err(e) => {
-      println(e);
+      println(e)
       assert(false)
     },
   }

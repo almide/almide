@@ -8,22 +8,17 @@
 // holds, so one skv walk serves String, List and Map accumulators alike.
 effect fn main() -> Unit = {
   let m = ["a": 1, "b": 2, "c": 3]
-
   // String accumulator: the join shape.
   println(map.fold(m, "", (acc, k, v) => acc + k + "=" + int.to_string(v) + ";"))
-
   // List accumulator: the keys-collect shape.
   let ks = map.fold(m, [], (acc, k, v) => acc + [k])
   println(list.join(ks, ","))
-
   // The accumulator threads through in entry order, and the subject stays
   // readable afterwards (the fold borrows keys and values, never consumes them).
   println(int.to_string(map.len(m)))
-
   // An empty map yields the seed untouched.
   let e: Map[String, Int] = [:]
   println("[" + map.fold(e, "seed", (acc, k, v) => acc + k) + "]")
-
   // `list.fold` and `set.fold` over String elements with a heap accumulator take
   // the same type-erased walk: a `Set[String]` IS a `DynListStr` block of unique,
   // insertion-ordered Strings, so one loop serves both subjects.

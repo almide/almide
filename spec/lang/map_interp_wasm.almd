@@ -4,12 +4,11 @@
 // via `map.values` (both callable, insertion-ordered now that a non-empty map literal materializes a
 // real map), then renders each `"<key>": <value>` entry inline. The two owned key/value lists drop at
 // scope end (PCC-verified). Byte-identical to v0 --target wasm.
-
 effect fn main() -> Unit = {
   let a: Map[String, Int] = ["x": 1, "y": 2, "z": 3]
   let b: Map[String, Int] = [:]
   let c: Map[String, Int] = ["neg": -5, "big": 1000]
-  let d: Map[String, Int] = ["a\"q\n": 7]
+  let d: Map[String, Int] = ['a"q\n': 7]
   println("${a}")
   println("${b}")
   println("${c}")

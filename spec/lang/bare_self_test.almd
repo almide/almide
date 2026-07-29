@@ -5,7 +5,7 @@ type User = { name: String }
 fn User.greet(self) -> String = "hi " + self.name
 
 test "bare self on a plain convention method" {
-  let u = User { name: "alice" };
+  let u = User { name: "alice" }
   assert_eq(u.greet(), "hi alice")
 }
 
@@ -21,7 +21,7 @@ fn Point.show(self) -> String = "(" + int.to_string(self.x) + ", " + int.to_stri
 fn display[T: Showable](item: T) -> String = item.show()
 
 test "bare self on a protocol-satisfying method" {
-  let p = Point { x: 1, y: 2 };
+  let p = Point { x: 1, y: 2 }
   assert_eq(display(p), "(1, 2)")
 }
 
@@ -29,10 +29,11 @@ test "bare self on a protocol-satisfying method" {
 type Counter = { n: Int }
 
 fn Counter.inc(self) -> Counter = Counter { n: self.n + 1 }
+
 fn Counter.value(self) -> Int = self.n
 
 test "bare self chained across multiple methods" {
-  let c = Counter { n: 0 };
+  let c = Counter { n: 0 }
   assert_eq(c.inc().inc().inc().value(), 3)
 }
 
@@ -42,7 +43,7 @@ type Document = { title: String, body: String }
 fn Document.contains_text(self, query: String) -> Bool = string.contains(self.body, query)
 
 test "bare self with additional non-self params" {
-  let doc = Document { title: "readme", body: "hello world" };
-  assert_eq(doc.contains_text("world"), true);
+  let doc = Document { title: "readme", body: "hello world" }
+  assert_eq(doc.contains_text("world"), true)
   assert_eq(doc.contains_text("missing"), false)
 }

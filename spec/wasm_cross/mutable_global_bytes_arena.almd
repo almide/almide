@@ -17,8 +17,8 @@
 // must keep the pre-write bytes. Eliding the COW would print the post-write value here
 // and diverge silently; COWing unconditionally would lose every write in `fill_slot`,
 // where the slot's block is unshared and the mutation must land in place.
-
 var arena = bytes.new(32)
+
 var log: List[Int] = []
 
 // Cross-function writes: `main` never touches the receiver, so the write has to reach
@@ -33,11 +33,9 @@ fn show(pos: Int) -> String = float.to_string(bytes.read_f32_le(arena, pos))
 fn main() -> Unit = {
   fill_slot(0, 1.5, 2.25)
   fill_slot(8, -3.0, 0.5)
-
   // A byte-granular mutator over the same slot, at the far end of the block.
   bytes.set_at(arena, 31, 200)
   bytes.set_at(arena, 30, 7)
-
   println(show(0))
   println(show(4))
   println(show(8))
@@ -45,7 +43,6 @@ fn main() -> Unit = {
   println(int.to_string(bytes.get_or(arena, 31, -1)))
   println(int.to_string(bytes.get_or(arena, 30, -1)))
   println(int.to_string(bytes.len(arena)))
-
   // THE ALIASING PROBE: `snap` co-owns the slot's block, so the next write must COW
   // and leave `snap` holding the pre-write bytes — the native RcCow semantics.
   let snap = arena
@@ -56,7 +53,6 @@ fn main() -> Unit = {
   // being written.
   println(show(8))
   println(int.to_string(bytes.get_or(snap, 31, -1)))
-
   // A write in a LOOP, so the slot round-trip (load, make-unique, store) runs many
   // times against a block that is unshared after the first COW — a spurious copy per
   // iteration would still print the right answer, but a lost store would not.
@@ -72,7 +68,6 @@ fn main() -> Unit = {
     j = j + 1
   }
   println(int.to_string(sum))
-
   // A mutable global of LIST type takes the same slot COW through `list.pop`.
   log = [10, 20, 30]
   let popped = list.pop(log)

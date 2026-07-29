@@ -6,11 +6,22 @@
 // Dup). The subject is tracked via seed_variant_param (heap_elem_lists after the is_result_listval_ty
 // narrow). v0==v1.
 fn f2(b: Bool, xs: List[Int]) -> Result[List[Int], String] = if b then ok(xs) else err("no")
+
 fn g(b: Bool, xs: List[Int]) -> Result[String, String] = {
   let bs = f2(b, xs)
-  match bs { ok(bytes) => ok(string.from_bytes(bytes)), err(e) => err(e) }
+  match bs {
+    ok(bytes) => ok(string.from_bytes(bytes)),
+    err(e) => err(e),
+  }
 }
+
 fn main() -> Unit = {
-  match g(true, [104, 105]) { ok(s) => println("ok:" + s), err(e) => println("err:" + e) }
-  match g(false, [104, 105]) { ok(s) => println("ok2:" + s), err(e) => println("err2:" + e) }
+  match g(true, [104, 105]) {
+    ok(s) => println("ok:" + s),
+    err(e) => println("err:" + e),
+  }
+  match g(false, [104, 105]) {
+    ok(s) => println("ok2:" + s),
+    err(e) => println("err2:" + e),
+  }
 }

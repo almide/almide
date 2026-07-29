@@ -6,27 +6,17 @@
 // (`emit_stored_field`). The WASM emitter previously copied both borrowed:
 // the svg `doc` shape (`{ ...piped_base, children }`) rendered `<svg/>` with
 // its attrs Map freed, then trapped __rc_dec on the scope-end drops.
+type Element = { tag: String, attrs: Map[String, String], children: List[Element], content: String }
 
-type Element = {
-  tag: String,
-  attrs: Map[String, String],
-  children: List[Element],
-  content: String,
-}
+fn el(tag: String) -> Element = Element { tag: tag, attrs: [:], children: [], content: "" }
 
-fn el(tag: String) -> Element =
-  Element { tag: tag, attrs: [:], children: [], content: "" }
-
-fn attr(element: Element, key: String, value: String) -> Element =
-  { ...element, attrs: map.set(element.attrs, key, value) }
+fn attr(element: Element, key: String, value: String) -> Element = { ...element, attrs: map.set(element.attrs, key, value) }
 
 fn render(e: Element) -> String = {
-  let attrs = map.entries(e.attrs)
-    |> list.map((p) => {
-      let (k, v) = p
-      " ${k}=\"${v}\""
-    })
-    |> list.join("")
+  let attrs = map.entries(e.attrs) |> list.map((p) => {
+    let (k, v) = p
+    " ${k}=\"${v}\""
+  }) |> list.join("")
   let kids = e.children |> list.map((c) => render(c)) |> list.join("")
   if list.is_empty(e.children) then "<${e.tag}${attrs}/>"
   else "<${e.tag}${attrs}>${kids}</${e.tag}>"
@@ -39,7 +29,6 @@ fn main() -> Unit = {
   println(render(d))
   // The base must still be intact after the spread copy is dropped.
   println(render(base))
-
   // Borrowed-alias override: a Var moved into the spread must be +1'd.
   let kids: List[Element] = [el("circle")]
   let g = { ...base, children: kids }

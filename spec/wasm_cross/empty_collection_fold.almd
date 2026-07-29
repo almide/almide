@@ -17,13 +17,18 @@ fn main() -> Unit = {
   let a: Float = list.fold(empty_l, -42.5, ((acc, x) => acc))
   let b: Int = map.fold(empty_m, 7, ((acc, k, v) => acc))
   let c: Int = set.fold(empty_s, 99, ((acc, x) => acc))
-  println(float.to_string(a))  // -42.5
-  println(int.to_string(b))    // 7
-  println(int.to_string(c))    // 99
+  println(float.to_string(a))
+  // -42.5
+  println(int.to_string(b))
+  // 7
+  println(int.to_string(c))
+  // 99
   // Non-empty folds that USE the element/key/value — must still infer normally.
   let m = map.set(map.set(map.new(), "x", 10), "y", 20)
   let s: Int = map.fold(m, 0, ((acc, k, v) => acc + v))
-  println(int.to_string(s))    // 30
+  println(int.to_string(s))
+  // 30
   let t: Int = list.fold([1, 2, 3], 0, ((acc, x) => acc + x))
-  println(int.to_string(t))    // 6
+  // 6
+  println(int.to_string(t))
 }

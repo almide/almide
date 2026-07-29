@@ -2,17 +2,13 @@
 // and consumed from the importer. Pre-fix this emitted invalid Rust
 // (Box::new at construction vs unboxed enum field, slice-vs-Vec on the
 // pattern-bound field).
-
 import recshape
 
 test "cross-module recursive record-variant constructs and recurses" {
-  let p = recshape.Group {
-    name: "g",
-    patterns: [
-      recshape.Leaf("a"),
-      recshape.Group { name: "h", patterns: [recshape.Leaf("b")] },
-    ],
-  }
+  let p = recshape.Group { name: "g", patterns: [
+    recshape.Leaf("a"),
+    recshape.Group { name: "h", patterns: [recshape.Leaf("b")] }
+  ] }
   assert_eq(recshape.emit(p), "g[a,h[b]]")
 }
 
@@ -22,7 +18,10 @@ test "cross-module recursive tuple-variant (direct recursion)" {
 }
 
 test "list of cross-module recursive variants maps through the module fn" {
-  let ps = [recshape.Leaf("a"), recshape.Group { name: "h", patterns: [recshape.Leaf("b")] }]
+  let ps = [
+    recshape.Leaf("a"),
+    recshape.Group { name: "h", patterns: [recshape.Leaf("b")] }
+  ]
   let out = ps |> list.map((p) => recshape.emit(p)) |> list.join(",")
   assert_eq(out, "a,h[b]")
 }

@@ -14,15 +14,8 @@
 // and an environment is a Value object chained through a "#parent" key. That
 // keeps every recursive structure inside the self-hosted Value machinery, so
 // the whole interpreter runs byte-identical on native and wasm.
-
 // ── Tokenizer ────────────────────────────────────────────────────────────
-fn tokenize(src: String) -> List[String] =
-  src
-    |> string.replace("(", " ( ")
-    |> string.replace(")", " ) ")
-    |> string.replace("\n", " ")
-    |> string.split(" ")
-    |> list.filter((t) => t != "")
+fn tokenize(src: String) -> List[String] = src |> string.replace("(", " ( ") |> string.replace(")", " ) ") |> string.replace("\n", " ") |> string.split(" ") |> list.filter((t) => t != "")
 
 fn is_number(t: String) -> Bool = {
   let head = string.slice(t, 0, 1)
@@ -35,17 +28,15 @@ fn is_number(t: String) -> Bool = {
 // A number token becomes a Value int, any other atom a Value string, and a
 // parenthesized form a Value array. `parse_list` walks tokens from `i` until
 // the matching ")" and returns the next index alongside the collected forms.
-fn atom(t: String) -> Value =
-  if is_number(t) then value.int(int.parse(t) ?? 0) else value.str(t)
+fn atom(t: String) -> Value = if is_number(t) then value.int(int.parse(t) ?? 0)
+else value.str(t)
 
 fn parse_one(toks: List[String], i: Int) -> (Value, Int) = {
   let t = list.get_or(toks, i, ")")
   if t == "(" then {
     let (items, next) = parse_list(toks, i + 1, [])
     (value.array(items), next)
-  } else {
-    (atom(t), i + 1)
-  }
+  } else { (atom(t), i + 1) }
 }
 
 fn parse_list(toks: List[String], i: Int, acc: List[Value]) -> (List[Value], Int) = {
@@ -58,12 +49,11 @@ fn parse_list(toks: List[String], i: Int, acc: List[Value]) -> (List[Value], Int
 }
 
 // Parse a whole program: a list of top-level forms.
-fn parse_program(toks: List[String], i: Int, acc: List[Value]) -> List[Value] =
-  if i >= list.len(toks) then acc
-  else {
-    let (v, next) = parse_one(toks, i)
-    parse_program(toks, next, acc + [v])
-  }
+fn parse_program(toks: List[String], i: Int, acc: List[Value]) -> List[Value] = if i >= list.len(toks) then acc
+else {
+  let (v, next) = parse_one(toks, i)
+  parse_program(toks, next, acc + [v])
+}
 
 // ── Environments ────────────────────────────────────────────────────────
 // A Value object of name → value, chained via "#parent". Lookup walks the
@@ -76,70 +66,70 @@ fn scope_new() -> Value = value.object([])
 // consumer fixture this example exists to exercise. (A `list.fold` over a
 // Value accumulator routes to a `fold_hacc` with no registered self-host
 // yet — the wall named it; the recursion is the registered-combinator form.)
-fn scope_bind(env2: Value, pairs: List[(Value, Value)]) -> Value =
-  match list.first(pairs) {
-    none => env2,
-    some(pair) => {
-      let (n, v) = pair
-      let e2 = value.merge(env2, value.object([(sym_name(n), v)]))
-      scope_bind(e2, list.drop(pairs, 1))
-    },
-  }
+fn scope_bind(env2: Value, pairs: List[(Value, Value)]) -> Value = match list.first(pairs) {
+  none => env2,
+  some(pair) => {
+    let (n, v) = pair
+    let e2 = value.merge(env2, value.object([(sym_name(n), v)]))
+    scope_bind(e2, list.drop(pairs, 1))
+  },
+}
 
-fn scope_child(parent: Value, names: List[Value], vals: List[Value]) -> Value =
-  scope_bind(value.object([("#parent", parent)]), list.zip(names, vals))
+fn scope_child(parent: Value, names: List[Value], vals: List[Value]) -> Value = scope_bind(value.object([("#parent", parent)]), list.zip(names, vals))
 
-fn scope_chain_get(env: Value, name: String) -> Result[Value, String] =
-  match value.get(env, name) {
-    ok(v) => ok(v),
-    err(e) => match value.get(env, "#parent") {
-      ok(p) => scope_chain_get(p, name),
-      err(_) => err(e),
-    },
-  }
+fn scope_chain_get(env: Value, name: String) -> Result[Value, String] = match value.get(env, name) {
+  ok(v) => ok(v),
+  err(e) => match value.get(env, "#parent") {
+    ok(p) => scope_chain_get(p, name),
+    err(_) => err(e),
+  },
+}
 
 // Lexical chain first; a miss falls back to the CURRENT top-level env —
 // Scheme semantics for top-level defines (late-bound), which is what lets
 // `(define fact (lambda (n) … (fact …)))` call itself through immutable
 // environments. A name bound nowhere evaluates to itself, so the builtin
 // operator names (+, car, …) reach `apply` as plain symbols.
-fn scope_get(env: Value, name: String, genv: Value) -> Value =
-  match scope_chain_get(env, name) {
+fn scope_get(env: Value, name: String, genv: Value) -> Value = match scope_chain_get(env, name) {
+  ok(v) => v,
+  err(_) => match value.get(genv, name) {
     ok(v) => v,
-    err(_) => match value.get(genv, name) {
-      ok(v) => v,
-      err(_) => value.str(name),
-    },
-  }
+    err(_) => value.str(name),
+  },
+}
 
-fn scope_define(env: Value, name: String, v: Value) -> Value =
-  value.merge(env, value.object([(name, v)]))
+fn scope_define(env: Value, name: String, v: Value) -> Value = value.merge(env, value.object([(name, v)]))
 
 fn sym_name(v: Value) -> String = value.as_string(v) ?? ""
 
 // ── Evaluator ───────────────────────────────────────────────────────────
-fn is_sym(v: Value, s: String) -> Bool =
-  match value.as_string(v) { ok(n) => n == s, err(_) => false }
+fn is_sym(v: Value, s: String) -> Bool = match value.as_string(v) {
+  ok(n) => n == s,
+  err(_) => false,
+}
 
-fn truthy(v: Value) -> Bool =
-  match value.as_bool(v) {
-    ok(b) => b,
-    err(_) => match value.as_int(v) { ok(n) => n != 0, err(_) => true },
-  }
+fn truthy(v: Value) -> Bool = match value.as_bool(v) {
+  ok(b) => b,
+  err(_) => match value.as_int(v) {
+    ok(n) => n != 0,
+    err(_) => true,
+  },
+}
 
 fn head_or_null(xs: List[Value]) -> Value = list.get(xs, 0) ?? value.null()
 
-fn eval(e: Value, env: Value, genv: Value) -> Value =
-  match value.as_int(e) {
-    ok(_) => e, // a number evaluates to itself
-    err(_) => match value.as_string(e) {
-      ok(name) => scope_get(env, name, genv), // a symbol looks itself up
-      err(_) => match value.as_array(e) {
-        ok(items) => eval_form(items, env, genv),
-        err(_) => e,
-      },
+fn eval(e: Value, env: Value, genv: Value) -> Value = match value.as_int(e) {
+  ok(_) => e,
+  // a number evaluates to itself
+  err(_) => match value.as_string(e) {
+    ok(name) => scope_get(env, name, genv),
+    // a symbol looks itself up
+    err(_) => match value.as_array(e) {
+      ok(items) => eval_form(items, env, genv),
+      err(_) => e,
     },
-  }
+  },
+}
 
 fn eval_form(items: List[Value], env: Value, genv: Value) -> Value = {
   let head = head_or_null(items)
@@ -150,23 +140,29 @@ fn eval_form(items: List[Value], env: Value, genv: Value) -> Value = {
     let c = eval(list_get_or_v(items, 1), env, genv)
     if truthy(c) then eval(list_get_or_v(items, 2), env, genv)
     else eval(list_get_or_v(items, 3), env, genv)
-  }
-  else if is_sym(head, "lambda") then {
+  } else if is_sym(head, "lambda") then {
     // (lambda (params...) body) — capture the defining environment.
-    let params = match value.as_array(list_get_or_v(items, 1)) { ok(ps) => ps, err(_) => [] }
+    let params = match value.as_array(list_get_or_v(items, 1)) {
+      ok(ps) => ps,
+      err(_) => [],
+    }
     value.array([value.str("#closure"), value.array(params), list_get_or_v(items, 2), env])
-  }
-  else if is_sym(head, "let") then {
+  } else if is_sym(head, "let") then {
     // (let ((name expr)...) body)
-    let binds = match value.as_array(list_get_or_v(items, 1)) { ok(bs) => bs, err(_) => [] }
-    let names = binds |> list.map((b) => match value.as_array(b) { ok(p) => head_or_null(p), err(_) => value.null() })
+    let binds = match value.as_array(list_get_or_v(items, 1)) {
+      ok(bs) => bs,
+      err(_) => [],
+    }
+    let names = binds |> list.map((b) => match value.as_array(b) {
+      ok(p) => head_or_null(p),
+      err(_) => value.null(),
+    })
     let vals = binds |> list.map((b) => match value.as_array(b) {
       ok(p) => eval(list.get(p, 1) ?? value.null(), env, genv),
       err(_) => value.null(),
     })
     eval(list_get_or_v(items, 2), scope_child(env, names, vals), genv)
-  }
-  else {
+  } else {
     // application: evaluate operator + operands
     let f = eval(head, env, genv)
     let args = list.tail(items) |> list.map((a) => eval(a, env, genv))
@@ -177,20 +173,21 @@ fn eval_form(items: List[Value], env: Value, genv: Value) -> Value = {
 // list.get with a Value-null default, at the arity eval_form needs.
 fn list_get_or_v(xs: List[Value], i: Int) -> Value = list.get(xs, i) ?? value.null()
 
-fn apply(f: Value, args: List[Value], genv: Value) -> Value =
-  match value.as_string(f) {
-    ok(name) => builtin(name, args),
-    err(_) => match value.as_array(f) {
-      ok(parts) =>
-        if is_sym(head_or_null(parts), "#closure") then {
-          let params = match value.as_array(list_get_or_v(parts, 1)) { ok(p) => p, err(_) => [] }
-          let body = list_get_or_v(parts, 2)
-          let cenv = list_get_or_v(parts, 3)
-          eval(body, scope_child(cenv, params, args), genv)
-        } else value.str("#not-a-function"),
-      err(_) => value.str("#not-a-function"),
-    },
-  }
+fn apply(f: Value, args: List[Value], genv: Value) -> Value = match value.as_string(f) {
+  ok(name) => builtin(name, args),
+  err(_) => match value.as_array(f) {
+    ok(parts) => if is_sym(head_or_null(parts), "#closure") then {
+      let params = match value.as_array(list_get_or_v(parts, 1)) {
+        ok(p) => p,
+        err(_) => [],
+      }
+      let body = list_get_or_v(parts, 2)
+      let cenv = list_get_or_v(parts, 3)
+      eval(body, scope_child(cenv, params, args), genv)
+    } else value.str("#not-a-function"),
+    err(_) => value.str("#not-a-function"),
+  },
+}
 
 fn int_of(v: Value) -> Int = value.as_int(v) ?? 0
 
@@ -205,12 +202,27 @@ fn builtin(name: String, args: List[Value]) -> Value = {
     ">" => value.bool(a > b),
     "=" => value.bool(a == b),
     "list" => value.array(args),
-    "car" => match value.as_array(list_get_or_v(args, 0)) { ok(xs) => head_or_null(xs), err(_) => value.null() },
-    "cdr" => match value.as_array(list_get_or_v(args, 0)) { ok(xs) => value.array(list.tail(xs)), err(_) => value.array([]) },
-    "cons" => match value.as_array(list_get_or_v(args, 1)) { ok(xs) => value.array([list_get_or_v(args, 0)] + xs), err(_) => value.array([list_get_or_v(args, 0)]) },
-    "null?" => match value.as_array(list_get_or_v(args, 0)) { ok(xs) => value.bool(list.is_empty(xs)), err(_) => value.bool(false) },
+    "car" => match value.as_array(list_get_or_v(args, 0)) {
+      ok(xs) => head_or_null(xs),
+      err(_) => value.null(),
+    },
+    "cdr" => match value.as_array(list_get_or_v(args, 0)) {
+      ok(xs) => value.array(list.tail(xs)),
+      err(_) => value.array([]),
+    },
+    "cons" => match value.as_array(list_get_or_v(args, 1)) {
+      ok(xs) => value.array([list_get_or_v(args, 0)] + xs),
+      err(_) => value.array([list_get_or_v(args, 0)]),
+    },
+    "null?" => match value.as_array(list_get_or_v(args, 0)) {
+      ok(xs) => value.bool(list.is_empty(xs)),
+      err(_) => value.bool(false),
+    },
     "append" => match value.as_array(list_get_or_v(args, 0)) {
-      ok(xs) => match value.as_array(list_get_or_v(args, 1)) { ok(ys) => value.array(xs + ys), err(_) => value.array(xs) },
+      ok(xs) => match value.as_array(list_get_or_v(args, 1)) {
+        ok(ys) => value.array(xs + ys),
+        err(_) => value.array(xs),
+      },
       err(_) => value.array([]),
     },
     _ => value.str("#unbound:" + name),
@@ -218,25 +230,26 @@ fn builtin(name: String, args: List[Value]) -> Value = {
 }
 
 // ── Driver: run a program (a list of forms), threading `define`s ────────
-fn run_forms(forms: List[Value], env: Value, out: List[String]) -> List[String] =
-  match list.get(forms, 0) {
-    none => out,
-    some(form) => {
-      let rest = list.tail(forms)
-      let items = match value.as_array(form) { ok(i) => i, err(_) => [] }
-      if list.len(items) > 0 and is_sym(head_or_null(items), "define") then {
-        let name = sym_name(list_get_or_v(items, 1))
-        let v = eval(list_get_or_v(items, 2), env, env)
-        run_forms(rest, scope_define(env, name, v), out)
-      } else {
-        let v = eval(form, env, env)
-        run_forms(rest, env, out + [value.stringify(v)])
-      }
-    },
-  }
+fn run_forms(forms: List[Value], env: Value, out: List[String]) -> List[String] = match list.get(forms, 0) {
+  none => out,
+  some(form) => {
+    let rest = list.tail(forms)
+    let items = match value.as_array(form) {
+      ok(i) => i,
+      err(_) => [],
+    }
+    if list.len(items) > 0 and is_sym(head_or_null(items), "define") then {
+      let name = sym_name(list_get_or_v(items, 1))
+      let v = eval(list_get_or_v(items, 2), env, env)
+      run_forms(rest, scope_define(env, name, v), out)
+    } else {
+      let v = eval(form, env, env)
+      run_forms(rest, env, out + [value.stringify(v)])
+    }
+  },
+}
 
-fn run(src: String) -> List[String] =
-  run_forms(parse_program(tokenize(src), 0, []), scope_new(), [])
+fn run(src: String) -> List[String] = run_forms(parse_program(tokenize(src), 0, []), scope_new(), [])
 
 fn show(title: String, src: String) -> Unit = {
   println("; " + title)
@@ -248,41 +261,8 @@ fn show(title: String, src: String) -> Unit = {
 }
 
 fn main() -> Unit = {
-  show("recursion — factorial and fibonacci", "
-    (define fact (lambda (n) (if (< n 2) 1 (* n (fact (- n 1))))))
-    (define fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
-    (fact 10)
-    (fib 15)
-  ")
-
-  show("closures — make-adder captures its environment", "
-    (define make-adder (lambda (n) (lambda (x) (+ x n))))
-    (define add5 (make-adder 5))
-    (define add40 (make-adder 40))
-    (add5 2)
-    (+ (add40 2) (add5 0))
-  ")
-
-  show("higher-order — map, defined in lisp itself", "
-    (define map (lambda (f xs)
-      (if (null? xs) (quote ())
-          (cons (f (car xs)) (map f (cdr xs))))))
-    (map (lambda (x) (* x x)) (list 1 2 3 4 5))
-  ")
-
-  show("quicksort — in lisp, on the interpreter, on both targets", "
-    (define filter (lambda (p xs)
-      (if (null? xs) (quote ())
-          (if (p (car xs))
-              (cons (car xs) (filter p (cdr xs)))
-              (filter p (cdr xs))))))
-    (define qsort (lambda (xs)
-      (if (null? xs) (quote ())
-          (let ((pivot (car xs)) (rest (cdr xs)))
-            (append
-              (qsort (filter (lambda (x) (< x pivot)) rest))
-              (cons pivot
-                (qsort (filter (lambda (x) (> x pivot)) rest))))))))
-    (qsort (list 5 3 8 1 9 2 7 4 6))
-  ")
+  show("recursion — factorial and fibonacci", "\n    (define fact (lambda (n) (if (< n 2) 1 (* n (fact (- n 1))))))\n    (define fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))\n    (fact 10)\n    (fib 15)\n  ")
+  show("closures — make-adder captures its environment", "\n    (define make-adder (lambda (n) (lambda (x) (+ x n))))\n    (define add5 (make-adder 5))\n    (define add40 (make-adder 40))\n    (add5 2)\n    (+ (add40 2) (add5 0))\n  ")
+  show("higher-order — map, defined in lisp itself", "\n    (define map (lambda (f xs)\n      (if (null? xs) (quote ())\n          (cons (f (car xs)) (map f (cdr xs))))))\n    (map (lambda (x) (* x x)) (list 1 2 3 4 5))\n  ")
+  show("quicksort — in lisp, on the interpreter, on both targets", "\n    (define filter (lambda (p xs)\n      (if (null? xs) (quote ())\n          (if (p (car xs))\n              (cons (car xs) (filter p (cdr xs)))\n              (filter p (cdr xs))))))\n    (define qsort (lambda (xs)\n      (if (null? xs) (quote ())\n          (let ((pivot (car xs)) (rest (cdr xs)))\n            (append\n              (qsort (filter (lambda (x) (< x pivot)) rest))\n              (cons pivot\n                (qsort (filter (lambda (x) (> x pivot)) rest))))))))\n    (qsort (list 5 3 8 1 9 2 7 4 6))\n  ")
 }

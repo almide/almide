@@ -4,7 +4,6 @@
 // at scope end, tripping the rc_dec double-free sentinel on the wasm leg
 // (native printed the right value and freed once). Each case below holds BOTH
 // the source and the derived list to scope end, so an un-owned alias traps.
-
 test "take_end co-owns String elements" {
   let src = ["a", "b", "c"]
   let s = list.take_end(src, 2)
@@ -44,7 +43,6 @@ test "the fuzz chain shape survives end to end" {
 // unregistered name and WALLED on the wasm leg (an honest wall, but every one of
 // them is a shape an LLM would write). Each case below holds BOTH the source and
 // the derived list to scope end, so an un-owned alias trips the rc_dec sentinel.
-
 fn pair_cell(p: (Float, Bool)) -> String = float.to_string(p.0) + (if p.1 then "T" else "F")
 
 test "tuple elements: modifiers co-own and leave the source intact" {
@@ -75,7 +73,11 @@ test "tuple elements: suffix copies co-own" {
 fn ints_str(xs: List[Int]) -> String = list.join(list.map(xs, int.to_string), "-")
 
 test "nested-list elements co-own through modifiers and suffix copies" {
-  let src: List[List[Int]] = [[1, 2], [3], [4, 5, 6]]
+  let src: List[List[Int]] = [
+    [1, 2],
+    [3],
+    [4, 5, 6]
+  ]
   let removed = list.remove_at(src, 0)
   let swapped = list.swap(src, 0, 2)
   let te = list.take_end(src, 2)

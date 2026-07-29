@@ -12,29 +12,35 @@
 // variant element from its `[tag][field…]` layout. This pins nullary variants in
 // either tuple position, both positions, and a payload-carrying variant, all
 // native == WASM.
-
 type Color = | Red | Green
+
 type Shape = | Empty | Full(Int)
 
-fn classify(a: Color, b: Color) -> String =
-  match (a, b) {
-    (Red, _)       => "red-first",
-    (_, Red)       => "red-second",
-    (Green, Green) => "both-green",
-  }
+fn classify(a: Color, b: Color) -> String = match (a, b) {
+  (Red, _) => "red-first",
+  (_, Red) => "red-second",
+  (Green, Green) => "both-green",
+}
 
-fn payload(s: Shape) -> String =
-  match (s, 0) {
-    (Full(x), _) => "full-" + int.to_string(x),
-    (Empty, _)   => "empty",
-  }
+fn payload(s: Shape) -> String = match (s, 0) {
+  (Full(x), _) => "full-" + int.to_string(x),
+  (Empty, _) => "empty",
+}
 
 fn main() -> Unit = {
-  println(classify(Red, Green))    // red-first
-  println(classify(Green, Red))    // red-second
-  println(classify(Green, Green))  // both-green
-  println(payload(Full(42)))       // full-42
-  println(payload(Empty))          // empty
+  println(classify(Red, Green))
+  // red-first
+  println(classify(Green, Red))
+  // red-second
+  println(classify(Green, Green))
+  // both-green
+  println(payload(Full(42)))
+  // full-42
+  println(payload(Empty))
+  // empty
   // Both nullary positions literal in a non-last arm.
-  println(match (Red, Green) { (Red, Green) => "rg", _ => "x" })
+  println(match (Red, Green) {
+    (Red, Green) => "rg",
+    _ => "x",
+  })
 }

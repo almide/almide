@@ -4,7 +4,6 @@
 // callable `set.to_list`, renders the `[...]` body inline like `list.to_string`, and wraps it in
 // `set.from_list(` … `)`. The owned `set.to_list` result is dropped at scope end (PCC-verified).
 // Byte-identical to v0 --target wasm.
-
 effect fn main() -> Unit = {
   let a: Set[Int] = set.from_list([3, 1, 2, 1, 3])
   let b: Set[Int] = set.from_list([])
@@ -17,7 +16,7 @@ effect fn main() -> Unit = {
   println("set=${a} done")
   let sa: Set[String] = set.from_list(["b", "a", "b", "c"])
   let sb: Set[String] = set.from_list([])
-  let sc: Set[String] = set.from_list(["q \"x\""])
+  let sc: Set[String] = set.from_list(['q "x"'])
   println("${sa}")
   println("${sb}")
   println("${sc}")

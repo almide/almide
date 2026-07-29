@@ -7,7 +7,9 @@
 // auto-unwrapped it: native built invalid Rust (E0308), wasm RAN and printed
 // a SILENTLY WRONG value (42 -> 0). Now both keep the Result, byte-identical.
 type Holder = { r: Result[Int, String] }
+
 effect fn step() -> Int = 42
+
 effect fn main() -> Unit = {
   let h = Holder { r: step() }
   let rs: List[Result[Int, String]] = [step(), step()]

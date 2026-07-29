@@ -1,6 +1,5 @@
 // bytes high-level operations: reverse / fill / map_each / insert / remove_at /
 // chunks / split / lines.
-
 test "reverse" {
   var b = bytes.new(0)
   bytes.append_u8(b, 1)
@@ -22,7 +21,8 @@ test "fill in-place" {
 
 test "insert in middle" {
   let b = bytes.from_string("ac")
-  let r = bytes.insert(b, 1, 0x62)  // 'b'
+  let r = bytes.insert(b, 1, 0x62)
+  // 'b'
   assert_eq(bytes.len(r), 3)
   assert_eq(bytes.read_u8(r, 0), 0x61)
   assert_eq(bytes.read_u8(r, 1), 0x62)

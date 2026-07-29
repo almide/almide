@@ -6,8 +6,11 @@
 // type TRAPPED on a heap-result closure ("indirect call type mismatch",
 // fuzz G-65) — capturing and non-capturing alike.
 fn zw_str(a: List[String], b: List[String]) -> List[String] = list.zip_with(a, b, ((x, y) => x + y))
+
 fn zw_cap(a: List[String], k: String) -> List[String] = list.zip_with(a, a, ((x, y) => k))
+
 fn zw_int(a: List[Int]) -> List[Int] = list.zip_with(a, a, ((x, y) => x + y))
+
 fn zw_mixed(a: List[String]) -> List[Int] = list.zip_with(a, a, ((x, y) => string.len(x) + string.len(y)))
 
 fn main() -> Unit = {

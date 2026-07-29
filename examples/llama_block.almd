@@ -14,16 +14,7 @@
 // This example shows the user-facing surface of the stack. The same
 // pattern scales to multi-layer models: wrap this in a loop over the
 // per-layer weights and you have a working Llama forward pass.
-
-fn llama_block(
-  x: Matrix,
-  gamma_attn: List[Float],
-  gamma_ffn: List[Float],
-  wq: Matrix, wk: Matrix, wv: Matrix, wo: Matrix,
-  w_gate: Matrix, w_up: Matrix, w_down: Matrix,
-  n_heads: Int,
-  eps: Float,
-) -> Matrix = {
+fn llama_block(x: Matrix, gamma_attn: List[Float], gamma_ffn: List[Float], wq: Matrix, wk: Matrix, wv: Matrix, wo: Matrix, w_gate: Matrix, w_up: Matrix, w_down: Matrix, n_heads: Int, eps: Float) -> Matrix = {
   // Pre-norm + attention
   let normed = matrix.rms_norm_rows(x, gamma_attn, eps)
   let q = matrix.linear_row_no_bias(normed, wq)
@@ -32,7 +23,6 @@ fn llama_block(
   let attn = matrix.masked_multi_head_attention(q, k, v, n_heads)
   let attn_out = matrix.linear_row_no_bias(attn, wo)
   let x_attn = matrix.add(x, attn_out)
-
   // Pre-norm + SwiGLU FFN
   let normed2 = matrix.rms_norm_rows(x_attn, gamma_ffn, eps)
   let gated = matrix.swiglu_gate(normed2, w_gate, w_up)
@@ -49,7 +39,6 @@ effect fn main() -> Unit = {
   let d_inner = 32
   let n_heads = 2
   let eps = 0.000001
-
   let x = matrix.ones(seq, d)
   let gamma_attn = list.repeat(1.0, d)
   let gamma_ffn = list.repeat(1.0, d)
@@ -60,12 +49,7 @@ effect fn main() -> Unit = {
   let w_gate = matrix.ones(d_inner, d)
   let w_up = matrix.ones(d_inner, d)
   let w_down = matrix.ones(d, d_inner)
-
-  let out = llama_block(
-    x, gamma_attn, gamma_ffn,
-    wq, wk, wv, wo, w_gate, w_up, w_down,
-    n_heads, eps,
-  )
+  let out = llama_block(x, gamma_attn, gamma_ffn, wq, wk, wv, wo, w_gate, w_up, w_down, n_heads, eps)
   let (rows, cols) = matrix.shape(out)
   println("llama_block output shape: " + int.to_string(rows) + " x " + int.to_string(cols))
 }

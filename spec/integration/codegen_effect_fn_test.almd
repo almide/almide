@@ -1,7 +1,5 @@
 // codegen_effect_fn_test — Effect function error propagation edge cases
-
 // ── Effect fn calling multiple effect fns in sequence ──
-
 effect fn parse_int_strict(s: String) -> Result[Int, String] = {
   let n = int.parse(s)!
   ok(n)
@@ -45,7 +43,6 @@ test "chained effect fn fails at even check" {
 }
 
 // ── Effect fn with loop and early return ──
-
 effect fn find_first_even(xs: List[String]) -> Result[Int, String] = {
   var i = 0
   while i < list.len(xs) {
@@ -69,13 +66,11 @@ test "effect fn with loop no even found" {
 }
 
 // ── Effect fn with if-else returning Result ──
-
 effect fn classify_number(s: String) -> Result[String, String] = {
   let n = parse_int_strict(s)!
   let label = if n > 100 then "large"
-    else if n > 10 then "medium"
-    else if n > 0 then "small"
-    else "non-positive"
+  else if n > 10 then "medium"
+  else if n > 0 then "small" else "non-positive"
   ok(label)
 }
 
@@ -87,7 +82,6 @@ test "effect fn with conditional classification" {
 }
 
 // ── Effect fn with match on intermediate result ──
-
 effect fn process_item(item: String) -> Result[String, String] = {
   let n = parse_int_strict(item)!
   let category = match n {
@@ -107,7 +101,6 @@ test "effect fn with match on unwrapped value" {
 }
 
 // ── Effect fn accumulating results in a loop ──
-
 effect fn sum_strings(strs: List[String]) -> Result[Int, String] = {
   var total = 0
   for s in strs {
@@ -126,7 +119,6 @@ test "effect fn loop accumulation empty" {
 }
 
 // ── Effect fn with guard in loop body ──
-
 effect fn sum_positive_strings(strs: List[String]) -> Result[Int, String] = {
   var total = 0
   for s in strs {

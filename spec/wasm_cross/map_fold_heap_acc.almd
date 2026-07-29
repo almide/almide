@@ -15,7 +15,9 @@ fn main() -> Unit = {
   println("${map.fold(subj, init, ((a, k, v) => a))}")
   println("${map.fold(subj, init, ((a, k, v) => ["fresh": v]))}")
   let y3: Map[String, String] = [:]
-  let r7 = map.fold(map.get_or(["k0": ["k0": "x"]], "missing", y3), ["k0": 1], ((a, k, v) => ["k": 10]))
+  let r7 = map.fold(map.get_or([
+    "k0": ["k0": "x"]
+  ], "missing", y3), ["k0": 1], ((a, k, v) => ["k": 10]))
   println("r7 = ${r7}")
   // init must still be alive and intact after every fold above.
   println("init = ${init}")

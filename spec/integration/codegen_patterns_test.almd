@@ -1,11 +1,6 @@
 // codegen_patterns_test — Pattern matching and destructuring edge cases
-
 // ── Match with nested variant and record patterns ──
-
-type Msg =
-  | Text(String)
-  | Number(Int)
-  | Pair(Int, Int)
+type Msg = | Text(String) | Number(Int) | Pair(Int, Int)
 
 fn msg_to_string(m: Msg) -> String = match m {
   Text(s) => "text:" + s,
@@ -20,7 +15,6 @@ test "variant match with all arms" {
 }
 
 // ── Match on option of variant ──
-
 test "match option of variant" {
   let x: Option[Msg] = some(Number(99))
   let result = match x {
@@ -42,7 +36,6 @@ test "match option of variant none case" {
 }
 
 // ── Tuple destructuring in let ──
-
 test "tuple destructure three elements" {
   let (a, b, c) = (10, "hello", true)
   assert_eq(a, 10)
@@ -57,13 +50,14 @@ test "tuple destructure from function return" {
 }
 
 // ── For loop with tuple destructuring ──
-
 test "for loop with tuple destructure from zip" {
   let names = ["alice", "bob", "carol"]
   let scores = [90, 85, 95]
   var results: List[String] = []
   for (name, score) in list.zip(names, scores) {
-    results = results + ["${name}:${int.to_string(score)}"]
+    results = results + [
+      "${name}:${int.to_string(score)}"
+    ]
   }
   assert_eq(results, ["alice:90", "bob:85", "carol:95"])
 }
@@ -72,13 +66,14 @@ test "for loop with enumerate tuple destructure" {
   let items = ["a", "b", "c"]
   var indexed: List[String] = []
   for (i, item) in list.enumerate(items) {
-    indexed = indexed + ["${int.to_string(i)}=${item}"]
+    indexed = indexed + [
+      "${int.to_string(i)}=${item}"
+    ]
   }
   assert_eq(indexed, ["0=a", "1=b", "2=c"])
 }
 
 // ── For loop with tuple destructure from map entries ──
-
 test "for (k, v) in map entries" {
   let m = map.set(map.set(map.new(), "x", 10), "y", 20)
   var sum = 0
@@ -89,7 +84,6 @@ test "for (k, v) in map entries" {
 }
 
 // ── Match with guard and complex condition ──
-
 test "match guard with function call in condition" {
   let xs = [1, 2, 3, 4, 5]
   let result = match xs {
@@ -101,7 +95,6 @@ test "match guard with function call in condition" {
 }
 
 // ── Record destructuring ──
-
 test "record destructure with many fields" {
   let config = { host: "localhost", port: 8080, debug: true, timeout: 30 }
   let { host, port, debug, timeout } = config
@@ -112,7 +105,6 @@ test "record destructure with many fields" {
 }
 
 // ── Match returning different types of expressions ──
-
 test "match arms returning records" {
   let x = 1
   let result = match x {
@@ -135,7 +127,6 @@ test "match arms returning tuples" {
 }
 
 // ── Match arms returning lists ──
-
 test "match arms returning lists" {
   let n = 3
   let result = match n {
@@ -148,7 +139,6 @@ test "match arms returning lists" {
 }
 
 // ── Nested match with block bodies ──
-
 test "nested match with blocks" {
   let x: Option[Result[Int, String]] = some(ok(42))
   let result = match x {
@@ -168,7 +158,6 @@ test "nested match with blocks" {
 }
 
 // ── Match with wildcard and binding together ──
-
 test "match wildcard in variant payload" {
   let msgs = [Pair(1, 2), Text("hi"), Number(5), Pair(3, 4)]
   var pair_sums: List[Int] = []
@@ -178,7 +167,9 @@ test "match wildcard in variant payload" {
       _ => none,
     }
     match maybe_sum {
-      some(s) => { pair_sums = pair_sums + [s] },
+      some(s) => {
+        pair_sums = pair_sums + [s]
+      },
       none => { () },
     }
   }

@@ -1,3 +1,8 @@
-type Phase = Active | Idle
+type Phase = | Active | Idle
+
 fn start() -> Phase = Idle
-fn show(p: Phase) -> String = match p { Active => "cb-active", Idle => "cb-idle" }
+
+fn show(p: Phase) -> String = match p {
+  Active => "cb-active",
+  Idle => "cb-idle",
+}

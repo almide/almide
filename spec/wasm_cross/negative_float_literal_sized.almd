@@ -6,6 +6,7 @@
 // The positive literal already took the context type, which is why only the
 // negatives broke. Folded into the literal now, at the context type.
 fn take32(f: Float32) -> String = float32.to_string(f)
+
 fn take64(f: Float64) -> String = float.to_string(float.from_float64(f))
 
 fn main() -> Unit = {

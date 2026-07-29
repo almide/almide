@@ -12,8 +12,8 @@
 //   - Per-dtype IR dispatch (stays via runtime SmallF32 tag)
 //   - `matrix.zeros[T]()` generic form → needs `T: Numeric` protocol
 //   - `Matrix[Int32]` etc beyond the Float pair
-
 fn row_count(m: Matrix[Float]) -> Int = matrix.rows(m)
+
 fn double_matrix(m: Matrix) -> Matrix = matrix.scale(m, 2.0)
 
 test "Matrix[Float] annotation binds to bare Matrix value" {

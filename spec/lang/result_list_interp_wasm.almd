@@ -3,8 +3,10 @@
 // `err("<quoted>")`. Two gaps close: constructing `ok([…])` (the ResultOk heap materializer admits a
 // scalar-list literal, incl empty `ok([])`), and rendering it (self-host `result.to_string_li`, the
 // inner list like `${list}` wrapped in `ok(…)`, the Err string quoted like a List[String] element).
-
-fn tag(r: Result[List[Int], String]) -> Int = match r { ok(v) => list.len(v), err(e) => 0 - 1 }
+fn tag(r: Result[List[Int], String]) -> Int = match r {
+  ok(v) => list.len(v),
+  err(e) => 0 - 1,
+}
 
 effect fn main() -> Unit = {
   let a: Result[List[Int], String] = ok([4, 5])

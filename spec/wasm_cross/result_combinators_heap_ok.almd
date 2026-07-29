@@ -6,10 +6,15 @@
 // emitted invalid wasm. Fuzz seed 1784352208133210990 index 904 (via map_err).
 // Each combinator sits in its own fn so the v1 leg verifies it independently.
 fn c_map(r: Result[String, String]) -> Result[String, String] = result.map(r, ((y) => y + "?"))
+
 fn c_map_err(r: Result[String, String]) -> Result[String, String] = result.map_err(r, ((y) => y + "!"))
+
 fn c_flat_map(r: Result[String, String]) -> Result[String, String] = result.flat_map(r, ((y) => ok(y + "F")))
+
 fn c_uoe(r: Result[String, String]) -> String = result.unwrap_or_else(r, ((y) => "fb:" + y))
+
 fn c_to_opt(r: Result[String, String]) -> Option[String] = result.to_option(r)
+
 fn c_to_eopt(r: Result[String, String]) -> Option[String] = result.to_err_option(r)
 
 fn main() -> Unit = {

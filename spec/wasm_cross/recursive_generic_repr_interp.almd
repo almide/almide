@@ -17,33 +17,26 @@
 //     mono-by-name bug corrupted (one fn served both, mis-typing the payload).
 //   • A recursive generic inside containers (List/Option) and a Tree[Int] /
 //     Tree[String] pair printed adjacently.
-
-type Tree[T] = Leaf(T) | Node(Tree[T], Tree[T])
+type Tree[T] = | Leaf(T) | Node(Tree[T], Tree[T])
 
 fn main() -> Unit = {
   let ti: Tree[Int] = Node(Leaf(1), Node(Leaf(2), Leaf(3)))
   println("int=${ti}")
-
   let ts: Tree[String] = Node(Leaf("a"), Leaf("b"))
   println("str=${ts}")
-
   let tf: Tree[Float] = Node(Leaf(1.5), Leaf(2.0))
   println("flt=${tf}")
-
   // Nested instantiation: payload is itself a container.
   let tl: Tree[List[Int]] = Node(Leaf([1, 2]), Leaf([3]))
   println("list=${tl}")
-
   // Two DIFFERENT instantiations live in the same program — each must route to
   // its own per-instantiation repr fn, not collide on a single `__repr_Tree`.
   let both_i: Tree[Int] = Leaf(99)
   let both_s: Tree[String] = Leaf("z")
   println("both=${both_i} | ${both_s}")
-
   // Recursive generic inside containers.
   let forest: List[Tree[Int]] = [Leaf(7), Node(Leaf(8), Leaf(9))]
   println("forest=${forest}")
-
   let opt: Option[Tree[String]] = some(Node(Leaf("x"), Leaf("y")))
   println("opt=${opt}")
 }

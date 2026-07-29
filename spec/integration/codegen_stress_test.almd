@@ -1,8 +1,6 @@
 type Point = { x: Int, y: Int }
 
-type Shape =
-  | Circle(Float)
-  | Rect(Float, Float)
+type Shape = | Circle(Float) | Rect(Float, Float)
 
 test "variable used 3 times" {
   let s = "hello"
@@ -43,7 +41,9 @@ test "string in interpolation then function" {
 test "variable in for loop then used after" {
   let xs = [1, 2, 3]
   var total = 0
-  for x in xs { total = total + x }
+  for x in xs {
+    total = total + x
+  }
   let len = list.len(xs)
   assert_eq(total, 6)
   assert_eq(len, 3)
@@ -103,39 +103,51 @@ test "triple nested for" {
   assert_eq(total, 1332)
 }
 
-fn area(s: Shape) -> Float =
-  match s { Circle(r) => 3.14 * r * r, Rect(w, h) => w * h }
+fn area(s: Shape) -> Float = match s {
+  Circle(r) => 3.14 * r * r,
+  Rect(w, h) => w * h,
+}
 
-test "match variant" { assert_eq(area(Rect(3.0, 4.0)), 12.0) }
+test "match variant" {
+  assert_eq(area(Rect(3.0, 4.0)), 12.0)
+}
 
 test "match string" {
-  let r = match "hello" { "hello" => "world", _ => "?" }
+  let r = match "hello" {
+    "hello" => "world",
+    _ => "?",
+  }
   assert_eq(r, "world")
 }
 
 test "option" {
-  let v = match list.get([10, 20], 1) { some(v) => v, none => 0 }
+  let v = match list.get([10, 20], 1) {
+    some(v) => v,
+    none => 0,
+  }
   assert_eq(v, 20)
 }
 
 test "while" {
   var i = 0
   var s = 0
-  while i < 5 { s = s + i; i = i + 1 }
+  while i < 5 {
+    s = s + i
+    i = i + 1
+  }
   assert_eq(s, 10)
 }
 
 test "pipe chain" {
-  let r = [1, 2, 3, 4, 5]
-    |> list.filter((x) => x > 2)
-    |> list.map((x) => x * 10)
-    |> list.fold(0, (a, x) => a + x)
+  let r = [1, 2, 3, 4, 5] |> list.filter((x) => x > 2) |> list.map((x) => x * 10) |> list.fold(0, (a, x) => a + x)
   assert_eq(r, 120)
 }
 
 fn factorial(n: Int) -> Int = if n <= 1 then 1 else n * factorial(n - 1)
 
-test "recursion" { assert_eq(factorial(5), 120) }
+test "recursion" {
+  assert_eq(factorial(5), 120)
+}
 
 fn greet(name: String, prefix: String = "Hello") -> String = "${prefix}, ${name}!"
 

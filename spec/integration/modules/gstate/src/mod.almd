@@ -1,22 +1,23 @@
 // gstate — module-global mutable state driven from another module (#846).
 // A non-effect module fn with no mut params can still mutate module `var`s;
 // LICM must never treat its call as loop-invariant.
-
 var count: Float = 0.0
+
 var totals: List[Float] = list.repeat(0.0, 4)
 
-pub fn bump_scalar(dt: Float) -> Unit = {
+fn bump_scalar(dt: Float) -> Unit = {
   count = count + dt
 }
 
-pub fn bump_at(i: Int, dt: Float) -> Unit = {
+fn bump_at(i: Int, dt: Float) -> Unit = {
   totals[i] = totals[i] + dt
 }
 
-pub fn reset() -> Unit = {
+fn reset() -> Unit = {
   count = 0.0
   totals = list.repeat(0.0, 4)
 }
 
-pub fn get_scalar() -> Float = count
-pub fn get_at(i: Int) -> Float = totals[i]
+fn get_scalar() -> Float = count
+
+fn get_at(i: Int) -> Float = totals[i]

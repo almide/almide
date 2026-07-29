@@ -7,7 +7,9 @@
 import letlib
 
 let DIRECT = letlib.GREETING
+
 let VIA_FN = letlib.welcome()
+
 let NUM_COUNT = list.len(letlib.NUMBERS)
 
 test "cross-module top-let direct heap-global read at init (#632)" {

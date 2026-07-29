@@ -7,14 +7,9 @@
 // interesting Unicode category so the cross-target diff gate proves native and
 // WASM agree byte-for-byte. Each row prints the 4 predicate results for a
 // carefully chosen scalar class.
-
 fn b(x: Bool) -> String = if x then "T" else "F"
 
-fn row(label: String, s: String) -> Unit =
-  println(label + ": alpha=" + b(string.is_alpha(s))
-    + " alnum=" + b(string.is_alphanumeric(s))
-    + " upper=" + b(string.is_upper(s))
-    + " lower=" + b(string.is_lower(s)))
+fn row(label: String, s: String) -> Unit = println(label + ": alpha=" + b(string.is_alpha(s)) + " alnum=" + b(string.is_alphanumeric(s)) + " upper=" + b(string.is_upper(s)) + " lower=" + b(string.is_lower(s)))
 
 fn main() -> Unit = {
   // ASCII
@@ -22,8 +17,10 @@ fn main() -> Unit = {
   row("ascii_lower", "abc")
   row("ascii_digit", "123")
   row("ascii_alnum", "Ab1")
-  row("ascii_punct", "A.B")     // has an alpha, '.' is non-alpha
-  row("ascii_dotonly", "...")   // no alpha at all
+  row("ascii_punct", "A.B")
+  // has an alpha, '.' is non-alpha
+  row("ascii_dotonly", "...")
+  // no alpha at all
   // Greek (cased, plus the Σ/σ pair)
   row("greek_lower", "αβγ")
   row("greek_upper", "ΑΒΓ")
@@ -40,18 +37,26 @@ fn main() -> Unit = {
   row("fullwidth_up", "ＡＢＣ")
   row("fullwidth_lo", "ａｂｃ")
   // Numeric-but-not-alpha categories
-  row("superscript", "²")       // No
-  row("fraction", "½")          // No
+  row("superscript", "²")
+  // No
+  row("fraction", "½")
+  // No
   // Roman numerals (Nl: alphabetic AND cased)
   row("roman_up", "Ⅴ")
   row("roman_lo", "ⅴ")
-  row("no_only", "²½")          // alnum, not alpha, no case
+  row("no_only", "²½")
+  // alnum, not alpha, no case
   // Titlecase + modifier + eszett edge cases
-  row("titlecase", "ǅ")         // alpha, neither upper nor lower
-  row("modifier", "ʰ")          // Lm: alpha, lowercase
-  row("eszett", "ß")            // alpha, lowercase
+  row("titlecase", "ǅ")
+  // alpha, neither upper nor lower
+  row("modifier", "ʰ")
+  // Lm: alpha, lowercase
+  row("eszett", "ß")
+  // alpha, lowercase
   // Mixed / boundary
-  row("digit_letter", "a1")     // not all alpha; alpha 'a' is lower
-  row("mixed_case_uni", "Ａa")  // fullwidth-upper + ascii-lower
+  row("digit_letter", "a1")
+  // not all alpha; alpha 'a' is lower
+  row("mixed_case_uni", "Ａa")
+  // fullwidth-upper + ascii-lower
   row("empty", "")
 }

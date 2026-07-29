@@ -7,7 +7,11 @@
 // [COMPILER BUG] / wasm refused). Now each unbound generic is fresh-instantiated
 // before the back-prop, so T = Box's element = Int resolves. native == wasm.
 type Box[T] = | B(T)
-fn unbox[T](b: Box[T]) -> T = match b { B(x) => x }
+
+fn unbox[T](b: Box[T]) -> T = match b {
+  B(x) => x
+}
+
 fn main() -> Unit = {
   let xs: List[Box[Int]] = [B(1), B(2), B(3)]
   let ys = xs |> list.map((b) => unbox(b))

@@ -19,7 +19,13 @@ fn guarded_write(data: Bytes) -> Int = {
 
 fn reassign_in_arm(n: Int) -> Int = {
   var r = 0
-  let x = if n > 5 then { r = 100; 1 } else { r = 7; 2 }
+  let x = if n > 5 then {
+    r = 100
+    1
+  } else {
+    r = 7
+    2
+  }
   r * 10 + x
 }
 

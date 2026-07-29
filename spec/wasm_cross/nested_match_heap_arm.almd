@@ -4,14 +4,13 @@
 // variant-value-match machinery the tail position uses, executing only the
 // taken leaf and moving out its owned String. Uses only linkable self-host
 // calls (int.parse / int.from_hex) so the whole program renders on v1.
-fn classify(c: String) -> String =
-  match int.parse(c) {
-    ok(n) => "int:" + int.to_string(n),
-    err(_) => match int.from_hex(c) {
-      ok(m) => "hex:" + int.to_string(m),
-      err(_) => "other:" + c,
-    },
-  }
+fn classify(c: String) -> String = match int.parse(c) {
+  ok(n) => "int:" + int.to_string(n),
+  err(_) => match int.from_hex(c) {
+    ok(m) => "hex:" + int.to_string(m),
+    err(_) => "other:" + c,
+  },
+}
 
 fn main() -> Unit = {
   println(classify("42"))

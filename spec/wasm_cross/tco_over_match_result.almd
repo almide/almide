@@ -8,11 +8,22 @@
 // result-accumulator Assign `result = ok(acc)`/`err(e)` Dups the carried payload (rc-balanced, no
 // double-free). v0==v1 on both the ok and err paths.
 fn f(p: Int) -> Result[Int, String] = if p < 5 then ok(p * 2) else err("oob")
+
 effect fn build(n: Int, pos: Int, acc: List[Int]) -> Result[List[Int], String] = {
   if pos >= n then ok(acc)
-  else { let x = f(pos)!  build(n, pos + 1, acc + [x]) }
+  else {
+    let x = f(pos)!
+    build(n, pos + 1, acc + [x])
+  }
 }
+
 effect fn main() -> Unit = {
-  match build(3, 0, []) { ok(xs) => println("ok:" + int.to_string(list.len(xs))), err(e) => println("err:" + e) }
-  match build(8, 0, []) { ok(xs) => println("ok2:" + int.to_string(list.len(xs))), err(e) => println("err2:" + e) }
+  match build(3, 0, []) {
+    ok(xs) => println("ok:" + int.to_string(list.len(xs))),
+    err(e) => println("err:" + e),
+  }
+  match build(8, 0, []) {
+    ok(xs) => println("ok2:" + int.to_string(list.len(xs))),
+    err(e) => println("err2:" + e),
+  }
 }

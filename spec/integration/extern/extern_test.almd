@@ -2,7 +2,6 @@
 // @extern test: Pattern 2 — body is fallback for targets without @extern
 // Since we compile to Rust, @extern(rs, ...) takes priority over the body.
 // The body is used as fallback for targets that don't have an @extern.
-
 // Pattern 1: Pure Almide (no extern, both targets use body)
 fn add(a: Int, b: Int) -> Int = a + b
 
@@ -18,14 +17,11 @@ fn my_max(a: Int, b: Int) -> Int
 fn main() -> Unit = {
   // Pattern 1: pure Almide
   assert_eq(add(2, 3), 5, "pure Almide fn")
-
   // Pattern 2: @extern(rs) delegates to std::cmp::min
   assert_eq(my_min(10, 20), 10, "@extern(rs) min")
   assert_eq(my_min(5, 3), 3, "@extern(rs) min reversed")
-
   // Pattern 3: @extern(rs) delegates to std::cmp::max
   assert_eq(my_max(10, 20), 20, "@extern(rs) max")
   assert_eq(my_max(5, 3), 5, "@extern(rs) max reversed")
-
   println("All @extern tests passed!")
 }

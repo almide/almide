@@ -5,12 +5,18 @@
 // Consume'd). `lower_heap_result_arm` now handles the ConcatList arm (the `"im"` per-arm balance), so the
 // whole mutual-recursive append loop — direct-self-recursion via inlining, TCO'd with the simultaneous
 // scalar update, appending `acc + [string.slice(…)]` per iteration — lowers end-to-end and byte-matches v0.
-fn collect(s: String, pos: Int, acc: List[String]) -> List[String] =
-  if pos >= string.len(s) then { if list.is_empty(acc) then acc else acc + ["end"] }
-  else collect(s, pos + 1, acc + [string.slice(s, pos, pos + 1)])
+fn collect(s: String, pos: Int, acc: List[String]) -> List[String] = if pos >= string.len(s) then {
+  if list.is_empty(acc) then acc
+  else acc + ["end"]
+} else collect(s, pos + 1, acc + [
+  string.slice(s, pos, pos + 1)
+])
 
 fn main() -> Unit = {
-  println(list.join(collect("ab", 0, []), "-"))    // a-b-end
-  println(list.join(collect("xyz", 0, []), "-"))   // x-y-z-end
-  println(int.to_string(list.len(collect("", 0, [])))) // 0
+  println(list.join(collect("ab", 0, []), "-"))
+  // a-b-end
+  println(list.join(collect("xyz", 0, []), "-"))
+  // x-y-z-end
+  // 0
+  println(int.to_string(list.len(collect("", 0, []))))
 }

@@ -5,10 +5,11 @@
 // freed WITHIN that arm (inside the wasm `then`), not at the function scope-end — else the ELSE path
 // ("hello", not 0x) hits an UNCONDITIONAL rc_dec of an uninitialized local = rc_dec(0) trap. Byte-
 // matches v0 for both arms.
-fn pn(c: String) -> Value =
-  if string.starts_with(c, "0x") then
-    match int.from_hex(string.drop(c, 2)) { ok(n) => value.int(n), err(_) => value.str(c) }
-  else value.str(c)
+fn pn(c: String) -> Value = if string.starts_with(c, "0x") then match int.from_hex(string.drop(c, 2)) {
+  ok(n) => value.int(n),
+  err(_) => value.str(c),
+} else value.str(c)
+
 fn main() -> Unit = {
   println(value.stringify(pn("hello")))
   println(value.stringify(pn("0xff")))

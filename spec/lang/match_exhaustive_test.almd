@@ -1,54 +1,44 @@
 // Exhaustiveness check: ensure exhaustive matches compile and run correctly.
-
 type Color = | Red | Green | Blue
 
-fn color_name(c: Color) -> String =
-  match c {
-    Red => "red"
-    Green => "green"
-    Blue => "blue"
-  }
+fn color_name(c: Color) -> String = match c {
+  Red => "red",
+  Green => "green",
+  Blue => "blue",
+}
 
-type Expr =
-  | Lit(Int)
-  | Neg(Expr)
-  | Add(Expr, Expr)
+type Expr = | Lit(Int) | Neg(Expr) | Add(Expr, Expr)
 
-fn eval(e: Expr) -> Int =
-  match e {
-    Lit(n) => n
-    Neg(inner) => 0 - eval(inner)
-    Add(a, b) => eval(a) + eval(b)
-  }
+fn eval(e: Expr) -> Int = match e {
+  Lit(n) => n,
+  Neg(inner) => 0 - eval(inner),
+  Add(a, b) => eval(a) + eval(b),
+}
 
-fn classify_option(x: Option[Option[Int]]) -> String =
-  match x {
-    some(some(n)) => "deep: " + int.to_string(n)
-    some(none) => "shallow none"
-    none => "nothing"
-  }
+fn classify_option(x: Option[Option[Int]]) -> String = match x {
+  some(some(n)) => "deep: " + int.to_string(n),
+  some(none) => "shallow none",
+  none => "nothing",
+}
 
-fn classify_result(x: Option[Result[Int, String]]) -> String =
-  match x {
-    some(ok(n)) => "ok: " + int.to_string(n)
-    some(err(e)) => "err: " + e
-    none => "none"
-  }
+fn classify_result(x: Option[Result[Int, String]]) -> String = match x {
+  some(ok(n)) => "ok: " + int.to_string(n),
+  some(err(e)) => "err: " + e,
+  none => "none",
+}
 
-fn bool_pair(a: Bool, b: Bool) -> String =
-  match (a, b) {
-    (true, true) => "tt"
-    (true, false) => "tf"
-    (false, true) => "ft"
-    (false, false) => "ff"
-  }
+fn bool_pair(a: Bool, b: Bool) -> String = match (a, b) {
+  (true, true) => "tt",
+  (true, false) => "tf",
+  (false, true) => "ft",
+  (false, false) => "ff",
+}
 
-fn classify_int(x: Int) -> String =
-  match x {
-    0 => "zero"
-    1 => "one"
-    _ => "other"
-  }
+fn classify_int(x: Int) -> String = match x {
+  0 => "zero",
+  1 => "one",
+  _ => "other",
+}
 
 test "variant exhaustive match" {
   assert_eq(color_name(Red), "red")

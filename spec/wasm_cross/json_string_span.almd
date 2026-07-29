@@ -15,46 +15,37 @@
 // quote that would otherwise end the string.
 import json
 
-fn s(text: String) -> String =
-  match json.parse(text) {
-    ok(v) => json.stringify(v),
-    err(e) => "ERR " + e,
-  }
+fn s(text: String) -> String = match json.parse(text) {
+  ok(v) => json.stringify(v),
+  err(e) => "ERR " + e,
+}
 
 fn main() -> Unit = {
   // Fill advances 6 past invalid hex — including over a closing quote.
-  println(s("[\"\\uZZZZtail\"]"))
-  println(s("[\"a\\uZZ\"]"))
-
+  println(s('["\\uZZZZtail"]'))
+  println(s('["a\\uZZ"]'))
   // Surrogate handling: a valid pair advances 12, everything else 6.
-  println(s("[\"\\uD83D\\uDE00\"]"))
-  println(s("[\"\\uD83D\\uD83D\"]"))
-  println(s("[\"\\uD83D\"]"))
-  println(s("[\"\\uDC00\"]"))
-  println(s("[\"\\uD83Dxy\"]"))
-
+  println(s('["\\uD83D\\uDE00"]'))
+  println(s('["\\uD83D\\uD83D"]'))
+  println(s('["\\uD83D"]'))
+  println(s('["\\uDC00"]'))
+  println(s('["\\uD83Dxy"]'))
   // Simple escapes: 2 raw bytes, at most 1 decoded.
-  println(s("[\"a\\nb\\tc\\rd\\be\\ff\"]"))
-  println(s("[\"q\\\"q\",\"s\\\\s\",\"sl\\/sl\"]"))
-
+  println(s('["a\\nb\\tc\\rd\\be\\ff"]'))
+  println(s('["q\\"q","s\\\\s","sl\\/sl"]'))
   // An unknown escape consumes 2 and writes nothing.
-  println(s("[\"x\\qy\"]"))
-
+  println(s('["x\\qy"]'))
   // Truncation: the fill yields what it read; the span must stop with it.
-  println(s("[\"abc"))
-  println(s("[\"abc\\"))
-  println(s("[\"abc\\u"))
-
+  println(s('["abc'))
+  println(s('["abc\\'))
+  println(s('["abc\\u'))
   // Empty and adjacent strings — a zero-length allocation is legal.
-  println(s("[\"\",\"\",\"a\"]"))
-  println(s("{\"\":\"\"}"))
-
+  println(s('["","","a"]'))
+  println(s('{"":""}'))
   // Multi-byte source bytes pass through untouched, 1 raw for 1 decoded.
-  println(s("[\"日本語\",\"emoji \\uD83D\\uDE00 end\"]"))
-
+  println(s('["日本語","emoji \\uD83D\\uDE00 end"]'))
   // Keys go through the same path as values.
-  println(s("{\"k\\u0041y\":\"v\",\"b\\\\d\":1}"))
-
+  println(s('{"k\\u0041y":"v","b\\\\d":1}'))
   // Many strings in one document: the case whose cost motivated the change.
-  println(s("[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\"]"))
+  println(s('["a","b","c","d","e","f","g","h"]'))
 }

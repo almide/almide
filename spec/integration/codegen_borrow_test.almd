@@ -1,6 +1,5 @@
 // Borrow/clone regression tests
 // Covers: param clone, for-in clone, Box deref, default args
-
 test "variable used 3 times" {
   let s = "hello"
   let a = string.len(s)
@@ -24,7 +23,9 @@ test "list used in multiple ops" {
 test "variable in for then used after" {
   let xs = [1, 2, 3]
   var total = 0
-  for x in xs { total = total + x }
+  for x in xs {
+    total = total + x
+  }
   assert_eq(list.len(xs), 3)
   assert_eq(total, 6)
 }
@@ -59,8 +60,8 @@ effect fn validated(s: String) -> Result[String, String] = {
 
 test "guard then ok in effect fn" {
   match validated("hi") {
-    ok(v) => assert_eq(v, "HI")
-    err(_) => assert(false)
+    ok(v) => assert_eq(v, "HI"),
+    err(_) => assert(false),
   }
 }
 
@@ -71,12 +72,12 @@ fn safe_div(a: Int, b: Int) -> Result[Int, String] = {
 
 test "guard err in pure Result fn" {
   match safe_div(10, 3) {
-    ok(v) => assert_eq(v, 3)
-    err(_) => assert(false)
+    ok(v) => assert_eq(v, 3),
+    err(_) => assert(false),
   }
   match safe_div(10, 0) {
-    ok(_) => assert(false)
-    err(e) => assert_eq(e, "div/0")
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "div/0"),
   }
 }
 
@@ -88,14 +89,16 @@ test "default args" {
 }
 
 test "power operator int" {
-  assert_eq(2 ** 10, 1024)
-  assert_eq(3 ** 0, 1)
+  assert_eq(2 ^ 10, 1024)
+  assert_eq(3 ^ 0, 1)
 }
 
 type IntList = | Cons(Int, IntList) | Nil
 
-fn sum_intlist(xs: IntList) -> Int =
-  match xs { Cons(h, t) => h + sum_intlist(t), Nil => 0 }
+fn sum_intlist(xs: IntList) -> Int = match xs {
+  Cons(h, t) => h + sum_intlist(t),
+  Nil => 0,
+}
 
 test "recursive tuple variant Box deref" {
   assert_eq(sum_intlist(Cons(1, Cons(2, Cons(3, Nil)))), 6)
@@ -103,11 +106,10 @@ test "recursive tuple variant Box deref" {
 
 type Tree = | Leaf(Int) | Node { left: Tree, right: Tree, value: Int }
 
-fn tree_sum(t: Tree) -> Int =
-  match t {
-    Leaf(n) => n
-    Node { left, right, value } => tree_sum(left) + tree_sum(right) + value
-  }
+fn tree_sum(t: Tree) -> Int = match t {
+  Leaf(n) => n,
+  Node { left, right, value } => tree_sum(left) + tree_sum(right) + value,
+}
 
 test "recursive record variant Box deref" {
   let t = Node { left: Leaf(1), right: Node { left: Leaf(2), right: Leaf(3), value: 10 }, value: 5 }
@@ -116,8 +118,8 @@ test "recursive record variant Box deref" {
 
 effect fn dispatch(cmd: String) -> Unit = {
   match cmd {
-    "a" => println("a")
-    _ => println("other")
+    "a" => println("a"),
+    _ => println("other"),
   }
 }
 

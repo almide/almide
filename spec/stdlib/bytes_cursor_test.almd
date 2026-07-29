@@ -1,6 +1,5 @@
 // bytes cursor family — immutable position-threaded reads.
 // Each read returns (next_pos, Option[T]); EOF returns (pos, none).
-
 test "skip clamps to len" {
   let b = bytes.new(8)
   assert_eq(bytes.skip(b, 0, 4), 4)
@@ -91,7 +90,6 @@ test "take_at returns none when not enough bytes" {
 }
 
 // ── New _at scalars (u16_be, i16_le, i16_be) — completes le/be symmetry ──
-
 test "read_u16_be_at advances and is big-endian" {
   var b = bytes.new(0)
   bytes.append_u16_be(b, 0x1234)
@@ -124,7 +122,6 @@ test "read_i16_be_at sign-extends negatives" {
 }
 
 // ── read_bool_at / read_f16_le_at / read_string_be_at ──
-
 test "read_bool_at advances and returns Some" {
   var b = bytes.new(0)
   bytes.append_u8(b, 1)
@@ -196,4 +193,3 @@ test "read_string_be_at none when body runs off" {
   assert_eq(p, 0)
   assert(option.is_none(v), "expected none at short body")
 }
-

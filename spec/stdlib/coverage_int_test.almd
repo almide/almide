@@ -1,5 +1,4 @@
 // Coverage tests for int stdlib functions
-
 test "int.wrap_add" {
   assert(int.wrap_add(255, 1, 8) == 0)
   assert(int.wrap_add(100, 200, 16) == 300)

@@ -9,6 +9,7 @@
 import env
 
 type Inner = { tag: String }
+
 type Outer = { inner: Inner, label: String }
 
 fn build(i: Int) -> Int = {

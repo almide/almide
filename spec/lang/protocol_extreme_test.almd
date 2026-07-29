@@ -1,4 +1,3 @@
-
 // protocol_extreme_test — Pushing protocol system to its limits
 // ── Protocol method in nested match ──
 protocol Classifiable {
@@ -17,10 +16,10 @@ fn HttpStatus.classify(s: HttpStatus) -> String = match s.code {
 }
 
 test "protocol with complex match guards" {
-  assert_eq(HttpStatus.classify(HttpStatus { code: 200 }), "ok");
-  assert_eq(HttpStatus.classify(HttpStatus { code: 301 }), "redirect");
-  assert_eq(HttpStatus.classify(HttpStatus { code: 404 }), "not found");
-  assert_eq(HttpStatus.classify(HttpStatus { code: 503 }), "server error");
+  assert_eq(HttpStatus.classify(HttpStatus { code: 200 }), "ok")
+  assert_eq(HttpStatus.classify(HttpStatus { code: 301 }), "redirect")
+  assert_eq(HttpStatus.classify(HttpStatus { code: 404 }), "not found")
+  assert_eq(HttpStatus.classify(HttpStatus { code: 503 }), "server error")
   assert_eq(HttpStatus.classify(HttpStatus { code: 100 }), "unknown")
 }
 
@@ -38,16 +37,16 @@ type Token: Encodable, Decodable = { kind: String, value: String }
 fn Token.encode_val(t: Token) -> String = t.kind + ":" + t.value
 
 fn Token.decode_val(raw: String) -> Token = {
-  let parts = string.split(raw, ":");
+  let parts = string.split(raw, ":")
   Token { kind: list.get_or(parts, 0, ""), value: list.get_or(parts, 1, "") }
 }
 
 test "encode then decode roundtrip" {
-  let t = Token { kind: "ident", value: "foo" };
-  let encoded = Token.encode_val(t);
-  assert_eq(encoded, "ident:foo");
-  let decoded = Token.decode_val(encoded);
-  assert_eq(decoded.kind, "ident");
+  let t = Token { kind: "ident", value: "foo" }
+  let encoded = Token.encode_val(t)
+  assert_eq(encoded, "ident:foo")
+  let decoded = Token.decode_val(encoded)
+  assert_eq(decoded.kind, "ident")
   assert_eq(decoded.value, "foo")
 }
 
@@ -64,8 +63,8 @@ fn Error.short(e: Error) -> String = "E" + int.to_string(e.code)
 fn Error.long(e: Error) -> String = "Error ${int.to_string(e.code)}: ${e.msg}"
 
 test "protocol methods in interpolation" {
-  let e = Error { code: 404, msg: "not found" };
-  let report = "Short: ${e.short()}, Long: ${e.long()}";
+  let e = Error { code: 404, msg: "not found" }
+  let report = "Short: ${e.short()}, Long: ${e.long()}"
   assert_eq(report, "Short: E404, Long: Error 404: not found")
 }
 
@@ -81,7 +80,7 @@ type Company: Summarizable = { name: String, hq: Address, employees: Int }
 fn Company.summarize(c: Company) -> String = c.name + " (" + c.hq.city + ", " + c.hq.country + ") - " + int.to_string(c.employees) + " employees"
 
 test "protocol on type with nested record field" {
-  let co = Company { name: "Acme", hq: Address { city: "Tokyo", country: "Japan" }, employees: 500 };
+  let co = Company { name: "Acme", hq: Address { city: "Tokyo", country: "Japan" }, employees: 500 }
   assert_eq(co.summarize(), "Acme (Tokyo, Japan) - 500 employees")
 }
 
@@ -100,8 +99,8 @@ fn Color.try_parse(raw: String) -> Option[Color] = match raw {
 }
 
 test "protocol method returning Option[Self]" {
-  assert_eq(Color.try_parse("red"), some(Red));
-  assert_eq(Color.try_parse("green"), some(Green));
+  assert_eq(Color.try_parse("red"), some(Red))
+  assert_eq(Color.try_parse("green"), some(Green))
   assert_eq(Color.try_parse("xyz"), none)
 }
 
@@ -122,9 +121,9 @@ test "merge multiple values via fold" {
     Counter { total: 10, count: 2 },
     Counter { total: 20, count: 3 },
     Counter { total: 5, count: 1 }
-  ];
-  let merged = list.fold(counters, Counter.empty(), (acc, c) => Counter.merge(acc, c));
-  assert_eq(merged.total, 35);
+  ]
+  let merged = list.fold(counters, Counter.empty(), (acc, c) => Counter.merge(acc, c))
+  assert_eq(merged.total, 35)
   assert_eq(merged.count, 6)
 }
 
@@ -139,11 +138,11 @@ fn Form.validate(f: Form) -> Result[Form, String] = if string.is_empty(f.name) t
 else if not string.contains(f.email, "@") then err("invalid email") else ok(f)
 
 test "validation protocol with early return" {
-  let good = Form { name: "Alice", email: "a@b.com" };
-  let no_name = Form { name: "", email: "a@b.com" };
-  let bad_email = Form { name: "Bob", email: "nope" };
-  assert_eq(result.is_ok(Form.validate(good)), true);
-  assert_eq(Form.validate(no_name), err("name required"));
+  let good = Form { name: "Alice", email: "a@b.com" }
+  let no_name = Form { name: "", email: "a@b.com" }
+  let bad_email = Form { name: "Bob", email: "nope" }
+  assert_eq(result.is_ok(Form.validate(good)), true)
+  assert_eq(Form.validate(no_name), err("name required"))
   assert_eq(Form.validate(bad_email), err("invalid email"))
 }
 
@@ -157,8 +156,8 @@ type Config: HasDefault = { debug: Bool, port: Int }
 fn Config.default_value() -> Config = Config { debug: false, port: 8080 }
 
 test "protocol with zero-arg factory method" {
-  let c = Config.default_value();
-  assert_eq(c.debug, false);
+  let c = Config.default_value()
+  assert_eq(c.debug, false)
   assert_eq(c.port, 8080)
 }
 
@@ -175,8 +174,8 @@ fn Sentence.tokenize(s: Sentence) -> List[String] = string.split(s.text, " ")
 fn Sentence.token_count(s: Sentence) -> Int = list.len(Sentence.tokenize(s))
 
 test "protocol method calling another protocol method via stdlib" {
-  let s = Sentence { text: "the quick brown fox" };
-  assert_eq(s.tokenize(), ["the", "quick", "brown", "fox"]);
+  let s = Sentence { text: "the quick brown fox" }
+  assert_eq(s.tokenize(), ["the", "quick", "brown", "fox"])
   assert_eq(s.token_count(), 4)
 }
 
@@ -185,8 +184,8 @@ test "protocol in list.map chain" {
     Sentence { text: "hello world" },
     Sentence { text: "one two three four" },
     Sentence { text: "hi" }
-  ];
-  let counts = list.map(sentences, (s) => Sentence.token_count(s));
+  ]
+  let counts = list.map(sentences, (s) => Sentence.token_count(s))
   assert_eq(counts, [2, 4, 1])
 }
 
@@ -200,10 +199,10 @@ type LogEntry: Decomposable = { level: String, message: String, timestamp: Int }
 fn LogEntry.parts(e: LogEntry) -> (String, String, Int) = (e.level, e.message, e.timestamp)
 
 test "protocol method with tuple destructuring" {
-  let entry = LogEntry { level: "error", message: "disk full", timestamp: 1000 };
-  let (lvl, msg, ts) = entry.parts();
-  assert_eq(lvl, "error");
-  assert_eq(msg, "disk full");
+  let entry = LogEntry { level: "error", message: "disk full", timestamp: 1000 }
+  let (lvl, msg, ts) = entry.parts()
+  assert_eq(lvl, "error")
+  assert_eq(msg, "disk full")
   assert_eq(ts, 1000)
 }
 
@@ -226,11 +225,11 @@ fn alert_action(a: Alert) -> String = if should_page(a) then "PAGE ONCALL"
 else if Alert.priority(a) == 2 then "send email" else "log only"
 
 test "protocol method in conditional logic" {
-  let crit = Alert { severity: "critical" };
-  let warn = Alert { severity: "warning" };
-  let info = Alert { severity: "info" };
-  assert_eq(alert_action(crit), "PAGE ONCALL");
-  assert_eq(alert_action(warn), "send email");
+  let crit = Alert { severity: "critical" }
+  let warn = Alert { severity: "warning" }
+  let info = Alert { severity: "info" }
+  assert_eq(alert_action(crit), "PAGE ONCALL")
+  assert_eq(alert_action(warn), "send email")
   assert_eq(alert_action(info), "log only")
 }
 
@@ -247,12 +246,12 @@ fn Shape.render(s: Shape) -> String = match s {
 }
 
 test "protocol on variant with different payloads" {
-  assert_eq(Shape.render(Circle(5)), "circle(r=5)");
+  assert_eq(Shape.render(Circle(5)), "circle(r=5)")
   assert_eq(Shape.render(Rect(10, 20)), "rect(10x20)")
 }
 
 test "protocol on variants in list.map" {
-  let shapes = [Circle(1), Rect(2, 3), Circle(4)];
-  let rendered = list.map(shapes, (s) => Shape.render(s));
+  let shapes = [Circle(1), Rect(2, 3), Circle(4)]
+  let rendered = list.map(shapes, (s) => Shape.render(s))
   assert_eq(rendered, ["circle(r=1)", "rect(2x3)", "circle(r=4)"])
 }

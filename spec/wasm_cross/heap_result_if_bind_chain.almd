@@ -19,7 +19,6 @@
 //
 // `describe` is the depth case: six chained binds, each reading the previous
 // ones, all four cond arrangements enumerated.
-
 fn clobber(c: Bool, seed: String) -> String = {
   let b = seed + "B"
   let j = if c then "A" else b

@@ -1,5 +1,4 @@
 // Coverage tests for math.log_gamma
-
 import math
 
 test "math.log_gamma of 1" {

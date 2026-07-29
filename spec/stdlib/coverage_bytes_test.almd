@@ -1,5 +1,4 @@
 // Coverage tests for bytes functions
-
 test "bytes.from_string" {
   let b = bytes.from_string("Hi")
   assert_eq(bytes.len(b), 2)

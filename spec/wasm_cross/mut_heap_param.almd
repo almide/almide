@@ -13,10 +13,35 @@
 // would be an invalid module.
 type Box = { items: List[Int] }
 
-fn push9(mut v: List[Int], x: Int) -> Int = { list.push(v, x); list.len(v) - 1 }
-fn addall(mut v: List[Int], n: Int) -> Unit = { var k = 0; while k < n { list.push(v, k); k = k + 1 } }
-fn addc(mut s: String, n: Int) -> Int = { var k = 0; while k < n { string.push(s, "x"); k = k + 1 } string.len(s) }
-fn addb(mut b: Bytes, n: Int) -> Unit = { var k = 0; while k < n { bytes.push(b, 65); k = k + 1 } }
+fn push9(mut v: List[Int], x: Int) -> Int = {
+  list.push(v, x)
+  list.len(v) - 1
+}
+
+fn addall(mut v: List[Int], n: Int) -> Unit = {
+  var k = 0
+  while k < n {
+    list.push(v, k)
+    k = k + 1
+  }
+}
+
+fn addc(mut s: String, n: Int) -> Int = {
+  var k = 0
+  while k < n {
+    string.push(s, "x")
+    k = k + 1
+  }
+  string.len(s)
+}
+
+fn addb(mut b: Bytes, n: Int) -> Unit = {
+  var k = 0
+  while k < n {
+    bytes.push(b, 65)
+    k = k + 1
+  }
+}
 
 fn main() -> Unit = {
   // Bind-RHS + realloc from a 1-element list (the issue's headline).
@@ -37,12 +62,13 @@ fn main() -> Unit = {
   r = push9(b, 5)
   var c: List[Int] = []
   var w = 0
-  while w < 3 { let _z = push9(c, w); w = w + 1 }
+  while w < 3 {
+    let _z = push9(c, w)
+    w = w + 1
+  }
   var d: List[Int] = []
   addall(d, 4)
-  println("a=" + int.to_string(list.len(a)) + " r=" + int.to_string(r)
-    + " b=" + int.to_string(list.len(b)) + " c=" + int.to_string(list.len(c))
-    + " d=" + int.to_string(list.len(d)))
+  println("a=" + int.to_string(list.len(a)) + " r=" + int.to_string(r) + " b=" + int.to_string(list.len(b)) + " c=" + int.to_string(list.len(c)) + " d=" + int.to_string(list.len(d)))
   // Record-field argument: the buffer FieldAssigns back into the record.
   var bx = Box { items: [1] }
   let _m = push9(bx.items, 7)

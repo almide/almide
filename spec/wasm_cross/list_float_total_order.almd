@@ -16,10 +16,10 @@
 // ASYMMETRY (deliberate): this list-extremum/ordering totalOrder is DISTINCT
 // from the SCALAR float.min/float.max/math.fmin/math.fmax, which keep their
 // C-049 NaN-IGNORING semantics.
-
 type R = { name: String, v: Float }
 
 fn fmtf(xs: List[Float]) -> String = list.join(list.map(xs, (x) => float.to_string(x)), ",")
+
 fn fmtr(xs: List[R]) -> String = list.join(list.map(xs, (r) => r.name), ",")
 
 fn main() -> Unit = {
@@ -27,16 +27,13 @@ fn main() -> Unit = {
   println("sort: " + fmtf(list.sort(xs)))
   println("min:  " + float.to_string(list.min(xs) ?? 99.0))
   println("max:  " + float.to_string(list.max(xs) ?? 99.0))
-
   // -0.0 < +0.0 under totalOrder.
   println("sort zeros: " + fmtf(list.sort([0.0, -0.0])))
-
   // Negatives sort by magnitude with sign.
   let ns = [-1.5, -3.0, -0.5, 2.0]
   println("sort neg: " + fmtf(list.sort(ns)))
   println("min neg:  " + float.to_string(list.min(ns) ?? 99.0))
   println("max neg:  " + float.to_string(list.max(ns) ?? 99.0))
-
   // +inf / -inf land at the totalOrder extremes (just inside ±NaN). These have
   // a DETERMINISTIC sign on all three judges, unlike a divided NaN whose sign is
   // implementation-defined (rustc const-folds `0.0/0.0` to +NaN, an x86 runtime
@@ -49,8 +46,12 @@ fn main() -> Unit = {
   println("sort inf: " + fmtf(list.sort(ws)))
   println("max inf:  " + float.to_string(list.max(ws) ?? 99.0))
   println("min inf:  " + float.to_string(list.min(ws) ?? 99.0))
-
   // sort_by a Float key (the path that emitted an invalid module).
-  let rs = [R{name: "a", v: 3.5}, R{name: "b", v: 1.2}, R{name: "c", v: 2.8}, R{name: "d", v: -1.0}]
+  let rs = [
+    R { name: "a", v: 3.5 },
+    R { name: "b", v: 1.2 },
+    R { name: "c", v: 2.8 },
+    R { name: "d", v: -1.0 }
+  ]
   println("sort_by: " + fmtr(list.sort_by(rs, (r) => r.v)))
 }

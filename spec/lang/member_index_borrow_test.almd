@@ -2,11 +2,14 @@
 // (`node.children[item.idx]` — the ceangal layout class): the element borrow must
 // chain through the field borrow, and per-element record reads must see the
 // element's slots inside a real for-in loop.
-
 type Color = { r: Float, a: Float }
+
 type Item = { idx: Int, basis: Float }
+
 type Child = { grow: Float, shrink: Float }
+
 type Node = { children: List[Child], gap: Float }
+
 type Line = { items: List[Item], used: Float }
 
 fn pass1(node: Node, line: Line) -> Float = {
@@ -21,13 +24,21 @@ fn pass1(node: Node, line: Line) -> Float = {
 }
 
 test "member-container index borrow in for-in" {
-  let n = { children: [{ grow: 1.0, shrink: 0.5 }, { grow: 2.0, shrink: 1.0 }], gap: 4.0 }
-  let ln = { items: [{ idx: 0, basis: 2.0 }, { idx: 1, basis: 3.0 }], used: 0.0 }
+  let n = { children: [
+    { grow: 1.0, shrink: 0.5 },
+    { grow: 2.0, shrink: 1.0 }
+  ], gap: 4.0 }
+  let ln = { items: [
+    { idx: 0, basis: 2.0 },
+    { idx: 1, basis: 3.0 }
+  ], used: 0.0 }
   assert(pass1(n, ln) == 7.0)
 }
 
 test "member-container index borrow direct" {
-  let n = { children: [{ grow: 5.0, shrink: 0.0 }], gap: 0.0 }
+  let n = { children: [
+    { grow: 5.0, shrink: 0.0 }
+  ], gap: 0.0 }
   assert(n.children[0].grow == 5.0)
 }
 
@@ -41,8 +52,14 @@ fn pass2(node: Node, line: Line, n: Int) -> Float = {
 }
 
 test "chained index-member scalar reads" {
-  let nd = { children: [{ grow: 2.0, shrink: 0.0 }, { grow: 5.0, shrink: 0.0 }], gap: 0.0 }
-  let ln = { items: [{ idx: 1, basis: 3.0 }, { idx: 0, basis: 4.0 }], used: 0.0 }
+  let nd = { children: [
+    { grow: 2.0, shrink: 0.0 },
+    { grow: 5.0, shrink: 0.0 }
+  ], gap: 0.0 }
+  let ln = { items: [
+    { idx: 1, basis: 3.0 },
+    { idx: 0, basis: 4.0 }
+  ], used: 0.0 }
   assert(pass2(nd, ln, 2) == 23.0)
 }
 
@@ -55,18 +72,27 @@ fn sum_items(line: Line, n: Int) -> Float = {
 }
 
 test "scalar index through a member-field list" {
-  let ln = { items: [{ idx: 0, basis: 1.5 }, { idx: 1, basis: 2.5 }], used: 0.0 }
+  let ln = { items: [
+    { idx: 0, basis: 1.5 },
+    { idx: 1, basis: 2.5 }
+  ], used: 0.0 }
   assert(sum_items(ln, 2) == 4.0)
 }
 
 fn rebind_read(n: Int) -> Float = {
   var a: List[Float] = []
-  for i in 0..<n { a = a + [int.to_float(i) + 1.0] }
+  for i in 0..<n {
+    a = a + [int.to_float(i) + 1.0]
+  }
   var b: List[Float] = []
-  for i in 0..<n { b = b + [a[i] * 3.0] }
+  for i in 0..<n {
+    b = b + [a[i] * 3.0]
+  }
   a = b
   var t = 0.0
-  for i in 0..<n { t = t + a[i] }
+  for i in 0..<n {
+    t = t + a[i]
+  }
   t
 }
 

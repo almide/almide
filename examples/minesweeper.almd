@@ -1,5 +1,4 @@
 // minesweeper — Terminal Minesweeper (9x9, 10 mines)
-
 import random
 import io
 
@@ -59,9 +58,7 @@ fn flood_fill(adjacent: List[Int], revealed: List[Bool], start_idx: Int) -> List
   while list.len(stack) > 0 {
     let idx = stack[list.len(stack) - 1]
     stack = list.take(stack, list.len(stack) - 1)
-    if rev[idx] then {
-      ()
-    } else {
+    if rev[idx] then { () } else {
       rev[idx] = true
       if adjacent[idx] == 0 then {
         let r = idx / 9
@@ -116,10 +113,9 @@ fn render_board(adjacent: List[Int], revealed: List[Bool], flagged: List[Bool], 
     for c in 0..<9 {
       let idx = r * 9 + c
       let cell = if show_mines and adjacent[idx] == -1 then "● "
-        else if flagged[idx] then "⚑ "
-        else if not revealed[idx] then "■ "
-        else if adjacent[idx] == 0 then "  "
-        else int.to_string(adjacent[idx]) + " "
+      else if flagged[idx] then "⚑ "
+      else if not revealed[idx] then "■ "
+      else if adjacent[idx] == 0 then "  " else int.to_string(adjacent[idx]) + " "
       row = row + cell
     }
     out = out + row + "|\n"
@@ -129,7 +125,7 @@ fn render_board(adjacent: List[Int], revealed: List[Bool], flagged: List[Bool], 
 }
 
 // Parse input: "r,c" or "f r,c"
-fn parse_input(input: String) -> Result[{flag: Bool, row: Int, col: Int}, String] = {
+fn parse_input(input: String) -> Result[{ flag: Bool, row: Int, col: Int }, String] = {
   let trimmed = string.trim(input)
   let is_flag = string.starts_with(trimmed, "f ")
   let coords_str = if is_flag then string.slice(trimmed, 2) else trimmed
@@ -140,7 +136,7 @@ fn parse_input(input: String) -> Result[{flag: Bool, row: Int, col: Int}, String
   match (int.parse(r_str), int.parse(c_str)) {
     (ok(r), ok(c)) => {
       guard r >= 0 and r < 9 and c >= 0 and c < 9 else err("Out of bounds (0-8)")
-      ok({flag: is_flag, row: r, col: c})
+      ok({ flag: is_flag, row: r, col: c })
     },
     _ => err("Invalid coordinates. Use numbers: r,c"),
   }
@@ -169,7 +165,6 @@ effect fn main() -> Unit = {
   println("9x9 grid, 10 mines")
   println("Commands: r,c to reveal | f r,c to flag/unflag")
   println("")
-
   var adj = make_zeros()
   var rev = make_bools()
   var flg = make_bools()
@@ -177,39 +172,28 @@ effect fn main() -> Unit = {
   var turn_count = 0
   var game_over = false
   var won = false
-
   while not game_over {
     println(render_board(adj, rev, flg, false))
     let flags = count_flags(flg)
     let remaining = 10 - flags
     println("Mines: ${int.to_string(remaining)} remaining | Turn: ${int.to_string(turn_count)}")
     io.print("> ")
-
     let input = io.read_line()
     match parse_input(input) {
-      err(msg) => {
-        println(msg)
-      },
+      err(msg) => { println(msg) },
       ok(cmd) => {
         let idx = cmd.row * 9 + cmd.col
         if cmd.flag then {
-          if rev[idx] then {
-            println("Cannot flag a revealed cell.")
-          } else {
+          if rev[idx] then { println("Cannot flag a revealed cell.") } else {
             flg[idx] = not flg[idx]
           }
         } else {
-          if rev[idx] then {
-            println("Already revealed.")
-          } else if flg[idx] then {
-            println("Unflag first (f r,c) before revealing.")
-          } else {
+          if rev[idx] then { println("Already revealed.") } else if flg[idx] then { println("Unflag first (f r,c) before revealing.") } else {
             if is_first then {
               let mines = place_mines(cmd.row, cmd.col)
               adj = build_adjacent(mines)
               is_first = false
             } else ()
-
             if adj[idx] == -1 then {
               rev[idx] = true
               game_over = true
@@ -227,7 +211,6 @@ effect fn main() -> Unit = {
       },
     }
   }
-
   println("")
   if won then {
     println(render_board(adj, rev, flg, false))

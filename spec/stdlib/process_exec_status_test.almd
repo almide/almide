@@ -13,7 +13,8 @@ test "process.exec_status on failing command returns non-zero code" {
   if not is_win then {
     let s = process.exec_status("false", [])!
     assert(s.code != 0)
-  } else {}
+  } else {
+  }
 }
 
 test "process.exec_status on nonexistent command returns err" {

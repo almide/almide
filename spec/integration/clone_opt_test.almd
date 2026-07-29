@@ -1,9 +1,7 @@
 // Clone optimization tests: verify IndexAccess borrow, use_count skip, push opt.
+type Tree = | Leaf | Node(Tree, Tree)
 
-type Tree = Leaf | Node(Tree, Tree)
-
-fn make(d: Int) -> Tree =
-  if d == 0 then Leaf else Node(make(d - 1), make(d - 1))
+fn make(d: Int) -> Tree = if d == 0 then Leaf else Node(make(d - 1), make(d - 1))
 
 fn check(t: Tree) -> Int = match t {
   Leaf => 1,
@@ -21,7 +19,9 @@ test "tree check no clone" {
 test "list index int (no clone needed)" {
   let xs = [10, 20, 30, 40, 50]
   var sum = 0
-  for i in 0..<5 { sum = sum + xs[i] }
+  for i in 0..<5 {
+    sum = sum + xs[i]
+  }
   assert_eq(sum, 150)
 }
 
@@ -53,7 +53,10 @@ test "list read after index assign" {
 
 // Nested for: both lists survive
 test "nested for with list access" {
-  let rows = [[1, 2], [3, 4]]
+  let rows = [
+    [1, 2],
+    [3, 4]
+  ]
   var total = 0
   for row in rows {
     for val in row {

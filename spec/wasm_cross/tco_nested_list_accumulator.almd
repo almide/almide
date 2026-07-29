@@ -10,11 +10,13 @@ local fn build(n: Int, pos: Int, acc: List[Int]) -> List[Int] = {
     let r = n - pos
     let new_acc = if r >= 2 then {
       let b1 = pos + 1
-      if r >= 3 then acc + [pos, b1, pos + 2] else acc + [pos, b1]
+      if r >= 3 then acc + [pos, b1, pos + 2]
+      else acc + [pos, b1]
     } else acc + [pos]
     build(n, pos + 3, new_acc)
   }
 }
+
 fn main() -> Unit = {
   println(int.to_string(list.len(build(7, 0, []))))
   println(int.to_string(list.len(build(4, 0, []))))

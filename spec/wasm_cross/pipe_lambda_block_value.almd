@@ -9,14 +9,24 @@
 fn main() -> Unit = {
   // single pipe-lambda (bind position)
   let a = 5 |> (n) => n * n
-  println(int.to_string(a))                              // 25
+  println(int.to_string(a))
+  // 25
   // chained pipe-lambdas (left-assoc: ((5)²)+1)
   let b = 5 |> (n) => n * n |> (n) => n + 1
-  println(int.to_string(b))                              // 26
+  println(int.to_string(b))
+  // 26
   // explicit block-valued scalar bind
-  let c = { let n = 7; n * n - 1 }
-  println(int.to_string(c))                              // 48
+  let c = {
+    let n = 7
+    n * n - 1
+  }
+  println(int.to_string(c))
+  // 48
   // pipe-lambda whose body is itself a block
-  let d = 3 |> (k) => { let e = k + k; e * e }
-  println(int.to_string(d))                              // 36
+  let d = 3 |> (k) => {
+    let e = k + k
+    e * e
+  }
+  // 36
+  println(int.to_string(d))
 }

@@ -16,22 +16,30 @@
 // a known native<->wasm divergence (WASM lacks copy-on-write at IndexAssign — see
 // the cow_check registry note). Everything here builds fresh values and reads them
 // back, so a leak / double-free / realloc bug would surface as a wrong result.
-
 // alloc + realloc growth: push N elements, sum must be exact.
 fn test_growth_sum() -> String = {
   var xs: List[Int] = []
-  for i in 0..<1000 { list.push(xs, i) }
+  for i in 0..<1000 {
+    list.push(xs, i)
+  }
   var total = 0
-  for x in xs { total = total + x }
-  int.to_string(total) + " " + int.to_string(list.len(xs))   // 499500 1000
+  for x in xs {
+    total = total + x
+  }
+  // 499500 1000
+  int.to_string(total) + " " + int.to_string(list.len(xs))
 }
 
 // string_alloc growth: builder loop with interleaved reads.
 fn test_string_builder() -> String = {
   var s = ""
-  for _ in 0..<200 { s = s + "x" }
+  for _ in 0..<200 {
+    s = s + "x"
+  }
   var dots = ""
-  for i in 0..<50 { dots = dots + "." + int.to_string(i % 10) }
+  for i in 0..<50 {
+    dots = dots + "." + int.to_string(i % 10)
+  }
   int.to_string(string.len(s)) + " " + int.to_string(string.len(dots)) + " " + string.slice(dots, 0, 6)
 }
 
@@ -40,16 +48,20 @@ fn test_string_builder() -> String = {
 fn build_nested(seed: Int) -> List[List[Int]] = {
   var outer: List[List[Int]] = []
   for i in 0..<20 {
-    outer = outer + [[seed + i, seed + i * 2, seed + i * 3]]
+    outer = outer + [
+      [seed + i, seed + i * 2, seed + i * 3]
+    ]
   }
   outer
 }
+
 fn test_rc_churn() -> String = {
   var checksum = 0
   for round in 0..<50 {
     let nested = build_nested(round * 100)
     let mid = nested[10]
-    checksum = checksum + mid[2]      // (round*100 + 30) summed over 50 rounds
+    checksum = checksum + mid[2]
+    // (round*100 + 30) summed over 50 rounds
   }
   int.to_string(checksum)
 }
@@ -65,7 +77,8 @@ fn test_map_churn() -> String = {
     let v = map.get(m, "k20") ?? -1
     hits = hits + v
   }
-  int.to_string(hits)                  // sum over rounds of 20*round
+  // sum over rounds of 20*round
+  int.to_string(hits)
 }
 
 // Set insert/contains churn. set.insert returns a new set.
@@ -73,22 +86,27 @@ fn test_set_churn() -> String = {
   var found = 0
   for _ in 0..<30 {
     var s = set.new()
-    for i in 0..<40 { s = set.insert(s, i * 2) }
+    for i in 0..<40 {
+      s = set.insert(s, i * 2)
+    }
     found = found + (if set.contains(s, 40) then 1 else 0)
     found = found + (if set.contains(s, 41) then 1 else 0)
   }
-  int.to_string(found)                 // 30 (only the even one is present each round)
+  // 30 (only the even one is present each round)
+  int.to_string(found)
 }
 
 // Deep recursion building + summing fresh lists (alloc pressure, no aliasing).
-fn sum_to(n: Int) -> Int =
-  if n <= 0 then 0 else n + sum_to(n - 1)
+fn sum_to(n: Int) -> Int = if n <= 0 then 0 else n + sum_to(n - 1)
+
 fn test_deep_alloc() -> String = {
   var acc = 0
   for k in 0..<100 {
     let xs = list.repeat(k, k % 10 + 1)
     var s = 0
-    for x in xs { s = s + x }
+    for x in xs {
+      s = s + x
+    }
     acc = acc + s
   }
   int.to_string(acc) + " " + int.to_string(sum_to(100))

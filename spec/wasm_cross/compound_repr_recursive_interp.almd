@@ -16,13 +16,17 @@
 //   • Anonymous records (`{ x: 1, y: 2 }`) — NO type name; fields render in
 //     SORTED name order on BOTH targets (the native synthesized `AlmdRec_*`
 //     struct stores fields sorted; the WASM walk sorts to match).
+type Tree = | Leaf(Int) | Node(Tree, Tree)
 
-type Tree = Leaf(Int) | Node(Tree, Tree)
 type RNode = { val: Int, kids: List[RNode] }
+
 type A = { b: List[B] }
+
 type B = { a: List[A] }
+
 type Holder[T] = { value: T, label: String }
-type Either[L, R] = Left(L) | Right(R)
+
+type Either[L, R] = | Left(L) | Right(R)
 
 fn main() -> Unit = {
   // ── Self-recursive variant ADT ──
@@ -35,19 +39,19 @@ fn main() -> Unit = {
   println("forest=${forest}")
   let opt_tree: Option[Tree] = some(Node(Leaf(4), Leaf(5)))
   println("opt_tree=${opt_tree}")
-
   // ── Self-recursive record (List indirection makes it native-legal) ──
   let rleaf: RNode = { val: 1, kids: [] }
   println("rleaf=${rleaf}")
-  let rtree: RNode = { val: 1, kids: [{ val: 2, kids: [] }, { val: 3, kids: [] }] }
+  let rtree: RNode = { val: 1, kids: [
+    { val: 2, kids: [] },
+    { val: 3, kids: [] }
+  ] }
   println("rtree=${rtree}")
-
   // ── Mutual recursion (A references B references A) ──
   let ma: A = { b: [] }
   let mb: B = { a: [ma] }
   let top: A = { b: [mb] }
   println("mutual=${top}")
-
   // ── Generic record: the site's concrete type args resolve the `T` payload ──
   let bi: Holder[Int] = { value: 42, label: "answer" }
   println("box_int=${bi}")
@@ -55,7 +59,6 @@ fn main() -> Unit = {
   println("box_str=${bs}")
   let bl: Holder[List[Int]] = { value: [1, 2, 3], label: "nums" }
   println("box_list=${bl}")
-
   // ── Generic variant: each constructor's payload resolves to the site type ──
   let el: Either[Int, String] = Left(5)
   println("either_left=${el}")
@@ -63,7 +66,6 @@ fn main() -> Unit = {
   println("either_right=${er}")
   let es: List[Either[Int, String]] = [Left(1), Right("y")]
   println("either_list=${es}")
-
   // ── Anonymous records: no type name, fields in SORTED name order ──
   let anon = { x: 1, y: 2 }
   println("anon=${anon}")
@@ -72,6 +74,9 @@ fn main() -> Unit = {
   let anon_unsorted = { zebra: 1, apple: 2, mango: 3 }
   println("anon_sorted=${anon_unsorted}")
   // Anonymous record nested in a list.
-  let anon_list = [{ x: 1, y: 2 }, { x: 3, y: 4 }]
+  let anon_list = [
+    { x: 1, y: 2 },
+    { x: 3, y: 4 }
+  ]
   println("anon_list=${anon_list}")
 }

@@ -14,16 +14,16 @@ effect fn main() -> Unit = {
   println(json.stringify(v1))
   // roundtrip: decode the Some-valued object, re-encode — the Option values survive
   match Rec.decode(v1) {
-    ok(r) => println(json.stringify(r.encode()))
-    err(e) => println("err:" + e)
+    ok(r) => println(json.stringify(r.encode())),
+    err(e) => println("err:" + e),
   }
   // absent field (nick) and explicit null (age) both decode to None
-  let pv = json.parse("{\"name\":\"B\",\"age\":null}")
+  let pv = json.parse('{"name":"B","age":null}')
   match pv {
     ok(pj) => match Rec.decode(pj) {
-      ok(r) => println(json.stringify(r.encode()))
-      err(e) => println("err:" + e)
-    }
-    err(pe) => println("parse:" + pe)
+      ok(r) => println(json.stringify(r.encode())),
+      err(e) => println("err:" + e),
+    },
+    err(pe) => println("parse:" + pe),
   }
 }

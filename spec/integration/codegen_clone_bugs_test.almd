@@ -1,7 +1,5 @@
 // codegen_clone_bugs_test — Ownership bugs: field access + spread, option matched twice
-
 // ── Bug 1: Record field access followed by spread ──
-
 test "record field access then spread" {
   let r = { name: "Alice", age: 30 }
   let n = r.name
@@ -24,7 +22,6 @@ test "record field access multiple fields then spread" {
 }
 
 // ── Bug 2: Same Option matched twice ──
-
 test "option matched twice some" {
   let x: Option[String] = some("hello")
   let a = match x {

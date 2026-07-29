@@ -12,7 +12,6 @@ effect fn main() -> Unit = {
   println(int.to_string(list.len(list.windows(xs, 2))))
   let one = ["solo"]
   println(int.to_string(list.len(list.chunk(one, 5))))
-
   // C-054's negative-count rule on the HEAP-element variants. The Int variants
   // gained their clamps with that contract; these _str twins in the same file
   // were left on the pre-clamp form, so `windows(xs, i32::MIN)` computed

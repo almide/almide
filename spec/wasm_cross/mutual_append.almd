@@ -7,15 +7,17 @@
 // the proven `i(id)m` slot. GUARDED: the inline is applied only because `frec` walls without it and
 // lowers with it (an already-lowering function is never touched — no regression). Semantics-preserving,
 // so this byte-matches the v0 oracle running the original mutual pair.
-fn frec(s: String, pos: Int, acc: List[String]) -> List[String] =
-  if pos >= string.len(s) then acc
-  else fstep(s, pos, acc, string.get(s, pos) ?? "")
-fn fstep(s: String, pos: Int, acc: List[String], c: String) -> List[String] =
-  if c == "," then frec(s, pos + 1, acc + [","])
-  else frec(s, pos + 1, acc)
+fn frec(s: String, pos: Int, acc: List[String]) -> List[String] = if pos >= string.len(s) then acc
+else fstep(s, pos, acc, string.get(s, pos) ?? "")
+
+fn fstep(s: String, pos: Int, acc: List[String], c: String) -> List[String] = if c == "," then frec(s, pos + 1, acc + [","])
+else frec(s, pos + 1, acc)
 
 fn main() -> Unit = {
-  println(int.to_string(list.len(frec("a,b,c", 0, []))))   // 2  (two commas)
-  println(int.to_string(list.len(frec("", 0, []))))        // 0
-  println(int.to_string(list.len(frec("x,y,z,w", 0, []))))// 3
+  println(int.to_string(list.len(frec("a,b,c", 0, []))))
+  // 2  (two commas)
+  println(int.to_string(list.len(frec("", 0, []))))
+  // 0
+  // 3
+  println(int.to_string(list.len(frec("x,y,z,w", 0, []))))
 }

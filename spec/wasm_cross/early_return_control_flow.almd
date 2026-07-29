@@ -6,7 +6,6 @@
 // `let v = expr!` needed early-return-on-Err. Each case below exercises BOTH
 // paths, so a wrong-branch lowering shows up as a value difference rather than
 // only as a wall.
-
 fn clamp_pos(x: Int) -> Int = {
   guard x > 0 else 0
   x * 2
@@ -29,8 +28,10 @@ effect fn sum_two(a: String, b: String) -> Result[Int, String] = {
   ok(x + y)
 }
 
-fn show(r: Result[Int, String]) -> String =
-  match r { ok(v) => "ok=" + int.to_string(v), err(e) => "err=" + e }
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok=" + int.to_string(v),
+  err(e) => "err=" + e,
+}
 
 effect fn main() -> Unit = {
   println("guard.pass  = " + int.to_string(clamp_pos(5)))

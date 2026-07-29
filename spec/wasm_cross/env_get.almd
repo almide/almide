@@ -2,7 +2,6 @@
 // env.get cross-target: a host-present variable (HOME — set on every dev/CI
 // host) reads the SAME bytes on native and wasm (WASI environ + inherit-env);
 // an absent name is none on both (?? takes the fallback).
-
 import env
 
 effect fn main() -> Unit = {

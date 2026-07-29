@@ -5,7 +5,6 @@
 // so get() returns upcast values. What we check here is that the path
 // compiles, wires correctly to cblas_sgemm, and produces numerically
 // sensible results (small relative error vs the f64 path).
-
 fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
   let d = if a > b then a - b else b - a
   d < tol
@@ -38,7 +37,6 @@ test "scale preserves SmallF32 variant" {
 // enum. That behaviour is now surfaced as a compile error at the type
 // layer — typed matrix ops stay within their dtype. Replaced with the
 // f32-only identity below that never crosses dtypes.
-
 test "mul_f32 on scaled ones × ones" {
   // 0.5 × 1.0 matmul on all-ones → each element = 3 * 0.5 * 1.0 = 1.5
   let a: Matrix[Float32] = matrix.ones_f32(3, 3) |> (m) => matrix.scale(m, 0.5)
@@ -73,15 +71,23 @@ test "mul_f32_scaled fuses alpha through cblas_sgemm alpha" {
 }
 
 test "mul_f32_t computes A @ B^T without a transpose copy" {
-  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
-  let b = matrix.from_lists([[5.0, 6.0], [7.0, 8.0]])
+  let a = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
+  let b = matrix.from_lists([
+    [5.0, 6.0],
+    [7.0, 8.0]
+  ])
   // In f64 space first (SmallF32 mul_f32_t expects SmallF32 inputs, so only
   // sanity-check shape/value via the f64 equivalent; full f32 path exercised
   // below via ones_f32 + mul_f32_t).
   let bt = matrix.transpose(b)
   let expected = matrix.mul(a, bt)
-  assert_eq(matrix.get(expected, 0, 0), 17.0)   // 1*5 + 2*6 = 17
-  assert_eq(matrix.get(expected, 0, 1), 23.0)   // 1*7 + 2*8 = 23
+  assert_eq(matrix.get(expected, 0, 0), 17.0)
+  // 1*5 + 2*6 = 17
+  assert_eq(matrix.get(expected, 0, 1), 23.0)
+  // 1*7 + 2*8 = 23
   assert_eq(matrix.get(expected, 1, 0), 39.0)
   assert_eq(matrix.get(expected, 1, 1), 53.0)
 }

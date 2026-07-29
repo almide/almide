@@ -8,6 +8,7 @@
 type Rec = { a: Float, b: Float }
 
 var items: List[Rec] = []
+
 var count = 0
 
 fn bump(r: Rec, d: Float) -> Rec = { a: r.a + d, b: r.b }
@@ -16,7 +17,9 @@ fn init() -> Unit = {
   count = 3
   items = []
   for i in 0..<count {
-    items = items + [{ a: int.to_float(i), b: int.to_float(i) * 2.0 }]
+    items = items + [
+      { a: int.to_float(i), b: int.to_float(i) * 2.0 }
+    ]
   }
 }
 

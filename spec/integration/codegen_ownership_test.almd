@@ -1,7 +1,5 @@
 // codegen_ownership_test — Ownership and variable reuse edge cases for Rust codegen
-
 // ── Variable used after for loop ──
-
 test "list used after for loop" {
   let xs = [1, 2, 3, 4, 5]
   var sum = 0
@@ -14,7 +12,6 @@ test "list used after for loop" {
 }
 
 // ── Variable used in multiple operations ──
-
 test "list used in multiple sequential operations" {
   let xs = [5, 3, 1, 4, 2]
   let sorted = list.sort(xs)
@@ -28,7 +25,6 @@ test "list used in multiple sequential operations" {
 }
 
 // ── String used after operations ──
-
 test "string used in multiple operations" {
   let s = "hello world"
   let upper = string.to_upper(s)
@@ -43,7 +39,6 @@ test "string used in multiple operations" {
 }
 
 // ── Record used after field access ──
-
 test "record field access multiple times" {
   let r = { name: "alice", age: 30, active: true }
   assert_eq(r.name, "alice")
@@ -56,7 +51,6 @@ test "record field access multiple times" {
 }
 
 // ── Variable used in both if branches and after ──
-
 test "variable used in both branches and after" {
   let xs = [1, 2, 3]
   let result = if list.len(xs) > 2 then list.sum(xs) else 0
@@ -67,7 +61,6 @@ test "variable used in both branches and after" {
 }
 
 // ── Variable used inside match and after ──
-
 test "variable used in match arms and after" {
   let xs = [10, 20, 30]
   let msg = match list.len(xs) {
@@ -80,7 +73,6 @@ test "variable used in match arms and after" {
 }
 
 // ── Var reassigned in loop body ──
-
 test "var reassigned multiple times" {
   var state = { count: 0, total: 0 }
   for x in [10, 20, 30] {
@@ -91,7 +83,6 @@ test "var reassigned multiple times" {
 }
 
 // ── Option used multiple times ──
-
 test "option value used across operations" {
   let opt = some([1, 2, 3])
   let result = match opt {
@@ -106,7 +97,6 @@ test "option value used across operations" {
 }
 
 // ── List concat with reuse ──
-
 test "list concat preserves originals" {
   let a = [1, 2]
   let b = [3, 4]
@@ -119,7 +109,6 @@ test "list concat preserves originals" {
 }
 
 // ── Variable used in closure and after ──
-
 test "variable used in closure and then directly" {
   let data = [1, 2, 3, 4, 5]
   let evens = list.filter(data, (x) => x % 2 == 0)
@@ -130,7 +119,6 @@ test "variable used in closure and then directly" {
 }
 
 // ── Map used after multiple operations ──
-
 test "map used after multiple operations" {
   let m = map.from_list([("a", 1), ("b", 2), ("c", 3)])
   let keys = list.sort(map.keys(m))

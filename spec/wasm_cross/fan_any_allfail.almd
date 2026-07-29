@@ -6,6 +6,10 @@
 effect fn fail_n(m: String) -> Result[Int, String] = err(m)
 
 effect fn main() -> Unit = {
-  let winner = fan.any([() => fail_n("a"), () => fail_n("b"), () => fail_n("c")])
+  let winner = fan.any([
+    () => fail_n("a"),
+    () => fail_n("b"),
+    () => fail_n("c")
+  ])
   println("unreachable: " + int.to_string(winner))
 }

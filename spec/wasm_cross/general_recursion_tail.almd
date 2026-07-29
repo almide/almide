@@ -10,6 +10,10 @@ effect fn scan(t: String, p: Int, acc: List[String]) -> Result[List[String], Str
     scan(t, p + 1, acc + [c])
   }
 }
+
 effect fn main() -> Unit = {
-  match scan("abc", 0, []) { ok(v) => println(list.join(v, "-")), err(e) => println("E:" + e) }
+  match scan("abc", 0, []) {
+    ok(v) => println(list.join(v, "-")),
+    err(e) => println("E:" + e),
+  }
 }

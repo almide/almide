@@ -4,7 +4,9 @@
 // function indices) must be host-independent (regression guard for the
 // HashMap-ordered mono append that diverged on wasm32).
 fn pair_first[A, B](p: (A, B)) -> A = p.0
+
 fn wrap[T](x: T) -> List[T] = [x]
+
 fn sum_len[T](xs: List[T]) -> Int = list.len(xs)
 
 fn main() -> Unit = {

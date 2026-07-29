@@ -4,8 +4,7 @@
 // termination surfaces as "Error: <msg>" + exit 1 on BOTH targets — native via
 // the Display `fn main` wrapper, wasm via __main_runner. NOT a native panic
 // (exit 101) and NOT a wasm unreachable trap (exit 134).
-effect fn step(x: Int) -> Result[Int, String] =
-  if x == 2 then err("element " + int.to_string(x) + " failed") else ok(x * 100)
+effect fn step(x: Int) -> Result[Int, String] = if x == 2 then err("element " + int.to_string(x) + " failed") else ok(x * 100)
 
 effect fn main() -> Unit = {
   let mapped = fan.map([1, 2, 3], (x) => step(x))

@@ -6,13 +6,10 @@
 // effect fn ran O(n) stack and crashed at ~1e5 depth (native stack overflow /
 // wasm call-stack trap). Three shapes: plain accumulate, an Err early-exit base
 // case (the `?` short-circuit must still fire), and a managed-param carry.
-effect fn sum_to(n: Int, acc: Int) -> Int =
-  if n <= 0 then acc else sum_to(n - 1, acc + n)
+effect fn sum_to(n: Int, acc: Int) -> Int = if n <= 0 then acc else sum_to(n - 1, acc + n)
 
-effect fn checked(n: Int) -> Int =
-  if n < 0 then fail("negative")
-  else if n == 0 then 0
-  else checked(n - 1)
+effect fn checked(n: Int) -> Int = if n < 0 then fail("negative")
+else if n == 0 then 0 else checked(n - 1)
 
 effect fn fail(msg: String) -> Int = err(msg)!
 
@@ -23,10 +20,8 @@ effect fn fail(msg: String) -> Int = err(msg)!
 // exited on iteration 1 with the accumulator's INITIAL value (0, not 500500) —
 // masked in `checked` above because that function always returns 0 anyway
 // (fuzz seed-20260718 index 946 exposed it via a `n - 0` nontermination twin).
-effect fn carried(n: Int, acc: Int) -> Int =
-  if n < 0 then fail("negative")
-  else if n == 0 then acc
-  else carried(n - 1, acc + n)
+effect fn carried(n: Int, acc: Int) -> Int = if n < 0 then fail("negative")
+else if n == 0 then acc else carried(n - 1, acc + n)
 
 effect fn main() -> Unit = {
   let s = sum_to(1000000, 0)

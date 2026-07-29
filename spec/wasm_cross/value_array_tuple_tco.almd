@@ -6,15 +6,17 @@
 // ONLY remaining blocker is the effect-fn `!` early-return (the let-bind `let (val,next)=dash_item(..)!`),
 // NOT the tuple/value-aggregate machinery, which this fixture pins as working.
 fn line_at(lines: List[String], pos: Int) -> String = list.get(lines, pos) ?? ""
-fn cs(lines: List[String], pos: Int, items: List[Value]) -> (Value, Int) =
-  if pos >= list.len(lines) then (value.array(items), pos)
-  else cs(lines, pos + 1, items + [value.str(line_at(lines, pos))])
+
+fn cs(lines: List[String], pos: Int, items: List[Value]) -> (Value, Int) = if pos >= list.len(lines) then (value.array(items), pos)
+else cs(lines, pos + 1, items + [value.str(line_at(lines, pos))])
 
 fn main() -> Unit = {
   let (v, n) = cs(["a", "b", "c"], 0, [])
-  println(int.to_string(n))                          // 3
+  println(int.to_string(n))
+  // 3
   match value.as_array(v) {
-    ok(arr) => println(int.to_string(list.len(arr))), // 3
+    ok(arr) => println(int.to_string(list.len(arr))),
+    // 3
     err(_) => println("err"),
   }
 }
