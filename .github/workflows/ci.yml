@@ -80,6 +80,20 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
+      # This job was the ONE heavy job with no cargo cache: every PR run
+      # downloaded the registry and cold-built the whole workspace's dev-profile
+      # test targets (~15 of its ~22 minutes) before a single test ran. Same
+      # shape as fuzz-nightly's cache — registry + git + target, keyed on
+      # Cargo.lock, prefix restore so a lockfile bump still warm-starts.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: test-rust-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: test-rust-cargo-${{ env.RUST_TOOLCHAIN }}-
+
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
