@@ -543,10 +543,13 @@ jobs:
       # DELIBERATELY unarmed (#983 decision): wasmtime is not installed there,
       # so the tool-gated wasm suites skip on Windows by design — Linux
       # (test-rust) and macOS are the armed legs.
-      - name: Cargo tests (workspace)
+      # PROBE ONLY (#1008 evidence run — this branch never merges): run just
+      # the LSP suite, serial and uncaptured, so the Windows hang's server-side
+      # trace lands in this log verbatim.
+      - name: LSP suite only (probe, serial, nocapture)
         env:
-          ALMIDE_EXPECT_TOOLS: ${{ runner.os == 'Windows' && '0' || '1' }}
-        run: cargo test --workspace
+          ALMIDE_EXPECT_TOOLS: "0"
+        run: cargo test --test lsp_test -- --nocapture --test-threads=1
 
       - uses: actions/upload-artifact@v7
         with:

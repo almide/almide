@@ -20,6 +20,9 @@ struct LspClient {
     /// Parsed server messages, delivered by the reader thread — recv'ing
     /// through a channel is what makes the deadline possible.
     rx: mpsc::Receiver<Value>,
+    /// The server's captured stderr (trace lines, drop notices) — dumped
+    /// into the deadline panic so a hang names its cause (#1008).
+    server_log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     /// The `capabilities` object from the initialize response.
     capabilities: Value,
 }
@@ -67,15 +70,26 @@ impl LspClient {
     fn start() -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_almide"))
             .arg("lsp")
+            .env("ALMIDE_LSP_TRACE", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("failed to start almide lsp");
         let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || reader_loop(stdout, tx));
-        let mut client = LspClient { child, rx, capabilities: Value::Null };
+        let server_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = server_log.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                let Ok(line) = line else { return };
+                log.lock().unwrap().push(line);
+            }
+        });
+        let mut client = LspClient { child, rx, server_log, capabilities: Value::Null };
         client.initialize();
         client
     }
@@ -94,13 +108,24 @@ impl LspClient {
             Ok(msg) => msg,
             Err(mpsc::RecvTimeoutError::Timeout) => panic!(
                 "no server message within {RECV_DEADLINE:?} — the server is hung \
-                 or fetching (#1008); an unbounded read here previously turned \
-                 this into a 4h+ CI hang"
+                 (#1008); an unbounded read here previously turned this into a \
+                 4h+ CI hang.\nserver stderr (tail):\n{}",
+                self.server_log_tail()
             ),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                panic!("server pipe closed without a response (server died)")
+                panic!(
+                    "server pipe closed without a response (server died).\nserver stderr (tail):\n{}",
+                    self.server_log_tail()
+                )
             }
         }
+    }
+
+    /// The last lines of the server's captured stderr, for hang forensics.
+    fn server_log_tail(&self) -> String {
+        let log = self.server_log.lock().unwrap();
+        let start = log.len().saturating_sub(40);
+        log[start..].join("\n")
     }
 
     /// Read responses until we find one with the given id.
@@ -549,6 +574,11 @@ fn lsp_didchange_never_fetches_or_writes_lock() {
     // project, and the no-fetch path must resolve against no deps.
     c.did_change(&uri, "let x = 2\n");
     let resp = c.hover(1, &uri, 0, 4);
+    // PROBE ONLY (#1008): dump the exchange even on success so the Windows
+    // leg's log carries the full server-side trace either way.
+    eprintln!("[probe] uri sent: {uri}");
+    eprintln!("[probe] hover response: {resp}");
+    eprintln!("[probe] server stderr:\n{}", c.server_log_tail());
     assert!(resp.get("id").is_some(), "server must answer after didChange");
     assert!(
         !dir.join("almide.lock").exists(),
