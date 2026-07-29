@@ -180,8 +180,80 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) 
 // Helpers
 // ══════════════════════════════════════════════════════════════
 
+/// `file://` URI → filesystem path, in the three shapes real clients send:
+/// `file:///tmp/x` (POSIX), `file:///C:/x`, and percent-encoded
+/// `file:///c%3A/x` (VS Code on Windows encodes the drive colon). The old
+/// bare `strip_prefix` left the leading slash and the `%3A` intact, so every
+/// real-editor path on Windows failed to resolve (#1008) — the manifest was
+/// never found and per-project analysis silently degraded.
 fn uri_to_path(uri: &Uri) -> Option<String> {
-    uri.as_str().strip_prefix("file://").map(|p| p.to_string())
+    let rest = uri.as_str().strip_prefix("file://")?;
+    let decoded = percent_decode(rest);
+    // `/C:/…` — a POSIX-form absolute path naming a Windows drive → `C:/…`.
+    let b = decoded.as_bytes();
+    if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
+        return Some(decoded[1..].to_string());
+    }
+    Some(decoded)
+}
+
+/// Minimal RFC 3986 percent-decoding (multi-byte UTF-8 sequences decode
+/// byte-wise, then re-validate as a string). Invalid escapes pass through
+/// literally rather than erroring — a path lookup on the raw text then fails
+/// visibly downstream instead of the URI being dropped here.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let hex = |c: u8| (c as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod uri_to_path_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    fn conv(s: &str) -> Option<String> {
+        uri_to_path(&Uri::from_str(s).unwrap())
+    }
+
+    #[test]
+    fn posix_path() {
+        assert_eq!(conv("file:///tmp/x.almd").as_deref(), Some("/tmp/x.almd"));
+    }
+
+    #[test]
+    fn windows_drive_plain() {
+        assert_eq!(conv("file:///C:/Users/x.almd").as_deref(), Some("C:/Users/x.almd"));
+    }
+
+    #[test]
+    fn windows_drive_percent_encoded_colon() {
+        // The exact shape VS Code sends on Windows.
+        assert_eq!(conv("file:///c%3A/Users/x.almd").as_deref(), Some("c:/Users/x.almd"));
+    }
+
+    #[test]
+    fn percent_encoded_space_and_utf8() {
+        assert_eq!(conv("file:///tmp/a%20b/%E3%81%82.almd").as_deref(), Some("/tmp/a b/あ.almd"));
+    }
+
+    #[test]
+    fn non_file_scheme_is_none() {
+        assert_eq!(conv("untitled:Untitled-1"), None);
+    }
 }
 
 fn publish_diagnostics(connection: &Connection, uri: &Uri, diags: &[Diagnostic]) {

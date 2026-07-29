@@ -3,6 +3,7 @@
 //! and verifies responses.
 
 use std::io::{Read, Write, BufRead, BufReader};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -14,6 +15,17 @@ use serde_json::{json, Value};
 /// 6h job default would have killed it (#1008). A deadline turns any future
 /// hang into a red naming the wait, in about a minute.
 const RECV_DEADLINE: Duration = Duration::from_secs(60);
+
+/// A CORRECT `file://` URI for a real path on every OS: forward slashes and
+/// the third slash before a Windows drive letter. The old inline
+/// `format!("file://{}", path.display())` produced `file://C:\…` on Windows —
+/// an INVALID URI the server's params deserialization rejected, which is how
+/// the didChange test's hover went unanswered and hung the suite for 6h per
+/// run (#1008).
+fn file_uri(path: &Path) -> String {
+    let s = path.display().to_string().replace('\\', "/");
+    if s.starts_with('/') { format!("file://{s}") } else { format!("file:///{s}") }
+}
 
 struct LspClient {
     child: std::process::Child,
@@ -567,18 +579,13 @@ fn lsp_didchange_never_fetches_or_writes_lock() {
     ).unwrap();
     let file = dir.join("main.almd");
     std::fs::write(&file, "let x = 1\n").unwrap();
-    let uri = format!("file://{}", file.display());
+    let uri = file_uri(&file);
 
     let mut c = LspClient::start();
     // didChange without a prior didOpen: the cache has no entry for this
     // project, and the no-fetch path must resolve against no deps.
     c.did_change(&uri, "let x = 2\n");
     let resp = c.hover(1, &uri, 0, 4);
-    // PROBE ONLY (#1008): dump the exchange even on success so the Windows
-    // leg's log carries the full server-side trace either way.
-    eprintln!("[probe] uri sent: {uri}");
-    eprintln!("[probe] hover response: {resp}");
-    eprintln!("[probe] server stderr:\n{}", c.server_log_tail());
     assert!(resp.get("id").is_some(), "server must answer after didChange");
     assert!(
         !dir.join("almide.lock").exists(),
