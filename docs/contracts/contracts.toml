@@ -2433,3 +2433,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mutable_global_bytes_copy_from.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-195"
+spec      = "ALS-M4"
+title     = "Value-position variant match over the checked-conversion family executes"
+statement = "A `match` over any cell of the checked numeric conversion matrix (#956: `to_*_checked` / `from_*_checked` on int, float, and every sized carrier module) whose scrutinee is a RUNTIME value executes as a real tag-read on both targets — let-bound, call-argument, and return position, both arms — and produces byte-identical output, as does the `!` unwrap over the same cells. Before this brick the admission list for materialized-Option subjects was maintained point-wise and drifted when #956 completed the matrix: `int.from_uint64_checked` and every sized-module cell (`uint8.to_int8_checked`, …) walled the v1 renderer with `variant (Option/Result) match bound to a let/var outside the executable subset` the moment the scrutinee stopped folding (#958 — the walled-real ratchet caught exactly this in #956's matrix test, which had to ship with a `?? sentinel` workaround). The family is now admitted by SHAPE — numeric carrier module × `to_/from_*_checked` name — in `is_self_host_option_module_fn`, sound because every cell is self-hosted through the ordinary some()/none ctor rails and returns a materialized Option over a scalar lane. The derived matrix gate `checked_conversion_family_is_admitted` reads the cell list from the stdlib sources themselves, so a new cell cannot drift out of the admission again — the point-wise failure mode is structurally closed, not just fixed."
+since     = "0.38.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/checked_conversion_value_match.almd", class = "fixture" },
+]

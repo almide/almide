@@ -100,6 +100,38 @@ impl LowerCtx {
                 .lower_prim_call(func, args)?
                 .ok_or_else(|| LowerError::Unsupported(format!("prim.{func} yields no value here")));
         }
+        // A sized-int WIDENING conversion reaching this generic path — the IDENTITY
+        // on the canonical-i64 slot: forward the operand, NO CallFn. The caps
+        // counter skips the IR node by the same predicate, so any producer that
+        // EMITS the call breaches `mir <= ir` — which is exactly what happened when
+        // the widening sat in ARGUMENT position (`to_int8_checked(int.to_int64(v))`)
+        // or in a heap-result arm's interpolation part (`"${x.to_int64()}"`):
+        // `lower_scalar_call_form` elides the operand position, but every other
+        // producer funnels here (#958's C-195 fixture, `classify` mir 6 > ir 5).
+        if crate::lower::is_identity_int_widening(module, func, args) {
+            return self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "identity int-widening operand outside the scalar subset not in this brick"
+                        .into(),
+                )
+            });
+        }
+        // `float.from_int(x)` — the single-instruction sitofp floor, same
+        // counter-alignment reasoning as the widening above.
+        if crate::lower::is_float_from_int_prim(module, func, args) {
+            let v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "float.from_int operand outside the scalar subset not in this brick".into(),
+                )
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::F64FromInt,
+                dst: Some(dst),
+                args: vec![v],
+            });
+            return Ok(dst);
+        }
         // INLINE `value.null()` to a tag-0 Value block (Alloc + store32 tag) instead of a CallFn — a
         // trivial pure constructor (value_core: `alloc_value(1); store32(h+4, 0)`). As a CallFn it would
         // OVER-COUNT vs the IR when the TCO synthesizes it for a `(Value,Int)` result-accumulator empty

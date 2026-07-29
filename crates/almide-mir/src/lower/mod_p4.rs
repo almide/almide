@@ -256,8 +256,34 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 /// EXECUTES. The SINGLE SOURCE for both the bound-var path (binds.rs) and the direct-
 /// subject path (control.rs) — keep them in sync to avoid tracking a non-materialized
 /// call (which would misread as `None`). Add a name only when its self-host impl lands.
+/// The numeric carrier modules of the checked-conversion matrix (#956).
+fn is_numeric_module(module: &str) -> bool {
+    matches!(
+        module,
+        "int" | "float" | "int8" | "int16" | "int32" | "int64"
+            | "uint8" | "uint16" | "uint32" | "uint64" | "float32" | "float64"
+    )
+}
+
 pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     let func = base_stdlib_fn_name(func);
+    // THE CHECKED NUMERIC CONVERSION FAMILY — admitted by SHAPE, never by
+    // name. Every `to_*_checked` / `from_*_checked` on a numeric carrier
+    // module is self-hosted through the ordinary some()/none ctor rails
+    // (#956's matrix rule: lossy pair ⇒ trio, on every carrier) and returns
+    // a materialized Option[scalar], so a value-position `match` / `??` over
+    // it EXECUTES. The enumerated per-fn list this replaces drifted the
+    // moment #956 completed the matrix: `int.from_uint64_checked` and every
+    // sized-module cell (`uint8.to_int8_checked`, …) walled value-position
+    // matches (#958). `checked_conversion_family_is_admitted` derives the
+    // cell list from the stdlib sources, so a new cell cannot drift out of
+    // this predicate again.
+    if is_numeric_module(module)
+        && (func.starts_with("to_") || func.starts_with("from_"))
+        && func.ends_with("_checked")
+    {
+        return true;
+    }
     match module {
         "list" => {
             // `fold` is here for the ONE Option-returning variant (`list.fold_ols`,
@@ -293,34 +319,8 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // the generic flat one-level-exact path — the payload is a TUPLE that itself owns a
         // heap slot (the String), not a single flat handle a blind `rc_dec` would free.
         "map" => matches!(func, "get" | "find"),
-        // int.to_{int,uint}N_checked builds a materialized Option[Int] (Some(n) when n fits the
-        // N-bit range, None otherwise) — a `match` over it EXECUTES.
-        "int" => matches!(
-            func,
-            "to_int8_checked"
-                | "to_int16_checked"
-                | "to_int32_checked"
-                | "to_uint8_checked"
-                | "to_uint16_checked"
-                | "to_uint32_checked"
-                | "to_uint64_checked"
-                | "to_float32_checked"
-        ),
-        // float.to_{int,uint}N_checked builds a materialized Option[IntN] (Some(to_T(n)) when n is
-        // an exact integer in range, None otherwise) — a `match` over it EXECUTES. Same scalar shape
-        // as the int variants (IntN is i64-repr); to_int64/to_uint64/to_float32 are not yet hosted.
-        "float" => matches!(
-            func,
-            "to_int8_checked"
-                | "to_int16_checked"
-                | "to_int32_checked"
-                | "to_uint8_checked"
-                | "to_uint16_checked"
-                | "to_uint32_checked"
-                | "to_int64_checked"
-                | "to_uint64_checked"
-                | "to_float32_checked"
-        ),
+        // The int/float checked conversions are admitted by the FAMILY SHAPE
+        // rule above the match — see the checked-numeric-conversion comment.
         // json.as_int/as_float/as_bool build a materialized Option (Some(scalar) / None) by reading
         // the shared Value tag (@4) — a `match`/`??` over the result EXECUTES. as_int/as_float WIDEN
         // across Int/Float exactly like v0. json.as_string is the heap-payload case: Some(a deep copy
