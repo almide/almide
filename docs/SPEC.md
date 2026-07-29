@@ -463,7 +463,7 @@ Modifier order: `[local|mod]? effect? fn`
 - Return type is required
 - The body is a single expression (after `=`)
 - `effect fn` marks functions with side effects
-- `fan { }` for concurrent execution (only inside `effect fn`)
+- `fan { }` for scoped concurrent execution — native threads, sequential on wasm (only inside `effect fn`)
 
 ```
 fn add(x: Int, y: Int) -> Int = x + y
@@ -751,7 +751,7 @@ Rules:
 - No `var` capture from outer scope (prevents data races)
 
 Library forms:
-- `fan.map(xs, f)` -- parallel map over a collection
+- `fan.map(xs, f)` -- map over a collection via the fan surface (deterministic, sequential in list order)
 - `fan.race(thunks)` -- first to complete wins, rest cancelled
 
 ### 9.10 Pipe
@@ -984,7 +984,7 @@ When a hole is found, the compiler returns:
 
 ### 13.1 fan Block
 
-`fan { }` runs expressions concurrently. Only valid inside `effect fn`.
+`fan { }` runs expressions as one scoped unit — real threads on native, sequential in declaration order on wasm; results are identical either way. Only valid inside `effect fn`.
 
 ```
 effect fn main() -> Result[Unit, String] = {
@@ -1002,7 +1002,7 @@ Results are returned as a tuple. If any expression returns `Err`, the entire `fa
 ### 13.2 fan.map / fan.race
 
 ```
-let results = fan.map(urls, (url) => fetch(url))   // parallel map
+let results = fan.map(urls, (url) => fetch(url))   // deterministic, list order
 let first = fan.race([task_a, task_b])              // first to complete wins
 ```
 
@@ -1228,7 +1228,7 @@ Target source code
 4. StdlibLowering -- module calls to named calls with arg decoration
 5. ResultPropagation -- insert `?` for effect fn calls
 6. BuiltinLowering -- assert_eq, println, etc. to Rust macros
-7. FanLowering -- fan blocks to tokio::join!/spawn
+7. FanLowering -- fan blocks to scoped threads (`std::thread::scope`)
 
 Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics.
 
@@ -1242,7 +1242,7 @@ Templates are defined in TOML files (`codegen/templates/*.toml`), separating syn
 | `==` / `!=` | `almide_eq!` macro (deep) | Byte comparison |
 | `+` on String | `format!` / owned concat | `string_concat` runtime |
 | `+` on List | `[...a, ...b]` | `list_concat` runtime |
-| `fan { }` | `tokio::join!` | Sequential (single-threaded) |
+| `fan { }` | `std::thread::scope` | Sequential (single-threaded) |
 
 ---
 

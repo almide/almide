@@ -48,9 +48,9 @@ Almide keeps concurrency boring on purpose: explicit fork, explicit join, automa
 
 One keyword, three forms:
 
-- **`fan { a(); b() }`** — run expressions concurrently, wait for all, return results as a tuple
-- **`fan.map(xs, fn)`** — parallel map over a collection, return results as a list
-- **`fan.race(thunks)`** — run thunks concurrently, return the first to complete, cancel the rest
+- **`fan { a(); b() }`** — run expressions as one scoped unit (real threads on native, sequential on wasm), wait for all, return results as a tuple in declaration order
+- **`fan.map(xs, fn)`** — map over a collection through the fan surface — deterministic, sequential in list order on both targets (C-004)
+- **`fan.race(thunks)`** — settle on the first thunk in LIST ORDER, deterministic rather than wall-clock; fan thunks are pure, so not running the rest is unobservable (C-004)
 
 The rules are minimal:
 
