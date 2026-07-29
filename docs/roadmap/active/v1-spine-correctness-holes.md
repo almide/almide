@@ -1,7 +1,7 @@
 <!-- description: Adversarial sweep of the v1 trust spine (2026-06-27) and the correctness holes it surfaced -->
 # v1 trust-spine correctness holes (adversarial sweep 2026-06-27)
 
-Found by a systematic adversarial sweep of render_program (v1 spine) vs native, probing shape-space the v0 corpus does NOT cover. All **verified reproducing in render_program** (not legacy emit_wasm). The corpus-wall (checks certs, not wat-validity) + output-parity (124 files) structurally miss these. Root hints below are the SWEEP agents' guesses (several cite legacy paths — the real site is the v1 spine crates/almide-mir/render_wasm\*; re-derive when fixing).
+Found by a systematic adversarial sweep of render_program (v1 spine) vs native, probing shape-space the v0 corpus does NOT cover. All **verified reproducing in render_program** (not legacy emit_wasm). The corpus-wall (checks certs, not wat-validity) + output-parity (124 files) structurally miss these. Root hints below are the SWEEP agents' guesses (several cite legacy paths — the real site is the v1 spine crates/almide-mir/src/render_wasm\*; re-derive when fixing).
 
 **30 confirmed holes.** Fix = lower correctly, OR narrowly wall (never emit invalid wasm / never miscompile) WITHOUT regressing the working corpus variant.
 

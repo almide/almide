@@ -26,7 +26,7 @@ RC) — makes no equivalence claim at all.
 |---|---|
 | Cross-target gate (`tests/wasm_runtime_test.rs::wasm_cross_target_spec`) | 65+ corpus files, byte-compared, **0 @xt-allow** |
 | Documented divergence list | **N = 0** (`fan.timeout`, the last entry, was removed from the language in 0.29.0 — C-006 flipped to active) |
-| Oracle-pairing registry (`crates/almide-codegen/rt-oracle-registry.toml`, gate = `scripts/check-rt-oracle-registry.sh`) | 118 routines: **76 verified / 42 grandfathered** (was 48; drain in progress) |
+| Oracle-pairing registry — RETIRED with the v0 emitter (#782); `scripts/check-rt-oracle-registry.sh` is a tombstone | superseded by spec/wasm_cross + the interp 3-way oracle (final v0 tally: 76 verified / 42 grandfathered) |
 | By-construction tables (Σ-probe derived from Rust std at emit time + all-scalar CI locks) | case folding, whitespace, UTF-8 classification, Unicode properties (Alphabetic/Alphanumeric/Uppercase/Lowercase) |
 | Lean kernel-check in CI | 41 theorems (Perceus RC / closure env / heap) — `lake build`, not just a sorry-grep |
 | Other ratchets | fmt round-trip property (no skips), host-arch-deterministic emit, snapshot suite |
@@ -55,7 +55,7 @@ A new divergence must evade ALL of these to exist:
    targets run the same source (the "two implementations drift" tap closes), shrinking
    the proof surface to ~30 IR ops + RC + layout; prove those (per-op theorems).
    **Selfhost is parked here by decision (2026-06-05) — roadmap-only until called.**
-   See `research/selfhost/` probes.
+   See `research/spike/v1-mir/` (the former `research/selfhost/` probes were removed).
 
 ## Live drain queue (all enumerated, coordinates known)
 

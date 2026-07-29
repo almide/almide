@@ -17,8 +17,8 @@ stdlib/<module>_<part>.almd     Split files: pure-Almide implementations used
         │     bundled_source(): include_str! of module bodies.
         │     The frontend extracts FnSigs; codegen extracts @inline_rust.
         │
-        ├─▶ crates/almide-mir/src/render_wasm/registry.rs
-        │     (include_str!(<file>), [(impl_fn, "module.fn")]) registrations:
+        ├─▶ crates/almide-types/src/self_host_registry.rs
+        │     self_host_runtime(): (SRC_<STEM>, [(impl_fn, "module.fn")]) registrations:
         │     pure-Almide impls compiled to WAT alongside user code.
         │     An unlinked stdlib call is a wall (hard error) in the renderer.
         │
@@ -32,7 +32,7 @@ stdlib/<module>_<part>.almd     Split files: pure-Almide implementations used
 1. **Implement in Almide** — add the function to `stdlib/<module>.almd` (or a
    new `stdlib/<module>_<part>.almd` split file for the WASM path).
 2. **WASM/v1 coverage** — register the split file in
-   `crates/almide-mir/src/render_wasm/registry.rs`; adjust
+   `crates/almide-types/src/self_host_registry.rs` (`self_host_runtime()`); adjust
    `crates/almide-mir/src/purity.rs` if the function's purity matters to
    lowering.
 3. **Native intrinsic (only when pure Almide won't do)** — implement

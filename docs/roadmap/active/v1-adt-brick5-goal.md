@@ -48,7 +48,7 @@ corpus-wall after each.
   `bind_variant_arm` (scalar binds only), `emit_variant_arm_chain` / `emit_variant_unit_chain`.
   Wired at: tail.rs (scalar+heap), binds.rs (let-bind), calls.rs (operand/arg + ctor construct
   in arg position), control.rs:~122 (unit statement).
-- v0 reference layout: `crates/almide-codegen/src/emit_wasm/collections.rs::emit_record`,
+- v0 reference layout (deleted with #782 — read via git history): `emit_wasm/collections.rs::emit_record`,
   `equality.rs::{variant_alloc_size,find_variant_tag_by_ctor}`, `mod.rs` variant registration.
   (v1 uses its OWN uniform-i64-slot block — tag@slot0, fields@slot1.., padded to slot_count —
   NOT v0's byte-packed layout. Only the observable stdout must match v0.)

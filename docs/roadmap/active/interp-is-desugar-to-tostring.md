@@ -22,7 +22,7 @@ The desugar landed (commit f81a93a0, develop-v1) in the **v1 lowering**
 (`crates/almide-mir/src/lower/mod.rs` `desugar_string_interp`), NOT the shared frontend. This
 deliberately defers the frontend desugar (layer 1) to keep v0 risk at zero. Evidence: the step-2
 diff touches only `almide-mir` (+ a new `stdlib/bool.almd`); `git diff crates/almide-frontend` is
-EMPTY; v0's `emit_string_interp` (in `crates/almide-codegen/src/emit_wasm/calls_string.rs`) is
+EMPTY; v0's `emit_string_interp` (in `emit_wasm/calls_string.rs`, deleted with #782 — git history) was
 unchanged. What was retired is the v1-internal `interp_str_lowerable` predicate — NOT the v0 oracle.
 The dual-oracle is fully intact and IS the gate: v1's desugar output is byte-compared against v0's
 output (corpus-wall (a)=250 interps byte-match v0; + independent goldens: Int/String/Bool/edge

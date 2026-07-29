@@ -127,6 +127,5 @@ spec/lang/effect_fn_test.almd
 spec/lang/effect_assign_unwrap_test.almd
 spec/lang/effect_if_branch_unwrap_test.almd
 spec/lang/effect_result_arg_test.almd
-spec/lang/match_arm_effect_unify_test.almd
 spec/integration/codegen_effect_fn_test.almd
 ```

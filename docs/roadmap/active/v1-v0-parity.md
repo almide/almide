@@ -191,7 +191,7 @@ phase 単位で goal 設定するのが回しやすい。例：
 ```
 DBG_DESUGAR_FN=<fn名> [DBG_DESUGAR_RAW=1] almide/render_program <file>   # eprintln に desugared IR
 ```
-`crates/almide-mir/src/lower/mod_p6.rs::dump_ir` / `dump_desugared_ir`、呼び出しは
+`crates/almide-mir/src/lower/desugar.rs::dump_ir` / `dump_desugared_ir`、呼び出しは
 `lower_function_all_impl`（mod.rs）。
 
 **発見**: man6（`type Basic: Codec` + 手書き effect-fn `dec` の両方を含む単一ファイル）で

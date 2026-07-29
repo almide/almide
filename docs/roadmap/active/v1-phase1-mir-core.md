@@ -20,7 +20,7 @@ Grounding: 既存コンパイラの所有権/レイアウト決定を6コンポ�
 
 精読で確定した最重要事実: **高 IR は既に「半 MIR」である。**
 
-- `IrStmtKind::RcInc/RcDec` は**既に IR ノード**(almide-ir/lib.rs:723)。Perceus が IR レベルで dup/drop を置いている。§2.2 の「dup→__rc_inc / drop→__rc_dec」行は文字通り `emit_wasm/statements.rs:329/358`。
+- `IrStmtKind::RcInc/RcDec` は**既に IR ノード**(crates/almide-ir/src/lib.rs:723)。Perceus が IR レベルで dup/drop を置いている。§2.2 の「dup→__rc_inc / drop→__rc_dec」行は文字通り v0 の `emit_wasm/statements.rs:329/358`(#782 で削除済み — git history 参照)。
 - `engine/layout.rs` の `LayoutRegistry`(:77)は**既に §2.1 Repr テーブルそのもの** — STRING/LIST/SWISS_MAP/SET/VARIANT/OPTION/RESULT を field offset(Fixed/AfterDynamic)+ MemType width + header_size で持ち、**このモジュール外にマジックナンバー0**(`list_layout.rs` は薄いアクセサ)。
 
 → Phase 1 は「ゼロから新 IR を建てる」のではなく、**既に中央化された事実を MIR 値に昇格し、散在する決定を1パスに畳む**作業。

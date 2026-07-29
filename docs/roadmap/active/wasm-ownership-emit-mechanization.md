@@ -143,7 +143,7 @@ churn fixture を追加。推測パッチは新たな leak/regression を生む�
 `almide_rt_error_context`(`r.clone().map_err(|e| format!("{ctx}: {e}"))`)を
 **実 wasm runtime routine 化**して rt-oracle 登録すること(上の
 `emit_extract_owned` 集約と同じ「手書き emit をオラクル準拠の単一実装に
-寄せる」方針)。`spec/wasm_cross/error_context.almd` で固定。
+寄せる」方針)。固定用 fixture `spec/wasm_cross/error_context.almd` は未追加(要作成 — 現状この主張を pin する fixture は存在しない)。
 
 ## 提案: emit 層の所有権を単一ヘルパーに集約する
 
@@ -177,7 +177,7 @@ IR レベルの `PerceusVerify` は emit 層の借用/所有権を見られな�
 ## 段階
 
 1. **#643 を runtime トレースで確定 → 単発修正** (emit 層 or pass_perceus、
-   設計意図「leak 優先」に合わせる)。+ `spec/wasm_cross/option_fallback_rc.almd`
+   設計意図「leak 優先」に合わせる)。+ `spec/wasm_cross/option_fallback_rc.almd`(未追加 — 要作成)
    回帰固定 + contract。
 2. `emit_extract_owned` ヘルパー抽出 + 全 payload-取り出しサイトを移行。
 3. `spec/churn/` owned-extract fixture + (将来) rc-count 差分ハーネス。

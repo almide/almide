@@ -374,12 +374,12 @@ The wasm binary is produced by the v1 MIR trust-spine, not by almide-codegen:
 `almide-mir` lowers the linked IR through MIR (Perceus ownership, layout) to
 WAT text; the CLI assembles it with the `wat` crate and keeps only function
 names in the name section. Stdlib calls are satisfied by self-hosted pure-Almide
-implementations (`stdlib/*.almd` via `render_wasm/registry.rs`); an unlinked
+implementations (`stdlib/*.almd` via `crates/almide-types/src/self_host_registry.rs`); an unlinked
 call is a wall — a hard, diagnosed error. The v0 direct emitter that this
 section used to describe was retired in #782.
 
 Details: [../WASM-OUTPUT.md](../WASM-OUTPUT.md),
-[../ARCHITECTURE.md](../ARCHITECTURE.md), `crates/almide-mir/CLAUDE.md`.
+[../ARCHITECTURE.md](../ARCHITECTURE.md), [crates/CLAUDE.md](../../crates/CLAUDE.md).
 
 ## 8. CodegenOptions
 
