@@ -20,6 +20,7 @@ bytes_f16_offset_overflow  out-of-interp-scope capability: prim.handle
 bytes_push_inplace  out-of-interp-scope capability: in-place container mutation `bytes.push` (mut receiver; interp args are by-value so the binding cannot be written back)
 bytes_rawptr  out-of-interp-scope capability: prim.handle
 bytes_set_value_semantics  out-of-interp-scope capability: prim.handle
+checked_conversion_value_match  out-of-interp-scope capability: prim.args_get_list
 chunk_str  out-of-interp-scope capability: prim.handle
 codec_decode_errors  out-of-interp-scope capability: prim.handle
 codec_float_int  out-of-interp-scope capability: prim.handle
