@@ -298,7 +298,7 @@ fn check_match_with_wildcard() {
 
 #[test]
 fn check_for_in_range() {
-    has_no_errors("effect fn main() -> Result[Unit, String] = {\n  for i in 0..10 {\n    println(int.to_string(i))\n  }\n  ok(())\n}");
+    has_no_errors("effect fn main() -> Result[Unit, String] = {\n  for i in 0..<10 {\n    println(int.to_string(i))\n  }\n  ok(())\n}");
 }
 
 #[test]

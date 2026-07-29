@@ -132,7 +132,7 @@ fn wasm_list_push_basic() {
     assert_cross_target(r#"
 fn main() -> Unit = {
   var xs: List[Int] = []
-  for i in 0..5 { list.push(xs, i * 10) }
+  for i in 0..<5 { list.push(xs, i * 10) }
   println(int.to_string(xs[4]))
 }
 "#);
@@ -143,7 +143,7 @@ fn wasm_list_push_capacity() {
     assert_cross_target(r#"
 fn main() -> Unit = {
   var xs: List[Int] = []
-  for i in 0..20 { list.push(xs, i) }
+  for i in 0..<20 { list.push(xs, i) }
   println(int.to_string(list.len(xs)) + " " + int.to_string(xs[19]))
 }
 "#);
@@ -330,7 +330,7 @@ fn wasm_list_with_capacity() {
     assert_cross_target(r#"
 fn main() -> Unit = {
   var xs = list.with_capacity(16)
-  for i in 0..10 { list.push(xs, i) }
+  for i in 0..<10 { list.push(xs, i) }
   println(int.to_string(list.len(xs)) + " " + int.to_string(xs[9]))
 }
 "#);
