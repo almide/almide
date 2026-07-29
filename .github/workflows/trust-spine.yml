@@ -36,6 +36,10 @@ on:
       # The corpus classifier embeds stdlib sources (registry include_str!), so
       # a stdlib change can move the wall set without touching almide-mir.
       - 'stdlib/**'
+      # spec/ IS the corpus the wall gate classifies — a spec-only commit can
+      # add a walled function (the #956 matrix test did exactly that) and the
+      # ratchet must run on it, not first on the next crates/ push.
+      - 'spec/**'
       # A release PR always bumps Cargo.toml, so the release path can never
       # slip through the paths filter on a version-bump-only diff.
       - 'Cargo.toml'
@@ -48,6 +52,7 @@ on:
       - 'proofs/**'
       - 'crates/**'
       - 'stdlib/**'
+      - 'spec/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
