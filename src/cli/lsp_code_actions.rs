@@ -42,14 +42,14 @@ fn code_action_for_e006(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Option<
         if !lt.contains("fn ") || lt.contains("effect fn") {
             continue;
         }
-        let c = lt.find("fn ")?;
+        let c = byte_col_to_utf16(lt, lt.find("fn ")?);
         return Some(CodeActionOrCommand::CodeAction(CodeAction {
             title: "Mark as effect fn".to_string(),
             kind: Some(CodeActionKind::QUICKFIX),
             diagnostics: Some(vec![diag.clone()]),
             edit: Some(WorkspaceEdit {
                 changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
-                    range: Range { start: Position { line: i as u32, character: c as u32 }, end: Position { line: i as u32, character: c as u32 + 2 } },
+                    range: Range { start: Position { line: i as u32, character: c }, end: Position { line: i as u32, character: c + 2 } },
                     new_text: "effect fn".to_string(),
                 }])])),
                 ..Default::default()
@@ -58,6 +58,36 @@ fn code_action_for_e006(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Option<
         }));
     }
     None
+}
+
+/// Materialize the compiler's machine-applicable fix (`try_replace_span`,
+/// round-tripped through the diagnostic's `data` field — see
+/// `diag_from_almide`) as a quickfix edit. The stored columns are the
+/// compiler's 1-indexed char offsets; they convert to UTF-16 here, where the
+/// line text is at hand.
+fn code_action_for_try_fix(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Option<CodeActionOrCommand> {
+    let data = diag.data.as_ref()?;
+    let snippet = data.get("try")?.as_str()?;
+    let line = (data.get("line")?.as_u64()? as usize).checked_sub(1)? as u32;
+    let col = data.get("col")?.as_u64()? as usize;
+    let end_col = data.get("endCol")?.as_u64()? as usize;
+    let line_text = lines.get(line as usize)?;
+    Some(CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Replace with `{}`", snippet),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![diag.clone()]),
+        edit: Some(WorkspaceEdit {
+            changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
+                range: Range {
+                    start: Position { line, character: char_col_to_utf16(line_text, col) },
+                    end: Position { line, character: char_col_to_utf16(line_text, end_col) },
+                },
+                new_text: snippet.to_string(),
+            }])])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }))
 }
 
 fn compute_code_actions(source: &str, diagnostics: &[Diagnostic], uri: &Uri) -> Vec<CodeActionOrCommand> {
@@ -72,6 +102,9 @@ fn compute_code_actions(source: &str, diagnostics: &[Diagnostic], uri: &Uri) -> 
             _ => None,
         };
         if let Some(a) = action {
+            actions.push(a);
+        }
+        if let Some(a) = code_action_for_try_fix(diag, &lines, uri) {
             actions.push(a);
         }
     }
@@ -107,7 +140,8 @@ fn collect_workspace_symbols_from_file(file_path: &std::path::Path, query: &str,
         };
         if !query.is_empty() && !name.to_lowercase().contains(query_lower) { continue; }
         let line = span.as_ref().map(|s| s.line.saturating_sub(1) as u32).unwrap_or(0);
-        let col = span.as_ref().map(|s| s.col.saturating_sub(1) as u32).unwrap_or(0);
+        let line_text = source.lines().nth(line as usize).unwrap_or("");
+        let col = span.as_ref().map(|s| char_col_to_utf16(line_text, s.col)).unwrap_or(0);
         #[allow(deprecated)]
         results.push(SymbolInformation {
             name: name.to_string(), kind,
@@ -156,39 +190,72 @@ fn publish_diagnostics(connection: &Connection, uri: &Uri, diags: &[Diagnostic])
     connection.sender.send(Message::Notification(notif)).ok();
 }
 
-fn diag_from_almide(d: &crate::diagnostic::Diagnostic) -> Diagnostic {
+/// Compiler diagnostic → LSP diagnostic. The compiler's line/col are
+/// 1-indexed char offsets; LSP wants 0-based lines and UTF-16 columns, so the
+/// conversion needs the source line text. A machine-applicable fix
+/// (`try_snippet` + `try_replace_span`) rides along in the `data` field —
+/// the client echoes `data` back on `textDocument/codeAction`, where
+/// `code_action_for_try_fix` materializes it as a quickfix edit. Before
+/// this, the already-computed fix-its were dropped here and never reached
+/// the client (#927).
+fn diag_from_almide(d: &crate::diagnostic::Diagnostic, lines: &[&str]) -> Diagnostic {
     let line = d.line.unwrap_or(1).saturating_sub(1) as u32;
-    let col = d.col.unwrap_or(1).saturating_sub(1) as u32;
-    let end_col = d.end_col.map(|c| c as u32).unwrap_or(col + 1);
+    let line_text = lines.get(line as usize).copied().unwrap_or("");
+    let col = char_col_to_utf16(line_text, d.col.unwrap_or(1));
+    let end_col = d.end_col.map(|c| char_col_to_utf16(line_text, c)).unwrap_or(col + 1);
+    let data = match (&d.try_snippet, d.try_replace_span) {
+        (Some(snippet), Some((l, c, ec))) => Some(serde_json::json!({
+            "try": snippet, "line": l, "col": c, "endCol": ec,
+        })),
+        _ => None,
+    };
     Diagnostic {
         range: Range { start: Position { line, character: col }, end: Position { line, character: end_col } },
         severity: Some(if d.level == crate::diagnostic::Level::Error { DiagnosticSeverity::ERROR } else { DiagnosticSeverity::WARNING }),
         code: d.code.as_ref().map(|c| NumberOrString::String(c.to_string())),
         source: Some("almide".to_string()),
         message: if d.hint.is_empty() { d.message.clone() } else { format!("{}\nhint: {}", d.message, d.hint) },
+        data,
         ..Default::default()
     }
 }
 
-fn resolve_imports_for_lsp(file_path: &str, program: &crate::ast::Program) -> Vec<(String, crate::ast::Program, bool)> {
-    let file = std::path::Path::new(file_path);
-    let dep_paths: Vec<(crate::project::PkgId, std::path::PathBuf)> = file.parent()
-        .and_then(|dir| {
-            // Walk up to find almide.toml
-            let mut d = dir;
-            loop {
-                let toml = d.join("almide.toml");
-                if toml.exists() {
-                    let proj = crate::project::parse_toml(&toml).ok()?;
-                    return crate::project_fetch::fetch_all_deps(&proj).ok().map(|deps| {
-                        deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect()
-                    });
-                }
-                d = d.parent()?;
-            }
-        })
+/// Walk up from `file_path` to the almide.toml governing it, if any.
+fn find_project_toml(file_path: &str) -> Option<std::path::PathBuf> {
+    let mut dir = std::path::Path::new(file_path).parent()?;
+    loop {
+        let toml = dir.join("almide.toml");
+        if toml.exists() {
+            return Some(toml);
+        }
+        dir = dir.parent()?;
+    }
+}
+
+/// Dependency source dirs for the project owning `file_path`, cached per
+/// almide.toml. `allow_fetch` is true only on didOpen: `fetch_all_deps`
+/// shells out to git and writes almide.lock, which must never run on a
+/// keystroke (#927). With `allow_fetch` false a cache miss resolves to no
+/// deps instead of touching the network. A failed fetch caches the empty
+/// list, so one broken manifest cannot re-trigger fetch storms.
+fn project_deps_for(file_path: Option<&str>, cache: &mut DepCache, allow_fetch: bool) -> Vec<(crate::project::PkgId, std::path::PathBuf)> {
+    let Some(toml) = file_path.and_then(find_project_toml) else { return Vec::new() };
+    if let Some(cached) = cache.get(&toml) {
+        return cached.clone();
+    }
+    if !allow_fetch {
+        return Vec::new();
+    }
+    let deps: Vec<(crate::project::PkgId, std::path::PathBuf)> = crate::project::parse_toml(&toml).ok()
+        .and_then(|proj| crate::project_fetch::fetch_all_deps(&proj).ok())
+        .map(|deps| deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect())
         .unwrap_or_default();
-    match crate::resolve::resolve_imports_with_deps(file_path, program, &dep_paths) {
+    cache.insert(toml, deps.clone());
+    deps
+}
+
+fn resolve_imports_cached(file_path: &str, program: &crate::ast::Program, deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Vec<(String, crate::ast::Program, bool)> {
+    match crate::resolve::resolve_imports_with_deps(file_path, program, deps) {
         Ok(r) => r.modules.into_iter().map(|(n, p, _, s)| (n, p, s)).collect(),
         Err(_) => vec![],
     }

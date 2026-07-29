@@ -103,7 +103,7 @@ local   mod     fan
 ### 1.6 Operators and Delimiters
 
 ```
-Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  >>  ..  ..=
+Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  >>  ..<  ...
 Postfix:     !  ?  ?.  ??
 Unary:       -  not
 Logical:     and  or
@@ -114,7 +114,7 @@ Delimiters:  (  )  {  }  [  ]  ,  .  :  ;  |  _  @  ...
 
 - `^` is exponentiation (right-associative). `**` is accepted as an alias
 - `+` is overloaded: addition for numbers, concatenation for strings and lists
-- `..` is exclusive range, `..=` is inclusive range
+- `..<` is exclusive range, `...` is inclusive range (the Rust-style `..`/`..=` are a diagnosed E031 with a mechanical fix-it)
 - `...` is spread (in records)
 - `_` is wildcard (in match patterns) or placeholder (in pipe arguments)
 - `@` is used for extern annotations
@@ -463,7 +463,7 @@ Modifier order: `[local|mod]? effect? fn`
 - Return type is required
 - The body is a single expression (after `=`)
 - `effect fn` marks functions with side effects
-- `fan { }` for concurrent execution (only inside `effect fn`)
+- `fan { }` for scoped concurrent execution — native threads, sequential on wasm (only inside `effect fn`)
 
 ```
 fn add(x: Int, y: Int) -> Int = x + y
@@ -718,7 +718,7 @@ for (k, v) in map.entries(config) {
   println(k + " = " + v)
 }
 
-for i in 0..10 {
+for i in 0..<10 {
   println(int.to_string(i))
 }
 ```
@@ -751,7 +751,7 @@ Rules:
 - No `var` capture from outer scope (prevents data races)
 
 Library forms:
-- `fan.map(xs, f)` -- parallel map over a collection
+- `fan.map(xs, f)` -- map over a collection via the fan surface (deterministic, sequential in list order)
 - `fan.race(thunks)` -- first to complete wins, rest cancelled
 
 ### 9.10 Pipe
@@ -797,8 +797,8 @@ Resolution: when `x.f(args...)` is called, the compiler looks for `f(x, args...)
 ### 9.12 Range
 
 ```
-0..5            // [0, 1, 2, 3, 4]    exclusive end
-1..=5           // [1, 2, 3, 4, 5]    inclusive end
+0..<5           // [0, 1, 2, 3, 4]    exclusive end
+1...5           // [1, 2, 3, 4, 5]    inclusive end
 for i in 0..n { ... }   // no list allocation (optimized)
 ```
 
@@ -868,7 +868,7 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 | 2 | `and` | left |
 | 3 | `==` `!=` `<` `<=` `>` `>=` | non-assoc (chaining is an error) |
 | 4 | `\|>` (pipe) | left, asymmetric (see below) |
-| 5 | `..` `..=` (range) | none |
+| 5 | `..<` `...` (range) | none |
 | 6 | `+` `-` (additive) | left |
 | 7 | `*` `/` `%` (multiplicative) | left |
 | 8 | `^` (power; `**` is an alias) | right |
@@ -897,7 +897,7 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 | `and` `or` `not` | Boolean logic |
 | `\|>` | Pipe |
 | `>>` | Function composition |
-| `..` `..=` | Range (exclusive / inclusive) |
+| `..<` `...` | Range (exclusive / inclusive) |
 | `!` `?` `?.` `??` (postfix) | Unwrap / to-Option / optional chain / fallback |
 
 In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equality. In WASM codegen, they emit byte-level comparison.
@@ -984,7 +984,7 @@ When a hole is found, the compiler returns:
 
 ### 13.1 fan Block
 
-`fan { }` runs expressions concurrently. Only valid inside `effect fn`.
+`fan { }` runs expressions as one scoped unit — real threads on native, sequential in declaration order on wasm; results are identical either way. Only valid inside `effect fn`.
 
 ```
 effect fn main() -> Result[Unit, String] = {
@@ -1002,7 +1002,7 @@ Results are returned as a tuple. If any expression returns `Err`, the entire `fa
 ### 13.2 fan.map / fan.race
 
 ```
-let results = fan.map(urls, (url) => fetch(url))   // parallel map
+let results = fan.map(urls, (url) => fetch(url))   // deterministic, list order
 let first = fan.race([task_a, task_b])              // first to complete wins
 ```
 
@@ -1228,7 +1228,7 @@ Target source code
 4. StdlibLowering -- module calls to named calls with arg decoration
 5. ResultPropagation -- insert `?` for effect fn calls
 6. BuiltinLowering -- assert_eq, println, etc. to Rust macros
-7. FanLowering -- fan blocks to tokio::join!/spawn
+7. FanLowering -- fan blocks to scoped threads (`std::thread::scope`)
 
 Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics.
 
@@ -1242,7 +1242,7 @@ Templates are defined in TOML files (`codegen/templates/*.toml`), separating syn
 | `==` / `!=` | `almide_eq!` macro (deep) | Byte comparison |
 | `+` on String | `format!` / owned concat | `string_concat` runtime |
 | `+` on List | `[...a, ...b]` | `list_concat` runtime |
-| `fan { }` | `tokio::join!` | Sequential (single-threaded) |
+| `fan { }` | `std::thread::scope` | Sequential (single-threaded) |
 
 ---
 

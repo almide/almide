@@ -194,12 +194,12 @@ impl LowerCtx {
             Some(v) => CallArg::Scalar(v),
             None => {
                 self.ops.truncate(mark);
-                return Err(LowerError::Unsupported(
+                return Err(LowerError::at(
+                    a.span,
                     "scalar-result match over a heap subject in a call-argument \
                      position outside the executable subset cannot be faithfully \
                      computed (a Const-0 would silently pick a wrong arm) not in \
-                     this brick"
-                        .into(),
+                     this brick",
                 ));
             }
         }))

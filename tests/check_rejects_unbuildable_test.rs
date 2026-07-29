@@ -102,21 +102,33 @@ fn a_constructor_in_match_arm_position_is_still_accepted() {
 #[test]
 fn a_chained_range_is_rejected() {
     assert_rejected(
-        "fn main() -> Unit = {\n  let xs = 0..1..2\n  println(int.to_string(list.len(xs)))\n}",
+        "fn main() -> Unit = {\n  let xs = 0..<1..<2\n  println(int.to_string(list.len(xs)))\n}",
         "Chained range operators are not allowed",
     );
     assert_rejected(
-        "fn main() -> Unit = {\n  let xs = 0..=1..=2\n  println(int.to_string(list.len(xs)))\n}",
+        "fn main() -> Unit = {\n  let xs = 0...1...2\n  println(int.to_string(list.len(xs)))\n}",
         "Chained range operators are not allowed",
     );
 }
 
 #[test]
+fn retired_range_spellings_are_rejected_with_the_migration_notice() {
+    assert_rejected(
+        "fn main() -> Unit = println(int.to_string(list.len(0..3)))",
+        "'..' was retired",
+    );
+    assert_rejected(
+        "fn main() -> Unit = println(int.to_string(list.len(0..=3)))",
+        "'..=' was retired",
+    );
+}
+
+#[test]
 fn ordinary_ranges_still_parse() {
-    assert_accepted("fn main() -> Unit = println(int.to_string(list.len(0..3)))");
-    assert_accepted("fn main() -> Unit = println(int.to_string(list.len(0..=3)))");
-    assert_accepted("fn main() -> Unit = { for i in 0..3 { println(int.to_string(i)) } }");
+    assert_accepted("fn main() -> Unit = println(int.to_string(list.len(0..<3)))");
+    assert_accepted("fn main() -> Unit = println(int.to_string(list.len(0...3)))");
+    assert_accepted("fn main() -> Unit = { for i in 0..<3 { println(int.to_string(i)) } }");
     // A range whose bounds are themselves expressions must keep working — the
     // rejection looks at the bound's SHAPE, not at the tokens around it.
-    assert_accepted("fn main() -> Unit = { let n = 2\n  println(int.to_string(list.len(n - 1..n + 2)))\n }");
+    assert_accepted("fn main() -> Unit = { let n = 2\n  println(int.to_string(list.len(n - 1..<n + 2)))\n }");
 }

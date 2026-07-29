@@ -656,7 +656,7 @@ for (k, v) in map.entries(m) {
 Underscore for ignored variable:
 
 ```
-for _ in 0..5 {
+for _ in 0..<5 {
   println("tick")
 }
 ```
@@ -690,14 +690,14 @@ while true {
 ### 5.14 Range
 
 ```
-0..5              // [0, 1, 2, 3, 4]     (exclusive end)
-1..=5             // [1, 2, 3, 4, 5]     (inclusive end)
+0..<5             // [0, 1, 2, 3, 4]     (exclusive end)
+1...5             // [1, 2, 3, 4, 5]     (inclusive end)
 ```
 
 Ranges can be used in for loops (optimized, no list allocation):
 
 ```
-for i in 0..n {
+for i in 0..<n {
   println(int.to_string(i))
 }
 ```
@@ -962,7 +962,7 @@ match pair {
 | 3 | `^` | Right |
 | 4 | `*` `/` `%` | Left |
 | 5 | `+` `-` | Left |
-| 6 | `..` `..=` | Non-associative |
+| 6 | `..<` `...` | Non-associative |
 | 7 | `==` `!=` `<` `>` `<=` `>=` | Non-associative |
 | 8 | `and` | Left |
 | 9 | `or` | Left |

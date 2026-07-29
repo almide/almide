@@ -498,6 +498,62 @@
         }
     }
 
+    #[test]
+    fn checked_conversion_family_is_admitted() {
+        // THE MATRIX GATE for the checked numeric conversion family (#958):
+        // every `to_*_checked` / `from_*_checked` a numeric stdlib module
+        // hosts must be admitted by `is_self_host_option_module_fn`, so a
+        // value-position `match` over any cell EXECUTES instead of walling.
+        // The cell list is DERIVED from the stdlib sources — the enumerated
+        // per-fn list the shape rule replaced drifted the moment #956
+        // completed the matrix (`int.from_uint64_checked` walled every
+        // let-bound match over it).
+        let stdlib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
+        let numeric = [
+            "int", "float", "int8", "int16", "int32", "int64",
+            "uint8", "uint16", "uint32", "uint64", "float32", "float64",
+        ];
+        let mut cells = 0usize;
+        for module in numeric {
+            for entry in std::fs::read_dir(&stdlib).expect("stdlib dir") {
+                let path = entry.expect("dir entry").path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                // The module's own file plus its `<module>_<part>.almd` splits
+                // (`int.almd`, `int_checked.almd` — but NOT `int8_convert.almd`
+                // under `int`, whose prefix is `int8_`).
+                if name != format!("{module}.almd") && !name.starts_with(&format!("{module}_")) {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&path).expect("read stdlib file");
+                for line in src.lines() {
+                    let decl = line.trim_start();
+                    let decl = decl.strip_prefix("pub ").unwrap_or(decl);
+                    let Some(rest) = decl.strip_prefix("fn ") else { continue };
+                    let fn_name: String = rest
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect();
+                    if !fn_name.ends_with("_checked")
+                        || !(fn_name.starts_with("to_") || fn_name.starts_with("from_"))
+                    {
+                        continue;
+                    }
+                    cells += 1;
+                    assert!(
+                        crate::lower::is_self_host_option_module_fn(module, &fn_name),
+                        "checked-conversion cell {module}.{fn_name} is not admitted — \
+                         a value-position match over it would wall (#958)"
+                    );
+                }
+            }
+        }
+        assert!(
+            cells >= 50,
+            "expected the full #956 matrix (58 cells at authoring time), found {cells} — \
+             did the stdlib layout move out from under this gate?"
+        );
+    }
+
 include!("tests_part4_b.rs");
 include!("tests_part4_c.rs");
 include!("tests_part4_d.rs");

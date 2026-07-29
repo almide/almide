@@ -62,7 +62,7 @@ test "nested do blocks" {
 
 test "guard with continue in for" {
   var sum = 0;
-  for i in 0..10 {
+  for i in 0..<10 {
     guard i % 2 == 0 else continue;
     sum = sum + i;
   };

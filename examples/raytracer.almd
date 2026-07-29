@@ -174,7 +174,7 @@ fn pixel(px: Int, py: Int, w: Int, h: Int) -> V3 = {
 // Two pixel rows per text row: ▀ with fg = upper pixel, bg = lower pixel.
 fn render_row(py: Int, w: Int, h: Int) -> String = {
   var line = ""
-  for px in 0..w {
+  for px in 0..<w {
     let top = pixel(px, py, w, h)
     let bot = pixel(px, py + 1, w, h)
     let fg = "\x1b[38;2;${int.to_string(channel(top.x))};${int.to_string(channel(top.y))};${int.to_string(channel(top.z))}m"

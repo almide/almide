@@ -31,6 +31,42 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LowerError {
     Unsupported(String),
+    /// A wall carrying the SOURCE SPAN of the construct that walled (#931):
+    /// line/col/end_col in the lexer's 1-indexed char convention, straight off
+    /// the nearest IR node. Construct via [`LowerError::at`] — every NEW wall
+    /// site must use it (the spanless count is ratcheted by
+    /// `spanless_wall_count_only_goes_down`), so the CLI can render the wall
+    /// through the Diagnostic machinery with the source line and a caret
+    /// instead of a bare sentence.
+    UnsupportedAt { reason: String, span: almide_ir::Span },
+}
+
+impl LowerError {
+    /// Span-carrying wall constructor — pass the nearest IR node's span.
+    /// Falls back to the spanless form when the node carries none, so callers
+    /// never have to branch.
+    pub fn at(span: Option<almide_ir::Span>, reason: impl Into<String>) -> LowerError {
+        match span {
+            Some(span) => LowerError::UnsupportedAt { reason: reason.into(), span },
+            None => LowerError::Unsupported(reason.into()),
+        }
+    }
+
+    /// The wall reason, span or not — what every ledger/notice prints.
+    pub fn reason(&self) -> &str {
+        match self {
+            LowerError::Unsupported(reason) => reason,
+            LowerError::UnsupportedAt { reason, .. } => reason,
+        }
+    }
+
+    /// The source span, when the construction site had one to give.
+    pub fn span(&self) -> Option<almide_ir::Span> {
+        match self {
+            LowerError::Unsupported(_) => None,
+            LowerError::UnsupportedAt { span, .. } => Some(*span),
+        }
+    }
 }
 
 /// The USER-FACING rendering: the reason, bare. The `Debug` form wraps it in
@@ -42,9 +78,7 @@ pub enum LowerError {
 /// formats through THIS, so the reason reads as one sentence at any depth.
 impl std::fmt::Display for LowerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LowerError::Unsupported(reason) => f.write_str(reason),
-        }
+        f.write_str(self.reason())
     }
 }
 
@@ -265,16 +299,23 @@ pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
     else {
         return None;
     };
-    if args.len() != 1 || func.as_str() != "to_int64" {
-        return None;
+    is_identity_int_widening(module.as_str(), func.as_str(), args).then(|| &args[0])
+}
+
+/// The (module, func, args) core of [`identity_int_widening_call`], for the
+/// producers that hold an UNPACKED Module call (`lower_pure_module_value_call`)
+/// — one predicate, so the elision and the caps counter cannot drift apart.
+pub fn is_identity_int_widening(module: &str, func: &str, args: &[IrExpr]) -> bool {
+    if args.len() != 1 || func != "to_int64" {
+        return false;
     }
     if !matches!(
-        module.as_str(),
+        module,
         "int" | "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
     ) {
-        return None;
+        return false;
     }
-    let arg_int = matches!(
+    matches!(
         args[0].ty,
         Ty::Int
             | Ty::Int8
@@ -285,8 +326,7 @@ pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
             | Ty::UInt16
             | Ty::UInt32
             | Ty::UInt64
-    );
-    arg_int.then(|| &args[0])
+    )
 }
 
 /// A `float.from_int(x)` call over an `Int` — the sitofp floor (#806 step 2):
@@ -299,11 +339,13 @@ pub fn float_from_int_prim_call(e: &IrExpr) -> Option<&IrExpr> {
     else {
         return None;
     };
-    (module.as_str() == "float"
-        && func.as_str() == "from_int"
-        && args.len() == 1
-        && matches!(args[0].ty, Ty::Int))
-    .then(|| &args[0])
+    is_float_from_int_prim(module.as_str(), func.as_str(), args).then(|| &args[0])
+}
+
+/// The (module, func, args) core of [`float_from_int_prim_call`] — same
+/// single-predicate discipline as [`is_identity_int_widening`].
+pub fn is_float_from_int_prim(module: &str, func: &str, args: &[IrExpr]) -> bool {
+    module == "float" && func == "from_int" && args.len() == 1 && matches!(args[0].ty, Ty::Int)
 }
 
 /// The `@extern(wasm, module, name)` attribute on a function, iff present (the

@@ -1,0 +1,3 @@
+expects_code = "E031"
+expects_error = "'..' was retired"
+hint_substring = "almide fix"

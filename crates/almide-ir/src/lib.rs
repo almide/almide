@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 use serde::{Serialize, Deserialize};
-use almide_base::Span;
+pub use almide_base::Span;
 use almide_base::intern::Sym;
 use almide_lang::types::Ty;
 

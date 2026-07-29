@@ -24,7 +24,7 @@ type P = { x: Float, y: Float, on: Bool }
 fn rotate_from(ps: List[P], start: Int) -> List[P] = {
   let n = list.len(ps)
   var out: List[P] = []
-  for i in 0..n {
+  for i in 0..<n {
     out = out + [ps[(i + start) % n]]
   }
   out
@@ -65,7 +65,7 @@ fn main() -> Unit = {
   // element that is a fresh literal next to an indexed one — the two element
   // shapes side by side in one accumulator.
   var mixed: List[P] = []
-  for i in 0..list.len(ps) {
+  for i in 0..<list.len(ps) {
     mixed = mixed + [ps[i]]
     mixed = mixed + [P { x: 0.0, y: 0.0, on: false }]
   }
@@ -80,10 +80,10 @@ fn main() -> Unit = {
   var k = 0
   while k < 8 {
     var src: List[P] = []
-    for i in 0..3 {
+    for i in 0..<3 {
       src = src + [P { x: int.to_float(k * 10 + i), y: 0.0, on: true }]
     }
-    for i in 0..3 {
+    for i in 0..<3 {
       keep = keep + [src[i]]
     }
     k = k + 1

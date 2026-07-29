@@ -357,7 +357,9 @@ pub(crate) fn classify_int_literal(raw: &str, ty: &Ty, negated: bool) -> Literal
     }
 }
 
-/// The inclusive range `ty` accepts, as written in a diagnostic — `0..=255`.
+/// The inclusive range `ty` accepts, as written in a diagnostic — `0...255`
+/// (the Swift-style inclusive spelling, #966 — a diagnostic quoting the
+/// retired `..=` would teach the very syntax E031 rejects).
 ///
 /// Rust states this range in a note on its out-of-range literal error, and it
 /// is the difference between a hint a reader can act on and one they have to go
@@ -366,9 +368,9 @@ pub(crate) fn classify_int_literal(raw: &str, ty: &Ty, negated: bool) -> Literal
 pub(crate) fn int_type_range(ty: &Ty) -> Option<String> {
     let (signed, bits) = int_type_signed_bits(ty)?;
     Some(if signed {
-        format!("-{}..={}", 1u128 << (bits - 1), (1u128 << (bits - 1)) - 1)
+        format!("-{}...{}", 1u128 << (bits - 1), (1u128 << (bits - 1)) - 1)
     } else {
-        format!("0..={}", (1u128 << bits) - 1)
+        format!("0...{}", (1u128 << bits) - 1)
     })
 }
 

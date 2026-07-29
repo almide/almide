@@ -124,7 +124,7 @@ test "for in list" {
 
 test "for in range" {
   var sum = 0;
-  for i in 0..5 {
+  for i in 0..<5 {
     sum = sum + i;
   };
   assert_eq(sum, 10)
@@ -132,7 +132,7 @@ test "for in range" {
 
 test "for in inclusive range" {
   var sum = 0;
-  for i in 1..=5 {
+  for i in 1...5 {
     sum = sum + i;
   };
   assert_eq(sum, 15)
@@ -166,8 +166,8 @@ test "for with zip" {
 
 test "nested for" {
   var sum = 0;
-  for i in 0..3 {
-    for j in 0..3 {
+  for i in 0..<3 {
+    for j in 0..<3 {
       sum = sum + 1;
     };
   };
@@ -408,7 +408,7 @@ test "for with index counter var" {
 
 test "for in large range" {
   var sum = 0;
-  for i in 0..100 {
+  for i in 0..<100 {
     sum = sum + 1;
   };
   assert_eq(sum, 100)
@@ -416,8 +416,8 @@ test "for in large range" {
 
 test "for nested with accumulation" {
   var pairs: List[String] = [];
-  for i in 0..3 {
-    for j in 0..3 {
+  for i in 0..<3 {
+    for j in 0..<3 {
       pairs = pairs + [
         "${int.to_string(i)}${int.to_string(j)}"
       ];
@@ -452,7 +452,7 @@ test "do guard with complex condition" {
 
 test "for guard continue skip odds" {
   var evens: List[Int] = [];
-  for x in 1..=10 {
+  for x in 1...10 {
     guard x % 2 == 0 else continue;
     evens = evens + [x];
   };

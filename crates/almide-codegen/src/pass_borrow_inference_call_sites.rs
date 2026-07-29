@@ -322,6 +322,37 @@ fn find_mut_borrow_var(arg: &IrExpr) -> Option<VarId> {
     None
 }
 
+/// Hoist one conflicting read arg into a `let __hoist` binding, preserving a
+/// by-ref calling convention: a `&expr` arg hoists its INNER expr and passes
+/// `&__hoist`. Hoisting the whole `Borrow` bound a reference where the Bind
+/// path expects an owned value — for a mutable global that emitted
+/// `let __hoist: RcCow<Vec<u8>> = &G.with(…)`, invalid Rust on both the
+/// binding and the call site (#955, `bytes.copy_from(g, g, …)`). Binding the
+/// inner expr instead lets the Bind renderer apply its owned-value glue
+/// (a global read binds through `RcCow::from(…)`), and `&__hoist`
+/// deref-coerces at the call.
+fn hoist_one_arg(arg: IrExpr, hoisted: &mut Vec<IrStmt>, vt: &mut VarTable) -> IrExpr {
+    let arg_ty = arg.ty.clone();
+    let (inner, rewrap) = match arg.kind {
+        IrExprKind::Borrow { expr, as_str, mutable: false } => (*expr, Some(as_str)),
+        kind => (IrExpr { kind, ty: arg_ty.clone(), span: arg.span, def_id: arg.def_id }, None),
+    };
+    let tmp_ty = inner.ty.clone();
+    let tmp = vt.alloc(sym("__hoist"), tmp_ty.clone(), Mutability::Let, None);
+    hoisted.push(IrStmt {
+        kind: IrStmtKind::Bind { var: tmp, mutability: Mutability::Let, ty: tmp_ty.clone(), value: inner },
+        span: None,
+    });
+    let var = IrExpr { kind: IrExprKind::Var { id: tmp }, ty: tmp_ty, span: None, def_id: None };
+    match rewrap {
+        Some(as_str) => IrExpr {
+            kind: IrExprKind::Borrow { expr: Box::new(var), as_str, mutable: false },
+            ty: arg_ty, span: None, def_id: None,
+        },
+        None => var,
+    }
+}
+
 fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
@@ -348,13 +379,7 @@ fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
                     if find_mut_borrow_var(&arg).is_some() {
                         arg // keep the &mut arg as-is
                     } else if uses_var(&arg, mut_id) {
-                        let tmp = vt.alloc(sym("__hoist"), arg.ty.clone(), Mutability::Let, None);
-                        let tmp_ty = arg.ty.clone();
-                        hoisted_stmts.push(IrStmt {
-                            kind: IrStmtKind::Bind { var: tmp, mutability: Mutability::Let, ty: tmp_ty.clone(), value: arg },
-                            span: None,
-                        });
-                        IrExpr { kind: IrExprKind::Var { id: tmp }, ty: tmp_ty, span: None, def_id: None }
+                        hoist_one_arg(arg, &mut hoisted_stmts, vt)
                     } else {
                         arg
                     }
@@ -458,13 +483,7 @@ fn hoist_call_if_needed(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<al
             if find_mut_borrow_var(&arg).is_some() {
                 arg
             } else if uses_var(&arg, mut_id) {
-                let tmp = vt.alloc(sym("__hoist"), arg.ty.clone(), Mutability::Let, None);
-                let tmp_ty = arg.ty.clone();
-                hoisted_stmts.push(IrStmt {
-                    kind: IrStmtKind::Bind { var: tmp, mutability: Mutability::Let, ty: tmp_ty.clone(), value: arg },
-                    span: None,
-                });
-                IrExpr { kind: IrExprKind::Var { id: tmp }, ty: tmp_ty, span: None, def_id: None }
+                hoist_one_arg(arg, &mut hoisted_stmts, vt)
             } else {
                 arg
             }

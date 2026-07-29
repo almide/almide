@@ -21,7 +21,7 @@ type St = { iv: Bytes }
 
 fn rotate(state: St, n: Int) -> Bytes = {
   var iv = state.iv
-  for _i in 0..n {
+  for _i in 0..<n {
     let first = bytes.read_u8(iv, 0)
     iv = bytes.concat(bytes.slice(iv, 1, 4), bytes.from_list([first + 10]))
   }
@@ -51,7 +51,7 @@ fn main() -> Unit = {
 
   // The fast self-update path still works (fresh, unaliased buffer).
   var buf = bytes.new(4)
-  for i in 0..4 {
+  for i in 0..<4 {
     buf = bytes.set(buf, i, (i + 1) * 3)
   }
   println(bytes.to_list(buf) |> list.map((x) => int.to_string(x)) |> list.join(","))

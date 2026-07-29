@@ -9,10 +9,10 @@ fn lerp(a: Vec2, b: Vec2, t: Float) -> Vec2 =
   { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
 
 test "range map scalar" {
-  assert_eq(0..5 |> list.map((i) => i * i), [0, 1, 4, 9, 16]);
-  assert_eq(1..=3 |> list.map((i) => i * 10), [10, 20, 30]);
-  assert_eq(list.len(3..3 |> list.map((i) => i)), 0);
-  assert_eq(2..6 |> list.map((i) => i + 100), [102, 103, 104, 105])
+  assert_eq(0..<5 |> list.map((i) => i * i), [0, 1, 4, 9, 16]);
+  assert_eq(1...3 |> list.map((i) => i * 10), [10, 20, 30]);
+  assert_eq(list.len(3..<3 |> list.map((i) => i)), 0);
+  assert_eq(2..<6 |> list.map((i) => i + 100), [102, 103, 104, 105])
 }
 
 test "range map record elements with heap captures" {
@@ -21,7 +21,7 @@ test "range map record elements with heap captures" {
   let color = [0.5, 0.6]
   let n = 4
   let nf = int.to_float(n)
-  let segs = 0..n |> list.map((i) => {
+  let segs = 0..<n |> list.map((i) => {
     let t0 = int.to_float(i) / nf
     let t1 = int.to_float(i + 1) / nf
     { p0: lerp(a, b, t0), p1: lerp(a, b, t1), color: color, path_id: 7 }
@@ -34,7 +34,7 @@ test "range map record elements with heap captures" {
 }
 
 test "range map scalar-only record elements" {
-  let pts = 0..3 |> list.map((i) => { px: i, py: i * 2, on: i == 1 })
+  let pts = 0..<3 |> list.map((i) => { px: i, py: i * 2, on: i == 1 })
   let shown = pts
     |> list.map((p) => int.to_string(p.px) + ":" + int.to_string(p.py) + ":" + (if p.on then "T" else "F"))
     |> list.join(",")

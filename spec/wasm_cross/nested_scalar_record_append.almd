@@ -8,7 +8,7 @@ type P = { x: Int, y: Int, on: Bool }
 
 fn build(n: Int) -> List[P] = {
   var ps: List[P] = []
-  for i in 0..n {
+  for i in 0..<n {
     ps = ps + [{ x: i, y: i * 2, on: i == 1 }]
   }
   ps
@@ -16,7 +16,7 @@ fn build(n: Int) -> List[P] = {
 
 fn groups(n: Int) -> List[List[P]] = {
   var gs: List[List[P]] = []
-  for i in 0..n {
+  for i in 0..<n {
     gs = gs + [build(i)]
   }
   gs

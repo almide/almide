@@ -24,7 +24,7 @@ fn zipish(view: View, rx: Float, rh: Float, idx: Int) -> Zip = {
     let ih = view._item_height
     frame_h = rh
     let total = list.len(view._children)
-    for i in 0..total {
+    for i in 0..<total {
       let child = view._children[i]
       let cs = child._style
       let iy = rx + int.to_float(i) * ih

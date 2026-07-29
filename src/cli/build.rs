@@ -515,15 +515,35 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
             // The reason renders through `LowerError`'s Display — one readable
             // sentence, however deep the wall nested — never the `{:?}` form,
             // whose per-level `Unsupported("…")` wrappers and escaped quotes
-            // were the worst diagnostic in the compiler (#931).
-            err(&format!(
-                "error: this program shape is not yet supported by the verified wasm renderer\n\n  \
-                 {e}\n\n  \
-                 The unverified v0 wasm emitter was retired (#782): a wall is an honest error\n  \
-                 instead of a silent fallback. If this names a missing capability, please file\n  \
-                 it with the source shape that triggered it:\n  \
-                 https://github.com/almide/almide/issues"
-            ));
+            // were the worst diagnostic in the compiler (#931). A wall whose
+            // construction site had a span renders through the Diagnostic
+            // machinery — source line, caret, the works — so the user sees
+            // WHERE the shape lives, not just what it is.
+            if let Some(span) = e.span() {
+                let mut d = crate::diagnostic::Diagnostic::error(
+                    e.reason().to_string(),
+                    "the unverified v0 wasm emitter was retired (#782): a wall is an honest \
+                     error instead of a silent fallback. If this names a missing capability, \
+                     please file it with the source shape that triggered it: \
+                     https://github.com/almide/almide/issues",
+                    "the verified wasm render (v1 trust spine) — this shape is not yet in its subset",
+                );
+                d.line = Some(span.line);
+                d.col = Some(span.col);
+                if span.end_col > span.col {
+                    d.end_col = Some(span.end_col);
+                }
+                err(&format!("{}", crate::diagnostic_render::display_with_source(&d, source_text)));
+            } else {
+                err(&format!(
+                    "error: this program shape is not yet supported by the verified wasm renderer\n\n  \
+                     {e}\n\n  \
+                     The unverified v0 wasm emitter was retired (#782): a wall is an honest error\n  \
+                     instead of a silent fallback. If this names a missing capability, please file\n  \
+                     it with the source shape that triggered it:\n  \
+                     https://github.com/almide/almide/issues"
+                ));
+            }
             Err(())
         }
     }

@@ -112,7 +112,7 @@ evidence  = [
 id        = "C-004"
 spec      = "ALS-R3"
 title     = "fan.race / fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: fan.settle THUNK side-effect interleaving is wall-clock on native (real threads) and sequential on wasm — settle pins its RESULT list order only."
+statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -2421,4 +2421,26 @@ since     = "0.37.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mutable_global_repeat_writes.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-194"
+spec      = "ALS-M4"
+title     = "bytes.copy_from with a mutable-global destination writes through the storage slot"
+statement = "`bytes.copy_from` with a mutable module-level `var Bytes` as DESTINATION lands the copy in the module's storage slot on both targets, whether the source is a distinct global, the same global (non-overlapping ranges), or a local. Native's in-place-mutator table was missing `copy_from` — the one two-buffer entry in the runtime's &mut surface — so the destination rendered through the generic global-read path as `&mut G.with(|c| (**c.borrow()).clone())`: a mutation of a discarded temporary clone. A distinct-global copy COMPILED and silently read back the pre-copy bytes on native while wasm wrote through (the silent-wrong-value class); the self-copy spelling was the loud tell, emitting invalid Rust because the aliasing hoist bound the whole `&src` borrow (`let __hoist: RcCow<Vec<u8>> = &G.with(…)`) where the Bind path expects an owned value. Two changes close it: `copy_from` joins the native mutator table (mirroring almide-mir's lower/calls.rs list, which always had it), so the destination takes the same slot-COW receiver discipline as `set_at`/`fill`; and the hoist binds the borrow's INNER expr and re-borrows `&__hoist` at the call, so the snapshot gets the Bind renderer's owned-value glue and the by-ref calling convention is preserved. OVERLAPPING self-copy ranges carry SNAPSHOT semantics on both targets (#963): the copy reads as if src were snapshotted before the first write. Native gets this from the aliasing hoist's clone (safe Rust cannot alias `&mut` and `&`); the wasm self-host detects the aliased block (dh == sh — the only way two Bytes overlap, every block being its own allocation) and routes through copy_within's direction-switching memmove, which is as-if-through-a-temp. Before #963 wasm's forward byte loop observed its own writes and propagated src[soff] down the range — newly reachable only once this contract's fix made self-copies compile at all. Both directions are pinned in the fixture."
+since     = "0.38.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mutable_global_bytes_copy_from.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-195"
+spec      = "ALS-M4"
+title     = "Value-position variant match over the checked-conversion family executes"
+statement = "A `match` over any cell of the checked numeric conversion matrix (#956: `to_*_checked` / `from_*_checked` on int, float, and every sized carrier module) whose scrutinee is a RUNTIME value executes as a real tag-read on both targets — let-bound, call-argument, and return position, both arms — and produces byte-identical output, as does the `!` unwrap over the same cells. Before this brick the admission list for materialized-Option subjects was maintained point-wise and drifted when #956 completed the matrix: `int.from_uint64_checked` and every sized-module cell (`uint8.to_int8_checked`, …) walled the v1 renderer with `variant (Option/Result) match bound to a let/var outside the executable subset` the moment the scrutinee stopped folding (#958 — the walled-real ratchet caught exactly this in #956's matrix test, which had to ship with a `?? sentinel` workaround). The family is now admitted by SHAPE — numeric carrier module × `to_/from_*_checked` name — in `is_self_host_option_module_fn`, sound because every cell is self-hosted through the ordinary some()/none ctor rails and returns a materialized Option over a scalar lane. The derived matrix gate `checked_conversion_family_is_admitted` reads the cell list from the stdlib sources themselves, so a new cell cannot drift out of the admission again — the point-wise failure mode is structurally closed, not just fixed."
+since     = "0.38.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/checked_conversion_value_match.almd", class = "fixture" },
 ]

@@ -110,7 +110,7 @@ fn fmt_expr_infix(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Compose { left, right, .. } => joined(left, " >> ", right),
         ExprKind::UnwrapOr { expr: e, fallback, .. } => joined(e, " ?? ", fallback),
         ExprKind::Range { start, end, inclusive, .. } => {
-            joined(start, if *inclusive { "..=" } else { ".." }, end)
+            joined(start, if *inclusive { "..." } else { "..<" }, end)
         }
         ExprKind::Binary { op, left, right, .. } => {
             fmt_expr(out, left, depth);

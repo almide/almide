@@ -49,9 +49,10 @@ pub enum TokenType {
     Question,         // ?
     QuestionDot,      // ?.
     QuestionQuestion, // ??
-    DotDot,    // ..
-    DotDotEq,  // ..=
-    DotDotDot, // ...
+    DotDot,    // .. — record-rest in patterns/types; RETIRED as a range operator (#966: E033 fix-it → ..<)
+    DotDotEq,  // ..= — RETIRED (#966: E033 fix-it → ...)
+    DotDotDot, // ... — record/list spread (prefix) AND inclusive range (infix)
+    DotDotLt,  // ..< — exclusive range
     At,        // @
     // Whitespace / structure
     Comment, Newline, EOF,
@@ -622,6 +623,7 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         // Three-char
         ('.', Some('.'), Some('=')) => (TokenType::DotDotEq, "..=", 3),
         ('.', Some('.'), Some('.')) => (TokenType::DotDotDot, "...", 3),
+        ('.', Some('.'), Some('<')) => (TokenType::DotDotLt, "..<", 3),
         // Two-char
         ('-', Some('>'), _) => (TokenType::Arrow, "->", 2),
         ('=', Some('>'), _) => (TokenType::FatArrow, "=>", 2),

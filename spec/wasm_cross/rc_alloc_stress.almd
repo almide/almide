@@ -20,7 +20,7 @@
 // alloc + realloc growth: push N elements, sum must be exact.
 fn test_growth_sum() -> String = {
   var xs: List[Int] = []
-  for i in 0..1000 { list.push(xs, i) }
+  for i in 0..<1000 { list.push(xs, i) }
   var total = 0
   for x in xs { total = total + x }
   int.to_string(total) + " " + int.to_string(list.len(xs))   // 499500 1000
@@ -29,9 +29,9 @@ fn test_growth_sum() -> String = {
 // string_alloc growth: builder loop with interleaved reads.
 fn test_string_builder() -> String = {
   var s = ""
-  for _ in 0..200 { s = s + "x" }
+  for _ in 0..<200 { s = s + "x" }
   var dots = ""
-  for i in 0..50 { dots = dots + "." + int.to_string(i % 10) }
+  for i in 0..<50 { dots = dots + "." + int.to_string(i % 10) }
   int.to_string(string.len(s)) + " " + int.to_string(string.len(dots)) + " " + string.slice(dots, 0, 6)
 }
 
@@ -39,14 +39,14 @@ fn test_string_builder() -> String = {
 // A refcount imbalance corrupts a later allocation reusing freed blocks.
 fn build_nested(seed: Int) -> List[List[Int]] = {
   var outer: List[List[Int]] = []
-  for i in 0..20 {
+  for i in 0..<20 {
     outer = outer + [[seed + i, seed + i * 2, seed + i * 3]]
   }
   outer
 }
 fn test_rc_churn() -> String = {
   var checksum = 0
-  for round in 0..50 {
+  for round in 0..<50 {
     let nested = build_nested(round * 100)
     let mid = nested[10]
     checksum = checksum + mid[2]      // (round*100 + 30) summed over 50 rounds
@@ -57,9 +57,9 @@ fn test_rc_churn() -> String = {
 // Map insert/lookup churn (alloc/rehash + rc on string keys). map.insert mutates.
 fn test_map_churn() -> String = {
   var hits = 0
-  for round in 0..30 {
+  for round in 0..<30 {
     var m = map.new()
-    for i in 0..40 {
+    for i in 0..<40 {
       map.insert(m, "k" + int.to_string(i), i * round)
     }
     let v = map.get(m, "k20") ?? -1
@@ -71,9 +71,9 @@ fn test_map_churn() -> String = {
 // Set insert/contains churn. set.insert returns a new set.
 fn test_set_churn() -> String = {
   var found = 0
-  for _ in 0..30 {
+  for _ in 0..<30 {
     var s = set.new()
-    for i in 0..40 { s = set.insert(s, i * 2) }
+    for i in 0..<40 { s = set.insert(s, i * 2) }
     found = found + (if set.contains(s, 40) then 1 else 0)
     found = found + (if set.contains(s, 41) then 1 else 0)
   }
@@ -85,7 +85,7 @@ fn sum_to(n: Int) -> Int =
   if n <= 0 then 0 else n + sum_to(n - 1)
 fn test_deep_alloc() -> String = {
   var acc = 0
-  for k in 0..100 {
+  for k in 0..<100 {
     let xs = list.repeat(k, k % 10 + 1)
     var s = 0
     for x in xs { s = s + x }
