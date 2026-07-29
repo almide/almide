@@ -250,7 +250,7 @@ effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 - **Layer 2** (implemented): `[permissions].allow` in almide.toml -- restricts stdlib capabilities per package
 - **Layer 3** (future): Consumer restricts dependency capabilities
 
-Test: Effect inference unit tests in `src/codegen/pass_effect_inference.rs` (`#[cfg(test)]` module)
+Test: Effect inference unit tests in `crates/almide-codegen/src/pass_effect_inference.rs` (`#[cfg(test)]` module)
 
 ## 9. Error Codes
 

@@ -16,7 +16,7 @@ For an `effect fn`, `x!` (`IrExprKind::Unwrap`), the effect-fn auto-`?`
 RETURN. The v0 **wasm** emitter renders that Err path as a bare early return:
 
 ```
-// crates/almide-codegen/src/emit_wasm/expressions.rs
+// v0's emit_wasm/expressions.rs (deleted with #782 — read via git history)
 //   Unwrap/Result : 846   local_get(scratch); return_;
 //   Unwrap/Option : 826   ... return_;
 //   Try           : 786   ... local_get(res); return_;
@@ -26,7 +26,7 @@ RETURN. The v0 **wasm** emitter renders that Err path as a bare early return:
 
 The function's per-heap-local `rc_dec` frees are inserted by the Perceus pass
 ONLY at the terminal `Ret`/`Nop`
-(`crates/almide-codegen/src/pass_perceus.rs:389-441 insert_decs_before_ret`).
+(v0's `pass_perceus.rs:389-441 insert_decs_before_ret` — deleted with #782; see git history).
 The early `return_` is an unconditional control transfer to the function end that
 jumps PAST all of those decs. So any heap local already bound and still live at
 the early-return point is LEAKED on the Err path.

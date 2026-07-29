@@ -123,7 +123,7 @@ A recognizer pass that runs **before** lifting. A closure may be inlined iff a
 - **(a) the use site**: the closure is *anonymous* (not the RHS of any `Bind`),
   *single-use*, and does not escape its scope; **and**
 - **(b) the sink**: the callee is on a curated allowlist of *consume-only*
-  combinators carrying `@fn_arg_consumed(idx)` in `stdlib/defs`, verified once
+  combinators carrying `@fn_arg_consumed(idx)` in the stdlib `.almd` sources (the stdlib/defs TOML pipeline is gone), verified once
   against the runtime impl — so the closure cannot escape *through* the call (a
   `fold` whose reducer captures the fn into the accumulator would otherwise
   escape it).
@@ -302,7 +302,7 @@ effect fn main() -> Unit = {
 ```
 
 **True root cause (frontend, *not* Perceus or the `Try` emit — the earlier hypothesis
-in this doc was wrong).** `lower_call_target` (`almide-frontend/src/lower/calls.rs`)
+in this doc was wrong).** `lower_call_target` (`crates/almide-frontend/src/lower/calls_target.rs`)
 decided `Named` vs `Computed` for `add5(10)` by reading the **`var_table` snapshot
 type** of `add5` and checking `matches!(.., Ty::Fn)`. In an effect fn the effect-`?`
 unwrap rewrite (`auto_try`) runs *after* lowering, so at the call site `add5`'s stored
@@ -419,5 +419,5 @@ The capture-*cell* architecture is complete. A later adversarial cross-target sw
 adjacent divergences in how closures are *typed / parsed / stored* (string mutators on WASM,
 closure-in-tuple, list-index call, typed params, closure-in-map, non-Copy-element IndexAssign) —
 orthogonal to capture cells. Those are tracked separately in
-[Closure Codegen Cross-Target Gaps](closure-codegen-cross-target-gaps.md) (5 fixed via #334; 2 deep
+[Closure Codegen Cross-Target Gaps](../done/closure-codegen-cross-target-gaps.md) (5 fixed via #334; 2 deep
 ones root-caused and open).

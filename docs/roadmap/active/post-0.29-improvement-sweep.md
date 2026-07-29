@@ -45,4 +45,4 @@
 ## 関連
 
 - flight ladder は別建て: [#586](https://github.com/almide/almide/issues/586)（#776 リファレンスアプリ / #777 lowering 信頼基底縮小 / #569 WCET 更新済み）
-- [v1-release-path](v1-release-path.md) / [v1-org-byte-verification](v1-org-byte-verification.md) / [code-health-codopsy](code-health-codopsy.md)
+- [v1-release-path](v1-release-path.md) / [v1-org-byte-verification](v1-org-byte-verification.md) / [code-health-codopsy](../done/code-health-codopsy.md)

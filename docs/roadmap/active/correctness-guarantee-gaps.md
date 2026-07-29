@@ -157,7 +157,7 @@ Quick wins first (small effort, high leverage):
     現状 `hard_fail = cfg!(debug_assertions)`（pass.rs:248）。release では
     print のみで素通り。注意: そのまま hard error 化すると、下記
     under-constrained のような「今 warning で通っているプログラム」が
-    全て compile error になる破壊的変更。先に spec/exercises 全量で
+    全て compile error になる破壊的変更。先に spec/ 全量で
     影響件数を測ること。
   - **under-constrained を明確に拒否**: `ok([])` を fold init にし err 値が
     一度も現れないケースは err 型 `E` が原理的に未制約 → 現状

@@ -567,15 +567,15 @@ Source (.almd)
 
 ### Key Data Structures
 
-- **`Ty` enum** (`src/types/mod.rs`): Internal type representation. 17 variants covering all types.
-- **`TypeEnv`** (`src/types/env.rs`): The type environment. Holds type declarations, function signatures, scopes, protocol definitions, and conformance tracking.
-- **`FnSig`** (`src/types/mod.rs`): Function signature with params, return type, generics, structural bounds, and protocol bounds.
-- **`TypeConstructorId`** (`src/types/constructor.rs`): Identifies type constructors (List, Option, Result, Map, Set, user-defined). Used by the `Applied` variant of `Ty`.
-- **`Kind`** (`src/types/constructor.rs`): The "type of a type constructor" — `*`, `* -> *`, `* -> * -> *`.
-- **`UnionFind`** (`src/check/types.rs`): Disjoint-set structure for inference variable equivalence. Union-by-rank with path compression.
-- **`Checker`** (`src/check/mod.rs`): Orchestrates the three-pass type checking pipeline.
+- **`Ty` enum** (`crates/almide-types/src/types/mod.rs`): Internal type representation. 17 variants covering all types.
+- **`TypeEnv`** (`crates/almide-frontend/src/type_env.rs`): The type environment. Holds type declarations, function signatures, scopes, protocol definitions, and conformance tracking.
+- **`FnSig`** (`crates/almide-types/src/types/mod.rs`): Function signature with params, return type, generics, structural bounds, and protocol bounds.
+- **`TypeConstructorId`** (`crates/almide-types/src/types/constructor.rs`): Identifies type constructors (List, Option, Result, Map, Set, user-defined). Used by the `Applied` variant of `Ty`.
+- **`Kind`** (`crates/almide-types/src/types/constructor.rs`): The "type of a type constructor" — `*`, `* -> *`, `* -> * -> *`.
+- **`UnionFind`** (`crates/almide-frontend/src/check/types.rs`): Disjoint-set structure for inference variable equivalence. Union-by-rank with path compression.
+- **`Checker`** (`crates/almide-frontend/src/check/mod.rs`): Orchestrates the three-pass type checking pipeline.
 
-### Unification (`src/types/unify.rs`)
+### Unification (`crates/almide-types/src/types/unify.rs`)
 
 The `unify` function matches a signature type against a concrete type, collecting `TypeVar` bindings:
 
@@ -587,7 +587,7 @@ The `unify` function matches a signature type against a concrete type, collectin
 
 `substitute` replaces bound `TypeVar`s in a type with their bindings.
 
-### Type Constructor Registry (`src/types/constructor.rs`)
+### Type Constructor Registry (`crates/almide-types/src/types/constructor.rs`)
 
 Every type constructor is registered with its kind and algebraic laws. The registry enables uniform operations across all container types and supports stream fusion optimizations:
 

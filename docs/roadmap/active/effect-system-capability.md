@@ -102,9 +102,9 @@ Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything 
    - Pure `fn` → zero capabilities (unchanged)
 
 **Files to modify**:
-- `stdlib/defs/*.toml` — add `capability = "FS.read"` field to each function def
+- stdlib `.almd` sources — declare the capability on each function (the stdlib/defs TOML pipeline is gone; per-fn metadata lives in the .almd bodies)
 - `crates/almide-frontend/src/check/` — capability checking pass
-- `crates/almide-frontend/src/resolve.rs` — parse [permissions] from almide.toml
+- `src/resolve.rs` (root crate) — parse [permissions] from almide.toml
 - `crates/almide-base/src/` — CapabilitySet type (u16 bitset)
 
 **Test**: Write an agent test that compiles with `allow = ["FS.read"]` and fails with `fs.write_text` call.
@@ -137,8 +137,8 @@ Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything 
    Orchestrator reads this before loading the WASM binary — verify capabilities match policy.
 
 **Files to modify**:
-- `crates/almide-codegen/src/emit_wasm/mod.rs` — conditional WASI import emission
-- `crates/almide-codegen/src/emit_wasm/runtime.rs` — WASI import registration
+- `crates/almide-mir/src/render_wasm*` — conditional WASI import emission (this plan predates #782; v0's emit_wasm/ is deleted)
+- `crates/almide-types/src/self_host_registry.rs` — WASI import registration (v0 path deleted, #782)
 - `src/cli/build.rs` — emit manifest.json
 
 **Test**: Build with `allow = ["IO.stdout"]` → verify WASM binary has no `path_open` import.
@@ -185,9 +185,9 @@ Fn { params: Vec<Ty>, ret: Box<Ty>, effects: CapabilitySet }
 This is the most invasive change (touches Ty enum, unification, inference) but enables precise tracking through HOFs.
 
 **Files to modify**:
-- `crates/almide-types/src/types.rs` — CapabilitySet field on Ty::Fn
+- `crates/almide-types/src/types/mod.rs` — CapabilitySet field on Ty::Fn
 - `crates/almide-frontend/src/check/infer.rs` — effect propagation through HOFs
-- `crates/almide-frontend/src/check/unify.rs` — CapabilitySet unification
+- `crates/almide-types/src/types/unify.rs` — CapabilitySet unification
 
 ### Phase 5: MCP Server Stdlib Module
 
