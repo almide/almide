@@ -152,7 +152,7 @@ fn check_pipe_operator() {
 
 #[test]
 fn check_range() {
-    has_no_errors("fn f() -> List[Int] = 0..5");
+    has_no_errors("fn f() -> List[Int] = 0..<5");
 }
 
 #[test]

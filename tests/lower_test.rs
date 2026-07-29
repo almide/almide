@@ -234,13 +234,13 @@ fn lower_tuple_literal() {
 
 #[test]
 fn lower_range() {
-    let ir = lower("fn f() -> List[Int] = 0..5");
+    let ir = lower("fn f() -> List[Int] = 0..<5");
     assert!(matches!(ir.functions[0].body.kind, IrExprKind::Range { inclusive: false, .. }));
 }
 
 #[test]
 fn lower_range_inclusive() {
-    let ir = lower("fn f() -> List[Int] = 1..=10");
+    let ir = lower("fn f() -> List[Int] = 1...10");
     assert!(matches!(ir.functions[0].body.kind, IrExprKind::Range { inclusive: true, .. }));
 }
 
