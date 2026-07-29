@@ -4,10 +4,13 @@ pre-commit:
       glob: "docs/roadmap/{active,on-hold,done}/*.md"
       run: bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md && git add docs/roadmap/README.md
     rt-oracle-registry:
-      glob: "{crates/almide-codegen/src/emit_wasm/*.rs,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-rt-oracle-registry.sh,scripts/lib/contract-classes.txt}"
+      # emit_wasm/*.rs and rt-oracle-registry.toml were deleted with the v0
+      # retirement (#782) — dead glob members pruned (#981). The hook stays
+      # wired so the tombstone re-arms if emit_wasm/ ever reappears.
+      glob: "{scripts/check-rt-oracle-registry.sh,scripts/lib/contract-classes.txt}"
       run: scripts/check-rt-oracle-registry.sh
     contracts:
-      glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/gen-claims.sh,README.md}"
+      glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/gen-claims.sh,README.md}"
       run: bash scripts/gen-claims.sh && git add README.md && scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
     ratchet-separation:
       run: scripts/check-ratchet-separation.sh

@@ -95,9 +95,21 @@ tcb_block() {
     ml=$(wc -l < proofs/checker.ml | tr -d ' ')
     mli=$(wc -l < proofs/checker.mli | tr -d ' ')
   else
+    # Carrying the recorded number forward is SELF-FULFILLING for the checker
+    # size: the value is read out of the document --check then verifies. Jobs
+    # that have the extracted checker (trust-spine, after make verify-trust)
+    # set GEN_CLAIMS_REQUIRE_MEASURED=1 to forbid this branch entirely (#989);
+    # the light checks-job keeps the fallback for the theorem counts, which
+    # always re-derive from committed sources.
+    if [ "${GEN_CLAIMS_REQUIRE_MEASURED:-}" = "1" ]; then
+      # >&2: tcb_block's stdout is redirected into the block file, so an error
+      # on stdout would vanish into the temp file instead of the log.
+      echo "::error::tcb block: proofs/checker.ml absent but this job requires the MEASURED size (run make verify-trust first) — the carried-forward fallback is self-fulfilling (#989)" >&2
+      exit 2
+    fi
     ml=$(grep -oE '`proofs/checker\.ml` = \*\*[0-9]+ lines\*\*' "$SPINE" | grep -oE '[0-9]+' | head -1)
     mli=$(grep -oE '\(\+ [0-9]+' "$SPINE" | grep -oE '[0-9]+' | head -1)
-    [ -n "$ml" ] && [ -n "$mli" ] || { echo "::error::tcb block: proofs/checker.ml absent and no recorded size to carry forward"; exit 2; }
+    [ -n "$ml" ] && [ -n "$mli" ] || { echo "::error::tcb block: proofs/checker.ml absent and no recorded size to carry forward" >&2; exit 2; }
   fi
   coqn=$(grep -hcE '^(Theorem|Lemma) ' proofs/*.v | paste -sd+ - | bc)
   leann=$(grep -hc '^theorem' crates/almide-perceus-belt/AlmidePerceusBelt/*.lean | paste -sd+ - | bc)

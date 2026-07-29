@@ -19,12 +19,20 @@ ratchet=""
 impl=""
 while IFS= read -r f; do
     case "$f" in
-        proofs/output-parity-baseline.txt) ratchet="$ratchet $f" ;;
-        crates/almide-mir/src/lower/tests*.rs|crates/almide-mir/src/render_wasm/tests*.rs|tests/*.rs)
+        # EVERY ratchet artifact, not just the parity baseline (#988: the list
+        # named exactly one file, so walled-real/coverage/embedded-size
+        # baselines and the abstain ledger were freely co-committable with
+        # implementation). In-source ratchet constants (BASELINE/GENUINE_SKIPS)
+        # ride the test-file arm below via their expectation-flip check.
+        proofs/*-baseline.txt|scripts/*-baseline.txt|crates/almide-interp/interp-abstain-ledger.txt)
+            ratchet="$ratchet $f" ;;
+        crates/almide-mir/tests/*.rs|crates/almide-mir/src/lower/tests*.rs|crates/almide-mir/src/render_wasm/tests*.rs|tests/*.rs)
             impl_test="$f"
             # a test-file change is a ratchet move only when it flips an
             # expectation (expect_err/KnownBroken); adding a new test is fine.
-            if git diff --cached -U0 -- "$f" | grep -qE '^\+.*((expect_err)|(KnownBroken))'; then
+            # an expectation flip OR a ratchet-constant move counts (#988):
+            # BASELINE / GENUINE_SKIPS / MAX_* are "what counts as passing".
+            if git diff --cached -U0 -- "$f" | grep -qE '^\+.*((expect_err)|(KnownBroken)|(BASELINE[: ])|(GENUINE_SKIPS)|(MAX_[A-Z_]+ *=))'; then
                 ratchet="$ratchet $f"
             fi
             ;;
