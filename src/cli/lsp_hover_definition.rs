@@ -39,10 +39,39 @@ fn compute_hover(doc: &AnalyzedDoc, pos: Position) -> Option<Hover> {
 // Go to Definition — dispatches on Located word, walks AST for declaration
 // ══════════════════════════════════════════════════════════════
 
-/// Extract the identifier word (`[A-Za-z0-9_]+`) touching column `col` in
-/// `line`, plus its `[start, end)` byte range. Shared by `compute_definition`
-/// and `compute_rename`, which had identical copies of this word-boundary
-/// scan.
+/// LSP positions arrive in UTF-16 code units — the encoding this server
+/// declares in its capabilities. Convert one to a byte offset into `line`,
+/// clamping past-EOL positions to the line end. Slicing with the raw
+/// `character` value treated bytes as columns: any non-ASCII text before the
+/// cursor produced wrong offsets, and a cursor past a char boundary or past
+/// EOL panicked the server (#927). The returned offset is always a char
+/// boundary.
+fn utf16_col_to_byte(line: &str, col: u32) -> usize {
+    let mut units = 0u32;
+    for (byte, ch) in line.char_indices() {
+        if units >= col {
+            return byte;
+        }
+        units += ch.len_utf16() as u32;
+    }
+    line.len()
+}
+
+/// 1-indexed char column — the lexer's span/diagnostic convention — to
+/// 0-based UTF-16 code units, for every position this server emits.
+fn char_col_to_utf16(line: &str, char_col: usize) -> u32 {
+    line.chars().take(char_col.saturating_sub(1)).map(|c| c.len_utf16() as u32).sum()
+}
+
+/// Byte offset into `line` to 0-based UTF-16 code units, for emitted
+/// positions derived from byte scans (`str::find` results).
+fn byte_col_to_utf16(line: &str, byte: usize) -> u32 {
+    line[..byte.min(line.len())].chars().map(|c| c.len_utf16() as u32).sum()
+}
+
+/// Extract the identifier word (`[A-Za-z0-9_]+`) touching byte column `col`
+/// in `line`, plus its `[start, end)` byte range. `col` must be a char
+/// boundary (convert LSP positions through `utf16_col_to_byte` first).
 fn word_at(line: &str, col: usize) -> Option<(&str, usize, usize)> {
     if col >= line.len() { return None; }
     let start = line[..col].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
@@ -55,7 +84,7 @@ fn word_at(line: &str, col: usize) -> Option<(&str, usize, usize)> {
 /// `compute_definition`'s first phase: search the current file's own
 /// declarations (fn/type/top-let name, or a variant constructor name) for
 /// a match. Extracted verbatim.
-fn find_decl_definition(program: &crate::ast::Program, word: &str, uri: &Uri) -> Option<Location> {
+fn find_decl_definition(program: &crate::ast::Program, word: &str, uri: &Uri, lines: &[&str]) -> Option<Location> {
     for decl in &program.decls {
         let (name, span) = match decl {
             crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), span),
@@ -64,7 +93,7 @@ fn find_decl_definition(program: &crate::ast::Program, word: &str, uri: &Uri) ->
             _ => continue,
         };
         if name == word {
-            return span_to_location(span, uri);
+            return span_to_location(span, uri, lines);
         }
         // Variant constructors
         if let crate::ast::Decl::Type { ty: crate::ast::TypeExpr::Variant { cases }, span, .. } = decl {
@@ -75,7 +104,7 @@ fn find_decl_definition(program: &crate::ast::Program, word: &str, uri: &Uri) ->
                     crate::ast::VariantCase::Record { name, .. } => name.as_str(),
                 };
                 if case_name == word {
-                    return span_to_location(span, uri);
+                    return span_to_location(span, uri, lines);
                 }
             }
         }
@@ -122,25 +151,25 @@ fn find_stdlib_definition(line: &str, word: &str, start: usize, end: usize) -> O
 fn compute_definition(doc: &AnalyzedDoc, pos: Position, uri: &Uri) -> Option<Location> {
     let lines: Vec<&str> = doc.source.lines().collect();
     let line = lines.get(pos.line as usize)?;
-    let col = pos.character as usize;
+    let col = utf16_col_to_byte(line, pos.character);
     let (word, start, end) = word_at(line, col)?;
 
-    if let Some(loc) = find_decl_definition(&doc.program, word, uri) {
+    if let Some(loc) = find_decl_definition(&doc.program, word, uri, &lines) {
         return Some(loc);
     }
 
     find_stdlib_definition(line, word, start, end)
 }
 
-fn span_to_location(span: &Option<crate::ast::Span>, uri: &Uri) -> Option<Location> {
+fn span_to_location(span: &Option<crate::ast::Span>, uri: &Uri, lines: &[&str]) -> Option<Location> {
     let s = span.as_ref()?;
     let line = s.line.saturating_sub(1) as u32;
-    let col = s.col.saturating_sub(1) as u32;
+    let line_text = lines.get(line as usize).copied().unwrap_or("");
     Some(Location {
         uri: uri.clone(),
         range: Range {
-            start: Position { line, character: col },
-            end: Position { line, character: s.end_col as u32 },
+            start: Position { line, character: char_col_to_utf16(line_text, s.col) },
+            end: Position { line, character: char_col_to_utf16(line_text, s.end_col) },
         },
     })
 }
@@ -152,8 +181,8 @@ fn span_to_location(span: &Option<crate::ast::Span>, uri: &Uri) -> Option<Locati
 fn compute_completions(source: &str, pos: Position) -> Vec<CompletionItem> {
     let lines: Vec<&str> = source.lines().collect();
     let line = match lines.get(pos.line as usize) { Some(l) => *l, None => return vec![] };
-    let col = pos.character as usize;
-    let prefix = &line[..col.min(line.len())];
+    let col = utf16_col_to_byte(line, pos.character);
+    let prefix = &line[..col];
 
     if let Some(dot_pos) = prefix.rfind('.') {
         let module_start = prefix[..dot_pos].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
@@ -189,7 +218,8 @@ fn compute_completions(source: &str, pos: Position) -> Vec<CompletionItem> {
 // Document Symbols
 // ══════════════════════════════════════════════════════════════
 
-fn compute_document_symbols(doc: &AnalyzedDoc) -> Vec<SymbolInformation> {
+fn compute_document_symbols(doc: &AnalyzedDoc, uri: &Uri) -> Vec<SymbolInformation> {
+    let lines: Vec<&str> = doc.source.lines().collect();
     let mut symbols = Vec::new();
     for decl in &doc.program.decls {
         let (name, kind, span) = match decl {
@@ -200,11 +230,12 @@ fn compute_document_symbols(doc: &AnalyzedDoc) -> Vec<SymbolInformation> {
             _ => continue,
         };
         let line = span.as_ref().map(|s| s.line.saturating_sub(1) as u32).unwrap_or(0);
-        let col = span.as_ref().map(|s| s.col.saturating_sub(1) as u32).unwrap_or(0);
+        let line_text = lines.get(line as usize).copied().unwrap_or("");
+        let col = span.as_ref().map(|s| char_col_to_utf16(line_text, s.col)).unwrap_or(0);
         #[allow(deprecated)]
         symbols.push(SymbolInformation {
             name, kind,
-            location: Location { uri: Uri::from_str("file:///").unwrap(), range: Range { start: Position { line, character: col }, end: Position { line, character: col } } },
+            location: Location { uri: uri.clone(), range: Range { start: Position { line, character: col }, end: Position { line, character: col } } },
             tags: None, deprecated: None, container_name: None,
         });
     }
@@ -249,7 +280,7 @@ fn find_active_call(prefix: &str) -> Option<(usize, u32)> {
 fn compute_signature_help(source: &str, pos: Position, doc: Option<&AnalyzedDoc>) -> Option<SignatureHelp> {
     let lines: Vec<&str> = source.lines().collect();
     let line = lines.get(pos.line as usize)?;
-    let prefix = &line[..pos.character as usize];
+    let prefix = &line[..utf16_col_to_byte(line, pos.character)];
 
     let (paren_pos, active_param) = find_active_call(prefix)?;
     let before = prefix[..paren_pos].trim_end();
@@ -297,33 +328,8 @@ fn make_sig_help(prefix: &str, params: &[(crate::intern::Sym, crate::types::Ty)]
     }
 }
 
-// ══════════════════════════════════════════════════════════════
-// Rename
-// ══════════════════════════════════════════════════════════════
-
-fn compute_rename(source: &str, pos: Position, uri: &Uri, new_name: &str) -> Option<WorkspaceEdit> {
-    let lines: Vec<&str> = source.lines().collect();
-    let line = lines.get(pos.line as usize)?;
-    let col = pos.character as usize;
-    let (old_name, _, _) = word_at(line, col)?;
-
-    let mut edits = Vec::new();
-    for (line_idx, line_text) in lines.iter().enumerate() {
-        let mut search_from = 0;
-        while let Some(found) = line_text[search_from..].find(old_name) {
-            let abs = search_from + found;
-            let before_ok = abs == 0 || { let b = line_text.as_bytes()[abs - 1]; !b.is_ascii_alphanumeric() && b != b'_' };
-            let after = abs + old_name.len();
-            let after_ok = after >= line_text.len() || { let b = line_text.as_bytes()[after]; !b.is_ascii_alphanumeric() && b != b'_' };
-            if before_ok && after_ok {
-                edits.push(TextEdit {
-                    range: Range { start: Position { line: line_idx as u32, character: abs as u32 }, end: Position { line: line_idx as u32, character: after as u32 } },
-                    new_text: new_name.to_string(),
-                });
-            }
-            search_from = after;
-        }
-    }
-    if edits.is_empty() { return None; }
-    Some(WorkspaceEdit { changes: Some(HashMap::from([(uri.clone(), edits)])), ..Default::default() })
-}
+// Rename was removed from the advertised capabilities: the previous
+// implementation was an unscoped textual find/replace over the raw buffer —
+// no scope resolution, no shadowing, matches inside string literals and
+// comments, single-file only — which silently corrupts user code (#927).
+// It returns when it can be binding-aware via the Checker.

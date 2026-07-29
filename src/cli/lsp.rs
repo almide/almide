@@ -15,17 +15,22 @@ struct AnalyzedDoc {
     lsp_diagnostics: Vec<Diagnostic>,
 }
 
+/// Dependency source dirs cached per almide.toml, so a keystroke never
+/// re-runs the fetcher (which shells out to git and writes almide.lock).
+type DepCache = HashMap<std::path::PathBuf, Vec<(crate::project::PkgId, std::path::PathBuf)>>;
+
 impl AnalyzedDoc {
-    fn analyze(source: &str, file_path: Option<&str>) -> Self {
+    fn analyze(source: &str, file_path: Option<&str>, deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Self {
+        let src_lines: Vec<&str> = source.lines().collect();
         let tokens = crate::lexer::Lexer::tokenize(source);
         let mut parser = crate::parser::Parser::new(tokens);
         let (mut program, parse_errors) = match parser.parse() {
             Ok(p) => {
-                let errs: Vec<Diagnostic> = parser.errors.iter().map(|e| diag_from_almide(e)).collect();
+                let errs: Vec<Diagnostic> = parser.errors.iter().map(|e| diag_from_almide(e, &src_lines)).collect();
                 (p, errs)
             }
             Err(_) => {
-                let errs = parser.errors.iter().map(|e| diag_from_almide(e)).collect();
+                let errs = parser.errors.iter().map(|e| diag_from_almide(e, &src_lines)).collect();
                 return AnalyzedDoc {
                     source: source.to_string(),
                     program: empty_program(),
@@ -44,9 +49,10 @@ impl AnalyzedDoc {
             };
         }
 
-        // Cross-file import resolution
+        // Cross-file import resolution against the caller-provided dep list —
+        // analyze itself never fetches.
         let resolved_modules = file_path
-            .map(|fp| resolve_imports_for_lsp(fp, &program))
+            .map(|fp| resolve_imports_cached(fp, &program, deps))
             .unwrap_or_default();
 
         let canon = crate::canonicalize::canonicalize_program(
@@ -68,7 +74,7 @@ impl AnalyzedDoc {
         for d in &check_diags {
             // Suppress E015 (reimpl-lint) for stdlib source files
             if is_stdlib && d.code.as_deref() == Some("E015") { continue; }
-            diags.push(diag_from_almide(d));
+            diags.push(diag_from_almide(d, &src_lines));
         }
 
         AnalyzedDoc {
@@ -312,11 +318,12 @@ fn find_node_usage_lookup(doc: &AnalyzedDoc, word: &str, line: u32) -> Option<Lo
     find_user_ident(doc, word)
 }
 
-fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
+fn find_node(doc: &AnalyzedDoc, line: u32, col_utf16: u32) -> Option<Located> {
     let source = &doc.source;
     let lines: Vec<&str> = source.lines().collect();
     let line_text = lines.get(line as usize)?;
-    let (word, start, end) = word_at(line_text, col as usize)?;
+    let col = utf16_col_to_byte(line_text, col_utf16);
+    let (word, start, end) = word_at(line_text, col)?;
 
     // 1. Keywords
     if let Some(info) = lookup_keyword_info(word) {
@@ -423,9 +430,18 @@ fn find_ident_in_stmt(stmt: &crate::ast::Stmt, name: &str, type_map: &crate::typ
 // LSP Server
 // ══════════════════════════════════════════════════════════════
 
-/// `run_lsp`'s server-capabilities declaration. Extracted verbatim.
+/// `run_lsp`'s server-capabilities declaration.
+///
+/// `position_encoding` declares UTF-16 explicitly — that is what an LSP
+/// client sends by default, and every position this server reads or emits is
+/// converted through the utf16/char-column helpers rather than sliced as raw
+/// bytes (#927). Rename is deliberately NOT advertised: the old
+/// implementation was an unscoped textual find/replace (renamed matches
+/// inside strings, comments, and shadowed scopes), which silently corrupts
+/// user code. It comes back when it can be binding-aware via the Checker.
 fn lsp_server_capabilities() -> ServerCapabilities {
     ServerCapabilities {
+        position_encoding: Some(PositionEncodingKind::UTF16),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         completion_provider: Some(CompletionOptions {
@@ -441,7 +457,6 @@ fn lsp_server_capabilities() -> ServerCapabilities {
             work_done_progress_options: Default::default(),
         }),
         workspace_symbol_provider: Some(OneOf::Left(true)),
-        rename_provider: Some(OneOf::Left(true)),
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
         ..Default::default()
     }
@@ -456,15 +471,21 @@ fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> 
 }
 
 /// `run_lsp`'s notification dispatch (`didOpen`/`didChange`/`didClose`).
-/// Extracted verbatim.
-fn handle_notification(notif: Notification, connection: &Connection, documents: &mut HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>) {
+///
+/// Dep fetching (git shell-out, almide.lock write) is allowed only on
+/// didOpen — opening a file is a deliberate user action. didChange runs on
+/// every keystroke and serves the dep list cached at open time; a project
+/// never opened in this session analyzes against no deps rather than
+/// touching the network (#927).
+fn handle_notification(notif: Notification, connection: &Connection, documents: &mut HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>, dep_cache: &mut DepCache) {
     match notif.method.as_str() {
         "textDocument/didOpen" => {
             if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params) {
                 let uri = params.text_document.uri.clone();
                 let source = params.text_document.text;
                 let file_path = uri_to_path(&uri);
-                let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
+                let deps = project_deps_for(file_path.as_deref(), dep_cache, true);
+                let doc = AnalyzedDoc::analyze(&source, file_path.as_deref(), &deps);
                 publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
                 documents.insert(uri.clone(), source);
                 analyzed.insert(uri, doc);
@@ -476,7 +497,8 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
                 if let Some(change) = params.content_changes.into_iter().last() {
                     let source = change.text;
                     let file_path = uri_to_path(&uri);
-                    let doc = AnalyzedDoc::analyze(&source, file_path.as_deref());
+                    let deps = project_deps_for(file_path.as_deref(), dep_cache, false);
+                    let doc = AnalyzedDoc::analyze(&source, file_path.as_deref(), &deps);
                     publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
                     documents.insert(uri.clone(), source);
                     analyzed.insert(uri, doc);
@@ -507,6 +529,7 @@ pub fn run_lsp() {
 
     let mut documents: HashMap<Uri, String> = HashMap::new();
     let mut analyzed: HashMap<Uri, AnalyzedDoc> = HashMap::new();
+    let mut dep_cache: DepCache = HashMap::new();
 
     for msg in &connection.receiver {
         match msg {
@@ -517,7 +540,7 @@ pub fn run_lsp() {
                     connection.sender.send(Message::Response(r)).ok();
                 }
             }
-            Message::Notification(notif) => handle_notification(notif, &connection, &mut documents, &mut analyzed),
+            Message::Notification(notif) => handle_notification(notif, &connection, &mut documents, &mut analyzed, &mut dep_cache),
             Message::Response(_) => {}
         }
     }
@@ -547,7 +570,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
         "textDocument/documentSymbol" => {
             let params: DocumentSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
             let doc = analyzed.get(&params.text_document.uri)?;
-            let symbols = compute_document_symbols(doc);
+            let symbols = compute_document_symbols(doc, &params.text_document.uri);
             let result = serde_json::to_value(DocumentSymbolResponse::Flat(symbols)).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
@@ -582,15 +605,6 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let params: WorkspaceSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
             let symbols = compute_workspace_symbols(&params.query, workspace_root);
             let result = serde_json::to_value(symbols).ok()?;
-            Some(Response::new_ok(req.id.clone(), result))
-        }
-        "textDocument/rename" => {
-            let params: RenameParams = serde_json::from_value(req.params.clone()).ok()?;
-            let uri = &params.text_document_position.text_document.uri;
-            let pos = params.text_document_position.position;
-            let source = documents.get(uri)?;
-            let edit = compute_rename(source, pos, uri, &params.new_name);
-            let result = edit.map(|e| serde_json::to_value(e).unwrap_or(serde_json::Value::Null)).unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/codeAction" => {
