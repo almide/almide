@@ -112,7 +112,7 @@ evidence  = [
 id        = "C-004"
 spec      = "ALS-R3"
 title     = "fan.race / fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: fan.settle THUNK side-effect interleaving is wall-clock on native (real threads) and sequential on wasm — settle pins its RESULT list order only."
+statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
