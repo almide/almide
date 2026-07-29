@@ -144,11 +144,15 @@ fn int.from_int8(n: Int8) -> Int
 fn int.from_uint16(n: UInt16) -> Int
 fn int.from_uint32(n: UInt32) -> Int
 fn int.from_uint64(n: UInt64) -> Int
+fn int.from_uint64_checked(n: UInt64) -> Option[Int]
+fn int.from_uint64_saturating(n: UInt64) -> Int
 fn int.from_uint8(n: UInt8) -> Int
 fn int.log2_ceil(n: Int) -> Int
 fn int.log2_floor(n: Int) -> Int
 fn int.max(a: Int, b: Int) -> Int
+fn int.max_value() -> Int
 fn int.min(a: Int, b: Int) -> Int
+fn int.min_value() -> Int
 fn int.next_power_of_two(n: Int) -> Int
 fn int.parse(s: String) -> Result[Int, String]
 fn int.pop_count(n: Int) -> Int
