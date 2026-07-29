@@ -51,3 +51,75 @@ fn int64_to_float64(x: Int64) -> Float64 = {
   let v = int.from_int64(x)
   int.to_float64(v)
 }
+
+// Lossy-pair trio (matrix rule): checked/saturating via the same int pivot.
+fn int64_to_int8_checked(x: Int64) -> Option[Int8] = {
+  let i = int.from_int64(x)
+  int.to_int8_checked(i)
+}
+
+fn int64_to_int8_saturating(x: Int64) -> Int8 = {
+  let i = int.from_int64(x)
+  int.to_int8_saturating(i)
+}
+
+fn int64_to_int16_checked(x: Int64) -> Option[Int16] = {
+  let i = int.from_int64(x)
+  int.to_int16_checked(i)
+}
+
+fn int64_to_int16_saturating(x: Int64) -> Int16 = {
+  let i = int.from_int64(x)
+  int.to_int16_saturating(i)
+}
+
+fn int64_to_int32_checked(x: Int64) -> Option[Int32] = {
+  let i = int.from_int64(x)
+  int.to_int32_checked(i)
+}
+
+fn int64_to_int32_saturating(x: Int64) -> Int32 = {
+  let i = int.from_int64(x)
+  int.to_int32_saturating(i)
+}
+
+fn int64_to_uint8_checked(x: Int64) -> Option[UInt8] = {
+  let i = int.from_int64(x)
+  int.to_uint8_checked(i)
+}
+
+fn int64_to_uint8_saturating(x: Int64) -> UInt8 = {
+  let i = int.from_int64(x)
+  int.to_uint8_saturating(i)
+}
+
+fn int64_to_uint16_checked(x: Int64) -> Option[UInt16] = {
+  let i = int.from_int64(x)
+  int.to_uint16_checked(i)
+}
+
+fn int64_to_uint16_saturating(x: Int64) -> UInt16 = {
+  let i = int.from_int64(x)
+  int.to_uint16_saturating(i)
+}
+
+fn int64_to_uint32_checked(x: Int64) -> Option[UInt32] = {
+  let i = int.from_int64(x)
+  int.to_uint32_checked(i)
+}
+
+fn int64_to_uint32_saturating(x: Int64) -> UInt32 = {
+  let i = int.from_int64(x)
+  int.to_uint32_saturating(i)
+}
+
+fn int64_to_uint64_checked(x: Int64) -> Option[UInt64] = {
+  let i = int.from_int64(x)
+  int.to_uint64_checked(i)
+}
+
+fn int64_to_uint64_saturating(x: Int64) -> UInt64 = {
+  let i = int.from_int64(x)
+  int.to_uint64_saturating(i)
+}
+

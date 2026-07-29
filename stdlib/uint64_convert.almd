@@ -79,3 +79,105 @@ fn uint64_to_string(x: UInt64) -> String = {
     int.to_string(int.from_uint64(q)) + int.to_string(int.from_uint64(r))
   }
 }
+
+// Lossy-pair trio (matrix rule): checked/saturating via the same int pivot.
+fn uint64_to_int8_checked(x: UInt64) -> Option[Int8] = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_int8_checked(i)
+  else None
+}
+
+fn uint64_to_int8_saturating(x: UInt64) -> Int8 = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_int8_saturating(i)
+  else int.to_int8(127)
+}
+
+fn uint64_to_int16_checked(x: UInt64) -> Option[Int16] = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_int16_checked(i)
+  else None
+}
+
+fn uint64_to_int16_saturating(x: UInt64) -> Int16 = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_int16_saturating(i)
+  else int.to_int16(32767)
+}
+
+fn uint64_to_int32_checked(x: UInt64) -> Option[Int32] = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_int32_checked(i)
+  else None
+}
+
+fn uint64_to_int32_saturating(x: UInt64) -> Int32 = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_int32_saturating(i)
+  else int.to_int32(2147483647)
+}
+
+fn uint64_to_int64_checked(x: UInt64) -> Option[Int64] = {
+  let i = int.from_uint64(x)
+  if i >= 0 then {
+    let v = int.to_int64(i)
+    Some(v)
+  }
+  else None
+}
+
+fn uint64_to_int64_saturating(x: UInt64) -> Int64 = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_int64(i)
+  else int.to_int64(9223372036854775807)
+}
+
+fn uint64_to_uint8_checked(x: UInt64) -> Option[UInt8] = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_uint8_checked(i)
+  else None
+}
+
+fn uint64_to_uint8_saturating(x: UInt64) -> UInt8 = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_uint8_saturating(i)
+  else int.to_uint8(255)
+}
+
+fn uint64_to_uint16_checked(x: UInt64) -> Option[UInt16] = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_uint16_checked(i)
+  else None
+}
+
+fn uint64_to_uint16_saturating(x: UInt64) -> UInt16 = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_uint16_saturating(i)
+  else int.to_uint16(65535)
+}
+
+fn uint64_to_uint32_checked(x: UInt64) -> Option[UInt32] = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_uint32_checked(i)
+  else None
+}
+
+fn uint64_to_uint32_saturating(x: UInt64) -> UInt32 = {
+  let i = int.from_uint64(x)
+  if i >= 0 then int.to_uint32_saturating(i)
+  else int.to_uint32(4294967295)
+}
+
+
+// U64 -> Int trio tail (int.from_uint64_checked/_saturating): upper half is None/i64::MAX.
+fn int_from_uint64_checked(x: UInt64) -> Option[Int] = {
+  let i = int.from_uint64(x)
+  if i >= 0 then Some(i)
+  else None
+}
+
+fn int_from_uint64_saturating(x: UInt64) -> Int = {
+  let i = int.from_uint64(x)
+  if i >= 0 then i
+  else 9223372036854775807
+}

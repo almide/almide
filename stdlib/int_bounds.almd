@@ -1,0 +1,59 @@
+// int_bounds — SELF-HOSTED `min_value`/`max_value` for the Int carrier and all eight
+// sized integer modules (v1 registry source; the native bodies live in each module's
+// own bundled file). Negative literals are built as `0 - N` and i64::MIN as two steps
+// so no token exceeds the i64 literal range. Pure scalar.
+
+fn int_min_value() -> Int = {
+  let a = 0 - 9223372036854775807
+  a - 1
+}
+
+fn int_max_value() -> Int = 9223372036854775807
+
+fn int8_min_value() -> Int8 = {
+  let v = 0 - 128
+  int.to_int8(v)
+}
+
+fn int8_max_value() -> Int8 = int.to_int8(127)
+
+fn int16_min_value() -> Int16 = {
+  let v = 0 - 32768
+  int.to_int16(v)
+}
+
+fn int16_max_value() -> Int16 = int.to_int16(32767)
+
+fn int32_min_value() -> Int32 = {
+  let v = 0 - 2147483648
+  int.to_int32(v)
+}
+
+fn int32_max_value() -> Int32 = int.to_int32(2147483647)
+
+fn int64_min_value() -> Int64 = {
+  let a = 0 - 9223372036854775807
+  let b = a - 1
+  int.to_int64(b)
+}
+
+fn int64_max_value() -> Int64 = int.to_int64(9223372036854775807)
+
+fn uint8_min_value() -> UInt8 = int.to_uint8(0)
+
+fn uint8_max_value() -> UInt8 = int.to_uint8(255)
+
+fn uint16_min_value() -> UInt16 = int.to_uint16(0)
+
+fn uint16_max_value() -> UInt16 = int.to_uint16(65535)
+
+fn uint32_min_value() -> UInt32 = int.to_uint32(0)
+
+fn uint32_max_value() -> UInt32 = int.to_uint32(4294967295)
+
+fn uint64_min_value() -> UInt64 = int.to_uint64(0)
+
+fn uint64_max_value() -> UInt64 = {
+  let v = 0 - 1
+  int.to_uint64(v)
+}

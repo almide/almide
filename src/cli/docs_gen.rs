@@ -45,9 +45,10 @@ pub fn cmd_docs_gen(check: bool) {
     drifts.extend(check_auto_imported(&llms));
     drifts.extend(check_diagnostic_registry_bijection());
     drifts.extend(check_stdlib_fn_count());
+    drifts.extend(check_numeric_conversion_matrix());
 
     if drifts.is_empty() {
-        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count)"));
+        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix)"));
         return;
     }
 
@@ -284,6 +285,82 @@ fn check_stdlib_fn_count() -> Vec<String> {
                     ));
                 }
             }
+        }
+    }
+    drifts
+}
+
+/// The integer-conversion MATRIX gate (#956). The conversion family is defined
+/// by a rule, not by enumeration-by-hand: over the carriers {Int, Int8..Int64,
+/// UInt8..UInt64}, every ordered pair has the plain (truncating) form, and a
+/// pair whose source range does not fit the destination — a LOSSY pair — must
+/// also have `_checked` (Option on overflow) and `_saturating` (clamp), while a
+/// lossless pair must NOT (an always-`Some` checked variant is noise). Every
+/// carrier module also carries `min_value`/`max_value`. This computes the
+/// expected surface from the range table and diffs it against the compiler's
+/// own module interfaces in both directions, so the family can never again be
+/// extended point-wise: a new carrier or a forgotten cell is a drift here.
+fn check_numeric_conversion_matrix() -> Vec<String> {
+    // (module, min, max) — i128 so u64::MAX fits.
+    const CARRIERS: &[(&str, i128, i128)] = &[
+        ("int8", i8::MIN as i128, i8::MAX as i128),
+        ("int16", i16::MIN as i128, i16::MAX as i128),
+        ("int32", i32::MIN as i128, i32::MAX as i128),
+        ("int64", i64::MIN as i128, i64::MAX as i128),
+        ("uint8", 0, u8::MAX as i128),
+        ("uint16", 0, u16::MAX as i128),
+        ("uint32", 0, u32::MAX as i128),
+        ("uint64", 0, u64::MAX as i128),
+    ];
+    const INT: (&str, i128, i128) = ("int", i64::MIN as i128, i64::MAX as i128);
+    let lossy = |s: &(&str, i128, i128), d: &(&str, i128, i128)| !(d.1 <= s.1 && s.2 <= d.2);
+
+    let mut expect_present: Vec<(&str, String)> = Vec::new();
+    let mut expect_absent: Vec<(&str, String)> = Vec::new();
+    for s in CARRIERS {
+        for d in CARRIERS.iter().filter(|d| d.0 != s.0) {
+            expect_present.push((s.0, format!("to_{}", d.0)));
+            let target = if lossy(s, d) { &mut expect_present } else { &mut expect_absent };
+            target.push((s.0, format!("to_{}_checked", d.0)));
+            target.push((s.0, format!("to_{}_saturating", d.0)));
+        }
+        // The Int column is spelled on the `int` module: plain `from_<s>`, and
+        // the trio tail exactly for the one lossy widening (UInt64 → Int).
+        expect_present.push(("int", format!("from_{}", s.0)));
+        let target = if lossy(s, &INT) { &mut expect_present } else { &mut expect_absent };
+        target.push(("int", format!("from_{}_checked", s.0)));
+        target.push(("int", format!("from_{}_saturating", s.0)));
+        // The Int row: plain `to_<d>` always; trio iff lossy (Int → Int64 is
+        // the identity range, so its checked/saturating must not exist).
+        expect_present.push(("int", format!("to_{}", s.0)));
+        let target = if lossy(&INT, s) { &mut expect_present } else { &mut expect_absent };
+        target.push(("int", format!("to_{}_checked", s.0)));
+        target.push(("int", format!("to_{}_saturating", s.0)));
+    }
+    for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
+        expect_present.push((m, "min_value".to_string()));
+        expect_present.push((m, "max_value".to_string()));
+    }
+
+    let mut drifts = Vec::new();
+    let mut surface: std::collections::HashMap<&str, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
+    for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
+        let (file, lenient) = super::compile::resolve_module_to_file(m);
+        let (program, source_text, checker) =
+            super::compile::parse_and_typecheck_for_compile(&file, lenient);
+        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+        let iface = almide::interface::extract(&ir, m, Some(&source_text));
+        surface.insert(m, iface.functions.iter().map(|f| f.name.clone()).collect());
+    }
+    for (m, f) in &expect_present {
+        if !surface[m].contains(f) {
+            drifts.push(format!("numeric matrix: `{m}.{f}` is required (lossy pair or bounds) but missing"));
+        }
+    }
+    for (m, f) in &expect_absent {
+        if surface[m].contains(f) {
+            drifts.push(format!("numeric matrix: `{m}.{f}` exists but the pair is lossless — a checked/saturating form there is noise; remove it or fix the range table"));
         }
     }
     drifts

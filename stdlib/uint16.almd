@@ -13,3 +13,15 @@ fn to_uint64(x: UInt16) -> UInt64 = int.to_uint64(int.from_uint16(x))
 fn to_float32(x: UInt16) -> Float32 = int.to_float32(int.from_uint16(x))
 fn to_float64(x: UInt16) -> Float64 = int.to_float64(int.from_uint16(x))
 fn to_string(x: UInt16) -> String = int.to_string(int.from_uint16(x))
+
+// ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
+fn to_int8_checked(x: UInt16) -> Option[Int8] = int.to_int8_checked(int.from_uint16(x))
+fn to_int8_saturating(x: UInt16) -> Int8 = int.to_int8_saturating(int.from_uint16(x))
+fn to_int16_checked(x: UInt16) -> Option[Int16] = int.to_int16_checked(int.from_uint16(x))
+fn to_int16_saturating(x: UInt16) -> Int16 = int.to_int16_saturating(int.from_uint16(x))
+fn to_uint8_checked(x: UInt16) -> Option[UInt8] = int.to_uint8_checked(int.from_uint16(x))
+fn to_uint8_saturating(x: UInt16) -> UInt8 = int.to_uint8_saturating(int.from_uint16(x))
+
+// ── Bounds ──
+fn min_value() -> UInt16 = int.to_uint16(0)
+fn max_value() -> UInt16 = int.to_uint16(65535)

@@ -29,3 +29,52 @@ fn to_float64(x: UInt64) -> Float64 =
 fn to_string(x: UInt64) -> String =
   if int.from_uint64(x) >= 0 then int.to_string(int.from_uint64(x))
   else int.to_string(int.from_uint64(x / 10)) + int.to_string(int.from_uint64(x % 10))
+
+// ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
+fn to_int8_checked(x: UInt64) -> Option[Int8] =
+  if int.from_uint64(x) >= 0 then int.to_int8_checked(int.from_uint64(x))
+  else None
+fn to_int8_saturating(x: UInt64) -> Int8 =
+  if int.from_uint64(x) >= 0 then int.to_int8_saturating(int.from_uint64(x))
+  else int.to_int8(127)
+fn to_int16_checked(x: UInt64) -> Option[Int16] =
+  if int.from_uint64(x) >= 0 then int.to_int16_checked(int.from_uint64(x))
+  else None
+fn to_int16_saturating(x: UInt64) -> Int16 =
+  if int.from_uint64(x) >= 0 then int.to_int16_saturating(int.from_uint64(x))
+  else int.to_int16(32767)
+fn to_int32_checked(x: UInt64) -> Option[Int32] =
+  if int.from_uint64(x) >= 0 then int.to_int32_checked(int.from_uint64(x))
+  else None
+fn to_int32_saturating(x: UInt64) -> Int32 =
+  if int.from_uint64(x) >= 0 then int.to_int32_saturating(int.from_uint64(x))
+  else int.to_int32(2147483647)
+fn to_int64_checked(x: UInt64) -> Option[Int64] =
+  if int.from_uint64(x) >= 0 then Some(int.to_int64(int.from_uint64(x)))
+  else None
+fn to_int64_saturating(x: UInt64) -> Int64 =
+  if int.from_uint64(x) >= 0 then int.to_int64(int.from_uint64(x))
+  else int.to_int64(9223372036854775807)
+fn to_uint8_checked(x: UInt64) -> Option[UInt8] =
+  if int.from_uint64(x) >= 0 then int.to_uint8_checked(int.from_uint64(x))
+  else None
+fn to_uint8_saturating(x: UInt64) -> UInt8 =
+  if int.from_uint64(x) >= 0 then int.to_uint8_saturating(int.from_uint64(x))
+  else int.to_uint8(255)
+fn to_uint16_checked(x: UInt64) -> Option[UInt16] =
+  if int.from_uint64(x) >= 0 then int.to_uint16_checked(int.from_uint64(x))
+  else None
+fn to_uint16_saturating(x: UInt64) -> UInt16 =
+  if int.from_uint64(x) >= 0 then int.to_uint16_saturating(int.from_uint64(x))
+  else int.to_uint16(65535)
+fn to_uint32_checked(x: UInt64) -> Option[UInt32] =
+  if int.from_uint64(x) >= 0 then int.to_uint32_checked(int.from_uint64(x))
+  else None
+fn to_uint32_saturating(x: UInt64) -> UInt32 =
+  if int.from_uint64(x) >= 0 then int.to_uint32_saturating(int.from_uint64(x))
+  else int.to_uint32(4294967295)
+
+// ── Bounds ──
+fn min_value() -> UInt64 = int.to_uint64(0)
+// -1 reinterprets to the all-ones lane = 2^64 - 1 (truncating `to_uint64`).
+fn max_value() -> UInt64 = int.to_uint64(-1)

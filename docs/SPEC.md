@@ -1081,7 +1081,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ## 17. Standard Library
 
-869 functions across 41 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
+965 functions across 41 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
 ### 17.1 Auto-Imported Modules
 
