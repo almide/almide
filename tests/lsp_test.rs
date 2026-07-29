@@ -9,6 +9,8 @@ use serde_json::{json, Value};
 struct LspClient {
     child: std::process::Child,
     reader: BufReader<std::process::ChildStdout>,
+    /// The `capabilities` object from the initialize response.
+    capabilities: Value,
 }
 
 impl LspClient {
@@ -22,7 +24,7 @@ impl LspClient {
             .expect("failed to start almide lsp");
         let stdout = child.stdout.take().unwrap();
         let reader = BufReader::new(stdout);
-        let mut client = LspClient { child, reader };
+        let mut client = LspClient { child, reader, capabilities: Value::Null };
         client.initialize();
         client
     }
@@ -83,6 +85,7 @@ impl LspClient {
         }));
         let resp = self.recv_response(0);
         assert!(resp.get("result").is_some(), "initialize should succeed");
+        self.capabilities = resp["result"]["capabilities"].clone();
 
         // Send initialized notification
         self.send(&json!({
@@ -155,6 +158,45 @@ impl LspClient {
             "method": "textDocument/documentSymbol",
             "params": {
                 "textDocument": { "uri": uri }
+            }
+        }));
+        self.recv_response(id)
+    }
+
+    fn did_change(&mut self, uri: &str, text: &str) {
+        self.send(&json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{ "text": text }]
+            }
+        }));
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    fn signature_help(&mut self, id: i64, uri: &str, line: u32, character: u32) -> Value {
+        self.send(&json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }
+        }));
+        self.recv_response(id)
+    }
+
+    fn code_action(&mut self, id: i64, uri: &str, diagnostics: Value) -> Value {
+        self.send(&json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/codeAction",
+            "params": {
+                "textDocument": { "uri": uri },
+                "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+                "context": { "diagnostics": diagnostics }
             }
         }));
         self.recv_response(id)
@@ -350,6 +392,150 @@ fn lsp_document_symbols() {
     assert!(names.contains(&"double"), "should contain double: {:?}", names);
     assert!(names.contains(&"Color"), "should contain Color: {:?}", names);
     assert!(names.contains(&"main"), "should contain main: {:?}", names);
+    c.shutdown();
+}
+
+/// UTF-16 code-unit column of `target`'s first occurrence in `line` — the
+/// encoding the server declares and every request position must use.
+fn utf16_col(line: &str, target: &str) -> u32 {
+    let byte = line.find(target).unwrap();
+    line[..byte].chars().map(|c| c.len_utf16() as u32).sum()
+}
+
+#[test]
+fn lsp_capabilities_declare_utf16_and_no_rename() {
+    let mut c = LspClient::start();
+    assert_eq!(
+        c.capabilities["positionEncoding"].as_str(),
+        Some("utf-16"),
+        "server must declare the encoding it honors: {}",
+        c.capabilities
+    );
+    assert!(
+        c.capabilities.get("renameProvider").is_none(),
+        "unscoped textual rename must not be advertised: {}",
+        c.capabilities
+    );
+    c.shutdown();
+}
+
+#[test]
+fn lsp_hover_after_nonascii_text() {
+    let mut c = LspClient::start();
+    // Japanese before the hover target: the UTF-16 column differs from the
+    // byte column, which the old byte-sliced positions either missed or
+    // panicked on.
+    let src = "let greeting = \"world\"\nlet msg = \"こんにちは、\" + greeting\n";
+    c.open_file(TEST_URI, src);
+    let line1 = src.lines().nth(1).unwrap();
+    let resp = c.hover(1, TEST_URI, 1, utf16_col(line1, "greeting"));
+    let val = hover_value(&resp);
+    assert!(val.contains("greeting") && val.contains("String"), "hover after Japanese text: got {}", val);
+    c.shutdown();
+}
+
+#[test]
+fn lsp_position_inside_multibyte_no_panic() {
+    let mut c = LspClient::start();
+    let src = "let msg = \"こんにちは\"\nlet x = 1\n";
+    c.open_file(TEST_URI, src);
+    // A UTF-16 column landing inside the Japanese literal: the old code
+    // sliced the line at that value as a BYTE offset — mid-char — and the
+    // server died of a char-boundary panic.
+    let resp = c.hover(1, TEST_URI, 0, 13);
+    assert!(resp.get("id").is_some(), "server must answer, not die");
+    // And a column far past EOL must clamp, not panic.
+    let resp = c.hover(2, TEST_URI, 0, 10_000);
+    assert!(resp.get("id").is_some(), "past-EOL hover must answer");
+    // The server is still alive and correct afterwards.
+    let line1 = src.lines().nth(1).unwrap();
+    let resp = c.hover(3, TEST_URI, 1, utf16_col(line1, "x"));
+    assert!(hover_value(&resp).contains("Int"), "server still serves after odd positions");
+    c.shutdown();
+}
+
+#[test]
+fn lsp_signature_help_past_eol_no_panic() {
+    let mut c = LspClient::start();
+    let src = "let s = string.len(\"日本語\")\n";
+    c.open_file(TEST_URI, src);
+    // The old code sliced `&line[..pos.character]` with no bound check —
+    // any client cursor past EOL (or inside the multibyte literal) killed
+    // the server.
+    let resp = c.signature_help(1, TEST_URI, 0, 10_000);
+    assert!(resp.get("id").is_some(), "past-EOL signatureHelp must answer");
+    let resp = c.signature_help(2, TEST_URI, 0, utf16_col(src, "\")") + 1);
+    assert!(resp.get("id").is_some(), "signatureHelp near multibyte text must answer");
+    c.shutdown();
+}
+
+#[test]
+fn lsp_document_symbols_carry_real_uri() {
+    let mut c = LspClient::start();
+    c.open_file(TEST_URI, TEST_SOURCE);
+    let resp = c.document_symbols(1, TEST_URI);
+    let symbols = resp["result"].as_array().unwrap();
+    assert!(!symbols.is_empty());
+    for s in symbols {
+        assert_eq!(
+            s["location"]["uri"].as_str(),
+            Some(TEST_URI),
+            "documentSymbol must carry the document's own URI, not a fabricated one: {}",
+            s
+        );
+    }
+    c.shutdown();
+}
+
+#[test]
+fn lsp_didchange_never_fetches_or_writes_lock() {
+    // A project with a dependency manifest: didChange must not shell out to
+    // git or write almide.lock — the old server did both on every keystroke.
+    let dir = std::env::temp_dir().join(format!("almide_lsp_didchange_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("almide.toml"),
+        "[package]\nname = \"lsp_didchange_probe\"\n\n[dependencies]\nnonexistent_pkg = { git = \"https://invalid.invalid/nowhere\", branch = \"main\" }\n",
+    ).unwrap();
+    let file = dir.join("main.almd");
+    std::fs::write(&file, "let x = 1\n").unwrap();
+    let uri = format!("file://{}", file.display());
+
+    let mut c = LspClient::start();
+    // didChange without a prior didOpen: the cache has no entry for this
+    // project, and the no-fetch path must resolve against no deps.
+    c.did_change(&uri, "let x = 2\n");
+    let resp = c.hover(1, &uri, 0, 4);
+    assert!(resp.get("id").is_some(), "server must answer after didChange");
+    assert!(
+        !dir.join("almide.lock").exists(),
+        "didChange must never write almide.lock"
+    );
+    c.shutdown();
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn lsp_try_fix_reaches_client_as_code_action() {
+    let mut c = LspClient::start();
+    // E013 with a close-match suggestion emits a machine-applicable
+    // try_replace fix ("p.name") — it must survive into the published
+    // diagnostic's `data` and come back as a quickfix edit.
+    let src = "type Person = { name: String, age: Int }\nfn get(p: Person) -> String = p.nam\n";
+    c.open_file(TEST_URI, src);
+    let msg = c.recv();
+    let diags = msg["params"]["diagnostics"].clone();
+    let e013 = diags.as_array().unwrap().iter()
+        .find(|d| d["code"].as_str() == Some("E013"))
+        .unwrap_or_else(|| panic!("expected an E013 diagnostic, got {}", diags));
+    assert!(e013.get("data").is_some(), "E013's fix-it must ride in `data`: {}", e013);
+
+    let resp = c.code_action(1, TEST_URI, json!([e013]));
+    let actions = resp["result"].as_array().unwrap();
+    let fix = actions.iter().find(|a| a["title"].as_str().map_or(false, |t| t.contains("p.name")))
+        .unwrap_or_else(|| panic!("expected a quickfix applying `p.name`, got {}", resp["result"]));
+    let edits = &fix["edit"]["changes"][TEST_URI];
+    assert_eq!(edits[0]["newText"].as_str(), Some("p.name"), "quickfix edit text: {}", fix);
     c.shutdown();
 }
 
