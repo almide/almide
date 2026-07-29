@@ -34,12 +34,14 @@ fn build_and_run(src_path: &Path, dir: &Path, wasm_opt: bool) -> Option<(i32, St
     assert!(build.status.success(), "wasm build failed ({}):\n{}", if wasm_opt { "--wasm-opt" } else { "plain" }, String::from_utf8_lossy(&build.stderr));
 
     match Command::new("wasmtime").arg("--dir=/").arg("-S").arg("inherit-env=y").arg(&wasm_path).output() {
-        Ok(o) if o.status.code() != Some(127) => Some((
+        // A 127 guest exit is a comparable observable, not wasmtime-absence
+        // (#991) — only a spawn error means the tool is gone.
+        Ok(o) => Some((
             o.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&o.stdout).trim().to_string(),
             String::from_utf8_lossy(&o.stderr).trim().to_string(),
         )),
-        _ => None,
+        Err(_) => None,
     }
 }
 
@@ -69,14 +71,23 @@ fn wasm_opt_parity_spec() {
         let name = path.file_stem().unwrap().to_str().unwrap().to_string();
         let dir = tempfile::tempdir().unwrap();
 
+        // A mid-corpus spawn failure is this fixture's failure — never
+        // `return` from inside the loop, which dropped the remaining corpus
+        // and the accumulated failures as a green pass (#991).
         let plain = match std::panic::catch_unwind(|| build_and_run(&path, dir.path(), false)) {
             Ok(Some(r)) => r,
-            Ok(None) => return, // wasmtime unavailable mid-run → skip the gate
+            Ok(None) => {
+                failed.push(format!("{name}: wasmtime could not be spawned mid-run (plain)"));
+                continue;
+            }
             Err(_) => { failed.push(format!("{name}: plain build/run panicked")); continue; }
         };
         let opt = match std::panic::catch_unwind(|| build_and_run(&path, dir.path(), true)) {
             Ok(Some(r)) => r,
-            Ok(None) => return,
+            Ok(None) => {
+                failed.push(format!("{name}: wasmtime could not be spawned mid-run (--wasm-opt)"));
+                continue;
+            }
             Err(_) => { failed.push(format!("{name}: --wasm-opt build/run panicked")); continue; }
         };
 

@@ -379,7 +379,11 @@ fn run_native_capture(source: &str) -> (i32, String, String) {
 }
 
 /// Compile to wasm + run via wasmtime; return (exit_code, stdout, stderr).
-/// `None` if wasmtime is unavailable (the assertion is then skipped).
+/// `None` ONLY when wasmtime itself cannot be spawned. A guest exit of 127 is
+/// an ordinary comparable observable (#991): the old `!= Some(127)` guard
+/// conflated it with wasmtime-absence, and the corpus gate `return`ed green
+/// mid-run on the first such fixture — discarding every remaining fixture AND
+/// every failure already accumulated.
 fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
     let dir = tempfile::tempdir().unwrap();
     let src_path = dir.path().join("test.almd");
@@ -391,12 +395,12 @@ fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
         .expect("failed to build wasm");
     assert!(build.status.success(), "wasm build failed:\n{}", String::from_utf8_lossy(&build.stderr));
     match Command::new("wasmtime").arg("--dir=/").arg("-S").arg("inherit-env=y").arg(wasm_path.to_str().unwrap()).output() {
-        Ok(o) if o.status.code() != Some(127) => Some((
+        Ok(o) => Some((
             o.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&o.stdout).trim().to_string(),
             String::from_utf8_lossy(&o.stderr).trim().to_string(),
         )),
-        _ => None,
+        Err(_) => None,
     }
 }
 
