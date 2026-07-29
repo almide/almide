@@ -88,7 +88,7 @@ fn load() -> Result<String, String> {
 ### WASM target
 
 外部ランタイムは存在しない。stdlib は self-hosted な純 Almide 実装
-（`stdlib/*.almd` → `crates/almide-mir/src/render_wasm/registry.rs`）が
+（`stdlib/*.almd` → `crates/almide-types/src/self_host_registry.rs`）が
 ユーザコードと一緒に WAT へコンパイルされ、少数の手書き WAT プリアンブルと
 共にモジュールへ埋め込まれる。詳細: [WASM-OUTPUT.md](./WASM-OUTPUT.md)。
 

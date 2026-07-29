@@ -78,7 +78,7 @@ records. Concrete pieces:
    this, but the recursion is shallow per-level).
 
 3. **`__drop_map_ss`** (generic `Map[String,String]` free, self-host once in `stdlib/value_core.almd`
-   + register in `render_wasm/registry.rs`): the Map is a DynListStr of `2*len` String slots (key,val
+   + register in `almide-types/src/self_host_registry.rs`): the Map is a DynListStr of `2*len` String slots (key,val
    pairs) — rc_dec each of `2 * load32(h+4)` slots, then rc_dec the block. (NOTE: a flat `DropListStr`
    is WRONG here — it uses len@4 = entry count = n, not 2n, leaking the values.)
 
@@ -124,7 +124,7 @@ records. Concrete pieces:
 - `crates/almide-mir/src/lib.rs` — `Op::DropVariant` (258) + the Drop family.
 - `crates/almide-mir/examples/render_program.rs` (~217) + `crates/almide-mir/src/render_wasm/tests_part1.rs`
   (~217) — where `generate_variant_drop_sources` is appended + linked.
-- `stdlib/value_core.almd` + `crates/almide-mir/src/render_wasm/registry.rs` — `__drop_map_ss`.
+- `stdlib/value_core.almd` + `crates/almide-types/src/self_host_registry.rs` — `__drop_map_ss`.
 - svg source: `/Users/o6lvl4/workspace/github.com/almide/svg/src/mod.almd` (Element @ line 11, el @ 44,
   doc @ 47, group @ 97, render_el @ ~205).
 
