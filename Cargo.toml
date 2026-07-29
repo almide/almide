@@ -51,3 +51,11 @@ proptest = "1"
 insta = "1"
 tempfile = "3"
 
+# The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
+# content on any mtime bump — git pull/checkout triggers a full opt-3 recompile
+# of the embedding crate even when content is unchanged (8.6s bin / 30s
+# almide-types cascade). Incremental makes that false positive ~0.8s (#1006).
+# CI builds cold and should opt out via CARGO_INCREMENTAL=0.
+[profile.release]
+incremental = true
+

@@ -49,6 +49,9 @@ env:
   # random. Deep runs stay available through the `minutes` dispatch input, which
   # is where the #812-scale histograms should come from.
   FUZZ_MINUTES: "5"
+  # Cold runners gain nothing from the workspace's release-incremental
+  # profile (#1006) — it only bloats the caches. Opt out.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   # The build is its OWN job so the fuzz job spends its whole runner lifetime

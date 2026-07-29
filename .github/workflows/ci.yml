@@ -37,6 +37,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.89.0"
+  # Cold runners gain nothing from the workspace's release-incremental
+  # profile (#1006) — it only bloats the caches. Opt out.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   # ═══════════════════════════════════════════════
