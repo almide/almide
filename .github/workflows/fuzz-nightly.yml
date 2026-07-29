@@ -182,53 +182,23 @@ jobs:
       # numbers — indistinguishable from a real finding, and #796's "two
       # consecutive green nights" had nothing to read.
       #
-      # The `=== campaign summary ===` block only prints when the campaign loop
-      # exits on its own (time or program budget), so its PRESENCE is the
-      # budget_completed signal — a reclaimed runner cannot fake it. The
-      # `fuzz-night:` line is the per-night record #924 asks for: programs,
-      # elapsed, throughput, findings — one greppable line in the log and the
-      # step summary, so a throughput regression is visible across nights.
-      # A truncated night still reports its last progress line. The streaks the
-      # closure conditions read (#924: 14 full-budget nights, #796: 2 green)
-      # are scored from step conclusions by scripts/fuzz-track-record.sh.
+      # The rendering lives in scripts/fuzz-night-verdict.sh (testable locally,
+      # unlike inline YAML bash): it emits the markdown verdict on stdout and
+      # the greppable `fuzz-night:` record line — programs, elapsed, throughput,
+      # findings, budget_completed — on stderr, so a throughput regression is
+      # visible across nights in the job logs. budget_completed is read from
+      # the fuzzer's own `=== campaign summary ===` block, which only prints
+      # when the campaign loop exits on its own — a reclaimed runner cannot
+      # fake it. The streaks the closure conditions read (#924: 14 full-budget
+      # nights, #796: 2 green) are scored from step conclusions by
+      # scripts/fuzz-track-record.sh.
       - name: Campaign verdict
         if: always()
         run: |
-          MINUTES="${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}"
-          FINDINGS="${{ steps.campaign.outputs.findings || '?' }}"
-          echo "## Nightly fuzz verdict" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ ! -s fuzz-output.txt ]; then
-            echo "The campaign produced no output — it was killed before it started." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          # The campaign header pads its columns ("seed     = N"), so the
-          # separator is `space*=space*`, not a single "= ".
-          SEED=$(grep -oE "seed += +[0-9]+" fuzz-output.txt | tr -s ' ' | head -1 || true)
-          if grep -q "^=== campaign summary ===" fuzz-output.txt; then
-            ELAPSED=$(awk '/^  elapsed /{print $3; exit}' fuzz-output.txt)
-            GENERATED=$(awk '/^  generated /{print $3; exit}' fuzz-output.txt)
-            THROUGHPUT=$(awk '/^  throughput /{print $3; exit}' fuzz-output.txt)
-            LINE="fuzz-night: budget_completed=true minutes=$MINUTES elapsed=$ELAPSED generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS"
-          else
-            LAST=$(grep -E "^ *\[ *[0-9]+s\]" fuzz-output.txt | tail -1 || true)
-            LINE="fuzz-night: budget_completed=false minutes=$MINUTES last_progress=\"${LAST:-<none>}\" findings=$FINDINGS"
-          fi
-          echo "$LINE"
-          {
-            echo '```'
-            echo "$LINE"
-            echo '```'
-            echo ""
-            echo "Campaign ${SEED:-seed unknown} — replay a finding with"
-            echo '`xtarget-fuzz replay --seed S --index I`'
-            if grep -q "^=== campaign summary ===" fuzz-output.txt; then
-              echo ""
-              echo '```'
-              sed -n '/^=== campaign summary ===/,$p' fuzz-output.txt | head -25
-              echo '```'
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          bash scripts/fuzz-night-verdict.sh fuzz-output.txt \
+            "${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}" \
+            "${{ steps.campaign.outputs.findings || '?' }}" \
+            >> "$GITHUB_STEP_SUMMARY" || true
           exit 0
 
       - name: Upload findings
