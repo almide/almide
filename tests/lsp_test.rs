@@ -4,13 +4,63 @@
 
 use std::io::{Read, Write, BufRead, BufReader};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 use serde_json::{json, Value};
+
+/// How long any single server response may take before the test fails.
+/// Reads used to block UNBOUNDED on the server pipe, so a non-responding
+/// server was an infinite test hang — 4h20m on the Windows leg before the
+/// 6h job default would have killed it (#1008). A deadline turns any future
+/// hang into a red naming the wait, in about a minute.
+const RECV_DEADLINE: Duration = Duration::from_secs(60);
 
 struct LspClient {
     child: std::process::Child,
-    reader: BufReader<std::process::ChildStdout>,
+    /// Parsed server messages, delivered by the reader thread — recv'ing
+    /// through a channel is what makes the deadline possible.
+    rx: mpsc::Receiver<Value>,
     /// The `capabilities` object from the initialize response.
     capabilities: Value,
+}
+
+/// The reader half, on its own thread: blocks on the pipe, parses framed
+/// JSON-RPC messages, forwards them. When the child dies (or is killed by
+/// `Drop`) the pipe EOFs and the thread exits.
+fn reader_loop(stdout: std::process::ChildStdout, tx: mpsc::Sender<Value>) {
+    let mut reader = BufReader::new(stdout);
+    loop {
+        let mut header = String::new();
+        let mut len: Option<usize> = None;
+        loop {
+            header.clear();
+            if reader.read_line(&mut header).is_err() || header.is_empty() {
+                return; // EOF / broken pipe — server gone
+            }
+            let trimmed = header.trim();
+            if trimmed.is_empty() {
+                if len.is_some() { break; } // end of headers
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
+                len = rest.trim().parse().ok();
+            }
+        }
+        let Some(len) = len else { return };
+        let mut buf = vec![0u8; len];
+        if reader.read_exact(&mut buf).is_err() { return; }
+        let Ok(msg) = serde_json::from_slice::<Value>(&buf) else { return };
+        if tx.send(msg).is_err() { return; } // client dropped
+    }
+}
+
+impl Drop for LspClient {
+    /// Kill the server on ANY exit path (panic included): a deadline panic
+    /// must not leave an orphan `almide lsp` holding the pipe open.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl LspClient {
@@ -23,8 +73,9 @@ impl LspClient {
             .spawn()
             .expect("failed to start almide lsp");
         let stdout = child.stdout.take().unwrap();
-        let reader = BufReader::new(stdout);
-        let mut client = LspClient { child, reader, capabilities: Value::Null };
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || reader_loop(stdout, tx));
+        let mut client = LspClient { child, rx, capabilities: Value::Null };
         client.initialize();
         client
     }
@@ -39,25 +90,17 @@ impl LspClient {
     }
 
     fn recv(&mut self) -> Value {
-        // Read Content-Length header
-        let mut header = String::new();
-        loop {
-            header.clear();
-            self.reader.read_line(&mut header).unwrap();
-            let trimmed = header.trim();
-            if trimmed.is_empty() { break; }
-            if trimmed.starts_with("Content-Length:") {
-                let len: usize = trimmed.split(':').nth(1).unwrap().trim().parse().unwrap();
-                // Read blank line after header
-                let mut blank = String::new();
-                self.reader.read_line(&mut blank).unwrap();
-                // Read body
-                let mut buf = vec![0u8; len];
-                self.reader.read_exact(&mut buf).unwrap();
-                return serde_json::from_slice(&buf).unwrap();
+        match self.rx.recv_timeout(RECV_DEADLINE) {
+            Ok(msg) => msg,
+            Err(mpsc::RecvTimeoutError::Timeout) => panic!(
+                "no server message within {RECV_DEADLINE:?} — the server is hung \
+                 or fetching (#1008); an unbounded read here previously turned \
+                 this into a 4h+ CI hang"
+            ),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("server pipe closed without a response (server died)")
             }
         }
-        panic!("no response received");
     }
 
     /// Read responses until we find one with the given id.
