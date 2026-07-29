@@ -6,7 +6,7 @@
 effect fn main() -> Unit = {
   let a: Option[Map[String, Int]] = some(["a": 1, "b": 2, "c": -7])
   let b: Option[Map[String, Int]] = none
-  let d: Option[Map[String, Int]] = some(["k\"x": 0, "big": 9223372036854775807])
+  let d: Option[Map[String, Int]] = some(['k"x': 0, "big": 9223372036854775807])
   println("${a}")
   println("${b}")
   println("${d}")

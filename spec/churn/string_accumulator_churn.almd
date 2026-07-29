@@ -5,10 +5,8 @@
 // (rc == 1 + byte-cap headroom in place, geometric growth else) did not exist.
 // Byte-identical output native == wasm; the gate's wall-clock kill catches a
 // regression to the quadratic copy as a hang.
-
-fn grow_tco(acc: String, i: Int, n: Int) -> String =
-  if i >= n then acc
-  else grow_tco(acc + "x", i + 1, n)
+fn grow_tco(acc: String, i: Int, n: Int) -> String = if i >= n then acc
+else grow_tco(acc + "x", i + 1, n)
 
 fn main() -> Unit = {
   var acc = ""

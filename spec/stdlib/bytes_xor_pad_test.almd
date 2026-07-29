@@ -1,5 +1,4 @@
 // bytes.xor / pad_left / pad_right / copy_from
-
 test "xor pairwise" {
   var a = bytes.new(0)
   bytes.append_u8(a, 0xFF)
@@ -11,9 +10,12 @@ test "xor pairwise" {
   bytes.append_u8(b, 0xAA)
   let r = bytes.xor(a, b)
   assert_eq(bytes.len(r), 3)
-  assert_eq(bytes.read_u8(r, 0), 0xAA)  // 0xFF ^ 0x55
-  assert_eq(bytes.read_u8(r, 1), 0xFF)  // 0x0F ^ 0xF0
-  assert_eq(bytes.read_u8(r, 2), 0x00)  // 0xAA ^ 0xAA
+  assert_eq(bytes.read_u8(r, 0), 0xAA)
+  // 0xFF ^ 0x55
+  assert_eq(bytes.read_u8(r, 1), 0xFF)
+  // 0x0F ^ 0xF0
+  // 0xAA ^ 0xAA
+  assert_eq(bytes.read_u8(r, 2), 0x00)
 }
 
 test "xor short result is min length" {

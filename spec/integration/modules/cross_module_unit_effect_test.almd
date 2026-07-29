@@ -30,7 +30,6 @@
 //   - The test file compiles (cross-module lifted calls resolve)
 //   - The emitted WASM validates at instantiate time
 //   - Effect fns called across module boundaries execute correctly
-
 import effectlib
 
 // Cross-module Unit-returning call in tail position
@@ -58,7 +57,6 @@ effect fn main() -> Result[Unit, String] = {
   tail_unit_call()!
   stmt_unit_calls()!
   nested_unit_call()!
-
   println("cross_module_unit_effect: all calls succeeded")
   ok(())
 }

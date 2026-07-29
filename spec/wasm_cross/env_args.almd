@@ -15,7 +15,7 @@
 // the real one. Both legs print length 0, byte-identical. #276
 import env
 
-effect fn main() -> () = {
+effect fn main() -> Unit = {
   let args = env.args()
   println(int.to_string(list.len(args)))
   println(if list.len(args) == 0 then "no-program-args" else "has-program-args")

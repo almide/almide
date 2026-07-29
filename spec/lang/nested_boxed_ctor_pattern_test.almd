@@ -7,8 +7,7 @@
 // is now rewritten to a flat pattern + a `matches!` shape-guard + `let-else`
 // box-move-outs, so a non-match still falls through to a later arm. Runs on BOTH
 // targets (native ⇄ wasm must agree).
-
-type Tree = Leaf(Int) | Node(Tree, Tree)
+type Tree = | Leaf(Int) | Node(Tree, Tree)
 
 fn sum(t: Tree) -> Int = match t {
   Leaf(n) => n,

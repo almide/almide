@@ -2,7 +2,6 @@
 // `guard let name = scrutinee else { … }` binds the unwrapped inner value for the REST
 // of the block; the else branch is the early-exit value. The frontend desugars the block
 // tail into the Some/Ok arm of a match on the scrutinee.
-
 fn first_or(xs: List[Int], d: Int) -> Int = {
   guard let head = list.first(xs) else { d }
   head * 10
@@ -36,9 +35,9 @@ fn unwrap_res(r: Result[Int, String]) -> Int = {
 }
 
 test "guard let unwraps Ok" {
-  assert_eq(unwrap_res(Ok(10)), 11)
+  assert_eq(unwrap_res(ok(10)), 11)
 }
 
 test "guard let takes the else exit on Err" {
-  assert_eq(unwrap_res(Err("x")), 0 - 99)
+  assert_eq(unwrap_res(err("x")), 0 - 99)
 }

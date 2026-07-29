@@ -5,14 +5,21 @@
 // loop can't carry) so the function lowers as REAL recursion (input-bounded, matches v0) instead of
 // walling on a nested-in-loop heap reassign.
 effect fn esc(t: String, p: Int) -> Result[(String, Int), String] = ok(("X", p + 1))
+
 effect fn rd(t: String, p: Int, buf: String) -> Result[(String, Int), String] = {
   if p >= string.len(t) then ok((buf, p))
   else if string.slice(t, p, p + 1) == "y" then {
     let (ch, np) = esc(t, p + 1)!
     rd(t, np, buf + ch)
-  }
-  else rd(t, p + 1, buf + string.slice(t, p, p + 1))
+  } else rd(t, p + 1, buf + string.slice(t, p, p + 1))
 }
+
 effect fn main() -> Unit = {
-  match rd("ayc", 0, "") { ok(r) => { let (s, n) = r  println(s + ":" + int.to_string(n)) }, err(e) => println("E:" + e) }
+  match rd("ayc", 0, "") {
+    ok(r) => {
+      let (s, n) = r
+      println(s + ":" + int.to_string(n))
+    },
+    err(e) => println("E:" + e),
+  }
 }

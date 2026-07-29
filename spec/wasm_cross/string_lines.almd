@@ -4,8 +4,8 @@
 // byte-identical native == wasm. The wasm impl was naive split-on-\n (a
 // spurious trailing empty line + retained \r), masked under an inadequate
 // "verified" fixture that only tested the no-trailing-newline subset.
-fn show(s: String) -> String =
-  "${int.to_string(list.len(string.lines(s)))}:${list.join(string.lines(s), "|")}"
+fn show(s: String) -> String = "${int.to_string(list.len(string.lines(s)))}:${list.join(string.lines(s), "|")}"
+
 fn main() -> Unit = {
   println(show("a\nb\n"))
   println(show("a\nb"))

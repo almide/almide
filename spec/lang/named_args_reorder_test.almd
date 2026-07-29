@@ -2,8 +2,7 @@
 // positional slot they were written in. A legal middle-skip or out-of-order
 // named call type-checks and runs; an ill-typed named value is rejected by E005
 // naming the right parameter (checker matches lowering's by-name binding).
-fn f(a: Int, b: String = "B", c: Int = 0) -> String =
-  "${int.to_string(a)}${b}${int.to_string(c)}"
+fn f(a: Int, b: String = "B", c: Int = 0) -> String = "${int.to_string(a)}${b}${int.to_string(c)}"
 
 fn g(x: Int, y: String) -> String = "${int.to_string(x)}${y}"
 

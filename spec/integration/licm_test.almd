@@ -1,6 +1,6 @@
 // LICM (Loop-Invariant Code Motion) tests: verify correct hoisting behavior.
-
 fn square(x: Int) -> Int = x * x
+
 fn add(a: Int, b: Int) -> Int = a + b
 
 // Pure stdlib calls should be hoisted
@@ -8,8 +8,11 @@ test "list.len hoisted" {
   let xs = [1, 2, 3, 4, 5]
   var total = 0
   for i in 0..<100 {
-    if i < list.len(xs) then total = total + 1
-    else total = total
+    if i < list.len(xs) then {
+      total = total + 1
+    } else {
+      total = total
+    }
   }
   assert_eq(total, 5)
 }

@@ -9,7 +9,6 @@
 // value semantics that the COW must preserve: after `var b = a`, mutating one
 // side is never visible through the other — for a bare Bytes, a bare Matrix,
 // and a record field holding each. Native (RcCow) is the oracle here.
-
 type Pack = { tag: String, buf: Bytes }
 
 test "bytes copy then mutate one side" {
@@ -21,7 +20,9 @@ test "bytes copy then mutate one side" {
 }
 
 test "matrix copy stays independent of derived result" {
-  var m = matrix.from_lists([[2.0]])
+  var m = matrix.from_lists([
+    [2.0]
+  ])
   var m2 = m
   let m3 = matrix.scale(m2, 5.0)
   assert_eq(matrix.get(m, 0, 0), 2.0)

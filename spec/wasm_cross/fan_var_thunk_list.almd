@@ -7,13 +7,18 @@
 // (indirect call type mismatch) for pure named-fn-ref thunks. Both the
 // frontend Ok-adapter and the Rust Send+Sync boxing now follow the var.
 effect fn one() -> Result[Int, String] = ok(1)
+
 fn ra() -> Int = 1
+
 fn rb() -> Int = 2
+
 effect fn main() -> Unit = {
-  let lam: List[() -> Result[Int, String]] = [() => one()]
+  let lam: List[fn() -> Result[Int, String]] = [
+    () => one()
+  ]
   let r = fan.race(lam)
   println("race=${r}")
-  let refs: List[() -> Int] = [ra, rb]
+  let refs: List[fn() -> Int] = [ra, rb]
   let s = fan.settle(refs)
   println("settle=${list.len(s)}")
 }

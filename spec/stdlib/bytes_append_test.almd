@@ -1,5 +1,4 @@
 // bytes.append_*_le — symmetric appenders for all integer/float widths.
-
 test "append_u8 builds a single byte" {
   var b = bytes.new(0)
   bytes.append_u8(b, 0x42)

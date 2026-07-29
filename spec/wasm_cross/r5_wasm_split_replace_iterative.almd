@@ -13,25 +13,29 @@
 //   split  : "a," * 5000  → 5001 segments
 //   replace: "a," * 6000  → 6000 occurrences of ","
 //   empty-from replace inserts `to` at every codepoint boundary.
-
 fn main() -> Unit = {
   // split: 5000 "a," → first segment "a", total 5001 parts.
   let s = string.repeat("a,", 5000)
   let parts = string.split(s, ",")
-  println(parts |> list.first ?? "none")        // a
-  println(int.to_string(list.len(parts)))        // 5001
-
+  println(parts |> list.first ?? "none")
+  // a
+  println(int.to_string(list.len(parts)))
+  // 5001
   // replace: 6000 "," → ";", length preserved.
   let big = string.repeat("a,", 6000)
   let r = string.replace(big, ",", ";")
-  println(int.to_string(string.len(r)))          // 12000
-
+  println(int.to_string(string.len(r)))
+  // 12000
   // Empty-pattern replace inserts at every char boundary (Rust parity).
-  println(string.replace("abc", "", "X"))        // XaXbXcX
-  println(string.replace("", "", "Z"))           // Z
-
+  println(string.replace("abc", "", "X"))
+  // XaXbXcX
+  println(string.replace("", "", "Z"))
+  // Z
   // A few small semantics, just to keep the oracle honest.
-  println(string.split("a,,b", ",") |> list.join("|"))   // a||b
-  println(string.split("", ",") |> list.join("|"))       // (one empty segment)
-  println(string.replace("abcabc", "abc", "X"))          // XX
+  println(string.split("a,,b", ",") |> list.join("|"))
+  // a||b
+  println(string.split("", ",") |> list.join("|"))
+  // (one empty segment)
+  // XX
+  println(string.replace("abcabc", "abc", "X"))
 }

@@ -5,12 +5,11 @@
 // same-numbered `_white`/`_black` refs inside `_default` — ceangal's scroll
 // `BOUNCING = 2` / `FRICTION = 0.035` replacing view's `_transparent` /
 // `_white` Colors: a silent wrong value dependent on module link order.
-
 import constfleet
 import palette2
 
 test "module record toplet keeps its own module's referents" {
-  assert_eq(palette2.fg_r(), 1.0);
+  assert_eq(palette2.fg_r(), 1.0)
   assert_eq(palette2.bg_r(), 0.5)
 }
 

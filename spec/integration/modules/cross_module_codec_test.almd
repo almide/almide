@@ -4,15 +4,9 @@
 // definition `almide_rt_varlib_Pigment_encode` (module_origin) carries — so the
 // native build failed with `E0425: cannot find function Pigment_encode`. Covers the
 // direct field and the `List[T]` element path.
-
 import varlib
 
-type Wrapped: Codec = {
-  id: Int,
-  payload: varlib.Pigment,
-  palette: List[varlib.Pigment],
-  accent: Option[varlib.Pigment],
-}
+type Wrapped: Codec = { id: Int, payload: varlib.Pigment, palette: List[varlib.Pigment], accent: Option[varlib.Pigment] }
 
 test "cross-module type method called directly: mod.Type.method() (新①)" {
   let p = varlib.Pigment { r: 1, g: 2, b: 3 }
@@ -23,12 +17,10 @@ test "cross-module type method called directly: mod.Type.method() (新①)" {
 }
 
 test "cross-module derived Codec roundtrip (direct + List + Option field) (#411-B, 新②)" {
-  let w = Wrapped {
-    id: 7,
-    payload: varlib.Pigment { r: 1, g: 2, b: 3 },
-    palette: [varlib.Pigment { r: 4, g: 5, b: 6 }, varlib.Pigment { r: 7, g: 8, b: 9 }],
-    accent: some(varlib.Pigment { r: 10, g: 20, b: 30 }),
-  }
+  let w = Wrapped { id: 7, payload: varlib.Pigment { r: 1, g: 2, b: 3 }, palette: [
+    varlib.Pigment { r: 4, g: 5, b: 6 },
+    varlib.Pigment { r: 7, g: 8, b: 9 }
+  ], accent: some(varlib.Pigment { r: 10, g: 20, b: 30 }) }
   match Wrapped.decode(Wrapped.encode(w)) {
     ok(v) => {
       assert_eq(v.id, 7)

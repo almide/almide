@@ -6,8 +6,8 @@
 //
 // `mod fn` restricts visibility to the same project.
 // Calling it from an external consumer must fail.
-
 import extlib
+
 fn main(_args: List[String]) -> Unit = {
   println(extlib.mod_())
 }

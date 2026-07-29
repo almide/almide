@@ -3,6 +3,7 @@
 // `add(5, 10)`. Before this, the Method-target default-fill was skipped and
 // codegen emitted `add(5)` one arg short (invalid Rust / wasm stack underflow).
 fn add(a: Int, b: Int = 10) -> Int = a + b
+
 fn scale(x: Int, by: Int = 2, plus: Int = 1) -> Int = x * by + plus
 
 test "UFCS fills a single default" {

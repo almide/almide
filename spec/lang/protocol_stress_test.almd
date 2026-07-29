@@ -1,4 +1,3 @@
-
 // protocol_stress_test — Aggressive protocol edge cases
 // ── Protocol method in pipe chain ──
 protocol Transformable {
@@ -13,7 +12,7 @@ fn Val.double(v: Val) -> Val = Val { n: v.n * 2 }
 fn Val.negate(v: Val) -> Val = Val { n: 0 - v.n }
 
 test "protocol methods chained via pipe" {
-  let result = Val { n: 3 } |> Val.double() |> Val.double() |> Val.negate();
+  let result = Val { n: 3 } |> Val.double() |> Val.double() |> Val.negate()
   assert_eq(result.n, -12)
 }
 
@@ -31,8 +30,8 @@ test "protocol method in lambda" {
     Animal { species: "cat" },
     Animal { species: "dog" },
     Animal { species: "bird" }
-  ];
-  let names = list.map(animals, (a) => Animal.get_name(a));
+  ]
+  let names = list.map(animals, (a) => Animal.get_name(a))
   assert_eq(names, ["cat", "dog", "bird"])
 }
 
@@ -41,8 +40,8 @@ test "protocol method in filter lambda" {
     Animal { species: "cat" },
     Animal { species: "dog" },
     Animal { species: "catfish" }
-  ];
-  let cats = list.filter(animals, (a) => string.starts_with(Animal.get_name(a), "cat"));
+  ]
+  let cats = list.filter(animals, (a) => string.starts_with(Animal.get_name(a), "cat"))
   assert_eq(list.len(cats), 2)
 }
 
@@ -56,8 +55,8 @@ type Coord: Displayable = { x: Int, y: Int }
 fn Coord.display(c: Coord) -> String = "(" + int.to_string(c.x) + ", " + int.to_string(c.y) + ")"
 
 test "protocol method in string interpolation" {
-  let c = Coord { x: 3, y: 7 };
-  let s = "Point: ${c.display()}";
+  let c = Coord { x: 3, y: 7 }
+  let s = "Point: ${c.display()}"
   assert_eq(s, "Point: (3, 7)")
 }
 
@@ -74,12 +73,12 @@ fn Tree.collapse(t: Tree) -> String = match t {
 }
 
 test "recursive protocol method on tree" {
-  let tree = Branch(Branch(Leaf("a"), Leaf("b")), Leaf("c"));
+  let tree = Branch(Branch(Leaf("a"), Leaf("b")), Leaf("c"))
   assert_eq(Tree.collapse(tree), "a+b+c")
 }
 
 test "deeply nested recursive protocol" {
-  let deep = Branch(Branch(Branch(Leaf("1"), Leaf("2")), Leaf("3")), Branch(Leaf("4"), Leaf("5")));
+  let deep = Branch(Branch(Branch(Leaf("1"), Leaf("2")), Leaf("3")), Branch(Leaf("4"), Leaf("5")))
   assert_eq(Tree.collapse(deep), "1+2+3+4+5")
 }
 
@@ -105,11 +104,11 @@ fn Account.entity_score(a: Account) -> Int = a.karma
 fn Account.entity_summary(a: Account) -> String = a.username + " (karma: " + int.to_string(a.karma) + ")"
 
 test "protocol with 5 methods" {
-  let acc = Account { id: 1, username: "alice", active: true, karma: 42 };
-  assert_eq(acc.entity_id(), 1);
-  assert_eq(acc.entity_name(), "alice");
-  assert_eq(acc.entity_active(), true);
-  assert_eq(acc.entity_score(), 42);
+  let acc = Account { id: 1, username: "alice", active: true, karma: 42 }
+  assert_eq(acc.entity_id(), 1)
+  assert_eq(acc.entity_name(), "alice")
+  assert_eq(acc.entity_active(), true)
+  assert_eq(acc.entity_score(), 42)
   assert_eq(acc.entity_summary(), "alice (karma: 42)")
 }
 
@@ -128,9 +127,9 @@ fn Temp.classify(t: Temp) -> String = match t.celsius {
 }
 
 test "protocol method with match + guards" {
-  assert_eq(Temp.classify(Temp { celsius: -5 }), "freezing");
-  assert_eq(Temp.classify(Temp { celsius: 15 }), "cold");
-  assert_eq(Temp.classify(Temp { celsius: 25 }), "warm");
+  assert_eq(Temp.classify(Temp { celsius: -5 }), "freezing")
+  assert_eq(Temp.classify(Temp { celsius: 15 }), "cold")
+  assert_eq(Temp.classify(Temp { celsius: 25 }), "warm")
   assert_eq(Temp.classify(Temp { celsius: 35 }), "hot")
 }
 
@@ -148,8 +147,8 @@ test "protocol method in for loop accumulation" {
     Bucket { items: [1, 2] },
     Bucket { items: [3, 4, 5] },
     Bucket { items: [6] }
-  ];
-  let total = list.fold(buckets, 0, (acc, b) => acc + Bucket.count(b));
+  ]
+  let total = list.fold(buckets, 0, (acc, b) => acc + Bucket.count(b))
   assert_eq(total, 6)
 }
 
@@ -166,17 +165,17 @@ fn Counter.increment(c: Counter) -> Counter = Counter { value: c.value + 1 }
 fn Counter.reset(c: Counter) -> Counter = Counter { value: 0 }
 
 test "immutable update chain via protocol" {
-  let c = Counter { value: 0 };
-  let c2 = Counter.increment(Counter.increment(Counter.increment(c)));
-  assert_eq(c2.value, 3);
-  assert_eq(c.value, 0);
-  let c3 = Counter.reset(c2);
+  let c = Counter { value: 0 }
+  let c2 = Counter.increment(Counter.increment(Counter.increment(c)))
+  assert_eq(c2.value, 3)
+  assert_eq(c.value, 0)
+  let c3 = Counter.reset(c2)
   assert_eq(c3.value, 0)
 }
 
 test "protocol update in fold" {
-  let c = Counter { value: 0 };
-  let result = list.fold([1, 2, 3, 4, 5], c, (acc, _) => Counter.increment(acc));
+  let c = Counter { value: 0 }
+  let result = list.fold([1, 2, 3, 4, 5], c, (acc, _) => Counter.increment(acc))
   assert_eq(result.value, 5)
 }
 
@@ -190,10 +189,10 @@ type Csv: Expandable = { raw: String }
 fn Csv.expand(c: Csv) -> List[String] = string.split(c.raw, ",")
 
 test "protocol method returning List" {
-  let c = Csv { raw: "a,b,c,d" };
-  let parts = c.expand();
-  assert_eq(list.len(parts), 4);
-  assert_eq(list.get(parts, 0), some("a"));
+  let c = Csv { raw: "a,b,c,d" }
+  let parts = c.expand()
+  assert_eq(list.len(parts), 4)
+  assert_eq(list.get(parts, 0), some("a"))
   assert_eq(list.get(parts, 3), some("d"))
 }
 
@@ -207,9 +206,9 @@ type Entry: Decomposable = { key: String, value: Int }
 fn Entry.decompose(e: Entry) -> (String, Int) = (e.key, e.value)
 
 test "protocol method returning tuple" {
-  let e = Entry { key: "score", value: 100 };
-  let (k, v) = e.decompose();
-  assert_eq(k, "score");
+  let e = Entry { key: "score", value: 100 }
+  let (k, v) = e.decompose()
+  assert_eq(k, "score")
   assert_eq(v, 100)
 }
 
@@ -228,11 +227,11 @@ fn Student.rank(s: Student) -> Int = if s.gpa > 3.5 then 1
 else if s.gpa > 3.0 then 2 else 3
 
 test "three conventions: Eq + Repr + user protocol" {
-  let a = Student { name: "Alice", gpa: 3.8 };
-  let b = Student { name: "Alice", gpa: 3.2 };
-  assert_eq(a == b, true);
-  assert_eq(a.repr(), "Alice");
-  assert_eq(a.rank(), 1);
+  let a = Student { name: "Alice", gpa: 3.8 }
+  let b = Student { name: "Alice", gpa: 3.2 }
+  assert_eq(a == b, true)
+  assert_eq(a.repr(), "Alice")
+  assert_eq(a.rank(), 1)
   assert_eq(b.rank(), 2)
 }
 
@@ -249,9 +248,9 @@ fn Task.matches(t: Task, query: String) -> Bool = string.contains(t.title, query
 fn Task.is_active(t: Task) -> Bool = not t.done
 
 test "protocol predicates combined with and/or" {
-  let t = Task { title: "fix bug #42", done: false };
-  assert_eq(t.matches("bug") and t.is_active(), true);
-  assert_eq(t.matches("feature") or t.is_active(), true);
+  let t = Task { title: "fix bug #42", done: false }
+  assert_eq(t.matches("bug") and t.is_active(), true)
+  assert_eq(t.matches("feature") or t.is_active(), true)
   assert_eq(t.matches("feature") and not t.is_active(), false)
 }
 
@@ -260,7 +259,7 @@ test "protocol predicates in list filter" {
     Task { title: "fix bug", done: false },
     Task { title: "add feature", done: true },
     Task { title: "fix typo", done: false }
-  ];
-  let active_fixes = list.filter(tasks, (t) => Task.matches(t, "fix") and Task.is_active(t));
+  ]
+  let active_fixes = list.filter(tasks, (t) => Task.matches(t, "fix") and Task.is_active(t))
   assert_eq(list.len(active_fixes), 2)
 }

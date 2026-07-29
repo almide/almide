@@ -13,30 +13,25 @@
 // offset (so a literal written out of declaration order reads correct values).
 // A truly anonymous record (no matching declared type) stays prefix-less and
 // sorted, identical on both targets.
+type Rec = { zeta: Int, alpha: Int, mid: Int }
 
-type Rec   = { zeta: Int, alpha: Int, mid: Int }
 type Point = { x: Int, y: Int }
 
 fn main() -> Unit = {
   // Inferred, literal in declaration order.
   let a = { zeta: 1, alpha: 2, mid: 3 }
   println("${a}")
-
   // Inferred, literal written OUT of declaration order: values must stay correct.
   let b = { alpha: 2, mid: 3, zeta: 1 }
   println("${b}")
-
   // Explicit annotation (already matched): keep parity.
   let c: Rec = { zeta: 7, alpha: 8, mid: 9 }
   println("${c}")
-
   // Inside a list.
   println("${[a]}")
-
   // A different declared record type.
   let p = { y: 20, x: 10 }
   println("${p}")
-
   // Truly anonymous (no declared type with these fields): prefix-less + sorted.
   let anon = { foo: 1, bar: 2 }
   println("${anon}")

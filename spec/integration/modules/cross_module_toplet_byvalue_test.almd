@@ -19,8 +19,8 @@ test "cross-module List top-let passed by value (#486)" {
 }
 
 test "cross-module top-let through bind and closure (#486)" {
-  let x = toplib.SYSTEM;
-  let f = (s: String) => s + "?";
+  let x = toplib.SYSTEM
+  let f = (s: String) => s + "?"
   assert_eq(f(x), "hi?")
 }
 
@@ -33,22 +33,22 @@ test "cross-module un-annotated record top-let member access" {
 }
 
 test "cross-module record top-let list and fn-returned record" {
-  assert_eq(toplib.CFGS |> list.len, 2);
+  assert_eq(toplib.CFGS |> list.len, 2)
   assert_eq(toplib.mk().name, "via-fn")
 }
 
 test "cross-module spread from a record top-let base (#502)" {
-  let c = { ...toplib.CFG, name: "z" };
+  let c = { ...toplib.CFG, name: "z" }
   assert_eq(c.name, "z")
 }
 
 test "cross-module spread from a rebound top-let base (#502)" {
-  let x = toplib.CFG;
-  let c = { ...x, name: "y" };
+  let x = toplib.CFG
+  let c = { ...x, name: "y" }
   assert_eq(c.name, "y")
 }
 
 test "cross-module spread from a fn-returned base (#502)" {
-  let c = { ...toplib.mk(), name: "w" };
+  let c = { ...toplib.mk(), name: "w" }
   assert_eq(c.name, "w")
 }

@@ -1,6 +1,5 @@
 // Peephole optimization tests: verify swap, reverse, rotate, copy patterns
 // are correctly detected and produce correct results.
-
 test "swap pattern" {
   var xs = [10, 20, 30, 40, 50]
   let tmp = xs[1]
@@ -40,7 +39,9 @@ test "reverse single element" {
 test "rotate left pattern" {
   var xs = [1, 2, 3, 4, 5]
   let p0 = xs[0]
-  for i in 0..<4 { xs[i] = xs[i + 1] }
+  for i in 0..<4 {
+    xs[i] = xs[i + 1]
+  }
   xs[4] = p0
   assert_eq(xs, [2, 3, 4, 5, 1])
 }
@@ -48,7 +49,9 @@ test "rotate left pattern" {
 test "rotate left partial" {
   var xs = [10, 20, 30, 40, 50]
   let p0 = xs[0]
-  for i in 0..<2 { xs[i] = xs[i + 1] }
+  for i in 0..<2 {
+    xs[i] = xs[i + 1]
+  }
   xs[2] = p0
   assert_eq(xs[0], 20)
   assert_eq(xs[1], 30)
@@ -59,13 +62,16 @@ test "rotate left partial" {
 test "copy pattern" {
   var src = [100, 200, 300, 400]
   var dst = [0, 0, 0, 0]
-  for i in 0..<4 { dst[i] = src[i] }
+  for i in 0..<4 {
+    dst[i] = src[i]
+  }
   assert_eq(dst, [100, 200, 300, 400])
 }
 
 test "self-assignment eliminated" {
   var x = 42
-  x = x  // should be eliminated, not cause issues
+  x = x
+  // should be eliminated, not cause issues
   assert_eq(x, 42)
 }
 

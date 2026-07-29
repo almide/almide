@@ -9,7 +9,9 @@ type P = { x: Int, y: Int, on: Bool }
 fn build(n: Int) -> List[P] = {
   var ps: List[P] = []
   for i in 0..<n {
-    ps = ps + [{ x: i, y: i * 2, on: i == 1 }]
+    ps = ps + [
+      { x: i, y: i * 2, on: i == 1 }
+    ]
   }
   ps
 }

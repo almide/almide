@@ -1,4 +1,5 @@
 type R = { name: String, n: Int }
+
 fn main() -> Unit = {
   var sink = 0
   var i = 0

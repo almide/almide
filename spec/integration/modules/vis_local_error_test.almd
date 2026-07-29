@@ -6,8 +6,8 @@
 //
 // `local fn` restricts visibility to the same file only.
 // Calling it from any other module must fail.
-
 import extlib
+
 fn main(_args: List[String]) -> Unit = {
   println(extlib.local_())
 }

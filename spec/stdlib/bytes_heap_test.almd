@@ -28,8 +28,10 @@ test "nested heap_save/restore" {
   bytes.set_i32_le(b1, 0, 99)
   let inner = bytes.heap_save()
   let _b2 = bytes.new(256)
-  bytes.heap_restore(inner) // free _b2 only
+  bytes.heap_restore(inner)
+  // free _b2 only
   // b1 should still be valid
   assert(bytes.read_i32_le(b1, 0) == 99)
-  bytes.heap_restore(outer) // free b1 too
+  // free b1 too
+  bytes.heap_restore(outer)
 }

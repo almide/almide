@@ -1,4 +1,3 @@
-
 // generics_test — Generic functions, records, variants, type application
 // ── Generic identity ──
 fn id[T](x: T) -> T = x
@@ -31,7 +30,7 @@ test "first of string list" {
 }
 
 test "first of empty list" {
-  let empty: List[Int] = [];
+  let empty: List[Int] = []
   assert_eq(first(empty), none)
 }
 
@@ -43,14 +42,14 @@ fn make_box[T](v: T, l: String) -> Box[T] = { value: v, label: l }
 fn unbox[T](b: Box[T]) -> T = b.value
 
 test "generic record int box" {
-  let b = make_box(42, "answer");
-  assert_eq(b.value, 42);
-  assert_eq(b.label, "answer");
+  let b = make_box(42, "answer")
+  assert_eq(b.value, 42)
+  assert_eq(b.label, "answer")
   assert_eq(unbox(b), 42)
 }
 
 test "generic record string box" {
-  let b = make_box("hello", "greeting");
+  let b = make_box("hello", "greeting")
   assert_eq(unbox(b), "hello")
 }
 
@@ -63,12 +62,12 @@ fn unwrap_or[T](w: Wrapper[T], default: T) -> T = match w {
 }
 
 test "generic variant wrapped" {
-  let w = Wrapped(99);
+  let w = Wrapped(99)
   assert_eq(unwrap_or(w, 0), 99)
 }
 
 test "generic variant empty" {
-  let w: Wrapper[Int] = Empty();
+  let w: Wrapper[Int] = Empty()
   assert_eq(unwrap_or(w, 42), 42)
 }
 
@@ -76,9 +75,9 @@ test "generic variant empty" {
 fn lengths(xs: List[String]) -> List[Int] = list.map(xs, (s) => string.len(s))
 
 test "list type application int vs string" {
-  let nums = [1, 2, 3];
-  let strs = ["ab", "cde", "f"];
-  assert_eq(list.len(nums), 3);
+  let nums = [1, 2, 3]
+  let strs = ["ab", "cde", "f"]
+  assert_eq(list.len(nums), 3)
   assert_eq(lengths(strs), [2, 3, 1])
 }
 
@@ -86,12 +85,12 @@ test "list type application int vs string" {
 fn safe_head[T](xs: List[T]) -> Option[T] = list.get(xs, 0)
 
 test "option with int" {
-  let r: Option[Int] = safe_head([5, 6, 7]);
+  let r: Option[Int] = safe_head([5, 6, 7])
   assert_eq(r, some(5))
 }
 
 test "option with string" {
-  let r: Option[String] = safe_head(["x", "y"]);
+  let r: Option[String] = safe_head(["x", "y"])
   assert_eq(r, some("x"))
 }
 
@@ -102,14 +101,14 @@ fn zip_first[A, B](xs: List[A], ys: List[B]) -> Option[(A, B)] = match (list.get
 }
 
 test "multi type param generic" {
-  assert_eq(zip_first([1, 2], ["a", "b"]), some((1, "a")));
-  let empty_ints: List[Int] = [];
+  assert_eq(zip_first([1, 2], ["a", "b"]), some((1, "a")))
+  let empty_ints: List[Int] = []
   assert_eq(zip_first(empty_ints, ["a"]), none)
 }
 
 // ── Explicit type arguments ──
 test "explicit type arguments" {
-  assert_eq(id[Int](100), 100);
-  assert_eq(id[String]("hi"), "hi");
+  assert_eq(id[Int](100), 100)
+  assert_eq(id[String]("hi"), "hi")
   assert_eq(id[Bool](false), false)
 }

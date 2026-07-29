@@ -1,13 +1,12 @@
-
 // Comprehensive float module tests
 // ── to_string ──
 test "float.to_string integer value" {
-  let s = float.to_string(3.0);
+  let s = float.to_string(3.0)
   assert(string.contains(s, "3"))
 }
 
 test "float.to_string decimal" {
-  let s = float.to_string(1.5);
+  let s = float.to_string(1.5)
   assert(string.contains(s, "1.5"))
 }
 
@@ -98,7 +97,7 @@ test "float.sqrt zero" {
 }
 
 test "float.sqrt non-perfect" {
-  let s = float.sqrt(2.0);
+  let s = float.sqrt(2.0)
   assert(s > 1.41 and s < 1.42)
 }
 
@@ -167,7 +166,7 @@ test "float.clamp above" {
 }
 
 test "float.clamp at bounds" {
-  assert_eq(float.clamp(0.0, 0.0, 1.0), 0.0);
+  assert_eq(float.clamp(0.0, 0.0, 1.0), 0.0)
   assert_eq(float.clamp(1.0, 0.0, 1.0), 1.0)
 }
 

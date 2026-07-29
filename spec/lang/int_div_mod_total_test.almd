@@ -5,7 +5,6 @@
 // guard: the checked-div rewrite (native `almide_div!`/`almide_mod!`, wasm guarded
 // div/rem) must not perturb ordinary results — including negative operands, whose
 // truncated-toward-zero `/` and sign-of-dividend `%` are easy to get wrong.
-
 fn shield(x: Int, v: Int) -> Int = (x - x) + v
 
 test "integer division truncates toward zero" {

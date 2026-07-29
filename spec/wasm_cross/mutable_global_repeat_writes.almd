@@ -5,7 +5,6 @@
 // perf half of the same machinery — the receiver borrow that keeps the block
 // at rc == 1 between writes — is pinned structurally in almide-mir's op tests;
 // here the OBSERVABLE promise is pinned: values, aliasing, both targets.
-
 var arena = bytes.new(8)
 
 fn main() -> Unit = {

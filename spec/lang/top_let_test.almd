@@ -1,4 +1,3 @@
-
 let PI = 3.141592653589793
 
 let SOLAR_MASS = 4.0 * PI * PI
@@ -10,20 +9,20 @@ let MAX_COUNT = 100
 let IS_DEBUG = false
 
 fn main() -> Unit = {
-  println("PI = ${PI}");
-  println("SOLAR_MASS = ${SOLAR_MASS}");
-  println("DAYS_PER_YEAR = ${DAYS_PER_YEAR}");
-  println("MAX_COUNT = ${MAX_COUNT}");
+  println("PI = ${PI}")
+  println("SOLAR_MASS = ${SOLAR_MASS}")
+  println("DAYS_PER_YEAR = ${DAYS_PER_YEAR}")
+  println("MAX_COUNT = ${MAX_COUNT}")
   println("IS_DEBUG = ${IS_DEBUG}")
 }
 
 test "top-level let numeric" {
-  assert_eq(MAX_COUNT, 100);
+  assert_eq(MAX_COUNT, 100)
   assert_eq(DAYS_PER_YEAR, 365.24)
 }
 
 test "top-level let cross-reference" {
-  let expected = 4.0 * 3.141592653589793 * 3.141592653589793;
+  let expected = 4.0 * 3.141592653589793 * 3.141592653589793
   assert_eq(SOLAR_MASS, expected)
 }
 
@@ -32,8 +31,8 @@ test "top-level let bool" {
 }
 
 test "top-level let usage in expressions" {
-  let _half_mass = SOLAR_MASS / 2.0;
-  let x = MAX_COUNT + 1;
+  let _half_mass = SOLAR_MASS / 2.0
+  let x = MAX_COUNT + 1
   assert_eq(x, 101)
 }
 
@@ -59,17 +58,17 @@ test "top-level let used in function" {
 let ZERO = 0
 
 test "top-level zero" {
-  assert_eq(ZERO, 0);
+  assert_eq(ZERO, 0)
   assert_eq(ZERO + 1, 1)
 }
 
 test "top-level let in arithmetic" {
-  let result = MAX_COUNT * 2 + 50;
+  let result = MAX_COUNT * 2 + 50
   assert_eq(result, 250)
 }
 
 test "top-level let in conditional" {
-  let label = if IS_DEBUG then "debug" else "release";
+  let label = if IS_DEBUG then "debug" else "release"
   assert_eq(label, "release")
 }
 
@@ -77,13 +76,13 @@ test "top-level let in match" {
   let result = match MAX_COUNT {
     100 => "century",
     _ => "other",
-  };
+  }
   assert_eq(result, "century")
 }
 
 test "top-level let in comparison" {
-  assert_eq(MAX_COUNT > 50, true);
-  assert_eq(MAX_COUNT < 200, true);
+  assert_eq(MAX_COUNT > 50, true)
+  assert_eq(MAX_COUNT < 200, true)
   assert_eq(ZERO == 0, true)
 }
 
@@ -101,11 +100,11 @@ test "unannotated option-of-record top-level let match" {
   let label = match MAYBE_CFG {
     some(c) => c.name,
     none => "?",
-  };
-  assert_eq(label, "opt");
+  }
+  assert_eq(label, "opt")
   let missing = match NO_CFG {
     some(c) => c.name,
     none => "?",
-  };
+  }
   assert_eq(missing, "?")
 }

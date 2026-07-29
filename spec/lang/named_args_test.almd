@@ -1,4 +1,3 @@
-
 fn greet(name: String, greeting: String = "Hello") -> String = "${greeting}, ${name}!"
 
 fn add3(a: Int, b: Int, c: Int = 0) -> Int = a + b + c
@@ -20,6 +19,6 @@ test "named with default" {
 }
 
 test "mixed positional and named with default" {
-  assert_eq(add3(1, 2, c: 10), 13);
+  assert_eq(add3(1, 2, c: 10), 13)
   assert_eq(add3(1, b: 2), 3)
 }

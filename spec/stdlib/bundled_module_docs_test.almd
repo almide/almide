@@ -18,7 +18,6 @@
 // on wasm now, which surfaces a `list.fold_hacc` (heap-accumulator fold) inside
 // their own bodies — the largest bucket in the #812 subset ledger, not a defect
 // here. `spec/stdlib/path_args_test.almd` covers the same modules on the wasm leg.
-
 import path
 import html
 import base64

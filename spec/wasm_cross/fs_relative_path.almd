@@ -22,7 +22,6 @@
 //     on the wasm test leg); v0's harness-only pipeline cannot compile fs.stat
 //     (the FileStat registry skew), so this determinism-gated fixture stays on
 //     the v0-compilable surface.
-
 import fs
 
 effect fn main() -> Unit = {

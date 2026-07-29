@@ -5,10 +5,12 @@
 // identically or rustc rejects `box(…)` as a reserved keyword. A single shared
 // keyword predicate now drives both sides (an incomplete per-site list left the
 // definition or the call unescaped). WASM has no such keyword conflict. #659.
-
 fn box(x: Int) -> Int = x + 1
+
 fn move(x: Int) -> Int = x + 2
+
 fn dyn(x: Int) -> Int = x + 3
+
 fn unsafe(x: Int) -> Int = x + 4
 
 fn main() -> Unit = {

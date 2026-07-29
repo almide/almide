@@ -52,9 +52,9 @@ test "P0-010: nested missing" {
 }
 
 test "P0-012: roundtrip" {
-  let b = Basic { id: 42, name: "Alice" };
-  let b2 = decode_basic(b.encode());
-  assert_eq(b2.id, 42);
+  let b = Basic { id: 42, name: "Alice" }
+  let b2 = decode_basic(b.encode())
+  assert_eq(b2.id, 42)
   assert_eq(b2.name, "Alice")
 }
 
@@ -66,12 +66,12 @@ test "P0-013: unknown ignored" {
 }
 
 test "P0-017: flat JSON roundtrip" {
-  let b = Basic { id: 99, name: "Bob" };
-  let text = json.stringify(b.encode());
+  let b = Basic { id: 99, name: "Bob" }
+  let text = json.stringify(b.encode())
   match json.parse(text) {
     ok(v) => {
-      let b2 = decode_basic(v);
-      assert_eq(b2.id, 99);
+      let b2 = decode_basic(v)
+      assert_eq(b2.id, 99)
       assert_eq(b2.name, "Bob")
     },
     err(_) => assert(false),
@@ -79,13 +79,13 @@ test "P0-017: flat JSON roundtrip" {
 }
 
 test "P0-018: nested roundtrip" {
-  let o = Outer { label: "test", inner: Inner { x: 10, y: 20 } };
-  let text = json.stringify(o.encode());
+  let o = Outer { label: "test", inner: Inner { x: 10, y: 20 } }
+  let text = json.stringify(o.encode())
   match json.parse(text) {
     ok(v) => {
-      let o2 = decode_outer(v);
-      assert_eq(o2.label, "test");
-      assert_eq(o2.inner.x, 10);
+      let o2 = decode_outer(v)
+      assert_eq(o2.label, "test")
+      assert_eq(o2.inner.x, 10)
       assert_eq(o2.inner.y, 20)
     },
     err(_) => assert(false),
@@ -101,8 +101,8 @@ fn decode_opt(v: Value) -> WithOpt = match WithOpt.decode(v) {
 test "P0-003: optional field missing" {
   match json.parse('{"id": 1}') {
     ok(v) => {
-      let w = decode_opt(v);
-      assert_eq(w.id, 1);
+      let w = decode_opt(v)
+      assert_eq(w.id, 1)
       assert_eq(w.nickname, none)
     },
     err(_) => assert(false),
@@ -132,9 +132,9 @@ fn decode_def(v: Value) -> WithDef = match WithDef.decode(v) {
 test "P0-006: default field missing" {
   match json.parse('{"id": 1}') {
     ok(v) => {
-      let w = decode_def(v);
-      assert_eq(w.id, 1);
-      assert_eq(w.name, "anonymous");
+      let w = decode_def(v)
+      assert_eq(w.id, 1)
+      assert_eq(w.name, "anonymous")
       assert_eq(w.active, true)
     },
     err(_) => assert(false),
@@ -151,8 +151,8 @@ test "P0-007: default field null" {
 test "P0-008: default field present" {
   match json.parse('{"id": 1, "name": "Bob", "active": false}') {
     ok(v) => {
-      let w = decode_def(v);
-      assert_eq(w.name, "Bob");
+      let w = decode_def(v)
+      assert_eq(w.name, "Bob")
       assert_eq(w.active, false)
     },
     err(_) => assert(false),

@@ -5,6 +5,7 @@
 import json
 
 type Addr: Codec = { city: String, zip: Int }
+
 type Person: Codec = { name: String, age: Int, home: Addr, tags: List[String] }
 
 effect fn main() -> Unit = {
@@ -13,7 +14,7 @@ effect fn main() -> Unit = {
   let v = p.encode()
   println(json.stringify(v))
   match Person.decode(v) {
-    ok(p2) => println(p2.name + "/" + int.to_string(p2.age) + "/" + p2.home.city + "/" + int.to_string(list.len(p2.tags)))
-    err(e) => println("err:" + e)
+    ok(p2) => println(p2.name + "/" + int.to_string(p2.age) + "/" + p2.home.city + "/" + int.to_string(list.len(p2.tags))),
+    err(e) => println("err:" + e),
   }
 }

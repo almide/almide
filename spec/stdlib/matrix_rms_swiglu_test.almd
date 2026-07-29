@@ -1,5 +1,4 @@
 // RMSNorm and SwiGLU primitives for Llama-style transformer FFN.
-
 fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
   let d = if a > b then a - b else b - a
   d < tol
@@ -7,7 +6,9 @@ fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
 
 test "rms_norm_rows: identity gamma on uniform row" {
   // For row [1,1,1,1], mean(x²) = 1, so y[j] = 1 / sqrt(1+ε) * γ[j] ≈ γ[j].
-  let x = matrix.from_lists([[1.0, 1.0, 1.0, 1.0]])
+  let x = matrix.from_lists([
+    [1.0, 1.0, 1.0, 1.0]
+  ])
   let gamma = [1.0, 2.0, 3.0, 4.0]
   let y = matrix.rms_norm_rows(x, gamma, 0.000001)
   assert(approx_eq(matrix.get(y, 0, 0), 1.0, 0.0001))
@@ -18,8 +19,12 @@ test "rms_norm_rows: identity gamma on uniform row" {
 
 test "rms_norm_rows: scale-invariant (per row)" {
   // Scaling a row by k should not change its RMS-normalized form (with γ=1).
-  let x1 = matrix.from_lists([[1.0, 2.0, 3.0, 4.0]])
-  let x2 = matrix.from_lists([[10.0, 20.0, 30.0, 40.0]])
+  let x1 = matrix.from_lists([
+    [1.0, 2.0, 3.0, 4.0]
+  ])
+  let x2 = matrix.from_lists([
+    [10.0, 20.0, 30.0, 40.0]
+  ])
   let gamma = [1.0, 1.0, 1.0, 1.0]
   let y1 = matrix.rms_norm_rows(x1, gamma, 0.000001)
   let y2 = matrix.rms_norm_rows(x2, gamma, 0.000001)
@@ -28,10 +33,17 @@ test "rms_norm_rows: scale-invariant (per row)" {
 }
 
 test "swiglu_gate matches manual silu(x@W_gate) * (x@W_up)" {
-  let x = matrix.from_lists([[1.0, 2.0]])
-  let w_gate = matrix.from_lists([[0.5, 0.5], [1.0, -0.5]])
-  let w_up = matrix.from_lists([[1.0, 0.0], [0.0, 1.0]])
-
+  let x = matrix.from_lists([
+    [1.0, 2.0]
+  ])
+  let w_gate = matrix.from_lists([
+    [0.5, 0.5],
+    [1.0, -0.5]
+  ])
+  let w_up = matrix.from_lists([
+    [1.0, 0.0],
+    [0.0, 1.0]
+  ])
   // Gate: x @ W_gate^T
   //   z[0] = 1*0.5 + 2*0.5 = 1.5
   //   z[1] = 1*1.0 + 2*(-0.5) = 0.0

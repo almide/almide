@@ -1,5 +1,7 @@
 var counter = 0
+
 var label = "init"
+
 var items: List[Int] = []
 
 fn bump() -> Unit = {

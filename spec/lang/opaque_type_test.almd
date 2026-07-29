@@ -1,5 +1,4 @@
 // opaque type — comprehensive test for mod type (nominal newtype)
-
 mod type SafeHtml = String
 
 // ── Construction ──
@@ -7,7 +6,7 @@ fn escape(s: String) -> SafeHtml = SafeHtml(s)
 
 // ── Unwrap (pattern match) ──
 fn unwrap_html(h: SafeHtml) -> String = match h {
-  SafeHtml(s) => s,
+  SafeHtml(s) => s
 }
 
 // ── Pass opaque type around ──

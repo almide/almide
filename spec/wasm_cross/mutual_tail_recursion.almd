@@ -5,9 +5,11 @@
 // Self tail-recursion is the upstream TCO loop; this is the cross-fn chain
 // the loop rewrite cannot reach.
 fn is_even(n: Int) -> Bool = if n == 0 then true else is_odd(n - 1)
+
 fn is_odd(n: Int) -> Bool = if n == 0 then false else is_even(n - 1)
 
 fn ping(n: Int, acc: Int) -> Int = if n == 0 then acc else pong(n - 1, acc + 1)
+
 fn pong(n: Int, acc: Int) -> Int = if n == 0 then acc else ping(n - 1, acc + 2)
 
 fn main() -> Unit = {

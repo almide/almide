@@ -1,5 +1,4 @@
 // bytes.set_*_le, append_*_be, read_*_be_array — symmetric writers/readers.
-
 test "set_u8 overwrites byte at position" {
   var b = bytes.new(4)
   bytes.set_u8(b, 1, 0x42)

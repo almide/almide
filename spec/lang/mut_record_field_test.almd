@@ -8,7 +8,6 @@
 // exactly like a bare `mut List` param. Previously this was rejected at the
 // checker (E007 "temporary expression") and then mis-lowered to an owned
 // non-`mut` binding (E0596).
-
 type Box = { xs: List[Int] }
 
 fn add(mut b: Box, v: Int) -> Int = {

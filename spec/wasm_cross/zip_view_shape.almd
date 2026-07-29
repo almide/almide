@@ -4,21 +4,27 @@
 // ANON-record concat), reading loop-elem borrows (child._style.bg.r), an
 // OUTER borrow (s), a mutable-global assign, and a cross-arm accumulator —
 // returned as a record. Byte-identical on native and wasm.
-
 type Color = { r: Float, g: Float }
+
 type Style = { bg: Color, opacity: Float, selectable: Int }
+
 type View = { _kind: Int, _children: List[View], _content: String, _style: Style, _item_height: Float }
+
 type Item = { x: Float, y: Float, w: Float, h: Float, bg_r: Float, bg_g: Float, bg_b: Float, bg_a: Float, fg_r: Float, fg_g: Float, fg_b: Float, fg_a: Float, rounded: Float, opacity: Float, font_size: Float, selectable: Int, content: String, kind: Int, scrollable: Int }
+
 type Zip = { items: List[Item], index: Int }
 
 let LIST = 4
+
 let ROW = 2
 
 var frame_h = 0.0
 
 fn zipish(view: View, rx: Float, rh: Float, idx: Int) -> Zip = {
   let s = view._style
-  var items: List[Item] = [{ x: rx, y: 0.0, w: 2.0, h: 3.0, bg_r: s.bg.r, bg_g: 0.1, bg_b: 0.2, bg_a: 0.3, fg_r: 0.4, fg_g: 0.5, fg_b: 0.6, fg_a: 0.7, rounded: 0.0, opacity: 0.9, font_size: 14.0, selectable: s.selectable, content: view._content, kind: 0, scrollable: 0 }]
+  var items: List[Item] = [
+    { x: rx, y: 0.0, w: 2.0, h: 3.0, bg_r: s.bg.r, bg_g: 0.1, bg_b: 0.2, bg_a: 0.3, fg_r: 0.4, fg_g: 0.5, fg_b: 0.6, fg_a: 0.7, rounded: 0.0, opacity: 0.9, font_size: 14.0, selectable: s.selectable, content: view._content, kind: 0, scrollable: 0 }
+  ]
   var next_idx = idx + 1
   if view._kind == LIST then {
     let ih = view._item_height
@@ -28,8 +34,12 @@ fn zipish(view: View, rx: Float, rh: Float, idx: Int) -> Zip = {
       let child = view._children[i]
       let cs = child._style
       let iy = rx + int.to_float(i) * ih
-      items = items + [{ x: iy, y: 1.0, w: 2.0, h: 3.0, bg_r: cs.bg.r, bg_g: 0.1, bg_b: 0.2, bg_a: 0.3, fg_r: 0.4, fg_g: 0.5, fg_b: 0.6, fg_a: 0.7, rounded: 0.0, opacity: s.opacity, font_size: 14.0, selectable: s.selectable, content: "", kind: ROW, scrollable: 1 }]
-      items = items + [{ x: iy, y: 2.0, w: 2.0, h: 3.0, bg_r: 0.0, bg_g: 0.1, bg_b: 0.2, bg_a: 0.3, fg_r: 0.4, fg_g: 0.5, fg_b: 0.6, fg_a: 0.7, rounded: 0.0, opacity: 1.0, font_size: 14.0, selectable: cs.selectable, content: child._content, kind: 0, scrollable: 0 }]
+      items = items + [
+        { x: iy, y: 1.0, w: 2.0, h: 3.0, bg_r: cs.bg.r, bg_g: 0.1, bg_b: 0.2, bg_a: 0.3, fg_r: 0.4, fg_g: 0.5, fg_b: 0.6, fg_a: 0.7, rounded: 0.0, opacity: s.opacity, font_size: 14.0, selectable: s.selectable, content: "", kind: ROW, scrollable: 1 }
+      ]
+      items = items + [
+        { x: iy, y: 2.0, w: 2.0, h: 3.0, bg_r: 0.0, bg_g: 0.1, bg_b: 0.2, bg_a: 0.3, fg_r: 0.4, fg_g: 0.5, fg_b: 0.6, fg_a: 0.7, rounded: 0.0, opacity: 1.0, font_size: 14.0, selectable: cs.selectable, content: child._content, kind: 0, scrollable: 0 }
+      ]
     }
   } else ()
   { items: items, index: next_idx }

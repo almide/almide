@@ -11,12 +11,10 @@ effect fn main() -> Unit = {
   mi = map.set(mi, "b", 20)
   mi = map.set(mi, "c", 30)
   println(int.to_string(map.fold(mi, 0, (acc, k, v) => acc + v)))
-
   var mf: Map[String, Float] = map.new()
   mf = map.set(mf, "x", 1.5)
   mf = map.set(mf, "y", 2.5)
   println(float.to_string(map.fold(mf, 0.0, (acc, k, v) => acc + v)))
-
   var ms: Map[String, String] = map.new()
   ms = map.set(ms, "k", "v")
   println(map.fold(ms, "[", (acc, k, v) => acc + k + "=" + v) + "]")

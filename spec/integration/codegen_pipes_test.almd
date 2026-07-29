@@ -1,111 +1,87 @@
 // codegen_pipes_test — Pipe operator chaining edge cases
-
 // ── Long pipe chain ──
-
 test "long pipe chain on list" {
-  let result = [10, 5, 3, 8, 1, 7, 2, 9, 4, 6]
-    |> list.filter((x) => x > 3)
-    |> list.sort()
-    |> list.reverse()
-    |> list.take(3)
-    |> list.map((x) => x * 10)
+  let result = [
+    10,
+    5,
+    3,
+    8,
+    1,
+    7,
+    2,
+    9,
+    4,
+    6
+  ] |> list.filter((x) => x > 3) |> list.sort() |> list.reverse() |> list.take(3) |> list.map((x) => x * 10)
   assert_eq(result, [100, 90, 80])
 }
 
 // ── Pipe to user-defined function ──
-
-fn double_all(xs: List[Int]) -> List[Int] =
-  list.map(xs, (x) => x * 2)
+fn double_all(xs: List[Int]) -> List[Int] = list.map(xs, (x) => x * 2)
 
 fn sum_all(xs: List[Int]) -> Int = list.sum(xs)
 
 test "pipe to user-defined functions" {
-  let result = [1, 2, 3, 4, 5]
-    |> double_all()
-    |> sum_all()
+  let result = [1, 2, 3, 4, 5] |> double_all() |> sum_all()
   assert_eq(result, 30)
 }
 
 // ── Pipe with string operations ──
-
 test "pipe chain string processing" {
-  let result = "  Hello, World!  "
-    |> string.trim()
-    |> string.to_lower()
-    |> string.split(" ")
-    |> list.map((w) => string.to_upper(string.slice(w, 0, 1)) + string.slice(w, 1, string.len(w)))
-    |> string.join(" ")
+  let result = "  Hello, World!  " |> string.trim() |> string.to_lower() |> string.split(" ") |> list.map((w) => string.to_upper(string.slice(w, 0, 1)) + string.slice(w, 1, string.len(w))) |> string.join(" ")
   assert_eq(result, "Hello, World!")
 }
 
 // ── Pipe with map operations ──
-
 test "pipe chain with map" {
-  let result = [("a", 1), ("b", 2), ("c", 3)]
-    |> map.from_list()
-    |> map.values()
-    |> list.sort()
-    |> list.sum()
+  let result = [("a", 1), ("b", 2), ("c", 3)] |> map.from_list() |> map.values() |> list.sort() |> list.sum()
   assert_eq(result, 6)
 }
 
 // ── Pipe with lambda ──
-
 test "pipe with inline lambda" {
-  let result = 10
-    |> (x) => x * 2
-    |> (x) => x + 5
-    |> (x) => x * 3
+  let result = 10 |> (x) => x * 2 |> (x) => x + 5 |> (x) => x * 3
   assert_eq(result, 75)
 }
 
 // ── Pipe mixing UFCS and pipe ──
-
 test "pipe mixed with operations" {
-  let result = [5, 3, 1, 4, 2]
-    |> list.sort()
-    |> list.map((x) => x * x)
-    |> list.filter((x) => x > 4)
-    |> list.sum()
+  let result = [5, 3, 1, 4, 2] |> list.sort() |> list.map((x) => x * x) |> list.filter((x) => x > 4) |> list.sum()
   assert_eq(result, 50)
 }
 
 // ── Pipe with fold ──
-
 test "pipe ending with fold" {
-  let result = ["hello", "world", "foo", "bar"]
-    |> list.map((s) => string.len(s))
-    |> list.fold(0, (acc, n) => acc + n)
+  let result = ["hello", "world", "foo", "bar"] |> list.map((s) => string.len(s)) |> list.fold(0, (acc, n) => acc + n)
   assert_eq(result, 16)
 }
 
 // ── Pipe with partition ──
-
 test "pipe with partition and tuple access" {
-  let (evens, odds) = [1, 2, 3, 4, 5, 6, 7, 8]
-    |> list.partition((x) => x % 2 == 0)
+  let (evens, odds) = [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ] |> list.partition((x) => x % 2 == 0)
   assert_eq(list.sum(evens), 20)
   assert_eq(list.sum(odds), 16)
 }
 
 // ── Pipe with flat_map ──
-
 test "pipe with flat_map expanding" {
-  let result = [1, 2, 3]
-    |> list.flat_map((x) => [x, x * 10])
-    |> list.filter((x) => x > 5)
-    |> list.sort()
+  let result = [1, 2, 3] |> list.flat_map((x) => [x, x * 10]) |> list.filter((x) => x > 5) |> list.sort()
   assert_eq(result, [10, 20, 30])
 }
 
 // ── Pipe on generic user-defined function ──
-
-fn wrap_all[T](xs: List[T]) -> List[Option[T]] =
-  list.map(xs, (x) => some(x))
+fn wrap_all[T](xs: List[T]) -> List[Option[T]] = list.map(xs, (x) => some(x))
 
 test "pipe with generic user function" {
-  let result = [1, 2, 3]
-    |> wrap_all()
-    |> list.filter_map((x) => x)
+  let result = [1, 2, 3] |> wrap_all() |> list.filter_map((x) => x)
   assert_eq(result, [1, 2, 3])
 }

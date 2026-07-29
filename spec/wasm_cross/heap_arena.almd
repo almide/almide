@@ -15,16 +15,19 @@
 // The checkpoint value itself is target-specific (0 vs a real pointer) and is
 // NEVER printed — only the post-restore observable results, which must match.
 // The gate (wasm_cross_target_spec) asserts byte-identical stdout. Native oracle.
-
 // Take a checkpoint, build + consume scratch lists, restore, then verify that
 // fresh allocations after the restore are correct (no clobbered live data).
 fn arena_round(base: Int) -> Int = {
   let cp = bytes.heap_save()
   // Scratch work whose memory is reclaimable after restore.
   var scratch: List[Int] = []
-  for i in 0..<100 { list.push(scratch, base + i) }
+  for i in 0..<100 {
+    list.push(scratch, base + i)
+  }
   var s = 0
-  for x in scratch { s = s + x }
+  for x in scratch {
+    s = s + x
+  }
   bytes.heap_restore(cp)
   s
 }
@@ -38,21 +41,29 @@ fn main() -> Unit = {
     acc = acc + arena_round(r * 10)
   }
   println(int.to_string(acc))
-
   // After all the save/restore churn, a fresh persistent list must be intact.
   var persist: List[Int] = []
-  for i in 0..<50 { list.push(persist, i * i) }
+  for i in 0..<50 {
+    list.push(persist, i * i)
+  }
   var psum = 0
-  for x in persist { psum = psum + x }
+  for x in persist {
+    psum = psum + x
+  }
   println(int.to_string(psum) + " " + int.to_string(persist[7]) + " " + int.to_string(list.len(persist)))
-
   // Nested checkpoint/restore: inner restore must not corrupt outer live data.
   let cp_outer = bytes.heap_save()
   var outer_live: List[Int] = []
-  for i in 0..<10 { list.push(outer_live, i + 1) }
-  let inner = arena_round(1000)          // takes + restores its own checkpoint
+  for i in 0..<10 {
+    list.push(outer_live, i + 1)
+  }
+  let inner = arena_round(1000)
+  // takes + restores its own checkpoint
   var ol_sum = 0
-  for x in outer_live { ol_sum = ol_sum + x }   // outer must still read 1..10 = 55
+  for x in outer_live {
+    ol_sum = ol_sum + x
+  }
+  // outer must still read 1..10 = 55
   bytes.heap_restore(cp_outer)
   println(int.to_string(inner) + " " + int.to_string(ol_sum))
 }

@@ -8,7 +8,11 @@
 // sides (f never called — unchanged copy), the identity closure, replacing a nested Object element,
 // and a closure that reads the old element.
 effect fn main() -> Unit = {
-  let xs = [value.int(1), value.object([("a", value.int(2))]), value.int(3)]
+  let xs = [
+    value.int(1),
+    value.object([("a", value.int(2))]),
+    value.int(3)
+  ]
   println(value.stringify(value.array(list.update(xs, 0, (v) => value.int(9)))))
   println(value.stringify(value.array(list.update(xs, 0 - 1, (v) => value.str("BAD")))))
   println(value.stringify(value.array(list.update(xs, 9, (v) => value.str("BAD")))))

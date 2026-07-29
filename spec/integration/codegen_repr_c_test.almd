@@ -1,15 +1,11 @@
 // codegen_repr_c_test — Named types (struct/enum) used in FFI-style patterns:
 // pub fields, field access, variant matching, record spread, display
-
 // ── Simple record types with field access ──
-
 type Point = { x: Float, y: Float }
 
-fn distance(p: Point) -> Float =
-  float.sqrt(p.x * p.x + p.y * p.y)
+fn distance(p: Point) -> Float = float.sqrt(p.x * p.x + p.y * p.y)
 
-fn translate(p: Point, dx: Float, dy: Float) -> Point =
-  { x: p.x + dx, y: p.y + dy }
+fn translate(p: Point, dx: Float, dy: Float) -> Point = { x: p.x + dx, y: p.y + dy }
 
 test "record creation and field access" {
   let p = Point { x: 3.0, y: 4.0 }
@@ -39,7 +35,6 @@ test "record passed to function and returned" {
 }
 
 // ── Simple enum (unit variants) ──
-
 type Color = | Red | Green | Blue
 
 fn color_name(c: Color) -> String = match c {
@@ -76,7 +71,6 @@ test "unit variant equality" {
 }
 
 // ── Enum with payloads ──
-
 type Shape = | Circle(Float) | Rect(Float, Float) | Triangle(Float, Float, Float)
 
 fn area(s: Shape) -> Float = match s {
@@ -118,9 +112,13 @@ test "variant matching with wildcard" {
 }
 
 // ── List of variants with filter/map ──
-
 test "list of variants filtered and mapped" {
-  let shapes = [Circle(1.0), Rect(2.0, 3.0), Circle(4.0), Triangle(3.0, 4.0, 5.0)]
+  let shapes = [
+    Circle(1.0),
+    Rect(2.0, 3.0),
+    Circle(4.0),
+    Triangle(3.0, 4.0, 5.0)
+  ]
   let circles = list.filter(shapes, (s) => is_circle(s))
   assert_eq(list.len(circles), 2)
   let areas = list.map(shapes, (s) => area(s))
@@ -129,7 +127,6 @@ test "list of variants filtered and mapped" {
 }
 
 // ── Record with enum field (composition) ──
-
 type Styled = { shape: Shape, color: Color, label: String }
 
 fn styled_description(s: Styled) -> String = {
@@ -149,7 +146,7 @@ test "record containing enum fields" {
 test "list of records with enum fields" {
   let items = [
     Styled { shape: Circle(1.0), color: Red, label: "small" },
-    Styled { shape: Rect(2.0, 3.0), color: Blue, label: "box" },
+    Styled { shape: Rect(2.0, 3.0), color: Blue, label: "box" }
   ]
   let labels = list.map(items, (i) => i.label)
   assert_eq(labels, ["small", "box"])
@@ -159,11 +156,7 @@ test "list of records with enum fields" {
 }
 
 // ── Enum with record payloads used in FFI-like patterns ──
-
-type Message =
-  | Ping
-  | Data { payload: String, seq: Int }
-  | Error { code: Int, message: String }
+type Message = | Ping | Data { payload: String, seq: Int } | Error { code: Int, message: String }
 
 fn message_code(m: Message) -> Int = match m {
   Ping => 0,
@@ -193,7 +186,7 @@ test "enum record payload in list operations" {
     Ping,
     Data { payload: "a", seq: 1 },
     Error { code: 500, message: "fail" },
-    Data { payload: "b", seq: 2 },
+    Data { payload: "b", seq: 2 }
   ]
   let codes = list.map(msgs, (m) => message_code(m))
   assert_eq(codes, [0, 1, 500, 2])
@@ -202,31 +195,25 @@ test "enum record payload in list operations" {
 }
 
 // ── Nested named records ──
-
 type BoundingBox = { min: Point, max: Point }
 
 fn bbox_width(b: BoundingBox) -> Float = b.max.x - b.min.x
+
 fn bbox_height(b: BoundingBox) -> Float = b.max.y - b.min.y
+
 fn bbox_area(b: BoundingBox) -> Float = bbox_width(b) * bbox_height(b)
 
-fn bbox_contains(b: BoundingBox, p: Point) -> Bool =
-  p.x >= b.min.x and p.x <= b.max.x and p.y >= b.min.y and p.y <= b.max.y
+fn bbox_contains(b: BoundingBox, p: Point) -> Bool = p.x >= b.min.x and p.x <= b.max.x and p.y >= b.min.y and p.y <= b.max.y
 
 test "nested records with field access chains" {
-  let bb = BoundingBox {
-    min: Point { x: 0.0, y: 0.0 },
-    max: Point { x: 10.0, y: 5.0 },
-  }
+  let bb = BoundingBox { min: Point { x: 0.0, y: 0.0 }, max: Point { x: 10.0, y: 5.0 } }
   assert_eq(bbox_width(bb), 10.0)
   assert_eq(bbox_height(bb), 5.0)
   assert_eq(bbox_area(bb), 50.0)
 }
 
 test "nested record used in predicate" {
-  let bb = BoundingBox {
-    min: Point { x: 0.0, y: 0.0 },
-    max: Point { x: 10.0, y: 10.0 },
-  }
+  let bb = BoundingBox { min: Point { x: 0.0, y: 0.0 }, max: Point { x: 10.0, y: 10.0 } }
   assert_eq(bbox_contains(bb, Point { x: 5.0, y: 5.0 }), true)
   assert_eq(bbox_contains(bb, Point { x: 15.0, y: 5.0 }), false)
 }

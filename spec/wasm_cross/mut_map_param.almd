@@ -5,11 +5,9 @@
 // inference, so the in-place mutator never promoted it to a mutable borrow the
 // way `list.push` does) and the mutation persists, byte-identically wasm. Covers
 // a write-only mutator and a read-then-write one through the same `mut` param.
-
 fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = map.insert(m, k, v)
 
-fn bump(mut m: Map[String, Int], k: String) -> Unit =
-  map.insert(m, k, map.get_or(m, k, 0) + 1)
+fn bump(mut m: Map[String, Int], k: String) -> Unit = map.insert(m, k, map.get_or(m, k, 0) + 1)
 
 fn main() -> Unit = {
   var counts: Map[Int, Int] = [:]
@@ -19,7 +17,6 @@ fn main() -> Unit = {
   println("c1=" + int.to_string(map.get_or(counts, 1, 0)))
   println("c2=" + int.to_string(map.get_or(counts, 2, 0)))
   println("len=" + int.to_string(map.len(counts)))
-
   var freq: Map[String, Int] = [:]
   bump(freq, "a")
   bump(freq, "a")

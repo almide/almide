@@ -12,18 +12,14 @@ fn main() -> Unit = {
   // The case that diverged: an in-range negative zero against a `0.0` lower bound.
   println("${float.clamp(-0.0, 0.0, 1000000.0)}")
   println("${float.clamp(-0.0, -1.0, 1.0)}")
-
   // Both bounds still clamp.
   println("${float.clamp(5.0, 0.0, 3.0)}")
   println("${float.clamp(-5.0, 0.0, 3.0)}")
-
   // In-range values pass through.
   println("${float.clamp(1.5, 0.0, 3.0)}")
-
   // NaN fails both comparisons and lands on the upper bound — the same result
   // the `fmin`/`fmax` form produced, so this is unchanged.
-  println("${float.clamp(0.0/0.0, 0.0, 3.0)}")
-
+  println("${float.clamp(0.0 / 0.0, 0.0, 3.0)}")
   // The neighbouring min/max keep their own (wasm-spec) zero behaviour: this
   // contract is about `clamp` alone.
   println("${float.max(-0.0, 0.0)}:${float.min(-0.0, 0.0)}")

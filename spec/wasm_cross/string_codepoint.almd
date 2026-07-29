@@ -3,10 +3,10 @@
 // WASM must byte-match it. Exercises chars/reverse/slice/take/drop/first/last/
 // get/codepoint/from_codepoint/pad on ASCII + multibyte input (Latin-1 accent,
 // CJK, 4-byte emoji, 3-byte currency). No @xt-allow — this must be exact.
-
 fn report(s: String) -> Unit = {
   println("-- ${s} --")
-  println("len=${int.to_string(string.len(s))}")              // BYTE length
+  println("len=${int.to_string(string.len(s))}")
+  // BYTE length
   println("nchars=${int.to_string(list.length(string.chars(s)))}")
   println("reverse=${string.reverse(s)}")
   println("chars=${list.join(string.chars(s), "|")}")
@@ -29,18 +29,35 @@ fn report(s: String) -> Unit = {
 }
 
 fn main() -> Unit = {
-  let samples = ["hello", "héllo", "日本語", "a😀b", "x€y日", ""]
-  for s in samples { report(s) }
-
+  let samples = [
+    "hello",
+    "héllo",
+    "日本語",
+    "a😀b",
+    "x€y日",
+    ""
+  ]
+  for s in samples {
+    report(s)
+  }
   // from_codepoint: valid scalars (1-4 byte encode) + invalid → empty string.
-  let cps = [104, 233, 26085, 128512, 8364, 0, 1114111, 1114112, 55296]
+  let cps = [
+    104,
+    233,
+    26085,
+    128512,
+    8364,
+    0,
+    1114111,
+    1114112,
+    55296
+  ]
   for c in cps {
     let enc = string.from_codepoint(c)
     // round-trip the valid ones back through codepoint for a stable check
     let back = string.codepoint(enc) ?? -1
     println("from_cp ${int.to_string(c)} -> [${enc}] back=${int.to_string(back)} bytes=${int.to_string(string.len(enc))}")
   }
-
   // Negative n: native casts `n as usize` (a negative i64 -> huge), so take/take_end
   // return the WHOLE string and drop/drop_end return EMPTY. WASM must match.
   for s in ["héllo", "日本語", "a😀b"] {

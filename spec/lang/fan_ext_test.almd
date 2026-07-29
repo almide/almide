@@ -1,4 +1,3 @@
-
 // fan.any, fan.settle.
 // fan.any is now DETERMINISTIC: it tries thunks in LIST ORDER and returns the
 // FIRST Ok as Result[T, String]; if all fail it returns a defined Err. In a test
@@ -12,7 +11,7 @@ test "fan.any first success" {
   let result = fan.any([
     () => succeed(42),
     () => succeed(99)
-  ]);
+  ])
   assert_eq(result, ok(42))
 }
 
@@ -20,7 +19,7 @@ test "fan.any skips failures" {
   let result = fan.any([
     () => fail("nope"),
     () => succeed(7)
-  ]);
+  ])
   assert_eq(result, ok(7))
 }
 
@@ -28,7 +27,7 @@ test "fan.any all fail returns a defined error" {
   let result = fan.any([
     () => fail("a"),
     () => fail("b")
-  ]);
+  ])
   assert_eq(result, err("fan.any: all candidates failed"))
 }
 
@@ -38,7 +37,6 @@ test "fan.settle collects all" {
     () => succeed(1),
     () => fail("bad"),
     () => succeed(3)
-  ]);
+  ])
   assert_eq(list.len(results), 3)
 }
-

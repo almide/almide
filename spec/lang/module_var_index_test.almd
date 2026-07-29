@@ -1,8 +1,8 @@
 // Mutable module-level `var` INDEX-ASSIGN (the ceangal scroll state class):
 // writes through the global slot must be visible to every function, and a
 // call-bearing initializer (`list.repeat`) must run at startup.
-
 var speeds: List[Float] = list.repeat(0.0, 4)
+
 var marks: List[Int] = [1, 2, 3]
 
 fn set_speed(i: Int, v: Float) -> Unit = {

@@ -5,6 +5,7 @@
 // keeps memory in page 1 and the loop COMPLETES ("done"); a leak grows past 64KB and TRAPS (OOB)
 // well before 20000 iters (~320 would already exhaust a leaking 64KB). Byte-matches v0 ("done").
 fn use_arr(a: Value) -> Int = 0
+
 fn main() -> Unit = {
   var i = 0
   while i < 20000 {

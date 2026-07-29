@@ -14,13 +14,13 @@ test "list encode-decode roundtrip" {
   let c = Container { name: "box", items: [
     Item { id: 1, value: "a" },
     Item { id: 2, value: "b" }
-  ], tags: ["x", "y"] };
-  let text = json.stringify(c.encode());
-  println(text);
+  ], tags: ["x", "y"] }
+  let text = json.stringify(c.encode())
+  println(text)
   match json.parse(text) {
     ok(v) => {
-      let c2 = decode_container(v);
-      assert_eq(c2.name, "box");
+      let c2 = decode_container(v)
+      assert_eq(c2.name, "box")
       assert_eq(c2.tags, ["x", "y"])
     },
     err(_) => assert(false),

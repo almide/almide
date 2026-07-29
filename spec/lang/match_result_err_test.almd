@@ -8,7 +8,6 @@
 // non-valtype, so the epilogue appended `unreachable` and the function trapped
 // (exit 134) — while native ran correctly. Now the match recovers the concrete
 // Result type from the arm values, so native == WASM.
-
 // ── Every arm is err ──
 fn all_err(x: Int) -> Result[Int, String] = match x {
   2 => err("two"),
@@ -91,11 +90,11 @@ fn opt_mixed(x: Int) -> Option[Int] = match x {
 }
 
 test "option match: all none" {
-  assert_eq(opt_all_none(2), none);
+  assert_eq(opt_all_none(2), none)
   assert_eq(opt_all_none(5), none)
 }
 
 test "option match: mixed" {
-  assert_eq(opt_mixed(2), none);
+  assert_eq(opt_mixed(2), none)
   assert_eq(opt_mixed(3), some(30))
 }

@@ -6,9 +6,13 @@
 fn fi(n: Int) -> Bytes = {
   var buf = bytes.new(0)
   var v = n
-  while v > 0 { bytes.push(buf, int.band(v, 0xFF)); v = int.bshr(v, 8) }
+  while v > 0 {
+    bytes.push(buf, int.band(v, 0xFF))
+    v = int.bshr(v, 8)
+  }
   buf
 }
+
 fn main() -> Unit = {
   let b = fi(0x010203)
   println(int.to_string(bytes.len(b)))

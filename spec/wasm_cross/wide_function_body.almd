@@ -13,7 +13,6 @@
 // The width here (140 statements) is a behavior lock, not a stack-overflow
 // regressor (that needs thousands of frames — guarded by
 // tests/compiler_stack_test.rs, which pins a small ALMIDE_COMPILER_STACK).
-
 effect fn main() -> Unit = {
   var total: Int = 0
   let s0 = string.repeat("ab", 1)

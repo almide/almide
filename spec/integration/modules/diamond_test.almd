@@ -2,7 +2,6 @@
 // Structure: this file → dmod_b → dmod_d (+ dmod_d.utils submodule)
 //                       → dmod_c → dmod_d
 // dmod_d is shared (loaded once)
-
 import dmod_b
 import dmod_c
 import dmod_d
@@ -10,7 +9,6 @@ import dmod_d.utils as utils
 import dmod_d.nested.deep as deep
 
 // ── Phase 1: Symbol resolution — no collisions ──
-
 test "diamond: B calls D" {
   assert_eq(dmod_b.from_b(), "B says: from D")
 }
@@ -28,7 +26,6 @@ test "diamond: D value consistent" {
 }
 
 // ── Phase 2: Type identity — D type is the same through B and C ──
-
 test "diamond: B creates D Logger type" {
   let logger = dmod_b.make_b_logger()
   assert_eq(dmod_d.log_name(logger), "B")
@@ -59,7 +56,6 @@ test "diamond: direct D Logger works with both B and C" {
 }
 
 // ── Phase 3: Submodule through diamond ──
-
 test "diamond: D submodule called via explicit import" {
   assert_eq(utils.format_level(0), "DEBUG")
   assert_eq(utils.format_level(1), "INFO")
@@ -68,7 +64,6 @@ test "diamond: D submodule called via explicit import" {
 }
 
 // ── Phase 4: Deep nested submodule via explicit import ──
-
 test "diamond: deep nested via explicit import" {
   assert_eq(deep.greet("world"), "hello from deep: world")
 }

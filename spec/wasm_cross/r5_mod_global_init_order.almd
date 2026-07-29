@@ -13,12 +13,14 @@
 // `wasm_cross_module_global_init_order_*` in tests/wasm_runtime_test.rs; the
 // single-file wasm_cross gate cannot host module projects, so this fixture
 // locks the same `__init_globals` ordering machinery in single-file form.
-
 fn make_banner() -> String = "${APP_NAME} ready"
 
 let BANNER = make_banner()
+
 let APP_NAME = "modg"
+
 let ITEMS = [10, 20, 30]
+
 let FIRST = list.len(ITEMS)
 
 fn main() -> Unit = {

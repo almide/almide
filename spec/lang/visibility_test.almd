@@ -1,4 +1,3 @@
-
 // visibility_test — pub, local, mod visibility modifiers
 fn add_pub(a: Int, b: Int) -> Int = a + b
 

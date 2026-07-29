@@ -3,7 +3,6 @@
 // regenerates and diffs). Each case executes a manifest probe on
 // multibyte input; a failure here means the implementation drifted
 // from the DECLARED semantic dimension (#419 class, C-065).
-
 test "string.len unit=codepoint" {
   assert_eq("${string.len("café7")}", "5")
 }
@@ -77,5 +76,5 @@ test "string.drop_end unit=codepoint" {
 }
 
 test "string.run_length_encode unit=count" {
-  assert_eq("${string.run_length_encode("ééa")}", "[(\"é\", 2), (\"a\", 1)]")
+  assert_eq("${string.run_length_encode("ééa")}", '[("é", 2), ("a", 1)]')
 }

@@ -7,5 +7,4 @@ type Loc = { name: String, found: Bool }
 
 fn missing() -> Loc = { name: "", found: false }
 
-fn pick(locs: List[Loc], name: String) -> Loc =
-  locs |> list.fold(missing(), (acc, l) => if l.name == name then l else acc)
+fn pick(locs: List[Loc], name: String) -> Loc = locs |> list.fold(missing(), (acc, l) => if l.name == name then l else acc)

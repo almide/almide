@@ -11,13 +11,12 @@
 // at codegen entry and extends the link mangle to Lambda/ClosureCreate/Call
 // type-args/RcWrap. This fixture just has to BUILD AND RUN (both targets) —
 // if the gate fires again it fails to compile.
-
 import loclib
 
 test "cross-module record through a fold-accumulator lambda builds and runs (#681)" {
   let locs = [
     loclib.Loc { name: "a", found: true },
-    loclib.Loc { name: "b", found: true },
+    loclib.Loc { name: "b", found: true }
   ]
   assert_eq(loclib.pick(locs, "b").name, "b")
   assert_eq(loclib.pick(locs, "missing").name, "")

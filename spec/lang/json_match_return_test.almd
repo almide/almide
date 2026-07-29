@@ -24,7 +24,7 @@ fn parse_and_count(data: String) -> Int = {
 
 test "parse and count" {
   assert_eq(parse_and_count("invalid"), -1)
-  assert_eq(parse_and_count("{\"items\":[]}"), 0)
-  assert_eq(parse_and_count("{\"items\":[1,2,3]}"), 3)
-  assert_eq(parse_and_count("{\"items\":[1,2,3,4,5]}"), 5)
+  assert_eq(parse_and_count('{"items":[]}'), 0)
+  assert_eq(parse_and_count('{"items":[1,2,3]}'), 3)
+  assert_eq(parse_and_count('{"items":[1,2,3,4,5]}'), 5)
 }

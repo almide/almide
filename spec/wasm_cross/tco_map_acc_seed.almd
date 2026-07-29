@@ -15,40 +15,33 @@
 // elision is rc==1-gated, which a Dup'd rc>=2 block defeats by construction.
 // The zero-iteration case pins the share discipline itself: the result aliases
 // the seed and both are dropped independently.
+fn go(xs: List[Int], i: Int, acc: Map[Int, Int]) -> Map[Int, Int] = if i >= list.len(xs) then acc
+else go(xs, i + 1, map.set(acc, list.get_or(xs, i, 0), 1))
 
-fn go(xs: List[Int], i: Int, acc: Map[Int, Int]) -> Map[Int, Int] =
-  if i >= list.len(xs) then acc
-  else go(xs, i + 1, map.set(acc, list.get_or(xs, i, 0), 1))
+fn gs(xs: List[String], i: Int, acc: Set[String]) -> Set[String] = if i >= list.len(xs) then acc
+else gs(xs, i + 1, set.insert(acc, list.get_or(xs, i, "")))
 
-fn gs(xs: List[String], i: Int, acc: Set[String]) -> Set[String] =
-  if i >= list.len(xs) then acc
-  else gs(xs, i + 1, set.insert(acc, list.get_or(xs, i, "")))
-
-fn gm(xs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
-  if i >= list.len(xs) then acc
-  else {
-    let k = list.get_or(xs, i, "")
-    gm(xs, i + 1, map.set(acc, k, k + "!"))
-  }
+fn gm(xs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] = if i >= list.len(xs) then acc
+else {
+  let k = list.get_or(xs, i, "")
+  gm(xs, i + 1, map.set(acc, k, k + "!"))
+}
 
 fn main() -> Unit = {
   // The original counterexample: the seed entry must survive the loop.
   let seed = map.from_list([(99, 7)])
   let m = go([1, 2], 0, seed)
   println("len=${int.to_string(map.len(m))} seed99=${int.to_string(map.get_or(m, 99, -1))} orig=${int.to_string(map.len(seed))}")
-
   // Zero iterations: the result SHARES the seed's block (rc=2); both handles
   // are then dropped independently — the share must not double-free or leak.
   let seed0 = map.from_list([(5, 50)])
   let z = go([], 0, seed0)
   println("zero=${int.to_string(map.len(z))}:${int.to_string(map.len(seed0))}")
-
   // Set accumulator, non-empty seed.
   let ss = set.from_list(["keep"])
   let s2 = gs(["a", "b"], 0, ss)
   let kept = if set.contains(s2, "keep") then "y" else "n"
   println("set=${int.to_string(set.len(s2))} keep=${kept} orig=${int.to_string(set.len(ss))}")
-
   // String-KV map (interleaved _str repr — nested string handles under the
   // rc-gated recursive drop), non-empty seed.
   let ms = map.set(map.new(), "seed", "v0")

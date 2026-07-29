@@ -3,7 +3,6 @@
 // arms. Regression — such a match was typed `Never`, so the WASM function
 // epilogue appended `unreachable` and trapped (exit 134) while native ran fine.
 // Now native == WASM byte-for-byte on stdout.
-
 fn all_err(x: Int) -> Result[Int, String] = match x {
   2 => err("two"),
   _ => err("other"),

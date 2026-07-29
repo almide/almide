@@ -14,8 +14,11 @@
 import math
 
 fn pe(x: Float) -> Unit = println(float.to_string(math.exp(x)))
+
 fn pl(x: Float) -> Unit = println(float.to_string(math.log(x)))
+
 fn p2(x: Float) -> Unit = println(float.to_string(math.log2(x)))
+
 fn p10(x: Float) -> Unit = println(float.to_string(math.log10(x)))
 
 fn main() -> Unit = {
@@ -29,27 +32,30 @@ fn main() -> Unit = {
   pe(-10.0)
   pe(709.0)
   pe(709.7827)
-  pe(710.0)          // overflow -> inf
+  pe(710.0)
+  // overflow -> inf
   pe(-700.0)
-  pe(-745.0)         // subnormal 5e-324 (was clamped to 0)
+  pe(-745.0)
+  // subnormal 5e-324 (was clamped to 0)
   pe(-745.2)
-  pe(-746.0)         // underflow -> 0
+  pe(-746.0)
+  // underflow -> 0
   pe(-0.0001)
   pe(0.0001)
-
   // log (natural)
   pl(1.0)
   pl(2.718281828459045)
   pl(10.0)
   pl(0.5)
   pl(1000000.0)
-  pl(1.0e-300)
-  pl(1.0e300)
-  pl(0.0)            // -inf (was NaN)
-  pl(-2.0)           // NaN
+  pl(0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001)
+  pl(1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0)
+  pl(0.0)
+  // -inf (was NaN)
+  pl(-2.0)
+  // NaN
   pl(2.0)
   pl(123.456)
-
   // log2 — exact powers of two stay exact
   p2(1.0)
   p2(2.0)
@@ -57,9 +63,9 @@ fn main() -> Unit = {
   p2(1024.0)
   p2(3.0)
   p2(0.5)
-  p2(0.0)            // -inf
-  p2(1.0e100)
-
+  p2(0.0)
+  // -inf
+  p2(10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0)
   // log10 — exact powers of ten stay exact
   p10(1.0)
   p10(10.0)
@@ -67,9 +73,9 @@ fn main() -> Unit = {
   p10(1000.0)
   p10(2.0)
   p10(0.5)
-  p10(0.0)           // -inf
-  p10(1.0e-10)
-
+  p10(0.0)
+  // -inf
+  p10(0.0000000001)
   // NEGATIVE zero: log(±0) = -inf for ALL THREE (IEEE/musl). The v1 self-host
   // dropped the sign-bit half of musl's gate (`hx < 0x00100000 || hx>>31`), so
   // -0.0 skipped the ±0 arm and hit the blanket NaN reject (differential-fuzz

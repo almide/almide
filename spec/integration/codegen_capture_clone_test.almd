@@ -1,8 +1,6 @@
 // codegen_capture_clone_test — Variables captured by closures and reused afterward,
 // ensuring CaptureClonePass correctly inserts pre-clones
-
 // ── Capture + use after in for loop ──
-
 test "capture then use in for loop" {
   var result: List[String] = []
   let items = ["a", "b", "c"]
@@ -26,7 +24,6 @@ test "outer variable captured in for-loop closure" {
 }
 
 // ── Same variable captured by two closures sequentially ──
-
 test "variable in two sequential closures" {
   let tag = "v"
   let xs = ["a", "b"]
@@ -47,7 +44,6 @@ test "variable in closure then used directly" {
 }
 
 // ── Three closures capturing the same variable ──
-
 test "variable captured by three closures" {
   let sep = "-"
   let a = list.map(["x", "y"], (s) => s + sep + "a")
@@ -59,7 +55,6 @@ test "variable captured by three closures" {
 }
 
 // ── Closure capturing list variable ──
-
 test "list captured by closure and reused" {
   let data = [10, 20, 30]
   let doubled = list.map(data, (x) => x * 2)
@@ -71,7 +66,6 @@ test "list captured by closure and reused" {
 }
 
 // ── Closure capturing record variable ──
-
 test "record captured by closure and reused" {
   let config = { prefix: "log", level: 2 }
   let items = ["a", "b"]
@@ -83,19 +77,21 @@ test "record captured by closure and reused" {
 }
 
 // ── Capture inside nested closures ──
-
 test "capture in nested map operations" {
   let multiplier = 10
-  let matrix = [[1, 2], [3, 4]]
-  let result = list.map(matrix, (row) =>
-    list.map(row, (x) => x * multiplier)
-  )
-  assert_eq(result, [[10, 20], [30, 40]])
+  let matrix = [
+    [1, 2],
+    [3, 4]
+  ]
+  let result = list.map(matrix, (row) => list.map(row, (x) => x * multiplier))
+  assert_eq(result, [
+    [10, 20],
+    [30, 40]
+  ])
   assert_eq(multiplier, 10)
 }
 
 // ── For loop with closure + post-loop use of iterated collection ──
-
 test "iterate list then use it after" {
   let names = ["alice", "bob"]
   var greetings: List[String] = []
@@ -110,7 +106,6 @@ test "iterate list then use it after" {
 }
 
 // ── Tuple destructure captured by closure ──
-
 test "destructured variable captured by closure" {
   let (first, second) = ("hello", "world")
   let items = [1, 2]
@@ -123,21 +118,17 @@ test "destructured variable captured by closure" {
 }
 
 // ── Closure in filter + closure in map on same data ──
-
 test "filter and map closures on same list" {
   let threshold = 3
   let data = [1, 2, 3, 4, 5]
   let above = list.filter(data, (x) => x > threshold)
-  let labeled = list.map(data, (x) =>
-    if x > threshold then "high" else "low"
-  )
+  let labeled = list.map(data, (x) => if x > threshold then "high" else "low")
   assert_eq(above, [4, 5])
   assert_eq(labeled, ["low", "low", "low", "high", "high"])
   assert_eq(list.len(data), 5)
 }
 
 // ── Multiple variables captured in same closure ──
-
 test "multiple captures in one closure" {
   let base = 100
   let scale = 2
@@ -149,7 +140,6 @@ test "multiple captures in one closure" {
 }
 
 // ── Var accumulator + closure capture in loop ──
-
 test "var accumulator with closure in loop body" {
   var total = 0
   let weights = [1, 2, 3]

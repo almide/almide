@@ -5,30 +5,48 @@
 // leg printed a value outside the type's range entirely. Each `+`/`-`/`*` on a
 // narrow width is now re-wrapped (signed: shl+sar; unsigned: mask).
 fn a8(x: Int8, y: Int8) -> Int8 = x + y
+
 fn s8(x: Int8, y: Int8) -> Int8 = x - y
+
 fn m8(x: Int8, y: Int8) -> Int8 = x * y
+
 fn au8(x: UInt8, y: UInt8) -> UInt8 = x + y
+
 fn su8(x: UInt8, y: UInt8) -> UInt8 = x - y
+
 fn a16(x: Int16, y: Int16) -> Int16 = x + y
+
 fn au16(x: UInt16, y: UInt16) -> UInt16 = x + y
+
 fn a32(x: Int32, y: Int32) -> Int32 = x + y
+
 fn au32(x: UInt32, y: UInt32) -> UInt32 = x + y
 
 fn main() -> Unit = {
   // Each width's overflow edge, signed and unsigned.
-  println(int8.to_string(a8(127, 1)))        // -128
-  println(int8.to_string(s8(-128, 1)))       // 127
-  println(int8.to_string(m8(64, 4)))         // 0
-  println(uint8.to_string(au8(200, 100)))    // 44
-  println(uint8.to_string(su8(0, 1)))        // 255
-  println(int16.to_string(a16(32767, 1)))    // -32768
-  println(uint16.to_string(au16(65535, 1)))  // 0
-  println(int32.to_string(a32(2147483647, 1)))   // -2147483648
-  println(uint32.to_string(au32(4294967295, 1))) // 0
+  println(int8.to_string(a8(127, 1)))
+  // -128
+  println(int8.to_string(s8(-128, 1)))
+  // 127
+  println(int8.to_string(m8(64, 4)))
+  // 0
+  println(uint8.to_string(au8(200, 100)))
+  // 44
+  println(uint8.to_string(su8(0, 1)))
+  // 255
+  println(int16.to_string(a16(32767, 1)))
+  // -32768
+  println(uint16.to_string(au16(65535, 1)))
+  // 0
+  println(int32.to_string(a32(2147483647, 1)))
+  // -2147483648
+  println(uint32.to_string(au32(4294967295, 1)))
+  // 0
   // In-range arithmetic is untouched.
-  println(int8.to_string(a8(3, 4)))          // 7
-  println(uint8.to_string(au8(3, 4)))        // 7
-
+  println(int8.to_string(a8(3, 4)))
+  // 7
+  println(uint8.to_string(au8(3, 4)))
+  // 7
   // The SAME edges reached WITHOUT a call, so the constant folder computes
   // them instead of the runtime (#901). Folding kept i64 width and emitted the
   // result as a literal of the declared type — `128i8`, which rustc rejects
@@ -36,23 +54,28 @@ fn main() -> Unit = {
   // -128. Fold-time now narrows exactly as the runtime path wraps.
   let p8: Int8 = 127
   let q8: Int8 = 1
-  println(int8.to_string(p8 + q8))           // -128
+  println(int8.to_string(p8 + q8))
+  // -128
   let pu8: UInt8 = 200
   let qu8: UInt8 = 100
-  println(uint8.to_string(pu8 + qu8))        // 44
+  println(uint8.to_string(pu8 + qu8))
+  // 44
   let p16: Int16 = 32767
   let q16: Int16 = 1
-  println(int16.to_string(p16 + q16))        // -32768
+  println(int16.to_string(p16 + q16))
+  // -32768
   let p32: Int32 = 2147483647
   let q32: Int32 = 1
-  println(int32.to_string(p32 + q32))        // -2147483648
+  println(int32.to_string(p32 + q32))
+  // -2147483648
   let pu32: UInt32 = 4294967295
   let qu32: UInt32 = 1
-  println(uint32.to_string(pu32 + qu32))     // 0
+  println(uint32.to_string(pu32 + qu32))
+  // 0
   let m1: Int8 = 64
   let m2: Int8 = 4
-  println(int8.to_string(m1 * m2))           // 0
-
+  println(int8.to_string(m1 * m2))
+  // 0
   // `^` is repeated multiplication, so it wraps at the declared width like `*`.
   // It reached the lane by a different road and missed the wrap: on wasm the
   // operator lowers to a `math.pow` CALL, which never passed through the IntBinOp
@@ -63,15 +86,21 @@ fn main() -> Unit = {
   // Wrapping once at the end is wrapping at every step: two's-complement
   // multiplication is congruent mod 2^bits.
   let e32: Int32 = 1000000 - 3
-  println(int32.to_string(e32 ^ 2))          // -733379959
+  println(int32.to_string(e32 ^ 2))
+  // -733379959
   let e8: Int8 = 5
-  println(int8.to_string(e8 ^ 3))            // 125
+  println(int8.to_string(e8 ^ 3))
+  // 125
   let f8: Int8 = 6
-  println(int8.to_string(f8 ^ 3))            // -40
+  println(int8.to_string(f8 ^ 3))
+  // -40
   let eu8: UInt8 = 20
-  println(uint8.to_string(eu8 ^ 2))          // 144
+  println(uint8.to_string(eu8 ^ 2))
+  // 144
   let e16: Int16 = 300
-  println(int16.to_string(e16 ^ 2))          // 24464
+  println(int16.to_string(e16 ^ 2))
+  // 24464
   // The carrier's own width is untouched: no wrap is applied to Int.
-  println(int.to_string(2 ^ 62))             // 4611686018427387904
+  // 4611686018427387904
+  println(int.to_string(2 ^ 62))
 }

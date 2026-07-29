@@ -11,7 +11,6 @@
 // Previously the wasm leg emitted a VOID def while callers `local.set` the
 // promised Result handle — a structurally invalid module (honest refusal at
 // build time, never wrong bytes).
-
 effect fn do_nothing() -> Unit = {
   println("dn")
 }

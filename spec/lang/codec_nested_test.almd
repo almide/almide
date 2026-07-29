@@ -13,15 +13,15 @@ fn unwrap_weather(v: Value) -> WeatherInfo = match WeatherInfo.decode(v) {
 }
 
 test "nested codec roundtrip" {
-  let c = Coord { lon: 139.69, lat: 35.69 };
-  let wi = Wind { speed: 3.6, deg: 350 };
-  let w = WeatherInfo { coord: c, wind: wi, name: "Tokyo", visibility: 10000 };
-  let v = w.encode();
-  let text = json.stringify(v);
+  let c = Coord { lon: 139.69, lat: 35.69 }
+  let wi = Wind { speed: 3.6, deg: 350 }
+  let w = WeatherInfo { coord: c, wind: wi, name: "Tokyo", visibility: 10000 }
+  let v = w.encode()
+  let text = json.stringify(v)
   match json.parse(text) {
     ok(v2) => {
-      let w2 = unwrap_weather(v2);
-      assert_eq(w2.name, "Tokyo");
+      let w2 = unwrap_weather(v2)
+      assert_eq(w2.name, "Tokyo")
       assert_eq(w2.visibility, 10000)
     },
     err(_) => assert(false),

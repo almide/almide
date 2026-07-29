@@ -1,13 +1,11 @@
 // Submodule call tests (Go-style: each module imported individually)
 // Verify that submodules must be explicitly imported to use.
-
 import dmod_d
 import dmod_d.utils
 import dmod_d.nested.deep
 import dmod_b
 
 // ── Direct package function ──
-
 test "submodule: top-level function" {
   assert_eq(dmod_d.shared(), "from D")
 }
@@ -17,7 +15,6 @@ test "submodule: top-level value" {
 }
 
 // ── Submodule via explicit import ──
-
 test "submodule: utils call via import" {
   assert_eq(utils.format_level(0), "DEBUG")
   assert_eq(utils.format_level(1), "INFO")
@@ -26,14 +23,12 @@ test "submodule: utils call via import" {
 }
 
 // ── Deep submodule via explicit import ──
-
 test "submodule: deep nested via import" {
   assert_eq(deep.greet("x"), "hello from deep: x")
   assert_eq(deep.greet(""), "hello from deep: ")
 }
 
 // ── Mix top-level and submodule in same expression ──
-
 test "submodule: top-level and submodule in one expression" {
   let level = dmod_d.value() - 42
   let label = utils.format_level(level)
@@ -49,7 +44,6 @@ test "submodule: type from top-level used with submodule" {
 }
 
 // ── Submodule through diamond dependency ──
-
 test "submodule: B uses D, then access D submodule directly" {
   let from_b = dmod_b.from_b()
   let level = utils.format_level(1)

@@ -8,7 +8,6 @@
 // `almide check` pass that only one target could build. These are the accepted
 // shapes; the rejections (a canonical VALUE peer, and a sized value returned
 // into a canonical `Int` slot) live in tests/sized_width_peer_join_test.rs.
-
 fn widen(u: UInt8) -> Int = int.from_uint8(u)
 
 test "a list literal joins to the sized element width" {
@@ -27,9 +26,15 @@ test "if arms join to the sized width" {
 
 test "match arms join to the sized width" {
   let u: UInt8 = 9
-  let v = match 2 { 0 => 1, _ => u }
+  let v = match 2 {
+    0 => 1,
+    _ => u,
+  }
   assert_eq(uint8.to_string(v), "9")
-  let w = match 0 { 0 => 1, _ => u }
+  let w = match 0 {
+    0 => 1,
+    _ => u,
+  }
   assert_eq(uint8.to_string(w), "1")
 }
 

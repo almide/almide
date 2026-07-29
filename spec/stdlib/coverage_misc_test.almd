@@ -32,7 +32,7 @@ test "value.as_array" {
 }
 
 test "value.get" {
-  let v = json.parse("{\"key\": \"val\"}")!
+  let v = json.parse('{"key": "val"}')!
   let r = value.get(v, "key")
   assert(result.is_ok(r))
 }
@@ -54,7 +54,6 @@ test "option.or_else" {
   let a: Option[Int] = none
   let b = option.or_else(a, () => some(42))
   assert_eq(b, some(42))
-
   let c = some(10)
   let d = option.or_else(c, () => some(42))
   assert_eq(d, some(10))
@@ -64,7 +63,6 @@ test "option.unwrap_or_else" {
   let a: Option[Int] = none
   let b = option.unwrap_or_else(a, () => 99)
   assert_eq(b, 99)
-
   let c = some(10)
   let d = option.unwrap_or_else(c, () => 99)
   assert_eq(d, 10)

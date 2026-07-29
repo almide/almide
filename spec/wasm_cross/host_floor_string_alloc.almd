@@ -27,7 +27,6 @@
 //
 // The `??` fallbacks (rather than `!`) keep every effect call out of a `!`
 // unwrap inside a loop body, which is a separate MIR-lowering-subset wall.
-
 import fs
 
 fn path_of(dir: String, n: Int) -> String = dir + "/f" + int.to_string(n) + ".txt"

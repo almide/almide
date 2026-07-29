@@ -6,7 +6,6 @@
 // native and wasm must print byte-identical output. Fixed timestamps only (no
 // wall clock) so the result is deterministic. This locks the fix for #747, where
 // the default v0 wasm arm was a stub that ignored the pattern entirely.
-
 import datetime
 
 fn main() -> Unit = {
@@ -16,11 +15,9 @@ fn main() -> Unit = {
   println(datetime.format(ts, "%H:%M:%S"))
   println(datetime.format(ts, "%Y-%m-%dT%H:%M:%SZ"))
   println(datetime.format(ts, "date=%Y/%m/%d time=%H.%M.%S"))
-
   // The unix epoch and one day later — leading-zero months/days.
   let epoch = datetime.from_parts(1970, 1, 2, 0, 0, 0)
   println(datetime.format(epoch, "%d/%m/%Y %H:%M:%S"))
-
   // An unrecognized specifier and a stray '%' pass through unchanged.
   println(datetime.format(ts, "%Y%% %q end"))
 }

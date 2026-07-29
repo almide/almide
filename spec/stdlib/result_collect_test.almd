@@ -1,7 +1,5 @@
 // result collect/partition/collect_map tests
-
 // ── result.collect ──
-
 test "result.collect all ok" {
   let rs: List[Result[Int, String]] = [ok(1), ok(2), ok(3)]
   let collected = result.collect(rs)
@@ -37,7 +35,6 @@ test "result.collect single err" {
 }
 
 // ── result.partition ──
-
 test "result.partition mixed" {
   let rs: List[Result[Int, String]] = [ok(1), err("x"), ok(2), err("y")]
   let (oks, errs) = result.partition(rs)
@@ -67,7 +64,6 @@ test "result.partition empty" {
 }
 
 // ── result.collect_map ──
-
 test "result.collect_map all ok" {
   let xs = [1, 2, 3]
   let collected: Result[List[Int], List[String]] = result.collect_map(xs, (x) => ok(x * 10))

@@ -14,20 +14,15 @@ fn main() -> Unit = {
     ("empty_arr", json.array([])),
     ("empty_obj", json.object([])),
     ("flag", json.from_bool(false)),
-    ("ratio", json.from_float(2.5)),
+    ("ratio", json.from_float(2.5))
   ])
   println(json.stringify_pretty(v))
-
   // top-level array + scalar
   println(json.stringify_pretty(json.array([json.from_string("a"), json.from_string("b")])))
   println(json.stringify_pretty(json.from_int(42)))
-
   // Combining-mark strings/keys stay RAW UTF-8 under the canonical 5-escape
   // rule (the {:?} escape_debug path emitted `\u{301}` — invalid JSON and a
   // byte divergence vs the wasm leg; differential-fuzz).
-  let accents = json.object([
-    ("cafe\u{0301}", json.from_string("e\u{0301}clair")),
-    ("quoted\"key", json.from_string("tab\there")),
-  ])
+  let accents = json.object([("café", json.from_string("éclair")), ('quoted"key', json.from_string("tab\there"))])
   println(json.stringify_pretty(accents))
 }

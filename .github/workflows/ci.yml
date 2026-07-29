@@ -403,6 +403,9 @@ jobs:
           $ALMIDE "$f" --target rust > /dev/null && echo "Rust emit OK"
           $ALMIDE "$f" --emit-ast    > /dev/null && echo "AST emit OK"
 
+      - name: fmt gate (spec/ + examples/ stay formatted, #919)
+        run: /tmp/almide-bin/almide fmt --check spec/ examples/
+
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
 
@@ -416,7 +419,7 @@ jobs:
         run: scripts/check-embedded-size.sh
 
       - name: Stdlib semantics manifest (coverage + regen-diff, #521)
-        run: scripts/check-semantics-manifest.sh
+        run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-semantics-manifest.sh
 
       - name: Stdlib doc signature indexes up to date (regenerate and diff)
         run: ALMIDE_BIN=/tmp/almide-bin/almide python3 tools/gen-stdlib-doc-index.py --check
