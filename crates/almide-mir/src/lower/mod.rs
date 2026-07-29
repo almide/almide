@@ -25,6 +25,89 @@ use almide_ir::{
 use almide_lang::types::Ty;
 use std::collections::{HashMap, HashSet};
 
+/// The KNOWN wall shapes (#931): a coarse classification of the constructs
+/// the verified renderer most often refuses. Each known shape carries a
+/// plain-language headline and the documented rewrite (the CHEATSHEET idioms)
+/// that takes the program back inside the subset — so the CLI can lead with
+/// what the USER wrote and how to change it, keeping the compiler-internal
+/// reason string for a trailing `note:`. `Other` is every wall with no
+/// specific rewrite; it renders as before (reason as the headline).
+/// `wall_shape_hints.rs` gates that every non-`Other` shape has both texts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WallShape {
+    /// A `while` body reassigning a heap accumulator (`s = s + x`).
+    WhileHeapAccumulator,
+    /// A `match`/`if` producing a heap value, bound to a `let`/`var`.
+    HeapResultBind,
+    /// An Option/Result match bound to a `let`/`var` outside the executable
+    /// (scalar-payload) subset.
+    VariantValueMatch,
+    /// A call argument (or scalar-call operand) whose shape the lowering
+    /// cannot admit.
+    CallArgument,
+    /// A tail-position expression that is not a supported field/element
+    /// extraction.
+    TailExtraction,
+    /// No specific rewrite known — the reason string is the whole story.
+    Other,
+}
+
+impl WallShape {
+    /// What the user wrote, in surface-language vocabulary — the diagnostic
+    /// headline. `None` for [`WallShape::Other`].
+    pub fn headline(&self) -> Option<&'static str> {
+        match self {
+            WallShape::WhileHeapAccumulator => Some(
+                "this `while` body grows a heap value (String/List) across iterations \
+                 — not yet in the verified wasm subset",
+            ),
+            WallShape::HeapResultBind => Some(
+                "this `match`/`if` produces a heap value (String/List/record) and is \
+                 bound to a let/var — not yet in the verified wasm subset",
+            ),
+            WallShape::VariantValueMatch => Some(
+                "this Option/Result match binds a payload shape that is not yet in \
+                 the verified wasm subset",
+            ),
+            WallShape::CallArgument => Some(
+                "this call argument's shape is not yet in the verified wasm subset",
+            ),
+            WallShape::TailExtraction => Some(
+                "this return expression's shape is not yet in the verified wasm subset",
+            ),
+            WallShape::Other => None,
+        }
+    }
+
+    /// The documented rewrite that takes the program back inside the subset
+    /// (the CHEATSHEET/CLAUDE.md idioms). `None` for [`WallShape::Other`].
+    pub fn rewrite_hint(&self) -> Option<&'static str> {
+        match self {
+            WallShape::WhileHeapAccumulator => Some(
+                "hoist the accumulator into a recursive helper fn (prefer recursion \
+                 over var + while), or build the value with a list combinator \
+                 (map / filter / join)",
+            ),
+            WallShape::HeapResultBind => Some(
+                "move the `match`/`if` into tail position: return it from a small \
+                 helper fn instead of binding it to a let/var",
+            ),
+            WallShape::VariantValueMatch => Some(
+                "scalar payloads (Int/Float/Bool) execute directly; for heap payloads \
+                 match in tail position via a helper fn, or collapse the value first \
+                 with `??`",
+            ),
+            WallShape::CallArgument => Some(
+                "hoist the argument into its own `let` binding and pass the name",
+            ),
+            WallShape::TailExtraction => Some(
+                "bind the expression to a `let` and return the binding",
+            ),
+            WallShape::Other => None,
+        }
+    }
+}
+
 /// A lowering could not proceed because the input is outside this brick's
 /// subset (or violates a precondition such as concrete types). Carrying the
 /// reason keeps the pass TOTAL — no case is silently skipped.
@@ -37,8 +120,10 @@ pub enum LowerError {
     /// site must use it (the spanless count is ratcheted by
     /// `spanless_wall_count_only_goes_down`), so the CLI can render the wall
     /// through the Diagnostic machinery with the source line and a caret
-    /// instead of a bare sentence.
-    UnsupportedAt { reason: String, span: almide_ir::Span },
+    /// instead of a bare sentence. Sites matching a known [`WallShape`]
+    /// construct via [`LowerError::shaped`] instead, which additionally buys
+    /// the per-shape headline and rewrite hint.
+    UnsupportedAt { reason: String, span: almide_ir::Span, shape: WallShape },
 }
 
 impl LowerError {
@@ -47,8 +132,26 @@ impl LowerError {
     /// never have to branch.
     pub fn at(span: Option<almide_ir::Span>, reason: impl Into<String>) -> LowerError {
         match span {
-            Some(span) => LowerError::UnsupportedAt { reason: reason.into(), span },
+            Some(span) => {
+                LowerError::UnsupportedAt { reason: reason.into(), span, shape: WallShape::Other }
+            }
             None => LowerError::Unsupported(reason.into()),
+        }
+    }
+
+    /// Shape-carrying wall constructor (#931): [`LowerError::at`] plus the
+    /// known [`WallShape`], so the CLI headlines the construct and hints its
+    /// documented rewrite. Spanless input falls back exactly as `at` does —
+    /// the shape is dropped, because the hint machinery renders only through
+    /// the span path.
+    pub fn shaped(
+        span: Option<almide_ir::Span>,
+        shape: WallShape,
+        reason: impl Into<String>,
+    ) -> LowerError {
+        match span {
+            Some(span) => LowerError::UnsupportedAt { reason: reason.into(), span, shape },
+            None => LowerError::at(None, reason),
         }
     }
 
@@ -65,6 +168,15 @@ impl LowerError {
         match self {
             LowerError::Unsupported(_) => None,
             LowerError::UnsupportedAt { span, .. } => Some(*span),
+        }
+    }
+
+    /// The wall's shape — [`WallShape::Other`] when the site recorded none
+    /// (every spanless wall, and every `at`-constructed site).
+    pub fn shape(&self) -> WallShape {
+        match self {
+            LowerError::UnsupportedAt { shape, .. } => *shape,
+            _ => WallShape::Other,
         }
     }
 }

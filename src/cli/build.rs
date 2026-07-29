@@ -518,14 +518,31 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
             // were the worst diagnostic in the compiler (#931). A wall whose
             // construction site had a span renders through the Diagnostic
             // machinery — source line, caret, the works — so the user sees
-            // WHERE the shape lives, not just what it is.
+            // WHERE the shape lives, not just what it is. A KNOWN WallShape
+            // additionally headlines the construct in surface-language
+            // vocabulary and hints its documented rewrite; the raw reason —
+            // compiler-internal vocabulary and all — moves to a trailing
+            // `note:` where it still serves a bug report.
             if let Some(span) = e.span() {
+                let shape = e.shape();
+                let (message, hint, reason_note) =
+                    match (shape.headline(), shape.rewrite_hint()) {
+                        (Some(headline), Some(rewrite)) => {
+                            (headline.to_string(), rewrite.to_string(), Some(e.reason()))
+                        }
+                        _ => (
+                            e.reason().to_string(),
+                            "the unverified v0 wasm emitter was retired (#782): a wall is an \
+                             honest error instead of a silent fallback. If this names a missing \
+                             capability, please file it with the source shape that triggered it: \
+                             https://github.com/almide/almide/issues"
+                                .to_string(),
+                            None,
+                        ),
+                    };
                 let mut d = crate::diagnostic::Diagnostic::error(
-                    e.reason().to_string(),
-                    "the unverified v0 wasm emitter was retired (#782): a wall is an honest \
-                     error instead of a silent fallback. If this names a missing capability, \
-                     please file it with the source shape that triggered it: \
-                     https://github.com/almide/almide/issues",
+                    message,
+                    hint,
                     "the verified wasm render (v1 trust spine) — this shape is not yet in its subset",
                 );
                 d.line = Some(span.line);
@@ -533,7 +550,16 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
                 if span.end_col > span.col {
                     d.end_col = Some(span.end_col);
                 }
-                err(&format!("{}", crate::diagnostic_render::display_with_source(&d, source_text)));
+                let mut rendered =
+                    crate::diagnostic_render::display_with_source(&d, source_text);
+                if let Some(reason) = reason_note {
+                    rendered.push_str(&format!(
+                        "\n  note: {reason}\n  note: if the rewrite does not apply, file the \
+                         source shape that triggered this: \
+                         https://github.com/almide/almide/issues"
+                    ));
+                }
+                err(&rendered);
             } else {
                 err(&format!(
                     "error: this program shape is not yet supported by the verified wasm renderer\n\n  \
