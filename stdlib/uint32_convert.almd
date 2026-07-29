@@ -51,3 +51,55 @@ fn uint32_to_string(x: UInt32) -> String = {
   let i = int.from_uint32(x)
   int.to_string(i)
 }
+
+// Lossy-pair trio (matrix rule): checked/saturating via the same int pivot.
+fn uint32_to_int8_checked(x: UInt32) -> Option[Int8] = {
+  let i = int.from_uint32(x)
+  int.to_int8_checked(i)
+}
+
+fn uint32_to_int8_saturating(x: UInt32) -> Int8 = {
+  let i = int.from_uint32(x)
+  int.to_int8_saturating(i)
+}
+
+fn uint32_to_int16_checked(x: UInt32) -> Option[Int16] = {
+  let i = int.from_uint32(x)
+  int.to_int16_checked(i)
+}
+
+fn uint32_to_int16_saturating(x: UInt32) -> Int16 = {
+  let i = int.from_uint32(x)
+  int.to_int16_saturating(i)
+}
+
+fn uint32_to_int32_checked(x: UInt32) -> Option[Int32] = {
+  let i = int.from_uint32(x)
+  int.to_int32_checked(i)
+}
+
+fn uint32_to_int32_saturating(x: UInt32) -> Int32 = {
+  let i = int.from_uint32(x)
+  int.to_int32_saturating(i)
+}
+
+fn uint32_to_uint8_checked(x: UInt32) -> Option[UInt8] = {
+  let i = int.from_uint32(x)
+  int.to_uint8_checked(i)
+}
+
+fn uint32_to_uint8_saturating(x: UInt32) -> UInt8 = {
+  let i = int.from_uint32(x)
+  int.to_uint8_saturating(i)
+}
+
+fn uint32_to_uint16_checked(x: UInt32) -> Option[UInt16] = {
+  let i = int.from_uint32(x)
+  int.to_uint16_checked(i)
+}
+
+fn uint32_to_uint16_saturating(x: UInt32) -> UInt16 = {
+  let i = int.from_uint32(x)
+  int.to_uint16_saturating(i)
+}
+

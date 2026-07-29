@@ -79,7 +79,7 @@ use almide_ir::free_vars::free_vars;
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use almide_ir::*;
 use almide_base::intern::sym;
-use almide_lang::types::Ty;
+use almide_lang::types::{is_heap_ty, Ty};
 
 /// Lift every heap-typed `let`/`var`-bound `if`/`match` value into a fresh tail
 /// helper function, replacing the bind value with a call to that helper.
@@ -360,14 +360,10 @@ impl<'a> BranchLifter<'a> {
     }
 }
 
-/// Heap-managed types (need refcount; lowered as `Ptr`/`Boxed`) vs `Copy` scalars.
-///
-/// This MIRRORS `almide_mir::lower::is_heap_ty` exactly. It is duplicated here
-/// (not imported) because `almide-mir` depends on `almide-optimize`, so importing
-/// it would create a dependency cycle. Keep the two definitions in sync: a scalar
-/// that this predicate misclassifies as heap would lift a bind the renderer
-/// already handles inline (harmless but wasteful); a heap type misclassified as
-/// scalar would leave the original wall in place.
+// The heap classification is imported from `almide_lang::types` (#926) — the
+// dependency-cycle reason this file used to carry a verbatim copy is gone now
+// that the definition lives beside `Ty` itself, upstream of both this crate and
+// `almide-mir` (whose `lower::is_heap_ty` re-exports the same fn).
 /// Does the statement contain a HEAP-result `if`/`match` anywhere (bind value, call
 /// argument, operand)? The dense-chain scan counts these BEFORE the MIR-side ANF lift
 /// rewrites call-arg branches into let binds.
@@ -389,29 +385,6 @@ fn stmt_holds_heap_if(stmt: &IrStmt) -> bool {
     v.0
 }
 
-fn is_heap_ty(ty: &Ty) -> bool {
-    !matches!(
-        ty,
-        Ty::Int
-            | Ty::Int8
-            | Ty::Int16
-            | Ty::Int32
-            | Ty::Int64
-            | Ty::UInt8
-            | Ty::UInt16
-            | Ty::UInt32
-            | Ty::UInt64
-            | Ty::Float
-            | Ty::Float32
-            | Ty::Float64
-            | Ty::Bool
-            | Ty::Unit
-            | Ty::Never
-            | Ty::RawPtr
-            | Ty::ConstParam { .. }
-            | Ty::ConstValue { .. }
-    )
-}
 
 #[cfg(test)]
 mod tests {

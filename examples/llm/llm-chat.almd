@@ -1,10 +1,10 @@
 // llm-chat — Interactive LLM chat using almai
 //
 // Usage:
-//   almide run examples/llm-chat.almd
+//   almide run examples/llm/llm-chat.almd
 //
 // Set ANTHROPIC_API_KEY in your environment, or use a different provider:
-//   MODEL=cf/@cf/meta/llama-3.3-70b-instruct-fp8-fast almide run examples/llm-chat.almd
+//   MODEL=cf/@cf/meta/llama-3.3-70b-instruct-fp8-fast almide run examples/llm/llm-chat.almd
 
 import almai
 import almai.conv
@@ -20,7 +20,7 @@ effect fn main() -> Unit = {
 }
 
 effect fn chat_loop(model: String, conversation: conv.Conversation) -> Unit = {
-  print("> ")
+  io.print("> ")
   let input = io.read_line()
   if string.trim(input) == "" then
     println("Bye!")

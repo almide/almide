@@ -23,7 +23,7 @@ impl NanoPass for ResultPropagationPass {
 
     fn run(&self, mut program: IrProgram, target: Target) -> PassResult {
         // Result wrapping is Rust/WASM-only. (The TS target and its ResultErasurePass were removed.)
-        let wrap_non_result = matches!(target, Target::Rust | Target::Wasm);
+        let wrap_non_result = matches!(target, Target::Rust);
 
         let lifted_fns = lift_effect_fn_signatures(&mut program, wrap_non_result);
         let intrinsic_effect_syms = collect_intrinsic_effect_result_syms(wrap_non_result);

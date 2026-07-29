@@ -29,16 +29,16 @@ Almide が**既に回避した**他言語の失敗:
 
 ---
 
-## 現在地: v0.8.0
+## 現在地: v0.37.0（この節の詳細は当時のスナップショット — 最新は README / llms.txt）
 
 ```
 コンパイラ          84 ファイル / 19,536 行
                     生成コードは外部 crate 不要（stdlib ランタイムを自己内包）
 stdlib             22 モジュール / 390 関数 / ランタイム 100%
 テスト             167 .almd テストファイル + Rust unit tests (TypeVar regression 6件含む)
-ターゲット          Rust, TypeScript, JavaScript, npm package, WASM
+ターゲット          Rust, WASM（TS/JS/npm は 2026-03-28 に削除 — playground は WASM 実行）
 Exercises          25 本 / 6 tiers
-並行処理           fan { }, fan.map, fan.race, fan.any, fan.settle, fan.timeout
+並行処理           fan { }, fan.map, fan.race, fan.any, fan.settle
 セキュリティ       Layer 1 (Effect Isolation) + Layer 2 (Capability Restriction via almide.toml [permissions])
 Effect推論         自動capability推論 (IO/Net/Env/Time/Rand/Fan/Log) + almide check --effects
 エラー処理         Option + Result の 2 機構のみ (Swift の 3 機構の失敗を回避)
@@ -61,7 +61,7 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 | 並行処理 | なし | fan ファミリー 6 API |
 | セキュリティ | なし | Effect Isolation |
 | Codec | なし | auto-derive, Value, JSON roundtrip |
-| ターゲット | Rust のみ | Rust + TS + JS + npm + WASM |
+| ターゲット | Rust のみ | Rust + WASM |
 | パターンマッチ | 基本 | 網羅性チェック、ネスト、ガード |
 | 診断 | 行番号のみ | file:line + context + hint + error recovery |
 | テスト | 0 | 2,033+ |

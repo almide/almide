@@ -257,6 +257,25 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
             }
             None
         }
+        // A STRING-INTERPOLATION part (`println("a=${fetch()}")` — the auto-`?` on
+        // an effect call INSIDE the interpolation, #950): every part is evaluated
+        // unconditionally, left to right, so an unwrap there lifts exactly like a
+        // call argument. Without this arm the unwrap reached the interp lowering
+        // intact and the whole call-arg interp walled ("non-lowerable string
+        // interpolation in a call-argument position") — while the hoisted twin
+        // (`let v = fetch(); println("a=${v}")`) lowered fine, which is the tell
+        // that only the LIFT was missing, not the machinery.
+        IrExprKind::StringInterp { parts } => {
+            for (idx, p) in parts.iter().enumerate() {
+                let almide_ir::IrStringPart::Expr { expr } = p else { continue };
+                if let Some((u, ne)) = take_or_recurse(expr, tmp) {
+                    let mut v = parts.clone();
+                    v[idx] = almide_ir::IrStringPart::Expr { expr: ne };
+                    return Some((u, mk(IrExprKind::StringInterp { parts: v })));
+                }
+            }
+            None
+        }
         IrExprKind::ResultOk { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultOk { expr: Box::new(ne) }))),
         IrExprKind::ResultErr { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultErr { expr: Box::new(ne) }))),
         IrExprKind::OptionSome { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::OptionSome { expr: Box::new(ne) }))),

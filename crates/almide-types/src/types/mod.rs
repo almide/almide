@@ -2,9 +2,11 @@
 /// Distinct from ast::TypeExpr which is a syntactic node.
 
 mod compatibility;
+mod heap;
 mod unify;
 pub mod constructor;
 
+pub use heap::is_heap_ty;
 pub use unify::{unify, substitute, contains_typevar};
 pub use constructor::{TypeConstructorId, TypeConstructorRegistry, Kind, AlgebraicLaw};
 use crate::intern::Sym;

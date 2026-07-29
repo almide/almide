@@ -1,51 +1,120 @@
 #!/usr/bin/env bash
-# A2 byte-binding GROUNDING gate. The Coq proof
-# `WasmEncode.rc_inc_bytes_encode_the_instruction_tree` shows our encoder produces
-# `rc_inc_bytes` for the rc_inc instruction tree — but that is only meaningful if
-# `rc_inc_bytes` and the opcode constants are the REAL wasm bytes, not a guess.
-# This gate re-assembles the rc primitives with the real assembler (wat2wasm) and
-# confirms the bytes match what `WasmEncode.v` models — so the opcode constants are
-# grounded in reality, re-checked every build (the anti-circularity).
+# A2 byte-binding GROUNDING gate — the mechanized triangle (#932).
 #
-# Skips (exit 0) if wat2wasm is unavailable, so the proof gate never blocks on it;
-# CI installs wabt so the grounding actually runs.
+# The Coq proof `WasmEncode.rc_inc_bytes_encode_the_instruction_tree` (and
+# WasmExec's rc_dec theorems) are about byte LISTS defined in the .v files.
+# Those theorems mean something only if the lists are (a) the bytes the real
+# assembler produces and (b) the bytes OUR RENDERER actually emits. This gate
+# closes the triangle with ZERO hand-copied constants:
+#
+#   proofs/*.v byte lists  ←→  wat2wasm(assembled WAT)  ←→  the renderer's
+#   (parsed from source)        (the real assembler)         OWN $rc_inc/$rc_dec
+#                                                            (extracted from a
+#                                                             rendered module)
+#
+# The previous edition assembled a WAT heredoc WRITTEN IN THIS SCRIPT — textually
+# equivalent to the renderer's, but nothing enforced it: edit the renderer and
+# every "the renderer's real bytes" theorem silently became a statement about a
+# shell-script literal.
+#
+# Tool policy: locally a missing tool is an honest skip; in CI it is a FAILURE
+# (#921) — a gate that exits 0 without its instrument is not a gate.
 set -euo pipefail
+cd "$(dirname "$0")"
+ROOT=".."
 
-if ! command -v wat2wasm >/dev/null 2>&1; then
-  echo "check-wasm-bytes: wat2wasm (wabt) not found — SKIP (grounding not re-checked here)"
+require_or_skip() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  if [ "${CI:-}" = "true" ]; then
+    echo "check-wasm-bytes: $1 not found — FAIL (CI must install it)"
+    exit 1
+  fi
+  echo "check-wasm-bytes: $1 not found — SKIP (grounding not re-checked here)"
   exit 0
-fi
+}
+require_or_skip wat2wasm
+require_or_skip cargo
+require_or_skip python3
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 hex() { od -An -v -tx1 "$1" | tr -d ' \n'; }
 
-# --- rc_inc: the FULL body must equal WasmEncode.rc_inc_bytes ---
-cat > "$tmp/rc_inc.wat" <<'EOF'
-(module (memory 1)
-  (func $rc_inc (param $p i32)
-    (i32.store (i32.add (local.get $p) (i32.const 0))
-               (i32.add (i32.load (i32.add (local.get $p) (i32.const 0))) (i32.const 1)))))
+# ── 1. Render a probe through THE renderer and extract its $rc_inc/$rc_dec ──
+# The probe exercises a mutable-global Bytes read+write, which keeps both rc
+# primitives reachable in the pruned output (a Dup renders `call $rc_inc`; the
+# scope-end release renders `call $rc_dec`).
+cat > "$tmp/probe.almd" <<'EOF'
+var g = bytes.new(8)
+
+fn main() -> Unit = {
+  bytes.set_at(g, 0, 7)
+  println(int.to_string(bytes.get_or(g, 0, 0 - 1)))
+}
 EOF
+( cd "$ROOT" && cargo run --release -q -p almide-mir --example render_program -- "$tmp/probe.almd" ) \
+  > "$tmp/probe.wat" 2>/dev/null
+for f in rc_inc rc_dec; do
+  python3 - "$tmp/probe.wat" "$f" > "$tmp/$f.func.wat" <<'PY'
+import sys
+w = open(sys.argv[1]).read()
+name = sys.argv[2]
+i = w.find(f"(func ${name} ")
+if i < 0:
+    i = w.find(f"(func ${name}\n")
+if i < 0:
+    sys.exit(f"extract: (func ${name} ...) not found in the rendered module")
+d = 0
+for j in range(i, len(w)):
+    if w[j] == "(": d += 1
+    elif w[j] == ")":
+        d -= 1
+        if d == 0:
+            print(w[i:j+1]); sys.exit(0)
+sys.exit(f"extract: unbalanced parens for ${name}")
+PY
+  echo "ok   extracted the renderer's real \$$f"
+done
+
+# ── 2. Parse the PROVEN byte lists out of the .v sources ───────────────────
+# WasmEncode.rc_inc_bytes and WasmExec.rc_dec_bytes are `[a;b;…]` lists of
+# decimal opcode/immediate bytes; hex-encode them here so the script carries
+# no byte constant of its own.
+vlist_hex() { # file defname
+  python3 - "$1" "$2" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"Definition\s+" + re.escape(sys.argv[2]) + r"\s*:\s*list Z\s*:=\s*\[(.*?)\]\.", src, re.S)
+if not m:
+    sys.exit(f"parse: Definition {sys.argv[2]} not found")
+print("".join(f"{int(t):02x}" for t in re.split(r"[;\s]+", m.group(1).strip()) if t))
+PY
+}
+RC_INC_BODY="$(vlist_hex WasmEncode.v rc_inc_bytes)"
+RC_DEC_BODY="$(vlist_hex WasmExec.v rc_dec_bytes)"
+
+# ── 3. Assemble the RENDERER's functions and compare against the proofs ────
+{ printf '(module (memory 1)\n'; cat "$tmp/rc_inc.func.wat"; printf ')\n'; } > "$tmp/rc_inc.wat"
 wat2wasm "$tmp/rc_inc.wat" -o "$tmp/rc_inc.wasm"
-RC_INC_BODY="200041006a200041006a28020041016a3602000b"   # == WasmEncode.rc_inc_bytes
 if [[ "$(hex "$tmp/rc_inc.wasm")" == *"$RC_INC_BODY"* ]]; then
-  echo "ok   rc_inc body bytes match WasmEncode.rc_inc_bytes ($RC_INC_BODY)"
+  echo "ok   the renderer's \$rc_inc assembles to WasmEncode.rc_inc_bytes ($RC_INC_BODY)"
 else
-  echo "FAIL rc_inc: assembler bytes do not match WasmEncode.rc_inc_bytes"; exit 1
+  echo "FAIL rc_inc: the RENDERER'S bytes do not match WasmEncode.rc_inc_bytes — the"
+  echo "     renderer and the proof have drifted (exactly what this gate exists to catch)"
+  exit 1
 fi
 
-# --- rc_dec core: ground the remaining opcode constants the encoder defines
-#     (local.set / i32.eqz / if / blocktype-void / unreachable / i32.sub) ---
-cat > "$tmp/rc_dec.wat" <<'EOF'
-(module (memory 1)
-  (func $rc_dec (param $p i32) (local $rc i32)
-    (local.set $rc (i32.load (i32.add (local.get $p) (i32.const 0))))
-    (if (i32.eqz (local.get $rc)) (then (unreachable)))
-    (local.set $rc (i32.sub (local.get $rc) (i32.const 1)))
-    (i32.store (i32.add (local.get $p) (i32.const 0)) (local.get $rc))))
-EOF
+{ printf '(module (memory 1) (global $freelist (mut i32) (i32.const 0))\n'; cat "$tmp/rc_dec.func.wat"; printf ')\n'; } > "$tmp/rc_dec.wat"
 wat2wasm "$tmp/rc_dec.wat" -o "$tmp/rc_dec.wasm"
 DEC_HEX="$(hex "$tmp/rc_dec.wasm")"
+if [[ "$DEC_HEX" == *"$RC_DEC_BODY"* ]]; then
+  echo "ok   the renderer's \$rc_dec assembles to WasmExec.rc_dec_bytes (incl. trap + free-list push)"
+else
+  echo "FAIL rc_dec: the RENDERER'S bytes do not match WasmExec.rc_dec_bytes — drift"
+  exit 1
+fi
+
+# Opcode grounding for the constants WasmEncode defines, checked on the REAL
+# rc_dec's assembled hex (not a synthetic snippet).
 check_op() { # subsequence label
   if [[ "$DEC_HEX" == *"$1"* ]]; then echo "ok   opcode grounded: $2 ($1)";
   else echo "FAIL opcode not grounded: $2 ($1)"; exit 1; fi
@@ -54,26 +123,8 @@ check_op "2101"     "local.set (0x21)"
 check_op "45044000" "i32.eqz; if void; unreachable (0x45 0x04 0x40 0x00)"
 check_op "41016b"   "i32.const 1; i32.sub (0x41 .. 0x6b)"
 
-# --- the FULL rc_dec (free-list incl global.get/set) == WasmExec.rc_dec_bytes ---
-cat > "$tmp/rc_dec_full.wat" <<'EOF'
-(module (memory 1) (global $freelist (mut i32) (i32.const 0))
-  (func $rc_dec (param $p i32) (local $rc i32)
-    (local.set $rc (i32.load (i32.add (local.get $p) (i32.const 0))))
-    (if (i32.eqz (local.get $rc)) (then (unreachable)))
-    (local.set $rc (i32.sub (local.get $rc) (i32.const 1)))
-    (i32.store (i32.add (local.get $p) (i32.const 0)) (local.get $rc))
-    (if (i32.eqz (local.get $rc))
-      (then (i32.store (i32.add (local.get $p) (i32.const 4)) (global.get $freelist))
-            (global.set $freelist (local.get $p))))))
-EOF
-wat2wasm "$tmp/rc_dec_full.wat" -o "$tmp/rc_dec_full.wasm"
-RC_DEC_BODY="200041006a28020021012001450440000b200141016b2101200041006a20013602002001450440200041046a2300360200200024000b0b"
-if [[ "$(hex "$tmp/rc_dec_full.wasm")" == *"$RC_DEC_BODY"* ]]; then
-  echo "ok   full rc_dec body bytes match WasmDecode.rc_dec_real_bytes (incl global.get/set 0x23/0x24)"
-else
-  echo "FAIL full rc_dec: assembler bytes do not match WasmDecode.rc_dec_real_bytes"; exit 1
-fi
-
 echo
-echo "WASM-BYTES OK: WasmEncode.v's opcode constants and rc_inc_bytes are grounded"
-echo "in the real assembler (wat2wasm) — the byte-binding proof is non-circular."
+echo "WASM-BYTES OK: the RENDERER'S OWN \$rc_inc/\$rc_dec, assembled by wat2wasm,"
+echo "match the byte lists the Rocq proofs are about — the byte-binding is"
+echo "non-circular AND anchored to the shipping renderer, with no hand-copied"
+echo "constants in between."

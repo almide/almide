@@ -385,6 +385,19 @@ pub(crate) struct LowerCtx {
     /// DEFER behavior. Cert-neutral: a scalar `SetLocal` carries no heap ownership (the
     /// same no-op `verify_ownership` already proves for the loop-carried SetLocal).
     unit_arm_depth: u32,
+    /// The in-place mutator's RECEIVER handle, staged by `mutable_global_cow` for the
+    /// one argument read that follows it (#946). The COW loads the slot's handle and
+    /// makes it unique; handing that SAME unique handle to the mutator as a BORROW —
+    /// instead of letting `read_mutable_global_slot` re-load and `Dup` it — is what
+    /// keeps the block at rc == 1 for the NEXT write in the same body. The Dup was a
+    /// value-semantics reference the scope releases only at its end, so a second
+    /// `bytes.copy_from(dst, …)` in one loop body saw rc == 2 at its COW and paid a
+    /// full O(|dst|) copy EVERY iteration — nendo's three-copies-per-vertex VRM loop
+    /// ran 23 s where three single-copy loops ran 2 ms. Consumed by `value_or_global`
+    /// on the first read of the matching var (the receiver, args[0]) and cleared at
+    /// every statement boundary, so it can never leak past the mutator's own
+    /// statement into an alias-creating read.
+    pending_inplace_receiver: Option<(VarId, ValueId)>,
     /// The module's top-level `let` bindings (VarId → declared Ty). A reference to one
     /// of these resolves to no FUNCTION-local `value_of` entry; this DECLARED set lets
     /// `value_or_global` distinguish a legitimate global reference (materialize a fresh

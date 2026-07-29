@@ -1,6 +1,9 @@
 // md2html — Markdown to HTML converter (subset)
 //
-// Usage: almide run showcase/md2html.almd -- README.md
+// Usage: almide run examples/md2html.almd -- README.md
+
+import env
+import fs
 
 effect fn main() -> Unit = {
   let args = env.args()

@@ -177,9 +177,20 @@ fn link_self_host_runtime_to_fixpoint(
                 entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
             if any_called && !any_defined {
                 let rt = source_to_ir(rt_source)?;
+                let linked_from = functions.len();
                 for f in &rt.functions {
                     lower_and_link_one_runtime_fn(f, layouts, entries, verbose, functions);
                 }
+                // The self-append rewrite runs on USER functions before this
+                // linker (it has to — the fixpoint scan below is what links the
+                // append callees it introduces), so the registry bodies linked
+                // HERE never met it: json.parse's own `list.push` accumulator
+                // loops stayed full-copy concats — O(n²) inside the very stdlib,
+                // while identical user-written loops were amortized (#939).
+                // Rewriting each batch as it links closes that, and a callee the
+                // rewrite introduces (`__list_append1[_rc]`) is picked up by the
+                // NEXT fixpoint round's call scan like any other.
+                crate::concat_to_append::rewrite_self_append(&mut functions[linked_from..]);
             }
         }
         // Dedup by name (identical source ⇒ no-op merge).
@@ -776,6 +787,109 @@ mod tests {
     // decl survived. Before this fix, `source_to_ir_with` only checked the
     // `Result` and never inspected `Parser::errors`, so a source like this
     // would silently compile with the bare `println` call missing from the
+    /// #946: the RECEIVER of an in-place mutator over a mutable global borrows the
+    /// post-COW handle — it must NOT `Dup` the slot's handle, because that owned
+    /// reference (released only at scope end) is what made every SECOND write in a
+    /// body see rc == 2 at its COW and full-copy the buffer (O(|dst|) per write —
+    /// 23 s for nendo's VRM loop). Pinned structurally: the rendered `$main` of a
+    /// two-write body contains NO `$rc_inc` call at all (the writes' args are
+    /// scalars; the only rc_inc candidate was the receiver Dup).
+    #[test]
+    fn an_inplace_mutator_receiver_does_not_dup_the_global_slot() {
+        let source = r#"
+var g = bytes.new(8)
+fn main() -> Unit = {
+  bytes.set_at(g, 0, 1)
+  bytes.set_at(g, 1, 2)
+  println(int.to_string(bytes.get_or(g, 1, 0 - 1)))
+}
+"#;
+        let wat = try_render_wasm_source(source, &[], false).expect("two-write body renders");
+        let main_start = wat.find("(func $main").expect("main present");
+        let main_end = wat[main_start + 1..].find("\n  (func ").map(|i| main_start + 1 + i).unwrap_or(wat.len());
+        let main_body = &wat[main_start..main_end];
+        // `bytes.get_or` READS the global — that path legitimately Dups, and its
+        // argument ops (the Dup included) precede its call text. Assert on the two
+        // writes' region only: everything up to the LAST `$bytes.set_at` call.
+        let writes_end = main_body.rfind("(call $bytes.set_at").unwrap_or(main_body.len());
+        let writes_region = &main_body[..writes_end];
+        assert!(
+            !writes_region.contains("(call $rc_inc"),
+            "the in-place writes must not Dup the slot handle — an owned receiver \
+             reference makes the next write's MakeUnique copy the whole buffer:\n{writes_region}"
+        );
+    }
+
+    /// #939: a heap-element `list.push` accumulator loop must render through the
+    /// amortized `__list_append1_rc`, not the full-copy `__list_concat_rc` — the
+    /// copy is O(len) per element, O(n²) for the loop, and it took json.parse
+    /// from 5 ms to minutes on a 103 KiB document. Pinned STRUCTURALLY (the
+    /// rendered module names its callees) rather than by wall-clock, in both
+    /// places the window has to fire: a user-written loop, and the REGISTRY-
+    /// LINKED stdlib body (`__jp_array` — linked after the user-function pass
+    /// ran, which is exactly how the parser's own loop was missed).
+    #[test]
+    fn a_heap_element_push_loop_renders_the_amortized_append() {
+        let user_loop = r#"
+fn build(n: Int) -> Int = {
+  var acc: List[String] = []
+  var i = 0
+  while i < n {
+    list.push(acc, int.to_string(i))
+    i = i + 1
+  }
+  list.len(acc)
+}
+fn main() -> Unit = println(int.to_string(build(5)))
+"#;
+        let wat = try_render_wasm_source(user_loop, &[], false)
+            .expect("the heap-element push loop renders");
+        assert!(
+            wat.contains("__list_append1_rc"),
+            "a user heap-element push loop must call the amortized append"
+        );
+
+        // The STRING accumulator (#910): `acc = acc + "x"` must render through
+        // `__str_append1` — the whole-copy concat peaked at 1.27 GB over 100k
+        // appends and 400k died, while the amortized form runs flat at ~20 MB
+        // over 4M.
+        let string_loop = r#"
+fn main() -> Unit = {
+  var acc = ""
+  var i = 0
+  while i < 5 {
+    acc = acc + "x"
+    i = i + 1
+  }
+  println(int.to_string(string.len(acc)))
+}
+"#;
+        let wat = try_render_wasm_source(string_loop, &[], false)
+            .expect("the string accumulator loop renders");
+        assert!(
+            wat.contains("__str_append1"),
+            "a string self-append loop must call the amortized append"
+        );
+
+        let parser_loop = r#"
+import json
+fn main() -> Unit = {
+  match json.parse("[1, 2, 3]") {
+    ok(v) => println(int.to_string(list.len(option.unwrap_or(json.as_array(v), []))))
+    err(e) => println(e)
+  }
+}
+"#;
+        let wat = try_render_wasm_source(parser_loop, &[], false)
+            .expect("the json.parse program renders");
+        assert!(
+            wat.contains("__list_append1_rc"),
+            "the registry-linked json parser's accumulator loops must be rewritten too — \
+             the fixpoint linker runs after the user-function pass, so the rewrite has to \
+             ride the linker batch"
+        );
+    }
+
     // output — a wall was expected instead.
     #[test]
     fn dropped_top_level_statement_walls_instead_of_silently_compiling() {

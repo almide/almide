@@ -1,6 +1,6 @@
 // csv-to-json — CSV to JSON converter
 //
-// Usage: almide run showcase/csv-to-json.almd -- input.csv
+// Usage: almide run examples/csv-to-json.almd -- input.csv
 import env
 import fs
 

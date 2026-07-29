@@ -37,9 +37,6 @@ const LEDGERED: &[(&str, &str)] = &[
     ("api-client.almd", "network (HTTP)"),
     ("csv-to-json.almd", "reads stdin"),
     ("dotenv-check.almd", "reads .env files"),
-    ("llm-chat.almd", "LLM API + stdin"),
-    ("llm-code-review.almd", "LLM API"),
-    ("llm-json-extract.almd", "LLM API"),
     ("md2html.almd", "reads stdin"),
     (
         "minesweeper.almd",
@@ -157,4 +154,75 @@ fn parity_examples_are_byte_identical_across_targets() {
         }
     }
     assert!(failures.is_empty(), "example parity failures:\n{}", failures.join("\n"));
+}
+
+/// A LEDGERED example still has to COMPILE. The ledger reason exempts a file
+/// from byte-comparison — stdin, network, an LLM API — never from existing as
+/// a valid program. Nothing checked that before, and the shop window rotted
+/// exactly there: md2html, todo-api and dotenv-check shipped uncompilable for
+/// four months behind a green gate (#922 — their import lines were dropped by
+/// the very commit titled "fix broken examples").
+#[test]
+fn every_ledgered_example_still_checks() {
+    let mut broken = Vec::new();
+    for (f, _) in LEDGERED {
+        let out = Command::new(almide())
+            .args(["check", &format!("examples/{f}")])
+            .current_dir(repo_root())
+            .output()
+            .expect("run almide check");
+        if !out.status.success() {
+            broken.push(format!(
+                "{f}:\n{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "LEDGERED examples that no longer compile — the ledger exempts a file \
+         from byte-comparison, not from being a valid program:\n{}",
+        broken.join("\n")
+    );
+}
+
+/// The LLM examples (`examples/llm/`) are a real subproject importing the REAL
+/// `almai` package, pinned by `examples/llm/almide.lock` to an exact commit —
+/// so this checks them against the actual API instead of a vendored stub that
+/// would drift (#922; they had been uncompilable as flat examples because
+/// `import almai` had nothing to resolve against). A cold cache fetches the
+/// pinned commit once; CI's network reaches github.com by construction (the
+/// checkout itself does).
+#[test]
+fn the_llm_examples_check_against_the_real_almai() {
+    let dir = repo_root().join("examples/llm");
+    let mut checked = 0;
+    let mut broken = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("examples/llm/") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_none_or(|e| e != "almd") {
+            continue;
+        }
+        let out = Command::new(almide())
+            .args(["check", path.file_name().unwrap().to_str().unwrap()])
+            .current_dir(&dir)
+            .output()
+            .expect("run almide check");
+        checked += 1;
+        if !out.status.success() {
+            broken.push(format!(
+                "{}:\n{}{}",
+                path.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    }
+    assert!(checked >= 3, "the llm subproject holds the three llm examples, found {checked}");
+    assert!(
+        broken.is_empty(),
+        "llm examples that no longer check against the pinned almai:\n{}",
+        broken.join("\n")
+    );
 }

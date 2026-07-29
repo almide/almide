@@ -194,17 +194,18 @@ cross-module 形状がほぼ無かったから。コーパスが踏まない形�
 v0.27.0 (true Perceus: wasm frees デフォルト ON) 時点で「完全性が確保された」と
 **言えない**ものの台帳。柱は立ったが、宣言ではなく方向 — 以下が残り。
 
-### メモリ回収の既知有界例外 2 つ (契約 C-066 に明記済み)
+### メモリ回収の既知有界例外 1 つ (契約 C-066 に明記済み)
 1. **TCO 自己再帰ループの反復毎リーク** — Stage C 再設計待ち
    ([wasm-frees-ownership-discipline](./wasm-frees-ownership-discipline.md) 参照。
    旧 M2 の cherry-pick は free list を汚染し棄却済み; acceptance =
    `spec/churn/tco_loop_churn.almd`)。
-2. **construct-from-temp の参照 +1 リーク** — `emit_stored_field` の alias dup が
-   moved-out temp (Dec 免除) と対で過剰計上。リージョンリセット圏内のループでは
-   arena が吸収するが圏外では 1 構築 1 参照のリーク。実測: 2M 反復で ~48MB
-   (リセット無効時)。根治 = Koka 流 dup/drop の inc/dec 同時精密化。
-   どちらも**安全方向 (リークであって破損ではない)** — ただし O(1) メモリ主張には
-   この脚注が付く。
+   安全方向 (リークであって破損ではない) — O(1) メモリ主張にはこの脚注が付く。
+
+   ~~2. construct-from-temp の参照 +1 リーク~~ — **退役 (#911, 2026-07-28)**。
+   `emit_stored_field` は v0 emitter ごと削除 (#782)、v1 MIR 経路では
+   `verify_ownership` 下で所有が一度だけ決まりクラスは再導出されなかった。
+   実測 RSS フラット (200k/2M/10M 反復、入れ子 record 形含む)。
+   pin = `spec/churn/construct_from_temp_churn.almd`。
 
 ### フロントエンド規則一貫性の残り (本文 §; 優先順)
 - **§4** top-let storage-class 決定表 (#486 クラスの構造的根絶) — days

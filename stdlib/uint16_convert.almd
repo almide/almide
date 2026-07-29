@@ -51,3 +51,35 @@ fn uint16_to_string(x: UInt16) -> String = {
   let i = int.from_uint16(x)
   int.to_string(i)
 }
+
+// Lossy-pair trio (matrix rule): checked/saturating via the same int pivot.
+fn uint16_to_int8_checked(x: UInt16) -> Option[Int8] = {
+  let i = int.from_uint16(x)
+  int.to_int8_checked(i)
+}
+
+fn uint16_to_int8_saturating(x: UInt16) -> Int8 = {
+  let i = int.from_uint16(x)
+  int.to_int8_saturating(i)
+}
+
+fn uint16_to_int16_checked(x: UInt16) -> Option[Int16] = {
+  let i = int.from_uint16(x)
+  int.to_int16_checked(i)
+}
+
+fn uint16_to_int16_saturating(x: UInt16) -> Int16 = {
+  let i = int.from_uint16(x)
+  int.to_int16_saturating(i)
+}
+
+fn uint16_to_uint8_checked(x: UInt16) -> Option[UInt8] = {
+  let i = int.from_uint16(x)
+  int.to_uint8_checked(i)
+}
+
+fn uint16_to_uint8_saturating(x: UInt16) -> UInt8 = {
+  let i = int.from_uint16(x)
+  int.to_uint8_saturating(i)
+}
+

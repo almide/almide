@@ -87,7 +87,7 @@ almide run hello.almd
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Standard library** — 847 functions across 39 modules (string, list, map, json, http, fs, etc.)
+- **Standard library** — 965 functions across 41 modules (string, list, map, json, http, fs, etc.)
 - **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
@@ -100,7 +100,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 190 contracts — 190 active, 0 flagged-for-revision.**
+> **Ledger: 193 contracts — 193 active, 0 flagged-for-revision.**
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
@@ -110,29 +110,22 @@ This claim is not prose. Every observable promise is a named contract in the [be
 
 Full scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/EQUIVALENCE.md](./docs/EQUIVALENCE.md)**.
 
-## Memory Safety — Formally Verified
+## Memory Safety — What Is Proven, What Is Trusted
 
-You write no ownership annotations, no lifetimes, no `free` — memory management is decided by [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler: garbage-collector-free, pause-free. The inference computes where every heap value is introduced, duplicated, and consumed; what differs per target is only the *execution mechanism* for those decisions:
+You write no ownership annotations, no lifetimes, no `free` — memory management is decided by [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler: garbage-collector-free, pause-free. The inference computes where every heap value is introduced, duplicated, and consumed; what differs per target is only the *execution mechanism* for those decisions. A compiler that ships proofs owes you the boundary, so here it is:
 
-- **WebAssembly** — the decisions execute as reference counting: precise, compiler-placed RC with no GC. This is the path the Lean proofs below certify.
-- **Native (Rust)** — the same decisions are realized by Rust's own ownership machinery: the compiler emits ownership-idiomatic Rust, inserting borrows and clones for you; every heap value is freed by Rust's scope-end drops.
+- **WebAssembly — proven, per build.** The decisions execute as compiler-placed reference counting, and every build emits an ownership certificate that a **kernel-proven checker re-verifies** (Rocq/Coq spine, 96 theorems+lemmas, axiom-clean and independently re-checked by `coqchk`): the witnessed MIR is RC-balanced — no double-free, no leak in the modeled fragment — name-total, and capability-bounded. The proof is about the *IR-level Inc/Dec balance of the artifact in front of you*, not about the compiler's internals; a certified function can still compute the wrong value, which is what the separate [cross-target contract ledger](docs/contracts/README.md) and differential gates exist to catch. The exact boundary — which pipeline stages are proven, which are trusted, and what each gate does and does not claim — is the map in **[proven-vs-trusted.md](docs/contracts/proven-vs-trusted.md)**.
+- **Native (Rust) — trusted, not proven.** The same decisions are realized by Rust's own ownership machinery: the compiler emits ownership-idiomatic Rust, and every heap value is freed by Rust's scope-end drops. No proof covers this leg today; its evidence is differential (byte-identical output against the certified wasm leg, on the contract corpus). Sharing one certified Perceus MIR across both renderers is the [native trust-spine ladder](docs/roadmap/active/native-trust-spine.md) ([#764](https://github.com/almide/almide/issues/764)); shared scalar and list ops already render on both targets from the same MIR.
 
-Sharing one mechanically-checked Perceus MIR across both renderers — so the decisions are literally the same certified artifact on both legs — is the [native trust-spine ladder](docs/roadmap/active/native-trust-spine.md) ([#764](https://github.com/almide/almide/issues/764)); shared scalar and list ops already render on both targets from the same MIR.
+Where Rust gives you *zero-cost* abstraction (paid for in ownership annotations), Almide gives you **zero-annotation** abstraction: you write none, and the frees are decided by the compiler and re-checked by the proven checker on the wasm leg.
 
-Where Rust gives you *zero-cost* abstraction (paid for in ownership annotations), Almide gives you **zero-annotation** abstraction: you write none, and every heap free is machine-proven — *write none, prove all.*
-
-```lean
-theorem perceus_all_heap_freed (fb : FnBody) :
-    allHeapFreed (perceusTransform fb)
-```
-
-**For any program, the compiler produces code where every heap allocation is freed on all execution paths.** 22 theorems, 0 sorry — verified by the Lean 4 kernel, wired into the compiler's own verify pipeline (not a separate paper proof), with CI blocking any `sorry` from merging. Details: [`crates/almide-perceus-belt/`](./crates/almide-perceus-belt/) — [Specification](./docs/specs/perceus.md)
+The design that started this is the Lean 4 **Perceus belt** ([`crates/almide-perceus-belt/`](./crates/almide-perceus-belt/), 41 theorems, 0 sorry, CI-gated): a model of the ownership pass over a small IR fragment, proving among else that the transform emits a release for every allocation it sees (`allHeapFreed` — at least one `Dec` per heap binding in the modeled fragment; the stronger exact-balance predicate is what the per-build certificate checks on real programs). It is a proof about the *design*, mechanically checked; the per-build certificate above is what covers the *shipping artifact*. [Specification](./docs/specs/perceus.md)
 
 ## What's Next — v1: The Trust Spine
 
 > In active development on the `develop` branch. A ground-up redesign of the compiler's *trust model*, not a feature on top of v0.
 
-The Perceus proof above proves one compiler pass, once. v1 generalizes that principle to the **whole pipeline** — but instead of proving the 100k-line compiler, it proves a tiny *checker* and has the compiler emit a certificate on every build that the checker re-verifies. If the checker accepts, the artifact has the property — a theorem that never mentions the compiler's internals. That single move collapses the trusted base from ~100,000 lines to a few hundred, and asks a harder question than testing ever can: **not "do the tests pass?" but "can a machine prove the output is correct?"**
+The Perceus proof above proves one compiler pass, once. v1 generalizes that principle to the **whole pipeline** — but instead of proving the 100k-line compiler, it proves a tiny *checker* and has the compiler emit a certificate on every build that the checker re-verifies. If the checker accepts, the artifact has the property — a theorem that never mentions the compiler's internals. That single move collapses the trusted base from ~100,000 lines to the extracted checker (~1,400 lines of OCaml, machine-derived from the proofs), and asks a harder question than testing ever can: **not "do the tests pass?" but "can a machine prove the output is correct?"**
 
 The full architecture — the untrusted/trusted split, the ALS normative semantics in Coq, the verify-it-yourself receipts (C-SAFE / C-REPRO / C-FAITHFUL / C-PROVEN), and why builds are slower on purpose: **[docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md)**.
 
@@ -217,9 +210,8 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 
 | Headline | Value |
 |---|---|
-| WASM "Hello World" binary | **770 B** verified as shipped (reachability-pruned runtime + function-name debug info) — **548 B** after `wasm-opt -Oz`; Rust on the same target is 40 KB+ even fully size-tuned |
+| WASM "Hello World" binary | **703 B** verified as shipped (reachability-pruned runtime + function-name debug info) — **545 B** after `almide build --wasm-opt` (`wasm-opt -Oz`); Rust on the same target is 40 KB+ even fully size-tuned |
 | Native minigit CLI binary | **444 KB** stripped, 0 dependencies |
-| MiniGit AI-coding benchmark | **100% pass** (Sonnet 5 × 20 trials) — most concise of 5 languages (233 LOC), faster than Gleam/MoonBit |
 
 The verified pipeline ships the exact bytes its own rendering process produced —
 reachability DCE prunes unreached runtime helpers inside the renderer itself, but
@@ -237,10 +229,10 @@ Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.m
 | Targets | Rust (native), WASM (direct emit) |
 | Verified codegen | The v1 PCC pipeline is the **default** wasm path since 0.29.0 — certificates re-verified on every build (`--no-verified` opts out) |
 | Codegen | Rust: Nanopass + TOML templates; wasm: certified MIR → direct emit (the sole wasm path — the unverified emitter is retired) |
-| Stdlib | 847 functions across 39 modules |
+| Stdlib | 965 functions across 41 modules |
 | Tests | 310 test files pass (299 via WASM, 11 native) + 164-contract cross-target ledger |
 | MSR | 100% (30/30 tasks, Sonnet 4.6) — see the [scorecard](#msr-scorecard) above, measured by [almide-dojo](https://github.com/almide/almide-dojo) |
-| MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, same-model snapshot vs Gleam/MoonBit/Rust/TypeScript ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
+| MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, most concise of 5 languages (233 LOC); fastest agent completion wall-clock vs Gleam/MoonBit — an LLM-writability number (measured under 6–9× self-parallelism), **not** generated-code speed ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 
@@ -270,7 +262,7 @@ Browser-based compiler and runner. The Almide compiler runs as WASM — no serve
 - [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1 proof-carrying compilation architecture
 - [docs/BENCHMARKS.md](./docs/BENCHMARKS.md) — Binary sizes, native performance, AI coding benchmark
 - [docs/contracts/](./docs/contracts/) — Behavior-contract ledger (cross-target equivalence)
-- [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (847 functions across 39 modules)
+- [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (965 functions across 41 modules)
 - [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans
 
 ## Contributing

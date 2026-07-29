@@ -592,6 +592,11 @@ impl LowerCtx {
             dst: None,
             args: vec![addr2, handle],
         });
+        // Stage the now-unique handle for the mutator's OWN receiver argument —
+        // see `pending_inplace_receiver` (#946): re-reading the slot would `Dup`
+        // it, and that one extra reference is what made every SECOND in-place
+        // write in a body COW the whole buffer.
+        self.pending_inplace_receiver = Some((var, buf));
         Ok(())
     }
 }

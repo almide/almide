@@ -192,10 +192,12 @@
         assert_eq!(verify_ownership(&mir), Ok(()));
         if let Some(out) = build_and_run("valuesem", &render_wasm(&mir)) {
             assert_eq!(out, "a=9,2,3\nb=1,2,3");
-            // The dual-renderer thesis: the SAME MIR on the OTHER target agrees.
-            let rust_out = crate::render_rust::render_rust(&mir);
-            // (sanity that the two renderers were given the same program)
-            assert!(rust_out.contains("v0[0] = 9"));
+            // (The rung-1 sketch renderer this test used to poke for a dual-render
+            // sanity line was retired in #930. The dual-renderer thesis is carried
+            // by the REAL evidence now: the cross-target byte gate runs whole
+            // programs through the codegen native leg and this wasm leg and
+            // asserts identical output — a strictly stronger check than grepping
+            // a sketch's source text.)
         }
     }
 

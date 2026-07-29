@@ -198,10 +198,14 @@ fn rewrite_to_loop(
     reverted_to_own
 }
 
-/// Heap-typed for TCO RC purposes (mirrors Perceus `is_heap_type`).
+/// Heap-typed for TCO RC purposes — the SAME question Perceus asks, so the
+/// SAME definition (`perceus_verified::is_heap_type`). This was the seventh
+/// copy (#926's audit counted six), "mirroring" the Perceus predicate by
+/// comment and drifted the same `Ty::Named` behind as `pass_anf`'s: a
+/// nominal-record accumulator param got no entry-Inc / per-reassign Dec, so
+/// every loop iteration leaked the old accumulator block.
 fn tco_is_heap(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. }
-        | Ty::Unknown | Ty::Fn { .. })
+    crate::perceus_verified::is_heap_type(ty)
 }
 
 /// A heap param P is "managed" (entry-Inc + per-reassign Dec + base-case Dec) iff,

@@ -50,9 +50,18 @@ signature index below.
 Literals of a sized type are range-checked at compile time — `let a: Int8 = 200`
 is an E024 error, not a silent fold.
 
+## Checked / saturating narrowings and bounds
+
+Every **lossy** pair (source range does not fit the destination) also has
+`to_<dst>_checked` (`None` on overflow) and `to_<dst>_saturating` (clamp to the
+destination range); lossless pairs deliberately have only the plain form — an
+always-`Some` checked variant would be noise. `min_value()` / `max_value()`
+give this type's bounds. The whole surface is derived from the range table and
+machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (10 functions)
+## Signature index (20 functions)
 
 ```
 int8.to_int16(x: Int8) -> Int16
@@ -65,6 +74,16 @@ int8.to_uint64(x: Int8) -> UInt64
 int8.to_float32(x: Int8) -> Float32
 int8.to_float64(x: Int8) -> Float64
 int8.to_string(x: Int8) -> String
+int8.to_uint8_checked(x: Int8) -> Option[UInt8]
+int8.to_uint8_saturating(x: Int8) -> UInt8
+int8.to_uint16_checked(x: Int8) -> Option[UInt16]
+int8.to_uint16_saturating(x: Int8) -> UInt16
+int8.to_uint32_checked(x: Int8) -> Option[UInt32]
+int8.to_uint32_saturating(x: Int8) -> UInt32
+int8.to_uint64_checked(x: Int8) -> Option[UInt64]
+int8.to_uint64_saturating(x: Int8) -> UInt64
+int8.min_value() -> Int8
+int8.max_value() -> Int8
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

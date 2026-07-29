@@ -178,9 +178,18 @@ Reinterpret an integer's bits as an IEEE 754 float (f64).
 int.bits_to_float(4607182418800017408) // => 1.0
 ```
 
+## Matrix completeness (#956)
+
+The `_checked`/`_saturating` families here are the `Int`-source row of the
+integer conversion matrix; every sized module carries the same trio for its own
+lossy pairs, `UInt64 → Int` (the one lossy widening) is `from_uint64_checked` /
+`from_uint64_saturating`, and every carrier has `min_value()`/`max_value()`.
+The surface is derived from the range table and machine-enforced by the
+numeric-matrix gate in `almide docs-gen --check`.
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (66 functions)
+## Signature index (70 functions)
 
 ```
 int.to_string(n: Int) -> String
@@ -249,6 +258,10 @@ int.to_uint8_saturating(n: Int) -> UInt8
 int.to_uint16_saturating(n: Int) -> UInt16
 int.to_uint32_saturating(n: Int) -> UInt32
 int.to_uint64_saturating(n: Int) -> UInt64
+int.from_uint64_checked(n: UInt64) -> Option[Int]
+int.from_uint64_saturating(n: UInt64) -> Int
+int.min_value() -> Int
+int.max_value() -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

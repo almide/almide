@@ -80,11 +80,10 @@ fn emit_dialect_output(ir_program: &Option<almide::ir::IrProgram>, target: &str)
             err(&format!("dialect verify: {} (in {})", e.message, e.context));
         }
     }
-    if target == "rust" || target == "rs" {
-        out_no_nl(&format!("{}", almide_dialect::emit_rust::emit_module(&module)));
-    } else {
-        out_no_nl(&format!("{}", almide_dialect::dump::dump_module(&module)));
-    }
+    // The dialect's debug Rust emitter was retired (#930) — the dialect dump is
+    // the one debug view; real Rust emission is almide-codegen's.
+    out_no_nl(&format!("{}", almide_dialect::dump::dump_module(&module)));
+    let _ = target;
 }
 
 /// `cmd_emit`'s `--emit-ir` output path. Extracted verbatim.

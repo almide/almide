@@ -396,7 +396,7 @@ fn collect_defined_vars_module_call(expr: &IrExpr, defined: &mut HashSet<VarId>,
     // a clone and never grew `b.xs` (#712, after #703).
     let stdlib_sym = format!("almide_rt_{}_{}", module.as_str(), func.as_str());
     let stdlib_mutates_arg0 =
-        crate::pass_closure_conversion::is_inplace_mutator(&stdlib_sym);
+        is_inplace_mutator(&stdlib_sym);
     for (i, arg) in args.iter().enumerate() {
         let mutated = (i == 0 && stdlib_mutates_arg0)
             || mm.get(&(*module, *func)).map_or(false, |mp| mp.contains(&i));
@@ -418,7 +418,7 @@ fn collect_defined_vars_module_call(expr: &IrExpr, defined: &mut HashSet<VarId>,
 /// so the loop read len 0).
 fn collect_defined_vars_runtime_call(expr: &IrExpr, defined: &mut HashSet<VarId>) {
     let IrExprKind::RuntimeCall { symbol, args } = &expr.kind else { unreachable!() };
-    if !crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) { return; }
+    if !is_inplace_mutator(symbol.as_str()) { return; }
     let Some(arg0) = args.first() else { return; };
     if let Some(id) = root_var_of_place(&arg0.kind) {
         defined.insert(id);
@@ -518,3 +518,31 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &M
 
 include!("pass_licm_hoist.rs");
 include!("pass_licm_purity.rs");
+
+/// The in-place `&mut` stdlib mutator surface, by RUNTIME SYMBOL — LICM's
+/// purity question ("does discarding this call's result still mutate a
+/// captured var?"). Moved here from the retired wasm-only closure-conversion
+/// pass (#930): this file is its only live consumer. Distinct on purpose from
+/// `almide-mir`'s `is_inplace_mutator` (module.fn names, the receiver-COW
+/// question) — different vocabularies for different layers.
+pub(crate) fn is_inplace_mutator(symbol: &str) -> bool {
+    // ONLY the runtime fns that take `&mut` on `args[0]` (verified against
+    // runtime/rs/src/*.rs). The `list.set/insert/sort/reverse`, `map.set/remove`,
+    // and all `set.*` ops return a NEW value (pure) — calling them in a closure and
+    // discarding the result is a no-op, not a captured mutation.
+    matches!(symbol,
+        "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear"
+        | "almide_rt_map_insert" | "almide_rt_map_delete" | "almide_rt_map_clear"
+        | "almide_rt_string_push" | "almide_rt_string_push_char" | "almide_rt_string_clear"
+    )
+    // Bytes builders mutate their buffer in place (the runtime takes `&mut`): push,
+    // clear, fill, copy_within, set_at, as_mut_ptr, plus every append_*/set_*/write_*.
+    // Matched by shape — the read side is read_*/get/slice/len/… (disjoint). This is
+    // the complete &mut set in runtime/rs/src/bytes.rs; note bytes' stdlib `mut`
+    // annotations are incomplete (only push/set_at/copy_within), so we cannot key off
+    // the `mut` keyword here and instead encode the runtime's actual mutation surface.
+    || symbol.strip_prefix("almide_rt_bytes_").is_some_and(|m| {
+        matches!(m, "push" | "clear" | "fill" | "copy_within" | "set_at" | "as_mut_ptr")
+            || m.starts_with("append_") || m.starts_with("set_") || m.starts_with("write_")
+    })
+}

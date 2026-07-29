@@ -134,6 +134,7 @@ When adding or modifying stdlib functions (the stdlib is self-hosted — `stdlib
 - Only if a native intrinsic is required: implement `almide_rt_*` in `runtime/rs/src/<module>.rs` and declare it with `@intrinsic("almide_rt_*")` in the module's `.almd`
 - New modules: update `STDLIB_MODULES` / `BUNDLED_MODULES` / `bundled_source()` (and `AUTO_IMPORT_BUNDLED` if auto-imported) in `crates/almide-types/src/stdlib_info.rs`
 - Write a test in `spec/stdlib/` (as `*_test.almd` or inline `test` block); add the almide-interp bridge glue so the 3-way oracle covers it
+- **API families are extended by matrix, never point-wise.** If the function belongs to a family (numeric conversion trio `to_T`/`to_T_saturating`/`to_T_checked`, per-type bounds, Codec coverage, …), state the family's completeness rule (which cells must exist, which omissions are intentional — e.g. lossy⇒trio, lossless⇒plain only) and land/extend the executable matrix gate that asserts it in the SAME PR. A surface with a hand-maintained shape will drift; a gated matrix cannot
 
 When modifying codegen:
 - Test ownership: variables used after `for...in` must still work

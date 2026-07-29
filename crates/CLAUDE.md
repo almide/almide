@@ -1,6 +1,6 @@
 # Almide Compiler Crates
 
-> **Active redesign**: [docs/roadmap/active/codegen-ideal-form.md](../docs/roadmap/active/codegen-ideal-form.md) — codegen の理想形に向けたリファクタ計画。新しいパスや emit 修正を入れる前に一読。
+> **Codegen 理想形（完了済みの設計記録）**: [docs/roadmap/done/codegen-ideal-form.md](../docs/roadmap/done/codegen-ideal-form.md) — 新しいパスや emit 修正の設計判断はこの記録に整合させる。
 
 ## Pipeline
 
@@ -9,7 +9,7 @@ Source (.almd)
   → almide-syntax    Lex + parse → AST
   → almide-frontend  Type check + lower → IR
   → almide-optimize  Monomorphize + DCE → IR
-  → almide-codegen   Nanopass + emit → Rust (+ WGSL)
+  → almide-codegen   Nanopass + emit → Rust
   → almide-mir       v1 trust-spine → WASM (WAT) / native Rust render
 ```
 
@@ -27,7 +27,7 @@ almide-ir             Typed IR, VarTable, visitors
   ↕
 almide-frontend       Type checker, constraint solver, AST→IR lowering
 almide-optimize       Monomorphization, DCE, constant propagation
-almide-codegen        Nanopass pipeline, TOML templates, walker, WGSL emit
+almide-codegen        Nanopass pipeline, TOML templates, walker（WGSL は on-hold — attribute パースのみ）
 almide-mir            v1 Middle IR: ownership/layout SoT, WASM (WAT) + native renderers
 almide-interp         Pre-codegen IR tree-walker — 3rd cross-target oracle / executable spec
 almide-tools          Formatter, module interface, language server

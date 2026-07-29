@@ -267,3 +267,17 @@ fn to_uint32_saturating(n: Int) -> UInt32 =
 fn to_uint64_saturating(n: Int) -> UInt64 =
   if n < 0 then int.to_uint64(0)
   else int.to_uint64(n)
+
+// ── U64 → Int is the one lossy widening (the upper half exceeds i64::MAX);
+//    checked/saturating complete its trio next to the plain `from_uint64` ──
+fn from_uint64_checked(n: UInt64) -> Option[Int] =
+  if int.from_uint64(n) >= 0 then Some(int.from_uint64(n))
+  else None
+
+fn from_uint64_saturating(n: UInt64) -> Int =
+  if int.from_uint64(n) >= 0 then int.from_uint64(n)
+  else 9223372036854775807
+
+// ── Bounds ──
+fn min_value() -> Int = -9223372036854775807 - 1
+fn max_value() -> Int = 9223372036854775807

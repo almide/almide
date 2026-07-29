@@ -662,63 +662,9 @@ mod builtin_lowering {
     }
 }
 
-// ── ClosureConversionPass ───────────────────────────────────────
-
-mod closure_conversion {
-    use super::*;
-    use almide::codegen::pass_closure_conversion::ClosureConversionPass;
-
-    #[test]
-    fn lambda_lifted_to_function() {
-        // let f = (x) => x + 1; f(5)
-        let mut vt = VarTable::new();
-        let v_x = vt.alloc(sym("x"), Ty::Int, Mutability::Let, None);
-        let v_f = vt.alloc(sym("f"), Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }, Mutability::Let, None);
-
-        let lambda = mk_expr(IrExprKind::Lambda {
-            params: vec![(v_x, Ty::Int)],
-            body: Box::new(mk_expr(IrExprKind::BinOp {
-                op: BinOp::AddInt,
-                left: Box::new(mk_expr(IrExprKind::Var { id: v_x }, Ty::Int)),
-                right: Box::new(mk_expr(IrExprKind::LitInt { value: 1 }, Ty::Int)),
-            }, Ty::Int)),
-            lambda_id: Some(0),
-        }, Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) });
-
-        let call = mk_expr(IrExprKind::Call {
-            target: CallTarget::Computed { callee: Box::new(mk_expr(IrExprKind::Var { id: v_f }, Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) })) },
-            args: vec![mk_expr(IrExprKind::LitInt { value: 5 }, Ty::Int)],
-            type_args: vec![],
-        }, Ty::Int);
-
-        let body = mk_expr(IrExprKind::Block {
-            stmts: vec![IrStmt {
-                kind: IrStmtKind::Bind {
-                    var: v_f,
-                    mutability: Mutability::Let,
-                    ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
-                    value: lambda,
-                },
-                span: None,
-            }],
-            expr: Some(Box::new(call)),
-        }, Ty::Int);
-
-        let func = mk_fn("test_closure", vec![], Ty::Int, body, false);
-        let program = mk_program(vec![func], vt);
-        let result = run_pass(&ClosureConversionPass, program, Target::Wasm);
-
-        // A value-position lambda (here `let f = (x) => x + 1`, called via a
-        // Computed callee — not an inline-combinator arg) is lifted to a stable
-        // ClosureCreate even when capture-free. Only inline-combinator lambda args
-        // stay raw now. So the program gains a lifted `__closure_*` function.
-        // (Closure v2, P2b/A — representation is use-based, not capture-based.)
-        assert_eq!(result.functions.len(), 2,
-            "Capture-free VALUE lambda should be lifted to a closure, got {} functions", result.functions.len());
-        assert!(result.functions.iter().any(|f| f.name.as_str().starts_with("__closure_")),
-            "expected a lifted __closure_* function");
-    }
-}
+// ClosureConversionPass was wasm-pipeline-only and was deleted with the dead
+// wasm pipeline in #930 — closure lifting on the live path is exercised by the
+// almide-mir lowering tests and the spec/wasm_cross fixtures.
 
 // ── LICMPass ────────────────────────────────────────────────────
 

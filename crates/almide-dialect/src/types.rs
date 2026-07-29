@@ -120,7 +120,7 @@ fn from_ty_structural(ty: &almide_lang::types::Ty) -> Option<DialectType> {
 
 /// The printed name of a NULLARY dialect type, for either surface.
 ///
-/// `dump.rs` and `emit_rust.rs` each formatted the same 17 scalar variants in
+/// `dump.rs` (and the since-retired `emit_rust.rs`, #930) formatted the same 17 scalar variants in
 /// their own 28-arm match; the tables differ only in the spelling of a handful of
 /// entries, so they share one function and keep only their structural recursion.
 /// A non-scalar returns `None`.

@@ -4,7 +4,7 @@ IR → source code: Rust (primary) and WGSL (`emit_wgsl/`). The wasm binary path
 does NOT live here — it is the v1 MIR trust-spine in `crates/almide-mir`
 (the v0 direct emitter `emit_wasm/` was retired in #782).
 
-> **理想形リファクタのロードマップ**: [docs/roadmap/active/codegen-ideal-form.md](../../docs/roadmap/active/codegen-ideal-form.md)
+> **理想形リファクタのロードマップ**: [docs/roadmap/done/codegen-ideal-form.md](../../docs/roadmap/done/codegen-ideal-form.md)
 > 新しい codegen の修正を入れる前に、そこに挙げられた「場当たり修正を避けるべきポイント」を確認すること。特に: 関数解決は独立パスに、stdlib emit は宣言駆動、`emit_stub_call` による実行時 trap は避ける。
 
 ## Three-Layer Architecture
@@ -37,9 +37,11 @@ decisions made in passes + templates.
 
 - **Walker must stay target-agnostic.** If you need target-specific behavior, add a nanopass or a template guard.
 - **Nanopass passes are independent.** Each pass reads and rewrites the IrProgram. Passes must not assume ordering except through declared `Postcondition`s.
-- **`Target::Wasm` is a tombstone.** Its codegen arm is `unreachable!` — wasm
-  requests are routed to `almide-mir` before ever reaching this crate. Do not
-  add wasm emission logic here.
+- **There is no `Target::Wasm` here.** The variant, its 26-pass pipeline, the
+  wasm-only passes (a full second Perceus among them) and the
+  `Verified`/`Canonical` certificate chain were deleted in #930 — the tombstone
+  era's `unreachable!` arm included. Wasm requests are routed to `almide-mir`
+  before ever reaching this crate; do not add wasm emission logic here.
 
 ## History note: the rt-oracle registry
 

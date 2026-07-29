@@ -290,6 +290,12 @@ impl LowerCtx {
         // codegen now frees the live heap locals before the Err-path `return_`
         // [emit_wasm: emit_early_return_decs], so the deferred-continue cert is faithful
         // on both targets — no leak. See docs/roadmap/active/v0-unwrap-early-return-leak.md.)
+        //
+        // A staged in-place-mutator receiver never crosses a statement boundary: its
+        // one legitimate consumer is the SAME statement's receiver argument, and a
+        // stale entry surviving a rolled-back attempt would hand a later read an
+        // un-Dup'd alias of the slot's block (see `pending_inplace_receiver`, #946).
+        self.pending_inplace_receiver = None;
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, mutability } => {
                 self.var_decl_tys.insert(*var, ty.clone());

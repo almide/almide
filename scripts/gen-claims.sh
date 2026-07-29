@@ -76,12 +76,58 @@ rendered="$(awk -v start="$START" -v end="$END" -v bf="$blockfile" '
   !skip { print }
 ' "$README")"
 
+# ── TCB-numbers block in docs/TRUST-SPINE.md (#914) ─────────────────────────
+# The checker size and theorem counts are DERIVED here, never hand-written:
+# "a few hundred lines" drifted 1.7x past the real checker before anyone
+# noticed, and the README said 22 Lean theorems when the belt held 41. Same
+# marker discipline as the README claims block; --check makes drift red.
+SPINE="docs/TRUST-SPINE.md"
+TSTART="<!-- tcb:generated:start — derived by scripts/gen-claims.sh; DO NOT EDIT between the markers -->"
+TEND="<!-- tcb:generated:end -->"
+tcb_block() {
+  local ml mli coqn leann
+  # proofs/checker.ml is EXTRACTED (build-checker.sh), not committed — the light
+  # CI jobs run --check on a fresh checkout where it does not exist. When absent,
+  # carry the RECORDED numbers forward (they re-derive on any machine that has
+  # run the extraction, e.g. make verify-trust); the theorem counts always
+  # re-derive, since the .v/.lean sources are committed.
+  if [ -f proofs/checker.ml ]; then
+    ml=$(wc -l < proofs/checker.ml | tr -d ' ')
+    mli=$(wc -l < proofs/checker.mli | tr -d ' ')
+  else
+    ml=$(grep -oE '`proofs/checker\.ml` = \*\*[0-9]+ lines\*\*' "$SPINE" | grep -oE '[0-9]+' | head -1)
+    mli=$(grep -oE '\(\+ [0-9]+' "$SPINE" | grep -oE '[0-9]+' | head -1)
+    [ -n "$ml" ] && [ -n "$mli" ] || { echo "::error::tcb block: proofs/checker.ml absent and no recorded size to carry forward"; exit 2; }
+  fi
+  coqn=$(grep -hcE '^(Theorem|Lemma) ' proofs/*.v | paste -sd+ - | bc)
+  leann=$(grep -hc '^theorem' crates/almide-perceus-belt/AlmidePerceusBelt/*.lean | paste -sd+ - | bc)
+  printf '> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **%s lines** (+ %s\n' "$ml" "$mli"
+  printf '> `.mli`); Rocq spine = **%s theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);\n' "$coqn"
+  printf '> Lean Perceus belt = **%s theorems**, 0 sorry (CI-gated).\n' "$leann"
+}
+if grep -qxF "$TSTART" "$SPINE"; then
+  tblockfile="$(mktemp)"
+  tcb_block > "$tblockfile"
+  spine_rendered="$(awk -v start="$TSTART" -v end="$TEND" -v bf="$tblockfile" '
+    $0 == start { print; while ((getline line < bf) > 0) print line; skip = 1; next }
+    $0 == end   { skip = 0; print; next }
+    !skip { print }
+  ' "$SPINE")"
+else
+  echo "::error::tcb markers missing from $SPINE"; exit 2
+fi
+
 if [ "${1:-}" = "--check" ]; then
   if [ "$rendered" != "$(cat "$README")" ]; then
     echo "::error::README.md claims block is stale — run: bash scripts/gen-claims.sh"
+    exit 1
+  fi
+  if [ "$spine_rendered" != "$(cat "$SPINE")" ]; then
+    echo "::error::docs/TRUST-SPINE.md tcb block is stale — run: bash scripts/gen-claims.sh"
     exit 1
   fi
   exit 0
 fi
 
 printf '%s\n' "$rendered" > "$README"
+printf '%s\n' "$spine_rendered" > "$SPINE"

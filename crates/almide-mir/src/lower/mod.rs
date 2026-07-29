@@ -33,6 +33,21 @@ pub enum LowerError {
     Unsupported(String),
 }
 
+/// The USER-FACING rendering: the reason, bare. The `Debug` form wraps it in
+/// `Unsupported("…")` — and because walls nest (a fn's wall is quoted inside
+/// the program's), Debug-formatting at each level compounded into
+/// `Unsupported("…: Unsupported(\"…\")")` with escaped quotes, the worst
+/// diagnostic in the compiler (#931). Every layer that shows a wall to a HUMAN
+/// — the fn-wall ledger, the CLI's wall error, the native-fallback notice —
+/// formats through THIS, so the reason reads as one sentence at any depth.
+impl std::fmt::Display for LowerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LowerError::Unsupported(reason) => f.write_str(reason),
+        }
+    }
+}
+
 /// A FLAT scalar-slot heap block: an all-scalar tuple (`(Int, Int)`) or a
 /// `List[<scalar>]` (`List[Int]`) — every slot in the block is a raw i64 value,
 /// never a nested handle. Mirrors the `ListElemDrop::ScalarAggregate` gate in
@@ -58,31 +73,11 @@ pub fn is_flat_scalar_block_ty(ty: &Ty) -> bool {
 }
 
 /// Heap-managed types (need refcount: `Alloc`/`Dup`/`Drop`) vs `Copy` scalars.
-/// Mirrors the old `pass_perceus::is_heap_type` / `emit_wasm` copy — but here it
-/// is the SINGLE definition both renderers will read off the MIR.
-pub fn is_heap_ty(ty: &Ty) -> bool {
-    !matches!(
-        ty,
-        Ty::Int
-            | Ty::Int8
-            | Ty::Int16
-            | Ty::Int32
-            | Ty::Int64
-            | Ty::UInt8
-            | Ty::UInt16
-            | Ty::UInt32
-            | Ty::UInt64
-            | Ty::Float
-            | Ty::Float32
-            | Ty::Float64
-            | Ty::Bool
-            | Ty::Unit
-            | Ty::Never
-            | Ty::RawPtr
-            | Ty::ConstParam { .. }
-            | Ty::ConstValue { .. }
-    )
-}
+/// THE definition lives beside `Ty` (`almide_types::types::heap`, #926) as an
+/// exhaustive no-wildcard match, so a new `Ty` variant must be classified before
+/// the workspace compiles; this re-export keeps the SoT reading
+/// (`crate::lower::is_heap_ty`) both renderers and the optimizer share.
+pub use almide_lang::types::is_heap_ty;
 
 /// The i64-uniform bit pattern of a float literal: a `Float32`-typed literal carries the
 /// LOW-32 f32 pattern (the F32Demote/IntToF32 convention — see `PrimKind::F32Bin`),

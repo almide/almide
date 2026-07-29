@@ -12,7 +12,7 @@
 
 - Coq **16 ファイル / 45 定理**、全 `Print Assumptions` = "Closed under the global context"、
   `coqchk` De-Bruijn 再検査、cross-version 9.1.1 + 9.2(`proofs/check.sh`, `TRUSTED_BASE.md`)。
-- 資格化対象 = `proofs/checker.ml`(**683 行 OCaml 抽出**)← `OwnershipChecker.v`(309)+
+- 資格化対象 = `proofs/checker.ml`(現在 1,144 行 OCaml 抽出 — 実数は `scripts/gen-claims.sh` が docs/TRUST-SPINE.md に再生成)← `OwnershipChecker.v`(309)+
   `Subset.v`(88)+ `Extract.v`。核 = 符号付き Δ 左 fold + `subset_check` 包含。
 - `make verify-trust` = `check.sh` + `gate.sh` + `corpus-wall.sh` + `cargo test -p almide-mir`。
   `make receipt` = `receipt.sh`。CI が両方実行(`.github/workflows/trust-spine.yml`)。
@@ -64,7 +64,7 @@ airborne software に注入し得る)── 最も過酷。
 - **未信頼コンパイラ**(`almide-mir`+renderer)→ **出力が検証される TQL-5/Criteria-3 ツール**。
   DO-178C §6.0 + DO-330 が明示的に許す:ツールの出力が別プロセスで検証されるなら資格化レベルが
   下がる。ここでの verifier = 証明済み checker。
-- **checker**(`checker.ml` 683 行 ← `OwnershipChecker.v` 309 + `Subset.v` 88)= 残る資格化対象 ──
+- **checker**(`checker.ml` 1,144 行 — 台帳は docs/TRUST-SPINE.md の生成ブロック)= 残る資格化対象 ──
   ただし**テストでなく形式証明**で資格化(DO-330 + DO-333 結合)。
 
 **資格化証拠パッケージ(全て実在、`proofs/`)**:

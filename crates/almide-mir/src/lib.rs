@@ -40,7 +40,6 @@ pub mod pipeline;
 pub mod purity;
 pub(crate) mod mir_wellformed;
 pub mod render_native;
-pub mod render_rust;
 pub mod render_wasm;
 pub mod translation_validation;
 

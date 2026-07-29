@@ -14,8 +14,20 @@
 # CI installs both so the grounding actually runs.
 set -euo pipefail
 
-command -v wasmtime >/dev/null 2>&1 || { echo "check-wasm-exec: wasmtime not found — SKIP (executor grounding not re-checked here)"; exit 0; }
-command -v wat2wasm >/dev/null 2>&1 || { echo "check-wasm-exec: wat2wasm not found — SKIP"; exit 0; }
+# Locally a missing tool is an honest skip; in CI it is a FAILURE (#921): this
+# very check "skipped" green in every CI run ever because wasmtime was never
+# installed — a gate that silently exits 0 without its instrument is not a gate.
+require_or_skip() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  if [ "${CI:-}" = "true" ]; then
+    echo "check-wasm-exec: $1 not found — FAIL (CI must install it; a silent skip is how this gate never ran)"
+    exit 1
+  fi
+  echo "check-wasm-exec: $1 not found — SKIP (executor grounding not re-checked here)"
+  exit 0
+}
+require_or_skip wasmtime
+require_or_skip wat2wasm
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 

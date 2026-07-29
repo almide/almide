@@ -114,6 +114,25 @@ impl LowerCtx {
         Ok(())
     }
 
+    /// Memoize a materialized GLOBAL in `value_of` — but only in straight-line
+    /// context. Inside a REAL branch arm, a loop body, or any frame, the memo is
+    /// unsound: the defining op lands in that region's block, and a later reader
+    /// in a SIBLING arm (or after a zero-iteration loop) would reference a value
+    /// whose definition never executed on its path — on wasm that local is 0, and
+    /// `let CAP = 2097152` compared in both arms of an `if` made the else-arm
+    /// compare against 0 and take the wrong side (#945: aivarium's glTF loader
+    /// rejected every primitive; a 52849-vertex model loaded as zero geometry
+    /// with no error). The memo WAS sound when both arms linearized — every op
+    /// executed regardless of the branch — and became unsound exactly as real
+    /// branching spread; nothing in the types said the cache was
+    /// linearization-shaped, so nothing objected. One chokepoint, so the next
+    /// materialization site cannot re-decide this per shape.
+    fn memo_global(&mut self, var: VarId, dst: ValueId) {
+        if self.in_frame == 0 && self.unit_arm_depth == 0 && self.scalar_loop_depth == 0 {
+            self.value_of.insert(var, dst);
+        }
+    }
+
     pub(crate) fn value_or_global(&mut self, var: VarId) -> Result<ValueId, LowerError> {
         // A SHARED-CELL var (cells.rs) reads its cell slot FRESH on every reference —
         // checked BEFORE `value_of` (a cell var must never be cached: an intervening
@@ -134,6 +153,18 @@ impl LowerCtx {
         // by construction (only real constructions are ever stored through `__mg_take`/
         // `Store`), so member reads and spreads work on it.
         if let Some((index, ty)) = crate::lower::mutable_global_info(var) {
+            // The in-place mutator's receiver (#946): the COW that just ran staged
+            // its post-MakeUnique handle — hand it over as a BORROW (the slot owns
+            // the block and nothing between the COW and the call can release it)
+            // instead of re-loading and `Dup`ing. Consumed once; a SECOND read of
+            // the same var in the same statement (`bytes.copy_from(dst, dst, …)`'s
+            // source position) takes the normal owned-Dup path below.
+            if let Some((pv, pval)) = self.pending_inplace_receiver {
+                if pv == var {
+                    self.pending_inplace_receiver = None;
+                    return Ok(pval);
+                }
+            }
             return self.read_mutable_global_slot(index, &ty);
         }
         let ty = self
@@ -160,7 +191,7 @@ impl LowerCtx {
         }
         let dst = self.fresh_value();
         self.ops.push(Op::Const { dst });
-        self.value_of.insert(var, dst);
+        self.memo_global(var, dst);
         Ok(dst)
     }
 
@@ -295,7 +326,7 @@ impl LowerCtx {
         }
         if self.globals.contains_key(&src) {
             let v = self.value_or_global(src)?;
-            self.value_of.insert(var, v);
+            self.memo_global(var, v);
             return Ok(Some(v));
         }
         Ok(None)
@@ -317,7 +348,7 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.ops.push(Op::Alloc { dst, repr, init: const_init });
         self.live_heap_handles.push(dst);
-        self.value_of.insert(var, dst);
+        self.memo_global(var, dst);
         Ok(Some(dst))
     }
 
@@ -345,7 +376,7 @@ impl LowerCtx {
         }
         let dst = self.try_lower_str_list_literal(init)?;
         self.live_heap_handles.push(dst);
-        self.value_of.insert(var, dst);
+        self.memo_global(var, dst);
         Some(dst)
     }
 
@@ -388,7 +419,7 @@ impl LowerCtx {
             self.record_masks.remove(&dst);
             self.variant_drop_handles.insert(dst, name);
         }
-        self.value_of.insert(var, dst);
+        self.memo_global(var, dst);
         Some(dst)
     }
 
@@ -419,7 +450,7 @@ impl LowerCtx {
             self.live_heap_handles.push(dst);
         }
         self.materialized_options.insert(dst);
-        self.value_of.insert(var, dst);
+        self.memo_global(var, dst);
         Some(dst)
     }
 
@@ -446,7 +477,7 @@ impl LowerCtx {
         if !self.live_heap_handles.contains(&dst) {
             self.live_heap_handles.push(dst);
         }
-        self.value_of.insert(var, dst);
+        self.memo_global(var, dst);
         Some(dst)
     }
 
@@ -482,7 +513,7 @@ impl LowerCtx {
         if !init_has_call(init) {
             let mark = self.ops.len();
             if let Some(dst) = self.lower_scalar_value(init) {
-                self.value_of.insert(var, dst);
+                self.memo_global(var, dst);
                 return Ok(dst);
             }
             self.ops.truncate(mark);

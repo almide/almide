@@ -444,6 +444,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - `bytes`: `read_<dtype>_le|be(b, pos)` for one value, `read_<dtype>_le_array(b, pos, count)` for bulk, `set_<dtype>_le(b, pos, val)` to overwrite, `append_<dtype>_le(b, val)` to grow. `<dtype>` ∈ `u8|u16|u32|i32|i64|f16|f32|f64`.
 - `matrix`: row-shaped ops use `_rows` suffix (`softmax_rows`, `slice_rows`, `gather_rows`, `layer_norm_rows`); singular `_row` when an op consumes/produces *one* row (`linear_row`, `dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
 - `from_X` builds from another representation, `to_X` is its inverse (e.g. `from_bytes_f64_le` ↔ `to_bytes_f64_le`).
+- sized integers (`int8`…`int64`, `uint8`…`uint64`, plus `int` = i64): `x.to_<dst>()` truncates (Rust `as` semantics); every **lossy** pair also has `to_<dst>_checked` → `Option` (None on overflow) and `to_<dst>_saturating` (clamp) — lossless pairs have only the plain form. Every carrier has `min_value()`/`max_value()`. Widening is `int.from_<src>(x)`; the one lossy widening `UInt64 → Int` has `int.from_uint64_checked/_saturating`.
 
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor

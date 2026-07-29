@@ -707,3 +707,78 @@ mod proptest_lean_rust {
         }
     }
 }
+
+#[cfg(test)]
+mod heap_classification_pin {
+    use super::is_heap_type;
+    use almide_lang::intern::sym;
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    use almide_lang::types::{Ty, VariantCase};
+
+    /// The NATIVE-model classification, pinned per `Ty` variant with no
+    /// wildcard in the expectation table — adding a `Ty` variant fails this
+    /// match before it can be classified by omission (#926). Divergences from
+    /// the v1 base predicate (`almide_lang::types::is_heap_ty`) are the
+    /// native runtime model, not drift: a `Tuple` here is a Rust `(A, B)`
+    /// whose FIELDS carry their own counts; `Bytes` is a `Vec<u8>` under
+    /// value semantics; `Variant`/`Union`/`TypeVar` never reach codegen
+    /// un-resolved (a declared variant arrives as `Named`).
+    #[test]
+    fn the_native_model_classification_is_pinned_per_variant() {
+        let cases: Vec<(Ty, bool)> = vec![
+            (Ty::Int, false),
+            (Ty::Int8, false),
+            (Ty::Int16, false),
+            (Ty::Int32, false),
+            (Ty::Int64, false),
+            (Ty::UInt8, false),
+            (Ty::UInt16, false),
+            (Ty::UInt32, false),
+            (Ty::UInt64, false),
+            (Ty::Float, false),
+            (Ty::Float32, false),
+            (Ty::Float64, false),
+            (Ty::Bool, false),
+            (Ty::Unit, false),
+            (Ty::Never, false),
+            (Ty::RawPtr, false),
+            (Ty::Bytes, false),
+            (Ty::Matrix, false),
+            (Ty::Tuple(vec![Ty::Int, Ty::Bool]), false),
+            (Ty::OpenRecord { fields: vec![(sym("x"), Ty::Int)] }, false),
+            (Ty::Variant { name: sym("V"), cases: Vec::<VariantCase>::new() }, false),
+            (Ty::Union(vec![Ty::Int, Ty::String]), false),
+            (Ty::TypeVar(sym("T")), false),
+            (Ty::ConstParam { name: sym("N"), ty: Box::new(Ty::Int) }, false),
+            (Ty::ConstValue { ty: Box::new(Ty::Int), value: 3 }, false),
+            (Ty::String, true),
+            (Ty::Applied(TC::List, vec![Ty::Int]), true),
+            (Ty::Record { fields: vec![(sym("x"), Ty::Int)] }, true),
+            // The variant whose ABSENCE in two per-pass copies was the #926
+            // leak: ANF didn't lift what Perceus Dec's, and TCO left a
+            // nominal-record accumulator unmanaged.
+            (Ty::Named(sym("P"), vec![]), true),
+            (Ty::Fn { params: vec![], ret: Box::new(Ty::Unit) }, true),
+            (Ty::Unknown, true),
+        ];
+        // Every Ty variant appears exactly once above; this match is the
+        // no-new-variant-by-omission gate (extend the table AND this list).
+        for (ty, expected) in &cases {
+            match ty {
+                Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8
+                | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float | Ty::Float32
+                | Ty::Float64 | Ty::Bool | Ty::Unit | Ty::Never | Ty::RawPtr
+                | Ty::Bytes | Ty::Matrix | Ty::Tuple(..) | Ty::OpenRecord { .. }
+                | Ty::Variant { .. } | Ty::Union(..) | Ty::TypeVar(..)
+                | Ty::ConstParam { .. } | Ty::ConstValue { .. } | Ty::String
+                | Ty::Applied(..) | Ty::Record { .. } | Ty::Named(..)
+                | Ty::Fn { .. } | Ty::Unknown => {}
+            }
+            assert_eq!(
+                is_heap_type(ty),
+                *expected,
+                "{ty:?} native-model classification changed — if deliberate, update this pin"
+            );
+        }
+    }
+}

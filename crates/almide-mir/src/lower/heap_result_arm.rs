@@ -3,7 +3,27 @@ impl LowerCtx {
     /// A string LITERAL is `Alloc{Str}` + `Consume` (the per-arm `"im"` move-out balance —
     /// NOT added to `live_heap_handles`, it is moved out as the result). A NESTED `if` (a
     /// desugared `match`'s else-if) recurses, its result dst being this arm's value.
+    ///
+    /// Every caller emits this arm under REAL `IfThen`/`Else`/`EndIf` markers — exactly
+    /// one arm runs — so the arm raises `in_frame` AND `unit_arm_depth` for its whole
+    /// extent, the discipline `lower_scalar_arm` carries (C-188/#907). It raised NEITHER,
+    /// so context-sensitive machinery read the arm as straight-line code: `memo_global`
+    /// cached a heap global materialized in the THEN arm and the ELSE arm then compared
+    /// against a value whose defining alloc sits in the untaken block — `s == TAG` with
+    /// `TAG` mentioned in both arms answered `else-miss` for the very string TAG holds
+    /// (#945's heap twin; the scalar `CAP` edition was the reported glTF-loader bug).
     fn lower_heap_result_arm(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        self.in_frame += 1;
+        self.unit_arm_depth += 1;
+        let r = self.lower_heap_result_arm_unmarked(arm, result_ty);
+        self.unit_arm_depth -= 1;
+        self.in_frame -= 1;
+        r
+    }
+
+    /// [`Self::lower_heap_result_arm`]'s body, verbatim — split so the counter raise
+    /// brackets every early return.
+    fn lower_heap_result_arm_unmarked(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         // A HEAP-Ok PAYLOAD arm (`if age < 200 then "valid" else err(x)!` in a
         // `Result[String, _]` fn — the guard-chain tail): the arm value is the Ok
         // PAYLOAD, not the Result — returning it bare puts a raw String where the
