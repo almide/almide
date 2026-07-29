@@ -403,6 +403,9 @@ jobs:
           $ALMIDE "$f" --target rust > /dev/null && echo "Rust emit OK"
           $ALMIDE "$f" --emit-ast    > /dev/null && echo "AST emit OK"
 
+      - name: fmt gate (spec/ + examples/ stay formatted, #919)
+        run: /tmp/almide-bin/almide fmt --check spec/ examples/
+
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
 
