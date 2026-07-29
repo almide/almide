@@ -280,7 +280,7 @@ fn try_render_wasm_source_impl_rest(
 
     repair_and_substitute_globals(ir, &mut inlined_fns, &mut module_fn_sibs, &layouts, &all_fns);
 
-    let mut fn_walls: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut fn_walls: std::collections::HashMap<String, crate::lower::LowerError> = std::collections::HashMap::new();
     let mut functions = lower_main_and_sibling_fns(
         &inlined_fns,
         &module_fn_sibs,
@@ -414,10 +414,17 @@ fn try_render_wasm_source_impl_rest(
         // most common wall, and reporting it as "main is outside the subset"
         // collapsed every distinct reason into one bucket that no burn-down
         // could act on (#812).
-        return Err(LowerError::Unsupported(match &main_wall {
-            Some(reason) => format!("main is outside the MIR-lowering subset: {reason}"),
-            None => "main is outside the MIR-lowering subset (no main in the IR)".into(),
-        }));
+        // The wrapper PRESERVES the inner wall's span (#931): nesting adds
+        // context to the reason, never strips the location.
+        return Err(match &main_wall {
+            Some(inner) => LowerError::at(
+                inner.span(),
+                format!("main is outside the MIR-lowering subset: {inner}"),
+            ),
+            None => LowerError::Unsupported(
+                "main is outside the MIR-lowering subset (no main in the IR)".into(),
+            ),
+        });
     }
 
     // `pub fn` EXPORT roots (#457): a Public non-test MAIN-program fn must be a named wasm
@@ -467,17 +474,22 @@ fn try_render_wasm_source_impl_rest(
                 // burned the search on the export machinery — the same
                 // mis-attribution class as #904, reported as #906. `main` has
                 // carried its inner reason since #812; an export now does too.
-                return Err(LowerError::Unsupported(match fn_walls.get(n) {
-                    Some(reason) => format!(
-                        "exported `pub fn {n}` is outside the MIR-lowering subset \
-                         (the wasm module must carry its export): {reason}"
+                // Like the main wrapper: the nesting adds context, the inner
+                // wall's SPAN survives (#931).
+                return Err(match fn_walls.get(n) {
+                    Some(inner) => LowerError::at(
+                        inner.span(),
+                        format!(
+                            "exported `pub fn {n}` is outside the MIR-lowering subset \
+                             (the wasm module must carry its export): {inner}"
+                        ),
                     ),
-                    None => format!(
+                    None => LowerError::Unsupported(format!(
                         "exported `pub fn {n}` is outside the MIR-lowering subset (the wasm \
                          module must carry its export; no per-function wall was recorded — \
                          it was dropped before lowering)"
-                    ),
-                }));
+                    )),
+                });
             }
         }
     }
@@ -512,7 +524,7 @@ fn try_render_wasm_source_impl_rest(
 /// user module that is sitting right there in the package (#943).
 fn attribute_unlinked_calls(
     e: LowerError,
-    fn_walls: &std::collections::HashMap<String, String>,
+    fn_walls: &std::collections::HashMap<String, crate::lower::LowerError>,
 ) -> LowerError {
     let LowerError::Unsupported(msg) = &e else { return e };
     let Some(rest) = msg.strip_prefix("unlinked stdlib/runtime call(s) with no wasm definition: ")
