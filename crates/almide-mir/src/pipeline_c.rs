@@ -417,8 +417,9 @@ fn try_render_wasm_source_impl_rest(
         // The wrapper PRESERVES the inner wall's span (#931): nesting adds
         // context to the reason, never strips the location.
         return Err(match &main_wall {
-            Some(inner) => LowerError::at(
+            Some(inner) => LowerError::shaped(
                 inner.span(),
+                inner.shape(),
                 format!("main is outside the MIR-lowering subset: {inner}"),
             ),
             None => LowerError::Unsupported(
@@ -477,8 +478,9 @@ fn try_render_wasm_source_impl_rest(
                 // Like the main wrapper: the nesting adds context, the inner
                 // wall's SPAN survives (#931).
                 return Err(match fn_walls.get(n) {
-                    Some(inner) => LowerError::at(
+                    Some(inner) => LowerError::shaped(
                         inner.span(),
+                        inner.shape(),
                         format!(
                             "exported `pub fn {n}` is outside the MIR-lowering subset \
                              (the wasm module must carry its export): {inner}"
