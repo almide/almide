@@ -8,16 +8,16 @@
 // spelling was the loud tell, emitting invalid Rust (the aliasing hoist bound
 // a `&` borrow where the Bind path expects an owned value).
 //
-// Three shapes pinned:
+// Four shapes pinned:
 //   1. global dst ← distinct global src   (was silently wrong on native)
 //   2. global dst ← the SAME global (src == dst, the #955 repro) with
 //      NON-overlapping ranges
 //   3. global dst ← local src             (the mixed spelling)
-//
-// OVERLAPPING self-copy ranges are deliberately NOT probed here: the targets
-// disagree (native copies from a pre-call snapshot, wasm's byte loop sees its
-// own writes) — that divergence is tracked separately and gets its own
-// fixture when resolved.
+//   4. OVERLAPPING self-copy ranges, both directions — SNAPSHOT semantics
+//      (#963): the copy reads as if src were snapshotted first. Native gets
+//      this from the aliasing hoist's clone; the wasm self-host routes the
+//      aliased case through copy_within's direction-switching memmove.
+//      Before #963 wasm's forward byte loop observed its own writes.
 
 var arena = bytes.new(8)
 var other = bytes.new(8)
@@ -38,6 +38,18 @@ fn main() -> Unit = {
   bytes.set_at(scratch, 0, 9)
   bytes.copy_from(arena, scratch, 7, 0, 1)
   println(int.to_string(bytes.get_or(arena, 7, -1)))
+
+  // 4. overlapping self-copy, forward (doff > soff): arena[0..2] → arena[1..3].
+  //    Snapshot semantics: [1] gets the pre-copy [0], [2] gets the pre-copy [1]
+  //    — a forward byte loop would propagate [0] into both (#963).
+  bytes.copy_from(arena, arena, 1, 0, 2)
+  println(int.to_string(bytes.get_or(arena, 1, -1)))
+  println(int.to_string(bytes.get_or(arena, 2, -1)))
+
+  //    and backward (doff < soff): arena[3..5] → arena[2..4]
+  bytes.copy_from(arena, arena, 2, 3, 2)
+  println(int.to_string(bytes.get_or(arena, 2, -1)))
+  println(int.to_string(bytes.get_or(arena, 3, -1)))
 
   // The copies landed in the slot, not a clone: a fresh read in a callee sees
   // every write.
