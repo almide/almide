@@ -189,6 +189,26 @@ jobs:
           eval "$(opam env)"
           make receipt
 
+      - name: TCB claims re-derived from the MEASURED checker (not carried forward)
+        # This job is the one place proofs/checker.ml actually EXISTS (extracted
+        # by make verify-trust above), so gen-claims --check here measures the
+        # real artifact. The checks-job run of --check operates on a fresh
+        # checkout where the fallback reads the recorded number out of the very
+        # document it is checking — self-fulfilling for exactly the drift the
+        # script was built to catch (#989). REQUIRE_MEASURED forbids that
+        # fallback in this job.
+        # On drift, print the MEASURED regeneration as a diff — this job is the
+        # only environment with the extracted checker, so the log must carry
+        # the corrected numbers out (a bare "stale" verdict is not actionable
+        # from a machine without Coq).
+        run: |
+          if ! GEN_CLAIMS_REQUIRE_MEASURED=1 bash scripts/gen-claims.sh --check; then
+            echo "--- measured regeneration (the content docs/TRUST-SPINE.md + README.md should carry) ---"
+            GEN_CLAIMS_REQUIRE_MEASURED=1 bash scripts/gen-claims.sh
+            git --no-pager diff docs/TRUST-SPINE.md README.md
+            exit 1
+          fi
+
       # Save the opam (Rocq) root ONLY after a green run and only on a miss, so
       # the cache always holds a known-good toolchain.
       - name: Save opam root (OCaml + Rocq)

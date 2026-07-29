@@ -268,6 +268,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      # Pin the toolchain like every other job (#990): this job used to rely
+      # on the runner image's default rustup toolchain, which is exactly the
+      # kind of unpinned input the coverage ratchet should not depend on.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.89.0"
       - uses: actions/cache@v6
         with:
           path: |

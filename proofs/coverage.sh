@@ -6,7 +6,9 @@
 # lived exactly in such a hole). Statement coverage is the DO-178C entry rung —
 # MC/DC is the DAL-A rung; this script establishes the measurement, not a target.
 #
-#   bash proofs/coverage.sh          # measure + print the summary table
+#   bash proofs/coverage.sh            # measure + enforce the ratchet (= --check)
+#   bash proofs/coverage.sh --check    # same, explicit (what CI passes)
+#   bash proofs/coverage.sh --update   # additionally RAISE the baseline on gain
 #
 # Scope note: this instruments `cargo test -p almide-mir` (unit + gate tests) AND
 # a render_program sweep over spec/wasm_cross (the parity workload). The v0
@@ -17,15 +19,32 @@ set -euo pipefail
 export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Parse the mode for real (#990: `--check` was accepted and ignored — the
+# ratchet happened to run by default, but an unknown flag should be an error,
+# not a silently-absorbed fiction).
+MODE="${1:---check}"
+case "$MODE" in
+  --check|--update) ;;
+  *) echo "usage: coverage.sh [--check|--update]" >&2; exit 2 ;;
+esac
+
 # F6-2: identity of the evidence — stamp + verify the toolchain (see proofs/lib/stamp.sh).
 source "$ROOT/proofs/lib/stamp.sh"
 stamp_toolchain "$ROOT" || exit 1
 
-LLVM_BIN="$(echo "$HOME"/.rustup/toolchains/stable-*/lib/rustlib/*/bin | awk '{print $1}')"
-[ -x "$LLVM_BIN/llvm-profdata" ] || {
+# Resolve llvm-tools from the ACTIVE toolchain's sysroot, not a $HOME glob
+# (#990: the `stable-*` glob depends on the runner image's default toolchain
+# NAME — one image change and the 58% ratchet silently stops measuring).
+SYSROOT="$(rustc --print sysroot)"
+LLVM_BIN="$(echo "$SYSROOT"/lib/rustlib/*/bin | awk '{print $1}')"
+if [ ! -x "$LLVM_BIN/llvm-profdata" ]; then
+    if [ "${CI:-}" = "true" ]; then
+        echo "::error::coverage: llvm-tools not found under $SYSROOT — in CI a missing tool is a failure (#990); rustup component add llvm-tools-preview"
+        exit 1
+    fi
     echo "coverage: llvm-tools not installed (rustup component add llvm-tools-preview) — SKIP"
     exit 0
-}
+fi
 cd "$ROOT"
 
 # MANUAL llvm-cov pipeline — cargo-llvm-cov's multi-run orchestration silently
@@ -95,7 +114,7 @@ if [ -f "$BASELINE_FILE" ]; then
         exit 1
     fi
     echo "coverage ratchet OK: ${total_line_pct}% >= floor $(awk -v f="$floor" 'BEGIN{printf "%.2f", f/100}')%"
-    if [ "${1:-}" = "--update" ] && [ "$total_c" -gt "$floor" ]; then
+    if [ "$MODE" = "--update" ] && [ "$total_c" -gt "$floor" ]; then
         echo "$total_c" > "$BASELINE_FILE"
         echo "coverage ratchet RAISED to ${total_line_pct}%"
     fi

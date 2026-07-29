@@ -30,10 +30,11 @@ cd "$(git rev-parse --show-toplevel)"
 BASELINE_FILE="scripts/embedded-size-baseline.txt"
 # Percent the total may exceed the baseline before this fails.
 BUDGET_PCT="${EMBEDDED_SIZE_BUDGET_PCT:-10}"
-# The scan must find at least this many sources or it has gone blind (#976):
-# the bundled list alone names ~40 modules, so a result under the floor means
-# the discovery pattern no longer matches the embed sites, not a small stdlib.
-SOURCE_FLOOR=30
+# The scan must find close to the REAL count or it has gone blind (#976/#987):
+# 286 sources measured 2026-07-30; a floor of 30 would have let a discovery
+# break that loses 89% of the set read as green. Shrinking the stdlib on
+# purpose = lower this floor in the same change.
+SOURCE_FLOOR=250
 
 sources() {
   # Distinct stdlib stems named by any embed site: `SRC_<STEM>` references
@@ -82,9 +83,21 @@ fi
 
 baseline=$(tr -dc '0-9' < "$BASELINE_FILE")
 ceiling=$(( baseline + baseline * BUDGET_PCT / 100 ))
+floor=$(( baseline * 80 / 100 ))
 
 printf 'embedded-size: %s bytes over %s stdlib sources (baseline %s, ceiling %s, +%s%%)\n' \
   "$total" "$count" "$baseline" "$ceiling" "$BUDGET_PCT"
+
+# The ratchet fails in BOTH directions (#987): an unexplained drop below 80%
+# of baseline is a broken scan reading as a win, not progress. A legitimate
+# shrink (stdlib pruned on purpose) lowers the baseline in the same change —
+# the mirror of the grow-on-purpose rule below.
+if [ "$total" -lt "$floor" ]; then
+  echo "::error::embedded stdlib payload $total bytes is below $floor (80% of baseline $baseline)."
+  echo "A drop this size is a broken scan until proven otherwise. If the stdlib really"
+  echo "shrank on purpose, lower $BASELINE_FILE to $total in the SAME change."
+  exit 1
+fi
 
 # The five biggest sources, so a failure names where to look.
 if [ "$total" -gt "$ceiling" ]; then

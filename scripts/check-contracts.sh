@@ -43,7 +43,6 @@ cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 LEDGER="docs/contracts/contracts.toml"
 FIXTURE_DIR="spec/wasm_cross"
 DOC_DIR="docs/contracts"
-REGISTRY="crates/almide-codegen/rt-oracle-registry.toml"
 CLASS_FILE="scripts/lib/contract-classes.txt"
 
 [ -f "$LEDGER" ]      || { echo "::error::$LEDGER not found (run from repo root)"; exit 2; }
@@ -337,7 +336,11 @@ if [ -d "$ALS_DIR" ]; then
     fail=1
   fi
 
-  specd="$(grep -E '^spec      = ' "$LEDGER" | sed -E 's/^spec      = "([^"]+)"/\1/' | sort -u)"
+  # Lenient spacing, matching the presence check above (#989): the old
+  # six-space-aligned grep silently DROPPED any `spec = "..."` written with
+  # different spacing from this resolution loop — a bogus ALS key on an
+  # unaligned line passed presence and skipped existence.
+  specd="$(grep -E '^spec[ \t]*=' "$LEDGER" | sed -E 's/^spec[ \t]*=[ \t]*"([^"]+)".*/\1/' | sort -u)"
   n_specd=0
   for sec in $specd; do
     n_specd=$((n_specd + 1))
@@ -411,5 +414,8 @@ echo "  fixtures: $n_with_header/$n_fixtures carry a // @contract: header; bidir
 #   (9) cite a new section without regenerating conformance -> (i) stale-report.
 #  (10) delete a `since = ` line from any contract         -> (e) missing-required.
 #  (11) point a fixture header back at emit_wasm/rt_*.rs   -> (j) dead-path.
+#  (12) unaligned bogus spec key (`spec = "ALS-BOGUS"`, single space)  -> the
+#       spec-existence loop fires (#989: the aligned-only grep let it pass).
 # (10) and (11) were verified by hand against C-067 and spec/wasm_cross/
 # float_parse.almd: each flips the gate red alone and green again on restore.
+# (12) verified 2026-07-30: a single-space bogus key turns the gate red.
