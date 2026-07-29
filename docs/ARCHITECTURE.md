@@ -141,8 +141,9 @@ The wasm backend is the v1 MIR pipeline in `almide-mir`:
   name section.
 - Ownership/RC follows Perceus; the crate forbids `unsafe`.
 - Stdlib calls are *self-hosted*: pure-Almide implementations from
-  `stdlib/*.almd` are registered in `render_wasm/registry.rs` and compiled
-  along with user code. An unlinked stdlib call is a wall (hard error).
+  `stdlib/*.almd` are registered in `almide-types/src/self_host_registry.rs`
+  and compiled along with user code. An unlinked stdlib call is a wall (hard
+  error).
 - `wasmparser::validate` guards the test harness; `almide test --target wasm`
   falls back to native execution on a wall.
 
@@ -156,7 +157,8 @@ The stdlib is self-hosted: every function lives in `stdlib/<module>[_part].almd`
   codegen extracts `@inline_rust` templates. `@intrinsic("almide_rt_*")`
   declarations dispatch to hand-written Rust in `runtime/rs/src/<module>.rs`.
 - **WASM** — pure-Almide implementations registered in
-  `almide-mir/src/render_wasm/registry.rs` are compiled to WAT with user code.
+  `almide-types/src/self_host_registry.rs` (shared with the interp oracle)
+  are compiled to WAT with user code.
 
 Auto-import is the union of the seed list in
 `almide-frontend/src/import_table.rs` and `AUTO_IMPORT_BUNDLED` in

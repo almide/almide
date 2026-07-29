@@ -133,7 +133,7 @@ WIRING:
 1. `Op::DropVariant { v, ty }` in MIR — cert = ONE `d` (lib.rs + certificate.rs, alongside the
    other Drop* ops). Render → `(call $__drop_<ty> (local.get v))`.
 2. GENERATE the `__drop_<ty>` Almide source per recursive variant type at program assembly and
-   auto-link it (the cleanest hook is alongside `self_host_runtime()` in render_wasm/registry.rs
+   auto-link it (the cleanest hook is alongside `self_host_runtime()` in almide-types/src/self_host_registry.rs
    — but that registry is `include_str!` of fixed files, so add a DYNAMIC generated-source path:
    produce the source string from the `VariantLayouts`, run it through the same frontend feeder
    `lower_source` uses, rename its fn to `__drop_<ty>`, add to the program functions). Both
