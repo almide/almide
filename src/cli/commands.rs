@@ -194,6 +194,14 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
 enum WasmTestOutcome {
     Pass { file: String, count: usize, bytes: usize },
     Fail { file: String, detail: String },
+    /// The file does not compile on ANY target: resolve/type errors in the
+    /// entry file or an imported module. Distinct from `Skip` — a SKIP means
+    /// "correct program outside the verified renderer's subset", and the skip
+    /// ledger must never absorb diagnostics (#957). The default harness
+    /// routes these to the native fallback (which reports them
+    /// authoritatively); the standalone `--target wasm` harness counts them
+    /// FAILED, matching the default harness's verdict on the same file.
+    CompileError { file: String, detail: String },
     Skip { file: String, reason: String },
 }
 
@@ -265,9 +273,11 @@ fn resolve_wasm_test_deps(test_file: &str, program: &almide_lang::ast::Program) 
 
 /// `compile_and_run_wasm_test`'s type-check phase. Unlike `almide
 /// build`/`run --target wasm` (which print full diagnostics on a type
-/// error), a test-mode type error is a silent skip — the native fallback
-/// re-runs (and reports) it authoritatively. Extracted verbatim.
-fn typecheck_wasm_test_program(test_file: &str, source_text: &str, program: &mut almide_lang::ast::Program, resolved: &resolve::ResolvedModules) -> Result<check::Checker, ()> {
+/// error), test mode returns the errors compactly: the default harness
+/// routes the file to the native fallback, which re-runs and reports them
+/// authoritatively (printing here would duplicate every diagnostic); the
+/// standalone `--target wasm` harness prints this summary itself (#957).
+fn typecheck_wasm_test_program(test_file: &str, source_text: &str, program: &mut almide_lang::ast::Program, resolved: &resolve::ResolvedModules) -> Result<check::Checker, String> {
     let canon = canonicalize::canonicalize_program(
         program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
@@ -281,9 +291,23 @@ fn typecheck_wasm_test_program(test_file: &str, source_text: &str, program: &mut
     almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
     let diagnostics = checker.infer_program(program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
-        return Err(());
+        return Err(render_error_summary(diagnostics.iter().filter(|d| d.level == diagnostic::Level::Error)));
     }
     Ok(checker)
+}
+
+/// Compact per-file error summary for the standalone wasm harness's FAIL
+/// output: the first three error diagnostics, one line each.
+fn render_error_summary<'a>(errors: impl Iterator<Item = &'a diagnostic::Diagnostic>) -> String {
+    let mut detail = String::new();
+    for d in errors.take(3) {
+        let loc = match (d.line, d.col) {
+            (Some(l), Some(c)) => format!(":{}:{}", l, c),
+            _ => String::new(),
+        };
+        detail.push_str(&format!("  type error{}: {}\n", loc, d.message));
+    }
+    detail
 }
 
 /// `compile_and_run_wasm_test`'s pre-register + lower phase: pre-register
@@ -293,7 +317,7 @@ fn typecheck_wasm_test_program(test_file: &str, source_text: &str, program: &mut
 /// used to be a byte-for-byte duplicate of it). link/optimize/monomorphize
 /// stay in the caller so the ALMIDE_PROFILE "lower_modules" mark lands at
 /// the same point as before. Extracted verbatim.
-fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, ()> {
+fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, String> {
     for (name, _, pkg_id, _) in &resolved.modules {
         if let Some(pid) = pkg_id.as_ref() {
             let base = pid.mod_name();
@@ -310,18 +334,23 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
         );
     }
     resolved.sources = sources;
-    // An imported module's own type errors are NOT reported here: like the
+    // An imported module's own type errors are NOT printed here: like the
     // entry program's, they route the file to the authoritative native
-    // fallback, which prints them (#862). Reporting twice would duplicate
-    // every diagnostic in `almide test`'s output.
+    // fallback, which prints them (#862) — printing twice would duplicate
+    // every diagnostic in `almide test`'s output. They ARE returned
+    // compactly, so the standalone `--target wasm` harness can report its
+    // own FAIL verdict instead of absorbing them as a skip (#957).
     if module_diags.iter().any(|(_, _, ds)| ds.iter().any(|d| d.level == diagnostic::Level::Error)) {
-        return Err(());
+        return Err(render_error_summary(
+            module_diags.iter().flat_map(|(_, _, ds)| ds.iter()).filter(|d| d.level == diagnostic::Level::Error),
+        ));
     }
     Ok(ir_program)
 }
 
 fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> WasmTestOutcome {
     let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
+    let compile_error = |detail: String| WasmTestOutcome::CompileError { file: test_file.to_string(), detail };
     let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
 
@@ -339,7 +368,8 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
 
     let mut resolved = match resolve_wasm_test_deps(test_file, &program) {
         Ok(r) => r,
-        Err(e) => return skip(format!("resolve: {}", e)),
+        // An unresolvable import is broken on every target, not a wall.
+        Err(e) => return compile_error(format!("  resolve error: {}\n", e)),
     };
     mark(prof, &mut marks, "resolve");
 
@@ -353,13 +383,13 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
 
     let mut checker = match typecheck_wasm_test_program(test_file, &source_text, &mut program, &resolved) {
         Ok(c) => c,
-        Err(()) => return skip("type errors".to_string()),
+        Err(detail) => return compile_error(detail),
     };
     mark(prof, &mut marks, "check_user");
 
     let mut ir_program = match lower_wasm_test_modules(&program, &mut checker, &mut resolved) {
         Ok(ir) => ir,
-        Err(()) => return skip("type errors in an imported module".to_string()),
+        Err(detail) => return compile_error(detail),
     };
     mark(prof, &mut marks, "lower_modules");
     almide::ir_link::ir_link(&mut ir_program);
@@ -503,6 +533,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
     let file_of = |o: &WasmTestOutcome| match o {
         WasmTestOutcome::Pass { file, .. }
         | WasmTestOutcome::Fail { file, .. }
+        | WasmTestOutcome::CompileError { file, .. }
         | WasmTestOutcome::Skip { file, .. } => file.clone(),
     };
     outcomes.sort_by(|a, b| file_of(a).cmp(&file_of(b)));
@@ -518,6 +549,13 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             }
             WasmTestOutcome::Fail { file, detail } => {
                 err(&format!("FAIL {}", file));
+                err_no_nl(&format!("{}", detail));
+                failed += 1;
+            }
+            // Broken on every target — a FAIL verdict here, matching the
+            // default harness; SKIP is reserved for honest walls (#957).
+            WasmTestOutcome::CompileError { file, detail } => {
+                err(&format!("FAIL {} (does not compile)", file));
                 err_no_nl(&format!("{}", detail));
                 failed += 1;
             }
@@ -622,7 +660,12 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     for o in wasm_outcomes {
         match o {
             WasmTestOutcome::Pass { .. } => wasm_pass += 1,
-            WasmTestOutcome::Fail { file, .. } | WasmTestOutcome::Skip { file, .. } => fallback.push(file),
+            // CompileError routes to the fallback like everything else here:
+            // the native leg re-runs it and reports the diagnostics
+            // authoritatively (#862), turning it into a counted FAILED.
+            WasmTestOutcome::Fail { file, .. }
+            | WasmTestOutcome::CompileError { file, .. }
+            | WasmTestOutcome::Skip { file, .. } => fallback.push(file),
         }
     }
 
