@@ -21,8 +21,10 @@
 #   bash proofs/output-parity.sh            # gate: fail on regression vs baseline
 #   bash proofs/output-parity.sh --update   # ratchet: regenerate the baseline
 #
-# Requires: a built `almide` on PATH (v0 oracle) and `wasmtime`. Skips gracefully
-# if either is absent (so it never blocks an environment that lacks them).
+# Requires: a built oracle at $ALMIDE_BIN (default target/release/almide) and
+# `wasmtime`. Locally a missing tool SKIPs; under CI=true it is a hard FAILURE
+# (#978 — this gate spent its life skipping because CI never had `almide` on
+# PATH, and nothing noticed).
 set -uo pipefail
 # Determinism: sort/comm collation is LOCALE-DEPENDENT (`.` vs `_` invert between
 # C and UTF-8 collation), which made the SAME files appear as both "new match"
@@ -38,9 +40,26 @@ TMP="${TMPDIR:-/tmp}/almide-output-parity.$$"
 mkdir -p "$TMP"
 to() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }   # macOS has no `timeout`
 
-command -v wasmtime >/dev/null || { echo "output-parity: wasmtime not found — SKIP"; exit 0; }
-ALM="$(command -v almide || true)"
-[ -n "$ALM" ] || { echo "output-parity: almide (v0 oracle) not found — SKIP"; exit 0; }
+# In CI a missing tool is a FAILURE, not a skip (#978 — the require_or_skip
+# policy of proofs/check-wasm-exec.sh): this gate SKIPped on every CI run it
+# ever had, because it looked the oracle up on PATH while the workflow only
+# ever built ./target/release/almide. Resolve like diff-fuzz.sh does — never
+# a PATH `almide` — with ALMIDE_BIN as the override.
+if ! command -v wasmtime >/dev/null; then
+  if [ "${CI:-}" = "true" ]; then
+    echo "::error::output-parity: wasmtime not found — in CI a missing tool is a failure (#978)"
+    exit 1
+  fi
+  echo "output-parity: wasmtime not found — SKIP"; exit 0
+fi
+ALM="${ALMIDE_BIN:-$ROOT/target/release/almide}"
+if [ ! -x "$ALM" ]; then
+  if [ "${CI:-}" = "true" ]; then
+    echo "::error::output-parity: almide (v0 oracle) not found at $ALM — in CI a missing oracle is a failure (#978)"
+    exit 1
+  fi
+  echo "output-parity: almide (v0 oracle) not found at $ALM — SKIP"; exit 0
+fi
 
 cd "$ROOT"
 cargo build -q -p almide-mir --example render_program 2>/dev/null || { echo "output-parity: render_program build failed"; exit 1; }
@@ -77,7 +96,15 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|v0fail
   # exit code AND stderr (v1's normalized: strip the wasmtime module preamble).
   sed -e "s|$TMP/wat|<module>|g" -e '/^Error: failed to run main module/d' \
       -e '/^$/d' -e '/^Caused by:/d' -e 's/^ *[0-9]*: *//' "$TMP/v1e" > "$TMP/v1en"
-  if [ "$v0rc" -eq "$v1rc" ] && diff -q "$TMP/v0e" "$TMP/v1en" >/dev/null 2>&1; then
+  # v0's stderr is normalized symmetrically: `almide run` interleaves COMPILE
+  # notes with the program's runtime stderr, and #931 made the native-fallback
+  # notice print by default — compiler infrastructure, not a program
+  # observable, same class as wasmtime's preamble above. Without this, every
+  # trap fixture that walls the native-verified rung "regressed" the moment
+  # the notice went always-on (found re-arming this gate, #978).
+  sed -e '/^note: verified native render walled/d' -e '/^  reason: /d' \
+      "$TMP/v0e" > "$TMP/v0en"
+  if [ "$v0rc" -eq "$v1rc" ] && diff -q "$TMP/v0en" "$TMP/v1en" >/dev/null 2>&1; then
     VERDICT=match
   else
     VERDICT=xfail
@@ -108,13 +135,23 @@ for sv in "${suspects[@]:-}"; do
     match)    match=$((match+1)); echo "$f" >> "$TMP/matches.txt" ;;
     v0fail)   v0fail=$((v0fail+1)) ;;
     wall)     wall=$((wall+1)) ;;
-    runerr)   runerr=$((runerr+1)) ;;
+    runerr)   runerr=$((runerr+1)); echo "$f" >> "$TMP/runerr.txt" ;;
     xfail)    xfail=$((xfail+1)); echo "$f" >> "$TMP/xfail.txt" ;;
-    mismatch) mismatch=$((mismatch+1)) ;;
+    mismatch) mismatch=$((mismatch+1)); echo "$f" >> "$TMP/mismatch.txt" ;;
   esac
 done
 sort -o "$TMP/matches.txt" "$TMP/matches.txt"  # (re-sorted below after the retry appends)
 echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr XFAIL=$xfail v0fail=$v0fail skip=$skip"
+# A failure class NAMES its files (#978: counts alone leave nothing to act on
+# — a MISMATCH is the silent-miscompile class, the one this gate exists for).
+if [ "$mismatch" -gt 0 ]; then
+  echo "  (MISMATCH = renders and runs but the stdout bytes diverge — silent miscompile class):"
+  sed 's/^/    ! /' "$TMP/mismatch.txt"
+fi
+if [ "$runerr" -gt 0 ]; then
+  echo "  (RUNERR = renders but wasmtime rejects or traps where v0 succeeds):"
+  sed 's/^/    r /' "$TMP/runerr.txt"
+fi
 if [ "$xfail" -gt 0 ]; then
   echo "  (XFAIL = a trap/abort fixture whose v1 observable [stderr+exit] diverges from v0 —"
   echo "   the trap-semantics contract surface not yet implemented on the MIR render path):"

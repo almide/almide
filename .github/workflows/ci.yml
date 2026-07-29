@@ -1,18 +1,32 @@
 name: CI
 
+# Path filtering uses `paths` with ordered negations (last match wins), NOT
+# `paths-ignore`: the blanket docs/** ignore let a PR touching ONLY the
+# contract ledger (docs/contracts/contracts.toml), the ALS normative specs, or
+# the semantics manifest skip this workflow entirely — i.e. skip exactly the
+# gates that exist to check those files (#982). The re-includes below keep the
+# gate inputs in scope while ordinary docs/markdown stay ignored.
 on:
   push:
     branches: [main, develop]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!*.md'
+      - '!LICENSE'
+      - 'docs/contracts/**'
+      - 'docs/stdlib/semantics-manifest.toml'
+      - 'docs/specs/als/**'
   pull_request:
     branches: [main, develop]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!*.md'
+      - '!LICENSE'
+      - 'docs/contracts/**'
+      - 'docs/stdlib/semantics-manifest.toml'
+      - 'docs/specs/als/**'
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
@@ -134,8 +148,12 @@ jobs:
         # is ubuntu, so the lock applies.
         # ALMIDE_BIN points the cross-target tests at the built compiler (else
         # almide_bin() falls back to PATH and the tests skip).
+        # ALMIDE_EXPECT_TOOLS=1: this leg CLAIMS full tool coverage, so the
+        # tripwire test fails loudly if wasmtime/wasm-opt/almide ever go
+        # missing instead of letting the tool-gated suites skip-as-pass (#983).
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
+          ALMIDE_EXPECT_TOOLS: "1"
         # --workspace: a bare `cargo test` at the root tests only the ROOT
         # package — the member crates' suites (almide-interp's abstain-ledger
         # gate, frontend/codegen/tools unit tests) silently never ran in CI.
@@ -169,6 +187,14 @@ jobs:
         run: |
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test examples/
+
+      - name: Frees churn gate (ALMIDE_WASM_FREES over spec/churn)
+        # Was wired into NOTHING since it landed (#980) — the free-list-cycle
+        # gate never fired anywhere. This job has both requirements: wasmtime
+        # (installed above) and the built compiler.
+        env:
+          ALMIDE_BIN: /tmp/almide-bin/almide
+        run: bash scripts/check-frees-churn.sh
 
   test-arm:
     name: Test ARM (NEON, Apple Silicon)
@@ -287,7 +313,10 @@ jobs:
             ~/.cargo/git
             tools/wasmgen-harness/target
             tools/wasmgen-harness-uu/target
-          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-codegen/src/emit_wasm/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
+          # Keyed on the LIVE wasm emitter (almide-mir's v1 renderer) — the old
+          # key hashed crates/almide-codegen/src/emit_wasm/**, deleted with the
+          # v0 retirement, so that component silently hashed nothing (#992).
+          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
           restore-keys: wasmgen-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
@@ -396,12 +425,19 @@ jobs:
         run: chmod +x /tmp/almide-bin/almide
 
       - name: Smoke test - emit targets
+        # No `cmd && echo OK` here: under GitHub's `bash -e {0}` a failing
+        # non-final member of an && list does NOT trip errexit, so the emit
+        # failure was silently discarded (#984). And an EMPTY corpus is a hard
+        # error, not a pass — the find-nothing-exit-0 shape is how gates go
+        # blind (#976 class).
         run: |
           ALMIDE=/tmp/almide-bin/almide
           f=$(find spec/lang -name '*_test.almd' | head -1)
-          [ -z "$f" ] && echo "No spec files found" && exit 0
-          $ALMIDE "$f" --target rust > /dev/null && echo "Rust emit OK"
-          $ALMIDE "$f" --emit-ast    > /dev/null && echo "AST emit OK"
+          [ -n "$f" ] || { echo "::error::no spec/lang test files found — the smoke test lost its corpus (#984)"; exit 1; }
+          $ALMIDE "$f" --target rust > /dev/null
+          echo "Rust emit OK"
+          $ALMIDE "$f" --emit-ast > /dev/null
+          echo "AST emit OK"
 
       - name: fmt gate (spec/ + examples/ stay formatted, #919)
         run: /tmp/almide-bin/almide fmt --check spec/ examples/
@@ -409,7 +445,11 @@ jobs:
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
 
-      - name: WASM runtime oracle-pairing registry (every compile_* registered + verified tests exist)
+      - name: rt-oracle registry (RETIRED with v0, #782 — prints the tombstone; v1 is gated by spec/wasm_cross + the interp oracle)
+        # The step name previously claimed "every compile_* registered +
+        # verified tests exist" while the script short-circuits on the deleted
+        # v0 emitter dir (#981). The honest name stays until the script is
+        # deleted outright.
         run: scripts/check-rt-oracle-registry.sh
 
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
@@ -467,10 +507,32 @@ jobs:
         if: runner.os != 'Windows'
         run: curl https://wasmtime.dev/install.sh -sSf | bash && echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
 
+      - name: Install wasm-opt (binaryen)
+        if: runner.os == 'macOS'
+        # Without it wasm_opt_parity_test silently early-returned as a pass on
+        # this leg (#983) — the same skip-as-pass hole test-rust closes by
+        # installing binaryen.
+        run: brew install binaryen && wasm-opt --version
+
       # Parallel on every OS: the build-scratch lock (BuildDirLock) is now
       # cross-platform (flock / LockFileEx via fs2), so concurrent `almide`
       # subprocesses no longer race the shared scratch dir on Windows.
-      - run: cargo test
+      #
+      # --workspace: a bare `cargo test` tests only the ROOT package — the
+      # member crates' suites (almide-interp's abstain ledger, almide-mir's
+      # ratchets) silently never ran on these legs (#983; same fix as
+      # test-rust's, which documented the mistake without this job following).
+      #
+      # ALMIDE_EXPECT_TOOLS arms the tool tripwire (tests/
+      # tool_arming_tripwire_test.rs): on legs that claim tool coverage a
+      # missing wasmtime/wasm-opt is a FAILURE, not a silent skip. Windows is
+      # DELIBERATELY unarmed (#983 decision): wasmtime is not installed there,
+      # so the tool-gated wasm suites skip on Windows by design — Linux
+      # (test-rust) and macOS are the armed legs.
+      - name: Cargo tests (workspace)
+        env:
+          ALMIDE_EXPECT_TOOLS: ${{ runner.os == 'Windows' && '0' || '1' }}
+        run: cargo test --workspace
 
       - uses: actions/upload-artifact@v7
         with:
@@ -527,8 +589,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch playground deploy
+        # --fail-with-body: without it an expired PLAYGROUND_DISPATCH_TOKEN
+        # 401s, curl exits 0, and the playground silently stops updating
+        # (#984). Every other curl in this repo already uses -f for the same
+        # reason.
         run: |
-          curl -X POST \
+          curl --fail-with-body -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: token ${{ secrets.PLAYGROUND_DISPATCH_TOKEN }}" \
             https://api.github.com/repos/almide/playground/dispatches \

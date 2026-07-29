@@ -66,3 +66,12 @@ OCaml extraction (CertiCoq/CompCert will close it), hardware, ALS validity.
 Completeness is relative to the declared use; absolute-semantics coverage is
 NOT claimed.
 EOF
+
+# The receipt is honest only if it can go RED: a rendered FAIL in the verdict
+# table must also fail the process that produced it — before this guard the
+# script's exit was the heredoc's, so CI's "make receipt" step stayed green
+# around a FAIL table (#984). The fingerprint-reuse branch is all-PASS by
+# construction; this bites only the derived path.
+case "${PROOF}${GATE}${CWALL}${VTEST}" in
+  *FAIL*) echo "receipt: a verdict above is FAIL — refusing to exit green (#984)" >&2; exit 1 ;;
+esac

@@ -72,9 +72,13 @@ verify-trust:
 receipt:
 	proofs/receipt.sh
 
+# Real verdicts, real trees: the old recipe discarded both exit codes with
+# `|| true` and pointed the Almide formatter at src/ — which contains only
+# .rs files (#984). The .almd trees CI gates are spec/ and examples/ (#919);
+# stdlib/ stays out until the formatter-style question settles.
 fmt:
-	cargo fmt --check 2>/dev/null || true
-	$(BIN) fmt src/ 2>/dev/null || true
+	cargo fmt
+	$(BIN) fmt spec/ examples/
 
 ## Clean
 
@@ -108,7 +112,7 @@ version:
 help:
 	@echo "make build      - Build release binary"
 	@echo "make install    - Build + install to ~/.local/almide/"
-	@echo "make test       - Run almide spec/exercise tests"
+	@echo "make test       - Run almide spec/ tests"
 	@echo "make test-rust  - Run cargo tests"
 	@echo "make test-wasm  - Run WASM target tests"
 	@echo "make test-all   - Run all test suites"
