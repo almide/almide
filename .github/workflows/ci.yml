@@ -40,6 +40,12 @@ env:
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
+  # No CI job may ever wait on an interactive git credential prompt: on the
+  # Windows runners a git fetch of an unreachable/bogus remote can block in
+  # Git Credential Manager instead of failing fast — the suspected mechanism
+  # behind the 4h20m lsp_test hang (#1008).
+  GIT_TERMINAL_PROMPT: "0"
+  GCM_INTERACTIVE: "never"
 
 jobs:
   # ═══════════════════════════════════════════════
@@ -488,6 +494,11 @@ jobs:
           - os: windows-latest
             artifact: almide-windows
     runs-on: ${{ matrix.os }}
+    # A hung test must be a fast red, not a 6h grind (the trust-spine #921
+    # lesson): the Windows leg sat 4h20m inside a single blocked lsp_test
+    # before being cancelled by hand (#1008). Cold build + full workspace
+    # tests fit well inside this.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
