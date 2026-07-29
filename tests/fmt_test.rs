@@ -190,14 +190,24 @@ fn fmt_not() {
 
 #[test]
 fn fmt_range() {
-    let out = roundtrip("fn f() -> List[Int] = 0..10");
-    assert!(out.contains("0..10"));
+    let out = roundtrip("fn f() -> List[Int] = 0..<10");
+    assert!(out.contains("0..<10"));
 }
 
 #[test]
 fn fmt_range_inclusive() {
+    let out = roundtrip("fn f() -> List[Int] = 1...10");
+    assert!(out.contains("1...10"));
+}
+
+// #966: the formatter is the migration path for the retired spellings — an
+// old-syntax file round-trips to the new spellings.
+#[test]
+fn fmt_migrates_retired_range_spellings() {
+    let out = roundtrip("fn f() -> List[Int] = 0..10");
+    assert!(out.contains("0..<10"), "got: {out}");
     let out = roundtrip("fn f() -> List[Int] = 1..=10");
-    assert!(out.contains("1..=10"));
+    assert!(out.contains("1...10"), "got: {out}");
 }
 
 // ---- Result/Option ----

@@ -164,7 +164,7 @@ test "scope in if-else blocks" {
 
 test "var mutation visible after block" {
   var x = 0;
-  for i in 1..=5 {
+  for i in 1...5 {
     x = x + i;
   };
   assert_eq(x, 15);
@@ -175,7 +175,7 @@ test "var mutation visible after block" {
 test "for loop body scope isolation" {
   let prefix = "item";
   var items: List[String] = [];
-  for i in 0..3 {
+  for i in 0..<3 {
     let label = prefix + int.to_string(i);
     items = items + [label];
   };

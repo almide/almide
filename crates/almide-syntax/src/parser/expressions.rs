@@ -32,8 +32,12 @@ impl Parser {
             | TokenType::LtEq  | TokenType::GtEq
                                         => Some((6,  7)),   // non-assoc (enforced below)
             TokenType::PipeArrow        => Some((8,  25)),  // ★ asymmetric
-            TokenType::DotDot           => Some((10, 10)),  // range
-            TokenType::DotDotEq         => Some((10, 10)),
+            TokenType::DotDotLt         => Some((10, 10)),  // range, end-exclusive (#966)
+            TokenType::DotDotDot        => Some((10, 10)),  // range, end-inclusive — infix only;
+                                                            // prefix `...` is spread, consumed by the
+                                                            // record/list item parsers before this table
+            TokenType::DotDot           => Some((10, 10)),  // RETIRED range spelling → E031 fix-it
+            TokenType::DotDotEq         => Some((10, 10)),  // RETIRED range spelling → E031 fix-it
             TokenType::Plus | TokenType::Minus
             | TokenType::PlusPlus       => Some((12, 13)),  // left-assoc
             TokenType::Star | TokenType::Slash
@@ -45,11 +49,15 @@ impl Parser {
     }
 
     /// All token types that are infix operators (for newline lookahead).
+    /// `DotDotDot` is deliberately ABSENT: a line starting with `...` is a
+    /// spread inside a multiline record/list literal, and joining it to the
+    /// previous item as an inclusive range would rewrite those programs. An
+    /// inclusive range therefore cannot break the line BEFORE its `...`.
     const INFIX_TOKENS: &'static [TokenType] = &[
         TokenType::Or, TokenType::And,
         TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq,
         TokenType::PipeArrow, TokenType::ComposeArrow,
-        TokenType::DotDot, TokenType::DotDotEq,
+        TokenType::DotDot, TokenType::DotDotEq, TokenType::DotDotLt,
         TokenType::Plus, TokenType::Minus, TokenType::PlusPlus,
         TokenType::Star, TokenType::Slash, TokenType::Percent,
         TokenType::Caret,
@@ -93,6 +101,8 @@ impl Parser {
 
             let span = Some(self.current_span());
             let op_value = self.current().value.clone();
+            let (op_line, op_col, op_end_col) =
+                { let t = self.current(); (t.line, t.col, t.end_col) };
             self.advance();
             self.skip_newlines();
 
@@ -128,12 +138,41 @@ impl Parser {
                 TokenType::ComposeArrow => Expr::new(self.next_id(), span, ExprKind::Compose {
                     left: Box::new(left), right: Box::new(right),
                 }),
-                TokenType::DotDot => Expr::new(self.next_id(), span, ExprKind::Range {
+                TokenType::DotDotLt => Expr::new(self.next_id(), span, ExprKind::Range {
                     start: Box::new(left), end: Box::new(right), inclusive: false,
                 }),
-                TokenType::DotDotEq => Expr::new(self.next_id(), span, ExprKind::Range {
+                TokenType::DotDotDot => Expr::new(self.next_id(), span, ExprKind::Range {
                     start: Box::new(left), end: Box::new(right), inclusive: true,
                 }),
+                // #966: the Rust-style range spellings were retired for the
+                // self-describing Swift pair. The range still PARSES — `almide
+                // fix`/`fmt` need the AST to migrate the file, and downstream
+                // sees the program — but the E031 tombstone makes every
+                // compile path fail loudly, with a machine-applicable fix-it
+                // on the operator span.
+                TokenType::DotDot | TokenType::DotDotEq => {
+                    let inclusive = tt == TokenType::DotDotEq;
+                    let new_spelling = if inclusive { "..." } else { "..<" };
+                    let mut d = crate::diagnostic::Diagnostic::error(
+                        format!(
+                            "'{}' was retired: {} ranges are written '{}'",
+                            op_value,
+                            if inclusive { "end-inclusive" } else { "end-exclusive" },
+                            new_spelling,
+                        ),
+                        "run `almide fix` on this file to migrate every range mechanically",
+                        "range expression",
+                    ).with_code("E031")
+                     .with_try_replace(op_line, op_col, op_end_col, new_spelling);
+                    if let Some(f) = &self.file { d.file = Some(f.clone()); }
+                    d.line = Some(op_line);
+                    d.col = Some(op_col);
+                    d.end_col = Some(op_end_col);
+                    self.errors.push(d);
+                    Expr::new(self.next_id(), span, ExprKind::Range {
+                        start: Box::new(left), end: Box::new(right), inclusive,
+                    })
+                }
                 _ => Expr::new(self.next_id(), span, ExprKind::Binary {
                     op: sym(&op_value), left: Box::new(left), right: Box::new(right),
                 }),
@@ -168,7 +207,7 @@ impl Parser {
                 if matches!(start.kind, ExprKind::Range { .. }) || matches!(end.kind, ExprKind::Range { .. }) {
                     let (line, col) = left.span.map(|s| (s.line, s.col)).unwrap_or((0, 0));
                     return Err(format!(
-                        "Chained range operators are not allowed at line {}:{}\n  Hint: A range has one start and one end. Write: 0..2",
+                        "Chained range operators are not allowed at line {}:{}\n  Hint: A range has one start and one end. Write: 0..<2",
                         line, col
                     ));
                 }

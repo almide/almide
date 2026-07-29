@@ -32,7 +32,7 @@ mod tests {
                 format!("(>> {} {})", shape(&left.kind), shape(&right.kind))
             }
             ExprKind::Range { start, end, inclusive } => {
-                let op = if *inclusive { "..=" } else { ".." };
+                let op = if *inclusive { "..." } else { "..<" };
                 format!("({} {} {})", op, shape(&start.kind), shape(&end.kind))
             }
             ExprKind::Unary { op, operand } => {
@@ -130,42 +130,42 @@ mod tests {
     #[test]
     fn r1_range_then_pipe() {
         assert_eq!(
-            parse_shape("0..n |> list.map(f)"),
-            "(|> (.. 0 n) list.map(f))"
+            parse_shape("0..<n |> list.map(f)"),
+            "(|> (..< 0 n) list.map(f))"
         );
     }
 
     #[test]
     fn r2_range_add_then_pipe() {
         assert_eq!(
-            parse_shape("0..n+1 |> list.map(f)"),
-            "(|> (.. 0 (+ n 1)) list.map(f))"
+            parse_shape("0..<n+1 |> list.map(f)"),
+            "(|> (..< 0 (+ n 1)) list.map(f))"
         );
     }
 
     #[test]
     fn r3_range_with_add() {
-        assert_eq!(parse_shape("0..n + 1"), "(.. 0 (+ n 1))");
+        assert_eq!(parse_shape("0..<n + 1"), "(..< 0 (+ n 1))");
     }
 
     #[test]
     fn r4_range_both_add() {
-        assert_eq!(parse_shape("a+1..b+2"), "(.. (+ a 1) (+ b 2))");
+        assert_eq!(parse_shape("a+1..<b+2"), "(..< (+ a 1) (+ b 2))");
     }
 
     #[test]
     fn r5_range_pipe_add() {
         assert_eq!(
-            parse_shape("0..n |> list.map(f) + ys"),
-            "(+ (|> (.. 0 n) list.map(f)) ys)"
+            parse_shape("0..<n |> list.map(f) + ys"),
+            "(+ (|> (..< 0 n) list.map(f)) ys)"
         );
     }
 
     #[test]
     fn r6_range_pipe_chain() {
         assert_eq!(
-            parse_shape("0..10 |> list.filter(p) |> list.map(f)"),
-            "(|> (|> (.. 0 10) list.filter(p)) list.map(f))"
+            parse_shape("0..<10 |> list.filter(p) |> list.map(f)"),
+            "(|> (|> (..< 0 10) list.filter(p)) list.map(f))"
         );
     }
 
@@ -369,8 +369,8 @@ mod tests {
 
     #[test]
     fn k_range_basic() {
-        assert_eq!(parse_shape("0..10"), "(.. 0 10)");
-        assert_eq!(parse_shape("0..=10"), "(..= 0 10)");
+        assert_eq!(parse_shape("0..<10"), "(..< 0 10)");
+        assert_eq!(parse_shape("0...10"), "(... 0 10)");
     }
 
     #[test]

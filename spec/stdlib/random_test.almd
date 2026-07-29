@@ -78,7 +78,7 @@ effect fn rand_shuffle_single() -> Result[List[String], String] = {
 
 effect fn rand_int_repeated_in_range() -> Result[Bool, String] = {
   var all_in_range = true;
-  for i in 0..20 {
+  for i in 0..<20 {
     let n = random.int(1, 5);
     if n < 1 or n > 5 then {
       all_in_range = false;

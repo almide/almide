@@ -150,7 +150,7 @@ type Stamp: Replicable = { mark: String }
 
 fn Stamp.replicate(s: Stamp, n: Int) -> List[String] = {
   var result: List[String] = [];
-  for _ in 0..n {
+  for _ in 0..<n {
     result = result + [
       s.mark
     ];

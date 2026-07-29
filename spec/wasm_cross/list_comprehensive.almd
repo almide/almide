@@ -18,7 +18,7 @@ fn main() -> Unit = {
 
   // push (capacity growth)
   var ys: List[Int] = []
-  for i in 0..25 { list.push(ys, i * 2) }
+  for i in 0..<25 { list.push(ys, i * 2) }
   println(int.to_string(list.len(ys)) + " " + int.to_string(ys[24]))
 
   // pop
@@ -28,7 +28,7 @@ fn main() -> Unit = {
 
   // with_capacity
   var ws = list.with_capacity(32)
-  for i in 0..10 { list.push(ws, i) }
+  for i in 0..<10 { list.push(ws, i) }
   println(int.to_string(ws[9]))
 
   // slice / take / drop

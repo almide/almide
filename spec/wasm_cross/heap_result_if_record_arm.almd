@@ -7,7 +7,7 @@ fn tl(x: Int) -> { tag: Int, len: Int, hdr: Int } =
   if x < 0x80 then { tag: 1, len: x, hdr: 2 }
   else {
     var len = 0
-    for i in 0..2 { len = len + x }
+    for i in 0..<2 { len = len + x }
     { tag: 1, len: len, hdr: 3 }
   }
 fn main() -> Unit = {

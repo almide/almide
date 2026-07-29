@@ -18,7 +18,7 @@ fn check(tree: Tree) -> Int = match tree {
 // resets between iterations; every tree must count the same).
 fn sum_checks(n: Int, depth: Int) -> Int = {
   var total = 0
-  for _ in 0..n {
+  for _ in 0..<n {
     total = total + check(make(depth))
   }
   total
@@ -52,7 +52,7 @@ test "held tree (no window): the value survives multiple consumers" {
 test "windows interleave with unrelated heap use" {
   var xs: List[Int] = []
   var total = 0
-  for i in 0..3 {
+  for i in 0..<3 {
     total = total + check(make(2))
     list.push(xs, i * 10)
   }
@@ -79,7 +79,7 @@ fn sum_w(t: Weighted) -> Int = match t {
 
 test "region compact: scalar field packs next to handle fields" {
   var total = 0
-  for _ in 0..3 {
+  for _ in 0..<3 {
     total = total + sum_w(make_w(3))
   }
   assert_eq(total, 3 * 11)
@@ -102,7 +102,7 @@ fn count_t(t: Tri) -> Int = match t {
 
 test "region compact: two singletons chain the tag select" {
   var total = 0
-  for _ in 0..3 {
+  for _ in 0..<3 {
     total = total + count_t(make_t(6))
   }
   assert_eq(total, 3 * 21)
@@ -124,7 +124,7 @@ fn sum_f(t: FTree) -> Float = match t {
 
 test "region compact: float payload is bit-exact through the packed slot" {
   var total = 0.0
-  for _ in 0..2 {
+  for _ in 0..<2 {
     total = total + sum_f(make_f(3, 1.5))
   }
   // S(d,x) = x + 2*S(d-1, x+0.25); S(3, 1.5) = 13.0
@@ -144,9 +144,9 @@ test "region window: frontier grow inside one region" {
 // and every tree must still count the same.
 test "region windows interleave with free-list churn" {
   var total = 0
-  for i in 0..50 {
+  for i in 0..<50 {
     var xs: List[Int] = []
-    for j in 0..20 {
+    for j in 0..<20 {
       list.push(xs, i + j)
     }
     total = total + check(make(6)) + xs[19]

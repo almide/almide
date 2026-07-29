@@ -455,16 +455,16 @@ fn main() -> Unit = {
 
 #[test]
 fn for_in_range_exclusive_and_inclusive() {
-    // `1..5` is exclusive (sum 1+2+3+4 = 10); `1..=3` materializes to
+    // `1..<5` is exclusive (sum 1+2+3+4 = 10); `1...3` materializes to
     // [1, 2, 3] when displayed.
     let src = r#"
 fn main() -> Unit = {
   var sum = 0
-  for i in 1..5 {
+  for i in 1..<5 {
     sum = sum + i
   }
   println("${sum}")
-  let r = 1..=3
+  let r = 1...3
   println("${r}")
 }"#;
     expect_out(src, "10\n[1, 2, 3]\n");
@@ -818,7 +818,7 @@ fn huge_range_for_in_is_fuel_bounded_not_oom() {
     // FuelExhausted in O(fuel) steps and O(1) memory — the eager
     // materialization used to allocate the whole range (tens of GB) and
     // abort the process before the first fuel check.
-    let src = "fn main() -> Unit = {\n  var s = 0\n  for i in 0..2000000000 {\n    s = s + 1\n  }\n  println(\"${s}\")\n}";
+    let src = "fn main() -> Unit = {\n  var s = 0\n  for i in 0..<2000000000 {\n    s = s + 1\n  }\n  println(\"${s}\")\n}";
     let ir = lower(src);
     let out = almide_interp::Interpreter::new(&ir).with_fuel(10_000).run_main();
     assert!(

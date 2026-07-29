@@ -16,7 +16,7 @@ test "while-loop cross-module scalar accumulation" {
 
 test "for-loop cross-module list-slot accumulation" {
   gstate.reset()
-  for _ in 0..8 {
+  for _ in 0..<8 {
     gstate.bump_at(1, 0.25)
   }
   assert_eq(gstate.get_at(1), 2.0);

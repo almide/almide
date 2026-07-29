@@ -180,6 +180,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E028 | `main()` takes no parameters (`fn main(args: List[String])` is not wired on any target) | Read program arguments with `env.args()` inside the body |
 | E029 | Unknown type name in an annotation or record literal (would fail the native build after check accepted) | Declare the type, fix the spelling, or add the missing import |
 | E030 | Type has no ordering — `list.sort/min/max` or a `sort_by` key over Map/Set/Fn or compound-nested Float | Sort by an explicit orderable key (`list.sort_by(xs, (m) => <Int/String key>)`) |
+| E031 | Retired range spelling — `..`/`..=` were replaced by Swift-style `..<` (exclusive) / `...` (inclusive) | Write `0 ..< n` / `1 ... n`, or run `almide fix <file>` to migrate every range mechanically |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates
