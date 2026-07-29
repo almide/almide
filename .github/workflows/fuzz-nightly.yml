@@ -180,25 +180,25 @@ jobs:
       # reclaimed mid-run. A `exit 143` kill skips every conditional step, so
       # before this the only trace of a truncated night was a red X with no
       # numbers — indistinguishable from a real finding, and #796's "two
-      # consecutive green nights" had nothing to read. The last progress line
-      # the fuzzer printed is the verdict: it carries generated / clean /
-      # findings / walls, so a truncated night still says whether it found
-      # anything in the time it got.
+      # consecutive green nights" had nothing to read.
+      #
+      # The rendering lives in scripts/fuzz-night-verdict.sh (testable locally,
+      # unlike inline YAML bash): it emits the markdown verdict on stdout and
+      # the greppable `fuzz-night:` record line — programs, elapsed, throughput,
+      # findings, budget_completed — on stderr, so a throughput regression is
+      # visible across nights in the job logs. budget_completed is read from
+      # the fuzzer's own `=== campaign summary ===` block, which only prints
+      # when the campaign loop exits on its own — a reclaimed runner cannot
+      # fake it. The streaks the closure conditions read (#924: 14 full-budget
+      # nights, #796: 2 green) are scored from step conclusions by
+      # scripts/fuzz-track-record.sh.
       - name: Campaign verdict
         if: always()
         run: |
-          echo "## Nightly fuzz verdict" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ -s fuzz-output.txt ]; then
-            LAST=$(grep -E "^ *\[ *[0-9]+s\]" fuzz-output.txt | tail -1 || true)
-            SEED=$(grep -oE "seed = [0-9]+" fuzz-output.txt | head -1 || true)
-            echo "Last progress line: ${LAST:-<none>}" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Campaign ${SEED:-seed unknown} — replay a finding with" >> "$GITHUB_STEP_SUMMARY"
-            echo "xtarget-fuzz replay --seed S --index I" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "The campaign produced no output — it was killed before it started." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          bash scripts/fuzz-night-verdict.sh fuzz-output.txt \
+            "${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}" \
+            "${{ steps.campaign.outputs.findings || '?' }}" \
+            >> "$GITHUB_STEP_SUMMARY" || true
           exit 0
 
       - name: Upload findings
