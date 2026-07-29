@@ -140,7 +140,7 @@ int.rotate_left(128, 1, 8) // => 1
 
 ### `int.to_u32(a: Int) -> Int`
 
-Truncate an integer to an unsigned 32-bit value (mask to 0..4294967295).
+Truncate an integer to an unsigned 32-bit value (mask to 0...4294967295).
 
 ```almd
 int.to_u32(300) // => 300
@@ -148,7 +148,7 @@ int.to_u32(300) // => 300
 
 ### `int.to_u8(a: Int) -> Int`
 
-Truncate an integer to an unsigned 8-bit value (mask to 0..255).
+Truncate an integer to an unsigned 8-bit value (mask to 0...255).
 
 ```almd
 int.to_u8(300) // => 44
