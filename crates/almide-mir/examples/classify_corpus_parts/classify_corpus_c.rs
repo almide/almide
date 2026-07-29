@@ -166,6 +166,19 @@ fn classify_lower_one_fn(
                 // counterpart, so counting it would false-breach `mir <= ir`.
                 .filter(|o| !matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
                 .count();
+            if std::env::var_os("ALMIDE_DEBUG_CALL_OPS").is_some() {
+                for mir in &mirs {
+                    for o in &mir.ops {
+                        match o {
+                            Op::Call { func, .. } => eprintln!("[call-op] {}: Call {func:?}", mir.name),
+                            Op::CallFn { name, .. } => eprintln!("[call-op] {}: CallFn {name}", mir.name),
+                            Op::CallIndirect { .. } => eprintln!("[call-op] {}: CallIndirect", mir.name),
+                            _ => {}
+                        }
+                    }
+                }
+                eprintln!("[call-count] ir={ir_calls}");
+            }
             if ir_calls > mir_calls {
                 for mir in &mirs {
                     elided_call_fns.insert(mir.name.clone());
