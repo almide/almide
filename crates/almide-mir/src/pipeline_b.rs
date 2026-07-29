@@ -556,7 +556,7 @@ fn lower_main_and_sibling_fns(
     layouts: &PipelineLayouts,
     total_ir_fn_count: usize,
     verbose: bool,
-    fn_walls: &mut std::collections::HashMap<String, String>,
+    fn_walls: &mut std::collections::HashMap<String, crate::lower::LowerError>,
 ) -> Vec<crate::MirFunction> {
     let mut functions = Vec::new();
     let mut walled = Vec::new();
@@ -581,8 +581,8 @@ fn lower_main_and_sibling_fns(
                 // cause into one unattributable bucket — a third of the fuzzer's
                 // wall histogram (#812). An exported `pub fn` declines the module
                 // the same way, so it reads its reason out of here too (#906).
-                fn_walls.insert(func.name.as_str().to_string(), format!("{e}"));
                 walled.push(format!("{}: {e:?}", func.name.as_str()));
+                fn_walls.insert(func.name.as_str().to_string(), e);
             }
         }
     }
@@ -636,10 +636,10 @@ fn lower_main_and_sibling_fns(
             // with the cause discarded one frame down — the same mis-attribution
             // #906 fixed for exports and #904 for qualified type names (#943).
             Err(e) => {
-                fn_walls.insert(func.name.as_str().to_string(), format!("{e}"));
                 if verbose {
                     eprintln!("[v1-wall] module sibling {}: {e:?}", func.name.as_str());
                 }
+                fn_walls.insert(func.name.as_str().to_string(), e);
             }
         }
     }

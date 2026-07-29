@@ -652,10 +652,10 @@ impl LowerCtx {
                 Ok(())
             }
             Some(ArgOutcome::Pushed) => Ok(()),
-            None => Err(LowerError::Unsupported(format!(
-                "call argument {} not in this brick",
-                kind_name(&a.kind)
-            ))),
+            None => Err(LowerError::at(
+                a.span,
+                format!("call argument {} not in this brick", kind_name(&a.kind)),
+            )),
         }
     }
 }

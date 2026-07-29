@@ -13,11 +13,13 @@ impl LowerCtx {
         // `try_lower_scalar_while` already declined both shapes and rolled back.)
         self.wall_break_over_heap_frame(body, "while", self.live_heap_handles.len())?;
         if body_reassigns_heap(body) {
-            return Err(LowerError::Unsupported(
+            // The span points at the CONDITION — the nearest node the `while`
+            // itself carries; the accumulator sits in the body it heads (#931).
+            return Err(LowerError::at(
+                cond.span,
                 "while body with a heap-accumulator reassignment cannot be faithfully lowered \
                  (the model-one-iteration fallback defers the reassignment, dropping the \
-                 accumulation) not in this brick"
-                    .into(),
+                 accumulation) not in this brick",
             ));
         }
         self.record_elided_calls(cond);

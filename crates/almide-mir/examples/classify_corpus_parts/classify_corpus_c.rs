@@ -200,7 +200,9 @@ fn classify_lower_one_fn(
                 file_mirs.push((mir.name.clone(), mir));
             }
         }
-        Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
+        Ok(Err(wall_err)) => {
+            let reason = wall_err.reason().to_string();
+            let reason = &reason;
             // Categorize the wall: NATIVE-FFI (structural, excluded) iff this function is
             // in the transitive native-FFI closure; else REAL (a lowering gap to close).
             // A name absent from the node map (an inline_mutual_tail_recursion-synthesized

@@ -82,10 +82,10 @@ impl LowerCtx {
             return Ok(owned);
         }
         let container = extraction_container(expr).ok_or_else(|| {
-            LowerError::Unsupported(format!(
-                "{} is not a field/element extraction",
-                kind_name(&expr.kind)
-            ))
+            LowerError::at(
+                expr.span,
+                format!("{} is not a field/element extraction", kind_name(&expr.kind)),
+            )
         })?;
         let src = match &container.kind {
             IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id)?,
