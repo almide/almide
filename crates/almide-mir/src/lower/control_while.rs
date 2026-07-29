@@ -15,8 +15,9 @@ impl LowerCtx {
         if body_reassigns_heap(body) {
             // The span points at the CONDITION — the nearest node the `while`
             // itself carries; the accumulator sits in the body it heads (#931).
-            return Err(LowerError::at(
+            return Err(LowerError::shaped(
                 cond.span,
+                WallShape::WhileHeapAccumulator,
                 "while body with a heap-accumulator reassignment cannot be faithfully lowered \
                  (the model-one-iteration fallback defers the reassignment, dropping the \
                  accumulation) not in this brick",

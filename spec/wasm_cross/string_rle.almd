@@ -5,17 +5,24 @@
 // ASCII here; the multibyte codepoint-grouping case (formerly byte-granular on
 // wasm) is now fixed and pinned by spec/wasm_cross/string_split_rle_codepoint.almd
 // (C-050).
-fn show(s: String) -> String =
-  string.run_length_encode(s)
-    |> list.map((r) => { let (c, n) = r; c + int.to_string(n) })
-    |> list.join(",")
+fn show(s: String) -> String = string.run_length_encode(s) |> list.map((r) => {
+  let (c, n) = r
+  c + int.to_string(n)
+}) |> list.join(",")
 
 effect fn main() -> Unit = {
-  println(show(""))           // empty → no runs
-  println(show("x"))          // single char
-  println(show("aaabbc"))     // basic runs
-  println(show("aaaa"))       // one long run
-  println(show("abcde"))      // all distinct
-  println(show("aabbaa"))     // a repeated non-adjacently → separate runs
-  println(show("  ##  "))     // spaces and symbols
+  println(show(""))
+  // empty → no runs
+  println(show("x"))
+  // single char
+  println(show("aaabbc"))
+  // basic runs
+  println(show("aaaa"))
+  // one long run
+  println(show("abcde"))
+  // all distinct
+  println(show("aabbaa"))
+  // a repeated non-adjacently → separate runs
+  // spaces and symbols
+  println(show("  ##  "))
 }

@@ -1,13 +1,7 @@
-import fs
 import string
 import list
 import map
 import int
-import env
-
-// ============================================================
-// string module
-// ============================================================
 
 test "string.lines splits" {
   let lines = string.lines("hello\nworld\nfoo")
@@ -21,6 +15,9 @@ test "string.lines empty string" {
   assert_eq(list.len(string.lines("")), 0)
 }
 
+// ============================================================
+// string module
+// ============================================================
 test "string.trim" {
   assert_eq(string.trim("  hello  "), "hello")
   assert_eq(string.trim("\n\t "), "")
@@ -51,9 +48,6 @@ test "string.pad_start" {
   assert_eq(string.pad_start("ff", 8, "0"), "000000ff")
 }
 
-// int.parse returns Result, cannot use in non-effect test block
-// tested via effect fn in exercises/stdlib-effect-test/
-
 test "string.len" {
   assert_eq(string.len("hello"), 5)
   assert_eq(string.len(""), 0)
@@ -64,6 +58,8 @@ test "string.to_upper and to_lower" {
   assert_eq(string.to_lower("HELLO"), "hello")
 }
 
+// int.parse returns Result, cannot use in non-effect test block
+// tested via effect fn in exercises/stdlib-effect-test/
 test "string.get" {
   assert_eq(string.get("abc", 0), some("a"))
   assert_eq(string.get("abc", 5), none)
@@ -75,10 +71,6 @@ test "string.to_bytes" {
   assert_eq(list.get_or(bytes, 0, 0), 65)
   assert_eq(list.get_or(bytes, 1, 0), 66)
 }
-
-// ============================================================
-// list module
-// ============================================================
 
 test "list.get and get_or" {
   let xs = ["a", "b", "c"]
@@ -92,6 +84,9 @@ test "list.len" {
   assert_eq(list.len([1, 2, 3]), 3)
 }
 
+// ============================================================
+// list module
+// ============================================================
 test "list.sort" {
   assert_eq(list.sort(["c", "a", "b"]), ["a", "b", "c"])
   assert_eq(list.sort([3, 1, 2]), [1, 2, 3])
@@ -130,10 +125,6 @@ test "list concat with +" {
   assert_eq([] + [1], [1])
 }
 
-// ============================================================
-// map module
-// ============================================================
-
 test "map.new and set and get" {
   let m = map.set(map.set(map.new(), "a", 1), "b", 2)
   assert_eq(map.get(m, "a"), some(1))
@@ -147,6 +138,9 @@ test "map.contains" {
   assert(not map.contains(m, "missing"))
 }
 
+// ============================================================
+// map module
+// ============================================================
 test "map.remove" {
   let m = map.set(map.set(map.new(), "a", 1), "b", 2)
   let m2 = map.remove(m, "a")
@@ -166,15 +160,17 @@ test "map.len" {
 
 test "map get_or pattern with match" {
   let m = map.set(map.new(), "key", "val")
-  let v = match map.get(m, "key") { some(v) => v, none => "default" }
+  let v = match map.get(m, "key") {
+    some(v) => v,
+    none => "default",
+  }
   assert_eq(v, "val")
-  let v2 = match map.get(m, "missing") { some(v) => v, none => "default" }
+  let v2 = match map.get(m, "missing") {
+    some(v) => v,
+    none => "default",
+  }
   assert_eq(v2, "default")
 }
-
-// ============================================================
-// int module
-// ============================================================
 
 test "int.to_string" {
   assert_eq(int.to_string(42), "42")
@@ -188,9 +184,8 @@ test "int.to_hex" {
 }
 
 // ============================================================
-// operators
+// int module
 // ============================================================
-
 test "string concat" {
   assert_eq("hello" + " " + "world", "hello world")
 }
@@ -200,6 +195,9 @@ test "string interpolation" {
   assert_eq("hello ${name}", "hello world")
 }
 
+// ============================================================
+// operators
+// ============================================================
 test "xor via stdlib" {
   assert_eq(int.bxor(5, 3), 6)
   assert_eq(int.bxor(0, 0), 0)
@@ -220,10 +218,6 @@ test "comparison operators" {
   assert(1 == 1)
   assert(1 != 2)
 }
-
-// ============================================================
-// for...in (ownership safety)
-// ============================================================
 
 test "for...in does not consume list" {
   let xs = [1, 2, 3]
@@ -247,6 +241,9 @@ test "nested for...in" {
   assert_eq(total, 90)
 }
 
+// ============================================================
+// for...in (ownership safety)
+// ============================================================
 test "for...in with map.keys" {
   let m = map.set(map.set(map.new(), "a", 1), "b", 2)
   var count = 0
@@ -257,10 +254,6 @@ test "for...in with map.keys" {
   assert_eq(map.len(m), 2)
 }
 
-// ============================================================
-// control flow
-// ============================================================
-
 test "if then else" {
   let x = if true then 1 else 2
   assert_eq(x, 1)
@@ -269,18 +262,21 @@ test "if then else" {
 }
 
 test "match with option" {
-  let x = match some(42) { some(v) => v, none => 0 }
+  let x = match some(42) {
+    some(v) => v,
+    none => 0,
+  }
   assert_eq(x, 42)
-  let y = match none { some(v) => v, none => 0 }
+  let y = match none {
+    some(v) => v,
+    none => 0,
+  }
   assert_eq(y, 0)
 }
 
-// match with result needs type annotation, tested in effect fn context
-
 // ============================================================
-// list: reverse, any, all
+// control flow
 // ============================================================
-
 test "list.reverse" {
   assert_eq(list.reverse([1, 2, 3]), [3, 2, 1])
   assert_eq(list.reverse(["a"]), ["a"])
@@ -291,14 +287,14 @@ test "list.any" {
   assert(not list.any([1, 2, 3], (x) => x == 5))
 }
 
+// match with result needs type annotation, tested in effect fn context
+// ============================================================
+// list: reverse, any, all
+// ============================================================
 test "list.all" {
   assert(list.all([2, 4, 6], (x) => x % 2 == 0))
   assert(not list.all([2, 3, 6], (x) => x % 2 == 0))
 }
-
-// ============================================================
-// map.get_or
-// ============================================================
 
 test "map.get_or" {
   let m = map.set(map.new(), "key", "val")
@@ -306,16 +302,15 @@ test "map.get_or" {
   assert_eq(map.get_or(m, "missing", "default"), "default")
 }
 
-// ============================================================
-// hash function (cross-platform safe, within JS safe integer range)
-// ============================================================
-
 test "simple hash fold" {
   let data = string.to_bytes("test")
   let h = list.fold(data, 5381, (h, b) => h * 33 + b)
   assert(h > 0, "hash should be positive")
 }
 
+// ============================================================
+// map.get_or
+// ============================================================
 test "hash deterministic" {
   let h1 = list.fold(string.to_bytes("hello"), 5381, (h, b) => h * 33 + b)
   let h2 = list.fold(string.to_bytes("hello"), 5381, (h, b) => h * 33 + b)
@@ -323,9 +318,8 @@ test "hash deterministic" {
 }
 
 // ============================================================
-// string.chars
+// hash function (cross-platform safe, within JS safe integer range)
 // ============================================================
-
 test "string.chars basic" {
   assert_eq(string.chars("abc"), ["a", "b", "c"])
 }
@@ -334,13 +328,12 @@ test "string.chars empty" {
   assert_eq(string.chars(""), [])
 }
 
+// ============================================================
+// string.chars
+// ============================================================
 test "string.chars single" {
   assert_eq(string.chars("x"), ["x"])
 }
-
-// ============================================================
-// string.index_of
-// ============================================================
 
 test "string.index_of found" {
   assert_eq(string.index_of("hello world", "world"), some(6))
@@ -350,6 +343,9 @@ test "string.index_of not found" {
   assert_eq(string.index_of("hello", "xyz"), none)
 }
 
+// ============================================================
+// string.index_of
+// ============================================================
 test "string.index_of at start" {
   assert_eq(string.index_of("abc", "a"), some(0))
 }
@@ -357,10 +353,6 @@ test "string.index_of at start" {
 test "string.index_of empty needle" {
   assert_eq(string.index_of("abc", ""), some(0))
 }
-
-// ============================================================
-// string.repeat
-// ============================================================
 
 test "string.repeat basic" {
   assert_eq(string.repeat("ab", 3), "ababab")
@@ -370,13 +362,12 @@ test "string.repeat zero" {
   assert_eq(string.repeat("x", 0), "")
 }
 
+// ============================================================
+// string.repeat
+// ============================================================
 test "string.repeat one" {
   assert_eq(string.repeat("hi", 1), "hi")
 }
-
-// ============================================================
-// string.from_bytes
-// ============================================================
 
 test "string.from_bytes roundtrip" {
   let s = "hello"
@@ -388,9 +379,8 @@ test "string.from_bytes empty" {
 }
 
 // ============================================================
-// string.is_digit
+// string.from_bytes
 // ============================================================
-
 test "string.is_digit true" {
   assert(string.is_digit("0"))
   assert(string.is_digit("9"))
@@ -404,9 +394,8 @@ test "string.is_digit false" {
 }
 
 // ============================================================
-// string.is_alpha
+// string.is_digit
 // ============================================================
-
 test "string.is_alpha true" {
   assert(string.is_alpha("a"))
   assert(string.is_alpha("Z"))
@@ -420,9 +409,8 @@ test "string.is_alpha false" {
 }
 
 // ============================================================
-// string.is_alphanumeric
+// string.is_alpha
 // ============================================================
-
 test "string.is_alphanumeric true" {
   assert(string.is_alphanumeric("a1"))
   assert(string.is_alphanumeric("abc"))
@@ -436,9 +424,8 @@ test "string.is_alphanumeric false" {
 }
 
 // ============================================================
-// string.is_whitespace
+// string.is_alphanumeric
 // ============================================================
-
 test "string.is_whitespace true" {
   assert(string.is_whitespace(" "))
   assert(string.is_whitespace("\t"))
@@ -451,9 +438,8 @@ test "string.is_whitespace false" {
 }
 
 // ============================================================
-// UFCS for new string functions
+// string.is_whitespace
 // ============================================================
-
 test "string UFCS chars" {
   assert_eq("abc".chars(), ["a", "b", "c"])
 }
@@ -464,9 +450,8 @@ test "string UFCS is_digit" {
 }
 
 // ============================================================
-// list.enumerate
+// UFCS for new string functions
 // ============================================================
-
 test "list.enumerate basic" {
   let result = list.enumerate(["a", "b", "c"])
   assert_eq(list.len(result), 3)
@@ -478,9 +463,8 @@ test "list.enumerate single" {
 }
 
 // ============================================================
-// list.zip
+// list.enumerate
 // ============================================================
-
 test "list.zip basic" {
   let result = list.zip([1, 2, 3], [4, 5, 6])
   assert_eq(list.len(result), 3)
@@ -492,21 +476,27 @@ test "list.zip different lengths" {
 }
 
 // ============================================================
-// list.flatten
+// list.zip
 // ============================================================
-
 test "list.flatten basic" {
-  assert_eq(list.flatten([[1, 2], [3], [4, 5]]), [1, 2, 3, 4, 5])
+  assert_eq(list.flatten([
+    [1, 2],
+    [3],
+    [4, 5]
+  ]), [1, 2, 3, 4, 5])
 }
 
 test "list.flatten empty inner" {
-  assert_eq(list.flatten([[1], [], [2]]), [1, 2])
+  assert_eq(list.flatten([
+    [1],
+    [],
+    [2]
+  ]), [1, 2])
 }
 
 // ============================================================
-// list.take / list.drop
+// list.flatten
 // ============================================================
-
 test "list.take basic" {
   assert_eq(list.take([1, 2, 3, 4], 2), [1, 2])
 }
@@ -515,6 +505,9 @@ test "list.take more than length" {
   assert_eq(list.take([1, 2], 5), [1, 2])
 }
 
+// ============================================================
+// list.take / list.drop
+// ============================================================
 test "list.drop basic" {
   assert_eq(list.drop([1, 2, 3, 4], 2), [3, 4])
 }
@@ -523,25 +516,30 @@ test "list.drop all" {
   assert_eq(list.drop([1, 2], 5), [])
 }
 
-// ============================================================
-// list.sort_by
-// ============================================================
-
 test "list.sort_by string length" {
   let result = list.sort_by(["bb", "a", "ccc"], (s) => string.len(s))
   assert_eq(result, ["a", "bb", "ccc"])
 }
 
 test "list.sort_by string key" {
-  let xs = [["b", "2"], ["a", "1"], ["c", "3"]]
-  let sorted = list.sort_by(xs, (x) => match list.get(x, 0) { some(v) => v, none => "" })
-  assert_eq(list.map(sorted, (x) => match list.get(x, 0) { some(v) => v, none => "" }), ["a", "b", "c"])
+  let xs = [
+    ["b", "2"],
+    ["a", "1"],
+    ["c", "3"]
+  ]
+  let sorted = list.sort_by(xs, (x) => match list.get(x, 0) {
+    some(v) => v,
+    none => "",
+  })
+  assert_eq(list.map(sorted, (x) => match list.get(x, 0) {
+    some(v) => v,
+    none => "",
+  }), ["a", "b", "c"])
 }
 
 // ============================================================
-// list.unique
+// list.sort_by
 // ============================================================
-
 test "list.unique basic" {
   assert_eq(list.unique([1, 2, 2, 3, 1]), [1, 2, 3])
 }
@@ -550,13 +548,12 @@ test "list.unique preserves order" {
   assert_eq(list.unique(["b", "a", "b", "c", "a"]), ["b", "a", "c"])
 }
 
+// ============================================================
+// list.unique
+// ============================================================
 test "list.unique single" {
   assert_eq(list.unique([1]), [1])
 }
-
-// ============================================================
-// UFCS for new list functions
-// ============================================================
 
 test "list UFCS take and drop" {
   assert_eq([1, 2, 3, 4].take(2), [1, 2])
@@ -568,9 +565,8 @@ test "list UFCS unique" {
 }
 
 // ============================================================
-// tuples
+// UFCS for new list functions
 // ============================================================
-
 test "tuple literal" {
   let t = (1, "hello")
   assert_eq(t, (1, "hello"))
@@ -582,9 +578,8 @@ test "tuple 3 elements" {
 }
 
 // ============================================================
-// for...in tuple destructuring
+// tuples
 // ============================================================
-
 test "for...in with enumerate destructuring" {
   let items = ["a", "b", "c"]
   var result = ""
@@ -604,6 +599,9 @@ test "for...in with zip destructuring" {
   assert_eq(total, 66)
 }
 
+// ============================================================
+// for...in tuple destructuring
+// ============================================================
 test "for...in with map entries destructuring" {
   let m = map.set(map.set(map.new(), "x", 1), "y", 2)
   var sum = 0

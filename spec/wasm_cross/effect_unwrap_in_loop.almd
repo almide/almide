@@ -5,7 +5,6 @@
 // `if __ef then err else <post>` yields the propagated error. The accumulator stores an OWNED copy so
 // the loop-carried slot certifies as the proven i(id)m shape (corpus-wall ownership ACCEPT). Covers
 // the direct `let v = e!` shape AND the `!`-inside-a-nested-`if` shape (the list_instances form).
-
 // Direct `let n = e!` in the loop body (no continuation transients before the `!`).
 effect fn sum_parse(xs: List[String]) -> Result[Int, String] = {
   var total = 0
@@ -25,8 +24,7 @@ effect fn sum_positive(xs: List[String]) -> Result[Int, String] = {
     if string.len(tag) > 2 then {
       let n = int.parse(x)!
       total = total + n
-    }
-    else ()
+    } else ()
   }
   ok(total)
 }

@@ -5,7 +5,8 @@
 > 2026-06-06): the truth table below is now byte-identical on both targets,
 > locked by `spec/wasm_cross/alias_cow.almd`. The history below was ported from
 > the formerly-grandfathered `cow_check` note in
-> [crates/almide-codegen/rt-oracle-registry.toml](../../crates/almide-codegen/rt-oracle-registry.toml).
+> `crates/almide-codegen/rt-oracle-registry.toml` (retired with the v0 emitter, #782 —
+> see git history; the live gates are spec/wasm_cross + the interp oracle).
 > This is the SOLE doc-only contract — it records a real, currently-unfixable
 > native<->wasm divergence, not a behaviour we can yet certify.
 

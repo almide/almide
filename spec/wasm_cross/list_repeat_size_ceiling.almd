@@ -15,10 +15,8 @@ effect fn main() -> Unit = {
   // Ordinary counts are unaffected.
   println(int.to_string(list.len(list.repeat(7, 3))))
   println(int.to_string(list.len(list.repeat(7, 0))))
-
   // A negative count still clamps to empty (C-054), not to the ceiling.
   println(int.to_string(list.len(list.repeat(7, -5))))
-
   // The boundary itself succeeds on both legs — the guard rejects only ABOVE it.
   println(int.to_string(list.len(list.repeat(7, 268435456))))
 }

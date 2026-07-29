@@ -1,4 +1,3 @@
-
 // @contract: C-066
 // #643: an in-place stdlib mutator (`list.push`, `string.push`, `map.insert`)
 // applied to a binding declared OUTSIDE the loop reallocates that binding's
@@ -16,25 +15,25 @@
 effect fn main() -> Unit = {
   // 1. list.push onto a loop-outer var, with the list.get ?? lookahead that
   //    shapes the heap layout into the colliding case.
-  let cs = ["a", " "];
-  var out: List[String] = [];
-  var i = 0;
+  let cs = ["a", " "]
+  var out: List[String] = []
+  var i = 0
   while i < 2 {
-    let nx = list.get(cs, i + 1) ?? "";
+    let nx = list.get(cs, i + 1) ?? ""
     if nx == "x" then { list.push(out, "p") } else {
       list.push(out, list.slice(cs, i, i + 1) |> list.join(""))
-    };
-    i = i + 1;
-  };
-  println(out |> list.join(","));
+    }
+    i = i + 1
+  }
+  println(out |> list.join(","))
   // 2. string.push onto a loop-outer var (a different in-place mutator on the
   //    same escape path).
-  var acc: String = "";
-  var j = 0;
+  var acc: String = ""
+  var j = 0
   while j < 3 {
-    let piece = list.get(cs, j) ?? "z";
-    string.push(acc, piece);
-    j = j + 1;
-  };
+    let piece = list.get(cs, j) ?? "z"
+    string.push(acc, piece)
+    j = j + 1
+  }
   println(acc)
 }

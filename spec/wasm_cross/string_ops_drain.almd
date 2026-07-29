@@ -23,7 +23,6 @@
 //   - is_whitespace mirrors native chars().all(char::is_whitespace): the empty
 //     string is VACUOUSLY TRUE, and the set is full-Unicode White_Space (VT/FF
 //     and NBSP are whitespace), not just ASCII space/tab/CR/LF.
-
 fn b2s(b: Bool) -> String = if b then "T" else "F"
 
 fn from_code(code: Int) -> String = {
@@ -31,6 +30,7 @@ fn from_code(code: Int) -> String = {
   list.push(bs, code)
   string.from_bytes(bs)
 }
+
 fn from_codes2(a: Int, b: Int) -> String = {
   var bs: List[Int] = []
   list.push(bs, a)
@@ -71,7 +71,6 @@ fn section_strip() -> Unit = {
   println(string.strip_prefix("hello", "hello") ?? "NONE")
   println(string.strip_prefix("日本語", "日") ?? "NONE")
   println(string.strip_prefix("ab", "abc") ?? "NONE")
-
   println("STRIP_SUFFIX")
   println(string.strip_suffix("hello", "lo") ?? "NONE")
   println(string.strip_suffix("hello", "xy") ?? "NONE")
@@ -90,7 +89,6 @@ fn section_predicates() -> Unit = {
   println(b2s(string.is_digit("٣")))
   println(b2s(string.is_digit("-1")))
   println(b2s(string.is_digit(from_code(55))))
-
   println("IS_WHITESPACE")
   println(b2s(string.is_whitespace("   ")))
   println(b2s(string.is_whitespace(" \t\n")))

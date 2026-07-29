@@ -6,6 +6,7 @@
 // wrapped the index to i32 before the read check (silent wrong element for
 // indices >= 2^32). In-bounds reads/writes stay correct.
 fn pick(n: Int) -> Int = n
+
 fn main() -> Unit = {
   var xs = [10, 20, 30]
   xs[1] = 99

@@ -27,7 +27,6 @@ effect fn main() -> Unit = {
   let os = env.os()
   let known = os == "macos" or os == "linux" or os == "windows" or os == "wasi"
   if known then println("os:known") else println("os:UNKNOWN")
-
   // Non-empty on every host; absolute everywhere except Windows, whose temp
   // dir is a drive path. Checking both keeps the assertion true on all three
   // native platforms AND on the WASI leg without weakening it to "non-empty".

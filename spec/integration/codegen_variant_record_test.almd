@@ -1,12 +1,6 @@
 // codegen_variant_record_test — Variant with record payload edge cases
-
 // ── Variant with record payload and default fields ──
-
-type Event =
-  | Click { x: Int, y: Int, button: String = "left" }
-  | KeyPress { key: String, ctrl: Bool = false, shift: Bool = false }
-  | Resize { width: Int, height: Int }
-  | Close
+type Event = | Click { x: Int, y: Int, button: String = "left" } | KeyPress { key: String, ctrl: Bool = false, shift: Bool = false } | Resize { width: Int, height: Int } | Close
 
 fn event_label(e: Event) -> String = match e {
   Click { button, .. } => "click:${button}",
@@ -48,14 +42,13 @@ test "variant record zero-arg constructor" {
 }
 
 // ── List of variant records with heterogeneous constructors ──
-
 test "list of mixed variant records" {
   let events = [
     Click { x: 0, y: 0 },
     KeyPress { key: "enter" },
     Resize { width: 800, height: 600 },
     Close,
-    Click { x: 10, y: 20, button: "middle" },
+    Click { x: 10, y: 20, button: "middle" }
   ]
   let labels = list.map(events, (e) => event_label(e))
   assert_eq(list.len(labels), 5)
@@ -65,7 +58,6 @@ test "list of mixed variant records" {
 }
 
 // ── Filtering variant records by constructor ──
-
 fn is_click(e: Event) -> Bool = match e {
   Click { .. } => true,
   _ => false,
@@ -76,36 +68,30 @@ test "filter variant records by constructor" {
     Click { x: 1, y: 1 },
     KeyPress { key: "a" },
     Click { x: 2, y: 2 },
-    Close,
+    Close
   ]
   let clicks = list.filter(events, (e) => is_click(e))
   assert_eq(list.len(clicks), 2)
 }
 
 // ── Extracting fields from variant records ──
-
-fn extract_click_positions(events: List[Event]) -> List[(Int, Int)] =
-  list.filter_map(events, (e) => match e {
-    Click { x, y, .. } => some((x, y)),
-    _ => none,
-  })
+fn extract_click_positions(events: List[Event]) -> List[(Int, Int)] = list.filter_map(events, (e) => match e {
+  Click { x, y, .. } => some((x, y)),
+  _ => none,
+})
 
 test "extract fields from variant records" {
   let events = [
     Click { x: 10, y: 20 },
     KeyPress { key: "b" },
-    Click { x: 30, y: 40, button: "right" },
+    Click { x: 30, y: 40, button: "right" }
   ]
   let positions = extract_click_positions(events)
   assert_eq(positions, [(10, 20), (30, 40)])
 }
 
 // ── Nested variant records ──
-
-type Widget =
-  | Button { label: String, on_click: Event }
-  | Panel { title: String, children: List[Widget] }
-  | Spacer
+type Widget = | Button { label: String, on_click: Event } | Panel { title: String, children: List[Widget] } | Spacer
 
 fn widget_name(w: Widget) -> String = match w {
   Button { label, .. } => "btn:${label}",

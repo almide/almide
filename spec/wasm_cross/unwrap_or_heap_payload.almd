@@ -16,15 +16,12 @@ effect fn main() -> Unit = {
   println(int.to_string(map.len(option.unwrap_or(o1, [:]))))
   let o1n: Option[Map[String, Int]] = none
   println(int.to_string(map.len(option.unwrap_or(o1n, ["k": 7]))))
-
   // Mixed-repr tuple payload.
   let o2: Option[(String, Int)] = some(("a", 1))
   println(option.unwrap_or(o2, ("", 0)).0)
-
   // Nested Option payload.
   let o3: Option[Option[String]] = some(some("x"))
   println(option.unwrap_or(o3, none) ?? "d")
-
   // The Result twins, both arms.
   let r1: Result[Map[String, Int], String] = err("boom")
   println(int.to_string(map.len(result.unwrap_or(r1, ["z": 9]))))
@@ -32,7 +29,6 @@ effect fn main() -> Unit = {
   println(result.unwrap_or(r2, ("", 0)).0)
   let r3: Result[Option[String], String] = ok(some("v"))
   println(result.unwrap_or(r3, none) ?? "d")
-
   // The source stays readable after the unwrap — the payload is borrowed and
   // acquired, not moved out.
   println(int.to_string(map.len(m)))

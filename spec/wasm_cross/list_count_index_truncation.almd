@@ -27,12 +27,10 @@
 //   2^32     = 4294967296     (wraps to i32 0)
 //   2^32+k                    (wraps to a small in-range index k)
 //   2^33     = 8589934592
-
 fn fmt(xs: List[Int]) -> String = list.join(list.map(xs, (x) => int.to_string(x)), ",")
 
 fn main() -> Unit = {
   let xs = [10, 20, 30, 40, 50]
-
   // ── take / drop: count is UNSIGNED `min(n as usize, len)` ──
   println("take 2^32-1:   " + fmt(list.take(xs, 4294967295)))
   println("take 2^32:     " + fmt(list.take(xs, 4294967296)))
@@ -41,14 +39,12 @@ fn main() -> Unit = {
   println("drop 2^32-1:   " + fmt(list.drop(xs, 4294967295)))
   println("drop 2^32:     " + fmt(list.drop(xs, 4294967296)))
   println("drop 2:        " + fmt(list.drop(xs, 2)))
-
   // ── NEGATIVE counts: `n as usize` is huge, NOT 0. take(-1)=whole list,
   //    drop(-1)=[]. The old `max(count,0)` lo-clamp wrongly emptied take(-1)
   //    and kept drop(-1) whole. ──
   println("take -1:       " + fmt(list.take(xs, -1)))
   println("take -2^31:    " + fmt(list.take(xs, -2147483648)))
   println("drop -1:       " + fmt(list.drop(xs, -1)))
-
   // ── take_end / drop_end: the fuzzer-found pair (was len=6 / trap) ──
   println("take_end 2^32-1: " + fmt(list.take_end(xs, 4294967295)))
   println("take_end 2^32:   " + fmt(list.take_end(xs, 4294967296)))
@@ -56,7 +52,6 @@ fn main() -> Unit = {
   println("drop_end 2^32-1: " + fmt(list.drop_end(xs, 4294967295)))
   println("drop_end 2^32:   " + fmt(list.drop_end(xs, 4294967296)))
   println("drop_end -1:     " + fmt(list.drop_end(xs, -1)))
-
   // ── slice: start/end UNSIGNED (native `start as usize`, `end as usize`) ──
   println("slice 2^32-1..2^32: " + fmt(list.slice(xs, 4294967295, 4294967296)))
   println("slice 0..2^32:      " + fmt(list.slice(xs, 0, 4294967296)))
@@ -64,13 +59,11 @@ fn main() -> Unit = {
   println("slice 2^31+1..2^31+4: " + fmt(list.slice(xs, 2147483649, 2147483652)))
   println("slice -1..2:        " + fmt(list.slice(xs, -1, 2)))
   println("slice 0..-1:        " + fmt(list.slice(xs, 0, -1)))
-
   // ── get / get_or: UNSIGNED index → none / default when OOB ──
   println("get 2^32+1: " + int.to_string(list.get(xs, 4294967297) ?? -1))
   println("get 2:      " + int.to_string(list.get(xs, 2) ?? -1))
   println("get_or 2^32+1: " + int.to_string(list.get_or(xs, 4294967297, -9)))
   println("get_or -1:     " + int.to_string(list.get_or(xs, -1, -9)))
-
   // ── set / insert / remove_at / swap / update: no-op / append on OOB ──
   println("set 2^32+1: " + fmt(list.set(xs, 4294967297, 99)))
   println("set 2:      " + fmt(list.set(xs, 2, 99)))
@@ -82,7 +75,6 @@ fn main() -> Unit = {
   println("swap 0,4:      " + fmt(list.swap(xs, 0, 4)))
   println("update 2^32+1: " + fmt(list.update(xs, 4294967297, (x) => x * 2)))
   println("update 1:      " + fmt(list.update(xs, 1, (x) => x * 2)))
-
   // ── chunk / windows: count UNSIGNED-saturated, grouping unchanged. A
   //    NEGATIVE n is huge as usize → chunk groups into ONE chunk (was a
   //    div-by-0 TRAP under the old lo-clamp-to-0), windows → empty (was len=6).
@@ -93,7 +85,6 @@ fn main() -> Unit = {
   println("windows 2^32 outer-len: " + int.to_string(list.len(list.windows(xs, 4294967296))))
   println("windows 2 outer-len:    " + int.to_string(list.len(list.windows(xs, 2))))
   println("windows -1 outer-len:   " + int.to_string(list.len(list.windows(xs, -1))))
-
   // ── repeat: small count materializes; the wrap is just made lossless.
   // A NEGATIVE count clamps SIGNED to the EMPTY list on both targets (was a
   // native `vec![x; n as usize]` capacity panic vs a wasm alloc trap) ──

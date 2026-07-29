@@ -6,7 +6,12 @@
 // frees via rc_dec). Before this the match read len-tag @4 over a cap-tag block (it walled, or with the
 // other fixes would misread) — now byte-matches v0.
 fn f(b: Bool, xs: List[Int]) -> Result[List[Int], String] = if b then ok(xs) else err("no")
-fn lench(b: Bool, xs: List[Int]) -> Int = match f(b, xs) { ok(ys) => list.len(ys), err(e) => 0 - string.len(e) }
+
+fn lench(b: Bool, xs: List[Int]) -> Int = match f(b, xs) {
+  ok(ys) => list.len(ys),
+  err(e) => 0 - string.len(e),
+}
+
 fn main() -> Unit = {
   println(int.to_string(lench(true, [1, 2, 3])))
   println(int.to_string(lench(false, [1, 2, 3])))

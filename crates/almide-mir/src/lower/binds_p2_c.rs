@@ -441,8 +441,9 @@ impl LowerCtx {
             self.ops.truncate(mark);
             self.live_heap_handles.truncate(lhh_mark);
         }
-        Err(LowerError::at(
+        Err(LowerError::shaped(
             value.span,
+            WallShape::HeapResultBind,
             "heap-result `match` bound to a let/var cannot be faithfully \
              computed in this brick (would bind an empty deferred heap value); \
              the merged result has no sound scope-end drop in the flat certificate",
@@ -513,8 +514,9 @@ impl LowerCtx {
                 }
             }
         }
-        Err(LowerError::at(
+        Err(LowerError::shaped(
             value.span,
+            WallShape::HeapResultBind,
             "heap-result `if` bound to a let/var cannot be faithfully \
              computed in this brick (would bind an empty deferred heap value); \
              the merged result has no sound scope-end drop in the flat certificate",

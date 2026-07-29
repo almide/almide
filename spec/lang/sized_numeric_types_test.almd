@@ -15,16 +15,24 @@
 // against an Int literal are kept out of this file until those
 // sub-phases land. We exercise compile success + same-type
 // round-trip for now.
-
 fn id_i32(x: Int32) -> Int32 = x
+
 fn id_i16(x: Int16) -> Int16 = x
+
 fn id_i8(x: Int8) -> Int8 = x
+
 fn id_u32(x: UInt32) -> UInt32 = x
+
 fn id_u16(x: UInt16) -> UInt16 = x
+
 fn id_u8(x: UInt8) -> UInt8 = x
+
 fn id_u64(x: UInt64) -> UInt64 = x
+
 fn id_f32(x: Float32) -> Float32 = x
+
 fn id_int64(x: Int64) -> Int64 = x
+
 fn id_float64(x: Float64) -> Float64 = x
 
 test "Int32 fn compiles and accepts literal" {
@@ -90,39 +98,65 @@ test "Float64 fn" {
 }
 
 // ── Stage 1c: same-type arithmetic ───────────────────────────────
-
 fn add_i32(a: Int32, b: Int32) -> Int32 = a + b
+
 fn sub_i32(a: Int32, b: Int32) -> Int32 = a - b
+
 fn mul_u8(a: UInt8, b: UInt8) -> UInt8 = a * b
+
 fn div_u32(a: UInt32, b: UInt32) -> UInt32 = a / b
+
 fn mod_i16(a: Int16, b: Int16) -> Int16 = a % b
+
 fn add_f32(a: Float32, b: Float32) -> Float32 = a + b
+
 fn sub_u64(a: UInt64, b: UInt64) -> UInt64 = a - b
 
-test "Int32 addition" { assert_eq(add_i32(10, 20), 30) }
-test "Int32 subtraction" { assert_eq(sub_i32(50, 20), 30) }
-test "UInt8 multiplication" { assert_eq(mul_u8(10, 5), 50) }
-test "UInt32 division (unsigned)" { assert_eq(div_u32(100, 4), 25) }
-test "Int16 modulo" { assert_eq(mod_i16(23, 5), 3) }
-test "Float32 addition" { assert_eq(add_f32(1.5, 2.5), 4.0) }
-test "UInt64 subtraction" { assert_eq(sub_u64(1000, 200), 800) }
+test "Int32 addition" {
+  assert_eq(add_i32(10, 20), 30)
+}
+
+test "Int32 subtraction" {
+  assert_eq(sub_i32(50, 20), 30)
+}
+
+test "UInt8 multiplication" {
+  assert_eq(mul_u8(10, 5), 50)
+}
+
+test "UInt32 division (unsigned)" {
+  assert_eq(div_u32(100, 4), 25)
+}
+
+test "Int16 modulo" {
+  assert_eq(mod_i16(23, 5), 3)
+}
+
+test "Float32 addition" {
+  assert_eq(add_f32(1.5, 2.5), 4.0)
+}
+
+test "UInt64 subtraction" {
+  assert_eq(sub_u64(1000, 200), 800)
+}
 
 // Mixed-width arithmetic with explicit conversion — compiles and runs.
 // The negative path (unconverted mix is a compile error) is covered by
 // `tests/check_sized_numeric_mixed_width.rs` at the Rust-side checker
 // layer because `.almd` has no negative-test syntax.
 fn a32_plus_b8_via_i32(a: Int32, b: Int8) -> Int32 = a + b.to_int32()
+
 fn f32_plus_i32_via_float(a: Float32, b: Int32) -> Float32 = a + b.to_float32()
 
 test "Int32 + Int8 via .to_int32()" {
   assert_eq(a32_plus_b8_via_i32(100, 5), 105)
 }
+
 test "Float32 + Int32 via .to_float32()" {
   assert_eq(f32_plus_i32_via_float(1.5, 3), 4.5)
 }
 
 // ── Stage 3: UFCS conversion methods ─────────────────────────────
-
 test "Int32 to Int64" {
   let x: Int32 = 42
   let y: Int64 = x.to_int64()
@@ -181,7 +215,6 @@ test "Int8 sign extends to Int64" {
 // default `Ty::Int` in expr_types, so without lowering-side
 // coercion codegen emits `1i64` against a `Vec<(i8, i64)>` slot
 // (E0308 on native). Regression guard for that bug.
-
 test "List of (Int8, Int) tuples narrows element literal" {
   let a: List[(Int8, Int)] = [(1, 100)]
   let p = a[0]
@@ -236,8 +269,8 @@ test "List[Int] stays i64 (regression)" {
 // and WASM was SILENT-WRONG (the 8-byte write into the 1-byte Int8 slot
 // corrupted the next field's offset). Lowering now resolves the named
 // alias before descending, so the field literal narrows on both targets.
-
 type SizedRec = { b: Int8, n: Int }
+
 type USizedRec = { x: UInt8, y: Int }
 
 test "Named record alias with Int8 field narrows literal" {

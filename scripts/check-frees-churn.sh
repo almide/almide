@@ -3,6 +3,23 @@
 # run on wasmtime under a wall-clock kill, compare to native output.
 set -euo pipefail
 BIN="${ALMIDE_BIN:-target/release/almide}"
+
+# wasmtime presence up front (#980): perl's failed `exec` warns and exits 0,
+# so a missing wasmtime used to be captured as the wasm "output" and reported
+# as the misleading "FAIL (output diverges)". In CI a missing tool is a
+# failure; locally it is an honest skip.
+if ! command -v wasmtime >/dev/null; then
+  if [ "${CI:-}" = "true" ]; then
+    echo "::error::frees-churn: wasmtime not found — in CI a missing tool is a failure (#980)"
+    exit 1
+  fi
+  echo "frees-churn: wasmtime not found — SKIP"
+  exit 0
+fi
+# An emptied corpus must not pass vacuously (#976 class).
+count=$(ls spec/churn/*.almd 2>/dev/null | wc -l | tr -d ' ')
+[ "$count" -ge 5 ] || { echo "::error::frees-churn: only $count fixtures in spec/churn — the corpus moved (#980)"; exit 1; }
+
 fail=0
 for f in spec/churn/*.almd; do
   name=$(basename "$f" .almd)

@@ -82,8 +82,9 @@ impl LowerCtx {
             return Ok(owned);
         }
         let container = extraction_container(expr).ok_or_else(|| {
-            LowerError::at(
+            LowerError::shaped(
                 expr.span,
+                WallShape::TailExtraction,
                 format!("{} is not a field/element extraction", kind_name(&expr.kind)),
             )
         })?;

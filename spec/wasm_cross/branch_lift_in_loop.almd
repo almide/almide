@@ -8,8 +8,8 @@ fn classify(n: Int) -> Option[Int] = if n > 0 then some(n) else none
 effect fn main() -> Unit = {
   for t in [3, -1, 5, 0, 8] {
     let label = match classify(t) {
-      some(v) => "positive " + int.to_string(v)
-      none => "non-positive"
+      some(v) => "positive " + int.to_string(v),
+      none => "non-positive",
     }
     println(int.to_string(t) + ": " + label)
   }

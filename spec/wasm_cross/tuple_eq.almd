@@ -2,8 +2,11 @@
 // tuple == / != : field-wise deep equality (AND of per-field typed eq, recursing into nested tuples
 // and heap String fields). Was both-arms-linearized (silent). Byte-matches native.
 fn ci(a: (Int, Int), b: (Int, Int)) -> String = if a == b then "T" else "F"
+
 fn cs(a: (String, Int), b: (String, Int)) -> String = if a == b then "T" else "F"
+
 fn c3(a: (Int, Int, Int), b: (Int, Int, Int)) -> String = if a == b then "T" else "F"
+
 effect fn main() -> Unit = {
   let a = (1, 2)
   let b = (1, 2)

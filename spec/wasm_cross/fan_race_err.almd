@@ -5,9 +5,13 @@
 // NOT a native panic (exit 101, the old wall-clock rx.recv().unwrap()) and NOT a
 // wasm trap. (Distinct from fan.any, which would skip the failure to find an Ok.)
 effect fn boom() -> Result[Int, String] = err("primary failed")
+
 effect fn ok_n(x: Int) -> Result[Int, String] = ok(x)
 
 effect fn main() -> Unit = {
-  let winner = fan.race([() => boom(), () => ok_n(99)])
+  let winner = fan.race([
+    () => boom(),
+    () => ok_n(99)
+  ])
   println("unreachable: " + int.to_string(winner))
 }

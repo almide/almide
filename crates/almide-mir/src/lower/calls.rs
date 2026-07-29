@@ -110,8 +110,9 @@ impl LowerCtx {
         // producer funnels here (#958's C-195 fixture, `classify` mir 6 > ir 5).
         if crate::lower::is_identity_int_widening(module, func, args) {
             return self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::at(
+                LowerError::shaped(
                     args[0].span,
+                    WallShape::CallArgument,
                     "identity int-widening operand outside the scalar subset not in this brick",
                 )
             });
@@ -120,8 +121,9 @@ impl LowerCtx {
         // counter-alignment reasoning as the widening above.
         if crate::lower::is_float_from_int_prim(module, func, args) {
             let v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::at(
+                LowerError::shaped(
                     args[0].span,
+                    WallShape::CallArgument,
                     "float.from_int operand outside the scalar subset not in this brick",
                 )
             })?;

@@ -2,7 +2,6 @@
 // mutation of one is invisible through the other. Runs on BOTH targets via
 // `almide test` (WASM with native fallback). The cross-target byte-equality of
 // the same surface is locked separately by spec/wasm_cross/alias_cow.almd.
-
 type Box = { items: List[Int] }
 
 test "alias cow: IndexAssign through a var-alias" {
@@ -41,7 +40,8 @@ test "alias cow: alias chain a -> b -> c" {
 
 test "alias cow: branch-arm alias" {
   var a = [1, 2, 3]
-  var b = if true then a else [9, 9, 9]
+  var b = if true then a
+  else [9, 9, 9]
   a[0] = 99
   assert_eq(a, [99, 2, 3])
   assert_eq(b, [1, 2, 3])

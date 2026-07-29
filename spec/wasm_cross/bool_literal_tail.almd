@@ -4,7 +4,9 @@
 // it used to fall into in tail position (which made `(x) => true` return FALSE, a SILENT MISCOMPILE of
 // every constant-true predicate, e.g. list.all((x)=>true) wrongly = false). Bool is an i64 0/1 → ConstInt.
 fn always_true() -> Bool = true
+
 fn always_false() -> Bool = false
+
 effect fn main() -> Unit = {
   if always_true() then println("t-T") else println("t-F")
   if always_false() then println("f-T") else println("f-F")

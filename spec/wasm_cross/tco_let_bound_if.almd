@@ -4,11 +4,13 @@
 // continuation (the recursive call + accumulator append) into each arm, turning it into BRANCHED
 // recursion the TCO's tco_collect handles (it recurses both if arms) — the let-bound `if` is eliminated.
 // Byte-matches v0.
-local fn build(n: Int, pos: Int, acc: String) -> String =
-  if pos >= n then acc
-  else {
-    let c0 = "a"
-    let c1 = if pos > 1 then "B" else "b"
-    build(n, pos + 1, acc + c0 + c1)
-  }
-fn main() -> Unit = { println(build(4, 0, "")) }
+local fn build(n: Int, pos: Int, acc: String) -> String = if pos >= n then acc
+else {
+  let c0 = "a"
+  let c1 = if pos > 1 then "B" else "b"
+  build(n, pos + 1, acc + c0 + c1)
+}
+
+fn main() -> Unit = {
+  println(build(4, 0, ""))
+}

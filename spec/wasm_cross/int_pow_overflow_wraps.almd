@@ -7,9 +7,14 @@
 fn id(x: Int) -> Int = x + (x - x)
 
 fn main() -> Unit = {
-  println(int.to_string(math.pow(id(2), id(3))))    // 8
-  println(int.to_string(math.pow(id(2), id(64))))   // 0 (overflow wraps)
-  println(int.to_string(math.pow(id(0), id(0))))    // 1
-  println(int.to_string(math.pow(id(7), id(23))))   // 8922003266371364727
-  println(int.to_string(math.pow(id(10), id(19))))  // -8446744073709551616
+  println(int.to_string(math.pow(id(2), id(3))))
+  // 8
+  println(int.to_string(math.pow(id(2), id(64))))
+  // 0 (overflow wraps)
+  println(int.to_string(math.pow(id(0), id(0))))
+  // 1
+  println(int.to_string(math.pow(id(7), id(23))))
+  // 8922003266371364727
+  // -8446744073709551616
+  println(int.to_string(math.pow(id(10), id(19))))
 }

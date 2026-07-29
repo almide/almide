@@ -1,5 +1,4 @@
 // bytes search & comparison.
-
 test "starts_with prefix match" {
   let b = bytes.from_string("Hello, World!")
   assert_eq(bytes.starts_with(b, bytes.from_string("Hello")), true)
@@ -29,28 +28,28 @@ test "contains finds subsequence" {
 test "index_of returns position" {
   let b = bytes.from_string("Hello, World!")
   match bytes.index_of(b, bytes.from_string("World")) {
-    some(p) => assert_eq(p, 7)
-    none => assert(false)
+    some(p) => assert_eq(p, 7),
+    none => assert(false),
   }
   match bytes.index_of(b, bytes.from_string("Hello")) {
-    some(p) => assert_eq(p, 0)
-    none => assert(false)
+    some(p) => assert_eq(p, 0),
+    none => assert(false),
   }
 }
 
 test "index_of empty pattern is 0" {
   let b = bytes.from_string("xyz")
   match bytes.index_of(b, bytes.from_string("")) {
-    some(p) => assert_eq(p, 0)
-    none => assert(false)
+    some(p) => assert_eq(p, 0),
+    none => assert(false),
   }
 }
 
 test "index_of returns none on miss" {
   let b = bytes.from_string("xyz")
   match bytes.index_of(b, bytes.from_string("abc")) {
-    some(_) => assert(false)
-    none => assert(true)
+    some(_) => assert(false),
+    none => assert(true),
   }
 }
 

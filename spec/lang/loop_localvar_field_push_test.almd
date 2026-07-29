@@ -6,7 +6,6 @@
 // loop-variant (in both the Module-call and wasm RuntimeCall forms), so the
 // member is never hoisted. This became reachable after #703 made a `var`/`mut`
 // record field a legal `list.push` target. Runs on BOTH targets.
-
 type Box = { xs: List[Int] }
 
 fn build(n: Int) -> Box = {

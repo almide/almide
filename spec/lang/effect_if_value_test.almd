@@ -7,9 +7,10 @@
 // vs Result<Vec> mismatch (E0308, "codegen produced invalid Rust"). The node type
 // is now recomputed from the unwrapped branches. (auto-? runs in effect fns, not
 // `test` blocks, so the pattern lives in effect fns the tests call.) BOTH targets.
-
 fn pure_one() -> List[Int] = [1, 1]
+
 effect fn eff_two() -> List[Int] = [2, 2, 2]
+
 effect fn eff_three() -> List[Int] = [3, 3, 3, 3]
 
 // effect call + pure branch, if-value bound by let
@@ -64,8 +65,7 @@ test "effect call in a block-tail if bound by let (#717)" {
 
 // Error propagation through the if-value must still short-circuit `err` out of
 // the enclosing effect fn (the auto-? on the chosen branch stays load-bearing).
-effect fn boom(x: Int) -> Result[Int, String] =
-  if x < 0 then err("neg") else ok(x)
+effect fn boom(x: Int) -> Result[Int, String] = if x < 0 then err("neg") else ok(x)
 
 effect fn via_if(x: Int) -> Result[Int, String] = {
   let v = if x > 10 then boom(x) else boom(0 - 1)
@@ -112,7 +112,10 @@ test "un-annotated Result binding over an if, re-yielded as the tail (#717)" {
 }
 
 effect fn unannotated_tail_match(cond: Bool) -> Result[String, String] = {
-  let r = match cond { true => ok("hit"), _ => err("miss") }
+  let r = match cond {
+    true => ok("hit"),
+    _ => err("miss"),
+  }
   r
 }
 

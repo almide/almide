@@ -1,4 +1,3 @@
-
 // #485: in an effect fn, the auto-unwrap rule is identical across every
 // binding-shaped position — let, var, plain assign, index assign — and is
 // type-directed: a Result-typed TARGET keeps the Result, everything else
@@ -6,33 +5,33 @@
 effect fn step(n: Int) -> Int = n + 1
 
 effect fn plain_assign() -> Int = {
-  var x = 0;
-  x = step(x);
+  var x = 0
+  x = step(x)
   x
 }
 
 effect fn loop_assign() -> Int = {
-  var seq = 0;
+  var seq = 0
   while seq < 3 {
-    seq = step(seq);
-  };
+    seq = step(seq)
+  }
   seq
 }
 
 effect fn result_target_keeps() -> Int = {
-  var r: Result[Int, String] = ok(0);
-  r = step(5);
+  var r: Result[Int, String] = ok(0)
+  r = step(5)
   r ?? -1
 }
 
 effect fn annotated_let_keeps() -> Int = {
-  let r: Result[Int, String] = step(7);
+  let r: Result[Int, String] = step(7)
   r ?? -1
 }
 
 effect fn index_assign_unwraps() -> Int = {
-  var xs = [0, 0];
-  xs[0] = step(10);
+  var xs = [0, 0]
+  xs[0] = step(10)
   list.get(xs, 0) ?? -1
 }
 
@@ -41,7 +40,7 @@ effect fn index_assign_unwraps() -> Int = {
 effect fn declared_result() -> Result[Int, String] = ok(7)
 
 effect fn unannotated_unwraps() -> Int = {
-  let v = declared_result();
+  let v = declared_result()
   v
 }
 

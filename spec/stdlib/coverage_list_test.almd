@@ -1,7 +1,13 @@
 // Coverage tests for list.group_by
-
 test "list.group_by by parity" {
-  let items = [1, 2, 3, 4, 5, 6]
+  let items = [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ]
   let groups = items |> list.group_by((x) => int.to_string(x % 2))
   assert(map.contains(groups, "0"))
   assert(map.contains(groups, "1"))

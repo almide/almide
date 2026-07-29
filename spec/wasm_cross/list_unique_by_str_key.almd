@@ -6,17 +6,33 @@
 // on a String-key closure ("indirect call type mismatch", fuzz seed-20260718
 // index 9).
 fn by_str(xs: List[Bool]) -> List[Bool] = list.unique_by(xs, ((x) => "same"))
+
 fn by_parity(xs: List[Int]) -> List[Int] = list.unique_by(xs, ((x) => x % 2))
+
 fn by_show(xs: List[Int]) -> List[Int] = list.unique_by(xs, ((x) => int.to_string(x % 3)))
 
 fn main() -> Unit = {
   println("a = ${by_str([true, true, false])}")
   println("b = ${by_parity([1, 2, 3, 4])}")
-  println("c = ${by_show([1, 2, 3, 4, 5, 6])}")
+  println("c = ${by_show([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ])}")
 }
 
 test "unique_by over scalar and String keys" {
   assert_eq(list.unique_by([true, true, false], ((x) => "same")), [true])
   assert_eq(list.unique_by([1, 2, 3, 4], ((x) => x % 2)), [1, 2])
-  assert_eq(list.unique_by([1, 2, 3, 4, 5, 6], ((x) => int.to_string(x % 3))), [1, 2, 3])
+  assert_eq(list.unique_by([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ], ((x) => int.to_string(x % 3))), [1, 2, 3])
 }

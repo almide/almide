@@ -8,10 +8,10 @@
 // `wasm_cross_module_producer_side_variant_ctor` in tests/wasm_runtime_test.rs).
 // The single-file wasm_cross gate cannot host module projects, so this fixture
 // locks the producer-side construction + match repr in single-file form.
-
-type Shape = Circle(Int) | Square(Int)
+type Shape = | Circle(Int) | Square(Int)
 
 fn make_circle(r: Int) -> Shape = Circle(r)
+
 fn make_square(w: Int) -> Shape = Square(w)
 
 fn area(s: Shape) -> Int = match s {

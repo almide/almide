@@ -3,16 +3,11 @@
 // shape that miscompiled: IrLinkFlatten mangled `recshape.Pat` to
 // `almide_rt_recshape_Pat` without remapping `recursive_enums`, so the enum
 // decl dropped its Box while construction sites kept boxing.
+type Pat = | Leaf(String) | Group { name: String, patterns: List[Pat] }
 
-type Pat =
-  | Leaf(String)
-  | Group { name: String, patterns: List[Pat] }
+type Tree = | Tip(Int) | Node(Tree, Tree)
 
-type Tree =
-  | Tip(Int)
-  | Node(Tree, Tree)
-
-pub fn emit(p: Pat) -> String = match p {
+fn emit(p: Pat) -> String = match p {
   Leaf(s) => s,
   Group { name, patterns } => {
     let inner = patterns |> list.map((q) => emit(q)) |> list.join(",")
@@ -20,7 +15,7 @@ pub fn emit(p: Pat) -> String = match p {
   },
 }
 
-pub fn sum(t: Tree) -> Int = match t {
+fn sum(t: Tree) -> Int = match t {
   Tip(n) => n,
   Node(l, r) => sum(l) + sum(r),
 }

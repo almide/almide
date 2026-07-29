@@ -18,10 +18,8 @@
 //   2^32   = 4294967296   (wraps to i32 0)
 //   2^32+k = 4294967296+k (wraps to a small in-range count k)
 //   2^33   = 8589934592
-
 fn main() -> Unit = {
   let s = "abcde"
-
   // ── take / drop: codepoint COUNT, UNSIGNED (negative & huge → whole/empty) ──
   println("take -1:     [" + string.take(s, -1) + "]")
   println("take 2^32:   [" + string.take(s, 4294967296) + "]")
@@ -32,7 +30,6 @@ fn main() -> Unit = {
   println("drop 2^32:   [" + string.drop(s, 4294967296) + "]")
   println("drop 2^32+2: [" + string.drop(s, 4294967298) + "]")
   println("drop 2:      [" + string.drop(s, 2) + "]")
-
   // ── take_end / drop_end: codepoint COUNT, UNSIGNED ──
   println("take_end -1:     [" + string.take_end(s, -1) + "]")
   println("take_end 2^32:   [" + string.take_end(s, 4294967296) + "]")
@@ -42,7 +39,6 @@ fn main() -> Unit = {
   println("drop_end 2^32:   [" + string.drop_end(s, 4294967296) + "]")
   println("drop_end 2^32+2: [" + string.drop_end(s, 4294967298) + "]")
   println("drop_end 2:      [" + string.drop_end(s, 2) + "]")
-
   // ── multibyte: take/drop count CODEPOINTS, never split a UTF-8 scalar ──
   let m = "aé中b"
   println("m take -1:   [" + string.take(m, -1) + "]")
@@ -50,7 +46,6 @@ fn main() -> Unit = {
   println("m take 2:    [" + string.take(m, 2) + "]")
   println("m take_end -1: [" + string.take_end(m, -1) + "]")
   println("m drop_end 1:  [" + string.drop_end(m, 1) + "]")
-
   // ── repeat: small count works; saturation removes the wrap-to-wrong ──
   println("repeat 2: [" + string.repeat("xy", 2) + "]")
   println("repeat 0: [" + string.repeat("xy", 0) + "]")
@@ -69,7 +64,6 @@ fn main() -> Unit = {
   // line — not the ones above — is what pins the previously-panicking cell.
   let neg = string.repeat("ab", -1)
   println("repeat let -1 len: " + int.to_string(string.len(neg)))
-
   // ── pad_start / pad_end: small WIDTHS stay EXACT after the unsigned clamp.
   //    (Huge/`2^32+k` widths now both-FAIL — native abort / wasm memory.grow —
   //    instead of wasm silently wrapping to a small in-range width; that SIZE
@@ -78,7 +72,6 @@ fn main() -> Unit = {
   println("pad_start 2: [" + string.pad_start("ab", 2, "x") + "]")
   println("pad_end 5:   [" + string.pad_end("ab", 5, "x") + "]")
   println("pad_end 1:   [" + string.pad_end("ab", 1, "x") + "]")
-
   // ── slice: start/end clamped SIGNED on the i64 (byte indices) ──
   println("slice -1..2:        [" + string.slice(s, -1, 2) + "]")
   println("slice -3..-1:       [" + string.slice(s, -3, -1) + "]")
@@ -87,7 +80,6 @@ fn main() -> Unit = {
   println("slice 1..3:         [" + string.slice(s, 1, 3) + "]")
   println("slice 2^32..2^32+2: [" + string.slice(s, 4294967296, 4294967298) + "]")
   println("slice 2^31+1..2^33: [" + string.slice(s, 2147483649, 8589934592) + "]")
-
   // ── repeat: count clamps SIGNED — negative yields EMPTY on both targets ──
   // (was: native Rust capacity-overflow panic exit 101 vs wasm negative-alloc
   // trap exit 134 on repeat(s, -2^31) — differential-fuzz, neither a T6 form)

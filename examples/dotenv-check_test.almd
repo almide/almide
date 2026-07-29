@@ -1,9 +1,8 @@
 fn parse_dotenv(content: String) -> Map[String, String] = {
-  let lines = string.lines(content)
-    |> list.filter((line) => {
-      let trimmed = string.trim(line)
-      string.len(trimmed) > 0 and not string.starts_with(trimmed, "#")
-    })
+  let lines = string.lines(content) |> list.filter((line) => {
+    let trimmed = string.trim(line)
+    string.len(trimmed) > 0 and not string.starts_with(trimmed, "#")
+  })
   var m: Map[String, String] = map.new()
   for line in lines {
     let parts = string.split(line, "=")

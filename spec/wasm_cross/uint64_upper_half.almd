@@ -14,13 +14,11 @@ fn main() -> Unit = {
   println(probe(9223372036854775808))
   println(probe(9223372036854775807))
   println(probe(0))
-
   // Inline: the CONSTANT lane (the propagated-literal re-fold).
   let big: UInt64 = 18446744073709551615
   let dv: UInt64 = big / 2
   let md: UInt64 = big % 10
   println("${uint64.to_string(dv)}|${uint64.to_string(md)}|${uint64.to_string(big)}")
-
   // Ordering is unsigned; add wraps in two's complement (both bit patterns).
   let one: UInt64 = 1
   println(if big > one then "GT-OK" else "GT-BAD")

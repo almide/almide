@@ -19,7 +19,6 @@
 // - Compile error "unresolved int::to_string" → bundled fn got pruned
 //   before the @inline_rust dispatch path saw it. Check
 //   src/main.rs retain logic.
-
 test "int.to_string via @inline_rust dispatch" {
   assert_eq(int.to_string(42), "42")
 }

@@ -14,11 +14,15 @@ import regex
 
 fn b2s(b: Bool) -> String = if b then "T" else "F"
 
-fn ostr(o: Option[String]) -> String =
-  match o { some(s) => s, none => "NONE" }
+fn ostr(o: Option[String]) -> String = match o {
+  some(s) => s,
+  none => "NONE",
+}
 
-fn olist(o: Option[List[String]]) -> String =
-  match o { some(xs) => "[" + string.join(xs, "|") + "]", none => "NONE" }
+fn olist(o: Option[List[String]]) -> String = match o {
+  some(xs) => "[" + string.join(xs, "|") + "]",
+  none => "NONE",
+}
 
 fn main() -> Unit = {
   // ── alternation ──
@@ -27,7 +31,6 @@ fn main() -> Unit = {
   println(ostr(regex.find("(a|b)+", "qabbaq")))
   println(b2s(regex.full_match("a|bb|ccc", "ccc")))
   println(ostr(regex.find("gr(a|e)y", "grey")))
-
   // ── escape atoms ──
   println(b2s(regex.is_match("\\.", "a.b")))
   println(b2s(regex.is_match("\\.", "axb")))
@@ -39,14 +42,12 @@ fn main() -> Unit = {
   println(ostr(regex.find("\\S+", "   word ")))
   println(b2s(regex.is_match("a\\+b", "a+b")))
   println(b2s(regex.is_match("a\\+b", "aab")))
-
   // ── class escapes ──
   println(ostr(regex.find("[\\d]+", "xx42yy")))
   println(b2s(regex.is_match("[^\\d]", "5")))
   println(b2s(regex.is_match("[^\\d]", "a")))
   println(ostr(regex.find("[\\w]+", "@@abc@@")))
   println(ostr(regex.find("[a-z\\d]+", "AB3cd9!!")))
-
   // ── captures (incl. optional-miss) ──
   println(olist(regex.captures("(\\d+)-(\\d+)", "12-34")))
   println(olist(regex.captures("(a)(b)(c)", "abc")))
@@ -54,7 +55,6 @@ fn main() -> Unit = {
   println(olist(regex.captures("(\\w+)@(\\w+)", "user@host")))
   println(olist(regex.captures("(\\d+)", "hello")))
   println(olist(regex.captures("no groups", "no groups")))
-
   // ── multibyte '.' / class / anchors ──
   println(ostr(regex.find(".", "日本語")))
   println(ostr(regex.find("..", "日本語")))
@@ -63,26 +63,22 @@ fn main() -> Unit = {
   println(b2s(regex.is_match("^日", "日本語")))
   println(b2s(regex.is_match("語$", "日本語")))
   println(b2s(regex.is_match("a.b", "a\nb")))
-
   // ── quantifiers ──
   println(ostr(regex.find("a*", "aaab")))
   println(ostr(regex.find("colou?r", "color")))
   println(ostr(regex.find("colou?r", "colour")))
   println(ostr(regex.find("a+", "baaa")))
-
   // ── replace (verbatim rep) ──
   println(regex.replace("[0-9]+", "a1b22c333", "#"))
   println(regex.replace("a", "aaa", "$1"))
   println(regex.replace_first("[0-9]+", "a1b2c3", "X"))
   println(regex.replace("[0-9]+", "no digits", "X"))
-
   // ── split edges ──
   println("[" + string.join(regex.split(",", "a,,b,"), "|") + "]")
   println("[" + string.join(regex.split("[,;]", "a,b;c"), "|") + "]")
   println("[" + string.join(regex.split(",", "hello"), "|") + "]")
   println("[" + string.join(regex.split("", "abc"), "|") + "]")
   println("[" + string.join(regex.split("\\s+", "hello   world  foo"), "|") + "]")
-
   // ── full_match / find_all ──
   println(b2s(regex.full_match("[0-9]+", "123")))
   println(b2s(regex.full_match("[0-9]+", "abc123")))
@@ -90,56 +86,90 @@ fn main() -> Unit = {
   println("[" + string.join(regex.find_all("[0-9]+", "a1b22c333"), "|") + "]")
   println("[" + string.join(regex.find_all("\\w+", "one two  three"), "|") + "]")
   println("[" + string.join(regex.find_all("[本語]", "日本語日本"), "|") + "]")
-
   // ── empty alternation arms (leading / trailing / middle / triple / nested) ──
   // An empty arm is an empty Seq that matches length-0 at any position. wasm
   // previously dropped TRAILING empty arms (parser appended a spurious atom).
-  println(b2s(regex.is_match("a|", "zzz")))       // trailing empty → T
-  println(b2s(regex.is_match("|a", "zzz")))       // leading empty  → T
-  println(b2s(regex.is_match("a||b", "zzz")))     // middle empty   → T
-  println(b2s(regex.is_match("a|||", "zzz")))     // triple → T
-  println(ostr(regex.find("a|", "bza")))          // empty match at pos 0 → <>
-  println(ostr(regex.find("|a", "bza")))          // <>
-  println(b2s(regex.full_match("a|", "")))        // empty arm full-matches "" → T
-  println("[" + string.join(regex.find_all("a|", "bza"), "|") + "]")  // zero-width loop
+  println(b2s(regex.is_match("a|", "zzz")))
+  // trailing empty → T
+  println(b2s(regex.is_match("|a", "zzz")))
+  // leading empty  → T
+  println(b2s(regex.is_match("a||b", "zzz")))
+  // middle empty   → T
+  println(b2s(regex.is_match("a|||", "zzz")))
+  // triple → T
+  println(ostr(regex.find("a|", "bza")))
+  // empty match at pos 0 → <>
+  println(ostr(regex.find("|a", "bza")))
+  // <>
+  println(b2s(regex.full_match("a|", "")))
+  // empty arm full-matches "" → T
+  println("[" + string.join(regex.find_all("a|", "bza"), "|") + "]")
+  // zero-width loop
   println("[" + string.join(regex.split("a|", "abc"), "|") + "]")
-  println(olist(regex.captures("(a|)", "b")))     // group with empty arm → [""]
-  println(olist(regex.captures("(|a)", "b")))     // leading-empty group  → [""]
-  println(b2s(regex.is_match("(a|)*", "z")))      // quantified empty-arm group → T
-
+  println(olist(regex.captures("(a|)", "b")))
+  // group with empty arm → [""]
+  println(olist(regex.captures("(|a)", "b")))
+  // leading-empty group  → [""]
+  println(b2s(regex.is_match("(a|)*", "z")))
+  // quantified empty-arm group → T
   // ── replace / replace_first over EMPTY matches (native end-index guard) ──
   // `x*` / `a*` / empty pattern match length-0 at end-of-string; native used to
   // panic indexing chars[len]. Both targets now insert the rep at each zero-width
   // position and skip the missing end char.
-  println("<" + regex.replace("x*", "ab", "-") + ">")        // -a-b-
-  println("<" + regex.replace("", "ab", "-") + ">")          // empty pattern
-  println("<" + regex.replace("a*", "aaa", "-") + ">")       // greedy then empty-at-end
-  println("<" + regex.replace("a*", "bbb", "-") + ">")       // all zero-width
-  println("<" + regex.replace("b?", "abc", "-") + ">")       // optional zero-width mix
-  println("<" + regex.replace("a|", "abc", "-") + ">")       // empty arm
-  println("<" + regex.replace("x*", "", "-") + ">")          // empty match on empty text
-  println("<" + regex.replace("x*", "本a", "-") + ">")       // multibyte zero-width
-  println("<" + regex.replace_first("x*", "ab", "-") + ">")  // replace_first empty-at-start
+  println("<" + regex.replace("x*", "ab", "-") + ">")
+  // -a-b-
+  println("<" + regex.replace("", "ab", "-") + ">")
+  // empty pattern
+  println("<" + regex.replace("a*", "aaa", "-") + ">")
+  // greedy then empty-at-end
+  println("<" + regex.replace("a*", "bbb", "-") + ">")
+  // all zero-width
+  println("<" + regex.replace("b?", "abc", "-") + ">")
+  // optional zero-width mix
+  println("<" + regex.replace("a|", "abc", "-") + ">")
+  // empty arm
+  println("<" + regex.replace("x*", "", "-") + ">")
+  // empty match on empty text
+  println("<" + regex.replace("x*", "本a", "-") + ">")
+  // multibyte zero-width
+  println("<" + regex.replace_first("x*", "ab", "-") + ">")
+  // replace_first empty-at-start
   println("<" + regex.replace_first("a*", "aaa", "-") + ">")
   println("<" + regex.replace_first("a|", "abc", "-") + ">")
-
   // ── brace quantifiers {n} / {n,} / {n,m} (#845: used to silently never match) ──
-  println(b2s(regex.is_match(r"\d{3}", "abc123")))            // T
-  println(b2s(regex.is_match(r"\d{4}", "abc123")))            // F
-  println(b2s(regex.full_match(r"\d{3}", "123")))             // T
-  println(b2s(regex.full_match(r"\d{3}", "1234")))            // F
-  println(b2s(regex.full_match(r"\d{2,}", "12345")))          // T
-  println(b2s(regex.full_match(r"\d{6,}", "12345")))          // F
-  println(b2s(regex.full_match(r"\d{2,4}", "123")))           // T
-  println(b2s(regex.full_match(r"\d{2,4}", "12345")))         // F
-  println(ostr(regex.find(r"a{2,3}", "caaaab")))               // aaa (greedy)
-  println(olist(regex.captures(r"(\d{4})-(\d{2})-(\d{2})", "on 2026-03-09.")))
-  println("<" + regex.replace(r"o{2}", "foo book", "0") + ">") // f0 b0k
-  println(b2s(regex.full_match(r"(ab){2}", "abab")))           // grouped rep → T
-  println(b2s(regex.full_match(r"(ab){2}", "ab")))             // F
-  println(b2s(regex.full_match(r"a{0,2}b", "b")))              // zero-min → T
-  println(b2s(regex.full_match(r"あ{2}", "ああ")))             // multibyte reps → T
-  println(b2s(regex.full_match(r"a{x}", "a{x}")))              // malformed brace = literal → T
-  println(b2s(regex.full_match(r"a{,3}", "a{,3}")))            // {,m} unsupported = literal → T
-  println(b2s(regex.is_match(r"a{2", "a{2")))                  // unterminated = literal → T
+  println(b2s(regex.is_match("\\d{3}", "abc123")))
+  // T
+  println(b2s(regex.is_match("\\d{4}", "abc123")))
+  // F
+  println(b2s(regex.full_match("\\d{3}", "123")))
+  // T
+  println(b2s(regex.full_match("\\d{3}", "1234")))
+  // F
+  println(b2s(regex.full_match("\\d{2,}", "12345")))
+  // T
+  println(b2s(regex.full_match("\\d{6,}", "12345")))
+  // F
+  println(b2s(regex.full_match("\\d{2,4}", "123")))
+  // T
+  println(b2s(regex.full_match("\\d{2,4}", "12345")))
+  // F
+  println(ostr(regex.find("a{2,3}", "caaaab")))
+  // aaa (greedy)
+  println(olist(regex.captures("(\\d{4})-(\\d{2})-(\\d{2})", "on 2026-03-09.")))
+  println("<" + regex.replace("o{2}", "foo book", "0") + ">")
+  // f0 b0k
+  println(b2s(regex.full_match("(ab){2}", "abab")))
+  // grouped rep → T
+  println(b2s(regex.full_match("(ab){2}", "ab")))
+  // F
+  println(b2s(regex.full_match("a{0,2}b", "b")))
+  // zero-min → T
+  println(b2s(regex.full_match("あ{2}", "ああ")))
+  // multibyte reps → T
+  println(b2s(regex.full_match("a{x}", "a{x}")))
+  // malformed brace = literal → T
+  println(b2s(regex.full_match("a{,3}", "a{,3}")))
+  // {,m} unsupported = literal → T
+  // unterminated = literal → T
+  println(b2s(regex.is_match("a{2", "a{2")))
 }

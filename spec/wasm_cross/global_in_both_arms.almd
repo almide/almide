@@ -7,18 +7,16 @@
 // primitive and a 52849-vertex model loaded as zero geometry). The heap twin
 // (`s == TAG` in both arms) and the zero-iteration-loop shape (first use inside
 // a `while` body, second after it) fail the same way and are pinned here too.
-
 let CAP = 2097152
+
 let TAG = "alpha"
 
 fn inner(n: Int, count: Int) -> Int = {
   let base = 0
   if count < 0 then {
     if base + n > CAP then 0 - 13 else n
-  }
-  else {
-    if base + count > CAP then 0 - 14
-    else count
+  } else {
+    if base + count > CAP then 0 - 14 else count
   }
 }
 

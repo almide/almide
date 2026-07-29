@@ -1,17 +1,13 @@
 // Perceus monkey test: adversarial patterns designed to break RC.
 // If any test panics, leaks, or double-frees, the proof has a gap.
+fn build_str(n: Int) -> String = if n <= 0 then "" else build_str(n - 1) + "x"
 
-fn build_str(n: Int) -> String =
-  if n <= 0 then ""
-  else build_str(n - 1) + "x"
-
-fn fib_str(n: Int) -> String =
-  if n <= 1 then int.to_string(n)
-  else {
-    let a = fib_str(n - 1)
-    let b = fib_str(n - 2)
-    a + "+" + b
-  }
+fn fib_str(n: Int) -> String = if n <= 1 then int.to_string(n)
+else {
+  let a = fib_str(n - 1)
+  let b = fib_str(n - 2)
+  a + "+" + b
+}
 
 test "heap alloc + immediate discard" {
   let _ = "hello"
@@ -34,10 +30,8 @@ test "branch: both sides allocate" {
 }
 
 test "branch: nested if/else heap" {
-  let x = if true then
-    if false then "deep-left" else "deep-right"
-  else
-    "shallow"
+  let x = if true then if false then "deep-left" else "deep-right"
+  else "shallow"
   assert_eq(x, "deep-right")
 }
 
@@ -84,16 +78,20 @@ test "list map creates new list" {
 }
 
 test "list filter discards elements" {
-  let xs = [1, 2, 3, 4, 5, 6]
+  let xs = [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ]
   let evens = xs |> list.filter((x) => x % 2 == 0)
   assert_eq(evens, [2, 4, 6])
 }
 
 test "nested list operations" {
-  let result = [1, 2, 3, 4, 5]
-    |> list.map((x) => x * 10)
-    |> list.filter((x) => x > 20)
-    |> list.map((x) => int.to_string(x))
+  let result = [1, 2, 3, 4, 5] |> list.map((x) => x * 10) |> list.filter((x) => x > 20) |> list.map((x) => int.to_string(x))
   assert_eq(result, ["30", "40", "50"])
 }
 

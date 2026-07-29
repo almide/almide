@@ -69,4 +69,21 @@ if [ "$fail" -ne 0 ]; then
   echo "::error::host-architecture codegen determinism FAILED — the compiler emits different WASM on 32-bit vs 64-bit hosts (the playground runs wasm32). Sort any HashMap/HashSet whose iteration order reaches emitted bytes."
   exit 1
 fi
-echo "host-architecture codegen determinism: $n/$n emitted fixtures byte-identical across x86-64 and wasm32 ($walled walled, tracked #782)"
+
+# The gate must not pass VACUOUSLY (#985): `n` counts only fixtures that
+# reached the byte-compare, so a renderer regression that walled everything
+# printed "0/0 byte-identical" and exited 0. On a green run every corpus file
+# is either compared or walled — enforce that identity, and ratchet `walled`
+# at its real value (0 as of 2026-07-30, CI-measured over 324 fixtures): a
+# NEW wall is a conscious ceiling bump, never silent shrinkage of coverage.
+MAX_WALLED=0
+corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
+if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
+  echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
+  exit 1
+fi
+if [ "$walled" -gt "$MAX_WALLED" ]; then
+  echo "::error::host-determinism: $walled fixtures walled (ceiling $MAX_WALLED) — coverage shrank; fix the wall or raise MAX_WALLED consciously in the same change (#985)"
+  exit 1
+fi
+echo "host-architecture codegen determinism: $n/$corpus emitted fixtures byte-identical across x86-64 and wasm32 ($walled walled, ceiling $MAX_WALLED)"

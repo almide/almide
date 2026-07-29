@@ -56,6 +56,6 @@ so it shares no codegen pass with either backend. See
 ## When Adding a New Feature
 
 - **New syntax** → almide-syntax (parser) → almide-frontend (checker + lowering) → almide-codegen (passes + templates)
-- **New stdlib function** → pure-Almide impl in `stdlib/<module>[_<part>].almd`; register for WASM in `almide-mir/src/render_wasm/registry.rs`; native intrinsics (only when needed) in `runtime/rs/src/<module>.rs` + `@intrinsic` declaration. To keep the 3-way oracle covering it (instead of skipping it), also add the glue to almide-interp's bridge — it is hand-maintained, NOT auto-generated. See [almide-interp/CLAUDE.md](./almide-interp/CLAUDE.md#coverage-model--does-a-new-stdlib-fn-get-covered-automatically).
+- **New stdlib function** → pure-Almide impl in `stdlib/<module>[_<part>].almd`; register for WASM + interp in `almide-types/src/self_host_registry.rs` (`self_host_runtime()`); native intrinsics (only when needed) in `runtime/rs/src/<module>.rs` + `@intrinsic` declaration. To keep the 3-way oracle covering it (instead of skipping it), also add the glue to almide-interp's bridge — it is hand-maintained, NOT auto-generated. See [almide-interp/CLAUDE.md](./almide-interp/CLAUDE.md#coverage-model--does-a-new-stdlib-fn-get-covered-automatically).
 - **New type** → almide-types (Ty variant) → almide-frontend (inference rules) → almide-ir (IR nodes) → almide-codegen (emission)
 - **New codegen target** → almide-codegen (pass pipeline + TOML template + target entry)

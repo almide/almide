@@ -7,7 +7,11 @@
 effect fn main() -> Unit = {
   var i = 0
   while i < 5000 {
-    let o = value.object([("k", value.int(1)), ("m", value.str("x")), ("n", value.array([value.int(2), value.int(3)]))])
+    let o = value.object([
+      ("k", value.int(1)),
+      ("m", value.str("x")),
+      ("n", value.array([value.int(2), value.int(3)]))
+    ])
     i = i + 1
   }
   println("value-object-leak-clean")

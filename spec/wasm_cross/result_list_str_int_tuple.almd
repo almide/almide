@@ -9,11 +9,17 @@ fn parse_key(p: Int) -> Result[(List[String], Int), String] = {
 
 effect fn main() -> Unit = {
   match parse_key(20) {
-    ok(t) => { let (ks, n) = t  println(list.join(ks, ".") + " @ " + int.to_string(n)) },
-    err(e) => println("E:" + e)
+    ok(t) => {
+      let (ks, n) = t
+      println(list.join(ks, ".") + " @ " + int.to_string(n))
+    },
+    err(e) => println("E:" + e),
   }
   match parse_key(0 - 1) {
-    ok(t) => { let (ks, n) = t  println("ok") },
-    err(e) => println("E:" + e)
+    ok(t) => {
+      let (ks, n) = t
+      println("ok")
+    },
+    err(e) => println("E:" + e),
   }
 }

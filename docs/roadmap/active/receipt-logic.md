@@ -147,7 +147,7 @@ C-SAFE は**ソース不要・成果物だけで検証できる最強の型**。
    スコープを明記)。capability Phase 1-2 が前提。
 2. **Receipt v2**(+ C-FAITHFUL): CG-1 oracle 反転 + 性質台帳の公開と拡張。
 3. **Receipt v3**(T4 対応): 再現ビルド → 2 バックエンドを使った DDC 型
-   相互検証 → selfhost(`research/selfhost/`)。rustc そのものへの攻撃は
+   相互検証 → selfhost(旧 `research/selfhost/`、現 `research/spike/v1-mir/`)。rustc そのものへの攻撃は
    v1/v2 完了後に初めて意味を持つ。
 
 ## trust-layer.md への反映(追補 4 点)

@@ -6,6 +6,7 @@
 type Cell[T] = { _val: T, _id: Int }
 
 var _dirty = false
+
 var _next_id = 0
 
 fn cell[T](initial: T) -> Cell[T] = {
@@ -21,7 +22,7 @@ fn set[T](c: Cell[T], value: T) -> Cell[T] = {
   { ...c, _val: value }
 }
 
-fn update[T](c: Cell[T], f: (T) -> T) -> Cell[T] = {
+fn update[T](c: Cell[T], f: fn(T) -> T) -> Cell[T] = {
   _dirty = true
   { ...c, _val: f(c._val) }
 }

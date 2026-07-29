@@ -3,10 +3,9 @@
 // inner list renders like `${list}`, wrapped in `some(…)`). Two gaps close together: (1) constructing
 // `some([…])` — the OptionSome heap-payload materializer now admits a scalar-list literal (incl the
 // empty `some([])`); (2) rendering it — the self-host `option.to_string_li`. Byte-identical to v0.
-
 fn describe(o: Option[List[Int]]) -> String = match o {
-  some(v) => "len " + int.to_string(list.len(v))
-  none => "empty"
+  some(v) => "len " + int.to_string(list.len(v)),
+  none => "empty",
 }
 
 effect fn main() -> Unit = {

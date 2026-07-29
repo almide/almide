@@ -12,7 +12,9 @@ fn build(xs: List[Int]) -> Int = {
 }
 
 fn main() -> Unit = {
-  println(int.to_string(build([1, 2, 3])))            // param case
+  println(int.to_string(build([1, 2, 3])))
+  // param case
   let nums = [10, 20, 30, 40]
-  println(int.to_string(bytes.len(bytes.from_list(nums)))) // local case
+  // local case
+  println(int.to_string(bytes.len(bytes.from_list(nums))))
 }

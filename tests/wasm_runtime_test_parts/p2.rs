@@ -43,7 +43,14 @@ fn wasm_cross_target_spec() {
         let (rc, rout, rerr) = run_native_capture(&source);
         let wasm = match std::panic::catch_unwind(|| run_wasm_capture(&source)) {
             Ok(Some(w)) => w,
-            Ok(None) => return, // wasmtime unavailable mid-run → skip the gate
+            // A spawn failure mid-corpus (wasmtime WAS probed at entry) is
+            // this fixture's failure — never `return` from inside the loop:
+            // that discarded the rest of the corpus and every accumulated
+            // failure as a green pass (#991).
+            Ok(None) => {
+                failed.push(format!("{name}: wasmtime could not be spawned mid-run"));
+                continue;
+            }
             Err(_) => { failed.push(format!("{name}: WASM build/run panicked")); continue; }
         };
         let (wc, wout, werr) = wasm;
@@ -131,8 +138,10 @@ fn assert_cross_target_project(files: &[(&str, &str)]) {
         .arg("out.wasm")
         .output()
     {
-        Ok(o) if o.status.code() != Some(127) => o,
-        _ => return, // wasmtime unavailable
+        // A 127 guest exit flows into the success assertion below as an
+        // honest failure; only a spawn error means wasmtime is absent (#991).
+        Ok(o) => o,
+        Err(_) => return, // wasmtime unavailable
     };
     assert!(
         w.status.success(),

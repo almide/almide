@@ -9,13 +9,11 @@
 // `value_*`-named function into `almide_rt_value_*`, which collided
 // with user code and produced a non-existent runtime symbol such as
 // `almide_rt_value_to_float`.
-
 // Regression #868: the same pass rewrote ANY `__`-prefixed call to
 // `almide_rt___<name>` (the convention for generated codec helpers),
 // renaming a user fn's call sites but never its definition (E0425 on
 // `--target rust`). Only the generated `__encode_`/`__decode_` families
 // are rewritten now; other `__` names link like any user fn.
-
 fn __helper(x: Int) -> String = int.to_string(x + 1)
 
 fn value_to_float(n: Int) -> Float = int.to_float(n) + 0.5

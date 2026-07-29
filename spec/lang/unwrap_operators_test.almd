@@ -1,6 +1,4 @@
-
 // ── expr! on Result ──
-
 effect fn parse_must(s: String) -> Result[Int, String] = {
   let n = int.parse(s)!
   ok(n)
@@ -25,7 +23,6 @@ test "bang result chain" {
 }
 
 // ── expr! on Option ──
-
 effect fn get_first(xs: List[Int]) -> Result[Int, String] = {
   let v = list.first(xs)!
   ok(v)
@@ -40,7 +37,6 @@ test "bang option none propagates err" {
 }
 
 // ── expr ?? on Result ──
-
 test "qq result ok" {
   let v = int.parse("42") ?? 0
   assert_eq(v, 42)
@@ -52,7 +48,6 @@ test "qq result err uses fallback" {
 }
 
 // ── expr ?? on Option ──
-
 test "qq option some" {
   let xs = [10, 20]
   let v = list.first(xs) ?? 0
@@ -66,9 +61,7 @@ test "qq option none uses fallback" {
 }
 
 // ── expr? on Result → Option ──
-
-fn try_parse(s: String) -> Option[Int] =
-  int.parse(s)?
+fn try_parse(s: String) -> Option[Int] = int.parse(s)?
 
 test "question result ok becomes some" {
   assert_eq(try_parse("42"), some(42))
@@ -79,9 +72,7 @@ test "question result err becomes none" {
 }
 
 // ── expr? on Option → Option (identity) ──
-
-fn try_first(xs: List[Int]) -> Option[Int] =
-  list.first(xs)?
+fn try_first(xs: List[Int]) -> Option[Int] = list.first(xs)?
 
 test "question option some passthrough" {
   assert_eq(try_first([1, 2]), some(1))
@@ -92,7 +83,6 @@ test "question option none passthrough" {
 }
 
 // ── Combined operators ──
-
 test "qq chain result and option" {
   let port = int.parse(map.get(["port": "8080"], "port") ?? "3000") ?? 80
   assert_eq(port, 8080)
@@ -104,12 +94,10 @@ test "qq chain fallback key missing" {
 }
 
 // ── expr?.field — optional chaining ──
-
 type Profile = { name: String, age: Int }
 
-fn get_profile(id: Int) -> Option[Profile] =
-  if id == 1 then some({ name: "Alice", age: 30 })
-  else none
+fn get_profile(id: Int) -> Option[Profile] = if id == 1 then some({ name: "Alice", age: 30 })
+else none
 
 test "optional chain some" {
   let name = get_profile(1)?.name

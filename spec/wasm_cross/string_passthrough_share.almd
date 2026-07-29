@@ -6,12 +6,7 @@
 // returned the input string borrowed, so every no-match link in a pipe chain
 // added an extra Dec of the SAME buffer: a 3-link no-match `string.replace`
 // chain (svg escape_attr) under-flowed the refcount and trapped __rc_dec.
-
-fn escape(s: String) -> String =
-  s |> string.replace("&", "&amp;")
-    |> string.replace("<", "&lt;")
-    |> string.replace(">", "&gt;")
-    |> string.replace("\"", "&quot;")
+fn escape(s: String) -> String = s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(">", "&gt;") |> string.replace('"', "&quot;")
 
 fn main() -> Unit = {
   // 4-link chain, all no-match: every link passes the input through.

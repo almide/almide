@@ -6,27 +6,20 @@
 // non-matching value through the guard and panicked at the body's
 // `let-else unreachable!()` instead of falling through to the next arm
 // (wasm refined correctly; native panicked — a target divergence).
-
 type Color = | Red | Black
 
 type Tree = | Leaf | Node(Color, Tree, Int, Tree)
 
-// Int-coded result keeps every fn inside the v1 lowering subset (a
-// heap-result match is a known deferred class); the promise under test is the
-// PATTERN REFINEMENT, which is unchanged.
-fn check(t: Tree) -> Int =
-  match t {
-    Node(Red, Node(Red, _, _, _), _, _) => 1,
-    Node(Red, Node(_, _, 5, _), _, _) => 2,
-    Node(_, Node(Black, _, _, Node(Red, _, _, _)), _, _) => 3,
-    _ => 0,
-  }
+fn check(t: Tree) -> Int = match t {
+  Node(Red, Node(Red, _, _, _), _, _) => 1,
+  Node(Red, Node(_, _, 5, _), _, _) => 2,
+  Node(_, Node(Black, _, _, Node(Red, _, _, _)), _, _) => 3,
+  _ => 0,
+}
 
-fn label(code: Int) -> String =
-  if code == 1 then "red-red"
-  else if code == 2 then "five"
-  else if code == 3 then "deep"
-  else "other"
+fn label(code: Int) -> String = if code == 1 then "red-red"
+else if code == 2 then "five"
+else if code == 3 then "deep" else "other"
 
 effect fn main() -> Unit = {
   // inner tag mismatch: must fall through, not panic

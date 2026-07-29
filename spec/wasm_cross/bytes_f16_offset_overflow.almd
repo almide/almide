@@ -14,20 +14,22 @@ import json
 fn main() -> Unit = {
   // The case that diverged.
   println(float.to_string(bytes.read_f16_le(bytes.from_list([1, 124]), 9223372036854775807)))
-
   // The negative end was already guarded; it stays guarded.
   println(float.to_string(bytes.read_f16_le(bytes.from_list([255, 123]), -9223372036854775808)))
-
   // In-range reads are unaffected, including the last valid offset and the
   // first out-of-range one.
   println(float.to_string(bytes.read_f16_le(bytes.from_list([255, 123]), 0)))
   println(float.to_string(bytes.read_f16_le(bytes.from_list([255, 123]), 1)))
-
   // The array form takes the same guard per element.
   println(int.to_string(list.len(bytes.read_f16_le_array(bytes.from_list([255, 123, 0, 60]), 0, 2))))
-
   // The JSON parser's hex-quad bound had the same additive shape; a truncated
   // escape must stay an error rather than an out-of-range read.
-  println(match json.parse("{\"k\":\"\\u00e9\"}") { ok(v) => json.stringify(v), err(e) => "err" })
-  println(match json.parse("{\"k\":\"\\u00\"}") { ok(v) => json.stringify(v), err(e) => "err" })
+  println(match json.parse('{"k":"\\u00e9"}') {
+    ok(v) => json.stringify(v),
+    err(e) => "err",
+  })
+  println(match json.parse('{"k":"\\u00"}') {
+    ok(v) => json.stringify(v),
+    err(e) => "err",
+  })
 }

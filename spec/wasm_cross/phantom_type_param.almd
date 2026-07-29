@@ -7,7 +7,9 @@
 // struct and from every reference to it; the param carries no runtime data so
 // `Tagged[String]` and `Tagged[Int]` share one representation.
 type Tagged[T] = { raw: Int }
+
 fn unwrap_tag(t: Tagged[String]) -> Int = t.raw
+
 fn main() -> Unit = {
   let a: Tagged[String] = { raw: 7 }
   let b: Tagged[Int] = { raw: 9 }

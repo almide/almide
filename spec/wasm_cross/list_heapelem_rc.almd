@@ -6,7 +6,9 @@
 type Pt = { x: Int, tag: String }
 
 fn cell(p: (Float, Bool)) -> String = float.to_string(p.0) + (if p.1 then "T" else "F")
+
 fn pshow(p: Pt) -> String = int.to_string(p.x) + p.tag
+
 fn ints(xs: List[Int]) -> String = list.join(list.map(xs, int.to_string), "-")
 
 effect fn main() -> Unit = {
@@ -22,14 +24,20 @@ effect fn main() -> Unit = {
   // `update` takes a FUNCTION, not a replacement value — a distinct twin from `set`.
   println("tup.update    = " + list.join(list.map(list.update(tup, 1, (p) => (8.0, true)), cell), ","))
   println("tup.update_oob= " + list.join(list.map(list.update(tup, 99, (p) => (8.0, true)), cell), ","))
-
-  let recs: List[Pt] = [Pt { x: 1, tag: "a" }, Pt { x: 2, tag: "b" }, Pt { x: 3, tag: "c" }]
+  let recs: List[Pt] = [
+    Pt { x: 1, tag: "a" },
+    Pt { x: 2, tag: "b" },
+    Pt { x: 3, tag: "c" }
+  ]
   println("rec.remove_at = " + list.join(list.map(list.remove_at(recs, 1), pshow), ","))
   println("rec.set       = " + list.join(list.map(list.set(recs, 0, Pt { x: 9, tag: "z" }), pshow), ","))
   println("rec.tail      = " + list.join(list.map(list.tail(recs), pshow), ","))
   println("rec.src       = " + list.join(list.map(recs, pshow), ","))
-
-  let nested: List[List[Int]] = [[1, 2], [3], [4, 5, 6]]
+  let nested: List[List[Int]] = [
+    [1, 2],
+    [3],
+    [4, 5, 6]
+  ]
   println("nest.remove_at= " + list.join(list.map(list.remove_at(nested, 0), ints), "|"))
   println("nest.take_end = " + list.join(list.map(list.take_end(nested, 2), ints), "|"))
   println("nest.swap     = " + list.join(list.map(list.swap(nested, 0, 2), ints), "|"))

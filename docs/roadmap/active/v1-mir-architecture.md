@@ -104,7 +104,7 @@ MIR に小ステップ操作的意味論を与える(自分の IR だから出�
 
 ## 4. self-host runtime
 
-`runtime/rs`(native)と emit_wasm の ~136 routine(wasm)の二重実装が、ownership 以外の drift(~72%の本体: `string.lines`/regex/libm/json…)の源。v1 では **ランタイムを Almide で書く** → 同じ Core→MIR→target を通って全ターゲットへ。drift クラスごと消滅し、dogfooding にもなる(`research/selfhost/` の方向)。alloc/RC の最小プリミティブだけ MIR 組み込み、残りは Almide。ブートストラップは段階的に(Phase 3)。
+`runtime/rs`(native)と emit_wasm の ~136 routine(wasm)の二重実装が、ownership 以外の drift(~72%の本体: `string.lines`/regex/libm/json…)の源。v1 では **ランタイムを Almide で書く** → 同じ Core→MIR→target を通って全ターゲットへ。drift クラスごと消滅し、dogfooding にもなる(旧 `research/selfhost/`、現 `research/spike/v1-mir/` の方向)。alloc/RC の最小プリミティブだけ MIR 組み込み、残りは Almide。ブートストラップは段階的に(Phase 3)。
 
 ### 4.1 wasm emit の理想形 = 手書き wasm 表面を極小化して証明可能にする
 

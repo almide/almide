@@ -6,13 +6,9 @@
 // `RuntimeCall`s too (it only knew `Call` nodes — the #809 fix), so the seed
 // occurrence clones. Sibling of #809; the borrow-vs-move authority inside one
 // call is rustc's borrow live-range, not the flat last-use count.
-
 fn pick(base: Map[String, Int], grow: Bool) -> Int = {
-  let seeded = map.fold(
-    base,
-    (if grow then ["k": 1] else base),
-    (acc, k, v) => map.set(acc, k, v + 1),
-  )
+  let seeded = map.fold(base, (if grow then ["k": 1]
+  else base), (acc, k, v) => map.set(acc, k, v + 1))
   map.len(seeded)
 }
 
@@ -24,10 +20,7 @@ test "fold seed may reference the fold subject" {
 
 test "nested fold with subject-consuming seed builds and runs" {
   let acc: Map[String, Bool] = [:]
-  let r = map.fold(
-    map.fold(acc, (if map.get_or(["k0": false], "x", true) then ["k0": true] else acc), (a, k, v) => map.set(a, k, v)),
-    "z",
-    (a, k, v) => a + "!",
-  )
+  let r = map.fold(map.fold(acc, (if map.get_or(["k0": false], "x", true) then ["k0": true]
+  else acc), (a, k, v) => map.set(a, k, v)), "z", (a, k, v) => a + "!")
   assert_eq(r, "z!")
 }

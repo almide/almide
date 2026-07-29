@@ -48,7 +48,7 @@ corpus-wall after each.
   `bind_variant_arm` (scalar binds only), `emit_variant_arm_chain` / `emit_variant_unit_chain`.
   Wired at: tail.rs (scalar+heap), binds.rs (let-bind), calls.rs (operand/arg + ctor construct
   in arg position), control.rs:~122 (unit statement).
-- v0 reference layout: `crates/almide-codegen/src/emit_wasm/collections.rs::emit_record`,
+- v0 reference layout (deleted with #782 — read via git history): `emit_wasm/collections.rs::emit_record`,
   `equality.rs::{variant_alloc_size,find_variant_tag_by_ctor}`, `mod.rs` variant registration.
   (v1 uses its OWN uniform-i64-slot block — tag@slot0, fields@slot1.., padded to slot_count —
   NOT v0's byte-packed layout. Only the observable stdout must match v0.)
@@ -133,7 +133,7 @@ WIRING:
 1. `Op::DropVariant { v, ty }` in MIR — cert = ONE `d` (lib.rs + certificate.rs, alongside the
    other Drop* ops). Render → `(call $__drop_<ty> (local.get v))`.
 2. GENERATE the `__drop_<ty>` Almide source per recursive variant type at program assembly and
-   auto-link it (the cleanest hook is alongside `self_host_runtime()` in render_wasm/registry.rs
+   auto-link it (the cleanest hook is alongside `self_host_runtime()` in almide-types/src/self_host_registry.rs
    — but that registry is `include_str!` of fixed files, so add a DYNAMIC generated-source path:
    produce the source string from the `VariantLayouts`, run it through the same frontend feeder
    `lower_source` uses, rename its fn to `__drop_<ty>`, add to the program functions). Both

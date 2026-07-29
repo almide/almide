@@ -8,7 +8,6 @@
 // produced invalid Rust. WASM was unaffected. The fix makes the join runtime
 // accept `&[String]` (matching `almide_rt_list_join`), so ANY combination of
 // join / len / index / iteration over the same param compiles on both targets.
-
 fn summary(xs: List[String]) -> String = {
   let n = list.len(xs)
   string.join(xs, ",") + "/" + int.to_string(n)
@@ -21,7 +20,9 @@ fn first_and_count(xs: List[String]) -> String = {
 
 fn joined_with_iter(xs: List[String]) -> String = {
   var acc = ""
-  for x in xs { acc = acc + x }
+  for x in xs {
+    acc = acc + x
+  }
   acc + "|" + string.join(xs, "-") + "|" + int.to_string(list.len(xs))
 }
 

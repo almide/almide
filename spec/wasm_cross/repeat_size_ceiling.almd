@@ -14,7 +14,6 @@ effect fn main() -> Unit = {
   println("small = " + string.repeat("ab", 3))
   println("zero  = [" + string.repeat("ab", 0) + "]")
   println("neg   = [" + string.repeat("ab", -5) + "]")
-
   let n = list.len(env.args())
   let huge = 9223372036854775807 - n
   println("about to overflow")

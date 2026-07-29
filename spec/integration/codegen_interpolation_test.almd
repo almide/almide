@@ -1,7 +1,5 @@
 // codegen_interpolation_test — String interpolation edge cases for codegen
-
 // ── Interpolation with method calls ──
-
 test "interpolation with stdlib call" {
   let xs = [1, 2, 3]
   let n = list.len(xs)
@@ -10,14 +8,12 @@ test "interpolation with stdlib call" {
 }
 
 // ── Interpolation with nested function calls ──
-
 test "interpolation with nested calls" {
   let msg = "upper: ${string.to_upper(string.trim("  hello  "))}"
   assert_eq(msg, "upper: HELLO")
 }
 
 // ── Interpolation with arithmetic ──
-
 test "interpolation with arithmetic expression" {
   let a = 10
   let b = 20
@@ -26,7 +22,6 @@ test "interpolation with arithmetic expression" {
 }
 
 // ── Interpolation with match expression ──
-
 test "interpolation with match" {
   let x = some(42)
   let label = match x {
@@ -37,7 +32,6 @@ test "interpolation with match" {
 }
 
 // ── Interpolation with if expression ──
-
 test "interpolation with conditional" {
   let n = 7
   let msg = "n is ${if n > 5 then "big" else "small"}"
@@ -45,7 +39,6 @@ test "interpolation with conditional" {
 }
 
 // ── Multiple interpolations in sequence ──
-
 test "many interpolations in one string" {
   let a = 1
   let b = 2
@@ -56,17 +49,17 @@ test "many interpolations in one string" {
 }
 
 // ── Interpolation inside loop building strings ──
-
 test "interpolation inside for loop" {
   var lines: List[String] = []
   for i in 1...3 {
-    lines = lines + ["line ${int.to_string(i)}"]
+    lines = lines + [
+      "line ${int.to_string(i)}"
+    ]
   }
   assert_eq(lines, ["line 1", "line 2", "line 3"])
 }
 
 // ── Interpolation with record field access ──
-
 test "interpolation with record field" {
   let user = { name: "alice", age: 30 }
   let msg = "user: ${user.name}, age: ${int.to_string(user.age)}"
@@ -74,7 +67,6 @@ test "interpolation with record field" {
 }
 
 // ── Interpolation with string concatenation inside ──
-
 test "interpolation with concat inside" {
   let first = "hello"
   let last = "world"
@@ -83,7 +75,6 @@ test "interpolation with concat inside" {
 }
 
 // ── Interpolation with tuple field access ──
-
 test "interpolation with tuple index" {
   let t = (10, 20)
   let msg = "pair: (${int.to_string(t.0)}, ${int.to_string(t.1)})"
@@ -91,18 +82,13 @@ test "interpolation with tuple index" {
 }
 
 // ── Heredoc with complex interpolation ──
-
 test "heredoc with record field interpolation" {
   let config = { host: "localhost", port: 8080 }
-  let text = """
-    server: ${config.host}
-    port: ${int.to_string(config.port)}
-  """
+  let text = "server: ${config.host}\nport: ${int.to_string(config.port)}"
   assert_eq(text, "server: localhost\nport: 8080")
 }
 
 // ── Interpolation with empty string variable ──
-
 test "interpolation with empty var" {
   let empty = ""
   let msg = "before${empty}after"

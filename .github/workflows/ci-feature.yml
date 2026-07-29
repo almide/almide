@@ -24,6 +24,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.89.0"
+  # Cold runners gain nothing from the workspace's release-incremental
+  # profile (#1006) — it only bloats the caches. Opt out.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   build-and-test:
@@ -56,26 +59,25 @@ jobs:
         # --workspace: a bare `cargo test` tests only the root package (see ci.yml).
         run: cargo test --workspace
 
-      - name: Run exercises (Rust target)
-        continue-on-error: true  # TODO: re-enable after stdlib reconnection
+      # The execution signal for feature branches. This step was a double
+      # no-op for months (#979): it globbed `exercises/` — deleted long ago —
+      # and muted even that failure with continue-on-error ("TODO: re-enable
+      # after stdlib reconnection", which happened without the re-enable).
+      # `examples/` is the live corpus ci.yml runs; the count floor keeps a
+      # renamed corpus from reading as green (the #976 lesson).
+      - name: Run examples (Rust target)
         run: |
           ALMIDE=./target/release/almide
-          failed=0; passed=0
-          for f in exercises/*/*.almd; do
-            case "$f" in *_error_test.almd) continue;; esac
-            if $ALMIDE run "$f" 2>&1; then
-              passed=$((passed + 1))
-            else
-              echo "FAIL: $f"
-              failed=$((failed + 1))
-            fi
-          done
-          echo "::notice::Rust target: $passed passed, $failed failed"
-          [ $failed -eq 0 ]
+          count=$(find examples -name '*.almd' | wc -l)
+          [ "$count" -ge 10 ] || { echo "::error::only $count example files found — the corpus moved (#979)"; exit 1; }
+          $ALMIDE test examples/
 
       - name: Emit check (smoke)
-        continue-on-error: true  # TODO: re-enable after stdlib reconnection
         run: |
           ALMIDE=./target/release/almide
-          $ALMIDE exercises/pangram/pangram.almd --target rust > /dev/null && echo "Rust emit OK"
-          $ALMIDE exercises/pangram/pangram.almd --target ts   > /dev/null && echo "TS emit OK"
+          f=examples/binary-search.almd
+          [ -f "$f" ] || { echo "::error::$f not found — pick a new smoke fixture (#979)"; exit 1; }
+          $ALMIDE "$f" --target rust > /dev/null
+          echo "Rust emit OK"
+          $ALMIDE "$f" --emit-ast > /dev/null
+          echo "AST emit OK"

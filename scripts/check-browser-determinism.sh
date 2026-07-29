@@ -16,8 +16,19 @@ NATIVE_HARNESS="tools/wasmgen-harness"
 UU_HARNESS="tools/wasmgen-harness-uu"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
-command -v wasm-pack >/dev/null || { echo "::warning::wasm-pack not found — skipping browser-ABI determinism gate"; exit 0; }
-command -v node      >/dev/null || { echo "::warning::node not found — skipping browser-ABI determinism gate"; exit 0; }
+# In CI a missing tool is a FAILURE, not a skip (#985): the invoking job
+# installs node + wasm-pack, so their absence there means the gate silently
+# stopped gating. Locally the skip stays.
+missing_tool() {
+  if [ "${CI:-}" = "true" ]; then
+    echo "::error::browser-determinism: $1 not found — in CI a missing tool is a failure (#985)"
+    exit 1
+  fi
+  echo "::warning::$1 not found — skipping browser-ABI determinism gate"
+  exit 0
+}
+command -v wasm-pack >/dev/null || missing_tool wasm-pack
+command -v node      >/dev/null || missing_tool node
 
 echo "==> Building native harness"
 cargo build --release --manifest-path "$NATIVE_HARNESS/Cargo.toml" -q || { echo "::error::native harness build failed"; exit 2; }
@@ -60,4 +71,11 @@ if [ "$fail" -ne 0 ]; then
   echo "::error::browser-ABI codegen gate FAILED — the compiler panics or diverges when built to wasm32-unknown-unknown (the playground target). Common causes: unconditional std::time/Instant in the compile path, or HashMap iteration reaching emitted bytes."
   exit 1
 fi
-echo "browser-ABI determinism: $n/$n fixtures compile without panic and byte-identical to native"
+# No vacuous pass (#985): on a green run every corpus file was compared, so an
+# empty/renamed FIXTURE_DIR (n=0) is a broken scan, not a win.
+corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
+if [ "$corpus" -eq 0 ] || [ "$n" -ne "$corpus" ]; then
+  echo "::error::browser-determinism: compared $n of $corpus fixtures in $FIXTURE_DIR — the scan went blind (#985)"
+  exit 1
+fi
+echo "browser-ABI determinism: $n/$corpus fixtures compile without panic and byte-identical to native"

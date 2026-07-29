@@ -258,8 +258,9 @@ impl LowerCtx {
             // Outside the executable subset a Const-0 would silently pick a wrong
             // arm — WALL (the discipline: an unfaithful variant match rejects, never
             // emits a deferred 0).
-            return Err(LowerError::at(
+            return Err(LowerError::shaped(
                 subject.span,
+                WallShape::VariantValueMatch,
                 "variant (Option/Result) match bound to a let/var outside the \
                  executable subset cannot be faithfully computed (a Const-0 would \
                  silently pick a wrong arm) not in this brick",

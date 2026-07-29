@@ -2,7 +2,6 @@
 // The i64::MIN magnitude (9223372036854775808) overflows a signed parse, so a
 // negated int literal must fold the minus sign INTO the parse rather than
 // negating an already-overflowed (and clamped) magnitude. #660.
-
 fn main() -> Unit = {
   let lo: Int = -9223372036854775808
   let hi: Int = 9223372036854775807

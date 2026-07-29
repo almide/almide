@@ -9,4 +9,7 @@ fn pick(es: List[(Int, String)]) -> String = match es |> list.find((e) => e.1 ==
   none => "none",
   some((idx, line)) => int.to_string(idx) + ":" + line,
 }
-fn main() -> Unit = { println(pick(["a", "b", "c"] |> list.enumerate)) }
+
+fn main() -> Unit = {
+  println(pick(["a", "b", "c"] |> list.enumerate))
+}

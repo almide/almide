@@ -1,6 +1,5 @@
 // Test block result semantics: effect fn calls return Result[T, String] in test blocks.
 // No auto-unwrap. Use `!` for explicit unwrap, or assert on ok/err directly.
-
 effect fn safe_div(a: Int, b: Int) -> Int = {
   guard b != 0 else err("division by zero")!
   a / b

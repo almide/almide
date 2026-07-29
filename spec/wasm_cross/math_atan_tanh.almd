@@ -12,12 +12,10 @@
 //   - every tanh range split (log(5/3)/2, log(3)/2, |x| > 20, subnormal) and
 //     the expm1(1.1) upstream sanity vector through tanh(0.55)
 //   - signs, ±0, ±inf, NaN
-
 fn main() -> Unit = {
   let pinf = 1.0 / 0.0
   let nan = 0.0 / 0.0
   let nzero = -1.0 * 0.0
-
   // atan: subranges + identities
   println(float.to_string(math.atan(0.2)))
   println(float.to_string(math.atan(0.5)))
@@ -32,7 +30,6 @@ fn main() -> Unit = {
   println(float.to_string(math.atan(0.0 - pinf)))
   println(float.to_string(math.atan(nan)))
   println(float.to_string(math.atan(nzero)))
-
   // tanh: range splits + expm1 vector + saturation
   println(float.to_string(math.tanh(0.1)))
   println(float.to_string(math.tanh(0.2554)))

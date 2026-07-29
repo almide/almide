@@ -124,7 +124,7 @@ counted range のみ・no-alloc-in-loop・static pool ── これは **DO-178C
   - **Almide → Rust 翻訳忠実性** = `rust_pattern` 表 + per-build V。`Translation.v` の
     **eager instance は既に証明済み**(`eager_translation_refines_safety`)で、同じ shape。
     綺麗なマッピング(`Dup→.clone()` / `Drop→scope-end` / `Consume→move` /
-    `MakeUnique→no-op`)は `render_rust.rs:1-21` に「§3.2 faithful-renderer 契約」
+    `MakeUnique→no-op`)は `render_native.rs:1-21` に「§3.2 faithful-renderer 契約」
     として既に書かれている。
   - **Rust ソース → 機械語** = **Ferrocene に信頼**(ISO 26262 ASIL D / IEC 61508 資格化)。
     SCADE KCG 型で、`certification-grade.md:135` が既にこのアナロジーを書いている。
@@ -137,7 +137,7 @@ counted range のみ・no-alloc-in-loop・static pool ── これは **DO-178C
 
 Rust 経路が**2本に分裂**している:
 
-- **綺麗な所有権保存マッピング** = `crates/almide-mir/src/render_rust.rs`(368行のデモ)。
+- **綺麗な所有権保存マッピング** = `crates/almide-mir/src/render_native.rs`(368行のデモ)。
   だが Vec<i64> 一律・CLI 未接続・`v0`/`v1` 番号ローカルで**レビュー不可グレード**。
 - **本番 Rust** = `crates/almide-codegen/src/walker/` + `codegen/templates/rust.toml`
   (v0/legacy)。イディオマティックで**レビュー可・DO-178C「ソースは可読」を満たす**が、

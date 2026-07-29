@@ -652,8 +652,9 @@ impl LowerCtx {
                 Ok(())
             }
             Some(ArgOutcome::Pushed) => Ok(()),
-            None => Err(LowerError::at(
+            None => Err(LowerError::shaped(
                 a.span,
+                WallShape::CallArgument,
                 format!("call argument {} not in this brick", kind_name(&a.kind)),
             )),
         }

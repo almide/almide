@@ -1,5 +1,4 @@
 // Tests for string methods that had WASM codegen gaps
-
 test "starts_with" {
   assert("hello world".starts_with("hello"))
   assert(not "hello world".starts_with("world"))

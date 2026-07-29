@@ -25,11 +25,14 @@ set -uo pipefail
 # by spec/wasm_cross (the cross-target byte gate) and the interp 3-way oracle
 # instead. This gate is kept as a tombstone so CI/lefthook wiring stays intact;
 # it re-arms automatically if emit_wasm/ ever reappears.
+# cd FIRST, probe SECOND (#981): the relative -d probe used to run before the
+# cd, so any invocation from a subdirectory "retired" the gate regardless of
+# tree state.
+cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 if [ ! -d "crates/almide-codegen/src/emit_wasm" ]; then
   echo "rt-oracle-registry: RETIRED with the v0 wasm emitter (#782) — v1 self-hosts are gated by spec/wasm_cross + the interp oracle."
   exit 0
 fi
-cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 
 EMIT_DIR="crates/almide-codegen/src/emit_wasm"
 REGISTRY="crates/almide-codegen/rt-oracle-registry.toml"

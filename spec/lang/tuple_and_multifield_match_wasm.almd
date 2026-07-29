@@ -6,32 +6,36 @@
 //      payload sub-match, which then lowers by (1).
 //   3. a SINGLE-CTOR (newtype) variant match (`Pair(Int, String)`, `B(Int)`) — routed through an
 //      IfThen branch-merge with an unreachable empty-heap else, so the arm value does not double-move.
-
 fn tup(t: (String, Int)) -> String = match t {
   ("a", 1) => "A1",
   ("a", _) => "AX",
-  (_, 0)   => "X0",
-  (_, _)   => "XX",
+  (_, 0) => "X0",
+  (_, _) => "XX",
 }
 
-type Ev = KV(String, Int) | Tag(String)
+type Ev = | KV(String, Int) | Tag(String)
+
 fn ev(e: Ev) -> String = match e {
   KV("count", n) => "C" + int.to_string(n),
-  KV(_, n)       => "K" + int.to_string(n),
-  Tag("hot")     => "HOT",
-  Tag(_)         => "T",
+  KV(_, n) => "K" + int.to_string(n),
+  Tag("hot") => "HOT",
+  Tag(_) => "T",
 }
 
-type Rec = Pair(Int, String)
+type Rec = | Pair(Int, String)
+
 fn rec(r: Rec) -> String = match r {
   Pair(1, "one") => "1ONE",
-  Pair(1, _)     => "1X",
+  Pair(1, _) => "1X",
   Pair(_, "one") => "XONE",
-  Pair(_, _)     => "XX",
+  Pair(_, _) => "XX",
 }
 
-type Boxed = B(Int)
-fn unbox(b: Boxed) -> String = match b { B(n) => "b" + int.to_string(n) }
+type Boxed = | B(Int)
+
+fn unbox(b: Boxed) -> String = match b {
+  B(n) => "b" + int.to_string(n)
+}
 
 effect fn main() -> Unit = {
   println(tup(("a", 1)))

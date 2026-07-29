@@ -1,10 +1,8 @@
 // Verify that syntax_guide hints don't reject valid identifiers
 // that happen to match other-language keywords.
-
 type View = { kind: Int, value: String }
 
-fn diff(old: View, new: View) -> Int =
-  if old.kind != new.kind then 1 else 0
+fn diff(old: View, new: View) -> Int = if old.kind != new.kind then 1 else 0
 
 test "new as param name" {
   let a = View { kind: 1, value: "a" }

@@ -9,8 +9,10 @@ import args
 
 fn b2s(b: Bool) -> String = if b then "T" else "F"
 
-fn ostr(o: Option[String]) -> String =
-  match o { some(s) => s, none => "NONE" }
+fn ostr(o: Option[String]) -> String = match o {
+  some(s) => s,
+  none => "NONE",
+}
 
 effect fn main() -> Result[Unit, String] = {
   // path: pure string plumbing through the linked bundled module
@@ -22,7 +24,6 @@ effect fn main() -> Result[Unit, String] = {
   println(ostr(path.extension("Makefile")))
   println(b2s(path.is_absolute("/usr")))
   println(b2s(path.is_absolute("relative/path")))
-
   // args: exercises env.args() TWICE through the bundled module (the second
   // WASI args_sizes_get call is the alignment regression)
   println(b2s(args.flag("verbose")))

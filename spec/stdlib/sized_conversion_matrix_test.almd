@@ -15,9 +15,7 @@
 // because its literal arguments let the whole Option fold at compile time.
 // Sentinels are 0 and every expected value is non-zero, so the coalesce form
 // distinguishes Some(v) from None exactly as the unwrap would.
-
 // ── signed → unsigned (negative rejects / clamps to zero) ──
-
 test "int8 to uint8: negative is the lossy side" {
   let neg = int.to_int8(-5)
   assert_eq(int8.to_uint8_checked(neg).is_none(), true)
@@ -35,7 +33,6 @@ test "int64 to unsigned: negative rejects, positive passes" {
 }
 
 // ── signed narrowing (both overflow directions) ──
-
 test "int16 to int8: overflow both ways" {
   assert_eq(int16.to_int8_checked(int.to_int16(300)).is_none(), true)
   assert_eq(int16.to_int8_checked(int.to_int16(-300)).is_none(), true)
@@ -53,7 +50,6 @@ test "int32 and int64 narrowing boundaries" {
 }
 
 // ── unsigned → signed (high half rejects / clamps to max) ──
-
 test "uint8 to int8: the single lossy uint8 pair" {
   let u200 = int.to_uint8(200)
   assert_eq(uint8.to_int8_checked(u200).is_none(), true)
@@ -71,7 +67,6 @@ test "uint16 and uint32 to signed boundaries" {
 }
 
 // ── UInt64 source: the upper half (> i64::MAX) must NOT pivot signed ──
-
 test "uint64 upper half rejects and clamps as unsigned" {
   let umax = uint64.max_value()
   assert_eq(uint64.to_uint32_checked(umax).is_none(), true)
@@ -100,7 +95,6 @@ test "uint64 to Int widening trio on the int module" {
 }
 
 // ── bounds on every carrier ──
-
 test "min_value and max_value on all nine carriers" {
   assert_eq(int.max_value(), 9223372036854775807)
   assert_eq(int.min_value(), -9223372036854775807 - 1)

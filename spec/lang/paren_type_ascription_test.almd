@@ -3,7 +3,6 @@
 // just as a bare call argument. This unblocks a record-field value and a `let`
 // initializer, where the bare `[]: T` form isn't available (the `:` would be a
 // parse error). Both targets parse it identically (shared parser).
-
 type Holder = { id: Int, tags: List[String], nums: List[Int] }
 
 test "paren type ascription on empty list in a record field" {

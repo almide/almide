@@ -7,10 +7,12 @@
 // `list.map` lambda rendered `Vec<i64>`/`Fn(f64)->i64` on native (E0308/E0271)
 // and emitted invalid wasm (i64 vs f64), while the enclosing-generic pin
 // (`names[T: Labelled]`, protocol_ufcs_inferred_lambda) still applies.
-
 fn main() -> Unit = {
   // The nn variance_rows shape: zip → lambda → destructure → nested map+fold.
-  let data = [[1.0, 2.0], [3.0, 4.0]]
+  let data = [
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ]
   let means = [1.5, 3.5]
   let vs = list.zip(data, means) |> list.map((pair) => {
     let (row, mean) = pair
@@ -18,7 +20,6 @@ fn main() -> Unit = {
     list.fold(sq, 0.0, (acc, x) => acc + x) / int.to_float(list.len(row))
   })
   println(vs |> list.map((v) => float.to_string(v)) |> list.join(","))
-
   // Same shape without zip: inner let-bound map inside an outer map lambda.
   let sums = data |> list.map((row) => {
     let sq = list.map(row, (x) => x * x)

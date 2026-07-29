@@ -17,22 +17,18 @@ fn main() -> Unit = {
   println("len   = ${string.len(a)}")
   println("cross = ${string.slice(a, 1060, 1140)}")
   println("tail  = ${string.slice(a, 4080, 4098)}")
-
   // A large magnitude drives k up, so `n` reaches its maximum.
-  let b = float.to_fixed(1.7976931348623157e308, 4096)
+  let b = float.to_fixed(179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0, 4096)
   println("big.len   = ${string.len(b)}")
   println("big.cross = ${string.slice(b, 1400, 1460)}")
-
   // A subnormal drives k down, so the leading zeros path is exercised wide.
-  let c = float.to_fixed(5.0e-324, 4096)
+  let c = float.to_fixed(0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, 4096)
   println("sub.len   = ${string.len(c)}")
   println("sub.cross = ${string.slice(c, 1060, 1120)}")
-
   // Negative, and a rounding-carry case, both past the boundary.
   let d = float.to_fixed(0.0 - 12345.6789, 3000)
   println("neg.len   = ${string.len(d)}")
   println("neg.cross = ${string.slice(d, 1060, 1120)}")
-
   let e = float.to_fixed(0.999999, 2048)
   println("carry.len = ${string.len(e)}")
   println("carry.cross = ${string.slice(e, 1060, 1120)}")

@@ -58,6 +58,21 @@ for module in COVERED_MODULES:
         lines.append("")
 generated = "\n".join(lines)
 
+# The canonical form of the generated file is DEFINED as fmt(generator
+# output): spec/ sits under the fmt --check CI gate (#919), so post-process
+# through `almide fmt` — the two gates can then never disagree on this file,
+# and the generator never has to replicate the formatter's style choices.
+import os, subprocess, tempfile
+almide = os.environ.get("ALMIDE_BIN", "almide")
+tf = tempfile.NamedTemporaryFile("w", suffix=".almd", delete=False)
+tf.write(generated)
+tf.close()
+try:
+    subprocess.run([almide, "fmt", tf.name], check=True, capture_output=True)
+    generated = open(tf.name).read()
+finally:
+    os.unlink(tf.name)
+
 path = "spec/stdlib/string_semantics_manifest_test.almd"
 try:
     committed = open(path).read()

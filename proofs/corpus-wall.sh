@@ -141,6 +141,15 @@ if [ "$CORPUS" = "$ROOT/spec" ] || [ "$CORPUS" = "spec" ]; then
   grep '^WALLED REAL ' "$REPORT" | sed "s|^WALLED REAL ||; s|^$ROOT/||" \
     | awk -F' :: ' '{print $1" :: "$2}' | LC_ALL=C sort -u > "$ACTUAL" || true
   grep -v '^#' "$BASELINE" | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u > "$EXPECTED" || true
+  # The summary COUNT and the per-fn ENUMERATION must agree (#988): if the
+  # `WALLED REAL` line format drifts while the summary survives, $ACTUAL is
+  # empty, comm agrees with an all-comments baseline on nothing, and the
+  # ratchet prints OK for any N. Cross-check them before comparing.
+  ENUMERATED="$(grep -c . "$ACTUAL" || true)"
+  if [ "$ENUMERATED" -ne "$WALLED_REAL" ]; then
+    echo "WALL GATE FAIL: summary says $WALLED_REAL walled fn(s) but the report enumerates $ENUMERATED — WALLED REAL line format drift (#988)." >&2
+    rm -f "$ACTUAL" "$EXPECTED"; cleanup; exit 1
+  fi
   NEW_WALLS="$(LC_ALL=C comm -23 "$ACTUAL" "$EXPECTED")"
   STALE="$(LC_ALL=C comm -13 "$ACTUAL" "$EXPECTED")"
   if [ -n "$NEW_WALLS" ]; then

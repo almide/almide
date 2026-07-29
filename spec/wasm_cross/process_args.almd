@@ -17,7 +17,7 @@
 // byte-identical. #645
 import process
 
-effect fn main() -> () = {
+effect fn main() -> Unit = {
   let args = process.args()
   let first = list.get(args, 0) ?? ""
   println(int.to_string(list.len(args)))

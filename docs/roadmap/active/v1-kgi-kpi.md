@@ -144,7 +144,7 @@
   (c)runtime を Almide 化(Phase 3、v1-mir-architecture.md §4 / #575/#576)。
 
   PUNCH-LIST(順): (1) MIR op 集合をプリミティブ(alloc/RC + 不可分)へ定義、Push/Print 等
-  を runtime fn Call に置換、(2) 最小 stdlib を **Almide で書く**(`research/selfhost/` の
+  を runtime fn Call に置換、(2) 最小 stdlib を **Almide で書く**(旧 `research/selfhost/`、現 `research/spike/v1-mir/` の
   方向)→ render_program で program+runtime を v1 コンパイル → v0 と byte 一致、
   (3) faithful Module/Computed call の実行 → 制御フロー → closure → nested heap。
   ※ self-host 設計は骨太 ―― 疲労下で詰め込まず、fresh session で(検証ワークフローで

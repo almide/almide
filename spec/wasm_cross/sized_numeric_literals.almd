@@ -6,14 +6,14 @@ type Rec = { b: Int8, n: Int }
 
 fn main() -> Unit = {
   let a: List[(Int8, Int)] = [(1, 100), (127, 300)]
-  for p in a { let (x, y) = p; println("${int.to_string(int.from_int8(x))}:${int.to_string(y)}") }
-
+  for p in a {
+    let (x, y) = p
+    println("${int.to_string(int.from_int8(x))}:${int.to_string(y)}")
+  }
   let bs: List[Int8] = [1, 2, 127, -128]
   println(int.to_string(list.len(bs)))
-
   let r: Rec = { b: 127, n: 9999 }
   println("${int.to_string(int.from_int8(r.b))}:${int.to_string(r.n)}")
-
   let n: ((Int8, Int), Int) = ((127, 1000), 2000)
   let (inner, z) = n
   let (ix, iy) = inner

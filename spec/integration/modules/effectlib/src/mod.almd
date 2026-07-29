@@ -1,5 +1,4 @@
 // effectlib — test fixtures for cross-module effect fn calls
-
 effect fn read_config() -> Result[String, String] = {
   ok("config_value")
 }
@@ -11,7 +10,6 @@ fn pure_() -> String = "pure"
 //   fn foo() -> Unit  becomes  fn foo() -> Result[Unit, String]
 // with the body wrapped in ResultOk(Unit). Callers across module
 // boundaries must recognize these as already-lifted.
-
 effect fn do_nothing() -> Unit = {
   ()
 }

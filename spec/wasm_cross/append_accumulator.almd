@@ -8,17 +8,18 @@
 // `check_line_unroll_sound`, and accepted by the extracted `check_cert_lc`. (Memory note: the append
 // is via `__list_concat` (copy), O(n^2) like v0's deep recursion; n is kept small. A future in-place
 // push makes it O(n).)
-fn build(n: Int, acc: List[Int]) -> List[Int] =
-  if n <= 0 then acc
-  else build(n - 1, acc + [7])
+fn build(n: Int, acc: List[Int]) -> List[Int] = if n <= 0 then acc
+else build(n - 1, acc + [7])
 
 // a non-empty initial accumulator (the slot's upfront copy carries the seed elements)
-fn extend(n: Int, acc: List[Int]) -> List[Int] =
-  if n <= 0 then acc
-  else extend(n - 1, acc + [9])
+fn extend(n: Int, acc: List[Int]) -> List[Int] = if n <= 0 then acc
+else extend(n - 1, acc + [9])
 
 fn main() -> Unit = {
-  println(int.to_string(list.len(build(5, []))))        // 5
-  println(int.to_string(list.len(build(0, []))))        // 0  (loop runs zero times → the copy of [])
-  println(int.to_string(list.len(extend(3, [1, 2]))))   // 5  (seed 2 + 3 appends)
+  println(int.to_string(list.len(build(5, []))))
+  // 5
+  println(int.to_string(list.len(build(0, []))))
+  // 0  (loop runs zero times → the copy of [])
+  // 5  (seed 2 + 3 appends)
+  println(int.to_string(list.len(extend(3, [1, 2]))))
 }

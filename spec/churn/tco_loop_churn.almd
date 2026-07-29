@@ -1,5 +1,5 @@
-fn build(n: Int, acc: String) -> String =
-  if n == 0 then acc else build(n - 1, acc + "x")
+fn build(n: Int, acc: String) -> String = if n == 0 then acc else build(n - 1, acc + "x")
+
 fn main() -> Unit = {
   var i = 0
   var sink = 0

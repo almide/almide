@@ -4,7 +4,6 @@
 // read the empty block (v0=2, v1=0 — a MISCOMPILE). The literal is now routed through `map.from_list`
 // (a real map, byte-verified), so these operations byte-match v0 --target wasm. The empty literal
 // `[:]` was already correct.
-
 fn probe(m: Map[String, Int]) -> String = {
   let n = map.len(m)
   let x = map.get(m, "x") ?? -1

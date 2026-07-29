@@ -5,7 +5,6 @@
 // The lexer claims a prefix only when at least one digit of that radix
 // follows: a bare `0x` (or `0b2`, `0xg`) lexes as `0` + identifier and
 // fails to resolve, instead of silently folding the literal to 0.
-
 test "hex literals" {
   assert_eq(0xFF, 255)
   assert_eq(0Xff, 255)

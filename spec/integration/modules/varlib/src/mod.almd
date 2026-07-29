@@ -1,20 +1,16 @@
-type Policy = Never | OnFailure | Always
+type Policy = | Never | OnFailure | Always
 
-type Wrapper = Wrap(Int) | Empty
+type Wrapper = | Wrap(Int) | Empty
 
-type Shape =
-  | Circle { radius: Int }
-  | Dot
+type Shape = | Circle { radius: Int } | Dot
 
 type Pigment: Codec = { r: Int, g: Int, b: Int }
 
-fn parse_tag(s: String) -> Option[String] =
-  if string.starts_with(s, "tag:") then Some(string.slice(s, 4, string.len(s)))
-  else None
+fn parse_tag(s: String) -> Option[String] = if string.starts_with(s, "tag:") then some(string.slice(s, 4, string.len(s)))
+else none
 
 // Test: function reference used within the same module (intra-module)
-fn tag_count(items: List[String]) -> Int =
-  items |> list.filter_map(parse_tag) |> list.len
+fn tag_count(items: List[String]) -> Int = items |> list.filter_map(parse_tag) |> list.len
 
 // #631: a PRODUCER fn inside the owning module constructs the variant via the
 // BARE constructor and returns it. The ctor-call result type must be pinned to

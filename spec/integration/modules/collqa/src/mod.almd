@@ -1,3 +1,5 @@
 type Config = { a: Int }
+
 fn make() -> Config = Config { a: 7 }
+
 fn get_a(c: Config) -> Int = c.a

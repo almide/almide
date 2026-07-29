@@ -15,6 +15,6 @@ test "http.url_decode passes plain text through unchanged" {
 }
 
 test "http.url_decode passes malformed escapes through verbatim" {
-  assert_eq(http.url_decode("%ZZ"), "%ZZ");
+  assert_eq(http.url_decode("%ZZ"), "%ZZ")
   assert_eq(http.url_decode("100%"), "100%")
 }

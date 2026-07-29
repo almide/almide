@@ -10,12 +10,29 @@
 // on REAL THREADS, so their print interleaving is wall-clock (caught as a
 // 1-in-N gate flake: native printed B,A under load). Settle's RESULT list
 // order is deterministic and IS pinned; its thunks here are silent.
-fn thunk_a() -> Int = { println("A"); 1 }
-fn thunk_b() -> Int = { println("B"); 2 }
+fn thunk_a() -> Int = {
+  println("A")
+  1
+}
+
+fn thunk_b() -> Int = {
+  println("B")
+  2
+}
+
 fn quiet_a() -> Int = 1
+
 fn quiet_b() -> Int = 2
-fn try_c() -> Result[Int, String] = { println("C"); err("c") }
-fn try_d() -> Result[Int, String] = { println("D"); ok(4) }
+
+fn try_c() -> Result[Int, String] = {
+  println("C")
+  err("c")
+}
+
+fn try_d() -> Result[Int, String] = {
+  println("D")
+  ok(4)
+}
 
 effect fn main() -> Unit = {
   let r = fan.race([thunk_a, thunk_b])

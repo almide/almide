@@ -152,7 +152,7 @@ yaml's remaining 22 v1 walls are dominated by the dynamic `Value` model: `value.
    - tag == 6 (Object): payload = the key/value store (match v0's Object layout — `Vec<(String, Value)>`). `for each pair: rc_dec(key String); $__drop_value(value)`; then `rc_dec(store)`; then `rc_dec(p)`.
    The cert sees ONE `d` (an `Op::DropValue`, opaque). The recursion is the trusted routine — verified by the rt-oracle-registry DIFFERENTIAL test (a `value.stringify` round-trip fixture proves no leak/no double-free vs v0). A `value_elem_lists` List drops via a sibling `$__drop_list_value` (loop `$__drop_value` per element + free list).
 
-3. **`value.array`/`value.object` self-host** (value_core.almd): `alloc_value`, `store32(h+4, 5/6)`, `store64(h+12, <list/store handle>)` — MOVE the items in (v0 does `Array(items.clone())`, so a DEEP COPY: the self-host either copies items or takes ownership; match v0's bytes via the stringify round-trip). Register in render_wasm/registry.rs.
+3. **`value.array`/`value.object` self-host** (value_core.almd): `alloc_value`, `store32(h+4, 5/6)`, `store64(h+12, <list/store handle>)` — MOVE the items in (v0 does `Array(items.clone())`, so a DEEP COPY: the self-host either copies items or takes ownership; match v0's bytes via the stringify round-trip). Register in crates/almide-types/src/self_host_registry.rs (`self_host_runtime()`).
 
 4. **`value.as_array`/`value.as_object`** — read tag; tag 5/6 → `Ok(payload list/store)` (BINDS the heap payload — yaml:249), else `Err`. A heap-Ok Result (cap-as-tag, like value.as_string — reuse the str-result machinery from commit 7b24ef8f).
 

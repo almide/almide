@@ -6,9 +6,10 @@
 // the ANF-lift extractor had no StringInterp arm, so the unwrap reached the
 // interp lowering intact (#950). Every part is evaluated unconditionally, left
 // to right, which is what makes the lift sound.
-
 effect fn fetch() -> Result[String, String] = ok("hi")
+
 effect fn boom() -> Result[String, String] = err("nope")
+
 effect fn count() -> Result[Int, String] = ok(42)
 
 // Two unwraps in one interpolation: the fixpoint lifts them one at a time.
@@ -26,11 +27,11 @@ effect fn run_err() -> Result[Unit, String] = {
 
 effect fn main() -> Unit = {
   match run_ok() {
-    ok(_) => println("ok-path done")
-    err(e) => println("unexpected ${e}")
+    ok(_) => println("ok-path done"),
+    err(e) => println("unexpected ${e}"),
   }
   match run_err() {
-    ok(_) => println("unexpected ok")
-    err(e) => println("propagated: ${e}")
+    ok(_) => println("unexpected ok"),
+    err(e) => println("propagated: ${e}"),
   }
 }

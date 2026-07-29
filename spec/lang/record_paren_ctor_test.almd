@@ -1,4 +1,3 @@
-
 // #488: paren-NAMED construction is normalized to the brace pipeline —
 // `Cfg(name: x)` ≡ `Cfg { name: x }` for records and record-payload variant
 // cases, with field-set validation and defaults shared by both spellings.
@@ -20,17 +19,17 @@ fn tag_name(t: Tag) -> String = match t {
 }
 
 test "paren-named record construction equals brace form" {
-  assert_eq(mk_paren().name, "p");
-  assert_eq(mk_brace().name, "b");
+  assert_eq(mk_paren().name, "p")
+  assert_eq(mk_brace().name, "b")
   assert_eq(mk_paren().age, 7)
 }
 
 test "paren-empty construction fills defaults" {
-  assert_eq(mk_defaults().host, "localhost");
+  assert_eq(mk_defaults().host, "localhost")
   assert_eq(mk_defaults().port, 8080)
 }
 
 test "record-variant paren-named construction" {
-  let t = SetEmotion(name: "joy");
+  let t = SetEmotion(name: "joy")
   assert_eq(tag_name(t), "joy")
 }

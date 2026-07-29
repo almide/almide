@@ -36,9 +36,15 @@ fn spanless_wall_count_only_goes_down() {
          new wall sites must use `LowerError::at(<node>.span, reason)` so the wall \
          renders with a source location (#931)"
     );
+    // Blindness floor at 90% of the baseline, not 1 (#988): 192 of 193 sites
+    // relocating out of the scanned tree is a broken scan reading as a 99%
+    // win, not progress. A legitimate migration lands in reviewable
+    // increments and lowers BASELINE in the same (ratchet-only) commit.
     assert!(
-        count >= 1,
-        "sanity: the scan found {count} mentions — did the source layout move?"
+        count >= BASELINE * 9 / 10,
+        "sanity: the scan found only {count} mentions (baseline {BASELINE}) — \
+         the source layout moved out from under this ratchet; re-point it and \
+         lower BASELINE consciously (#988)"
     );
     if count < BASELINE {
         eprintln!(

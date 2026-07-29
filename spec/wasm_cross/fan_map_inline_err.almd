@@ -6,7 +6,6 @@
 // `fn main` wrapper, wasm via __main_runner. The inline `if ... then err(...) else
 // ok(x * 10)` body must still pin x:Int so the i64 `x * 10` path matches native.
 effect fn main() -> Unit = {
-  let mapped = fan.map([1, 2, 3], (x) =>
-    if x == 2 then err("element " + int.to_string(x) + " failed") else ok(x * 10))
+  let mapped = fan.map([1, 2, 3], (x) => if x == 2 then err("element " + int.to_string(x) + " failed") else ok(x * 10))
   println("unreachable: " + int.to_string(list.len(mapped)))
 }

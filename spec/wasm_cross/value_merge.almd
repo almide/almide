@@ -4,8 +4,15 @@
 // key/value, freed once by __vdrop_obj) — never the over-counting tuple+list+value.object chain that
 // leaked. The v1 MIR self-host byte-matches v0's NATIVE almide_rt_value_merge.
 effect fn main() -> Unit = {
-  let a = value.object([("x", value.int(1)), ("y", value.object([("p", value.int(5))])), ("z", value.int(3))])
-  let b = value.object([("y", value.int(9)), ("w", value.array([value.int(1)]))])
+  let a = value.object([
+    ("x", value.int(1)),
+    ("y", value.object([("p", value.int(5))])),
+    ("z", value.int(3))
+  ])
+  let b = value.object([
+    ("y", value.int(9)),
+    ("w", value.array([value.int(1)]))
+  ])
   println(value.stringify(value.merge(a, b)))
   println(value.stringify(value.merge(value.int(7), b)))
   println(value.stringify(value.merge(a, value.object([]))))

@@ -49,6 +49,9 @@ env:
   # random. Deep runs stay available through the `minutes` dispatch input, which
   # is where the #812-scale histograms should come from.
   FUZZ_MINUTES: "5"
+  # Cold runners gain nothing from the workspace's release-incremental
+  # profile (#1006) — it only bloats the caches. Opt out.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   # The build is its OWN job so the fuzz job spends its whole runner lifetime
@@ -268,6 +271,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      # Pin the toolchain like every other job (#990): this job used to rely
+      # on the runner image's default rustup toolchain, which is exactly the
+      # kind of unpinned input the coverage ratchet should not depend on.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.89.0"
       - uses: actions/cache@v6
         with:
           path: |

@@ -38,7 +38,6 @@
 // host can never clobber a free-list `next` field (the class that imposed
 // the old two-op ceiling). The op count below is deliberately ABOVE the old
 // ceiling, plus interleaved allocation churn, to pin the lift.
-
 import fs
 
 effect fn main() -> Unit = {

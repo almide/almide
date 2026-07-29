@@ -1,7 +1,11 @@
 let GREETING: String = "hello"
+
 let NUMBERS: List[Int] = [1, 2, 3]
+
 let UNDEFINED: Float = -1.0
+
 let MAX_ITEMS: Int = 42
+
 let PI: Float = 3.14159
 
 fn welcome() -> String = GREETING + " world"
@@ -21,4 +25,5 @@ fn box_left(w: Float, e: Edges) -> Float = w + e.left
 // (drivers infer the entry first; the refresh pass runs module top-lets
 // beforehand so env.top_lets is fully typed).
 fn default_gap() -> Float = -3.5
+
 let GAP = default_gap()

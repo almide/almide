@@ -7,23 +7,26 @@
 // `push_node` that also allocated the `list.get ?? d` Option box), and a
 // `mut`-param callee was invisible to the loop escape scan. Runs on BOTH
 // targets — this is the slabhra-tape build shape.
-
 type Tape = { depth: List[Int] }
 
 // `mut`-param fn that BOTH reads a field via `list.get ?? d` (allocates an
 // Option box the reclamation reclaims) AND pushes into the field (grows a buffer
 // that escapes via `t`). Exercises the Member-rooted in-place-mutator escape.
 fn node(mut t: Tape, pa: Int) -> Int = {
-  let dpa = if pa >= 0 then (list.get(t.depth, pa) ?? 0) else (0 - 1)
+  let dpa = if pa >= 0 then (list.get(t.depth, pa) ?? 0)
+  else (0 - 1)
   list.push(t.depth, dpa + 1)
   list.len(t.depth) - 1
 }
 
 test "mut-param fn grows a record field while allocating an inner temp (#705)" {
   var t: Tape = { depth: [] }
-  let a = node(t, 0 - 1)        // pa<0: no read; depth 0
-  let b = node(t, a)            // reads t.depth[0], pushes depth 1
-  let c = node(t, b)            // reads t.depth[1], pushes depth 2
+  let a = node(t, 0 - 1)
+  // pa<0: no read; depth 0
+  let b = node(t, a)
+  // reads t.depth[0], pushes depth 1
+  let c = node(t, b)
+  // reads t.depth[1], pushes depth 2
   assert(list.len(t.depth) == 3)
   assert(t.depth[0] == 0)
   assert(t.depth[1] == 1)

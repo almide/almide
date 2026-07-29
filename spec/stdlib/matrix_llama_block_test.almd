@@ -9,7 +9,6 @@
 // matrix stays ones; linear_row_no_bias(1s, 1s[d×d]) produces a
 // constant matrix of d; masked MHA on uniform Q/K/V is a row-wise
 // weighted average of V, which for uniform V stays uniform.
-
 fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
   let d = if a > b then a - b else b - a
   d < tol
@@ -21,7 +20,6 @@ test "llama 1-block forward: shape end-to-end" {
   let n_heads = 2
   let d_inner = 32
   let eps = 0.000001
-
   let x = matrix.ones(seq, d)
   let gamma1 = list.repeat(1.0, d)
   let gamma2 = list.repeat(1.0, d)
@@ -32,7 +30,6 @@ test "llama 1-block forward: shape end-to-end" {
   let w_gate = matrix.ones(d_inner, d)
   let w_up = matrix.ones(d_inner, d)
   let w_down = matrix.ones(d, d_inner)
-
   // Pre-norm + attention
   let normed = matrix.rms_norm_rows(x, gamma1, eps)
   let q = matrix.linear_row_no_bias(normed, wq)
@@ -40,18 +37,14 @@ test "llama 1-block forward: shape end-to-end" {
   let v = matrix.linear_row_no_bias(normed, wv)
   let attn = matrix.masked_multi_head_attention(q, k, v, n_heads)
   let attn_out = matrix.linear_row_no_bias(attn, wo)
-
   // Residual 1
   let x_attn = matrix.add(x, attn_out)
-
   // Pre-norm + FFN (SwiGLU)
   let normed2 = matrix.rms_norm_rows(x_attn, gamma2, eps)
   let gated = matrix.swiglu_gate(normed2, w_gate, w_up)
   let ffn_out = matrix.linear_row_no_bias(gated, w_down)
-
   // Residual 2
   let x_out = matrix.add(x_attn, ffn_out)
-
   let (r, c) = matrix.shape(x_out)
   assert_eq(r, seq)
   assert_eq(c, d)
@@ -66,21 +59,18 @@ test "llama 1-block: uniform input propagates uniformly through attention" {
   let d = 8
   let n_heads = 2
   let eps = 0.000001
-
   let x = matrix.ones(seq, d)
   let gamma = list.repeat(1.0, d)
   let wq = matrix.ones(d, d)
   let wk = matrix.ones(d, d)
   let wv = matrix.ones(d, d)
   let wo = matrix.ones(d, d)
-
   let normed = matrix.rms_norm_rows(x, gamma, eps)
   let q = matrix.linear_row_no_bias(normed, wq)
   let k = matrix.linear_row_no_bias(normed, wk)
   let v = matrix.linear_row_no_bias(normed, wv)
   let attn = matrix.masked_multi_head_attention(q, k, v, n_heads)
   let attn_out = matrix.linear_row_no_bias(attn, wo)
-
   // Every cell in attn_out should be the same value when inputs are
   // uniform — the attention distribution is softmax over identical
   // keys so it averages identical values.
@@ -100,8 +90,14 @@ test "llama 1-block: residual add preserves scale" {
   // produces the expected per-cell sum. Uses small concrete values so
   // the test is a drop-in semantic unit, independent of the
   // attention/FFN heavy machinery.
-  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
-  let b = matrix.from_lists([[10.0, 20.0], [30.0, 40.0]])
+  let a = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
+  let b = matrix.from_lists([
+    [10.0, 20.0],
+    [30.0, 40.0]
+  ])
   let r = matrix.add(a, b)
   assert_eq(matrix.get(r, 0, 0), 11.0)
   assert_eq(matrix.get(r, 0, 1), 22.0)

@@ -4,8 +4,19 @@
 // len-as-tag @4 (a scalar result), binds slot-0 @12 as a BORROW, the Err arm auto-Dups the borrowed
 // String before re-wrapping, and the subject drops AFTER the arms (DropListStr frees slot-0 once). v0==v1.
 fn classify(cp: Int) -> Result[Int, String] = if cp >= 65 then ok(cp - 65) else err("bad")
-effect fn run(a: Int) -> Result[Int, String] = { let x = classify(a)!  ok(x + 1) }
+
+effect fn run(a: Int) -> Result[Int, String] = {
+  let x = classify(a)!
+  ok(x + 1)
+}
+
 effect fn main() -> Unit = {
-  match run(66) { ok(n) => println("ok:" + int.to_string(n)), err(e) => println("err:" + e) }
-  match run(33) { ok(n) => println("ok:" + int.to_string(n)), err(e) => println("err:" + e) }
+  match run(66) {
+    ok(n) => println("ok:" + int.to_string(n)),
+    err(e) => println("err:" + e),
+  }
+  match run(33) {
+    ok(n) => println("ok:" + int.to_string(n)),
+    err(e) => println("err:" + e),
+  }
 }

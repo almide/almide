@@ -12,9 +12,18 @@
 // correct output) — the closure now hands out a co-owned +1 (C-146).
 fn main() -> Unit = {
   let s1: Result[Int, String] = err("x")
-  let r4: List[Int] = [1000000, 7, result.unwrap_or_else(result.or_else(s1, ((v) => s1)), ((t) => 256))]
+  let r4: List[Int] = [
+    1000000,
+    7,
+    result.unwrap_or_else(result.or_else(s1, ((v) => s1)), ((t) => 256))
+  ]
   let x3: Result[Bool, String] = ok(true)
-  let r5: List[Bool] = [result.unwrap_or(result.or_else(x3, ((x4) => x3)), true), true, false, true]
+  let r5: List[Bool] = [
+    result.unwrap_or(result.or_else(x3, ((x4) => x3)), true),
+    true,
+    false,
+    true
+  ]
   println("r4 = ${r4}")
   println("r5 = ${r5}")
 }

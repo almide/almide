@@ -20,6 +20,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.89.0"
+  # Cold runners gain nothing from the workspace's release-incremental
+  # profile (#1006) — it only bloats the caches. Opt out.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   cross-target:
@@ -130,9 +133,11 @@ jobs:
 
       - name: v1 trust-spine output parity (fixtures, ratcheting baseline)
         run: |
-          # FIXTURE byte-match of the V1 trust spine over spec/*.almd, gated against a ratcheting
-          # baseline (proofs/output-parity-baseline.txt) that can only GROW. The generative fuzz above
-          # catches NEW shapes; this catches a REGRESSION in any shape a committed fixture pins. The
-          # corpus-wall proves v1's SOUNDNESS properties but never compares stdout — this is the
-          # output-correctness leg. Skips gracefully if almide/wasmtime are absent.
+          # FIXTURE byte-match of the V1 trust spine over spec/ (recursive), gated against a
+          # ratcheting baseline (proofs/output-parity-baseline.txt) that can only GROW. The
+          # generative fuzz above catches NEW shapes; this catches a REGRESSION in any shape a
+          # committed fixture pins. The corpus-wall proves v1's SOUNDNESS properties but never
+          # compares stdout — this is the output-correctness leg. Under CI a missing tool is a
+          # hard failure (#978: the PATH-lookup skip made this gate a no-op on every run it ever
+          # had); the oracle resolves to ./target/release/almide built above.
           bash proofs/output-parity.sh

@@ -5,11 +5,16 @@
 // fixture asserts the deterministic RANGE property: random.int(lo, hi) ∈ [lo, hi]. Byte-matches v0
 // (both print "50"). A pure `fn` cannot reach random.int — only an effect fn (declares Entropy).
 import random
+
 effect fn main() -> Unit = {
   var hits = 0
   for i in 0..<50 {
     let r = random.int(10, 20)
-    if r >= 10 and r <= 20 then hits = hits + 1 else hits = hits
+    if r >= 10 and r <= 20 then {
+      hits = hits + 1
+    } else {
+      hits = hits
+    }
   }
   println(int.to_string(hits))
 }
