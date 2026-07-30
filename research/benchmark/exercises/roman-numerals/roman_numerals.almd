@@ -3,7 +3,7 @@ fn to_roman(n: Int) -> String = {
   let symbols = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
   var result = ""
   var remaining = n
-  for i in 0..13 {
+  for i in 0..<13 {
     let value = list.get_or(values, i, 0)
     let symbol = list.get_or(symbols, i, "")
     while remaining >= value {
