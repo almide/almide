@@ -1,91 +1,83 @@
-# Bolt Loop — One AI-DLC Iteration (Inception ⇄ Construction)
+# Bolt ループ手順書 — 1 iteration でやること
 
-Advance the current Unit from `docs/roadmap/ROAD_TO_1_0.md` by exactly one step, following
-the operating model in `docs/AI_DLC.md` and the pair discipline in `docs/ai-dlc/README.md`.
-Designed to run under `/loop` (dynamic pacing) — each invocation is one iteration.
-Never ask permission for actions this file authorizes (push, issue updates, normal minor
-releases); escalate only at Mob points.
+`/loop` で回す前提の手順書です。1 回の呼び出し = 1 iteration。
+毎回「同期 → いまの段階を見る → 一手を打つ → 記録する」の順に進みます。
+この手順書が許可している操作（push、issue の更新、普通の minor リリース）は、いちいち人間に確認しません。
+人間を呼ぶのは [AI_DLC.md](./AI_DLC.md) の Mob ポイント（M0〜M6）だけです。
 
-## 0. Sync & health
+## 0. 同期と健康確認
 
 ```bash
 git switch develop && git fetch origin && git pull --ff-only
 gh run list --branch develop --limit 3
 ```
 
-- If HEAD CI is red: this iteration's Bolt = fix CI **forward**. Never revert or
-  checkout files you did not modify yourself (other agents may own them).
-- If `git status` shows unexpected local changes: stop and escalate M6 — do not touch them.
+- develop の CI が赤なら、この iteration の仕事は赤の修理です。前に進める形で直します（fix forward）。
+  自分が触っていないファイルの revert / checkout は絶対にしない — 他のエージェントの作業かもしれません。
+- `git status` に見覚えのない変更があったら、触らずに M6 で人間を呼びます。
 
-## 1. Select the Unit
+## 1. いまの Unit を確かめる
 
-- Released = latest `v*` tag. Current Unit = the ladder row for the next unreleased minor.
-- Read the row, its linked issue(s), and `docs/ai-dlc/units/<version>/` if it exists.
-- If the row's Issue cell is `—`, create the issue and link it in the ladder in the same
-  commit (ladder rule). On 403: `gh auth switch --user O6lvl4` and retry.
+- リリース済み = 最新の `v*` タグ。いまの Unit = 台帳（ROAD_TO_1_0.md）で次の未リリース minor の行。
+- その行・リンクされた issue・`docs/ai-dlc/units/<version>/`（あれば）を読みます。
+- 行の Issue 欄が「—」なら、先に issue を作り、同じ commit で台帳にリンクを埋めます。
+  作成が 403 で失敗したら `gh auth switch --user O6lvl4` してやり直し。
 
-## 2. Phase dispatch — the pair discipline
+## 2. いまの段階を見て、一手を決める
 
-Every Unit lives as a pair: `units/<version>/inception.md` (what & why, Mob-validated)
-and `units/<version>/construction.md` (Bolt ledger with evidence). No construction
-without an approved inception.
+Unit は「計画書（inception.md）」と「実行台帳（construction.md）」の対で進みます。
+計画書の承認前に、作業は始めません。
 
-- **No `units/<version>/` yet → Inception iteration**: draft `inception.md` from the
-  ladder row + issues using `docs/ai-dlc/inception-template.md`. Ground every number in
-  evidence (read the issues; never invent). Commit, push, then escalate **M0**: a `mob`
-  issue linking the file, plus PushNotification. Stop this Unit.
-- **inception.md exists, M0 record empty**: check the `mob` issue for approval. If
-  approved → record approver/date/notes in `inception.md`, create `construction.md`
-  from the 提案 Bolt section (use `construction-template.md`), commit — then fall
-  through to Construction. If not approved → stop (only red-CI fixes are permitted work).
-- **Pair exists, M0 approved → Construction iteration**: first settle evidence — verify
-  the previous Bolt's CI run and record SHA + run URL in its ledger row. Then execute
-  the next 未着手 Bolt.
+- **`units/<version>/` がまだ無い → 計画書を書く回。**
+  台帳の行と issue を根拠に、[inception-template.md](./ai-dlc/inception-template.md) の形で書きます。
+  数字は issue から引くこと。創作しない。commit + push したら、`mob` issue と通知で承認（M0）を頼み、
+  この Unit は止めます。
+- **計画書はあるが、承認記録が空 → 承認を確認する回。**
+  `mob` issue を見て、承認されていたら承認者と日付を計画書に記録し、計画書の「Bolt 案」から
+  実行台帳を作って（[construction-template.md](./ai-dlc/construction-template.md)）、下の 3 へ。
+  まだなら止めます（やってよいのは CI 赤の修理だけ）。
+- **承認済み → Bolt を実行する回。**
+  まず前回の Bolt の後始末: CI の結果を確認し、実行台帳のその行に証拠（commit SHA と CI run の URL）を
+  書き込みます。それから、次の未着手 Bolt を 1 つ実行します。
 
-## 3. Execute ONE Bolt
+## 3. Bolt を 1 つ実行する
 
-- State the Bolt's DoD (from construction.md) before touching code.
-- Verify tiered and minimal — CI owns the full wall (no local full gates):
-  - `cargo test -p <touched crates>` must be zero-error before push
-  - `almide test <relevant spec dirs>` for language/stdlib-visible changes
-  - `make install` after compiler changes so the PATH binary is current
-- **Contract tripwire (M2)**: an observable cross-target behavior change without a
-  `C-NNN` ledger entry in the same commit → stop, escalate.
-- **Ratchet tripwire (M4)**: if green would require loosening any ratchet, wall, or
-  gate → stop, escalate. Fix forward is the only path.
-- Deviation from plan that stays inside the inception's Scope → note it in 実行メモ.
-  Deviation beyond Scope → M6 escalate.
+- 着手前に、その Bolt の完了条件を実行台帳から言葉にします。
+- 検証は最小限に。全量の審査は CI の仕事です:
+  - 触った crate の `cargo test` がエラーゼロになってから push
+  - 言語や stdlib から見える変更なら、該当ディレクトリの `almide test`
+  - コンパイラを触ったら `make install`（PATH のバイナリを最新にする）
+- **止まるべき地雷が 2 つあります:**
+  - ターゲット間で観測できる挙動が変わるのに、同じ commit に contract（C-NNN）が無い → 止めて M2
+  - ratchet や wall をゆるめないと緑にならない → 止めて M4。ゆるめる操作は選択肢に無い
+- 計画とのずれ: 計画書の「やること」の範囲内なら、実行台帳の実行メモに書いて続行。
+  範囲を超えるずれは M6 で人間を呼びます。
 
-## 4. Ship the Bolt
+## 4. push と記録
 
-- Commit in English, one concise line, no prefix — include the construction.md status
-  update (状態 → 完了; evidence lands next iteration per the ledger rule). Push
-  `origin develop` without asking.
+- commit は英語 1 行、prefix なし。実行台帳の状態更新（状態 → 完了。証拠は次回の後始末で記入）も
+  同じ commit に入れて push します。確認は取りません。
 
-## 5. Release check
+## 5. リリース判定
 
-- When construction.md's 完了判定 is fully satisfied (all Bolts evidenced, DoD↔evidence
-  mapping written):
-  - Normal minor: release automatically — bump `Cargo.toml` to the Unit's version,
-    commit, push, PR develop→main, merge on green (never force-merge), tag the merge
-    commit, let release.yml create the release (see `.claude/commands/almide-release.md`),
-    verify the 5 binaries + checksums, close the Unit's completed issues.
-  - Decade gate (0.50/0.60/0.70/0.80/0.90): post the audit brief on the issue,
-    escalate M1, and do NOT release without approval.
-- After release: the next iteration's step 2 will open the next Unit's Inception.
+- 実行台帳の「Unit 完了判定」が全部埋まったら:
+  - **普通の minor** → 自動でリリースします。`Cargo.toml` を bump → push → develop→main の PR →
+    CI 緑でマージ（force-merge 禁止）→ マージ commit にタグ → release.yml に任せる →
+    バイナリ 5 個と checksums を確認 → 済んだ issue を閉じる。
+    （詳細な手順は `.claude/commands/almide-release.md`）
+  - **節目（0.50 / 0.60 / 0.70 / 0.80 / 0.90）** → 監査ブリーフを issue に書いて M1。承認なしにリリースしない。
+- リリース後、次の iteration は次の Unit の計画書から始まります。
 
-## 6. Pace or stop (under /loop)
+## 6. 次にいつ動くか
 
-- Waiting on CI → schedule the next wakeup at ~480–600s (match CI duration; do not poll).
-- Waiting on an external clock (e.g. nightly runs) → wake once per expected event,
-  not more; meanwhile the only permitted look-ahead is drafting the NEXT Unit's
-  inception (never its construction).
-- More actionable Bolts exist → continue promptly next iteration.
-- Everything blocked on Mob → send the notification and stop the loop.
+- CI 待ち → 480〜600 秒後に起きる。それより細かく覗かない。
+- 夜間 run など外部の時計待ち → 1 イベントにつき 1 回だけ起きる。待ち時間の先回りは
+  「次の Unit の計画書を起草する」まで。実行台帳は作らない（承認前だから）。
+- やれる Bolt が残っている → すぐ続ける。
+- 全部が人間待ち → 通知して止まる。
 
-## Escalation protocol (Mob)
+## 人間の呼び方
 
-Create an issue labeled `mob` containing: 事象 / 根拠 / 選択肢 / 推奨 (what happened,
-evidence, options, recommendation). Send a PushNotification. Continue only with
-independent work; otherwise stop. A Mob escalation that turns out not to need a human
-is a loop defect — record it and tighten this file.
+`mob` ラベルの issue に 4 点を書きます: **何が起きたか / 根拠 / 選択肢 / おすすめ**。通知を送ります。
+独立の作業があれば続け、なければ止まります。
+呼んだ結果「人間は要らなかった」となったら、それはこの手順書の欠陥です — 記録して、この文書を直します。
