@@ -11,52 +11,34 @@ fn wasm_cross_target_spec() {
     // LOGGED, so a divergence is never silently ignored — and once it is fixed the
     // gate flags the now-stale allow so the entry gets removed. Native is the
     // reference; native==wasm is a hard invariant, not a "target difference".
-    let bin = almide_bin();
-    if Command::new(&bin).arg("--version").output().is_err() { return; }
-    // Needs wasmtime to run the wasm command and capture its stderr + exit code.
-    if Command::new("wasmtime").arg("--version").output().is_err() { return; }
-
-    let spec_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_cross");
-    if !spec_dir.exists() { return; }
-
-    let mut entries: Vec<_> = std::fs::read_dir(&spec_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
-        .collect();
-    entries.sort_by_key(|e| e.path());
-    if entries.is_empty() { return; }
+    // The legs come from the shared corpus (p4_corpus.rs) so the same program is
+    // not compiled once per gate. The classification below is unchanged.
+    let Some(legs) = corpus() else { return };
 
     let mut passed = 0;
     let mut allowed: Vec<String> = Vec::new();
     let mut stale: Vec<String> = Vec::new();
     let mut failed: Vec<String> = Vec::new();
 
-    for entry in &entries {
-        let path = entry.path();
-        let name = path.file_stem().unwrap().to_str().unwrap().to_string();
-        let source = std::fs::read_to_string(&path).unwrap();
-        let allow = source.lines().find_map(|l| {
-            l.trim().strip_prefix("// @xt-allow:").map(|r| r.trim().to_string())
-        });
-
-        let (rc, rout, rerr) = run_native_capture(&source);
-        let wasm = match std::panic::catch_unwind(|| run_wasm_capture(&source)) {
-            Ok(Some(w)) => w,
-            // A spawn failure mid-corpus (wasmtime WAS probed at entry) is
-            // this fixture's failure — never `return` from inside the loop:
-            // that discarded the rest of the corpus and every accumulated
-            // failure as a green pass (#991).
-            Ok(None) => {
-                failed.push(format!("{name}: wasmtime could not be spawned mid-run"));
-                continue;
-            }
-            Err(_) => { failed.push(format!("{name}: WASM build/run panicked")); continue; }
-        };
-        let (wc, wout, werr) = wasm;
+    for l in legs {
+        let name = &l.name;
+        let (rc, rout, rerr) = (l.native.0, &l.native.1, &l.native.2);
+        // The corpus records a wasm build/run panic — or a mid-run wasmtime
+        // spawn failure — as a sentinel leg so each gate reports it in its own
+        // words. Never a whole-gate return: that discarded the rest of the
+        // corpus and every accumulated failure as a green pass (#991).
+        if l.wasm.0 == i32::MIN && l.wasm.1 == "<panicked>" {
+            failed.push(format!("{name}: WASM build/run panicked"));
+            continue;
+        }
+        if l.wasm.0 == i32::MIN && l.wasm.1 == "<wasmtime-spawn-failed>" {
+            failed.push(format!("{name}: wasmtime could not be spawned mid-run"));
+            continue;
+        }
+        let (wc, wout, werr) = (l.wasm.0, &l.wasm.1, &l.wasm.2);
         let equal = rc == wc && rout == wout && rerr == werr;
 
-        match (equal, allow) {
+        match (equal, l.allow.as_ref()) {
             (true, None) => passed += 1,
             (true, Some(r)) => stale.push(format!("{name}: @xt-allow now MATCHES (was: {r}) — remove the directive")),
             (false, Some(r)) => allowed.push(format!("{name}: {r}")),

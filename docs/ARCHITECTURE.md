@@ -58,7 +58,7 @@ and serves as the cross-target oracle / executable spec.
   names are kept for debugging). The unverified v0 wasm emitter was retired
   (#782): a wall is a hard, diagnosed error — there is no silent fallback.
   `--wasm-opt` is opt-in and guarded by a differential parity gate against the
-  verified module (`tests/wasm_opt_parity_test.rs`).
+  verified module (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`).
 - **`--target wasm32` / `wasi`** — the generated Rust source compiled by bare
   `rustc --target wasm32-wasip1` (SIMD128 enabled). A different beast from
   `--target wasm`.
