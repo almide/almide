@@ -77,5 +77,6 @@ Today's "0 open silent bugs" reflects a stalled instrument, not a clean compiler
 
 ## Approval (M0)
 
-- Status: not approved
-- Approver / date / notes: —
+- Status: **approved**
+- Approver / date / notes: O6lvl4 / 2026-07-31 / approved in session. The separation of the
+  release judgment (3 consecutive complete nights) from #924's closure (14 nights) is approved.
