@@ -12,7 +12,9 @@ The first thing the approver reads>
 
 ## Background
 
-<Current state and root causes. Pull numbers from issues and measurements; invent nothing>
+<Current state and root causes. Pull numbers from issues and measurements; invent nothing.
+VERIFY the target's present state directly (code, workflows, CI runs) — the issue that
+described the problem may be stale (0.41's lesson: the repair had already landed)>
 
 ## Scope
 
