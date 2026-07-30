@@ -8,12 +8,12 @@
 - **decade = アーク**。テーマと出口ゲートを持つ。decade 境界（0.50, 0.60, …）はゲートリリース — その decade の出口監査を固定する 1 リリース。
 - **各 minor = 行 1 つ**。0.41–0.99 の 59 バージョン全てに行がある（大機能 54 + ゲートリリース 5）。パッチ（0.41.x）は自由。decade 内で番号が前後にずれるのは構わない — 不変条件は decade ゲートであってバージョン番号ではない。fuzz / hole-hunt / dogfood の findings が割り込むときは既存行を decade 内で後ろへスライドし、ゲートリリースで帳尻を監査する。
 - **順序の根拠**は依存関係:
-  1. **計測器が先** — fuzz が死んだまま codegen を触らない（0.4x）
-  2. **編集ループが規模非依存になってから** dogfood でスケール実測（0.4x）
-  3. **wasm 対等性と表現コスト**を、生きた oracle の上で直す（0.5x）
-  4. **cranelift（rustc 独立）**は差分 oracle が常時緑になってから（0.6x）
-  5. **証明と Critical プロファイル**は codegen が安定してから（0.7x）
-  6. **資格化キット**は証明の上に積む（0.8x）
+  1. **計測器が手術より先** — fuzz（0.41–0.42）が死んだまま codegen を触らない。hole-hunt レンズ（0.52）は wasm optimizer 接続より先、cranelift 差分ゲート（0.62）は heap/RC 実装より先
+  2. **決定文書は最上流** — concurrency の立場（0.44）は cross-target 契約・cranelift 実行モデル・critical profile・仕様凍結すべての上流なので 0.4x で決める
+  3. **基盤 → 永続層** — 単一ドライバ（0.43）→ クエリ基盤（0.47–0.48）→ その fingerprint を鍵にしたキャッシュ（0.49）。逆順は作り直しになる
+  4. **表現変更はバックエンド追加より先** — RcCow（0.55–0.56）は cranelift がその表現を対象コードにする前に終える
+  5. **デバッグ可能性はデフォルト切替より先** — DWARF（0.65）→ cranelift デフォルト化（0.66）
+  6. **証明と Critical プロファイルは codegen 安定後**（0.7x）、**資格化キットは証明の上**（0.8x）
   7. **仕様凍結は最後** — 全部が動いてから規範化する（0.9x）
 - 新 issue を立てたら、この台帳のどこかの decade に割付ける（同 PR で）。載らない issue を作らない。
 
@@ -28,13 +28,13 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 | 0.41 | fuzz-nightly を毎夜使える計測器に戻す（20 夜中 1 夜の根治）。perf scoreboard/ratchet（#917）の close-out | [#924](https://github.com/almide/almide/issues/924), [#917](https://github.com/almide/almide/issues/917) |
 | 0.42 | fuzz true green — 残 findings 0 + 連続緑 2 夜 | [#796](https://github.com/almide/almide/issues/796) |
 | 0.43 | 単一ドライバ — フロントエンド 1 回実行、手同期ドライバシーケンス 6 → 1 | [#925](https://github.com/almide/almide/issues/925) |
-| 0.44 | feature-gated runtime（http/zlib）の rtlib 化 — fresh dir の 8.4s 初回ビルド解消 | [#1002](https://github.com/almide/almide/issues/1002) |
-| 0.45 | 10k 行 dogfood プロジェクト着工 — スケール主張を実測に変える | [#1001](https://github.com/almide/almide/issues/1001) |
-| 0.46 | モジュール単位コンパイルキャッシュ（module rlib + typed-IR cache） — dogfood がトリガー（フルビルド 2-3s 超）を踏んだら | [#1003](https://github.com/almide/almide/issues/1003) |
+| 0.44 | concurrency モデルの立場決定と文書化 — structured concurrency vs data-parallel-only。cross-target 契約・cranelift 実行モデル・critical profile・仕様凍結すべての上流 | [#1000](https://github.com/almide/almide/issues/1000) |
+| 0.45 | feature-gated runtime（http/zlib）の rtlib 化 — fresh dir の 8.4s 初回ビルド解消 | [#1002](https://github.com/almide/almide/issues/1002) |
+| 0.46 | 10k 行 dogfood プロジェクト着工 — スケール主張を実測に変える | [#1001](https://github.com/almide/almide/issues/1001) |
 | 0.47 | クエリ/インクリメンタル基盤 phase 1 — LSP を per-keystroke 全再解析から解放 | [#928](https://github.com/almide/almide/issues/928) |
 | 0.48 | クエリ基盤 phase 2 — ビルドパイプライン本体をクエリ上に | [#928](https://github.com/almide/almide/issues/928) |
-| 0.49 | build-speed / runtime-perf / safety 三点セットの実測数字を README に載せ切る | [#999](https://github.com/almide/almide/issues/999) |
-| 0.50 | ゲートリリース — 0.4x 出口監査を固定し、以後のラチェットとして発効 | — |
+| 0.49 | モジュール単位コンパイルキャッシュ — クエリ fingerprint を鍵にした永続層（module rlib + typed-IR）。dogfood のフルビルド 2-3s 超がトリガー | [#1003](https://github.com/almide/almide/issues/1003) |
+| 0.50 | ゲートリリース — build-speed / runtime-perf / safety 三点セットの実測数字を README に載せ切り、0.4x 出口監査をラチェットとして発効 | [#999](https://github.com/almide/almide/issues/999) |
 
 **Gate 0.50**: fuzz 連続緑が常態 / dogfood フルビルドがキャッシュ効きで 2-3s 未満 / 三点の数字が public かつラチェット管理。
 
@@ -44,15 +44,15 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 
 | Version | 大機能 | Issue |
 |---|---|---|
-| 0.51 | QualifiedRef newtype — v1 MIR 上で bare type identity を表現不能にする（#433 クラスの型による根絶） | [#908](https://github.com/almide/almide/issues/908) |
-| 0.52 | concurrency モデルの立場決定と文書化 — structured concurrency vs data-parallel-only、cross-target 契約への含意 | [#1000](https://github.com/almide/almide/issues/1000) |
+| 0.51 | QualifiedRef newtype — v1 MIR 上で bare type identity を表現不能にする（#433 クラスの型による根絶）。以後の optimizer 追加はこの型の上で行う | [#908](https://github.com/almide/almide/issues/908) |
+| 0.52 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存。optimizer 手術の前に検出器を立てる | [#912](https://github.com/almide/almide/issues/912) |
 | 0.53 | wasm leg に nanopass optimizer 群を接続 | [#929](https://github.com/almide/almide/issues/929) |
 | 0.54 | wasm SIMD | [#929](https://github.com/almide/almide/issues/929) |
-| 0.55 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存 | [#912](https://github.com/almide/almide/issues/912) |
-| 0.56 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |
-| 0.57 | RcCow phase 2 — 対 Rust ギャップをラチェット下に | [#1004](https://github.com/almide/almide/issues/1004) |
-| 0.58 | 10k 行 dogfood プロジェクト完成・公開 — 0.45 着工分の完了、スケール数字（LOC・モジュール数・ビルド時間）を README に | [#1001](https://github.com/almide/almide/issues/1001) |
-| 0.59 | hole-hunt findings 焼却完了 — 0.55 のレンズ群が出した findings を 0 に | [#912](https://github.com/almide/almide/issues/912) |
+| 0.55 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |
+| 0.56 | RcCow phase 2 — 対 Rust ギャップをラチェット下に。表現変更は cranelift（0.6x）が対象コードを生成し始める前に完了 | [#1004](https://github.com/almide/almide/issues/1004) |
+| 0.57 | 10k 行 dogfood プロジェクト完成・公開 — 0.46 着工分の完了、スケール数字（LOC・モジュール数・ビルド時間）を README に | [#1001](https://github.com/almide/almide/issues/1001) |
+| 0.58 | hole-hunt findings 焼却完了 — 0.52 のレンズ群が出した findings を 0 に | [#912](https://github.com/almide/almide/issues/912) |
+| 0.59 | MSR の第三者再現性 — dojo ブリッジ CI（タスクサブセットを本 repo の PR ゲートで実行）+ 他言語でも同条件で走らせられる公開ハーネス。指標が土俵になる条件 | — |
 | 0.60 | ゲートリリース — クロスターゲット対等性監査を固定 | — |
 
 **Gate 0.60**: 両ターゲットの最適化品質が同格 / hole-hunt findings 0 / 対 Rust perf ギャップが計測・ラチェット管理下。
@@ -64,11 +64,11 @@ cranelift direct native emit のエンドゲーム（#1005）。0.4x で復活�
 | Version | 大機能 | Issue |
 |---|---|---|
 | 0.61 | cranelift spike — scalar core の MIR → CLIF | [#1005](https://github.com/almide/almide/issues/1005) |
-| 0.62 | heap / RC 演算 + closure | [#1005](https://github.com/almide/almide/issues/1005) |
-| 0.63 | rtlib リンクと stdlib 全面カバー | [#1005](https://github.com/almide/almide/issues/1005) |
-| 0.64 | 差分ゲート — cranelift leg vs rustc leg の挙動 oracle を CI 常設 | [#1005](https://github.com/almide/almide/issues/1005) |
-| 0.65 | debug ビルドのデフォルトを cranelift に切替（release は rustc 継続） | [#1005](https://github.com/almide/almide/issues/1005) |
-| 0.66 | cranelift debug info — DWARF 行情報と backtrace、debug ビルドを実際にデバッグ可能に | [#1005](https://github.com/almide/almide/issues/1005) |
+| 0.62 | 差分ゲート — cranelift leg vs rustc leg の挙動 oracle を scalar サブセットの時点で CI 常設し、以後のカバレッジ拡大と共に育てる | [#1005](https://github.com/almide/almide/issues/1005) |
+| 0.63 | heap / RC 演算 + closure | [#1005](https://github.com/almide/almide/issues/1005) |
+| 0.64 | rtlib リンクと stdlib 全面カバー | [#1005](https://github.com/almide/almide/issues/1005) |
+| 0.65 | cranelift debug info — DWARF 行情報と backtrace。デフォルト切替の前にデバッグ可能性を確保する | [#1005](https://github.com/almide/almide/issues/1005) |
+| 0.66 | debug ビルドのデフォルトを cranelift に切替（release は rustc 継続） | [#1005](https://github.com/almide/almide/issues/1005) |
 | 0.67 | in-process JIT 実行 — `almide run` / `almide test` の debug パスからリンカも消す | [#1005](https://github.com/almide/almide/issues/1005) |
 | 0.68 | 関数単位インクリメンタル再コンパイル — cranelift をクエリ基盤（0.47–0.48）に接続 | [#928](https://github.com/almide/almide/issues/928), [#1005](https://github.com/almide/almide/issues/1005) |
 | 0.69 | 編集ループ総仕上げ — check → run の p50/p95 を計測して README 数字に追加 | [#999](https://github.com/almide/almide/issues/999) |
@@ -156,10 +156,11 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 - **速度**: 編集ループが規模非依存、debug パスに rustc なし、対 Rust ギャップは実測・ラチェット管理
 - **信頼**: critical profile + qualification dossier が製品として渡せる、reference app が証拠
 - **数字**: build-speed / runtime-perf / safety の三点が README で実測公開
+- **指標**: MSR が第三者再現可能 — dojo ハーネスが公開され、他言語でも同条件で測れる（0.59）
 
 ## 台帳の完全性
 
 - **バージョン行 59 / 59** — 0.41–0.99 の全 minor に行がある（大機能 54 + ゲートリリース 5）
 - **open issue 40 / 40 割付済み** — バージョン行に 32、プログラムトラックに 8
-- Issue 欄が「—」の行（ゲートリリースと 0.96 / 0.98 / 0.99）は台帳新設の作業。着工時に issue を立てて同 PR でリンクを埋める
+- Issue 欄が「—」の行（0.59 / ゲートリリース 0.60–0.90 / 0.96 / 0.98 / 0.99）は台帳新設の作業。着工時に issue を立てて同 PR でリンクを埋める。0.50 のゲートリリースは #999 を成果物として持つ
 - この台帳と issue リストの乖離は負債 — 新 issue は同 PR でここに割付け、クローズしたら issue リンクが closed になることで進捗が見える
