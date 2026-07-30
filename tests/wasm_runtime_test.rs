@@ -489,3 +489,5 @@ fn main() -> Unit = {
 
 include!("wasm_runtime_test_parts/p2.rs");
 include!("wasm_runtime_test_parts/p3.rs");
+include!("wasm_runtime_test_parts/p4_corpus.rs");
+include!("wasm_runtime_test_parts/p5_gates.rs");

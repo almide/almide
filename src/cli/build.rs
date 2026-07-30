@@ -260,7 +260,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // finished output, so running it replaces bytes the trust-spine produced
     // with bytes a separate, un-certified tool rewrote. That is why it stays
     // an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
-    // see the wasm-opt parity leg (`tests/wasm_opt_parity_test.rs`) for the
+    // see the wasm-opt parity leg (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`) for the
     // differential-testing evidence backing this tier's own guarantee.
     if !wasm_opt {
         err(&format!(
