@@ -211,7 +211,7 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 | Headline | Value |
 |---|---|
 | WASM "Hello World" binary | **703 B** verified as shipped (reachability-pruned runtime + function-name debug info) — **545 B** after `almide build --wasm-opt` (`wasm-opt -Oz`); Rust on the same target is 40 KB+ even fully size-tuned |
-| Native minigit CLI binary | **444 KB** stripped, 0 dependencies |
+| Native minigit CLI binary | **418 KB** stripped, 0 dependencies |
 
 The verified pipeline ships the exact bytes its own rendering process produced —
 reachability DCE prunes unreached runtime helpers inside the renderer itself, but
