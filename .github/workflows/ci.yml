@@ -479,6 +479,30 @@ jobs:
           git diff --exit-code -- docs/contracts/README.md \
             || { echo "::error::docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"; exit 1; }
 
+  perf-ratchet:
+    name: Perf ratchet (native/Rust ratio, #917)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # rustc/cargo: the ratchet compiles the handwritten references and the
+      # generated Rust of each benchmark with the same toolchain.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - name: Native runtime ratio vs handwritten Rust
+        run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-perf-ratio.sh
+
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)
   # ═══════════════════════════════════════════════

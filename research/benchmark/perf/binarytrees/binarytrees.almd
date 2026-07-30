@@ -22,7 +22,7 @@ fn check(tree: Tree) -> Int = match tree {
 // Pure function: create and check n trees of given depth, sum their checksums
 fn check_trees(iterations: Int, depth: Int) -> Int = {
   var total = 0
-  for _ in 0..iterations {
+  for _ in 0..<iterations {
     total = total + check(make(depth))
   }
   total

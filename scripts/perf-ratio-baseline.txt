@@ -1,0 +1,6 @@
+# almide-native / handwritten-rust runtime ratio per benchmark
+# (bench.py --quick medians; see scripts/check-perf-ratio.sh)
+fasta 1.152
+fft 1.272
+nbody 0.997
+spectralnorm 1.001

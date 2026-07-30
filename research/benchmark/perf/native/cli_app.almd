@@ -16,7 +16,7 @@ fn hex_digit(n: Int) -> String =
 
 fn to_hex16(n: Int) -> String = {
   var result = ""
-  for i in 0..16 {
+  for i in 0..<16 {
     let shift = (15 - i) * 4
     let digit = int.band(int.bshr(n, shift), 15)
     result = result + hex_digit(digit)

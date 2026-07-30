@@ -3,10 +3,11 @@
 > Auto-generated from directory structure. Run `bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md` to update.
 >
 > [GRAND_PLAN.md](GRAND_PLAN.md) — 5-phase strategy
+> [ROAD_TO_1_0.md](ROAD_TO_1_0.md) — 0.41 → 0.99 version ladder
 
 ## Active
 
-69 items
+67 items
 
 | Item | Description |
 |------|-------------|
@@ -74,9 +75,7 @@
 | [V1 → V0 Parity — the completion plan](active/v1-v0-parity.md) | The completion plan to bring the v1 MIR trust-spine to full v0 parity |
 | [v1 dynamic Value model — the yaml keystone (path A: self-host + ONE trusted recursive-drop routine)](active/v1-value-model.md) | The dynamic Value model: self-host plus one trusted recursive-drop routine |
 | [柱C extension: bring Value rc into the certified region](active/value-rc-cert.md) | Bringing Value reference counting inside the certified region |
-| [Almide WASM Engine — Complete Redesign](done/wasm-engine-redesign.md) | Complete redesign of the WASM engine around LayoutRegistry, WasmIR, and WasmBuilder |
 | [WASM Reference-Count Frees: the Ownership-Discipline Drain](active/wasm-frees-ownership-discipline.md) | Draining the reference-count frees backlog by making the ownership discipline mechanical |
-| [WASM Optimization Roadmap](done/wasm-optimization-roadmap.md) | WASM optimization roadmap and the running scoreboard against Rust+LLVM |
 | [WASM 所有権 emit 層の機械化 (Perceus drift の構造的封じ込め)](active/wasm-ownership-emit-mechanization.md) | Mechanizing the WASM ownership emit layer to contain Perceus drift structurally |
 | [WASM Platform Frontier — beyond core Wasm 3.0](active/wasm-platform-frontier.md) | Post-Wasm-3.0 platform tracking — WASI 0.3 / Component Model, stack switching, shared-everything-threads |
 
@@ -119,10 +118,10 @@
 
 ## Done
 
-259 items
+261 items
 
 <details>
-<summary>Show all 259 completed items</summary>
+<summary>Show all 261 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

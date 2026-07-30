@@ -13,9 +13,9 @@ fn eval_a(i: Int, j: Int) -> Float = {
 
 fn multiply_av(v: List[Float], n: Int) -> List[Float] = {
   var result: List[Float] = []
-  for i in 0..n {
+  for i in 0..<n {
     var sum = 0.0
-    for j in 0..n {
+    for j in 0..<n {
       sum = sum + eval_a(i, j) * v[j]
     }
     result = result + [sum]
@@ -25,9 +25,9 @@ fn multiply_av(v: List[Float], n: Int) -> List[Float] = {
 
 fn multiply_atv(v: List[Float], n: Int) -> List[Float] = {
   var result: List[Float] = []
-  for i in 0..n {
+  for i in 0..<n {
     var sum = 0.0
-    for j in 0..n {
+    for j in 0..<n {
       sum = sum + eval_a(j, i) * v[j]
     }
     result = result + [sum]
@@ -50,22 +50,22 @@ effect fn main() -> Unit = {
   } else 100
 
   var u: List[Float] = []
-  for _ in 0..n {
+  for _ in 0..<n {
     u = u + [1.0]
   }
   var v: List[Float] = []
-  for _ in 0..n {
+  for _ in 0..<n {
     v = v + [0.0]
   }
 
-  for _ in 0..10 {
+  for _ in 0..<10 {
     v = multiply_atav(u, n)
     u = multiply_atav(v, n)
   }
 
   var vbv = 0.0
   var vv = 0.0
-  for i in 0..n {
+  for i in 0..<n {
     vbv = vbv + u[i] * v[i]
     vv = vv + v[i] * v[i]
   }

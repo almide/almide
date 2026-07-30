@@ -26,6 +26,7 @@ cat << 'HEADER'
 > Auto-generated from directory structure. Run `bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md` to update.
 >
 > [GRAND_PLAN.md](GRAND_PLAN.md) — 5-phase strategy
+> [ROAD_TO_1_0.md](ROAD_TO_1_0.md) — 0.41 → 0.99 version ladder
 
 HEADER
 
