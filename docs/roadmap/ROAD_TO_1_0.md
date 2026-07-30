@@ -5,8 +5,8 @@
 
 ## 読み方と運用ルール
 
-- **decade = アーク**。テーマと出口ゲートを持つ。decade 境界（0.50, 0.60, …）はゲート通過のチェックポイントリリース。
-- **各 minor = 大機能 1 つ**。パッチ（0.41.x）は自由。decade 内で番号が前後にずれるのは構わない — 不変条件は decade ゲートであってバージョン番号ではない。
+- **decade = アーク**。テーマと出口ゲートを持つ。decade 境界（0.50, 0.60, …）はゲートリリース — その decade の出口監査を固定する 1 リリース。
+- **各 minor = 行 1 つ**。0.41–0.99 の 59 バージョン全てに行がある（大機能 54 + ゲートリリース 5）。パッチ（0.41.x）は自由。decade 内で番号が前後にずれるのは構わない — 不変条件は decade ゲートであってバージョン番号ではない。fuzz / hole-hunt / dogfood の findings が割り込むときは既存行を decade 内で後ろへスライドし、ゲートリリースで帳尻を監査する。
 - **順序の根拠**は依存関係:
   1. **計測器が先** — fuzz が死んだまま codegen を触らない（0.4x）
   2. **編集ループが規模非依存になってから** dogfood でスケール実測（0.4x）
@@ -34,6 +34,7 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 | 0.47 | クエリ/インクリメンタル基盤 phase 1 — LSP を per-keystroke 全再解析から解放 | [#928](https://github.com/almide/almide/issues/928) |
 | 0.48 | クエリ基盤 phase 2 — ビルドパイプライン本体をクエリ上に | [#928](https://github.com/almide/almide/issues/928) |
 | 0.49 | build-speed / runtime-perf / safety 三点セットの実測数字を README に載せ切る | [#999](https://github.com/almide/almide/issues/999) |
+| 0.50 | ゲートリリース — 0.4x 出口監査を固定し、以後のラチェットとして発効 | — |
 
 **Gate 0.50**: fuzz 連続緑が常態 / dogfood フルビルドがキャッシュ効きで 2-3s 未満 / 三点の数字が public かつラチェット管理。
 
@@ -50,7 +51,9 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 | 0.55 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存 | [#912](https://github.com/almide/almide/issues/912) |
 | 0.56 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |
 | 0.57 | RcCow phase 2 — 対 Rust ギャップをラチェット下に | [#1004](https://github.com/almide/almide/issues/1004) |
-| 0.58–0.59 | バッファ — dogfood と hole-hunt の findings 焼却 | — |
+| 0.58 | 10k 行 dogfood プロジェクト完成・公開 — 0.45 着工分の完了、スケール数字（LOC・モジュール数・ビルド時間）を README に | [#1001](https://github.com/almide/almide/issues/1001) |
+| 0.59 | hole-hunt findings 焼却完了 — 0.55 のレンズ群が出した findings を 0 に | [#912](https://github.com/almide/almide/issues/912) |
+| 0.60 | ゲートリリース — クロスターゲット対等性監査を固定 | — |
 
 **Gate 0.60**: 両ターゲットの最適化品質が同格 / hole-hunt findings 0 / 対 Rust perf ギャップが計測・ラチェット管理下。
 
@@ -65,9 +68,13 @@ cranelift direct native emit のエンドゲーム（#1005）。0.4x で復活�
 | 0.63 | rtlib リンクと stdlib 全面カバー | [#1005](https://github.com/almide/almide/issues/1005) |
 | 0.64 | 差分ゲート — cranelift leg vs rustc leg の挙動 oracle を CI 常設 | [#1005](https://github.com/almide/almide/issues/1005) |
 | 0.65 | debug ビルドのデフォルトを cranelift に切替（release は rustc 継続） | [#1005](https://github.com/almide/almide/issues/1005) |
-| 0.66–0.69 | バッファ — 編集ループ最終形（check → run 体感即時）の磨き込み | — |
+| 0.66 | cranelift debug info — DWARF 行情報と backtrace、debug ビルドを実際にデバッグ可能に | [#1005](https://github.com/almide/almide/issues/1005) |
+| 0.67 | in-process JIT 実行 — `almide run` / `almide test` の debug パスからリンカも消す | [#1005](https://github.com/almide/almide/issues/1005) |
+| 0.68 | 関数単位インクリメンタル再コンパイル — cranelift をクエリ基盤（0.47–0.48）に接続 | [#928](https://github.com/almide/almide/issues/928), [#1005](https://github.com/almide/almide/issues/1005) |
+| 0.69 | 編集ループ総仕上げ — check → run の p50/p95 を計測して README 数字に追加 | [#999](https://github.com/almide/almide/issues/999) |
+| 0.70 | ゲートリリース — rustc-free debug 監査を固定 | — |
 
-**Gate 0.70**: `almide run` の debug パスから rustc が消滅、フル oracle 緑のまま。
+**Gate 0.70**: `almide run` の debug パスから rustc とリンカが消滅、フル oracle 緑のまま。
 
 ## 0.7x — 証明の深化と Critical プロファイル
 
@@ -84,6 +91,7 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 | 0.77 | コンパイラ構造カバレッジの計測とラチェット、safety pass の MC/DC | [#566](https://github.com/almide/almide/issues/566) |
 | 0.78 | wasm Critical 出力の qualified 実行環境 | [#865](https://github.com/almide/almide/issues/865) |
 | 0.79 | DO-333 formal-credit マッピング — 証明済み性質ごとの認証クレジット | [#575](https://github.com/almide/almide/issues/575) |
+| 0.80 | ゲートリリース — Critical プロファイル監査を固定 | — |
 
 **Gate 0.80**: 「critical profile でコンパイルが通る = 証明書が付く」が全て機械検査で成立。
 
@@ -99,9 +107,12 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 | 0.84 | リリース毎の署名付き qualification dossier 自動生成 | [#571](https://github.com/almide/almide/issues/571) |
 | 0.85 | service-history / problem-reporting 記録基盤 | [#584](https://github.com/almide/almide/issues/584) |
 | 0.86 | flight reference app — PID 制御則カーネルが `make verify` を end-to-end で通過（G-F4） | [#776](https://github.com/almide/almide/issues/776) |
-| 0.87–0.89 | バッファ — dossier の実戦投入フィードバック反映 | — |
+| 0.87 | dossier 外部レビュー round 1 — reference app の dossier を DER/TÜV 文脈の外部レビューに渡し、所見を反映 | [#571](https://github.com/almide/almide/issues/571), [#579](https://github.com/almide/almide/issues/579) |
+| 0.88 | qualification kit の顧客統合ストーリー — kit が提供する範囲と顧客側ドメインプロセスの境界を確立（G-F6） | [#574](https://github.com/almide/almide/issues/574) |
+| 0.89 | qualification kit v1 — 外部所見反映後の署名付き完成版 | [#571](https://github.com/almide/almide/issues/571), [#574](https://github.com/almide/almide/issues/574) |
+| 0.90 | ゲートリリース — 引き渡し可能性監査を固定 | — |
 
-**Gate 0.90**: reference app + dossier のセットを第三者にそのまま渡せる。
+**Gate 0.90**: reference app + dossier + kit のセットを第三者にそのまま渡せる。
 
 ## 0.9x — 規範仕様と 1.0 エンドゲーム
 
@@ -110,7 +121,10 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 | Version | 大機能 | Issue |
 |---|---|---|
 | 0.91 | almide-interp を第三審から規範意味論（normative semantics）へ昇格 | [#564](https://github.com/almide/almide/issues/564) |
-| 0.92–0.95 | ALS 規範言語仕様（CG-1）章別完成 — 文法 / 型システム / 意味論 / stdlib 契約 | [#530](https://github.com/almide/almide/issues/530) |
+| 0.92 | ALS 文法・構文章 — grammar の規範化 | [#530](https://github.com/almide/almide/issues/530) |
+| 0.93 | ALS 型システム章 — 推論・単一化・protocol 制約の規範化 | [#530](https://github.com/almide/almide/issues/530) |
+| 0.94 | ALS 動的意味論章 — 0.91 で昇格した interp 準拠で記述 | [#530](https://github.com/almide/almide/issues/530) |
+| 0.95 | ALS stdlib・cross-target 契約章 — contract ledger を仕様へ昇格 | [#530](https://github.com/almide/almide/issues/530) |
 | 0.96 | 仕様凍結 — 構文・演算子・stdlib 境界の最終監査、edition 方針発効 | — |
 | 0.97 | LTS / versioning コミットメント発効（multi-decade support policy） | [#578](https://github.com/almide/almide/issues/578) |
 | 0.98 | 既知乖離ゼロ監査 — contract ledger `flagged-for-revision` 0 / wall 0 / claim-drift 0 の最終確認 | — |
@@ -143,7 +157,9 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 - **信頼**: critical profile + qualification dossier が製品として渡せる、reference app が証拠
 - **数字**: build-speed / runtime-perf / safety の三点が README で実測公開
 
-## Issue 割付の完全性
+## 台帳の完全性
 
-open issue 40 / 40 をこの台帳に割付済み（バージョン行 32 + プログラムトラック 8）。
-この台帳と issue リストの乖離は負債 — 新 issue は同 PR でここに割付け、クローズしたら行を消す代わりに issue リンクが closed になることで進捗が見える。
+- **バージョン行 59 / 59** — 0.41–0.99 の全 minor に行がある（大機能 54 + ゲートリリース 5）
+- **open issue 40 / 40 割付済み** — バージョン行に 32、プログラムトラックに 8
+- Issue 欄が「—」の行（ゲートリリースと 0.96 / 0.98 / 0.99）は台帳新設の作業。着工時に issue を立てて同 PR でリンクを埋める
+- この台帳と issue リストの乖離は負債 — 新 issue は同 PR でここに割付け、クローズしたら issue リンクが closed になることで進捗が見える
