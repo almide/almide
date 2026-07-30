@@ -84,7 +84,10 @@ No work starts before the plan is approved.
   Permitted look-ahead during the wait: drafting the NEXT Unit's plan — never its ledger
   (that would be pre-approval work).
 - Actionable Bolts remain → continue promptly.
-- Everything is waiting on a human → notify and stop.
+- Everything is waiting on a human → notify. Running standalone, stop here. Running under
+  `/loop`, arm a watch on the open `mob` issue (new comments and closure are the wake
+  signals) and idle on a long heartbeat (~30 min) instead — an answer from anywhere
+  resumes the loop.
 
 ## How to call a human
 

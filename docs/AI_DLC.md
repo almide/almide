@@ -50,7 +50,8 @@ Your routine job is the single approval at step 2.
 
 The call format is fixed: an issue labeled `mob` (body: what happened / evidence / options /
 recommendation), plus a notification. Until you answer, the loop continues only with independent
-work — or stops on its own.
+work; under `/loop` it keeps a watch on the mob issue so your reply resumes it, and otherwise
+it stops on its own.
 
 ## Who catches which mistakes
 
