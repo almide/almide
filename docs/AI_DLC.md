@@ -10,16 +10,20 @@
 | AI-DLC | Almide での実体 | 備考 |
 |---|---|---|
 | Intent | decade アーク（0.4x 計測器と編集ループ、…） | ROAD_TO_1_0 の各節。出口ゲート付き |
-| Unit | minor バージョン行（ladder の 1 行） | DoD = 行の大機能 + 台帳ルール（issue リンク・テスト・contract 同 PR） |
-| Bolt | goal-prompt 駆動の 1 作業サイクル（数時間） | exit gate = CI 緑。1 Bolt ≧ 1 push |
+| Unit | minor バージョン行（ladder の 1 行）+ [docs/ai-dlc/units/\<version\>/](./ai-dlc/README.md) の **inception.md / construction.md の対** | inception = 詳細化（scope / DoD / リスク / 提案 Bolt）、construction = Bolt 実行台帳 |
+| Bolt | goal-prompt 駆動の 1 作業サイクル（数時間）。construction.md の 1 行 | exit gate = CI 緑。1 Bolt ≧ 1 push。証拠（SHA / CI run）必須 |
 | Deployment Unit | リリース済み minor（tag + 5 プラットフォームバイナリ） | release.yml が生成 |
-| Mob Elaboration | ladder の構造変更（行の新設・decade 跨ぎの移動） | 人間必須 |
+| Mob Elaboration | Unit ごとの inception 承認（M0）+ ladder の構造変更（行の新設・decade 跨ぎの移動） | 人間必須 |
 | Mob Programming / Testing | 通常は不要 — CI ゲート群が代替。Mob ポイント該当時のみ発生 | 下表 |
-| Context Memory | git 履歴 + issues + ROAD_TO_1_0 + docs/roadmap/active/ + goal prompt | 新しい状態ファイルは作らない |
+| Context Memory | git 履歴 + issues + ROAD_TO_1_0 + docs/ai-dlc/units/ + docs/roadmap/active/ | すべて versioned な artefact。野良の状態ファイルは作らない |
 | 人間の監督 = loss function | 機械ゲートが拾えない誤差だけを人間が拾う | 次節の分担表 |
 
-AI-DLC の Inception フェーズは 0.41–0.99 について**実施済み** — ROAD_TO_1_0 がその成果物
-（Unit 分解・DoD・依存順序・リスク = ゲート）である。以後の Inception は ladder の構造変更時のみ再発生する。
+Inception は **2 段階**である。Level 1（Intent → Unit 分解・依存順序・decade ゲート）は
+0.41–0.99 について実施済みで、ROAD_TO_1_0 がその成果物。Level 2（Unit の詳細化 —
+scope / DoD / リスク / 提案 Bolt）は **Unit ごとに着工直前** に `docs/ai-dlc/units/<version>/inception.md`
+として起草し、Mob 承認（M0）を経て初めて対になる construction.md（Bolt 実行台帳）が生まれる。
+Inception 無しの Construction は存在しない。59 個を先に量産もしない — 前の Unit の結果が
+次の inception の入力になるため、鮮度が規律である。
 
 ## loss function の分担 — 機械が拾う誤差 / 人間が拾う誤差
 
@@ -42,6 +46,7 @@ AI-DLC の Inception フェーズは 0.41–0.99 について**実施済み** �
 
 | # | 事象 | ループの挙動 |
 |---|---|---|
+| M0 | Unit inception の承認 — Construction の開始条件。Unit につき 1 回（まとめて先承認も可） | inception.md を起草・push して承認待ち。承認記録が埋まるまで Bolt は実行しない |
 | M1 | decade ゲートリリース（0.50 / 0.60 / 0.70 / 0.80 / 0.90） | 監査ブリーフを添えて承認待ち。**通常 minor のリリースは自動** |
 | M2 | 言語表面・仕様の決定 — syntax / stdlib 境界 / observable behavior の変更（= contract ledger の追加・変更）/ concurrency の立場 / ALS / 凍結 | 実装前に escalate |
 | M3 | 外向き主張の新設・文言変更（README / BENCHMARKS のクレーム）。ゲート済みスクリプトによる数字更新は自動でよい | escalate |
@@ -56,15 +61,15 @@ AI-DLC の Inception フェーズは 0.41–0.99 について**実施済み** �
 
 | Loop | 中身 | 走らせ方 | 状態 |
 |---|---|---|---|
-| L1 Bolt ループ（Construction） | [AI_DLC_BOLT_LOOP.md](./AI_DLC_BOLT_LOOP.md) — Unit 選択 → Bolt 計画（issue 上）→ 1 Bolt 実行 → push → CI → リリース判定 | 手元: `/loop` に本手順を渡す（動的ペーシング）。クラウド: `/schedule` で routine 化 | 稼働可 |
+| L1 Bolt ループ（Inception + Construction） | [AI_DLC_BOLT_LOOP.md](./AI_DLC_BOLT_LOOP.md) — Unit 選択 → inception 起草 → M0 承認 → construction 台帳で 1 Bolt 実行 → push → CI → 証拠記録 → リリース判定 | 手元: `/loop` に本手順を渡す（動的ペーシング）。クラウド: `/schedule` で routine 化 | 稼働可 |
 | L2 Ops ループ（Operations） | fuzz-nightly triage・CI 赤監視・ratchet ドリフト検知 → 自動修正 or escalate | 0.41 で計測器が蘇ってから `/schedule` の nightly routine に | 0.41 後に開設 |
 | L3 Release ループ | L1 に内蔵 — Unit DoD 緑で bump → develop→main PR → merge on green → tag → 検証 | L1 の一部 | 稼働可 |
 
 ## 可視性の設計（手放し ≠ 盲目）
 
-新しい状態ファイルは作らず、すべて既存の traceable な場所に書く:
+すべて versioned で traceable な artefact に書く（野良の状態ファイルは作らない）:
 
-- Bolt の進捗 = commit（英語 1 行）+ Unit issue のチェックリスト更新（証拠リンク付き）
+- Bolt の進捗 = commit（英語 1 行）+ `units/<version>/construction.md` の台帳更新（証拠 = SHA / CI run URL）
 - Unit の完了 = リリースノート（既存 release workflow の成果物）
 - 人間が要る事象 = `mob` issue + PushNotification
 - 全体の残量 = ROAD_TO_1_0 の issue リンクが closed になっていく様子そのもの
