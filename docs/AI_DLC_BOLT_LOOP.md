@@ -92,6 +92,7 @@ No work starts before the plan is approved.
 ## How to call a human
 
 Write a `mob`-labeled issue with four points: **what happened / evidence / options /
-recommendation**. Send a notification. Continue with independent work if any exists;
+recommendation**. Write it in English — the repo's issue language — and link the `.ja.md`
+documents where they help the reader. Send a notification. Continue with independent work if any exists;
 otherwise stop. If a call turns out not to have needed a human, that is a defect in this
 procedure — record it and tighten this document.
