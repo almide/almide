@@ -24,10 +24,33 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Dependencies | **0** (single static binary) |
 | WASM target | `almide build app.almd --target wasm` |
 
-Runtime performance against Rust is tracked per-benchmark on the wasm leg (see
-[WASM-OUTPUT.md](./WASM-OUTPUT.md) and the benchmark suite); a native runtime
-scoreboard with a stated baseline and repro script is #917 — no number is
-published here until it exists.
+### Runtime scoreboard (2026-07-30, Apple M4 Pro, rustc 1.96.1)
+
+Benchmarks-Game-style programs, Almide `--release` vs handwritten Rust compiled
+with the same flags (opt-level=3, LTO, 1 CGU), median of 5 interleaved runs,
+byte-identical stdout verified across every variant before timing. Produced by
+[research/benchmark/perf/bench.py](../research/benchmark/perf/README.md); raw
+per-run data: [results/2026-07-30-m4pro.json](../research/benchmark/perf/results/2026-07-30-m4pro.json).
+
+| Benchmark (workload) | Almide native | Handwritten Rust | Ratio |
+|---|---:|---:|---:|
+| n-body (50M steps) | **1.135s** | 1.134s same-shape / 1.552s array-based | **1.00×** / 0.73× |
+| spectral-norm (n=5500) | **0.685s** | 0.685s | **1.00×** |
+| fasta (25M) | **3.590s** | 3.083s | 1.16× |
+| FFT (2^22) | **0.181s** | 0.143s | 1.27× |
+
+Almide beats the array-based n-body reference because its unrolled-scalar idiom
+compiles to bounds-check-free locals; the same-shape reference isolates pure
+codegen overhead (≤1%). The `perf-ratchet` CI job
+([scripts/check-perf-ratio.sh](../scripts/check-perf-ratio.sh)) gates these
+ratios against a committed baseline so they can only move on purpose.
+
+The wasm leg is measured in the same dated results file: within 1.1–1.2× of
+native on the compute kernels (n-body 1.278s, spectral-norm 0.764s,
+fannkuch-redux 1.892s) and *faster* than native on binary-trees (0.239s vs
+0.835s), but it craters on hot list index writes (FFT: ~3,500× at 2^18) and on
+mandelbrot (~130×) — those two cliffs are the current wasm perf arc, tracked in
+#917's follow-up.
 
 ## AI Coding Language Benchmark
 
