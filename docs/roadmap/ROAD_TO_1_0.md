@@ -16,6 +16,7 @@
   6. **証明と Critical プロファイルは codegen 安定後**（0.7x）、**資格化キットは証明の上**（0.8x）
   7. **仕様凍結は最後** — 全部が動いてから規範化する（0.9x）
 - 新 issue を立てたら、この台帳のどこかの decade に割付ける（同 PR で）。載らない issue を作らない。
+- **実行は AI-DLC で回す** — 運用モデルは [docs/AI_DLC.md](../AI_DLC.md)（Intent=decade / Unit=行 / Bolt=作業サイクル、人間は Mob ポイントのみ）、ループ手順は [docs/AI_DLC_BOLT_LOOP.md](../AI_DLC_BOLT_LOOP.md)。
 
 ---
 
