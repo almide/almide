@@ -79,5 +79,6 @@ on the latest night (no separate diagnosis needed).
 
 ## Approval (M0)
 
-- Status: not approved
-- Approver / date / notes: —
+- Status: **approved**
+- Approver / date / notes: O6lvl4 / 2026-07-31 / approved in session. Streak-based DoD
+  (loop until dry) and worst-class-first ordering confirmed.
