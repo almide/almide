@@ -1,27 +1,39 @@
-# AI-DLC の Unit 置き場 — 計画書と実行台帳の対
+# AI-DLC Unit Home — Plan/Ledger Pairs
 
-ここには Unit（= [ROAD_TO_1_0.md](../roadmap/ROAD_TO_1_0.md) の 1 行）ごとの文書を置きます。
-1 Unit = 1 フォルダ。中身は必ずこの 2 枚です。
+> 日本語版: [README.ja.md](./README.ja.md)
+> The English `.md` files are canonical; `.ja.md` files are courtesy translations and may lag.
+> The loop reads and writes only the English files.
+
+This directory holds the documents for each Unit (= one row of
+[ROAD_TO_1_0.md](../roadmap/ROAD_TO_1_0.md)). One Unit = one folder, always with exactly
+these two files:
 
 ```
 docs/ai-dlc/units/<version>/
-  inception.md      — 計画書: やること / やらないこと / 完了条件 / 危ない所 / Bolt 案。人間の承認欄つき
-  construction.md   — 実行台帳: Bolt ごとの完了条件・状態・証拠（commit SHA と CI run の URL）
+  inception.md      — the plan: what to do / what not to do / done-criteria / risks /
+                      proposed Bolts. Carries the human-approval record
+  construction.md   — the ledger: per-Bolt done-criteria, status, and evidence
+                      (commit SHA and CI run URL)
 ```
 
-運用モデルの全体像は [docs/AI_DLC.md](../AI_DLC.md)、毎回の手順は [docs/AI_DLC_BOLT_LOOP.md](../AI_DLC_BOLT_LOOP.md)。
+The operating model is [docs/AI_DLC.md](../AI_DLC.md); the per-iteration procedure is
+[docs/AI_DLC_BOLT_LOOP.md](../AI_DLC_BOLT_LOOP.md).
 
-## 守ること 5 つ
+## Five rules
 
-1. **対で置く** — 計画書の無い実行台帳を作らない。証拠が計画書の完了条件に対応しない Unit は完了と呼ばない。
-2. **着工直前に書く** — 59 個まとめて先に書かない。前の Unit の結果（findings や計測値）が
-   次の計画書の材料になるので、先に書いた計画書は着工時には古くなっている。
-3. **承認（M0）前に Bolt を始めない** — 承認は Unit につき 1 回。まとめて先にもらってもよい。
-4. **Bolt 計画の正本はここ** — issue には重複させず、issue からここへリンクする。
-   証拠（commit SHA と CI run の URL）の無いチェックは無効。
-5. **相互に辿れること** — 台帳の行 ↔ このフォルダ ↔ issue ↔ commit がリンクでつながっている。
+1. **Always a pair** — never create a ledger without a plan. A Unit whose evidence does not
+   map to the plan's done-criteria is not "done".
+2. **Write just-in-time** — do not write all 59 plans up front. The previous Unit's results
+   (findings, measurements) feed the next plan; a plan written early is stale by the time
+   work starts.
+3. **No Bolts before approval (M0)** — one approval per Unit. Approving several in advance
+   is fine.
+4. **The ledger here is the single source of truth for Bolt plans** — do not duplicate them
+   in issues; link from the issue to here. A checkbox without evidence (commit SHA and
+   CI run URL) is invalid.
+5. **Everything traceable** — ladder row ↔ this folder ↔ issues ↔ commits are linked both ways.
 
-## テンプレート
+## Templates
 
-- [inception-template.md](./inception-template.md) — 計画書
-- [construction-template.md](./construction-template.md) — 実行台帳
+- [inception-template.md](./inception-template.md) — the plan
+- [construction-template.md](./construction-template.md) — the ledger

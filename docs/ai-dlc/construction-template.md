@@ -1,22 +1,26 @@
-# Unit <version> — 実行台帳
+# Unit <version> — Ledger
 
-> 対になる計画書: [inception.md](./inception.md)（承認済みであること）
-> ルール: 証拠（commit SHA / CI run の URL）の無いチェックは無効。
-> Bolt N の証拠は、次の iteration の冒頭（前回分の CI 確認時）に記入する。
+> 日本語版テンプレート: [construction-template.ja.md](./construction-template.ja.md)
 
-## Bolt 台帳
+> Paired plan: [inception.md](./inception.md) (must be approved)
+> Rule: a checkbox without evidence (commit SHA / CI run URL) is invalid.
+> Bolt N's evidence is recorded at the start of the next iteration, while checking the
+> previous run's CI.
 
-| Bolt | 何をやるか | この Bolt の完了条件 | 状態 | 証拠 |
+## Bolt ledger
+
+| Bolt | What | Done-criteria for this Bolt | Status | Evidence |
 |---|---|---|---|---|
-| B1 | <作業> | <条件> | 未着手 | — |
-| B2 | … | … | 未着手 | — |
+| B1 | <work> | <criteria> | pending | — |
+| B2 | … | … | pending | — |
 
-## 実行メモ
+## Notes
 
-<やってみて判明したこと。計画とのずれとその理由。ずれが計画書の「やること」を超えるなら M6 で人間を呼ぶ>
+<What execution revealed. Deviations from the plan and why. A deviation beyond the plan's
+Scope means calling a human (M6)>
 
-## Unit 完了判定
+## Unit completion
 
-- [ ] 全 Bolt が証拠つきで完了
-- [ ] 証拠が計画書の完了条件を満たしている（どの証拠がどの条件に対応するか明記）
-- [ ] リリース（普通の minor は自動 / 節目は M1 承認）
+- [ ] Every Bolt done with evidence
+- [ ] The evidence satisfies the plan's done-criteria (state which evidence maps to which criterion)
+- [ ] Released (ordinary minors automatically / milestones need M1 approval)

@@ -1,113 +1,126 @@
-# AI-DLC 運用モデル — Loop Engineering
+# AI-DLC Operating Model — Loop Engineering
 
-0.41 から 0.99 まで、59 リリースぶんの仕事が台帳（[ROAD_TO_1_0.md](./roadmap/ROAD_TO_1_0.md)）に並んでいます。
-これを毎回人間が指示して進めると、判断の回数は数百回になります。この文書は、その判断のほとんどを
-ループと CI に渡し、人間の出番を **7 つの場面だけ** に絞るための取り決めです。
+> 日本語版: [AI_DLC.ja.md](./AI_DLC.ja.md)
 
-構図はカーナビと同じです。目的地を決めるのはあなた。運転はループ。あなたが口を出すのは分岐点だけです。
+The ladder ([ROAD_TO_1_0.md](./roadmap/ROAD_TO_1_0.md)) lines up 59 releases' worth of work,
+from 0.41 to 0.99. Driving that by hand would mean hundreds of human decisions. This document
+hands most of those decisions to a loop and to CI, and narrows the human's role to **seven
+situations**.
 
-> 元にした手法: AWS の AI-Driven Development Lifecycle（AI-DLC）。用語の対応は文末の付録にあります。
-> ループの具体的な手順書は [AI_DLC_BOLT_LOOP.md](./AI_DLC_BOLT_LOOP.md)、
-> Unit ごとの文書の置き場とルールは [docs/ai-dlc/README.md](./ai-dlc/README.md)。
+The shape is a car navigation system: you pick the destination, the loop drives, and you only
+speak at the forks.
 
-## 覚える言葉は 4 つ
+> Method source: AWS's AI-Driven Development Lifecycle (AI-DLC). The term mapping is in the appendix.
+> The step-by-step procedure is [AI_DLC_BOLT_LOOP.md](./AI_DLC_BOLT_LOOP.md); per-Unit documents
+> and their rules live in [docs/ai-dlc/README.md](./ai-dlc/README.md).
 
-- **Unit** — バージョン 1 個ぶんの仕事。台帳の 1 行（例: 0.41 = fuzz の計測器を直す）
-- **Inception** — Unit の着工前に書く計画書。やること・やらないこと・完了条件をここで決める
-- **Bolt** — 数時間で終わる作業 1 回。実装して、テストして、push するまでが 1 Bolt
-- **Mob** — 人間（あなた）の判断が要る場面。ここ以外でループは人間を呼びません
+## Four terms to remember
 
-計画書と対になる実行台帳（Bolt の一覧と証拠を記録するファイル）を **Construction** と呼びます。
+- **Unit** — one version's worth of work; one row of the ladder (e.g. 0.41 = fix the fuzz instrument)
+- **Inception** — the plan written before a Unit starts: what to do, what not to do, and what "done" means
+- **Bolt** — one work cycle of a few hours: implement, test, push
+- **Mob** — a situation that needs a human decision. Outside these, the loop never calls a human
 
-## Unit の一生
+The ledger paired with the plan — the file that records each Bolt and its evidence — is called
+**Construction**.
 
-1. ループが台帳から次の Unit を選ぶ
-2. 計画書（`inception.md`）を書いて、あなたに承認を求める ← **ここで人間**
-3. 承認されたら、実行台帳（`construction.md`）に沿って Bolt を 1 つずつ実行する。push は自動、審査は CI
-4. 全部の Bolt が証拠つきで終わったら、リリースする（普通の minor は自動。節目だけ承認待ち）
-5. 次の Unit へ
+## The life of a Unit
 
-ふだんのあなたの仕事は、2 の承認 1 回だけです。
+1. The loop picks the next Unit from the ladder
+2. It writes the plan (`inception.md`) and asks you to approve ← **human here**
+3. Once approved, it executes Bolts one at a time from the ledger (`construction.md`).
+   Pushes are automatic; CI is the judge
+4. When every Bolt is done with evidence, it releases (ordinary minors automatically;
+   milestone versions wait for approval)
+5. On to the next Unit
 
-## あなたが呼ばれる 7 つの場面（Mob ポイント）
+Your routine job is the single approval at step 2.
 
-| 番号 | 場面 | 補足 |
+## The seven situations that call you (Mob points)
+
+| # | Situation | Notes |
 |---|---|---|
-| M0 | 計画書の承認 | Unit ごとに 1 回。まとめて先に承認してもよい |
-| M1 | 節目リリースの承認 | 0.50 / 0.60 / 0.70 / 0.80 / 0.90。監査ブリーフつきで承認待ち。普通の minor は自動 |
-| M2 | 言語の見た目やふるまいを変える決定 | 構文、stdlib の境界、ターゲット間で観測できる挙動の変更（= contract 台帳に触る変更） |
-| M3 | 外に見せる主張の文言 | README やベンチマークの言い回し。ゲート済みスクリプトによる数字の自動更新では呼ばれない |
-| M4 | 基準をゆるめたくなったとき | ratchet や wall を下げないと緑にならない状況。AI は絶対に自分でゆるめない。直す方向は常に前 |
-| M5 | 会社側の仕事 | 法人・認証機関・資金・デプロイ（program track）。ループは触らない |
-| M6 | 遭難 | 同じ原因で 2 回失敗した、計画の解釈が割れた、想定外の破壊的変更が要る |
+| M0 | Approving a Unit's plan | Once per Unit. Approving several in advance is fine |
+| M1 | Approving a milestone release | 0.50 / 0.60 / 0.70 / 0.80 / 0.90, with an audit brief. Ordinary minors release automatically |
+| M2 | Decisions that change the language's surface or behavior | Syntax, stdlib boundaries, observable cross-target behavior (= anything touching the contract ledger) |
+| M3 | Outward-facing claims | Wording in README or benchmarks. Number refreshes by gated scripts do not call you |
+| M4 | Pressure to loosen a standard | When green would require lowering a ratchet or wall. The AI never loosens one on its own; the only direction is forward |
+| M5 | Company-side work | Legal entity, certification authorities, funding, deployments (the program track). The loop does not touch these |
+| M6 | Distress | Two failures from the same cause, ambiguity in the plan, or an unplanned breaking change |
 
-呼び方は決まっています: `mob` ラベルの issue を立てて（本文は「何が起きたか / 根拠 / 選択肢 / おすすめ」の 4 点）、
-通知を送る。あなたが返事をするまで、ループは独立の作業だけ続け、なければ自分で止まります。
+The call format is fixed: an issue labeled `mob` (body: what happened / evidence / options /
+recommendation), plus a notification. Until you answer, the loop continues only with independent
+work — or stops on its own.
 
-## ミスは誰が捕まえるか
+## Who catches which mistakes
 
-この 7 場面の選び方には根拠があります。ミスを「機械が捕まえられるもの」と「人間にしか捕まえられないもの」に
-分けたとき、後者だけが Mob ポイントになっています。
+The seven situations come from one split: mistakes machines can catch versus mistakes only a
+human can catch. Only the latter became Mob points.
 
-**機械（CI ゲート群）が捕まえる:**
+**Machines (the CI gates) catch:**
 
-- 型・所有権・メモリ安全 — trust spine と wall（「黙って 0 になる」は存在しない）
-- ターゲット間の挙動差 — 3-way oracle、differential fuzz、byte gate
-- 性能・品質の後退 — ratchet 群（下がることはあっても、黙って戻ることはない）
-- 契約の欠落 — `scripts/check-contracts.sh`（fixture と C-NNN の相互リンク検査）
-- API の抜け — matrix gate
+- Types, ownership, memory safety — the trust spine and walls ("silently zero" does not exist)
+- Cross-target behavior differences — the 3-way oracle, differential fuzz, the byte gate
+- Regressions in performance or quality — the ratchets (they can go down, never silently back up)
+- Missing contracts — `scripts/check-contracts.sh` (bidirectional fixture ↔ C-NNN links)
+- API surface gaps — the matrix gates
 
-**人間にしか捕まえられない:**
+**Only a human catches:**
 
-- 完了条件は満たしたが、目的とずれている（意図のドリフト）
-- 外向きの主張が実力より大きい（2026-07 監査で実際に起きた）
-- 言語設計の趣味・筋の良し悪し
-- 事業判断
+- Work that meets its done-criteria but drifts from the goal
+- Claims bigger than the evidence (this actually happened — the 2026-07 audit)
+- Taste and judgment in language design
+- Business decisions
 
-## 進捗はどこで見るか
+## Where to see progress
 
-新しいダッシュボードは作りません。すべて、いつもの場所に残ります。
+No new dashboards. Everything lands where it already lives:
 
-- いまの作業 — `docs/ai-dlc/units/<version>/construction.md` のチェックと証拠（commit SHA と CI run の URL）
-- 完了した Unit — リリースノート
-- 人間待ちの案件 — `mob` ラベルの issue
-- 全体の残り — ROAD_TO_1_0 の issue リンクが閉じていく様子そのもの
+- Current work — checkboxes and evidence (commit SHA, CI run URL) in
+  `docs/ai-dlc/units/<version>/construction.md`
+- Finished Units — release notes
+- Items waiting on you — issues labeled `mob`
+- Overall remaining work — the ladder's issue links closing over time
 
-## 動かし方
+## How to run it
 
-1. 手元で回す: `/loop docs/AI_DLC_BOLT_LOOP.md に従い 1 iteration 実行`
-2. 離席してかまいません。人間が要る場面になると通知が来て、他にやれることがなければループは自分で止まります
-3. 将来はクラウド常駐に移します（`/schedule`）。夜間監視ループ（fuzz の triage・CI 赤の検知）は、
-   0.41 で fuzz の計測器が直ってから開設します — 計測器が死んだまま監視を名乗るのは嘘になるので
+1. Locally: `/loop follow docs/AI_DLC_BOLT_LOOP.md and execute one iteration`
+2. Walking away is fine. When a human is needed you get a notification, and if nothing else
+   is actionable the loop stops on its own
+3. Cloud residency comes later (`/schedule`). The nightly watch loop opens only after 0.41
+   revives the fuzz instrument — calling it "monitoring" while the instrument is dead would be a lie
 
-## ループの一覧
+## The loops
 
-| 名前 | 仕事 | 状態 |
+| Name | Job | Status |
 |---|---|---|
-| L1 Bolt ループ | Unit を選ぶ → 計画書 → 承認 → Bolt を 1 つずつ → リリース判定（[手順書](./AI_DLC_BOLT_LOOP.md)） | 稼働可 |
-| L2 夜間監視ループ | fuzz-nightly の triage、CI 赤の検知、ratchet のドリフト監視 | 0.41 後に開設 |
-| L3 リリースループ | bump → develop→main PR → タグ → 検証。L1 に内蔵 | 稼働可 |
+| L1 Bolt loop | Pick the Unit → plan → approval → Bolts one at a time → release check ([procedure](./AI_DLC_BOLT_LOOP.md)) | Ready |
+| L2 Nightly watch loop | fuzz-nightly triage, red-CI detection, ratchet drift watch | Opens after 0.41 |
+| L3 Release loop | bump → develop→main PR → tag → verify. Built into L1 | Ready |
 
-## この仕組み自体の合格条件
+## Acceptance criteria for this model itself
 
-- 0.41 を、Mob 以外の人間介入ゼロでリリースまで通せること。Mob 以外で人間が呼ばれたら、
-  それはこの仕組みの欠陥として、この文書と手順書を直す
-- 人間を呼んだうち 8 割以上が「呼んで正解だった」であること。空振りの呼び出しも欠陥
-- ratchet のゆるめゼロ、主張と実力のずれゼロが続いていること
+- The loop can take 0.41 to release with zero human involvement outside Mob points.
+  If a human is needed anywhere else, that is a defect in this model — fix this document
+  and the procedure
+- At least 80% of human calls turn out to have genuinely needed a human. Noisy calls are
+  also a defect
+- Zero ratchet loosening and zero drift between claims and reality, continuously
 
-## 付録: AWS AI-DLC との用語対応
+## Appendix: term mapping to AWS AI-DLC
 
-| AWS の言葉 | この repo での実体 |
+| AWS term | What it is in this repo |
 |---|---|
-| Intent | decade アーク（0.4x「計測器と編集ループ」など。出口ゲートつき） |
-| Unit | minor バージョン行 + `docs/ai-dlc/units/<version>/` の計画書・実行台帳の対 |
-| Bolt | 数時間の作業 1 回。実行台帳の 1 行 |
-| Deployment Unit | リリース済み minor（タグ + 5 プラットフォームのバイナリ） |
-| Mob Elaboration | 計画書の承認（M0）と、台帳の構造変更 |
-| Mob Programming / Testing | 通常は CI ゲート群が代替。Mob ポイント該当時のみ人間 |
-| Context Memory | git 履歴 + issues + ROAD_TO_1_0 + docs/ai-dlc/units/ |
-| 人間の監督 = loss function | 「ミスは誰が捕まえるか」の分担表 |
+| Intent | A decade arc (e.g. 0.4x "instruments and the edit loop"), with an exit gate |
+| Unit | A minor-version row plus the plan/ledger pair in `docs/ai-dlc/units/<version>/` |
+| Bolt | One work cycle of a few hours; one row of the ledger |
+| Deployment Unit | A released minor (tag + binaries for 5 platforms) |
+| Mob Elaboration | Plan approval (M0) and structural changes to the ladder |
+| Mob Programming / Testing | Normally replaced by the CI gates; humans only at Mob points |
+| Context Memory | Git history + issues + ROAD_TO_1_0 + docs/ai-dlc/units/ |
+| Human oversight as a loss function | The "who catches which mistakes" split |
 
-補足: AI-DLC の Inception は 2 段階に分けて運用します。Level 1（Intent を Unit に分解し、依存順に並べる）は
-0.41–0.99 ぶん実施済みで、ROAD_TO_1_0 がその成果物です。Level 2（Unit の詳細化 = 計画書）は
-着工直前に 1 Unit ずつ書きます。前の Unit の結果が次の計画書の材料になるため、先に 59 個は書きません。
+Note: we run AI-DLC's Inception in two levels. Level 1 (decompose Intents into Units and order
+them by dependency) is already done for 0.41–0.99 — ROAD_TO_1_0 is its artifact. Level 2 (the
+per-Unit plan) is written one Unit at a time, just before work starts: the previous Unit's
+results feed the next plan, so we do not write 59 plans up front.

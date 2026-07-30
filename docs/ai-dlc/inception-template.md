@@ -1,39 +1,43 @@
-# Unit <version> — 計画書: <台帳の行の大機能>
+# Unit <version> — Plan: <the ladder row's headline feature>
 
-- **ねらい**: <どのアーク（decade）の何を前進させるか。decade ゲートへの寄与も一言>
+> 日本語版テンプレート: [inception-template.ja.md](./inception-template.ja.md)
+
+- **Aim**: <which decade arc this advances and how; one line on its contribution to the decade gate>
 - **Issues**: <#NNN, …>
 
-## 3 行でいうと
+## In three lines
 
-<この Unit が「何を」「なぜ今」「どうなったら終わりか」を 3 行で。承認する人が最初に読む場所>
+<What this Unit does, why now, and what "done" looks like — in three lines.
+The first thing the approver reads>
 
-## 背景
+## Background
 
-<現状と根因。数字は issue や計測から引く。創作しない>
+<Current state and root causes. Pull numbers from issues and measurements; invent nothing>
 
-## やること
+## Scope
 
-- S1 <作業のかたまり>
+- S1 <a chunk of work>
 - S2 …
 
-## やらないこと
+## Out of scope
 
-- <この Unit でやらないことと、どの Unit がやるか（例: findings の修正は 0.42）>
+- <What this Unit does NOT do, and which Unit does it (e.g. fixing findings belongs to 0.42)>
 
-## 完了条件
+## Done-criteria
 
-- <検証できる形で書く。「〜できる」ではなく「〜が緑」「〜が記録される」「〜が issue に添付される」>
+- <Written verifiably: not "X works" but "X is green", "X is recorded", "X is attached to the issue">
 
-## 危ない所
+## Risks
 
-- R1 <リスクと吸収策。制御できない要因は、人間を呼ぶ条件（M6）も書く>
+- R1 <risk and its absorption plan. For factors outside our control, also state the condition
+  for calling a human (M6)>
 
-## Bolt 案
+## Proposed Bolts
 
-- B1 <数時間で終わるサイズの作業。承認後、この案から実行台帳を作る>
+- B1 <work sized to a few hours. After approval, the ledger is built from this list>
 - B2 …
 
-## 承認（M0）
+## Approval (M0)
 
-- 状態: 未承認
-- 承認者 / 日付 / 判断メモ: —
+- Status: not approved
+- Approver / date / notes: —

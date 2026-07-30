@@ -1,25 +1,30 @@
-# Unit 0.41 — 実行台帳
+# Unit 0.41 — Ledger
 
-> 対になる計画書: [inception.md](./inception.md)（承認済みであること）
-> ルール: 証拠（commit SHA / CI run の URL）の無いチェックは無効。
-> Bolt N の証拠は、次の iteration の冒頭（前回分の CI 確認時）に記入する。
+> 日本語版: [construction.ja.md](./construction.ja.md) — the loop updates only this English
+> ledger; the translation may lag.
 
-## Bolt 台帳
+> Paired plan: [inception.md](./inception.md) (must be approved)
+> Rule: a checkbox without evidence (commit SHA / CI run URL) is invalid.
+> Bolt N's evidence is recorded at the start of the next iteration, while checking the
+> previous run's CI.
 
-| Bolt | 何をやるか | この Bolt の完了条件 | 状態 | 証拠 |
+## Bolt ledger
+
+| Bolt | What | Done-criteria for this Bolt | Status | Evidence |
 |---|---|---|---|---|
-| B1 | fuzzer prebuild でビルド税を消す | nightly ジョブがビルドをスキップし、フォズ時間 ≈ 予算全体になる | 未着手 | — |
-| B2 | campaign を短い shard N 個に分割 | 分割後のワークフローが 1 夜完走する | 未着手 | — |
-| B3 | 予算復元 + programs/night の記録 | run summary に programs/night が出る。予算が削減前の水準以上 | 未着手 | — |
-| B4 | #917 の残務確認 | #917 close、または残りの Bolt がこの台帳に追加済み | 未着手 | — |
-| B5 | 3 夜連続フル予算完走の観測 | 3 夜分の run URL を証拠欄に記録 | 未着手 | — |
+| B1 | Fuzzer prebuild removes the build tax | The nightly job skips building; fuzz time ≈ the whole budget | pending | — |
+| B2 | Split the campaign into N short shards | The restructured workflow completes one full night | pending | — |
+| B3 | Restore the budget + record programs/night | The run summary shows programs/night; budget at or above the pre-cut level | pending | — |
+| B4 | Check #917's residuals | #917 closed, or its remaining work added to this ledger as Bolts | pending | — |
+| B5 | Observe 3 consecutive full-budget nights | 3 run URLs recorded as evidence | pending | — |
 
-## 実行メモ
+## Notes
 
-（未着工）
+(not started)
 
-## Unit 完了判定
+## Unit completion
 
-- [ ] 全 Bolt が証拠つきで完了
-- [ ] 証拠が計画書の完了条件を満たしている（どの証拠がどの条件に対応するか明記）
-- [ ] リリース v0.41.0（普通の minor — 自動可）。#924 は 14 夜条件まで open のまま 0.42 へ引き継ぐ
+- [ ] Every Bolt done with evidence
+- [ ] The evidence satisfies the plan's done-criteria (state which evidence maps to which criterion)
+- [ ] Release v0.41.0 (ordinary minor — automatic). #924 stays open until its 14-night
+      condition and carries over into 0.42
