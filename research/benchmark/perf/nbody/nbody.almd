@@ -70,7 +70,7 @@ effect fn main() -> Unit = {
 
   // Advance loop — fully unrolled 10 pairs, inv_dist^3 optimization
   let dt = 0.01
-  for _step in 0..n {
+  for _step in 0..<n {
     // Sun-Jupiter
     let dx = s_x - j_x;  let dy = s_y - j_y;  let dz = s_z - j_z
     let dsq = dx * dx + dy * dy + dz * dz
