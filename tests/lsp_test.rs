@@ -3,28 +3,105 @@
 //! and verifies responses.
 
 use std::io::{Read, Write, BufRead, BufReader};
+use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 use serde_json::{json, Value};
+
+/// How long any single server response may take before the test fails.
+/// Reads used to block UNBOUNDED on the server pipe, so a non-responding
+/// server was an infinite test hang — 4h20m on the Windows leg before the
+/// 6h job default would have killed it (#1008). A deadline turns any future
+/// hang into a red naming the wait, in about a minute.
+const RECV_DEADLINE: Duration = Duration::from_secs(60);
+
+/// A CORRECT `file://` URI for a real path on every OS: forward slashes and
+/// the third slash before a Windows drive letter. The old inline
+/// `format!("file://{}", path.display())` produced `file://C:\…` on Windows —
+/// an INVALID URI the server's params deserialization rejected, which is how
+/// the didChange test's hover went unanswered and hung the suite for 6h per
+/// run (#1008).
+fn file_uri(path: &Path) -> String {
+    let s = path.display().to_string().replace('\\', "/");
+    if s.starts_with('/') { format!("file://{s}") } else { format!("file:///{s}") }
+}
 
 struct LspClient {
     child: std::process::Child,
-    reader: BufReader<std::process::ChildStdout>,
+    /// Parsed server messages, delivered by the reader thread — recv'ing
+    /// through a channel is what makes the deadline possible.
+    rx: mpsc::Receiver<Value>,
+    /// The server's captured stderr (trace lines, drop notices) — dumped
+    /// into the deadline panic so a hang names its cause (#1008).
+    server_log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     /// The `capabilities` object from the initialize response.
     capabilities: Value,
+}
+
+/// The reader half, on its own thread: blocks on the pipe, parses framed
+/// JSON-RPC messages, forwards them. When the child dies (or is killed by
+/// `Drop`) the pipe EOFs and the thread exits.
+fn reader_loop(stdout: std::process::ChildStdout, tx: mpsc::Sender<Value>) {
+    let mut reader = BufReader::new(stdout);
+    loop {
+        let mut header = String::new();
+        let mut len: Option<usize> = None;
+        loop {
+            header.clear();
+            if reader.read_line(&mut header).is_err() || header.is_empty() {
+                return; // EOF / broken pipe — server gone
+            }
+            let trimmed = header.trim();
+            if trimmed.is_empty() {
+                if len.is_some() { break; } // end of headers
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
+                len = rest.trim().parse().ok();
+            }
+        }
+        let Some(len) = len else { return };
+        let mut buf = vec![0u8; len];
+        if reader.read_exact(&mut buf).is_err() { return; }
+        let Ok(msg) = serde_json::from_slice::<Value>(&buf) else { return };
+        if tx.send(msg).is_err() { return; } // client dropped
+    }
+}
+
+impl Drop for LspClient {
+    /// Kill the server on ANY exit path (panic included): a deadline panic
+    /// must not leave an orphan `almide lsp` holding the pipe open.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl LspClient {
     fn start() -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_almide"))
             .arg("lsp")
+            .env("ALMIDE_LSP_TRACE", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("failed to start almide lsp");
         let stdout = child.stdout.take().unwrap();
-        let reader = BufReader::new(stdout);
-        let mut client = LspClient { child, reader, capabilities: Value::Null };
+        let stderr = child.stderr.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || reader_loop(stdout, tx));
+        let server_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = server_log.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                let Ok(line) = line else { return };
+                log.lock().unwrap().push(line);
+            }
+        });
+        let mut client = LspClient { child, rx, server_log, capabilities: Value::Null };
         client.initialize();
         client
     }
@@ -39,25 +116,28 @@ impl LspClient {
     }
 
     fn recv(&mut self) -> Value {
-        // Read Content-Length header
-        let mut header = String::new();
-        loop {
-            header.clear();
-            self.reader.read_line(&mut header).unwrap();
-            let trimmed = header.trim();
-            if trimmed.is_empty() { break; }
-            if trimmed.starts_with("Content-Length:") {
-                let len: usize = trimmed.split(':').nth(1).unwrap().trim().parse().unwrap();
-                // Read blank line after header
-                let mut blank = String::new();
-                self.reader.read_line(&mut blank).unwrap();
-                // Read body
-                let mut buf = vec![0u8; len];
-                self.reader.read_exact(&mut buf).unwrap();
-                return serde_json::from_slice(&buf).unwrap();
+        match self.rx.recv_timeout(RECV_DEADLINE) {
+            Ok(msg) => msg,
+            Err(mpsc::RecvTimeoutError::Timeout) => panic!(
+                "no server message within {RECV_DEADLINE:?} — the server is hung \
+                 (#1008); an unbounded read here previously turned this into a \
+                 4h+ CI hang.\nserver stderr (tail):\n{}",
+                self.server_log_tail()
+            ),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!(
+                    "server pipe closed without a response (server died).\nserver stderr (tail):\n{}",
+                    self.server_log_tail()
+                )
             }
         }
-        panic!("no response received");
+    }
+
+    /// The last lines of the server's captured stderr, for hang forensics.
+    fn server_log_tail(&self) -> String {
+        let log = self.server_log.lock().unwrap();
+        let start = log.len().saturating_sub(40);
+        log[start..].join("\n")
     }
 
     /// Read responses until we find one with the given id.
@@ -499,7 +579,7 @@ fn lsp_didchange_never_fetches_or_writes_lock() {
     ).unwrap();
     let file = dir.join("main.almd");
     std::fs::write(&file, "let x = 1\n").unwrap();
-    let uri = format!("file://{}", file.display());
+    let uri = file_uri(&file);
 
     let mut c = LspClient::start();
     // didChange without a prior didOpen: the cache has no entry for this

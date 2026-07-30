@@ -492,17 +492,37 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
             }
         }
         "textDocument/didChange" => {
-            if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
-                let uri = params.text_document.uri.clone();
-                if let Some(change) = params.content_changes.into_iter().last() {
-                    let source = change.text;
-                    let file_path = uri_to_path(&uri);
-                    let deps = project_deps_for(file_path.as_deref(), dep_cache, false);
-                    let doc = AnalyzedDoc::analyze(&source, file_path.as_deref(), &deps);
-                    publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
-                    documents.insert(uri.clone(), source);
-                    analyzed.insert(uri, doc);
+            let trace = std::env::var("ALMIDE_LSP_TRACE").is_ok();
+            match serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
+                Ok(params) => {
+                    let uri = params.text_document.uri.clone();
+                    if let Some(change) = params.content_changes.into_iter().last() {
+                        let source = change.text;
+                        let file_path = uri_to_path(&uri);
+                        if trace {
+                            eprintln!("[lsp-trace] didChange uri={} path={:?}", uri.as_str(), file_path);
+                        }
+                        let t = std::time::Instant::now();
+                        let deps = project_deps_for(file_path.as_deref(), dep_cache, false);
+                        if trace {
+                            eprintln!("[lsp-trace] didChange deps resolved: {} in {:?}", deps.len(), t.elapsed());
+                        }
+                        let t = std::time::Instant::now();
+                        let doc = AnalyzedDoc::analyze(&source, file_path.as_deref(), &deps);
+                        if trace {
+                            eprintln!("[lsp-trace] didChange analyzed in {:?}", t.elapsed());
+                        }
+                        publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
+                        documents.insert(uri.clone(), source);
+                        analyzed.insert(uri, doc);
+                    }
                 }
+                // A notification with unparseable params is dropped by design
+                // (no reply channel exists for notifications) — but never
+                // SILENTLY: an undeserializable didChange means the analyzed
+                // map silently stops updating (#1008's hang started life as
+                // an invisible drop like this).
+                Err(e) => eprintln!("[lsp] didChange params failed to parse — dropped: {e}"),
             }
         }
         "textDocument/didClose" => {
@@ -535,12 +555,32 @@ pub fn run_lsp() {
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req).unwrap_or(false) { return; }
-                let resp = handle_request(&req, &documents, &analyzed, &workspace_root);
-                if let Some(r) = resp {
-                    connection.sender.send(Message::Response(r)).ok();
+                if std::env::var("ALMIDE_LSP_TRACE").is_ok() {
+                    eprintln!("[lsp-trace] request  {} id={:?}", req.method, req.id);
                 }
+                let resp = handle_request(&req, &documents, &analyzed, &workspace_root);
+                // A REQUEST must always get a response (JSON-RPC). A `None`
+                // here used to be a SILENT DROP — a client blocking on the
+                // reply waited forever, which is how the Windows CI leg burned
+                // 6h runs inside lsp_test since #961 (#1008). Anything the
+                // handler cannot answer (param-parse failure, no analyzed
+                // doc) is an honest empty result, and the drop is LOGGED so
+                // it can never be invisible again.
+                let r = resp.unwrap_or_else(|| {
+                    eprintln!(
+                        "[lsp] request {} id={:?} unanswerable (bad params or no analyzed doc) — replying null (#1008)",
+                        req.method, req.id
+                    );
+                    Response::new_ok(req.id.clone(), serde_json::Value::Null)
+                });
+                connection.sender.send(Message::Response(r)).ok();
             }
-            Message::Notification(notif) => handle_notification(notif, &connection, &mut documents, &mut analyzed, &mut dep_cache),
+            Message::Notification(notif) => {
+                if std::env::var("ALMIDE_LSP_TRACE").is_ok() {
+                    eprintln!("[lsp-trace] notification {}", notif.method);
+                }
+                handle_notification(notif, &connection, &mut documents, &mut analyzed, &mut dep_cache)
+            }
             Message::Response(_) => {}
         }
     }
