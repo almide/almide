@@ -529,3 +529,31 @@ Hypotheses eliminated so far: heap classification, `repr_of`, a missing routing 
 (retracted — the cell exists), and now a type-dependent failure inside
 `lower_pure_module_value_call`. Each elimination has been recorded rather than dropped, which
 is the only reason this has narrowed instead of circling.
+
+### R3 — fifth hypothesis eliminated, and a note on when to stop reading (2026-08-01)
+
+The `_leaf` group has NO `Call` arm at all — its arms are `LitStr`, `BinOp::ConcatStr`,
+`BinOp::ConcatList`, `StringInterp`, `Lambda`, `Var`, `Member`, `TupleIndex`. So a `Call`
+expression falls through it to `_aggregate` (which does have the `CallTarget::Module` arm)
+regardless of payload type. The "a `_leaf` arm declines the all-scalar tuple" hypothesis is
+wrong.
+
+**Five hypotheses eliminated by reading, none confirmed.** That ratio is the signal: reading
+has stopped paying, and every further guess costs a retraction risk (one already happened
+this cycle — the "missing routing cell" claim, which also produced a damaged stdlib file
+during its revert).
+
+**The next session should instrument, not read.** Concretely: add a temporary `eprintln!` at
+each `return`/`?` site in `lower_owned_heap_field` and `try_opt_scalar_tuple_payload`, build,
+run `s_s5` and `s_s11`, diff the traces, remove the prints. Two builds and a diff — it will
+name the site in one pass, where five careful readings did not.
+
+Eliminated so far, all recorded so nobody repeats them:
+1. all-scalar tuples are not heap → they are (`heap.rs:62`, with a unit test)
+2. `repr_of` rejects them → it rejects only `Ty::Unknown`
+3. `option` lacks a flat routing cell → it has one, and its predicate covers the case (retracted)
+4. `lower_pure_module_value_call` fails type-dependently → its tail always reaches `Op::CallFn`
+5. a `_leaf` arm declines the Call → `_leaf` has no `Call` arm
+
+Unchanged throughout: `s_s5` builds, `s_s11` walls, they differ only in element type, and the
+wall is honest (exit 1, no output, no wrong bytes) — it costs coverage, not correctness.
