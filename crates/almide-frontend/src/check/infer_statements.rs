@@ -514,10 +514,19 @@ impl Checker {
         }
         if (is_concat_ty(lc) && (is_concat_ty(rc) || is_unknown_ty(rc)))
             || (is_concat_ty(rc) && is_unknown_ty(lc)) {
-            // Unify element types for list concatenation: List[?0] + List[Int] → ?0 = Int
+            // Unify element types for list concatenation: List[?0] + List[Int] → ?0 = Int.
+            //
+            // `constrain`, not `unify_infer`: the latter binds inference variables and stays
+            // SILENT when both sides are concrete and different, so `[1] + ["a"]` type-checked
+            // and then emitted invalid Rust natively / printed the String block's ADDRESS as an
+            // Int element on wasm (#1030). The list LITERAL path already reports this exact
+            // mismatch as E001 (`[1, "a"]`), so the same property of the same language was
+            // checked on one path and not the other. `constrain` still unifies, so the
+            // inference-variable cases this rule exists for are unaffected — it additionally
+            // REPORTS when unification is impossible.
             if let (Ty::Applied(TypeConstructorId::List, la), Ty::Applied(TypeConstructorId::List, ra)) = (lc, rc) {
                 if let (Some(le), Some(re)) = (la.first(), ra.first()) {
-                    self.unify_infer(le, re);
+                    self.constrain(le.clone(), re.clone(), "list concatenation element");
                 }
             }
             return Some(resolve_ty(lt, &self.uf));

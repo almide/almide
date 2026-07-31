@@ -6,6 +6,11 @@
 # Run: bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md
 
 set -euo pipefail
+
+# Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
+# locale, so an unpinned sort produces different output on differently-configured
+# machines. #1031 caught docs/roadmap/README.md changing row order with no content change.
+export LC_ALL=C
 cd "$(dirname "$0")"
 
 extract_title() {

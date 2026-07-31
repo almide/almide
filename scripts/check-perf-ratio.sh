@@ -28,6 +28,11 @@
 # net costs 5%): raise the baseline in the same change, with the reasoning
 # in the commit. The number stays a reviewed decision instead of a drift.
 set -euo pipefail
+
+# Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
+# locale, so an unpinned sort produces different output on differently-configured
+# machines. #1031 caught docs/roadmap/README.md changing row order with no content change.
+export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
 
 BASELINE_FILE="scripts/perf-ratio-baseline.txt"

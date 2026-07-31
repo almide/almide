@@ -1,0 +1,151 @@
+// A reader for the TOML SUBSET `docs/contracts/contracts.toml` actually uses.
+//
+// NOT a TOML parser. The ledger uses exactly one table form, eight key names, and two value
+// shapes — measured, not assumed:
+//
+//   [[contract]]                              200 occurrences, the only table form
+//   key = "..."                               8 distinct keys
+//   key = [ ... ]  (multi-line)               200, always `evidence`
+//   { path = "...", class = "...", ... }      369, only as array elements
+//
+// No nested tables, no dotted keys, no dates, no numbers, no multi-line basic strings. A
+// reader for this subset is a three-state line scanner. Anyone reaching for general TOML
+// should write a general parser instead of widening this one — the narrowness is the point,
+// and it is why this file is short enough to read in one sitting.
+//
+// Unit 0.46 (docs/ai-dlc/units/0.46/construction.md). Modelled on stdlib/json*.almd, which
+// is the proof that a parser of this shape works in Almide.
+type Pair = { key: String, value: String }
+
+// One `[[contract]]` block: its scalar keys, and its `evidence` array as raw element
+// strings (each still `{ path = "...", class = "..." }` — parsed on demand by `inline_get`,
+// so a caller that only needs `path` never pays for the rest).
+type Table = { scalars: List[Pair], array_key: String, array_items: List[String] }
+
+fn is_blank_or_comment(l: String) -> Bool = {
+  let t = string.trim(l)
+  t == "" or string.starts_with(t, "#")
+}
+
+// `key       = "value"` → the key, trimmed. "" when the line is not a scalar assignment.
+fn scalar_key(line: String) -> String = {
+  let parts = string.split(line, "=")
+  if list.len(parts) < 2 then ""
+  else {
+    let k = string.trim(list.get_or(parts, 0, ""))
+    // A key is a bare identifier; anything with a space or a quote is not one, which keeps
+    // `{ path = "x" }` inline tables and quoted values from being read as assignments.
+    if k == "" or string.contains(k, " ") or string.contains(k, '"') then "" else k
+  }
+}
+
+// The value after the FIRST `=`, with surrounding quotes stripped. Everything after the
+// first `=` is rejoined, so a statement containing `=` survives intact.
+fn scalar_value(line: String) -> String = {
+  let parts = string.split(line, "=")
+  if list.len(parts) < 2 then ""
+  else {
+    let rest = list.slice(parts, 1, list.len(parts)) |> list.join("=")
+    let v = string.trim(rest)
+    if string.starts_with(v, '"') and string.ends_with(v, '"') and string.len(v) >= 2 then string.slice(v, 1, string.len(v) - 1)
+    else v
+  }
+}
+
+// A field of an inline table element: `{ path = "a", class = "b" }` → `inline_get(s, "path")`
+// is `"a"`. "" when absent — the caller distinguishes absent from empty by context, matching
+// what the bash original does with an unset awk variable.
+fn inline_get(item: String, field: String) -> String = {
+  let marker = field + ' = "'
+  let parts = string.split(item, marker)
+  if list.len(parts) < 2 then ""
+  else {
+    let rest = list.get_or(parts, 1, "")
+    let closed = string.split(rest, '"')
+    list.get_or(closed, 0, "")
+  }
+}
+
+// A BARE (unquoted) field of an inline table: `{ …, n = 1000 }` → `inline_num(s, "n")` is
+// `"1000"`. Separate from `inline_get` rather than a widening of it: the two are different
+// grammars (quoted string vs bare token), and a single function that guessed between them
+// would silently return the wrong thing for a value like `n = "1000"`. The ledger uses
+// exactly one bare field — `n` on fuzz evidence — and the count feeds the `fuzz(N)` column.
+fn inline_num(item: String, field: String) -> String = {
+  let marker = field + " = "
+  let parts = string.split(item, marker)
+  if list.len(parts) < 2 then ""
+  else {
+    let rest = string.trim(list.get_or(parts, 1, ""))
+    // Bare token: stop at the first separator that can follow one.
+    let at_comma = list.get_or(string.split(rest, ","), 0, rest)
+    let at_brace = list.get_or(string.split(at_comma, "}"), 0, at_comma)
+    string.trim(list.get_or(string.split(at_brace, " "), 0, at_brace))
+  }
+}
+
+fn table_get(t: Table, key: String) -> String = {
+  let hit = list.find(t.scalars, (p) => p.key == key)
+  match hit {
+    some(p) => p.value,
+    none => "",
+  }
+}
+
+// The scanner. Three states, walked recursively rather than with a mutable index:
+//
+//   Idle          — between blocks; `[[contract]]` opens one
+//   InTable       — collecting `key = "value"`; `key = [` opens the array
+//   InArray       — collecting elements until the closing `]`
+//
+// State is threaded as arguments (the accumulating table and the finished list) so there is
+// no mutable cursor to get out of step with the line index — the shape the CHEATSHEET
+// recommends over `var i` + `while`.
+fn empty_table() -> Table = Table { scalars: [], array_key: "", array_items: [] }
+
+fn is_table_header(l: String) -> Bool = {
+  let t = string.trim(l)
+  string.starts_with(t, "[[") and string.ends_with(t, "]]")
+}
+
+fn opens_array(line: String) -> Bool = string.ends_with(string.trim(line), "[")
+
+fn closes_array(line: String) -> Bool = {
+  let t = string.trim(line)
+  t == "]" or t == "],"
+}
+
+// An array element line: `{ path = "...", class = "..." },` → strip the trailing comma.
+fn array_item(line: String) -> String = {
+  let t = string.trim(line)
+  if string.ends_with(t, ",") then string.trim(string.slice(t, 0, string.len(t) - 1))
+  else t
+}
+
+fn with_scalar(t: Table, k: String, v: String) -> Table = Table { scalars: t.scalars + [
+  Pair { key: k, value: v }
+], array_key: t.array_key, array_items: t.array_items }
+
+fn with_item(t: Table, item: String) -> Table = Table { scalars: t.scalars, array_key: t.array_key, array_items: t.array_items + [item] }
+
+fn scan(lines: List[String], i: Int, cur: Table, open: Bool, in_array: Bool, out: List[Table]) -> List[Table] = if i >= list.len(lines) then {
+  if open then out + [cur]
+  else out
+} else {
+  let line = list.get_or(lines, i, "")
+  if is_blank_or_comment(line) then scan(lines, i + 1, cur, open, in_array, out)
+  else if in_array then {
+    if closes_array(line) then scan(lines, i + 1, cur, open, false, out)
+    else scan(lines, i + 1, with_item(cur, array_item(line)), open, true, out)
+  } else if is_table_header(line) then scan(lines, i + 1, empty_table(), true, false, if open then out + [cur]
+  else out)
+  else {
+    let k = scalar_key(line)
+    if k == "" then scan(lines, i + 1, cur, open, in_array, out)
+    else if opens_array(line) then scan(lines, i + 1, Table { scalars: cur.scalars, array_key: k, array_items: cur.array_items }, open, true, out)
+    else scan(lines, i + 1, with_scalar(cur, k, scalar_value(line)), open, false, out)
+  }
+}
+
+// Parse an array-of-tables document into its blocks, in source order.
+fn parse_tables(content: String) -> List[Table] = scan(string.split(content, "\n"), 0, empty_table(), false, false, [])

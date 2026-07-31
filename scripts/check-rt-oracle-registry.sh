@@ -19,6 +19,11 @@
 # compile_helpers across files, so the bare name alone is not unique).
 set -uo pipefail
 
+# Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
+# locale, so an unpinned sort produces different output on differently-configured
+# machines. #1031 caught docs/roadmap/README.md changing row order with no content change.
+export LC_ALL=C
+
 # #782: the v0 wasm emitter (crates/almide-codegen/src/emit_wasm/) is RETIRED —
 # there are no hand-written wasm runtime routines left to pair against the
 # native oracle. The v1 trust-spine's stdlib self-hosts are differential-gated

@@ -24,6 +24,11 @@
 #   ALMIDE_ORG_DIR  the dir holding the sibling org repos (default: parent of the main almide repo)
 set -euo pipefail
 
+# Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
+# locale, so an unpinned sort produces different output on differently-configured
+# machines. #1031 caught docs/roadmap/README.md changing row order with no content change.
+export LC_ALL=C
+
 # Build + binary + output live in THIS working tree (a git worktree may differ from the main repo).
 work_root="$(git rev-parse --show-toplevel)"
 # The org dir holds the sibling target repos (yaml, sha1, …) next to the MAIN almide repo.

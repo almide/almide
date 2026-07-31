@@ -307,9 +307,80 @@ cover heap pairs (`is_flat_heap_pair_ty`, `is_str_closure_pair_ty`,
 `is_flat_heap_scalar_pair_ty`) and an all-scalar tuple matches none of them. So the family is
 3/4 symmetric, not 4/4, and this line exists so the last cell is a named gap rather than a
 rediscovery. Closing it means teaching `lower_owned_heap_field` the all-scalar tuple call
-result, not touching the Option cells again.
+result, not touching the Option cells again. **Narrowed further (2026-07-31)**: the tuple
+LITERAL case is already handled — `owned_heap_field.rs`'s
+`IrExprKind::Record { .. } | IrExprKind::Tuple { .. }` arm admits a scalar-only aggregate via
+`try_lower_scalar_tuple_construct`. A CALL returning `(Int, Int)` takes a different arm
+entirely (the aggregate group's `CallTarget::Module` →
+`lower_pure_module_value_call`, `calls.rs:89`), and that is where it declines. So the fix is
+in the CALL path, not the tuple path: teach `lower_pure_module_value_call` (or the arm above
+it) to materialize an all-scalar aggregate result. **Narrowed AGAIN (2026-07-31), and it is smaller than "the call path"**: a USER-FN call
+result works for both tuple shapes — probes `s_s12` (`fn pair() -> (Int, Int)`) and `s_s13`
+(`fn pair() -> (String, Int)`) both BUILD through `some(pair())`. So the all-scalar tuple
+cell is NOT broken in general; the fallback covers it.
+
+What still walls is specifically `some(option.unwrap_or(s0, (1, 2)))` — an all-scalar tuple
+produced by a MODULE call (probe `s_s11`). And `(String, Int)` through the same module call
+DOES build (probe `s_s5`), even though both shapes reach `lower_owned_heap_field` through
+the same fallback. The two differ only in which arm selects them:
+`is_all_scalar_tuple` (checked first, claims `(Int, Int)`) vs `is_str_int_tuple`. So the
+remaining question is why the SAME fallback succeeds under one arm and not the other —
+likely `repr_of(Option[(Int,Int)])` or the fact that an all-scalar tuple result is not
+tracked in `live_heap_handles` the way a String-carrying one is, which
+`materialize_opt_str_some`'s `Consume` + `retain` then handles differently.
+
+Next step: diff the two paths for `s_s5` vs `s_s11` at the point `lower_owned_heap_field`
+returns — one returns `Some(id)` and the other `None`, on inputs that differ only in the
+tuple's element types. Both probes are two lines and live in the session scratchpad.
 
 **The original R3 program now walls one step LATER**, on `List argument cannot be faithfully
 materialized (would borrow an empty deferred heap value)` — the `list.fold(list.sort(tmp3), …)`
 over an empty list. Still an honest wall (exit 1, no output), not wrong bytes; a different
 cell, not a regression.
+
+## Dogfood findings (Unit 0.46, 2026-07-31)
+
+Not fuzz findings — these came from writing a real program (`tools/almide-gates`), and they
+are recorded here because this is where the live defect ledger lives.
+
+| # | Shape | Severity |
+|---|---|---|
+| [#1029](https://github.com/almide/almide/issues/1029) | an `effect fn` called in a `for`-loop body is not auto-unwrapped: native emits invalid Rust, wasm prints heap addresses as values | **FIXED via #1030** |
+| [#1030](https://github.com/almide/almide/issues/1030) | **root cause of #1029** — list concat does not constrain the RIGHT operand's element type | **FIXED** — `infer_plus_op_concat` now uses `constrain` instead of `unify_infer` |
+
+**#1030 is the smallest instance of the checker-accepts-but-lowering-reinterprets class found
+so far**: no effects, no concurrency, no generics — three lines. And the contrast is exact:
+`[1, "a"]` (literal) is correctly rejected with E001, while `[1] + ["a"]` (concat) is not. The
+same property, checked on one path and not the other.
+
+**What this says about coverage.** 180 lines of a real program found what 324 spec files and
+seven fuzz campaigns did not. The spec corpus is written by someone who knows the compiler;
+a program written to do a job reaches for shapes nobody thought to test. Three instances of
+this class turned up in one day (#1027, #1029, #1030), each by accident rather than by a
+detector — which is the argument for the hole-hunt lens at ladder row 0.52 (#912).
+
+### #1030 fix (2026-07-31)
+
+One call changed, in `check/infer_statements.rs::infer_plus_op_concat`:
+
+```rust
+- self.unify_infer(le, re);
++ self.constrain(le.clone(), re.clone(), "list concatenation element");
+```
+
+`unify_infer` binds inference variables and stays SILENT when both sides are concrete and
+different. `constrain` still unifies — so the inference-variable cases the rule exists for
+(`List[?0] + List[Int]`) are unaffected — but it also REPORTS when unification is impossible.
+
+Both repros are now check-time errors on both targets:
+
+- `[1] + ["a"]` → `error[E001]: type mismatch in list concatenation element: expected Int but got String`
+- `out = out + [one(p)]` (#1029) → `… expected Int but got Result[Int, String]`
+
+The second is worth noting: with concat honest, #1029's message now says exactly what is
+wrong — the effect call is a `Result` and the list wants an `Int` — which points the user at
+`!` instead of at an "Almide bug" panic. One fix, two reports, and the diagnostic is better
+than the one I would have written for #1029 on its own.
+
+Regression: 335 files green (spec 324 + examples 11), diagnostic harness green, plus
+`tests/diagnostics/e001-concat-element-mismatch`.

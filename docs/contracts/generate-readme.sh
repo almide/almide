@@ -4,12 +4,21 @@
 #
 #   bash docs/contracts/generate-readme.sh > docs/contracts/README.md
 #
+# Values are unquoted by stripping the LEADING `key = "` and the TRAILING quote only —
+# NOT at the first `"` found, because a title may contain an escaped one (C-050's
+# `string.split(\"\")`). Truncating there published a cut-off contract title until #1032.
+#
 # Output: the change-discipline header + one sorted table:
 #   | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 # "Strongest Evidence" = the highest-ranked evidence class present (rank from
 # scripts/lib/contract-classes.txt, line order = rank); fuzz shows its N. A `doc=`
 # renders the title as a link.
 set -euo pipefail
+
+# Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
+# locale, so an unpinned sort produces different output on differently-configured
+# machines. #1031 caught docs/roadmap/README.md changing row order with no content change.
+export LC_ALL=C
 cd "$(dirname "$0")/../.." || exit 2
 
 LEDGER="docs/contracts/contracts.toml"
@@ -70,11 +79,11 @@ awk -v classes="$CLASSES_CSV" '
   /'"'"''"'"''"'"'/ { in_stmt = !in_stmt; next }
   in_stmt { next }
   /^\[\[contract\]\]/ { flush(); next }
-  /^id[ \t]*=/      { v=$0; sub(/^id[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); id=v; next }
-  /^title[ \t]*=/   { v=$0; sub(/^title[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); title=v; next }
-  /^since[ \t]*=/   { v=$0; sub(/^since[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); since=v; next }
-  /^status[ \t]*=/  { v=$0; sub(/^status[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); status=v; next }
-  /^doc[ \t]*=/     { v=$0; sub(/^doc[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); doc=v; next }
+  /^id[ \t]*=/      { v=$0; sub(/^id[ \t]*=[ \t]*"/,"",v); sub(/"[ \t]*$/,"",v); id=v; next }
+  /^title[ \t]*=/   { v=$0; sub(/^title[ \t]*=[ \t]*"/,"",v); sub(/"[ \t]*$/,"",v); title=v; next }
+  /^since[ \t]*=/   { v=$0; sub(/^since[ \t]*=[ \t]*"/,"",v); sub(/"[ \t]*$/,"",v); since=v; next }
+  /^status[ \t]*=/  { v=$0; sub(/^status[ \t]*=[ \t]*"/,"",v); sub(/"[ \t]*$/,"",v); status=v; next }
+  /^doc[ \t]*=/     { v=$0; sub(/^doc[ \t]*=[ \t]*"/,"",v); sub(/"[ \t]*$/,"",v); doc=v; next }
   /path[ \t]*=[ \t]*"/ {
     line=$0
     p=line; sub(/^.*path[ \t]*=[ \t]*"/,"",p); sub(/".*$/,"",p)

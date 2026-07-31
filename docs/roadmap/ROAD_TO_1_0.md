@@ -28,9 +28,9 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 |---|---|---|
 | 0.41 | fuzz-nightly を毎夜使える計測器に戻す（20 夜中 1 夜の根治）。perf scoreboard/ratchet（#917）の close-out | [#924](https://github.com/almide/almide/issues/924), [#917](https://github.com/almide/almide/issues/917) |
 | 0.42 | 単一ドライバ — フロントエンド 1 回実行、手書き段順序 9 → 1。**出荷済** | [#925](https://github.com/almide/almide/issues/925) |
-| 0.43 | concurrency モデルの立場決定と、それに基づく fan 族の根治。立場は**決定的データ並列**に確定（[concurrency-stance.md](./active/concurrency-stance.md)）— `fan` はスケジューリングの構文であって意味論の構文ではない。実装: E008 の引数拡張(#1025) → `fan.race` トンボストーン(#1024) → キャンセル記述の削除(#1023) → arm 出力のリスト順フラッシュと trap 契約(#1026、C-004 の EXCEPTION 退役) | [#1000](https://github.com/almide/almide/issues/1000), [#1025](https://github.com/almide/almide/issues/1025), [#1024](https://github.com/almide/almide/issues/1024), [#1023](https://github.com/almide/almide/issues/1023), [#1026](https://github.com/almide/almide/issues/1026) |
+| 0.43 | **v0.42.0 で出荷済**（0.42 と同一タグ — 下の注記参照）。concurrency モデルの立場決定と、それに基づく fan 族の根治。立場は**決定的データ並列**に確定（[concurrency-stance.md](./active/concurrency-stance.md)）— `fan` はスケジューリングの構文であって意味論の構文ではない。実装: E008 の引数拡張(#1025) → `fan.race` トンボストーン(#1024) → キャンセル記述の削除(#1023) → arm 出力のリスト順フラッシュと trap 契約(#1026、C-004 の EXCEPTION 退役) | [#1000](https://github.com/almide/almide/issues/1000), [#1025](https://github.com/almide/almide/issues/1025), [#1024](https://github.com/almide/almide/issues/1024), [#1023](https://github.com/almide/almide/issues/1023), [#1026](https://github.com/almide/almide/issues/1026) |
 | 0.44 | fuzz true green — 残 findings 0 + 連続緑 2 夜 | [#796](https://github.com/almide/almide/issues/796) |
-| 0.45 | feature-gated runtime（http/zlib）の rtlib 化 — fresh dir の 8.4s 初回ビルド解消 | [#1002](https://github.com/almide/almide/issues/1002) |
+| 0.45 | **測定して着手しないと決定（2026-07-31）**。feature-gated runtime（http/zlib）の rtlib 化 — 8.4s は再現したが（全 4 キャッシュ層クリアで 9s）、rlib cache が編集ループでは吸収し、CI では container あたり 1 回 ~9s＝ジョブの約 2%。issue 自身の「それ以前ではない」が正しい。再武装条件を鋭利化して #1002 に記録 | [#1002](https://github.com/almide/almide/issues/1002) |
 | 0.46 | 10k 行 dogfood プロジェクト着工 — スケール主張を実測に変える | [#1001](https://github.com/almide/almide/issues/1001) |
 | 0.47 | クエリ/インクリメンタル基盤 phase 1 — LSP を per-keystroke 全再解析から解放 | [#928](https://github.com/almide/almide/issues/928) |
 | 0.48 | クエリ基盤 phase 2 — ビルドパイプライン本体をクエリ上に | [#928](https://github.com/almide/almide/issues/928) |
@@ -45,6 +45,14 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 > 「decade 内で番号が前後にずれるのは構わない — 不変条件は decade ゲートであって
 > バージョン番号ではない」に従い、完成した 2 つを先に出荷し、観測待ちの行を 0.44 へ
 > スライドした。Gate 0.50 の条件は変わっていない。
+
+
+> **0.42 と 0.43 は同じタグ（v0.42.0）で出荷した。** 両 Unit が develop 上で完成してから
+> 最初のリリースを切ったため、1 タグが 2 行分を運んだ。リリースノートは両方を記載している。
+> 直後に空の v0.43.0 を切るのは「既に出荷済みの内容を主張するバージョン番号」になるので
+> しない。以降の版番号は行番号より 1 つ後ろにずれる — ラダーの不変条件は decade ゲートで
+> あってバージョン番号ではない、というルールの範囲内。**教訓は「Unit が閉じた時点で出荷
+> する」**こと。まとめて出すこと自体は誤りではないが、行↔版の対応が静かに崩れる。
 
 **Gate 0.50**: fuzz 連続緑が常態 / dogfood フルビルドがキャッシュ効きで 2-3s 未満 / 三点の数字が public かつラチェット管理。
 
