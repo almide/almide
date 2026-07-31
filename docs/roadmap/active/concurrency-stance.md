@@ -99,17 +99,40 @@ ICE、wasm は黙って変更を捨てる。E008 が `var` キャプチャを正
 **呼び出し引数経由の同じ危険が完全に無検査**である。
 
 決定的モデルでは 2 つの arm が同じ可変束縛を触ることに定義可能な意味がない
-（リスト順の意味を与えるなら逐次実行と同じで、並列の意味がない）。E008 を
-呼び出し引数へ拡張して check 時に拒否する。**先行して潰してよい。**
+（リスト順の意味を与えるなら逐次実行と同じで、並列の意味がない）。
+
+**2026-07-31 の調査で、根は fan より 1 段深いことが判明した。** #1025 は fan の
+alias 問題として報告されているが、fan は必要条件ですらない:
+
+```almide
+effect fn pusher(xs: List[Int], n: Int) -> Result[Int, String] = { xs.push(n); ok(n) }
+let shared: List[Int] = []
+let a = pusher(shared, 1)!
+let b = pusher(shared, 2)!
+// native: len=2 / wasm: len=0
+```
+
+UFCS 形式 `xs.push(n)` は mut パラメータ検査を素通りする（同じ本体を
+`list.push(xs, n)` と書けば E007 で正しく拒否される）。原因は
+`check/calls_ufcs.rs` が `validate_mut_args` にレシーバを含めない引数リストを
+渡していること — UFCS 脱糖後、レシーバは引数 0 であり、`list.push(mut xs, x)` の
+mut パラメータはまさに index 0 である。
+
+これは wall でも trap でもなく、**checker が受理したプログラムでの
+クロスターゲット出力乖離＝誤ったバイト**であり、契約台帳が存在する理由そのものの
+クラスに当たる。**[#1027](https://github.com/almide/almide/issues/1027) を #1025 より
+先に直す**。mut 性が強制されれば #1025 は「2 つの arm が同じ `mut` 引数を渡す」に
+還元され、宣言だけで判定できるようになる。
 
 ## 実装順序（0.44 Unit）
 
-1. #1025 — E008 の引数への拡張（立場に非依存、最初）
-2. #1024 — `fan.race` トンボストーン + SPEC.md 修正
-3. #1023 — SPEC.md からキャンセル記述を削除、リスト順 Err を fixture で固定
-4. #1026 — arm 出力のバッファリング + リスト順フラッシュ、C-004 の EXCEPTION 退役、
+1. **#1027 — UFCS の mut パラメータ検査漏れ（誤バイト、最優先）**
+2. #1025 — fan の兄弟間 alias（#1027 の後なら宣言だけで判定できる）
+3. #1024 — `fan.race` トンボストーン + SPEC.md 修正
+4. #1023 — SPEC.md からキャンセル記述を削除、リスト順 Err を fixture で固定
+5. #1026 — arm 出力のバッファリング + リスト順フラッシュ、C-004 の EXCEPTION 退役、
    trap 契約の新設
-5. interp の `fan.race` / `fan.any` abstain を畳めるなら畳む（3 番目の審級を広げる）
+6. interp の `fan.race` / `fan.any` abstain を畳めるなら畳む（3 番目の審級を広げる）
 
 ## この決定が閉じないもの
 
