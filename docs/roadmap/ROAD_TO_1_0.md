@@ -27,15 +27,24 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 | Version | 大機能 | Issue |
 |---|---|---|
 | 0.41 | fuzz-nightly を毎夜使える計測器に戻す（20 夜中 1 夜の根治）。perf scoreboard/ratchet（#917）の close-out | [#924](https://github.com/almide/almide/issues/924), [#917](https://github.com/almide/almide/issues/917) |
-| 0.42 | fuzz true green — 残 findings 0 + 連続緑 2 夜 | [#796](https://github.com/almide/almide/issues/796) |
-| 0.43 | 単一ドライバ — フロントエンド 1 回実行、手同期ドライバシーケンス 6 → 1 | [#925](https://github.com/almide/almide/issues/925) |
-| 0.44 | concurrency モデルの立場決定と、それに基づく fan 族の根治。立場は**決定的データ並列**に確定（[concurrency-stance.md](./active/concurrency-stance.md)）— `fan` はスケジューリングの構文であって意味論の構文ではない。実装: E008 の引数拡張(#1025) → `fan.race` トンボストーン(#1024) → キャンセル記述の削除(#1023) → arm 出力のリスト順フラッシュと trap 契約(#1026、C-004 の EXCEPTION 退役) | [#1000](https://github.com/almide/almide/issues/1000), [#1025](https://github.com/almide/almide/issues/1025), [#1024](https://github.com/almide/almide/issues/1024), [#1023](https://github.com/almide/almide/issues/1023), [#1026](https://github.com/almide/almide/issues/1026) |
+| 0.42 | 単一ドライバ — フロントエンド 1 回実行、手書き段順序 9 → 1。**出荷済** | [#925](https://github.com/almide/almide/issues/925) |
+| 0.43 | concurrency モデルの立場決定と、それに基づく fan 族の根治。立場は**決定的データ並列**に確定（[concurrency-stance.md](./active/concurrency-stance.md)）— `fan` はスケジューリングの構文であって意味論の構文ではない。実装: E008 の引数拡張(#1025) → `fan.race` トンボストーン(#1024) → キャンセル記述の削除(#1023) → arm 出力のリスト順フラッシュと trap 契約(#1026、C-004 の EXCEPTION 退役) | [#1000](https://github.com/almide/almide/issues/1000), [#1025](https://github.com/almide/almide/issues/1025), [#1024](https://github.com/almide/almide/issues/1024), [#1023](https://github.com/almide/almide/issues/1023), [#1026](https://github.com/almide/almide/issues/1026) |
+| 0.44 | fuzz true green — 残 findings 0 + 連続緑 2 夜 | [#796](https://github.com/almide/almide/issues/796) |
 | 0.45 | feature-gated runtime（http/zlib）の rtlib 化 — fresh dir の 8.4s 初回ビルド解消 | [#1002](https://github.com/almide/almide/issues/1002) |
 | 0.46 | 10k 行 dogfood プロジェクト着工 — スケール主張を実測に変える | [#1001](https://github.com/almide/almide/issues/1001) |
 | 0.47 | クエリ/インクリメンタル基盤 phase 1 — LSP を per-keystroke 全再解析から解放 | [#928](https://github.com/almide/almide/issues/928) |
 | 0.48 | クエリ基盤 phase 2 — ビルドパイプライン本体をクエリ上に | [#928](https://github.com/almide/almide/issues/928) |
 | 0.49 | モジュール単位コンパイルキャッシュ — クエリ fingerprint を鍵にした永続層（module rlib + typed-IR）。dogfood のフルビルド 2-3s 超がトリガー | [#1003](https://github.com/almide/almide/issues/1003) |
 | 0.50 | ゲートリリース — build-speed / runtime-perf / safety 三点セットの実測数字を README に載せ切り、0.4x 出口監査をラチェットとして発効 | [#999](https://github.com/almide/almide/issues/999) |
+
+
+> **0.42–0.44 の順序を入れ替えた（2026-07-31）。** 元は 0.42=fuzz true green /
+> 0.43=単一ドライバ / 0.44=concurrency。fuzz true green の DoD は「連続緑 2 夜」で、
+> これは作業量ではなく**観測期間**に律速される — どれだけ手を動かしても今日は閉じない。
+> 一方 単一ドライバと concurrency は完成した。ラダー自身の運用ルール
+> 「decade 内で番号が前後にずれるのは構わない — 不変条件は decade ゲートであって
+> バージョン番号ではない」に従い、完成した 2 つを先に出荷し、観測待ちの行を 0.44 へ
+> スライドした。Gate 0.50 の条件は変わっていない。
 
 **Gate 0.50**: fuzz 連続緑が常態 / dogfood フルビルドがキャッシュ効きで 2-3s 未満 / 三点の数字が public かつラチェット管理。
 

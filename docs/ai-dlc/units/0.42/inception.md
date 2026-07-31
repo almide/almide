@@ -1,84 +1,95 @@
-# Unit 0.42 — Plan: Fuzz to True Green
+# Unit 0.42 — Plan: one driver (the frontend runs once)
 
-- **Aim**: The 0.4x arc's second step. 0.41 brought the instrument back; 0.42 makes its verdict
-  clean. Gate 0.50 needs "continuously green fuzz is the normal state", and #796's
-  two-consecutive-green-nights rule became meaningful again the moment the campaign started
-  completing its budget.
-- **Issues**: [#796](https://github.com/almide/almide/issues/796) (primary),
-  [#924](https://github.com/almide/almide/issues/924) (14-night streak continues through this Unit)
+- **Aim**: 0.4x arc — the edit loop stops scaling with how many times we happen to re-run the
+  frontend, and the six hand-synced driver sequences stop being a drift surface. This is also
+  the precondition for the decade's later rows: a query layer (0.47–0.48) and a compile cache
+  (0.49) cannot be retrofitted onto six parallel drivers.
+- **Issues**: [#925](https://github.com/almide/almide/issues/925)
 
 ## In three lines
 
-- The working instrument is catching real findings: 4 live records across the last 3 nights —
-  one silent wrong value (native `r15 = 100` vs wasm `r15 = 0`), one
-  check-accepted-but-native-build-failed, one wasm-run-failed-while-native-succeeded,
-  and two wasm build failures
-- Replay each deterministically, fix root causes forward (worst class first), and record every
-  fix in the Wave 3 section of the existing triage ledger
-- Done when live findings are 0 and two consecutive nights are green — that closes #796
+Every wasm build runs the whole front half twice: `compile_to_wasm_bytes` builds an
+`IrProgram`, discards it on the next line, and hands raw SOURCE TEXT to the renderer, which
+re-lexes, re-parses, re-typechecks, re-lowers, re-optimizes, re-monomorphizes.
+There are also ≥6 independent hand-written `lower → optimize → mono → ir_link` sequences kept
+in sync by hand, and #785 is already a recorded bug caused by exactly that divergence.
+Done means one driver function with one signature, called from every site, and a renderer
+entry point that takes the `IrProgram` it is given.
 
 ## Background
 
-Verified present state (not #796's body — its 2026-07-18 seed campaigns are already
-12/12 + 8/8 clean per `docs/roadmap/active/fuzz-findings-triage.md`, which stays the
-detail ledger for this work). The live findings, from the workflow's reports on #924:
+Verified against current `develop` (2026-07-31), not taken from the issue text:
 
-| Kind | Symptom | Replay |
-|---|---|---|
-| OutputDivergence | stdout differs: native `r15 = 100`, wasm `r15 = 0` | `xtarget-fuzz replay --seed 1785217538023450905 --index 861` |
-| NativeBuildFailure | native build failed after check accepted | `xtarget-fuzz replay --seed 1785217538023450905 --index 535` |
-| RunFailureDivergence | wasm run failed while native succeeded | `xtarget-fuzz replay --seed 1785304212462799529 --index 57` |
-| WasmBuildFailure | wasm build failed | `xtarget-fuzz replay --seed 1785304212462799529 --index 12` |
-| WasmBuildFailure | wasm build failed | `xtarget-fuzz replay --seed 1785389912282950207 --index 29` |
+- `src/cli/build.rs:578` `compile_to_wasm_bytes` — parse → typecheck → `lower_and_link_wasm_ir`
+  → `verify_wasm_ir` → `check_no_native_only_matrix`, then line 598 is literally
+  `let _ = (&mut ir_program, allow_unverified, verified);` and the next line calls
+  `render_wasm_module(&source_text, …)`. The `IrProgram` is built, gated, and thrown away.
+- The comment above that line still describes the v1 renderer as an OPT-IN that falls through
+  to v0 on a wall. v0 was retired in #782, so the discard is vestigial: it is not buying the
+  fallback it was written for.
+- `ir_link` appears in 8 files — `src/compile_driver.rs`, `src/cli/build.rs`,
+  `src/cli/emit.rs`, `src/cli/commands.rs`, `crates/almide-mir/src/pipeline.rs`,
+  two `crates/almide-mir/examples/`, and `crates/almide-interp/tests/eval_test.rs` —
+  which is the ≥6 the issue counts.
 
-Full-budget streak stands at 3/14; the coverage-ratchet job in the same workflow succeeded
-on the latest night (no separate diagnosis needed).
+The cost has two halves and they are not equally important. The wasted frontend pass is
+measurable and annoying. The drift between six drivers is the one that has already produced a
+bug (#785), and it is the one that gets worse as the decade adds passes.
 
 ## Scope
 
-- S1 Reproduce all live records locally and classify them by root cause
-- S2 Fix forward, worst class first — OutputDivergence is the silent-wrong-value class the
-  entire trust discipline exists to prevent
-- S3 Every fix that touches observable behavior carries its contract entry in the same
-  commit (the M2 tripwire stays armed)
-- S4 Record the campaign as **Wave 3** in `docs/roadmap/active/fuzz-findings-triage.md`
-- S5 Observe two consecutive green nights, then close #796
+- S1 One driver: a single function taking (file, options) and returning the linked, verified
+  `IrProgram`, with one signature, in one place.
+- S2 A renderer entry point that accepts an already-built `IrProgram`, so the wasm path stops
+  round-tripping through source text.
+- S3 Migrate every call site (CLI build / emit / commands / compile_driver, the mir pipeline,
+  both mir examples, the interp test harness) onto S1 + S2.
+- S4 Make the #785 class unrepresentable: after S3 there is no second place where the stage
+  order can be spelled, and a test or a structural gate pins that.
+- S5 Measure and record the build-time delta (the frontend now runs once).
 
 ## Out of scope
 
-- Raising nightly coverage (deferred on #924 until after this Unit)
-- The 14-night streak itself — it keeps counting; #924 stays open
-- New instrument lenses (pass-ordering etc.) — 0.52 (#912)
+- The query/incremental layer (0.47–0.48) and the compile cache (0.49). This Unit only makes
+  them possible; it does not start them.
+- Any change to what the stages DO. If a stage's behaviour changes, that is a separate finding
+  with its own contract check — this Unit is a plumbing change and must be output-identical.
 
 ## Done-criteria
 
-- Every live finding record is replayed and closed with a named root cause and a fix commit;
-  new findings that arrive on subsequent nights join Wave 3 and are held to the same bar
-  (the DoD is the streak, not a fixed list)
-- `scripts/fuzz-track-record.sh` shows a green streak ≥ 2 and #796 is closed
-- The Wave 3 table in fuzz-findings-triage.md is complete — each row has symptom, root
-  cause, and fix reference
+- `compile_to_wasm_bytes` no longer discards an `IrProgram`, and no build path passes source
+  text to the renderer when it already holds the IR.
+- Exactly one function in the workspace spells the `lower → optimize → mono → ir_link` order;
+  a test or gate fails if a second one appears.
+- Every call site listed in S3 is migrated — enumerated in the ledger, not summarized.
+- Full CI green, and the byte-identity gates in particular: this is a plumbing change, so
+  `spec/wasm_cross` output must be unchanged, not merely "still passing".
+- The build-time delta is measured on a fixed program and recorded in the ledger with the
+  command used.
 
 ## Risks
 
-- R1 The instrument keeps finding while we fix — expected and healthy; the streak-based DoD
-  absorbs it (loop until dry, not until a list empties)
-- R2 A root cause may sit deep in the checker or lowering; if a fix requires changing
-  observable behavior or a breaking change, that is M2 (contract decision), and repeated
-  failed attempts on the same finding are M6
-- R3 Two green nights cost real time — during the wait the loop may draft the next Unit's
-  plan (never its ledger)
+- **R1 — a hidden behavioural dependence on the second frontend run.** The renderer re-runs
+  canonicalize/infer/lower from raw programs; if any of that mutates state the first run left
+  behind, feeding it the first run's IR could change output. Absorption: treat byte-identity
+  of `spec/wasm_cross` as the gate, and if any fixture's bytes move, STOP and diagnose — a
+  moved byte here is a real semantic finding, not a rebase artifact.
+- **R2 — the examples and the interp test harness are easy to forget.** They are not on the
+  CI hot path the way `src/cli` is. Absorption: S3 enumerates them by path in the ledger, and
+  S4's gate is what actually prevents the omission.
+- **R3 — scope creep into the query layer.** The moment there is one driver, making it
+  incremental looks cheap. It is not, and it is 0.47. Absorption: the out-of-scope line above
+  is a hard boundary for this Unit.
 
 ## Proposed Bolts
 
-- B1 Build the fuzzer, replay all 5 live records, classify root causes, open the Wave 3 table
-- B2 Fix the OutputDivergence class (silent wrong value — worst first)
-- B3 Fix the build/run-failure classes (NativeBuildFailure, RunFailureDivergence, WasmBuildFailure ×2)
-- B4 Re-run a local campaign on the fixed compiler to confirm clean before the nightly does
-- B5 Observe 2 consecutive green nights → close #796 → release v0.42.0
-
-## Approval (M0)
-
-- Status: **approved**
-- Approver / date / notes: O6lvl4 / 2026-07-31 / approved in session. Streak-based DoD
-  (loop until dry) and worst-class-first ordering confirmed.
+- **B1** — Inventory: enumerate every `lower → optimize → mono → ir_link` site with its file,
+  line, and what it needs from the driver (options, whether it wants the verified gates).
+  Output is the migration table the later Bolts work down.
+- **B2** — Introduce the one driver and the IR-accepting renderer entry point, with no call
+  site migrated yet, so it lands green on its own.
+- **B3** — Migrate the CLI paths (build / emit / commands / compile_driver) and delete the
+  discard. Byte-identity of `spec/wasm_cross` is the acceptance check.
+- **B4** — Migrate the non-CLI sites (mir pipeline, both examples, interp test harness).
+- **B5** — Land the structural gate that makes a second stage-order spelling fail, measure the
+  build-time delta, and close #925.
