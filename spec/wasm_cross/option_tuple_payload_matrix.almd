@@ -28,19 +28,15 @@ fn main() -> Unit = {
   let a: Option[(Int, Int)] = none
   let r_a: (Int, Int) = option.unwrap_or(some(option.unwrap_or(a, (1, 2))), (3, 4))
   println("${r_a}")
-
   let b: Option[(String, Int)] = none
   let r_b: (String, Int) = option.unwrap_or(some(option.unwrap_or(b, ("a", 1))), ("b", 2))
   println("${r_b}")
-
   let c: Option[(Int, String)] = none
   let r_c: (Int, String) = option.unwrap_or(some(option.unwrap_or(c, (1, "a"))), (2, "b"))
   println("${r_c}")
-
   let d: Option[(String, String)] = none
   let r_d: (String, String) = option.unwrap_or(some(option.unwrap_or(d, ("a", "b"))), ("c", "d"))
   println("${r_d}")
-
   // The SOME side of every cell too: the payload the match KEEPS must be the owned one,
   // not a borrow of the subject that the subject's own drop then frees. An all-scalar
   // cell cannot show that (nothing to free), so the heap cells carry the weight — and a
