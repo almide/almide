@@ -429,14 +429,12 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // An imported module's own type errors abort the wasm build too (#862).
     crate::compile_driver::report_module_diagnostics(&module_diags).map_err(|_| ())?;
 
-    // IR link: merge dependency modules into root
-    almide::ir_link::ir_link(&mut ir_program);
-
-    // Optimize
-    almide::optimize::optimize_program(&mut ir_program);
-
-    // Monomorphize
-    almide::mono::monomorphize(&mut ir_program);
+    // The ONE driver (crates/almide-driver). This site used to spell the order itself, and
+    // spelled it DIFFERENTLY from the shipped wasm path: ir_link FIRST here, ir_link LAST in
+    // `almide_mir::pipeline`. Both were green, so the cross-target equivalence claim was
+    // resting on "the position of ir_link never matters" rather than on a shared driver
+    // (#925, and #785 is a recorded bug from exactly that divergence).
+    almide_driver::link_ir(&mut ir_program);
 
     Ok(ir_program)
 }

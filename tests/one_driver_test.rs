@@ -35,15 +35,15 @@ const ALLOWED: &[&str] = &[
 /// RATCHET, not an exemption list: the gate asserts the set matches EXACTLY, so a new
 /// hand-written driver fails immediately, and removing one requires editing this list —
 /// which makes each migration visible in the diff instead of silently satisfying a
-/// count. B3 empties the CLI rows; B4 empties the rest; B5 deletes the constant.
+/// count. B3 emptied the two CLI driver rows (build.rs, commands.rs) after verifying the
+/// order flip byte-identical on all 329 `spec/wasm_cross` fixtures; B4 empties the rest;
+/// B5 deletes the constant.
 ///
 /// Note the count: #925 said "≥6 independent driver sequences" and the mechanical sweep
 /// found NINE. `classify_corpus_parts/classify_corpus_b.rs`,
 /// `render_wasm/tests_part1.rs`, and `wasm_runtime_test_parts/p4_corpus.rs` were not in
 /// the issue's inventory — which is itself the argument for a gate over a hand count.
 const MIGRATION_BACKLOG: &[&str] = &[
-    "src/cli/build.rs",
-    "src/cli/commands.rs",
     "src/cli/emit.rs",
     "src/compile_driver.rs",
     "crates/almide-interp/tests/eval_test.rs",

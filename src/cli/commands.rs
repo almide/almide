@@ -392,9 +392,10 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         Err(detail) => return compile_error(detail),
     };
     mark(prof, &mut marks, "lower_modules");
-    almide::ir_link::ir_link(&mut ir_program);
-    almide::optimize::optimize_program(&mut ir_program);
-    almide::mono::monomorphize(&mut ir_program);
+    // The ONE driver — see the note in src/cli/build.rs. This is the site whose order the
+    // migration FLIPPED (ir_link first → last), so its acceptance check is byte-identity of
+    // spec/wasm_cross against the pre-migration capture, not merely a green suite.
+    almide_driver::link_ir(&mut ir_program);
     mark(prof, &mut marks, "opt_mono");
     // Native-only matrix ops (e.g. qwen3_block_q1_0_kv) have no WASM lowering;
     // skip with a clear reason instead of reaching the emitter (whose panic would

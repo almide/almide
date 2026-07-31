@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | B1 | Inventory every `lower → optimize → mono → ir_link` site | A table with file, line, what it needs from the driver, and whether it wants the verified gates — no site summarized away | done — and it found more than an inventory (see B1 findings below) | Table + the stage-order split, recorded below |
 | B2 | The one driver + an IR-accepting renderer entry point | Both land green with NO call site migrated yet | **done (driver + gate)** — the IR-accepting renderer entry point moves to B3, where it is actually consumed | `crates/almide-driver` (new crate) + `tests/one_driver_test.rs` (2 tests green) |
-| B3 | Migrate the CLI paths and delete the discard | `spec/wasm_cross` bytes UNCHANGED (not merely passing); the `let _ = (&mut ir_program, …)` line is gone | pending — **precondition stated below** | — |
+| B3 | Migrate the CLI paths and delete the discard | `spec/wasm_cross` bytes UNCHANGED (not merely passing); the `let _ = (&mut ir_program, …)` line is gone | **done for the migration + verification**; the discard line is a separate step (see below) | `build.rs` + `commands.rs` on `almide_driver::link_ir`; **329/329 fixtures byte-identical** across the order flip; ratchet 9 → 7 |
 | B4 | Migrate the non-CLI sites | mir pipeline, both mir examples, interp test harness — each named | pending | — |
 | B5 | Empty the ratchet + measurement + close #925 | `MIGRATION_BACKLOG` is deleted (not merely shortened); build-time delta recorded with the command used | pending | — |
 
@@ -114,6 +114,35 @@ Concretely, in this order:
 earlier in `compile_driver`). It is in the backlog because the gate's pair-detection sees the
 file, not because it is a third driver. Migrating it means restructuring where emit gets its
 IR, which belongs with B4's non-CLI work rather than with the order flip.
+
+
+### B3 result — the untested assumption is now a measurement
+
+The migration flipped the native path from order A (`ir_link` first) to order B
+(`ir_link` last). Verified the way the precondition demanded, and the way it can ONLY be
+verified — at the moment of the flip:
+
+- captured native `(exit, stdout, stderr)` for all **329** `spec/wasm_cross` fixtures on the
+  pre-migration binary,
+- migrated `src/cli/build.rs` and `src/cli/commands.rs`, rebuilt, captured again,
+- **`diff` is empty. 329/329 byte-identical.**
+
+That converts "the position of `ir_link` never matters" from an assumption the cross-target
+equivalence claim was silently resting on into a measured fact — and it is a fact that could
+not have been measured any other way, because once both legs share the driver they move
+TOGETHER and the 2-way `spec/wasm_cross` gate goes blind to exactly this difference.
+
+`MIGRATION_BACKLOG` is down from 9 to 7. Remaining: `src/cli/emit.rs`, `src/compile_driver.rs`,
+`crates/almide-interp/tests/eval_test.rs`,
+`crates/almide-mir/examples/classify_corpus_parts/classify_corpus_b.rs`,
+`crates/almide-mir/src/render_wasm/tests_part1.rs`, `crates/almide-mir/src/pipeline.rs`,
+`tests/wasm_runtime_test_parts/p4_corpus.rs` — B4's work.
+
+**The discard line is still there.** `src/cli/build.rs:596`'s
+`let _ = (&mut ir_program, allow_unverified, verified);` needs the renderer to accept an
+already-built `IrProgram` (S2), which is a change to `almide_mir::pipeline`'s entry point
+rather than to the CLI. It rides with B4, where that file is migrated anyway — splitting it
+out here would have meant touching `pipeline.rs` twice.
 
 ## Notes
 
