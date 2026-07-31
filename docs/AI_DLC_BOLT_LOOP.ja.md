@@ -49,6 +49,8 @@ Unit は「計画書（inception.md）」と「実行台帳（construction.md）
   - 触った crate の `cargo test` がエラーゼロになってから push
   - 言語や stdlib から見える変更なら、該当ディレクトリの `almide test`
   - コンパイラを触ったら `make install`（PATH のバイナリを最新にする）
+  - **新規・編集した `.almd` は必ず `almide fmt`** — fmt ゲートが `spec/` と `examples/` の
+    整形を強制しており、未整形のテストは 1 時間後の赤 CI になる（実際になった: abccf0b7 の修理）
 - **止まるべき地雷が 2 つあります:**
   - ターゲット間で観測できる挙動が変わるのに、同じ commit に contract（C-NNN）が無い → 止めて M2
   - ratchet や wall をゆるめないと緑にならない → 止めて M4。ゆるめる操作は選択肢に無い

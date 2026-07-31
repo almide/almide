@@ -53,6 +53,9 @@ No work starts before the plan is approved.
   - `cargo test` for the touched crates must be zero-error before pushing
   - `almide test` on the relevant spec directories for changes visible from the language or stdlib
   - `make install` after compiler changes, so the PATH binary is current
+  - `almide fmt` every NEW or EDITED `.almd` file — the fmt gate holds `spec/` and
+    `examples/` formatted, and an unformatted test file is a red CI an hour later
+    (it happened: commit abccf0b7's repair)
 - **Two tripwires that stop the iteration:**
   - Observable cross-target behavior changes without a contract (`C-NNN`) in the same commit
     → stop, call M2
