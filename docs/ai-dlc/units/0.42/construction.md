@@ -10,7 +10,7 @@
 
 | Bolt | What | Done-criteria for this Bolt | Status | Evidence |
 |---|---|---|---|---|
-| B1 | Build the fuzzer; replay all 5 live records; classify root causes; open the Wave 3 table | Every record reproduced (or its absence explained); each has a named symptom + suspected root-cause class in Wave 3 | pending | — |
+| B1 | Build the fuzzer; replay all 5 live records; classify root causes; open the wave table | Every record reproduced (or its absence explained); each has a named symptom + suspected root-cause class in the wave table | done | Wave 4 table in `docs/roadmap/active/fuzz-findings-triage.md`: 2 resolved-in-window (861, 535), 3 live (57 trap-divergence, 12 heap-if wall, 29 registry gap). Commit SHA recorded next iteration |
 | B2 | Fix the OutputDivergence class (native `r15 = 100` vs wasm `r15 = 0`) | The replay is clean on both targets; root cause named; contract entry if observable behavior was defined | pending | — |
 | B3 | Fix the build/run-failure classes (NativeBuildFailure, RunFailureDivergence, WasmBuildFailure ×2) | All four replays clean on both targets; root causes named | pending | — |
 | B4 | Local campaign on the fixed compiler | A fresh multi-thousand-program local campaign records 0 findings | pending | — |
@@ -18,7 +18,16 @@
 
 ## Notes
 
-(not started)
+- The plan said "Wave 3", but the triage ledger already carries a Wave 3 — this Unit's
+  campaign is **Wave 4**. In-scope naming correction.
+- B2's original target (the OutputDivergence) turned out to be already resolved on current
+  develop — no codegen commits landed between the finding night and now EXCEPT the
+  c4d38b1d..52200340 window (7/28–7/29), so B2 is retargeted to: attribute the resolving
+  commits for 861 and 535 (bisect the window) and confirm the resolution is real, not
+  host-dependent. In-scope retarget; the DoD (streak, not list) is unchanged.
+- Fix order for the live three, easiest-first to shrink the nightly surface while the M2
+  question on 57 is prepared: 29 (registry gap) → 12 (heap-if wall brick) → 57 (M2 first,
+  then implementation per the decision).
 
 ## Unit completion
 

@@ -97,6 +97,20 @@ implies. The F3 gate should make each structural: an Opaque that flows into a
 display/eq/observed op must wall the fn, and a self-host link must carry a
 repr-compatibility check (the `_h`/`_x` suffix discipline, mechanically).
 
+## Wave 4 (2026-07-28..30 nightly findings — the first post-revival campaigns, Unit 0.42)
+
+The 0.41 instrument revival made the campaign complete every night; these are the findings
+the completed nights recorded. Replayed and classified 2026-07-31 on develop e610331d
+(macOS; check/build-stage verdicts are host-independent).
+
+| # | Night / seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| 861 | 7/28, 1785217538023450905 | OutputDivergence | native `r15 = 100`, wasm `r15 = 0` — `result.unwrap_or_else(err, closure returning captured Float)` | **CLEAN on current develop** — resolved in the c4d38b1d..52200340 window (suspect 7021f11f: checker admission changed which impls link); exact attribution pending (B2) |
+| 535 | 7/28, same seed | NativeBuildFailure | check accepted `let m: Int8 = --9223372036854775808`; rustc then rejected | **RESOLVED** — the checker now rejects at E024 (sign/carrier-aware literal domain); resolver in the same window, attribution pending (B2) |
+| 57 | 7/29, 1785304212462799529 | RunFailureDivergence | mutated C-044 fixture: `factorial(n - -2147483648)` — native terminates (LLVM's accumulator tail-recursion elimination turns the ~4-billion-deep non-tail recursion into a loop that wraps to ≤ 1 and unwinds); wasm recurses faithfully and traps `call stack exhausted` at ~16k frames | **LIVE** — termination-under-resource-limits divergence; needs an M2 contract decision (is stack-exhaustion divergence a contracted class, or does the wasm leg owe an equivalent transform?) |
+| 12 | 7/29, same seed | WasmBuildFailure | wall: "If of Bool with a call-bearing arm cannot take the both-arms linearization" — the heap-if wall class (#904 residual) | **LIVE** — brick work: extend the MIR-lowering subset for call-bearing unresolvable-if arms |
+| 29 | 7/30, 1785389912282950207 | WasmBuildFailure | unlinked stdlib call `map.get_or_str_wall` — the String-valued `map.get_or` variant is not in the self-host registry | **LIVE** — registry gap; register the variant (or extend the impl) so the call links |
+
 ## Definition of done
 
 1. Every finding minimized (`gen` → delta), root-caused, and either FIXED
