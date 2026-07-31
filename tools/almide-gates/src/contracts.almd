@@ -12,18 +12,23 @@
 // lose when reimplementing.
 import toml
 
-// Rank by line order in scripts/lib/contract-classes.txt. Duplicated here rather than read
-// at runtime: the bash passes it via `-v classes=` from the same file, and a reader for a
-// one-column list would be more machinery than the six names are worth. The list is short
-// and stable; a mismatch shows up immediately as a wrong "Strongest Evidence" column.
-fn class_rank(c: String) -> Int = match c {
-  "doc-only" => 0,
-  "by-construction" => 1,
-  "fixture" => 2,
-  "fuzz" => 3,
-  "exhaustive" => 4,
-  "lean" => 5,
-  _ => -1,
+// Rank = LINE ORDER in `scripts/lib/contract-classes.txt`, threaded in from the caller.
+//
+// This was a hard-coded `match` on the six names, with a comment arguing that a reader for a
+// one-column list is more machinery than six stable strings are worth. That argument is wrong
+// in the one way that matters: the file exists PRECISELY so two gates cannot disagree about
+// the vocabulary, and a third copy inside the tool that checks them reintroduces the drift the
+// file was created to prevent. It is byte-identical today, which is exactly how such a copy
+// survives long enough to matter.
+//
+// Threaded as a PARAMETER rather than read here so these stay pure functions: the caller reads
+// the file once, and `strongest`/`rows` remain testable without a filesystem.
+fn class_rank(classes: List[String], c: String) -> Int = {
+  let hit = classes |> list.enumerate |> list.find((e) => e.1 == c)
+  match hit {
+    some(e) => e.0,
+    none => -1,
+  }
 }
 
 fn is_wasm_cross_fixture(path: String) -> Bool = string.starts_with(path, "spec/wasm_cross/") and string.ends_with(path, ".almd")
@@ -32,11 +37,11 @@ fn fixture_count(items: List[String]) -> Int = items |> list.filter((it) => is_w
 
 // The strongest class, with fuzz's N appended when present. `-` when the contract has no
 // evidence whose class is in the rank table.
-fn strongest(items: List[String]) -> String = {
-  let ranked = items |> list.map((it) => toml.inline_get(it, "class")) |> list.filter((c) => class_rank(c) >= 0)
+fn strongest(classes: List[String], items: List[String]) -> String = {
+  let ranked = items |> list.map((it) => toml.inline_get(it, "class")) |> list.filter((c) => class_rank(classes, c) >= 0)
   if list.len(ranked) == 0 then "-"
   else {
-    let best = ranked |> list.sort_by((c) => class_rank(c)) |> list.last
+    let best = ranked |> list.sort_by((c) => class_rank(classes, c)) |> list.last
     let b = best ?? "-"
     if b == "fuzz" then {
       let hit = list.find(items, (it) => toml.inline_get(it, "class") == "fuzz" and toml.inline_num(it, "n") != "")
@@ -48,12 +53,31 @@ fn strongest(items: List[String]) -> String = {
   }
 }
 
-fn row(t: toml.Table) -> String = {
+fn row(classes: List[String], t: toml.Table) -> String = {
   let id = toml.table_get(t, "id")
   let title = toml.table_get(t, "title")
   let doc = toml.table_get(t, "doc")
   let name = if doc == "" then title else "[" + title + "](" + doc + ")"
-  "| " + id + " | " + name + " | " + toml.table_get(t, "since") + " | " + toml.table_get(t, "status") + " | " + strongest(t.array_items) + " | " + int.to_string(fixture_count(t.array_items)) + " |"
+  "| " + id + " | " + name + " | " + toml.table_get(t, "since") + " | " + toml.table_get(t, "status") + " | " + strongest(classes, t.array_items) + " | " + int.to_string(fixture_count(t.array_items)) + " |"
 }
 
-fn rows(tables: List[toml.Table]) -> List[String] = tables |> list.filter((t) => toml.table_get(t, "id") != "") |> list.map((t) => row(t)) |> list.sort
+fn rows(classes: List[String], tables: List[toml.Table]) -> List[String] =
+  tables |> list.filter((t) => toml.table_get(t, "id") != "") |> list.map((t) => row(classes, t)) |> list.sort
+
+// The one place the file is read. Blank lines and `#` comments are stripped exactly as the
+// bash's `grep -vE '^[[:space:]]*(#|$)'` does, because the LINE ORDER after stripping is the
+// rank — a comment counted as a class would shift every rank below it.
+fn parse_classes(content: String) -> List[String] =
+  string.split(content, "\n")
+    |> list.map((l) => string.trim(l))
+    |> list.filter((l) => l != "" and not string.starts_with(l, "#"))
+
+test "the class file is stripped of comments and blanks before the order becomes the rank" {
+  // A comment counted as a class would shift every rank below it, silently demoting `fixture`
+  // — which is the FLOOR an active contract must reach.
+  let src = "# the vocabulary\ndoc-only\n\nby-construction\nfixture\n# strongest below\nfuzz\n"
+  let cs = parse_classes(src)
+  assert_eq(cs, ["doc-only", "by-construction", "fixture", "fuzz"])
+  assert_eq(class_rank(cs, "fixture"), 2)
+  assert_eq(class_rank(cs, "nope"), -1)
+}

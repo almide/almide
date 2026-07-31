@@ -752,3 +752,35 @@ latent here only because the fields it reads (`id`, `status`, `doc`, `since`, `p
 are read as presence flags, so the truncation never reaches them. The port should note it at
 the call site instead of quietly hardening it, so the day a `doc =` path grows a quote, the
 divergence is a known one.
+
+## The dogfood found a bug in the dogfood (2026-08-01)
+
+Writing `ledger_schema.almd`'s `rank_of` — which reads the evidence-class vocabulary from
+`scripts/lib/contract-classes.txt` — put it side by side with `contracts.almd`, which had the
+six names hard-coded in a `match`. Two rank implementations, in the same program, for the enum
+whose entire reason for living in a file is that **two gates must not be able to disagree about
+it**.
+
+The hard-coding was deliberate and argued, in a comment: a reader for a one-column list is more
+machinery than six stable strings are worth, and a mismatch shows up immediately as a wrong
+"Strongest Evidence" column. Both halves of that are true and the conclusion is still wrong.
+The file is not an implementation detail of the bash — it is the mechanism by which the ledger
+gate and the rt-oracle-registry gate provably share one vocabulary. A third copy inside the
+tool that CHECKS them reintroduces exactly the drift the file was created to prevent, and it
+does so invisibly, because it is byte-identical today. That is how such a copy survives long
+enough to matter.
+
+Fixed by threading the class list in as a PARAMETER — the caller reads the file once, and
+`class_rank` / `strongest` / `rows` stay pure and testable without a filesystem. The parser
+strips comments and blanks exactly as `grep -vE '^[[:space:]]*(#|$)'` does, with a test saying
+why: the line order AFTER stripping is the rank, so a comment counted as a class silently
+demotes `fixture` — which is the FLOOR an active contract must reach.
+
+`docs/contracts/README.md` re-verified after the change: **232 lines, 25,450 bytes, still
+byte-identical** to the bash original.
+
+The general shape, now three for three across this Unit: **a rule that is duplicated because
+duplication is cheaper than the abstraction is a rule that will eventually be two rules.** The
+locale pinning (#1031) was eleven copies of one `export LC_ALL=C`; the quote-truncation
+(#1032) was five copies of one unquoting expression; this is two copies of one enum. In each
+case the copies agreed on the day they were written.
