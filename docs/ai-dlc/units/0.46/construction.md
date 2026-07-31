@@ -718,9 +718,31 @@ gets weakened by the next person who trips it:
   `fan.timeout` in 0.29.0. Raising the ceiling to admit a new divergence is precisely the move
   this check exists to make impossible without saying so out loud.
 
-Remaining for B8: the two spec-keying directions, the three freshness checks, and the
-summary/histogram block — then the twelve mutations above, each of which must turn the Almide
-gate red with the same line.
+`ledger_speckey.almd` adds both spec-keying directions and the freshness messages, with 6 more
+tests. Verified against the real ledger and `docs/specs/als/` in one run: **64 distinct spec
+keys, 64 normative sections, 0 contracts without a key, 0 unresolved keys, 0 orphan sections**
+— the same numbers the bash prints.
+
+The REVERSE direction is the one worth keeping in view. Forward — every contract names a
+section that exists — is bookkeeping. Reverse — every normative section is cited by at least
+one contract — is not: an uncited section is a claim the spec makes that no executable evidence
+certifies, and its first run found ALS-T4 adjudicating `chunk/windows(n <= 0)` while BOTH
+targets disagreed with it (native raising a raw panic, wasm silently returning `len+1` empty
+windows). Nothing else in the project would have caught it, because every test agreed with the
+implementation and nothing read the section.
+
+Two more rules got tests that pin an edge the bash expresses only in a regex:
+
+- **A section heading matches on a BOUNDARY.** `grep -qE "^## $sec( |$)"` — without the
+  trailing alternation, `ALS-T1` resolves against `## ALS-T14 …` and a bogus key passes
+  validation by prefix.
+- **Keys are counted DISTINCT and byte-sorted.** `sort -u` under a pinned `LC_ALL=C`: counting
+  duplicates inflates the summary, and an unpinned collation reorders the error lines between
+  machines, which is #1031 exactly.
+
+Remaining for B8: wiring the three checks into one `check-contracts` subcommand with the
+bash's emission order and its summary/histogram block, then running the twelve mutations —
+each must turn the Almide gate red with the same line as the original.
 
 **One latent bug to reproduce rather than fix, and to name where it is reproduced**: the
 parser unquotes with `sub(/".*$/,"",v)` — truncate at the FIRST quote — which is precisely the
