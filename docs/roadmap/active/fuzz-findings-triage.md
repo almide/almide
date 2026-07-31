@@ -437,3 +437,43 @@ all-scalar tuple instantiation exists.
 
 If that is it, the fix is a registry entry rather than a lowering change — which is a much
 smaller and safer edit than the ownership-analysis change the earlier hypotheses implied.
+
+### R3 remainder — ROOT CAUSE FOUND (2026-08-01): a missing cell in the option/result family
+
+The hypothesis named above was right, and the gap is exact. `unwrap_or` is routed by payload
+type, and the two modules' cell sets are asymmetric:
+
+| payload | `result` | `option` |
+|---|---|---|
+| String | `result.str_unwrap_or` | `option.unwrap_or_str` |
+| Value | `result.value_unwrap_or` | `option.value_unwrap_or` |
+| List[Value] | `result.list_value_unwrap_or` | `option.listvalue_unwrap_or` |
+| List[Int] / List[String] | (via flat) | `option.listint_unwrap_or` / `option.liststr_unwrap_or` |
+| **flat scalar block** (an all-scalar TUPLE, `List[<scalar>]`, `Bytes`) | **`result.flat_unwrap_or`** | **— MISSING —** |
+| heap fallback | `result.unwrap_or_hx` | `option.unwrap_or_hx` |
+
+`Option[(Int, Int)]` matches no cell, so the routing returns `None` and the caller walls.
+`Option[(String, Int)]` is not all-scalar, so it takes the heap path and builds. That is the
+whole difference between probes `s_s11` and `s_s5`.
+
+**This is the same class as everything else found this cycle**: a family grown a point at a
+time. `result` got its flat cell when `result.zip`'s `(Int, Int)` needed it; nobody added the
+`option` twin because nothing had asked for it until a fuzz program did.
+
+**The fix, concretely:**
+
+1. Add `option_flat_unwrap_or` to `stdlib/value_core.almd`, modelled on
+   `result_flat_unwrap_or` (line 705) but for the OPTION layout — Option is len-as-tag, not
+   the Result's cap-as-tag-at-@16, so the body is NOT a copy: read the len slot, `0` = none →
+   return the fallback, else load the payload handle and let the bare-Var tail auto-acquire.
+   The neighbouring `?? d`-over-`Option[List[String]]` helper in the same file is the closer
+   template — its comment even says "the SAME len-as-tag prim".
+2. Register it in `self_host_registry.rs` next to `("result_flat_unwrap_or",
+   "result.flat_unwrap_or")`.
+3. Add the routing arm to `unwrap_or_call_name_option` (`lower/mod_p4_f.rs`), mirroring the
+   `result` arm's predicate (`Ty::Tuple(ts)` all-scalar, or a non-heap-element `List`).
+4. **Land a matrix gate in the same PR** — the family rule is that `option` and `result` carry
+   the SAME payload cells, and a test asserting cell-set equality is what stops the next
+   divergence. This gap existed precisely because nothing checked that.
+
+Probes: `s_s11` (walls) and `s_s5` (builds), two lines each, in the session scratchpad.
