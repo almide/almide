@@ -384,3 +384,21 @@ than the one I would have written for #1029 on its own.
 
 Regression: 335 files green (spec 324 + examples 11), diagnostic harness green, plus
 `tests/diagnostics/e001-concat-element-mismatch`.
+
+### R3 remainder — one hypothesis REFUTED (2026-08-01)
+
+Tested and eliminated: **"an all-scalar tuple is not heap, so it takes a different route."**
+It is heap. `crates/almide-types/src/types/heap.rs:62` classifies `Ty::Tuple(..)` as heap
+unconditionally — the match is exhaustive without a wildcard, and there is a unit test at
+line 113 pinning `Ty::Tuple(vec![Ty::Int, Ty::Bool])` on the heap side.
+
+So heap-ness is NOT what distinguishes `(Int, Int)` from `(String, Int)` in the OptionSome
+payload path. Both reach `lower_owned_heap_field` through the same fallback and both are
+heap; only the arm that selected them differs (`is_all_scalar_tuple`, checked first, vs
+`is_str_int_tuple`).
+
+Recorded as a refutation rather than dropped, because it is the obvious first guess and
+someone will otherwise spend the same twenty minutes on it. What remains is to instrument
+which early return in `lower_pure_module_value_call` (`calls.rs:89`) fires for
+`option.unwrap_or(s0, (1, 2))` but not for `option.unwrap_or(s0, ("a", 1))` — the two probes
+are `s_s11` and `s_s5` in the session scratchpad, two lines each.
