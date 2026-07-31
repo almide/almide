@@ -225,3 +225,63 @@ is what stops the next member from shipping unguarded.
 API-family rule already states: R2 was three point-wise answers to one question, and R1 was a
 guard restated more narrowly than the thing it guards. Neither was a missing feature — both
 were a surface that had been grown a point at a time.
+
+## Wave 6 — Round 7 local campaign (2026-07-31)
+
+3,424 programs / 25 min / `--jobs 6` on the Wave-5-fixed binary. **1 unique finding**
+(down from Round 6's 2), so B4's "0 findings" criterion is still not met.
+
+| # | seed / index | Kind | Status |
+|---|---|---|---|
+| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **fully diagnosed, fix designed, NOT yet implemented** |
+
+### R3 — the tuple payload family is keyed three different ways
+
+Minimal repro (2 lines):
+
+```almide
+let s0: Option[(String, Int)] = none
+let r: (String, Int) = option.unwrap_or(some(option.unwrap_or(s0, ("a", 1))), ("b", 2))
+```
+
+The payload is a CALL RESULT rather than a tuple literal. Measured sweep, one binary, one run:
+
+| `Some` payload type | admission key (`binds_p4_b.rs::try_lower_opt_tuple_and_variant_payloads`) | call-result payload |
+|---|---|---|
+| `(Int, String)` | `_ if Self::is_int_str_tuple(&expr.ty)` — **TYPE only** | ✅ builds |
+| `(String, Int)` | `IrExprKind::Tuple { .. } if is_str_int_tuple(…)` — **SHAPE + type** | ❌ walls |
+| `(String, String)` | `IrExprKind::Tuple { .. } if is_str_str_tuple(…)` | ❌ walls |
+| `(Int, Int)` (all-scalar) | `IrExprKind::Tuple { .. } if is_all_scalar_tuple(…)` | ❌ walls |
+
+One cell of four is type-keyed; three are shape-keyed. A tuple literal payload works for all
+four (probe s1), and binding the call result to a `let` first works for all four (probe s8) —
+only the inline call-result payload divides them. This is the THIRD instance of the same class
+today, after R2 (three answers to one head-count question) and R1 (an admission predicate
+restated more narrowly than the builder it guards).
+
+### Fix design, and why it was not implemented in the same pass
+
+The asymmetry is in the BUILDERS, not just the match arms:
+
+* `try_opt_int_str_tuple_payload` → `self.lower_owned_heap_field(expr)` — materializes an
+  owned heap value from an ARBITRARY expression, which is why its cell is type-keyed.
+* `try_opt_str_int_tuple_payload` / `_str_str_` / `_scalar_` → destructure
+  `IrExprKind::Tuple { elements }` and call `try_lower_tuple_construct(&elements)` /
+  `try_lower_scalar_tuple_construct(&elements)` — literal-only by construction.
+
+So the fix is to give the three shape-keyed builders the same fallback the int_str one already
+has: when the payload is not a literal `Tuple`, go through `lower_owned_heap_field`, then the
+existing `materialize_opt_str_some` + the existing `variant_drop_handles` entry
+(`opt_str_int` / `opt_str_str`).
+
+**The risk that makes this a separate pass**: the drop handle registered for each cell assumes
+the piece's SHAPE, and `lower_owned_heap_field` may not produce the same shape as
+`try_lower_tuple_construct`. If it does not, the fallback is a double-free or a leak — a
+memory-safety-shaped defect, not a wall. Verifying that requires reading both piece
+constructions against the `opt_str_int` / `opt_str_str` drop bodies and then running the
+churn-loop tests that expose a refcount error. That is careful work, and it was deliberately
+not started at the tail of a long session; the diagnosis above is complete enough that the
+implementation is mechanical-with-care rather than exploratory.
+
+Probe files: `s_s1`..`s_s11` in the session scratchpad; the discriminating trio is s9
+(`(Int, String)` call result → builds), s5 (`(String, Int)` → walls), s11 (`(Int, Int)` → walls).
