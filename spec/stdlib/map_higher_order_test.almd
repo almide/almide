@@ -224,3 +224,13 @@ test "map.get_or missing" {
   let m = ["a": 10]
   assert_eq(map.get_or(m, "z", 99), 99)
 }
+
+test "map.get_or string values existing" {
+  let m = ["a": "x", "b": "y"]
+  assert_eq(map.get_or(m, "b", "fallback"), "y")
+}
+
+test "map.get_or string values missing" {
+  let m = ["a": "x"]
+  assert_eq(map.get_or(m, "z", "fallback"), "fallback")
+}
