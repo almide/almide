@@ -46,7 +46,7 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 | Version | 大機能 | Issue |
 |---|---|---|
 | 0.51 | QualifiedRef newtype — v1 MIR 上で bare type identity を表現不能にする（#433 クラスの型による根絶）。以後の optimizer 追加はこの型の上で行う | [#908](https://github.com/almide/almide/issues/908) |
-| 0.52 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存。optimizer 手術の前に検出器を立てる | [#912](https://github.com/almide/almide/issues/912) |
+| 0.52 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存。optimizer 手術の前に検出器を立てる。実例棚: [#1018](https://github.com/almide/almide/issues/1018)（map.fold closure の under-check） | [#912](https://github.com/almide/almide/issues/912), [#1018](https://github.com/almide/almide/issues/1018) |
 | 0.53 | wasm leg に nanopass optimizer 群を接続 | [#929](https://github.com/almide/almide/issues/929) |
 | 0.54 | wasm SIMD | [#929](https://github.com/almide/almide/issues/929) |
 | 0.55 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |

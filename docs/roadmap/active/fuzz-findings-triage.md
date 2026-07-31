@@ -115,7 +115,8 @@ the completed nights recorded. Replayed and classified 2026-07-31 on develop e61
 
 | # | Source / seed | Kind | Symptom | Status |
 |---|---|---|---|---|
-| L0 | 2026-07-31 local B4 campaign (707 programs, 607 clean), seed 1785458401504935000 index 0 | WasmBuildFailure | wall: "map.fold with an unliftable/closure-list higher-order argument cannot execute faithfully in this brick (walled, not mis-valued)" | **LIVE** — a map.fold higher-order coverage hole; next fix target |
+| L0 | 2026-07-31 local B4 campaign (707 programs, 607 clean), seed 1785458401504935000 index 0 | WasmBuildFailure | wall: "map.fold with an unliftable/closure-list higher-order argument cannot execute faithfully in this brick (walled, not mis-valued)". Minimized (t3): `map.fold` with a HEAP-map accumulator and a map-literal-returning closure | **LIVE** — a map.fold higher-order coverage hole; next fix target |
+| L1 | found while minimizing L0 (probe t1) | Checker hole (ICE, both targets) | `map.fold`'s closure argument is under-checked for a SCALAR accumulator: an ill-typed body (`Int + String` via the (k,v,acc) order mistake) passes `almide check` and dies at IR verify. list.fold and the concrete-heap-acc map.fold case both reject correctly | **FILED** — [#1018](https://github.com/almide/almide/issues/1018), assigned to the 0.52 hole-hunt row (loud, not silent; not a nightly-red risk — the generator only emits well-typed closures) |
 
 ## Definition of done
 
