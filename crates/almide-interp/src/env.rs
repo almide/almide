@@ -65,6 +65,28 @@ impl Scope {
         }
     }
 
+    /// Hand the owning frame's storage for `id` to `f` as a mutable slot.
+    /// `None` = the variable was never bound.
+    ///
+    /// `get` + `assign` would do the same job, but `get` hands back a CLONE, so
+    /// an in-place container mutator holding it can never be the sole owner of
+    /// the inner `Rc` and has to copy the whole container on every call —
+    /// turning a push loop quadratic. With the slot itself, `Rc::make_mut`
+    /// copies only when an alias actually exists, which is both O(1) amortized
+    /// and exactly the COW rule the backends implement (C-033).
+    ///
+    /// `f` must not touch this scope: the owning frame's `RefCell` is borrowed
+    /// for the duration of the call.
+    pub fn with_slot<R>(&self, id: VarId, f: impl FnOnce(&mut Value) -> R) -> Option<R> {
+        {
+            let mut vars = self.inner.vars.borrow_mut();
+            if let Some(slot) = vars.get_mut(&id) {
+                return Some(f(slot));
+            }
+        }
+        self.inner.parent.as_ref()?.with_slot(id, f)
+    }
+
     /// Assign to an existing variable, walking the parent chain to find the
     /// frame that owns it. Returns `true` if the variable was found and
     /// updated, `false` if it was never bound (a should-not-happen on

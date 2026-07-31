@@ -18,6 +18,26 @@
 
 ## Notes
 
+- **CI repair (2026-07-31)**: the C-197 fixture landed in B3 (`allocation_within_limits`)
+  used `list.push`, which the interp could not evaluate, so it abstained without a ledger
+  entry and `interp_abstain_ledger` went red. The gate offers two fixes and names its
+  preference: widen the interp glue, or record the abstention. Widening won, because the
+  same hole held **16 fixtures** out of the third oracle, not just the new one.
+  `crates/almide-interp/src/inplace.rs` intercepts the `mut`-receiver mutators before the
+  dispatch path turns the receiver into a value, and writes the mutation back into its
+  binding. `Rc::make_mut` on the binding's own slot is both the COW rule (C-033) and the
+  reason a 100k-push loop stays linear — the first draft cloned the container per call and
+  would have been quadratic.
+  Measured outcome: **189 → 194 evaluated**, ledger 137 → 133. Five fixtures now evaluate
+  end to end (`inplace_mutator_statement`, `loop_buffer_churn`,
+  `loop_outer_inplace_mutate_rc`, `loop_push_trailing_increment`, and
+  `allocation_within_limits` itself). Five more got past the in-place barrier and now
+  abstain on a DIFFERENT, deeper gap (`prim.alloc_map` / `prim.alloc_list` /
+  `prim.handle`) — real progress, but not coverage yet; do not count them as recovered.
+  Six keep an in-place reason, now stated precisely instead of family-wide: a `mut`
+  parameter receiver (#1022) or a bytes byte-level writer (#1021).
+  `interp_cross_target_spec` stayed green, which is the load-bearing check — the interp
+  now VOTES on five fixtures it used to skip, and a wrong vote fails loudly.
 - The plan said "Wave 3", but the triage ledger already carries a Wave 3 — this Unit's
   campaign is **Wave 4**. In-scope naming correction.
 - B2's original target (the OutputDivergence) turned out to be already resolved on current

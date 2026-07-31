@@ -19,7 +19,8 @@ This crate adds a third, independent judge. It evaluates the IR at the cut point
 - `env.rs` — `VarId`-keyed, `Rc`-shared frames. Reproduces native `RcCow` capture semantics.
 - `eval.rs` — the tree-walker for every eval-able IR node, fuel accounting, the pattern engine (incl. list patterns, which survive past the cut point), and record-repr nominal-name recovery.
 - `dispatch.rs` — `Call` routing (`Named` / `Module` / `Method` / `Computed`), the variant-ctor registry, and the **HOF allowlist** (`is_hof`).
-- `hofs.rs` — the in-interp HOFs (map/filter/fold/…) and the interp-native container ops, plus the in-place-mutation guard.
+- `hofs.rs` — the in-interp HOFs (map/filter/fold/…) and the interp-native container ops, plus the in-place-mutation predicate.
+- `inplace.rs` — the `mut`-receiver mutators (`list.push`, `map.insert`, …), modeled as read → transform → write-back on the receiver's binding. `Rc::make_mut` on the binding's own storage slot IS the COW rule: sole owner mutates in place (a push loop stays linear), an alias forces the copy (C-033).
 - `bridge.rs` — the scalar/string/math `(module, func)` bridge.
 
 ## Coverage model — does a NEW stdlib fn get covered automatically?
@@ -37,7 +38,8 @@ When you add a stdlib fn and want the oracle to cover it: add the arm to the rig
 ## Rules
 
 - **The interp must MATCH the backends, not "be correct" in the abstract.** Where the backends share a quirk (e.g. anonymous-record fields render in sorted order; `${float}` uses plain `{}` Display with no `.0`; the `0.30000000000000004` shortest-roundtrip), the interp replicates the quirk. A divergence here is a third vote, and a wrong third vote is worse than a skip.
-- **A wrong vote is worse than an honest skip.** When the interp cannot faithfully model something (in-place `mut`-receiver container ops whose binding is unreachable by-value; platform-libm transcendentals that diverge from the backends' vendored musl-libm in the last ULP; non-deterministic `fan.*`), return `Flow::Unsupported` with a reason — never guess.
+- **A wrong vote is worse than an honest skip.** When the interp cannot faithfully model something (a `mut`-receiver mutation whose binding this frame cannot assign to — a `mut` parameter, whose effect the backends return to the CALLER's slot (C-132, issue #1022), or a record-field/temporary receiver; platform-libm transcendentals that diverge from the backends' vendored musl-libm in the last ULP; non-deterministic `fan.*`), return `Flow::Unsupported` with a reason — never guess.
+- **Abstain by NAME, not by family.** When one shape of a capability is modelable and another is not, the abstain must say which shape is missing, so the ledger records a gap someone can close rather than a whole family written off. `inplace.rs` splits three ways for exactly this reason: written back, `mut`-parameter receiver (#1022), byte-level buffer writer (#1021).
 - **Stay at the pre-codegen cut point.** Codegen-inserted IR nodes (`Clone`, `Borrow`, `IterChain`, `ClosureCreate`, `RuntimeCall`, …) are `unreachable!` by construction. If one becomes reachable, the cut point moved — fix the boundary, don't silently handle it.
 - **Skips are data-driven and loud.** Every skip is the interpreter's own `RunStatus::Unsupported`/`FuelExhausted`, logged with its reason. Never add a hardcoded skip-list to the harness.
 - **Fuel is mandatory.** Every eval step burns one unit (`DEFAULT_FUEL`); deep recursion is bounded by `MAX_DEPTH`. An adversarial loop must terminate as `FuelExhausted`, never hang.

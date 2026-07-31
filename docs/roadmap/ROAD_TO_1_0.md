@@ -121,7 +121,7 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 
 | Version | 大機能 | Issue |
 |---|---|---|
-| 0.91 | almide-interp を第三審から規範意味論（normative semantics）へ昇格 | [#564](https://github.com/almide/almide/issues/564) |
+| 0.91 | almide-interp を第三審から規範意味論（normative semantics）へ昇格。前提は abstain 台帳を 0 に寄せること — 残る in-place 系の穴が [#1021](https://github.com/almide/almide/issues/1021)（bytes バイト単位ライタ）と [#1022](https://github.com/almide/almide/issues/1022)（mut パラメータの copy-out） | [#564](https://github.com/almide/almide/issues/564), [#1021](https://github.com/almide/almide/issues/1021), [#1022](https://github.com/almide/almide/issues/1022) |
 | 0.92 | ALS 文法・構文章 — grammar の規範化 | [#530](https://github.com/almide/almide/issues/530) |
 | 0.93 | ALS 型システム章 — 推論・単一化・protocol 制約の規範化 | [#530](https://github.com/almide/almide/issues/530) |
 | 0.94 | ALS 動的意味論章 — 0.91 で昇格した interp 準拠で記述 | [#530](https://github.com/almide/almide/issues/530) |
