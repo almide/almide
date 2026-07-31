@@ -27,6 +27,7 @@ dependencies = [
  "almide-base",
  "almide-codegen",
  "almide-dialect",
+ "almide-driver",
  "almide-frontend",
  "almide-interp",
  "almide-ir",
@@ -81,6 +82,17 @@ dependencies = [
  "almide-base",
  "almide-ir",
  "almide-lang",
+]
+
+[[package]]
+name = "almide-driver"
+version = "0.12.2"
+dependencies = [
+ "almide-base",
+ "almide-frontend",
+ "almide-ir",
+ "almide-lang",
+ "almide-optimize",
 ]
 
 [[package]]

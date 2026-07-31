@@ -1,0 +1,13 @@
+[package]
+name = "almide-driver"
+version = "0.12.2"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "The one frontend driver: the single place that spells the lower → optimize → mono → ir_link stage order."
+
+[dependencies]
+almide-base = { path = "../almide-base" }
+almide-lang = { path = "../almide-lang" }
+almide-ir = { path = "../almide-ir" }
+almide-frontend = { path = "../almide-frontend" }
+almide-optimize = { path = "../almide-optimize" }

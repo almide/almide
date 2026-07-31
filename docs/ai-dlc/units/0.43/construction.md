@@ -12,10 +12,10 @@
 | Bolt | What | Done-criteria for this Bolt | Status | Evidence |
 |---|---|---|---|---|
 | B1 | Inventory every `lower → optimize → mono → ir_link` site | A table with file, line, what it needs from the driver, and whether it wants the verified gates — no site summarized away | done — and it found more than an inventory (see B1 findings below) | Table + the stage-order split, recorded below |
-| B2 | The one driver + an IR-accepting renderer entry point | Both land green with NO call site migrated yet | pending | — |
+| B2 | The one driver + an IR-accepting renderer entry point | Both land green with NO call site migrated yet | **done (driver + gate)** — the IR-accepting renderer entry point moves to B3, where it is actually consumed | `crates/almide-driver` (new crate) + `tests/one_driver_test.rs` (2 tests green) |
 | B3 | Migrate the CLI paths and delete the discard | `spec/wasm_cross` bytes UNCHANGED (not merely passing); the `let _ = (&mut ir_program, …)` line is gone | pending | — |
 | B4 | Migrate the non-CLI sites | mir pipeline, both mir examples, interp test harness — each named | pending | — |
-| B5 | Structural gate + measurement + close #925 | A second stage-order spelling fails a test; build-time delta recorded with the command used | pending | — |
+| B5 | Empty the ratchet + measurement + close #925 | `MIGRATION_BACKLOG` is deleted (not merely shortened); build-time delta recorded with the command used | pending | — |
 
 
 ## B1 findings — the sites are not merely hand-synced, they are not the same sequence
@@ -56,6 +56,29 @@ Consequences for this Unit, decided here rather than discovered in B3:
 3. B5's structural gate should pin the ORDER, not just the count of call sites. A gate that
    only forbids a second spelling would have been satisfied by today's tree if the two
    spellings had been in one file.
+
+
+### B2 notes — placement, and a count the issue undercounted
+
+**Placement.** `almide-frontend` does not depend on `almide-optimize` (they are siblings),
+so neither can host a function that runs both stages. A new thin `almide-driver` crate,
+above the pair and below `almide-mir`, is the only placement with no cycle and no layering
+inversion. It owns exactly the stage order and nothing else.
+
+**Order.** `optimize → monomorphize → ir_link` — order B from B1. `ir_link` runs LAST so the
+linker sees the monomorphized call graph rather than resolving calls mono is about to
+specialize. A second test pins that order so it cannot be re-permuted silently.
+
+**The gate is a RATCHET, not an exemption list.** It asserts the offender set matches
+`MIGRATION_BACKLOG` EXACTLY: a new hand-written driver fails immediately, and removing one
+requires editing the list, so every migration is visible in the diff. B3/B4 empty it; B5
+deletes the constant.
+
+**The mechanical sweep found NINE sites, not the issue's "≥6".** Three were missing from
+the issue's inventory: `crates/almide-mir/examples/classify_corpus_parts/classify_corpus_b.rs`,
+`crates/almide-mir/src/render_wasm/tests_part1.rs`, and
+`tests/wasm_runtime_test_parts/p4_corpus.rs`. That gap is itself the argument for a gate
+over a hand count — the hand count was already 33% low when it was written.
 
 ## Notes
 

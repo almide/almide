@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab"]
 resolver = "3"
 exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
 
@@ -16,6 +16,7 @@ almide-ir = { path = "crates/almide-ir" }
 almide-codegen = { path = "crates/almide-codegen" }
 almide-tools = { path = "crates/almide-tools" }
 almide-optimize = { path = "crates/almide-optimize" }
+almide-driver = { path = "crates/almide-driver" }
 almide-interp = { path = "crates/almide-interp" }
 almide-frontend = { path = "crates/almide-frontend" }
 almide-dialect = { path = "crates/almide-dialect" }
