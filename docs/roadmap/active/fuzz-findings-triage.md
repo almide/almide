@@ -557,3 +557,48 @@ Eliminated so far, all recorded so nobody repeats them:
 
 Unchanged throughout: `s_s5` builds, `s_s11` walls, they differ only in element type, and the
 wall is honest (exit 1, no output, no wrong bytes) — it costs coverage, not correctness.
+
+### R3 — INSTRUMENTED, and the answer arrived in one pass (2026-08-01)
+
+Five readings found nothing; two builds with a temporary `eprintln!` found it immediately.
+Recording both the answer and the method, because the method is the transferable part.
+
+**The expression is not a `Call`. It is a `Match`.**
+
+```
+[R3] NO group claimed it
+[R3] scalar_tuple: lower_owned_heap_field -> false for kind
+     Match { subject: IrExpr { kind: Var { id: VarId(0) },
+     ty: Applied(Option, [Tuple([Int, Int …
+```
+
+`option.unwrap_or(s0, (1, 2))` is desugared to a `match` before it reaches
+`lower_owned_heap_field`. **Every one of the five eliminated hypotheses was about the `Call`
+path — a path this expression never takes.** That is why careful reading kept missing it: the
+reasoning was sound and the premise was wrong, and only a trace could show the premise.
+
+**Where it actually declines.** `owned_heap_field.rs:476` DOES have a `Match` arm:
+
+```rust
+IrExprKind::Match { subject, arms } => {
+    let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
+    let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return Some(None) };
+    let obj = self.try_lower_heap_result_if(cond, then, else_, &expr.ty)?;
+    …
+}
+```
+
+So the decline is inside `desugar_match_to_if` or `try_lower_heap_result_if`. The `(String, Int)`
+probe reaches this same arm 10 times and builds, so the arm works — it is the all-scalar tuple
+that one of those two rejects. Most likely candidate: the desugared `else` arm is a TUPLE
+LITERAL `(1, 2)`, and `try_lower_heap_result_if` must materialize it as an arm value.
+(`try_lower_heap_result_if`'s own `is_heap_ty(result_ty)` guard is not it — `Ty::Tuple` is heap.)
+
+**Next step**: the same trace, one level down — print at each `?`/`return` inside
+`try_lower_heap_result_if` / `lower_heap_result_if_inner`, run `s_s11`, read which arm
+declines. One build.
+
+**The method, generalised.** Five careful readings cost more than two instrumented builds and
+were wrong. The tell was the ratio — five hypotheses eliminated, none confirmed — and the rule
+worth keeping is: *when eliminations outnumber confirmations and nothing converges, the
+premise is probably wrong, and only a trace can show which premise.*
