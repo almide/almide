@@ -109,6 +109,37 @@ fn map_from_list_msv(
   __msv_from_at(ph, n, 0, map_new_msv())
 }
 
+// remove on the msv split layout: build a new map excluding `k` — keys deep-copied
+// (__msv_store_key), surviving values co-owned (rc_inc), exactly map_set_msv's copy
+// discipline with one slot skipped. A missing key (idx -1, skip matches nothing)
+// copies everything through the same walk.
+fn __msv_remove_copy(sh: Int, rh: Int, n: Int, rn: Int, skip: Int, i: Int, j: Int) -> Int =
+  if i >= n then 0
+  else if i == skip then __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j)
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __msv_store_key(rh + 12 + j * 8, kk)
+    let old = prim.load64(sh + 12 + (n + i) * 8)
+    prim.rc_inc(old)
+    prim.store64(rh + 12 + (rn + j) * 8, old)
+    __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j + 1)
+  }
+
+fn map_remove_msv(
+  m: Map[String, Map[String, String]],
+  k: String,
+) -> Map[String, Map[String, String]] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let idx = __msv_find(sh, n, k, 0)
+  let rn = if idx < 0 then n else n - 1
+  let r = prim.alloc_map_kv(rn * 2)
+  let rh = prim.handle(r)
+  let _c = __msv_remove_copy(sh, rh, n, rn, idx, 0, 0)
+  prim.store32(rh + 4, rn)
+  r
+}
+
 // The stored value (or the default) via the hshare co-own idiom.
 fn __msv_elem(h: Int, n: Int, idx: Int) -> Map[String, String] = {
   let v: Map[String, String] = prim.load_handle(h + 12 + (n + idx) * 8)

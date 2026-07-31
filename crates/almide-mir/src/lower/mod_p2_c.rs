@@ -510,7 +510,13 @@ pub fn is_map_msb_ty(ty: &Ty) -> bool {
             if b.len() == 2 && matches!(b[0], Ty::String)
                 && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float))
             || matches!(&a[1], Ty::Applied(TypeConstructorId::Option, o)
-                if o.len() == 1 && matches!(o[0], Ty::String))))
+                if o.len() == 1 && matches!(o[0], Ty::String))
+            // Result[T, String] with T scalar or String: len-as-tag (Ok = len 0) /
+            // cap-as-tag (len 1) blocks — the len-counted low-32 slots are the owned
+            // Strings, and the high-32 tag is inert under the $rc_dec i32 wrap.
+            || matches!(&a[1], Ty::Applied(TypeConstructorId::Result, e)
+                if e.len() == 2 && matches!(e[1], Ty::String)
+                    && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))))
 }
 
 /// `Map[String, List[Option[Int]]]` — the mlo family (String keys, LIST-OF-OPTIONS values;

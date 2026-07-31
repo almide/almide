@@ -268,6 +268,26 @@ test "option-valued map literal churn" {
   assert_eq(hits, 5)
 }
 
+test "map.get_or and remove on a result-valued map" {
+  let s0: Result[Int, String] = err("boom")
+  let okv: Result[Int, String] = ok(7)
+  let m: Map[String, Result[Int, String]] = ["k0": s0, "k1": okv]
+  assert_eq(result.unwrap_or(map.get_or(m, "k1", err("d")), 0), 7)
+  assert_eq(result.unwrap_or(map.get_or(m, "k0", err("d")), 42), 42)
+  let m2 = map.remove(m, "k0")
+  assert_eq(result.unwrap_or(map.get_or(m2, "k0", ok(9)), 0), 9)
+  assert_eq(result.unwrap_or(map.get_or(m2, "k1", err("d")), 0), 7)
+}
+
+test "result-valued map literal churn" {
+  var total = 0
+  for i in [1, 2, 3] {
+    let m: Map[String, Result[Int, String]] = ["a": ok(i), "b": err("x")]
+    total = total + result.unwrap_or(map.get_or(m, "a", ok(0)), 0)
+  }
+  assert_eq(total, 6)
+}
+
 test "nested scalar-value map literal churn" {
   var count = 0
   for i in [1, 2, 3, 4, 5] {
