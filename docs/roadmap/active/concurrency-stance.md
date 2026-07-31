@@ -45,7 +45,35 @@ modification survival rate である。同じ入力で走らせるたび出力�
 
 ## 4 件への帰結
 
-### #1024 `fan.race` — 撤去する（リネームではなく）
+### #1024 `fan.race` — 撤去は **branch `fan-race-removal` (ccbd963e) に退避中**
+
+作業は完了に近いが、**移行の意味論判断が残っている**ため develop には入れていない。
+済んでいるもの: checker の E027 トンボストーン、C-004 の題と statement から
+`fan.race` 節を削除、C-005 から head-Err 節と `spec/wasm_cross/fan_race_err.almd` を削除、
+SPEC.md §9.8/§13.2・README・DESIGN の更新、診断 fixture `e027-fan-race-removed` 追加、
+契約ゲート緑（198 契約 / flagged 0）。
+
+**残っているのは 6 ファイルの移行**で、これは機械置換では済まない:
+
+    spec/lang/fan_race_test.almd
+    spec/lang/fan_value_regression_test.almd
+    spec/lang/fan_race_any_wasm.almd
+    spec/wasm_cross/fan_pure_thunks.almd
+    spec/wasm_cross/fan_var_thunk_list.almd
+    spec/wasm_cross/fan_deterministic.almd
+
+`fan.race(ts)` ≡ `ts[0]()` であり、`fan.any` は **thunk[0] が失敗したときに挙動が違う**
+（any は次の Ok を探す）。head が Err のケースを assert しているテストを機械的に
+`fan.any` へ置換すると、**通るが誤ったことを主張するテスト**になる。各ファイルが
+何を pin しているかを読んでから移すこと。wasm_cross の 3 本は C-004 の evidence
+でもあるので、移行後に契約ゲートを再実行する。
+
+撤去中に見つかった**トンボストーンの連鎖**（これは branch 上で修正済）:
+`e027-fan-timeout-removed/fixed.almd` が `fan.race` を移行先にしていた。
+**トンボストーンの移行先は生きた表面でなければならない** — 死んだ表面へ誘導する
+ヒントは、次の撤去で静かに壊れる。
+
+### #1024（元の分析）
 
 実装は既にリスト順で正しい。C-004 も正しい。嘘をついているのは SPEC.md だけ。
 
