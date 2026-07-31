@@ -112,15 +112,18 @@ impl LowerCtx {
             return Some(ListElemDrop::StrMapStr);
         }
         if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
+            && (matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
                 if b.len() == 2 && matches!(b[0], Ty::String)
-                    && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float)))
+                    && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float))
+                || matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
+                    if o.len() == 1 && matches!(o[0], Ty::String))))
         {
-            // A `(String, Map[String, <scalar>])` TUPLE element (the msb pairs list,
-            // `["k0": ["k0": false]]` desugared to `map.from_list_msv([...])`): slot1's
-            // inner map owns only its KEY Strings (the skv split layout) — the static
-            // `$__drop_list_str_msb` (map_msv.almd) frees slot0 flat and key-sweeps the
-            // last-ref inner map. Same placement rationale as StrMapStr above.
+            // A `(String, Map[String, <scalar>])` or `(String, Option[String])` TUPLE
+            // element (the msb pairs list — both value shapes follow the len@4-counted
+            // String-slot discipline, see `is_map_msb_ty`): slot1 owns exactly its
+            // len-counted String slots — the static `$__drop_list_str_msb`
+            // (map_msv.almd) frees slot0 flat and len-sweeps the last-ref value block.
+            // Same placement rationale as StrMapStr above.
             return Some(ListElemDrop::StrMapSkv);
         }
         if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)

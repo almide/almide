@@ -178,11 +178,13 @@ fn __drop_list_str_mss(xs: List[(String, Map[String, String])]) -> Unit = {
   prim.rc_dec(h)
 }
 
-// ── msb: the inner map is the map_skv SPLIT layout (Map[String, Bool/Int/Float]) ──
-// Its @4 is the KEY count `entries`; only the key slots 0..entries-1 own Strings, the
-// value region is scalar i64s owning no heap. The sweep frees EXACTLY the key slots —
-// map_skv's own scope-end discipline — where the msv sweep (all @4 slots) would read
-// scalar values as handles and free garbage.
+// ── msb: value blocks following the "len@4-counted String slots" discipline ──
+// Two value shapes share this sweep: an inner map in the map_skv SPLIT layout
+// (Map[String, Bool/Int/Float] — @4 is the KEY count `entries`; only the key slots
+// 0..entries-1 own Strings, the value region is scalar) and an Option[String]
+// (a 0-or-1-element DynListStr — @4 counts the payload String at slot 0; none = 0).
+// Both own exactly `@4` String handles at slots 0..len-1, so one sweep serves both —
+// where the msv sweep (all @4 slots as Strings) would free scalar values as handles.
 fn __drop_msb_inner_slots(ih: Int, m2: Int, j: Int) -> Unit =
   if j >= m2 then ()
   else {

@@ -493,18 +493,24 @@ pub fn is_map_msv_ty(ty: &Ty) -> bool {
             if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
 }
 
-/// `Map[String, Map[String, <scalar>]]` — the msb variant of the msv family: the INNER
-/// map is the map_skv SPLIT layout (`len@4` = KEY count; only the key slots own Strings,
-/// the value region is scalar). The handle-generic msv from_list/get_or impls serve it
-/// unchanged; the DROP differs — `$__drop_map_msb` sweeps each last-ref inner map's KEY
-/// slots only (the msv all-slot sweep would free scalar values as handles).
+/// The msb variant of the msv family: a `Map[String, V]` whose VALUE blocks follow the
+/// "len@4-counted String slots" discipline — exactly `len@4` owned String handles sit at
+/// slots 0..len-1, and everything after owns no heap. Two value shapes qualify:
+/// `Map[String, <scalar>]` (the map_skv SPLIT layout — `len@4` = KEY count, keys own
+/// Strings, the value region is scalar) and `Option[String]` (a 0-or-1-element
+/// `DynListStr` — `materialize_opt_str_some`'s block, payload String at slot 0). The
+/// handle-generic msv from_list/get_or impls serve both unchanged; the DROP differs from
+/// msv — `$__drop_map_msb` sweeps exactly the len-counted slots (the msv all-slot sweep
+/// would free scalar values as handles).
 pub fn is_map_msb_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
         && matches!(a[0], Ty::String)
-        && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+        && (matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
             if b.len() == 2 && matches!(b[0], Ty::String)
-                && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float)))
+                && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float))
+            || matches!(&a[1], Ty::Applied(TypeConstructorId::Option, o)
+                if o.len() == 1 && matches!(o[0], Ty::String))))
 }
 
 /// `Map[String, List[Option[Int]]]` — the mlo family (String keys, LIST-OF-OPTIONS values;

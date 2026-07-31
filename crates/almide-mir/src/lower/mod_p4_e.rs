@@ -330,24 +330,28 @@ fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {
         if func == "get_or"
             && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
                 if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+                    && (matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
                         if b.len() == 2
                             && matches!(b[0], Ty::String)
-                            && matches!(b[1], Ty::String | Ty::Bool | Ty::Int | Ty::Float))) =>
+                            && matches!(b[1], Ty::String | Ty::Bool | Ty::Int | Ty::Float))
+                        || matches!(&a[1], Ty::Applied(TypeConstructorId::Option, o)
+                            if o.len() == 1 && matches!(o[0], Ty::String)))) =>
     {
-        // Inner String = msv proper; inner scalar = the msb DROP variant. Both share the
-        // handle-generic `_msv` from_list/get_or impls — only the drop routing differs
-        // (`is_map_msb_ty` → `$__drop_map_msb` key-sweep).
+        // Inner String = msv proper; inner scalar-value map or Option[String] = the msb
+        // DROP variants. All share the handle-generic `_msv` from_list/get_or impls —
+        // only the drop routing differs (`is_map_msb_ty` → `$__drop_map_msb` len-sweep).
         Some(MapName::Suffix("_msv"))
     }
     (true, true)
         if func == "from_list"
             && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
                 if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+                    && (matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
                         if b.len() == 2
                             && matches!(b[0], Ty::String)
-                            && matches!(b[1], Ty::String | Ty::Bool | Ty::Int | Ty::Float))) =>
+                            && matches!(b[1], Ty::String | Ty::Bool | Ty::Int | Ty::Float))
+                        || matches!(&a[1], Ty::Applied(TypeConstructorId::Option, o)
+                            if o.len() == 1 && matches!(o[0], Ty::String)))) =>
     {
         Some(MapName::Suffix("_msv"))
     }

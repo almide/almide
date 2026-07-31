@@ -244,6 +244,30 @@ test "map.get_or nested scalar-value map" {
   assert_eq(map.contains(miss, "x"), true)
 }
 
+test "map.get_or option-valued map" {
+  let m: Map[String, Option[String]] = ["k": some("z"), "n": none]
+  assert_eq(map.get_or(m, "k", none), some("z"))
+  assert_eq(map.get_or(m, "n", some("x")), none)
+  assert_eq(map.get_or(m, "zz", some("fb")), some("fb"))
+}
+
+test "map.fold into an option-valued map accumulator" {
+  let src: Map[String, Int] = ["a": 1, "b": 2]
+  let acc0: Map[String, Option[String]] = [:]
+  let r = map.fold(src, acc0, ((acc, k, v) => ["k": some("v")]))
+  assert_eq(map.get_or(r, "k", none), some("v"))
+}
+
+test "option-valued map literal churn" {
+  var hits = 0
+  for i in [1, 2, 3, 4, 5] {
+    let m: Map[String, Option[String]] = ["k": some("z"), "n": none]
+    assert_eq(map.get_or(m, "k", none), some("z"))
+    hits = hits + 1
+  }
+  assert_eq(hits, 5)
+}
+
 test "nested scalar-value map literal churn" {
   var count = 0
   for i in [1, 2, 3, 4, 5] {
