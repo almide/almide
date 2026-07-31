@@ -416,3 +416,24 @@ retraction — the discipline that cost is worth paying here too.
 What is NOT in doubt: the cell is an honest wall (exit 1, no output, no wrong bytes), it
 costs coverage rather than correctness, and the two-line probes that discriminate it are
 `s_s5` (builds) and `s_s11` (walls) in the session scratchpad.
+
+### R3 remainder — the decline is localised to ONE call, with a named next hypothesis (2026-08-01)
+
+Traced by reading, confirmed by the two probes:
+
+- `s_s5` `Option[(String, Int)]` → `try_opt_str_int_tuple_payload` → `lower_owned_heap_field(expr)` → **succeeds**
+- `s_s11` `Option[(Int, Int)]` → `try_opt_scalar_tuple_payload` → `lower_owned_heap_field(expr)` → **fails**
+
+Two different arms, but they make the SAME call with the SAME expression shape
+(`option.unwrap_or(s0, <tuple literal>)`, a `CallTarget::Module`). Only the result TYPE
+differs. So the decline is inside `lower_pure_module_value_call` (`calls.rs:89`) and it is
+type-dependent.
+
+**Next hypothesis to test** (more specific than "instrument the early returns"): the stdlib's
+`option.unwrap_or` is routed or monomorphized BY PAYLOAD TYPE, and there is a cell for a
+String-carrying tuple but not for an all-scalar one. Check `self_host_registry.rs` /
+`stdlib_info.rs` for how `option.unwrap_or` specializations are registered, and whether the
+all-scalar tuple instantiation exists.
+
+If that is it, the fix is a registry entry rather than a lowering change — which is a much
+smaller and safer edit than the ownership-analysis change the earlier hypotheses implied.
