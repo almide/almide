@@ -314,9 +314,24 @@ LITERAL case is already handled — `owned_heap_field.rs`'s
 entirely (the aggregate group's `CallTarget::Module` →
 `lower_pure_module_value_call`, `calls.rs:89`), and that is where it declines. So the fix is
 in the CALL path, not the tuple path: teach `lower_pure_module_value_call` (or the arm above
-it) to materialize an all-scalar aggregate result. Start by instrumenting which of its early
-returns fires for `option.unwrap_or(s0, (1, 2))` — probe `s_s11.almd` in the session
-scratchpad is the two-line repro.
+it) to materialize an all-scalar aggregate result. **Narrowed AGAIN (2026-07-31), and it is smaller than "the call path"**: a USER-FN call
+result works for both tuple shapes — probes `s_s12` (`fn pair() -> (Int, Int)`) and `s_s13`
+(`fn pair() -> (String, Int)`) both BUILD through `some(pair())`. So the all-scalar tuple
+cell is NOT broken in general; the fallback covers it.
+
+What still walls is specifically `some(option.unwrap_or(s0, (1, 2)))` — an all-scalar tuple
+produced by a MODULE call (probe `s_s11`). And `(String, Int)` through the same module call
+DOES build (probe `s_s5`), even though both shapes reach `lower_owned_heap_field` through
+the same fallback. The two differ only in which arm selects them:
+`is_all_scalar_tuple` (checked first, claims `(Int, Int)`) vs `is_str_int_tuple`. So the
+remaining question is why the SAME fallback succeeds under one arm and not the other —
+likely `repr_of(Option[(Int,Int)])` or the fact that an all-scalar tuple result is not
+tracked in `live_heap_handles` the way a String-carrying one is, which
+`materialize_opt_str_some`'s `Consume` + `retain` then handles differently.
+
+Next step: diff the two paths for `s_s5` vs `s_s11` at the point `lower_owned_heap_field`
+returns — one returns `Some(id)` and the other `None`, on inputs that differ only in the
+tuple's element types. Both probes are two lines and live in the session scratchpad.
 
 **The original R3 program now walls one step LATER**, on `List argument cannot be faithfully
 materialized (would borrow an empty deferred heap value)` — the `list.fold(list.sort(tmp3), …)`
