@@ -162,9 +162,36 @@ impl<'a> Interpreter<'a> {
             // the unwrap and propagates an `Err` as `Flow::Return` — exactly the
             // backends' join-point `?`. We therefore just evaluate and collect.
             IrExprKind::Fan { exprs } => {
+                // The deterministic-data-parallelism model (docs/roadmap/active/
+                // concurrency-stance.md) defines a `fan` block's observable behaviour as
+                // sequential evaluation in LIST ORDER, so the interpreter models it exactly:
+                // evaluate every arm in order (JOINING all of them — there is no
+                // cancellation, C-199), then fail with the FIRST `Err` in list order.
+                //
+                // The arms are Result-typed and the block's type is the unwrapped payload —
+                // `infer_expr_g3_fan` does that unwrap in the checker. Without mirroring it
+                // here the tuple carried Results into arithmetic and the interpreter aborted
+                // with `internal: int op on Result and Int`, which is a WRONG VOTE into the
+                // 3-way oracle rather than an honest skip. C-199's fixture caught it.
                 let mut out = Vec::with_capacity(exprs.len());
+                let mut first_err: Option<String> = None;
                 for e in exprs {
-                    out.push(val!(self.eval_expr(e, scope)));
+                    let v = val!(self.eval_expr(e, scope));
+                    match v {
+                        Value::Result(Ok(payload)) => out.push(*payload),
+                        Value::Result(Err(payload)) => {
+                            if first_err.is_none() {
+                                first_err = Some(payload.display_bare());
+                            }
+                            // Keep the arity right for the tuple below; the value is
+                            // unreachable because `first_err` aborts before it is read.
+                            out.push(Value::Unit);
+                        }
+                        other => out.push(other),
+                    }
+                }
+                if let Some(msg) = first_err {
+                    return Some(Flow::Abort(msg));
                 }
                 // Single-expr fan is the bare value (no 1-tuple), matching both
                 // backends; multi-expr is a tuple.
