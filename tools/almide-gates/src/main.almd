@@ -9,6 +9,8 @@
 import fs
 import env
 import mdmeta
+import toml
+import contracts
 import env
 
 type Entry = { date: String, link: String, desc: String }
@@ -80,11 +82,23 @@ effect fn gen_roadmap_readme(root: String) -> String = {
   header + plain_section(root, "active", "Active")! + plain_section(root, "on-hold", "On Hold")! + done_section(root)!
 }
 
+effect fn gen_contracts_readme(root: String) -> String = {
+  let header = fs.read_text(root + "/.readme-header.md") ?? ""
+  let tables = toml.parse_tables(fs.read_text(root + "/contracts.toml")!)
+  let rs = contracts.rows(tables)
+  header + int.to_string(list.len(rs)) + " contracts\n\n" + "| ID | Contract | Since | Status | Strongest Evidence | # Fixtures |\n" + "|----|----------|-------|--------|--------------------|-----------:|\n" + list.join(rs, "\n") + "\n\n"
+}
+
 effect fn main() -> Unit = {
   let args = env.args()
+  // `env.args()` is the USER arguments only, 0-based — the program name is not element 0.
+  let cmd = list.get_or(args, 0, "roadmap-readme")
   let root = list.get_or(args, 1, "docs/roadmap")
-  // `println` adds the newline that the bash original's final `echo ""` produces, so the
+  let body = match cmd {
+    "contracts-readme" => gen_contracts_readme(root)!,
+    _ => gen_roadmap_readme(root)!,
+  }
+  // `println` adds the newline that the bash originals' final `echo ""` produces, so the
   // body is emitted with its own trailing blank line trimmed by exactly one.
-  let body = gen_roadmap_readme(root)!
   println(string.slice(body, 0, string.len(body) - 1))
 }

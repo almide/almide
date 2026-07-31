@@ -1,0 +1,59 @@
+// The `docs/contracts/generate-readme.sh` replacement: the contract ledger's summary table.
+//
+// Reads `contracts.toml` through the subset reader (`toml/mod.almd`) instead of awk. The
+// shape the bash original computes per contract:
+//
+//   | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
+//
+// "Strongest evidence" = the highest-ranked class present, rank = line order in
+// `scripts/lib/contract-classes.txt`; `fuzz` renders as `fuzz(N)` when the element carries
+// an `n =`. "# Fixtures" counts evidence paths under `spec/wasm_cross/` ending in `.almd` —
+// NOT every fixture-class item, which is a distinction the bash makes by path and is easy to
+// lose when reimplementing.
+import toml
+
+// Rank by line order in scripts/lib/contract-classes.txt. Duplicated here rather than read
+// at runtime: the bash passes it via `-v classes=` from the same file, and a reader for a
+// one-column list would be more machinery than the six names are worth. The list is short
+// and stable; a mismatch shows up immediately as a wrong "Strongest Evidence" column.
+fn class_rank(c: String) -> Int = match c {
+  "doc-only" => 0,
+  "by-construction" => 1,
+  "fixture" => 2,
+  "fuzz" => 3,
+  "exhaustive" => 4,
+  "lean" => 5,
+  _ => -1,
+}
+
+fn is_wasm_cross_fixture(path: String) -> Bool = string.starts_with(path, "spec/wasm_cross/") and string.ends_with(path, ".almd")
+
+fn fixture_count(items: List[String]) -> Int = items |> list.filter((it) => is_wasm_cross_fixture(toml.inline_get(it, "path"))) |> list.len
+
+// The strongest class, with fuzz's N appended when present. `-` when the contract has no
+// evidence whose class is in the rank table.
+fn strongest(items: List[String]) -> String = {
+  let ranked = items |> list.map((it) => toml.inline_get(it, "class")) |> list.filter((c) => class_rank(c) >= 0)
+  if list.len(ranked) == 0 then "-"
+  else {
+    let best = ranked |> list.sort_by((c) => class_rank(c)) |> list.last
+    let b = best ?? "-"
+    if b == "fuzz" then {
+      let hit = list.find(items, (it) => toml.inline_get(it, "class") == "fuzz" and toml.inline_num(it, "n") != "")
+      match hit {
+        some(it) => "fuzz(" + toml.inline_num(it, "n") + ")",
+        none => "fuzz",
+      }
+    } else b
+  }
+}
+
+fn row(t: toml.Table) -> String = {
+  let id = toml.table_get(t, "id")
+  let title = toml.table_get(t, "title")
+  let doc = toml.table_get(t, "doc")
+  let name = if doc == "" then title else "[" + title + "](" + doc + ")"
+  "| " + id + " | " + name + " | " + toml.table_get(t, "since") + " | " + toml.table_get(t, "status") + " | " + strongest(t.array_items) + " | " + int.to_string(fixture_count(t.array_items)) + " |"
+}
+
+fn rows(tables: List[toml.Table]) -> List[String] = tables |> list.filter((t) => toml.table_get(t, "id") != "") |> list.map((t) => row(t)) |> list.sort

@@ -66,6 +66,24 @@ fn inline_get(item: String, field: String) -> String = {
   }
 }
 
+// A BARE (unquoted) field of an inline table: `{ …, n = 1000 }` → `inline_num(s, "n")` is
+// `"1000"`. Separate from `inline_get` rather than a widening of it: the two are different
+// grammars (quoted string vs bare token), and a single function that guessed between them
+// would silently return the wrong thing for a value like `n = "1000"`. The ledger uses
+// exactly one bare field — `n` on fuzz evidence — and the count feeds the `fuzz(N)` column.
+fn inline_num(item: String, field: String) -> String = {
+  let marker = field + " = "
+  let parts = string.split(item, marker)
+  if list.len(parts) < 2 then ""
+  else {
+    let rest = string.trim(list.get_or(parts, 1, ""))
+    // Bare token: stop at the first separator that can follow one.
+    let at_comma = list.get_or(string.split(rest, ","), 0, rest)
+    let at_brace = list.get_or(string.split(at_comma, "}"), 0, at_comma)
+    string.trim(list.get_or(string.split(at_brace, " "), 0, at_brace))
+  }
+}
+
 fn table_get(t: Table, key: String) -> String = {
   let hit = list.find(t.scalars, (p) => p.key == key)
   match hit {

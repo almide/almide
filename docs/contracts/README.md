@@ -77,7 +77,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-047 | math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap | 0.24.0 | active | fixture | 3 |
 | C-048 | int.wrap_* / int.rotate_* saturate the mask to u64::MAX for bits >= 64 | 0.24.0 | active | fixture | 1 |
 | C-049 | float.sign is f64::signum; float/math min/max ignore NaN | 0.24.0 | active | fixture | 1 |
-| C-050 | string.split(\ | 0.24.0 | active | fixture | 1 |
+| C-050 | string.split(\"\") and string.run_length_encode are codepoint-granular | 0.24.0 | active | fixture | 1 |
 | C-051 | math.log_gamma is bit-identical (both targets use the vendored musl-libm log) | 0.24.0 | active | fixture | 1 |
 | C-052 | A fold over an empty collection requires the collection to carry an element type (no codegen defaulting) | 0.24.0 | active | fixture | 1 |
 | C-053 | list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm | 0.24.0 | active | fixture | 1 |

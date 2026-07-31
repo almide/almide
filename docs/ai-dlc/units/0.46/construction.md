@@ -10,7 +10,7 @@
 | B1 | Choose the program and write down why | The shape and rough module layout are concrete; the rejected candidates carry their reason | **done** | Below |
 | B2 | Skeleton: module/package layout, builds green, ~1k lines. Record build time | — | **first subcommand done, byte-identical** | `tools/almide-gates/` (2 modules, ~190 lines); output matches `LC_ALL=C bash docs/roadmap/generate-readme.sh` exactly — 390 lines, 59,262 bytes |
 | B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
-| B4 | Reach ~10k lines. Record build time; plot against the assumed linear | — | pending | — |
+| B4 | The contracts-README subcommand (the first TOML consumer) | Byte-identical to the bash original | **done** | 231 lines / 25,297 bytes identical; found and fixed a truncation bug in the original (#1032) |
 | B5 | Resolve #1003's and #1002's triggers with the measured numbers | — | pending | — |
 
 ## B1 — the program: `almide-gates`, this repo's own gate and generator toolchain
@@ -223,6 +223,46 @@ Two design notes worth keeping:
 One language friction: `then (` followed by a newline is a parse error; the block form
 `then { … }` is required. Not a bug, but the diagnostic (`Expected expression … got Newline`)
 does not suggest the fix.
+
+### B4 result — and a third defect in the original
+
+`contracts-readme` is byte-identical to `docs/contracts/generate-readme.sh`: **231 lines,
+25,297 bytes**. `almide-gates` is now ~400 lines across four modules.
+
+The diff came down to exactly one row, and **the Almide side was the correct one**:
+
+```
+bash:   | C-050 | string.split(\ | 0.24.0 | active | fixture | 1 |
+almide: | C-050 | string.split(\"\") and string.run_length_encode are codepoint-granular | … |
+```
+
+The awk unquoted values with `sub(/".*$/,"",v)` — delete from the FIRST remaining quote — so
+a title containing an escaped quote was truncated. `docs/contracts/README.md` had been
+publishing a cut-off contract name. Filed and fixed as
+**[#1032](https://github.com/almide/almide/issues/1032)**, applying the fix to all five
+extractors rather than just `title`: the defect is in the unquoting rule, not in the field,
+and fixing one field is how the next one gets missed.
+
+**This is the second time the reimplementation was right and the original was wrong**
+(#1031 was locale-dependent sort order). Both share a cause worth naming: with one
+implementation there is nothing to diff against, so a wrong answer and a right answer look
+identical. That is the dogfood's value stated precisely — not "we found bugs in the
+compiler", but "a second implementation makes the first one falsifiable".
+
+**A faithfulness decision.** The Unit's rule is that a byte-match is the acceptance check and
+the reimplementation copies the original's quirks rather than improving them. That rule was
+written for behavioural conventions (dropping undated rows). It does NOT extend to a
+corruption of published output: reproducing the truncation would have meant writing code
+whose purpose was to be wrong. The bash was fixed instead, and both now agree.
+
+### Two more language-surface notes
+
+- `env.args()` returns the USER arguments only, 0-based — the program name is not element 0.
+  Reaching for argv[0] out of C habit cost a debug cycle.
+- `inline_get` (quoted values) and `inline_num` (bare values like `n = 1000`) are separate
+  functions on purpose. One function guessing between the two grammars would silently return
+  the wrong thing for `n = "1000"`, and the ledger has exactly one bare field — small enough
+  that the ambiguity is avoidable rather than manageable.
 
 ### State for the next session
 
