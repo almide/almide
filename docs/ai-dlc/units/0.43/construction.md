@@ -49,7 +49,14 @@ Two process findings worth keeping:
 - [x] Every Bolt done with evidence
 - [x] The evidence satisfies the plan's done-criteria — S1 → the stance page + #1000;
       S2 → the four closures; S3 → C-199, C-200, C-004/C-005 edits, each with its fixture
-- [ ] Release v0.43.0 (ordinary minor — blocked behind 0.42 and 0.43 in ladder order)
+- [x] **Shipped in v0.42.0**, not in a v0.43.0 of its own. Both Units completed on develop
+      before either was released, so one tag carried both and the release notes credit both.
+      Cutting an immediate v0.43.0 would have been an empty release — a version number
+      claiming content that already shipped.
+      **Process lesson**: release per Unit, at the moment the Unit closes. Batching two Units
+      into one tag is not wrong, but it silently breaks the row↔version mapping the ladder
+      otherwise maintains, and the honest repair (say so) is uglier than the discipline
+      (ship when done).
 
 ## Retrospective (Try)
 
