@@ -1,0 +1,25 @@
+// E027: fan.race was removed in 0.42.0.
+//
+// Almide's concurrency model is deterministic data-parallelism (the answer to #1000,
+// docs/roadmap/active/concurrency-stance.md): `fan` may execute in parallel, but
+// observable behaviour is defined to be sequential evaluation in LIST ORDER. A
+// combinator named for "first to complete wins" has no meaning in that model.
+//
+// It never raced anyway — the desugar replaced `fan.race([t0, t1, …])` with t0's body
+// and never evaluated the rest, so it was a no-op wrapper whose name was its only
+// contribution. SPEC.md sold it as a race while contract C-004 documented list order;
+// the prose was the part that was wrong.
+effect fn a() -> Result[String, String] = ok("a")
+
+effect fn b() -> Result[String, String] = ok("b")
+
+effect fn main() -> Unit = {
+  let w = fan.race([
+    () => a(),
+    () => b()
+  ])
+  match w {
+    ok(v) => println(v),
+    err(e) => println(e),
+  }
+}

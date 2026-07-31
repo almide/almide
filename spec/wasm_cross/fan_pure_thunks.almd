@@ -35,8 +35,6 @@ fn try_d() -> Result[Int, String] = {
 }
 
 effect fn main() -> Unit = {
-  let r = fan.race([thunk_a, thunk_b])
-  println("race=${r}")
   let a = fan.any([try_c, try_d])
   println("any=${a}")
   let s = fan.settle([quiet_a, quiet_b])

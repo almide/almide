@@ -42,9 +42,11 @@ test "fan.any returns the String winner" {
   assert_eq(w, ok("alpha"))
 }
 
-// ── fan.race Result bound to a Result let — ?? and == must type-check ──
-test "fan.race result supports ?? and ==" {
-  let r: Result[Int, String] = fan.race([
+// ── a fan combinator's Result bound to a Result let — ?? and == must type-check ──
+// (was written against fan.race, removed in 0.42.0; the regression is about the BINDING,
+// not about which combinator produced it, so fan.any over a succeeding thunk pins it.)
+test "fan combinator result supports ?? and ==" {
+  let r: Result[Int, String] = fan.any([
     () => succeed(42)
   ])
   assert_eq(r ?? -1, 42)
@@ -58,17 +60,18 @@ test "fan.race result supports ?? and ==" {
 // (E0308), and a captured closure VALUE is `Rc<dyn Fn>`, neither Send nor Sync
 // (E0277). The native runner (`almide test --target rust`) is what exercises
 // this — the wasm runner table-dispatches closures and never hit the bug.
-// fan.race is now deterministic on BOTH targets (thunk[0]'s settled Result, a
-// Result[T, E] in a test block), so a head thunk is the stable winner.
-test "fan.race over capturing thunks (native E0308)" {
+// Written against fan.race, removed in 0.42.0. The regression is TWO capturing thunks
+// sharing one list — the shape that produced E0308 — not which combinator consumed them,
+// so it moves to fan.settle, which keeps both thunks live and stays distinct from the
+// fan.any case below.
+test "two capturing thunks share one fan thunk list (native E0308)" {
   let a = 4
   let b = 5
-  let w = fan.race([
+  let rs = fan.settle([
     () => succeed(a + 5),
     () => succeed(b + 4)
   ])
-  // thunk[0] = a + 5 = 9, deterministically
-  assert_eq(w, ok(9))
+  assert_eq(list.len(rs), 2)
 }
 
 test "fan.any over capturing thunks picks the lone success" {

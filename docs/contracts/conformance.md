@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-64 normative sections; 337 distinct executable fixtures.
+64 normative sections; 336 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -51,7 +51,7 @@
 | ALS-M14 | C-173 | `spec/wasm_cross/unsigned_literal_domain.almd` (byte-compare)<br>`tests/diagnostics/e024-unsigned-negative-literal/broken.almd` (checker) |
 | ALS-R1 | C-035 | `spec/wasm_cross/int_div_by_zero.almd` (byte-compare)<br>`spec/wasm_cross/match_result.almd` (byte-compare)<br>`spec/wasm_cross/option_result.almd` (byte-compare)<br>`spec/wasm_cross/early_return_control_flow.almd` (byte-compare) |
 | ALS-R2 | C-008, C-009, C-010, C-011 | `spec/wasm_cross/compound_repr_interp.almd` (byte-compare)<br>`spec/wasm_cross/repr_parity_pin.almd` (byte-compare)<br>`spec/wasm_cross/compound_repr_records_interp.almd` (byte-compare)<br>`spec/wasm_cross/compound_repr_recursive_interp.almd` (byte-compare)<br>`spec/wasm_cross/recursive_generic_repr_interp.almd` (byte-compare)<br>`spec/wasm_cross/float_concrete.almd` (byte-compare)<br>`spec/wasm_cross/num_edge_to_string.almd` (byte-compare)<br>`spec/wasm_cross/int_float_ops.almd` (byte-compare)<br>`spec/wasm_cross/float_interp_forms.almd` (byte-compare) |
-| ALS-R3 | C-004, C-005, C-006 | `spec/wasm_cross/fan_deterministic.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_inline_lambda.almd` (byte-compare)<br>`spec/wasm_cross/fan_pure_thunks.almd` (byte-compare)<br>`spec/wasm_cross/fan_var_thunk_list.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_err.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_inline_err.almd` (byte-compare)<br>`spec/wasm_cross/fan_any_allfail.almd` (byte-compare)<br>`spec/wasm_cross/fan_race_err.almd` (byte-compare)<br>`spec/wasm_cross/option_none_unwrap_term.almd` (byte-compare)<br>`tests/diagnostics/e027-fan-timeout-removed/broken.almd` (checker)<br>`tests/diagnostic_harness_test.rs` (cargo gate) |
+| ALS-R3 | C-004, C-005, C-006 | `spec/wasm_cross/fan_deterministic.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_inline_lambda.almd` (byte-compare)<br>`spec/wasm_cross/fan_pure_thunks.almd` (byte-compare)<br>`spec/wasm_cross/fan_var_thunk_list.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_err.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_inline_err.almd` (byte-compare)<br>`spec/wasm_cross/fan_any_allfail.almd` (byte-compare)<br>`spec/wasm_cross/option_none_unwrap_term.almd` (byte-compare)<br>`tests/diagnostics/e027-fan-timeout-removed/broken.almd` (checker)<br>`tests/diagnostic_harness_test.rs` (cargo gate) |
 | ALS-R4 | C-012 | `spec/wasm_cross/const_fold_nonfinite_float.almd` (byte-compare) |
 | ALS-R5 | C-096, C-112, C-118, C-133, C-189 | `spec/wasm_cross/process_args.almd` (byte-compare)<br>`spec/wasm_cross/random_int_entropy.almd` (byte-compare)<br>`spec/wasm_cross/env_args.almd` (byte-compare)<br>`spec/wasm_cross/env_get.almd` (byte-compare)<br>`spec/wasm_cross/env_platform_reporting.almd` (byte-compare) |
 | ALS-R6 | C-042, C-137 | `spec/wasm_cross/fs_preopen_resolve.almd` (byte-compare)<br>`spec/wasm_cross/fs_relative_path.almd` (byte-compare)<br>`spec/stdlib/fs_stat_test.almd` (both-target test) |

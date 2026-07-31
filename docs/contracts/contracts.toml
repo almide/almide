@@ -111,8 +111,8 @@ evidence  = [
 [[contract]]
 id        = "C-004"
 spec      = "ALS-R3"
-title     = "fan.race / fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle."
+title     = "fan.any / fan.map / fan.settle are deterministic by list order"
+statement = "`fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (any skips failures to find an Ok.) `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -126,14 +126,13 @@ evidence  = [
 id        = "C-005"
 spec      = "ALS-R3"
 title     = "fan error propagation surfaces as the unified main-error abort"
-statement = "The first element fn returning Err in `fan.map` (named or inline lambda), a head-Err in `fan.race`, and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) all propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134)."
+statement = "The first element fn returning Err in `fan.map` (named or inline lambda) and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) all propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_map_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_inline_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
-  { path = "spec/wasm_cross/fan_race_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
 ]
 
