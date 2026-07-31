@@ -370,3 +370,27 @@ Two language-surface notes:
 
 Remaining: `output-parity` proper (the 382-row fixture sweep on top of this stamp),
 `fuzz-track-record` (adds JSON), `check-contracts` (composes everything).
+
+## B7 — the parity verdict rule, extracted and tested (2026-08-01)
+
+`tools/almide-gates/src/parity.almd`: `verdict_of` is `output-parity.sh`'s `run_one` decision
+as a PURE function of what the three commands did, with 4 tests.
+
+That extraction is the point. In the bash the five verdicts (match / mismatch / wall /
+runerr / v0fail) are interleaved with process invocation, so the RULE cannot be exercised
+without running the whole 382-fixture sweep. Pulled out, it is four assertions that run in
+milliseconds — including the two whose order is load-bearing:
+
+    render fails + oracle also failed  → v0fail
+    render fails + oracle succeeded    → wall
+
+Getting those backwards reports every broken fixture as a v1 wall, and **the wall count is a
+ratchet** — so a mislabel there inflates a number the project manages as debt. The bash has
+it right; nothing tested that it stayed right.
+
+This is a second kind of value from the port, distinct from finding defects: the
+reimplementation can be STRUCTURED so the decision logic is testable, where the original's
+shape made it reachable only through its I/O.
+
+Remaining for `output-parity`: the sweep itself (382 fixtures × 3 processes) on top of this
+rule and the B6 stamp. Then `fuzz-track-record` (adds JSON), then `check-contracts`.

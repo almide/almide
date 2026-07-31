@@ -1,0 +1,52 @@
+// The verdict rule of `proofs/output-parity.sh` — the v1 trust-spine output-parity gate.
+//
+// Per fixture: run it through the v0 oracle (`almide run`), render it with `render_program`,
+// run the WAT under wasmtime, and compare. The five verdicts and the ORDER of the tests are
+// the whole content — the bash gets them right and the order is load-bearing:
+//
+//   render fails + oracle also failed  → v0fail   (the fixture itself is broken, not v1)
+//   render fails + oracle succeeded    → wall     (v1 declines a program v0 runs — honest)
+//   oracle ok + wasmtime failed        → runerr   (v1 renders something that traps)
+//   outputs differ                     → mismatch (the silent-miscompile class)
+//   otherwise                          → match
+//
+// Getting the first two backwards would report every broken fixture as a v1 wall, and the
+// wall count is a ratchet — so a mislabel there inflates a number the project treats as debt.
+import process
+
+type Outcome = { verdict: String, stdout: String }
+
+// `run_one`'s decision, given what the three commands did. Pure on purpose: the verdict rule
+// is the part worth testing, and it needs no processes to exercise.
+fn verdict_of(oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool, oracle_out: String, wasm_out: String) -> String = if not render_ok then {
+  if oracle_ok then "wall" else "v0fail"
+} else if oracle_ok and not wasm_ok then "runerr"
+else if oracle_out != wasm_out then "mismatch" else "match"
+
+effect fn exit_ok(cmd: String, args: List[String]) -> Bool = {
+  let st = process.exec_status(cmd, args)
+  match st {
+    ok(s) => s.code == 0,
+    err(_) => false,
+  }
+}
+
+test "render failure with a working oracle is a wall, not a v0 failure" {
+  assert_eq(verdict_of(true, false, false, "", ""), "wall")
+  assert_eq(verdict_of(false, false, false, "", ""), "v0fail")
+}
+
+test "a rendered module that traps is a runerr" {
+  assert_eq(verdict_of(true, true, false, "x", ""), "runerr")
+}
+
+test "differing output is a mismatch, identical is a match" {
+  assert_eq(verdict_of(true, true, true, "a", "b"), "mismatch")
+  assert_eq(verdict_of(true, true, true, "a", "a"), "match")
+}
+
+test "a failing oracle whose output still matches is a match" {
+  // Both legs erroring the SAME way is agreement, not a finding — the bash reaches its
+  // stderr-normalising path for this case and can still conclude match.
+  assert_eq(verdict_of(false, true, true, "boom", "boom"), "match")
+}
