@@ -8,7 +8,7 @@
 | Bolt | What | Done-criteria for this Bolt | Status | Evidence |
 |---|---|---|---|---|
 | B1 | Choose the program and write down why | The shape and rough module layout are concrete; the rejected candidates carry their reason | **done** | Below |
-| B2 | Skeleton: module/package layout, builds green, ~1k lines. Record build time | — | pending | — |
+| B2 | Skeleton: module/package layout, builds green, ~1k lines. Record build time | — | **in progress — blocked on #1029** | `tools/almide-gates/` (2 modules, ~180 lines) type-checks; native build blocked |
 | B3 | Grow to ~5k lines of working functionality. Record build time | — | pending | — |
 | B4 | Reach ~10k lines. Record build time; plot against the assumed linear | — | pending | — |
 | B5 | Resolve #1003's and #1002's triggers with the measured numbers | — | pending | — |
@@ -82,6 +82,52 @@ the diagnostics hold at 8k, the Unit has produced its signal.
 Each subcommand is independently diffable against its bash original, so B2–B4 can land one
 at a time with the byte-match as the acceptance check rather than deferring all verification
 to the end.
+
+
+## B2 — the dogfood found a compiler bug in its first 180 lines
+
+`tools/almide-gates/src/{main.almd, mdmeta/mod.almd}` (~180 lines) implements the first
+subcommand: the `docs/roadmap/generate-readme.sh` replacement. It **type-checks clean**, and
+the native build **fails**:
+
+```
+error[E0308]: mismatched types
+3695 |         out.push(one(&*p));
+     |             ---- ^^^^^^^^ expected `i64`, found `Result<i64, String>`
+```
+
+Minimized to 16 lines and filed as **[#1029](https://github.com/almide/almide/issues/1029)**:
+an `effect fn` called inside a `for` loop body is not auto-unwrapped. Native emits invalid
+Rust; **wasm silently prints heap addresses** (`[8336, 8356]` where `[1, 2]` was expected).
+Same class as #1027 but worse — a single loop, and the wrong values print directly.
+
+This is plan R3 landing on the first try, and it is the argument for the Unit: 180 lines of
+real program found a silent-wrong-value bug that 324 spec files and seven fuzz campaigns had
+not. The spec corpus is written by someone who knows the compiler; a program written to do a
+job reaches for shapes nobody thought to test.
+
+### Friction encountered (not bugs — language surface notes)
+
+Recorded because a dogfood's job is also to report ergonomics:
+
+- `?` is Result→Option; propagation is `!`. Reaching for `?` out of Rust habit cost a
+  round-trip.
+- `list.map`'s callback is PURE, so an `effect fn` inside it types the element as
+  `Result[T, E]` and every downstream stage inherits the wrapper. The fix is to hoist the
+  effect into a `for` — which is exactly the shape that hit #1029.
+- `list.sort_by` takes a KEY extractor, not a comparator, and there is no `string.compare`,
+  so descending order is ascending-then-reverse.
+- One diagnostic pointed at the wrong definition: an E005 for `mdmeta.parse()` cited
+  `effect fn main()` as "defined here".
+
+### State for the next session
+
+`tools/almide-gates/src/` is committed and type-checks. B2 resumes by fixing #1029 (or
+working around the loop shape), then diffing the output against
+`bash docs/roadmap/generate-readme.sh` — the byte-match is the acceptance check, and the
+first attempt at that diff was a FALSE PASS (both sides empty, because the compile error was
+swallowed and `cd` had moved the bash script's relative paths). Check both outputs are
+non-empty before believing a match.
 
 ## Notes
 

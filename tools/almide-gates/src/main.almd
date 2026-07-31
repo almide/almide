@@ -1,0 +1,85 @@
+// almide-gates — this repository's quality gates and doc generators, in Almide.
+//
+// Unit 0.46's dogfood target (docs/ai-dlc/units/0.46/construction.md). The point is not
+// that these tasks need a new language: it is that 4,063 lines of untyped shell currently
+// guard the project's strongest correctness claims, and that every one of them has an
+// existing output to diff against. A reimplementation is correct exactly when its bytes
+// match the bash original's — which is the property that stops a dogfood program from
+// "working" in the sense that nobody checked.
+import fs
+import env
+import mdmeta
+import env
+
+type Entry = { date: String, link: String, desc: String }
+
+// `active/*.md` in shell glob order, which is byte-sorted.
+effect fn read_meta(path: String) -> Result[mdmeta.Meta, String] = {
+  let content = fs.read_text(path)!
+  ok(mdmeta.parse(path, content))
+}
+
+effect fn md_files(root: String, sub: String) -> List[String] = {
+  let dir = root + "/" + sub
+  let names = fs.list_dir(dir) ?? []
+  names |> list.filter((n) => string.ends_with(n, ".md")) |> list.sort |> list.map((n) => sub + "/" + n)
+}
+
+effect fn entry_of(root: String, rel: String) -> Entry = {
+  let m = read_meta(root + "/" + rel) ?? mdmeta.Meta { title: rel, description: "", done: "" }
+  Entry { date: m.done, link: "[" + m.title + "](" + rel + ")", desc: m.description }
+}
+
+// Done is sorted by date, newest first. The bash original pipes through `sort -t'|' -k1 -r`
+// and DROPS any row with an empty date (`[ -z "$date" ] && continue`), so a done/ file
+// missing its `<!-- done: -->` line silently vanishes from the table. Reproduced exactly —
+// a byte-match is the acceptance check, so a "fix" here would be a divergence.
+effect fn entries_of(root: String, files: List[String]) -> List[Entry] = {
+  // The effect call is hoisted out of the combinator chain on purpose: `list.map` takes a
+  // PURE callback, so `list.map(files, (f) => entry_of(root, f))` types the element as
+  // `Result[Entry, String]` and every downstream stage has to unwrap it. A `for` here keeps
+  // the effect at one place and lets the rest of the pipeline stay pure.
+  var out: List[Entry] = []
+  for f in files {
+    out = out + [entry_of(root, f)]
+  }
+  out
+}
+
+effect fn plain_section(root: String, sub: String, heading: String) -> String = {
+  let files = md_files(root, sub)
+  if list.len(files) == 0 then ""
+  else {
+    let rows = entries_of(root, files)! |> list.map((e) => "| " + e.link + " | " + e.desc + " |") |> list.join("\n")
+    "## " + heading + "\n\n" + int.to_string(list.len(files)) + " items\n\n" + "| Item | Description |\n|------|-------------|\n" + rows + "\n\n"
+  }
+}
+
+// Done is sorted by date, newest first. The bash original pipes through `sort -t'|' -k1 -r`
+// and DROPS any row with an empty date (`[ -z "$date" ] && continue`), so a done/ file
+// missing its `<!-- done: -->` line silently vanishes from the table. Reproduced exactly —
+// a byte-match is the acceptance check, so a "fix" here would be a divergence.
+//
+// `list.sort_by` takes a KEY extractor, not a comparator, and there is no `string.compare`,
+// so descending is ascending-then-reverse.
+effect fn done_section(root: String) -> String = {
+  let files = md_files(root, "done")
+  if list.len(files) == 0 then ""
+  else {
+    let entries = entries_of(root, files)! |> list.filter((e) => e.date != "") |> list.sort_by((e) => e.date) |> list.reverse
+    let count = list.len(files)
+    let rows = entries |> list.map((e) => "| " + e.date + " | " + e.link + " | " + e.desc + " |") |> list.join("\n")
+    "## Done\n\n" + int.to_string(count) + " items\n\n<details>\n<summary>Show all " + int.to_string(count) + " completed items</summary>\n\n" + "| Done | Item | Description |\n|------|------|-------------|\n" + rows + "\n\n</details>\n\n"
+  }
+}
+
+effect fn gen_roadmap_readme(root: String) -> String = {
+  let header = "# Almide Roadmap\n\n> Auto-generated from directory structure. Run `bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md` to update.\n>\n> [GRAND_PLAN.md](GRAND_PLAN.md) — 5-phase strategy\n> [ROAD_TO_1_0.md](ROAD_TO_1_0.md) — 0.41 → 0.99 version ladder\n"
+  header + plain_section(root, "active", "Active")! + plain_section(root, "on-hold", "On Hold")! + done_section(root)!
+}
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let root = list.get_or(args, 1, "docs/roadmap")
+  println(string.trim_end(gen_roadmap_readme(root)!))
+}

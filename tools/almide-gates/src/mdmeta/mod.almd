@@ -1,0 +1,68 @@
+// Front-matter extraction for the repo's roadmap markdown files.
+//
+// Every file in docs/roadmap/{active,on-hold,done} carries, by the rule in
+// docs/roadmap/CLAUDE.md:
+//   line 1        <!-- description: ... -->
+//   line 2 (done) <!-- done: YYYY-MM-DD -->
+//   next          # Title
+//
+// The bash original greps each field out of `head -N` separately. Doing it once per
+// file and returning a record is the same work with the file read once, and it makes
+// the "title missing → fall back to the basename" rule explicit instead of implicit
+// in a shell test.
+import self as gates
+
+type Meta = { title: String, description: String, done: String }
+
+fn strip_marker(line: String, prefix: String) -> String = {
+  let after = string.split(line, prefix)
+  if list.len(after) < 2 then ""
+  else {
+    let rest = list.get_or(after, 1, "")
+    let parts = string.split(rest, " -->")
+    string.trim(list.get_or(parts, 0, ""))
+  }
+}
+
+// The title is the FIRST `# ` heading in the first 10 lines — matching the bash
+// `head -10 | grep '^# ' | head -1`. A later heading is not the title.
+fn find_title(lines: List[String]) -> String = {
+  let head = list.take(lines, 10)
+  let hit = list.find(head, (l) => string.starts_with(l, "# "))
+  match hit {
+    some(l) => string.trim(string.slice(l, 2, string.len(l))),
+    none => "",
+  }
+}
+
+fn find_description(lines: List[String]) -> String = {
+  let head = list.take(lines, 3)
+  let hit = list.find(head, (l) => string.contains(l, "<!-- description:"))
+  match hit {
+    some(l) => strip_marker(l, "<!-- description:"),
+    none => "",
+  }
+}
+
+fn find_done(lines: List[String]) -> String = {
+  let head = list.take(lines, 5)
+  let hit = list.find(head, (l) => string.contains(l, "<!-- done:"))
+  match hit {
+    some(l) => strip_marker(l, "<!-- done:"),
+    none => "",
+  }
+}
+
+// `basename path .md`, for the title fallback.
+fn basename_stem(path: String) -> String = {
+  let segs = string.split(path, "/")
+  let last = list.get_or(segs, list.len(segs) - 1, path)
+  if string.ends_with(last, ".md") then string.slice(last, 0, string.len(last) - 3)
+  else last
+}
+
+fn parse(path: String, content: String) -> Meta = {
+  let lines = string.split(content, "\n")
+  let t = find_title(lines)
+  Meta { title: if t == "" then basename_stem(path) else t, description: find_description(lines), done: find_done(lines) }
+}
