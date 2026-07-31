@@ -309,6 +309,22 @@ impl LowerCtx {
                 // same fresh-owned move-in; the list's DropListListStr reclaims it two levels deep.
                 (elem_value && is_value_ty(&e.ty)) || elem_str || elem_list_flat
             }
+            // A String-result `if` ELEMENT with LITERAL arms (`["a", (if r2 then "b" else
+            // "d")]` — Wave 4 L2's fuzz shape, reachable whenever const-fold declines to
+            // collapse the cond): lowered via the proven heap-result-if machinery.
+            // Admitted only in the shape that machinery ALWAYS lowers — both arms LitStr,
+            // the cond a tracked scalar Var or a Bool literal — so the build loop's `?`
+            // never fails mid-build (the partial-ops-leak guard the Member arm documents).
+            IrExprKind::If { cond, then, else_ } => {
+                elem_str
+                    && matches!(&then.kind, IrExprKind::LitStr { .. })
+                    && matches!(&else_.kind, IrExprKind::LitStr { .. })
+                    && match &cond.kind {
+                        IrExprKind::Var { id } => self.value_of.contains_key(id),
+                        IrExprKind::LitBool { .. } => true,
+                        _ => false,
+                    }
+            }
             _ => false,
         })
     }
@@ -332,6 +348,16 @@ impl LowerCtx {
                 let obj = self.fresh_value();
                 self.ops.push(Op::Alloc { dst: obj, repr: ptr, init: Init::Str(s.clone()) });
                 obj
+            }
+            // The String-result literal-arm `if` element the pre-check admitted: one
+            // owned rc=1 String from the taken arm (the heap-result-if merge), moved
+            // into the slot like any fresh element — the caller does NOT scope-track it.
+            IrExprKind::If { cond, then, else_ }
+                if elem_str
+                    && matches!(&then.kind, IrExprKind::LitStr { .. })
+                    && matches!(&else_.kind, IrExprKind::LitStr { .. }) =>
+            {
+                self.try_lower_heap_result_if(cond, then, else_, &elem.ty)?
             }
             // A Var element: acquire a fresh owned reference (Dup) the list will own; the original
             // binding keeps its own reference. The dup is then Consume'd (moved) into the slot.
