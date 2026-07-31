@@ -737,7 +737,7 @@ while i < 10 {
 
 Loops while the condition is true. The loop body is `Unit`-typed.
 
-### 9.8 fan (Structured Concurrency)
+### 9.8 fan (Deterministic Data-Parallelism)
 
 ```
 fan { expr1; expr2; expr3 }
@@ -745,14 +745,24 @@ fan { expr1; expr2; expr3 }
 
 Runs expressions concurrently. Returns results as a tuple. Only valid inside `effect fn`.
 
+`fan` is a SCHEDULING construct, not a semantic one: execution may be parallel, but the
+program's observable behaviour is defined to be exactly that of sequential evaluation in
+list order. See [the concurrency stance](./roadmap/active/concurrency-stance.md).
+
 Rules:
-- If any expression returns `Err`, the entire `fan` fails and siblings are cancelled
+- All siblings are joined — there is no cancellation. If any returns `Err`, the block's
+  value is the FIRST `Err` in LIST ORDER (not the first to fail in wall-clock time), which
+  is what makes the outcome independent of scheduling. A sibling that does not terminate
+  makes the program not terminate, exactly as sequential evaluation would
 - No `let`/`var`/`for`/`while` inside `fan` blocks -- only expressions
 - No `var` capture from outer scope (prevents data races)
 
 Library forms:
 - `fan.map(xs, f)` -- map over a collection via the fan surface (deterministic, sequential in list order)
-- `fan.race(thunks)` -- first to complete wins, rest cancelled
+- `fan.any(thunks)` -- the first thunk whose result is `Ok`, in list order
+
+(`fan.race` is being removed: under list-order semantics it is exactly `thunks[0]()`, so the
+name promises timing behaviour the language deliberately does not have.)
 
 ### 9.10 Pipe
 
@@ -997,13 +1007,14 @@ effect fn main() -> Result[Unit, String] = {
 }
 ```
 
-Results are returned as a tuple. If any expression returns `Err`, the entire `fan` fails and siblings are cancelled.
+Results are returned as a tuple. All siblings are joined — nothing is cancelled. If any
+expression returns `Err`, the block's value is the first `Err` in list order.
 
-### 13.2 fan.map / fan.race
+### 13.2 fan.map / fan.any
 
 ```
 let results = fan.map(urls, (url) => fetch(url))   // deterministic, list order
-let first = fan.race([task_a, task_b])              // first to complete wins
+let first_ok = fan.any([task_a, task_b])           // first Ok in list order
 ```
 
 ### 13.3 Rules
@@ -1011,7 +1022,9 @@ let first = fan.race([task_a, task_b])              // first to complete wins
 - `fan { }` only inside `effect fn` — pure functions cannot fork
 - No `var` capture — only `let` bindings from outer scope (prevents data races)
 - No unstructured `spawn` — all concurrency is scoped
-- Fail-fast semantics — first error cancels all siblings
+- No cancellation, by design — a cancelled sibling's side effects would depend on when the
+  cancellation landed, which is exactly the scheduling dependence the model excludes. The
+  block joins every sibling and reports the first `Err` in list order
 
 ---
 
