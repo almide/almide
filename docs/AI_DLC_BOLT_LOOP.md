@@ -56,6 +56,13 @@ No work starts before the plan is approved.
   - `almide fmt` every NEW or EDITED `.almd` file — the fmt gate holds `spec/` and
     `examples/` formatted, and an unformatted test file is a red CI an hour later
     (it happened: commit abccf0b7's repair)
+  - REMOVING a language surface: sweep for it in `spec/`, `docs/`, AND the Rust sources —
+    unit tests carry `.almd` programs as inline STRING LITERALS, so a `spec/`-only sweep
+    misses them. Removing `fan.race` left
+    `crates/almide-mir/src/render_wasm/tests_part5_c.rs` referencing it and turned Trust
+    Spine red an hour later, after the same removal's spec migrations had all been done
+    carefully. Check the tombstone's own migration targets too: a hint pointing at a surface
+    the next removal deletes rots silently
   - a NEW `spec/wasm_cross` fixture also needs the interp abstain ledger regenerated in the
     SAME commit: `ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test -p almide --test wasm_runtime_test
     interp_abstain_ledger`. A fixture the interpreter cannot evaluate — anything reaching a
