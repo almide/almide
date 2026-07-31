@@ -113,6 +113,14 @@ the completed nights recorded. Replayed and classified 2026-07-31 on develop e61
 
 ### Wave 4 additions (the loop-until-dry tail)
 
+Round-2 local campaign (2026-07-31, 1,283 programs / 1,093 clean / 165 raw finding events
+deduped to 2 unique classes):
+
+| # | Seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L2 | 1785460667454423000 idx 5 | WasmBuildFailure | The heap-if wall PROPER this time: "if over an unresolvable condition (Call of Bool) with a call-bearing arm cannot take the both-arms linearization" — a Bool-returning call in the condition declines scalar lowering and the arms carry calls | **LIVE** — diagnose which condition call declines |
+| L3 | 1785460667454423000 idx 54 | OutputDivergence vs the REFERENCE INTERPRETER | A mutated C-182 fixture (Float32/Float64 negated-literal context typing): native and wasm agree EXACTLY (7 lines, `-2.5 … 123456792.0 -1.5`) but BOTH disagree with almide-interp — either a shared-lowering bug (the class the third judge exists to catch) or an interp Float32-model gap. The replay does not print the interp's expected output — a fuzzer reporting gap to fix in passing | **LIVE** — get the interp's expected output first; fix whichever judge is wrong |
+
 | # | Source / seed | Kind | Symptom | Status |
 |---|---|---|---|---|
 | L0 | 2026-07-31 local B4 campaign (707 programs, 607 clean), seed 1785458401504935000 index 0 | WasmBuildFailure | wall: "map.fold with an unliftable/closure-list higher-order argument cannot execute faithfully in this brick (walled, not mis-valued)". Minimized (t3): `map.fold` with a HEAP-map accumulator and a map-literal-returning closure | **FIXED (2026-07-31)** — the key insight: `Some(s)` for Option[String] IS a 1-element DynListStr (`materialize_opt_str_some`), so Option[String] values follow the same "len@4-counted String slots" discipline as the skv inner maps — the msb drops serve them VERBATIM. The fix is pure type-gate widening: `is_map_msb_ty`, the `StrMapSkv` pairs classifier, and the two msv routes now admit inner `Option[String]`. The fold needed nothing — `map.fold_skv_hacc` (any-heap-acc over a skv subject) already existed, and the closure lifted once its literal body lowered. Replay CLEAN; spec tests (get_or some/none/miss, fold-into-mso-acc, churn) on the wasm leg. Known residual cell: `??` over an mso `get_or` result lacks read-shape seeding (falls back honestly; recorded, not needed by L0) |
