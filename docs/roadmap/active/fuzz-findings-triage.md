@@ -132,6 +132,14 @@ Round-3 campaign (2026-07-31, 1,304 programs / 1,108 clean / 163 raw → 1 uniqu
 |---|---|---|---|---|
 | L4 | 1785464182375979000 idx 0 | WasmBuildFailure | `Map[String, Result[Int, String]]` values (get_or / remove) feeding `result.unwrap_or` — the STRICT-mode "scalar binding outside the value subset" refusal | **FIXED (2026-07-31)** — the recorded edit list landed verbatim: the family inner set centralized as `is_msv_family_inner` (inner String-keyed maps, Option[String], and Result[T,String] with T scalar or String — every "len@4-counted low-32 String handles" block, tag-safe under the `$rc_dec (param i32)` wrap), the three routes (get_or / remove / from_list) unified on it, `is_map_msb_ty` + the pairs classifier widened, and the NEW `map_remove_msv` (set_copy's discipline with one slot skipped) registered. One extra trap re-confirmed from the issue-sweep ledger: an rc_inc-using helper must ALSO join the `coown_names.rs` whitelist or it renders unlinked. Replay CLEAN; spec tests (ok/err get_or, remove, churn) on the wasm leg; mir 601/0 |
 
+Round-4 campaign (2026-07-31, 1,271 programs / 1,072 clean / 3 unique):
+
+| # | Seed 1785466162321453000 | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L5 | idx 985 | RunFailureDivergence | Mutated C-045: `for i in 0..<4294967295 { list.push(ys, i*2) }` (~34 GB of pushes). Native completes in its 64-bit address space; wasm32 hits the linear-memory ceiling and dies with an OOB memory fault at exactly the memory-size boundary (0x80010000) — the allocator runs PAST the end after a failed grow instead of aborting cleanly | **LIVE — M2 raised**: two halves, both contract-touching: (a) allocator robustness — a failed `memory.grow` must become a defined T6 abort ("out of memory"), never an OOB fault; (b) the memory-exhaustion divergence joins the resource-limit contract family (C-196's principle, memory flavor) with the oracle rule to match |
+| L6 | idx 33 | WasmBuildFailure | The same "List argument cannot be faithfully materialized" class — the next list-element cell outside the admitted set (element kind TBD from the source) | **LIVE** — classify the element kind, extend the admitted set on the L2 rails |
+| L7 | idx 757 | NativeBuildFailure | Check accepted a Float32 literal that rustc rejects: `error: literal out of range for f32` — the float sibling of the 535 integer-literal-domain class (C-173 was integer-only) | **LIVE** — range-check Float32 literals in the checker (E024's float twin) |
+
 ## Definition of done
 
 1. Every finding minimized (`gen` → delta), root-caused, and either FIXED
