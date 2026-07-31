@@ -462,6 +462,27 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // An Option/Result-SUBJECT match reaches here whenever a variant combinator is
+            // used as an owned-heap ELEMENT — `some(option.unwrap_or(s0, (1, 2)))` desugars
+            // the inner call to `match s0 { some(x) => x, none => (1, 2) }`, and THAT match is
+            // the OptionSome ctor's argument. `desugar_match_to_if` below only knows LITERAL
+            // arm chains (int literals + a catch-all, or a 2-arm Bool), so a `some`/`none` arm
+            // pair declined and the whole aggregate walled — the R3 fuzz finding. Every OTHER
+            // match-lowering site (binds_p2, calls_p4, control_p3, tail_b,
+            // heap_result_ctrl_arms) already tries the variant value-match ladder FIRST; this
+            // one site did not, which is the entire defect. `try_lower_variant_value_match`
+            // rolls its own ops/lifted/live-heap marks back on decline, so trying it costs
+            // nothing when the shape is out of subset — the literal path below still runs.
+            IrExprKind::Match { subject, arms } if crate::lower::is_variant_ty(&subject.ty) => {
+                // The merged if-result `dst` is the ONE owned rc=1 value (whichever arm ran),
+                // exactly like the `If` arm above — push it so the enclosing aggregate's
+                // per-slot `Consume` MOVES it into the slot.
+                let obj = self.try_lower_variant_value_match(subject, arms, &expr.ty)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             IrExprKind::Match { subject, arms } => {
                 let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
                 let IrExprKind::If { cond, then, else_ } = &if_expr.kind else {

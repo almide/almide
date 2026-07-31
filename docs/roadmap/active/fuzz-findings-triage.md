@@ -233,7 +233,7 @@ were a surface that had been grown a point at a time.
 
 | # | seed / index | Kind | Status |
 |---|---|---|---|
-| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **FIXED for 3 of the 4 cells**; the all-scalar cell has a named remainder (below) |
+| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **CLOSED (2026-08-01)** — all 4 cells build and agree native ⇄ wasm; C-201 + `spec/wasm_cross/option_tuple_payload_matrix.almd` is the matrix gate. Native-render remainder → #1037 |
 
 ### R3 — the tuple payload family is keyed three different ways
 
@@ -602,3 +602,61 @@ declines. One build.
 were wrong. The tell was the ratio — five hypotheses eliminated, none confirmed — and the rule
 worth keeping is: *when eliminations outnumber confirmations and nothing converges, the
 premise is probably wrong, and only a trace can show which premise.*
+
+### R3 — CLOSED, and the trace beat five readings by two builds (2026-08-01)
+
+**The cause, in one line.** `lower_owned_heap_field`'s `Match` arm only knew LITERAL arm
+chains, so the `some`/`none` pair that `option.unwrap_or` desugars to was declined outright.
+
+The previous entry's guess was wrong, and worth leaving visible: it named
+`try_lower_heap_result_if` as the likely rejecter. A trace printing `inner -> {is_some}` at
+that call fired zero times with `false` across the whole compile — that function never
+declines. The decline is one step earlier, in `desugar_match_to_if`, and the second trace
+printed the shape that reaches it:
+
+```
+[R3m] subj_ty=Applied(Option, [Tuple([Int, Int])]) arms=2
+[R3m]   pat=Some { inner: Bind { var: VarId(2), ty: Tuple([Int, Int]) } } guard=false
+[R3m]   pat=None                                                        guard=false
+```
+
+`desugar_match_to_if` handles a Bool 2-arm form and otherwise falls to `build_match_chain`,
+which wants int-literal arms plus a catch-all. A variant pattern pair matches neither.
+
+**The fix is not new machinery — it is a call that six other sites already make.**
+`try_lower_variant_value_match` is exactly "lower an Option/Result-subject match to a value",
+it rolls its own `ops`/`lifted`/`live_heap_handles` marks back on decline, and it is tried
+FIRST by `binds_p2`, `calls_p4`, `control_p3`, `tail_b`, and `heap_result_ctrl_arms`.
+`owned_heap_field` was the one match-lowering site that skipped straight to the literal
+desugar. One arm, ahead of the existing one, gated on `is_variant_ty(&subject.ty)`.
+
+**The family is now a matrix, not a sample.** All four element-type combinations measured on
+one binary in one run — `(Int, Int)`, `(String, Int)`, `(Int, String)`, `(String, String)` —
+build and agree native ⇄ wasm. `spec/wasm_cross/option_tuple_payload_matrix.almd` (C-201) is
+the executable gate, so a future change that re-divides the family by element type fails
+there instead of waiting for a fuzzer to rediscover it.
+
+**A remainder that was measured rather than waved past.** With the fix, the NATIVE verified
+render walls this family on `ownership verification failed` and falls back to the standard
+codegen. That reads like the fix broke something, so it was A/B'd on ONE binary by putting the
+new arm behind a temporary env guard:
+
+| program | without the arm | with the arm |
+|---|---|---|
+| `option.unwrap_or(s0, (1,2))` bound to a `let` (never reaches the arm) | ownership verification failed | ownership verification failed |
+| the matrix fixture | outside the MIR-lowering subset | ownership verification failed |
+
+The first row settles it: the ownership wall exists on a program the arm cannot touch. What
+the fix changed is the second program's wall REASON, from "subset" to "ownership" — both
+walls, one strictly more informative. Filed as #1037 and named inside C-201's statement, so the
+contract promises stdout+exit equality and does not claim a verified native render it does not
+have.
+
+**The method, again.** Two instrumented builds found what five careful readings missed, and
+then a third trace corrected the guess the second one produced. The rule from the last entry
+held — *when eliminations outnumber confirmations and nothing converges, the premise is
+probably wrong* — and this run adds a corollary: **a trace that confirms one hypothesis is
+still worth pointing at the NEXT hypothesis before acting on it.** The guess that
+`try_lower_heap_result_if` was the rejecter was written down as "most likely candidate" and
+was simply false; one `eprintln!` at its return site cost less than the reading that produced
+the guess.
