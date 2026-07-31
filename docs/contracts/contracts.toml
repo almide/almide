@@ -2456,3 +2456,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/recursion_depth_within_limits.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-197"
+spec      = "ALS-T6"
+title     = "Linear-memory exhaustion is a resource limit with a defined abort"
+statement = "Allocation that exceeds a target's memory resources is TARGET-DEPENDENT, and the divergence is contracted rather than silent: wasm32's linear memory is architecturally smaller than native's 64-bit address space, so a program whose completion requires more memory than wasm32 can grow (Wave 4 L5: ~4.29e9 pushes ≈ 34 GB — native completed, wasm32 could not) diverges by RESOURCE, not semantics. What IS promised: (1) the failure shape — wasm exhaustion is the DEFINED abort `Error: out of memory` + exit 1, never an out-of-bounds fault (the $oom primitive fires on a refused memory.grow, on an i32 frontier overflow in $alloc/$alloc8, and on a cap whose byte size would wrap the $list_new multiply — the L5 layer-2 wrap class that previously ran past the memory end and read as a memory-safety bug); (2) the convergent boundary — allocation within both targets' limits stays byte-identical (the fixture). The differential oracle classifies the one-sided memory-exhaustion case as this contracted class, mirroring C-196's stack rule."
+since     = "0.41.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/allocation_within_limits.almd", class = "fixture" },
+]

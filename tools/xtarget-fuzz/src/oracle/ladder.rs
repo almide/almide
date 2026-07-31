@@ -311,6 +311,23 @@ pub fn run_ladder(
                 .into(),
         };
     }
+    // C-197, the memory sibling: wasm32 exhausted its linear memory (the DEFINED
+    // "Error: out of memory" abort — the $oom primitive, never an OOB fault) while
+    // native's 64-bit address space satisfied the same program. A resource limit,
+    // not a semantic oracle — mirroring the stack rule above.
+    if one_sided_memory_exhaustion(
+        native.success(),
+        wasm.success(),
+        String::from_utf8_lossy(&wasm.stderr).contains("out of memory"),
+    ) {
+        return Outcome::Skipped {
+            reason: "wasm32 exhausted its linear memory (the defined out-of-memory \
+                     abort) while native's larger address space satisfied the \
+                     program — the C-197 resource-limit divergence, not a \
+                     semantic oracle"
+                .into(),
+        };
+    }
     if native.success() != wasm.success() {
         // One leg ran cleanly and the other did not — a run-failure
         // divergence in either direction (native can non-zero-exit BY DESIGN
@@ -469,6 +486,37 @@ fn one_sided_stack_exhaustion(
 ) -> bool {
     (native_ok && !wasm_ok && wasm_stack_exhausted)
         || (wasm_ok && !native_ok && native_stack_overflow)
+}
+
+/// C-197's decision, pure like its stack sibling: true iff wasm failed with the
+/// defined out-of-memory abort while native succeeded. (The reverse direction —
+/// native OOM while wasm succeeds — has no single stable native signature and
+/// stays a finding until one exists; wasm32 being the SMALLER space, the forward
+/// direction is the one the resource asymmetry actually produces.)
+fn one_sided_memory_exhaustion(native_ok: bool, wasm_ok: bool, wasm_oom: bool) -> bool {
+    native_ok && !wasm_ok && wasm_oom
+}
+
+#[cfg(test)]
+mod memory_exhaustion_classification_tests {
+    use super::one_sided_memory_exhaustion;
+
+    #[test]
+    fn wasm_oom_native_completed_is_contracted() {
+        // Wave 4 L5: ~34 GB of pushes — native's 64-bit space completed,
+        // wasm32 aborted with the defined line. C-197 — a skip, not a finding.
+        assert!(one_sided_memory_exhaustion(true, false, true));
+    }
+
+    #[test]
+    fn wasm_failure_without_the_oom_line_is_still_a_finding() {
+        assert!(!one_sided_memory_exhaustion(true, false, false));
+    }
+
+    #[test]
+    fn both_ok_is_not_this_rule() {
+        assert!(!one_sided_memory_exhaustion(true, true, false));
+    }
 }
 
 #[cfg(test)]

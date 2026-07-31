@@ -172,6 +172,12 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     ;; not found: bump the frontier (a genuinely fresh block)
     (local.set $p (global.get $bump))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
+    ;; A single request that OVERFLOWS the i32 frontier (p + n ≥ 2^32) can never be
+    ;; satisfied on wasm32 — and the wrapped bump would SKIP the grow check below and
+    ;; hand out a block whose writes run past the end (Wave 4 L5 layer 2: the ~34 GB
+    ;; push probe faulted at exactly the memory boundary). Unsigned wrap test.
+    (if (i32.lt_u (global.get $bump) (local.get $p))
+      (then (call $oom)))
     ;; GROW the linear memory if the new frontier passed the last allocated page. The wasm memory
     ;; starts at 1 page (64 KiB) with no max; a program that allocates more (a deep recursive
     ;; List-accumulator, a large file read) MUST grow it or the next store traps OOB. `memory.size`
@@ -204,6 +210,9 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (local $p i32)
     (local.set $p (i32.and (i32.add (global.get $bump) (i32.const 7)) (i32.const -8)))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
+    ;; Same frontier-overflow guard as $alloc (Wave 4 L5 layer 2).
+    (if (i32.lt_u (global.get $bump) (local.get $p))
+      (then (call $oom)))
     ;; Grow the linear memory past the last page if this (possibly large — a 4 KiB readdir buffer, a
     ;; file-content buffer) scratch alloc crossed it. Same page-count-only grow as `$alloc`, and the
     ;; same C-197 discipline: a refused grow is the defined `$oom` abort, never an OOB store.
@@ -220,6 +229,12 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
 
   (func $list_new (param $len i32) (param $cap i32) (result i32)
     (local $p i32)
+    ;; A cap whose byte size (header + cap*8) would WRAP the i32 multiply is an
+    ;; unsatisfiable single block on wasm32 — without this guard the wrapped size
+    ;; under-allocates and the element stores run past the block (the mul-wrap
+    ;; sibling of the frontier-overflow guard in $alloc; Wave 4 L5 layer 2).
+    (if (i32.gt_u (local.get $cap) (i32.const 268435454))
+      (then (call $oom)))
     (local.set $p (call $alloc (i32.add (i32.const {LIST_HEADER})
                                         (i32.mul (local.get $cap) (i32.const {ELEM_SIZE})))))
     (i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))
