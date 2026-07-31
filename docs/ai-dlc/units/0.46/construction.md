@@ -11,7 +11,7 @@
 | B2 | Skeleton: module/package layout, builds green, ~1k lines. Record build time | — | **first subcommand done, byte-identical** | `tools/almide-gates/` (2 modules, ~190 lines); output matches `LC_ALL=C bash docs/roadmap/generate-readme.sh` exactly — 390 lines, 59,262 bytes |
 | B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
 | B4 | The contracts-README subcommand (the first TOML consumer) | Byte-identical to the bash original | **done** | 231 lines / 25,297 bytes identical; found and fixed a truncation bug in the original (#1032) |
-| B5 | Resolve #1003's and #1002's triggers with the measured numbers | — | pending | — |
+| B5 | `conformance.md` — the third TOML consumer | Byte-identical | pending — shape analysed below | — |
 
 ## B1 — the program: `almide-gates`, this repo's own gate and generator toolchain
 
@@ -264,7 +264,32 @@ whose purpose was to be wrong. The bash was fixed instead, and both now agree.
   the wrong thing for `n = "1000"`, and the ledger has exactly one bare field — small enough
   that the ambiguity is avoidable rather than manageable.
 
-### State for the next session
+### B5 shape — what `conformance.md` needs beyond what exists
+
+Analysed before starting, so the next session does not re-read the script:
+
+`generate-conformance.sh` is **embedded Python**, not awk — a different shape from the two
+already ported. Beyond the TOML reader it needs four things, none of which exists yet in
+`almide-gates`:
+
+1. **Group by `spec` key.** Contracts are joined per ALS section; the reader returns them in
+   source order, so this is a grouping pass over `List[Table]`.
+2. **The ALS sort key.** `ALS-T6` sorts as `("T", 6)`, not lexically — so `ALS-T10` follows
+   `ALS-T9`, which a string sort gets wrong. `list.sort_by` takes a key extractor, so the key
+   has to be a single sortable value: zero-pad the number into the string (`"T" + pad(6)`).
+3. **Evidence filtered to `fixture`/`exhaustive`.** Not every class counts here, unlike the
+   README table which ranks all of them.
+4. **"How CI runs it" from the PATH**, four buckets: `spec/wasm_cross/` → byte-compare,
+   `tests/diagnostics/` → checker, other `spec/` → both-target test, `tests/*.rs` → cargo
+   gate. A prefix match, and the ORDER matters — `spec/wasm_cross/` must be tested before the
+   general `spec/` prefix or every fixture reads as "both-target test".
+
+Also needed: **distinct** fixture counting across sections (a fixture cited by two contracts
+counts once), which is a set operation — `list.unique` or a sort-then-dedup.
+
+Point 2 is the one worth flagging: it is a real difference between the two languages here.
+The Python uses a tuple key `(letters, int(digits))`; Almide's `sort_by` wants one value, so
+the number has to be encoded into the string rather than compared separately.
 
 **#1029 has a verified workaround** — `out = out + [one(p)!]` prints `[1, 2]` on native — so
 B2 is NOT blocked; it can proceed with explicit `!` while the checker fix lands separately.
