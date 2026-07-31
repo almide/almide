@@ -394,3 +394,30 @@ shape made it reachable only through its I/O.
 
 Remaining for `output-parity`: the sweep itself (382 fixtures × 3 processes) on top of this
 rule and the B6 stamp. Then `fuzz-track-record` (adds JSON), then `check-contracts`.
+
+## B8 — the nightly streak rule, extracted and tested (2026-08-01)
+
+`tools/almide-gates/src/streak.almd`: the fold from `scripts/fuzz-track-record.sh`, pure,
+with 6 tests. Same treatment as B7's verdict rule and for the same reason — in the bash it is
+interleaved with `gh api` calls, so the RULE can only be exercised by hitting the network.
+
+The rule worth pinning is that **the two streaks stop independently**:
+
+| night | green streak (#796, closes at 2) | full-budget streak (#924, closes at 14) |
+|---|---|---|
+| no findings | continues | continues |
+| findings | **ends** | **continues** — the instrument ran to completion |
+| truncated | ends | ends |
+
+A night with findings ends one and not the other, because #924 measures whether the
+instrument RAN, not whether it was quiet. Collapsing them into one counter — the obvious
+simplification, and what someone reading the bash quickly would write — makes #924
+unmeasurable: every finding would reset it, and the 14-night streak could never accumulate on
+a compiler that is still being fixed.
+
+One test pins the state this session actually measured (four full-budget nights, all with
+findings → #924 at 4/14, #796 at 0/2), so the rule is anchored to a real observation rather
+than only to invented cases.
+
+`almide-gates` is now **~680 lines across eight modules**, with four byte-identical
+subcommands and two extracted decision rules under test.
