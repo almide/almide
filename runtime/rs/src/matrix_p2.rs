@@ -190,7 +190,7 @@ pub fn almide_rt_matrix_rope_rotate_at(
 ) -> AlmideMatrix {
     let rows = x.len();
     let cols = if rows == 0 { 0 } else { x[0].len() };
-    let n_heads_u = n_heads.max(0) as usize;
+    let n_heads_u = almide_rt_matrix_head_count(n_heads);
     let head_dim_u = head_dim.max(0) as usize;
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
@@ -447,7 +447,7 @@ fn per_head_rms_norm(
     n_heads: i64,
     eps: f64,
 ) -> AlmideMatrix {
-    let n_heads = n_heads.max(1) as usize;
+    let n_heads = almide_rt_matrix_head_count(n_heads);
     if x.is_empty() { return vec![].into(); }
     let d = x[0].len();
     let head_dim = d / n_heads;
@@ -473,7 +473,7 @@ fn per_head_rms_norm(
 
 fn repeat_kv(kv: &AlmideMatrix, n_kv_heads: i64, n_rep: i64) -> AlmideMatrix {
     if n_rep <= 1 { return kv.clone(); }
-    let n_kv = n_kv_heads.max(1) as usize;
+    let n_kv = almide_rt_matrix_head_count(n_kv_heads);
     let n_rep_u = n_rep as usize;
     if kv.is_empty() { return vec![].into(); }
     let d = kv[0].len();
@@ -680,7 +680,7 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
 ) -> AlmideMatrix {
     let rows = x.len();
     let cols = if rows == 0 { 0 } else { x[0].len() };
-    let n_heads_u = n_heads.max(0) as usize;
+    let n_heads_u = almide_rt_matrix_head_count(n_heads);
     let head_dim_u = head_dim.max(0) as usize;
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
