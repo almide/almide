@@ -337,3 +337,24 @@ tuple's element types. Both probes are two lines and live in the session scratch
 materialized (would borrow an empty deferred heap value)` — the `list.fold(list.sort(tmp3), …)`
 over an empty list. Still an honest wall (exit 1, no output), not wrong bytes; a different
 cell, not a regression.
+
+## Dogfood findings (Unit 0.46, 2026-07-31)
+
+Not fuzz findings — these came from writing a real program (`tools/almide-gates`), and they
+are recorded here because this is where the live defect ledger lives.
+
+| # | Shape | Severity |
+|---|---|---|
+| [#1029](https://github.com/almide/almide/issues/1029) | an `effect fn` called in a `for`-loop body is not auto-unwrapped: native emits invalid Rust, wasm prints heap addresses as values | wrong bytes (wasm) |
+| [#1030](https://github.com/almide/almide/issues/1030) | **root cause of #1029** — list concat does not constrain the RIGHT operand's element type. `[1] + ["a"]` type-checks; native fails to build; wasm prints `[1, 8244]` | wrong bytes (wasm) |
+
+**#1030 is the smallest instance of the checker-accepts-but-lowering-reinterprets class found
+so far**: no effects, no concurrency, no generics — three lines. And the contrast is exact:
+`[1, "a"]` (literal) is correctly rejected with E001, while `[1] + ["a"]` (concat) is not. The
+same property, checked on one path and not the other.
+
+**What this says about coverage.** 180 lines of a real program found what 324 spec files and
+seven fuzz campaigns did not. The spec corpus is written by someone who knows the compiler;
+a program written to do a job reaches for shapes nobody thought to test. Three instances of
+this class turned up in one day (#1027, #1029, #1030), each by accident rather than by a
+detector — which is the argument for the hole-hunt lens at ladder row 0.52 (#912).
