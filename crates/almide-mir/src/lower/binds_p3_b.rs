@@ -119,7 +119,9 @@ impl LowerCtx {
                     if o.len() == 1 && matches!(o[0], Ty::String))
                 || matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, e)
                     if e.len() == 2 && matches!(e[1], Ty::String)
-                        && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))))
+                        && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))
+                || matches!(&tys[1], Ty::Tuple(ts)
+                    if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::String)))))
         {
             // A `(String, Map[String, <scalar>])` or `(String, Option[String])` TUPLE
             // element (the msb pairs list — both value shapes follow the len@4-counted

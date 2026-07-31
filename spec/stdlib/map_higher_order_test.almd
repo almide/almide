@@ -271,6 +271,27 @@ test "option-valued map literal churn" {
   assert_eq(hits, 5)
 }
 
+test "map.get_or on a tuple-valued map" {
+  let m: Map[String, (String, String)] = ["k0": ("a", "b"), "k1": ("c", "d")]
+  let got = map.get_or(m, "k0", ("x", "y"))
+  let (l, r) = got
+  assert_eq(l + r, "ab")
+  let miss = map.get_or(m, "zz", ("x", "y"))
+  let (l2, r2) = miss
+  assert_eq(l2 + r2, "xy")
+}
+
+test "tuple-valued map literal churn" {
+  var hits = 0
+  for i in [1, 2, 3] {
+    let m: Map[String, (String, String)] = ["k": ("p", "q")]
+    let (l, r) = map.get_or(m, "k", ("x", "y"))
+    assert_eq(l + r, "pq")
+    hits = hits + 1
+  }
+  assert_eq(hits, 3)
+}
+
 test "list of option-maps: literal and get_or" {
   let n1: Map[String, Bool] = ["x": true]
   let y2: Option[Map[String, Bool]] = none

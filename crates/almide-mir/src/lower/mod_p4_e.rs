@@ -336,6 +336,11 @@ fn is_msv_family_inner(v: &Ty) -> bool {
         || matches!(v, Ty::Applied(TypeConstructorId::Result, e)
             if e.len() == 2 && matches!(e[1], Ty::String)
                 && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))
+        // An all-String TUPLE value (`Map[String, (String, String)]` — Wave 4 N2):
+        // the tuple block is `DynList { len = slot count }` with every slot a String
+        // handle — the len-counted discipline verbatim.
+        || matches!(v, Ty::Tuple(ts)
+            if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::String)))
 }
 
 fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {

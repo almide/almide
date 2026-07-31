@@ -516,7 +516,11 @@ pub fn is_map_msb_ty(ty: &Ty) -> bool {
             // Strings, and the high-32 tag is inert under the $rc_dec i32 wrap.
             || matches!(&a[1], Ty::Applied(TypeConstructorId::Result, e)
                 if e.len() == 2 && matches!(e[1], Ty::String)
-                    && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))))
+                    && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))
+            // An all-String tuple value (Wave 4 N2): DynList { len = slot count },
+            // every slot a String handle — len-counted verbatim.
+            || matches!(&a[1], Ty::Tuple(ts)
+                if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::String)))))
 }
 
 /// `Map[String, List[Option[Int]]]` — the mlo family (String keys, LIST-OF-OPTIONS values;
