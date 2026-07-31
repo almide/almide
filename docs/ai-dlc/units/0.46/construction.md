@@ -309,3 +309,35 @@ non-empty before believing a match.
 
 - B1 was a decision Bolt by design (plan R1): sizing the program is the first real decision,
   and the Unit had to have a reviewable answer before any code.
+
+## The two remaining TOML-free subcommands — analysed, not started
+
+Both need capabilities `almide-gates` does not yet have, and they need DIFFERENT ones, so
+neither unlocks the other:
+
+**`scripts/fuzz-track-record.sh`** (85 lines) — needs **process invocation** (`gh api`) and
+**JSON parsing**. The stdlib has `json` (99 fns) and `process`, so both exist; what does not
+exist is any use of them in this program. Its logic is a streak fold over nightly runs.
+Risk: it hits the network, so a "byte-identical" check is against a moving target — the
+acceptance check has to be a FIXED captured JSON input, not a live `gh` call, or the diff is
+untestable.
+
+**`proofs/output-parity.sh`** (190 lines) — needs **process invocation** (`almide build`/`run`
+per fixture) and a 382-row baseline. No JSON. Its bash version already refuses to run when
+the PATH binary and the workspace build disagree — a guard worth preserving verbatim, since
+it is the same one-binary discipline the fuzz campaigns depend on.
+
+**`scripts/check-contracts.sh`** is the largest overall (TOML + the bidirectional link audit
++ freshness checks) and the one whose correctness matters most, since it gates every contract
+change. It goes LAST, when the reader and the process-invocation pieces are both proven by
+smaller subcommands.
+
+Suggested order: `output-parity` (process invocation, no JSON) → `fuzz-track-record` (adds
+JSON) → `check-contracts` (composes everything). Each step adds exactly one capability.
+
+## Note for whoever picks up #1033
+
+`git stash list` on this machine shows `stash@{0}: sibling: codegen render_expr Var-arm
+extraction WIP`. That is the exact area #1033 lives in (`render_expr` on a `Var` deciding
+ownership per-occurrence). It is NOT mine and was not touched. Check with its owner before
+starting there — the fix may already be in flight.
