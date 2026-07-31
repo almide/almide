@@ -504,3 +504,28 @@ exists and its predicate covers the case). What is still true: `s_s5` builds, `s
 they differ only in element type, and both reach `lower_owned_heap_field` through the same
 call. The next step remains instrumentation — printing which branch is taken — not more
 reading.
+
+### R3 — narrowed again: the decline is BEFORE the call, not inside it (2026-08-01)
+
+Read `lower_pure_module_value_call` to its end (`calls.rs:227+`): after `repr_of` it selects a
+name and pushes `Op::CallFn`, returning `Ok`. There is no type-dependent failure in its tail —
+for a well-formed `option.unwrap_or` it succeeds for BOTH payload types.
+
+So the earlier localisation ("the decline is inside `lower_pure_module_value_call`, and it is
+type-dependent") was wrong in its second half. The call is not where they diverge; **one of
+them never reaches it.**
+
+That points at `lower_owned_heap_field`'s group dispatch. Its `_leaf` group returns
+`Option<Option<ValueId>>` where the two negatives are DISTINCT and documented as such:
+`None` = "not my group, try the next", `Some(None)` = "my group DECLINES this field". If an
+arm in `_leaf` matches an all-scalar tuple and returns `Some(None)`, the router stops there
+and never tries `_aggregate` — which is where the `CallTarget::Module` arm lives.
+
+**Next probe** (cheap, and it settles it): in `owned_heap_field.rs`, check whether any `_leaf`
+arm can match a `Call` expression whose type is an all-scalar tuple. If one does and declines,
+that is the bug and the fix is in the arm's guard, not in the call path at all.
+
+Hypotheses eliminated so far: heap classification, `repr_of`, a missing routing cell
+(retracted — the cell exists), and now a type-dependent failure inside
+`lower_pure_module_value_call`. Each elimination has been recorded rather than dropped, which
+is the only reason this has narrowed instead of circling.
