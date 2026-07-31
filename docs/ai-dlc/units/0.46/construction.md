@@ -421,3 +421,35 @@ than only to invented cases.
 
 `almide-gates` is now **~680 lines across eight modules**, with four byte-identical
 subcommands and two extracted decision rules under test.
+
+## B9 — the bidirectional-link rule, extracted and verified on the real ledger (2026-08-01)
+
+`tools/almide-gates/src/contract_audit.almd`: `check-contracts.sh`'s symmetry rule, pure,
+with 5 tests — and run against the actual ledger:
+
+```
+fixture evidence links checked: 346
+asymmetric (ledger says, fixture does not): 0
+```
+
+An independent implementation reaching the same conclusion as the bash audit is the strongest
+check available short of byte-identity, and it is available NOW, before the full subcommand
+is ported.
+
+The rule reports its two asymmetries **separately**, because they fail differently:
+
+- **ledger lists the fixture, the fixture does not name the contract** — the contract's
+  evidence points at a file certifying something else. The contract looks covered and is not.
+- **the fixture names the contract, the ledger does not list it** — the fixture is not
+  counted, so deleting it would break nothing and nobody would notice.
+
+Collapsing them into one "links disagree" error would lose which side is lying, and the
+repair differs: the first is a wrong evidence entry, the second is a missing one.
+
+Also pinned: the id shape is exactly `C-` + THREE digits. `C-1` and `C-1000` are malformed
+rather than leniently accepted — the bash regex says so, and a lenient reimplementation would
+silently admit ids the ledger's own tooling cannot resolve.
+
+`almide-gates`: **~750 lines across nine modules**, four byte-identical subcommands, and
+three decision rules extracted under test (parity verdict, nightly streak, link symmetry).
+All three were reachable in the bash only through their I/O.
