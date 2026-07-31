@@ -1,0 +1,17 @@
+// E007: a UFCS method call must apply the same `mut`-parameter rule as the module
+// spelling. `xs.push(n)` desugars to `list.push(xs, n)`, whose first parameter is
+// declared `mut`, so an immutable `xs` is rejected either way.
+//
+// Before #1027 only the module spelling was checked: the UFCS path handed
+// `validate_mut_args` a list the receiver was not in, so a non-`mut` parameter could be
+// mutated in place. Native then propagated the mutation to the caller and wasm dropped
+// it — a checker-accepted program printing different numbers on the two targets.
+fn pusher(xs: List[Int], n: Int) -> Int = {
+  xs.push(n)
+  list.len(xs)
+}
+
+fn main() -> Unit = {
+  let shared: List[Int] = []
+  println(int.to_string(pusher(shared, 1)))
+}

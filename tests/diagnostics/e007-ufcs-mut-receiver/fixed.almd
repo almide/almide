@@ -1,0 +1,11 @@
+// The fix: declare the parameter `mut`, which is what the in-place mutation needs, and
+// pass a `var` binding at the call site.
+fn pusher(mut xs: List[Int], n: Int) -> Int = {
+  xs.push(n)
+  list.len(xs)
+}
+
+fn main() -> Unit = {
+  var shared: List[Int] = []
+  println(int.to_string(pusher(shared, 1)))
+}

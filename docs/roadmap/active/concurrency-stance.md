@@ -121,7 +121,10 @@ mut パラメータはまさに index 0 である。
 これは wall でも trap でもなく、**checker が受理したプログラムでの
 クロスターゲット出力乖離＝誤ったバイト**であり、契約台帳が存在する理由そのものの
 クラスに当たる。**[#1027](https://github.com/almide/almide/issues/1027) を #1025 より
-先に直す**。mut 性が強制されれば #1025 は「2 つの arm が同じ `mut` 引数を渡す」に
+先に直す**。**2026-07-31 修正済** — `check_call_target_builtin_ufcs` が解決キーを
+知っている位置で、レシーバを引数 0 に置いた `validate_ufcs_mut_args` を呼ぶ。
+上の repro は両ターゲットで E007 になり、正当な `mut` レシーバは動作継続。
+324 spec ファイル緑 + 診断 fixture `e007-ufcs-mut-receiver`。mut 性が強制されれば #1025 は「2 つの arm が同じ `mut` 引数を渡す」に
 還元され、宣言だけで判定できるようになる。
 
 ## 実装順序（0.44 Unit）
