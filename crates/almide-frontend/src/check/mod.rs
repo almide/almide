@@ -169,6 +169,7 @@ pub struct Checker {
     /// bound to / annotated as a wider type (`let u: UInt64 = …`) and the negated
     /// `i64::MIN` magnitude (`-9223372036854775808`).
     pub(crate) deferred_int_overflow_checks: Vec<IntOverflowSite>,
+    pub(crate) deferred_float_overflow_checks: Vec<FloatOverflowSite>,
     /// Un-annotated value bindings / discarded expression statements whose
     /// inferred type must be fully decidable. Each entry carries the binding's
     /// value `Ty` (with inference vars intact), an optional binding name (for the
@@ -218,6 +219,23 @@ pub(crate) struct IntOverflowSite {
     /// The declared type the literal is bound/annotated to, when it is the direct
     /// value of `let x: T = …` / `var x: T = …`. `None` ⇒ a default `Int` (i64)
     /// context. A wider `T` (e.g. `UInt64`) makes a >i64 literal valid.
+    pub context_ty: Option<Ty>,
+    pub span: Option<crate::ast::Span>,
+}
+
+/// A float literal whose magnitude exceeds f32's finite range, pending the
+/// post-solve check: an error ONLY if its effective type resolves to Float32
+/// (rustc rejects the emitted `<lit>f32` — the float sibling of the E024
+/// integer domain; Wave 4 L7). Unlike ints, no context threading is needed:
+/// a float literal's Float32-ness IS its solved type (the C-182 context typing).
+#[derive(Debug, Clone)]
+pub(crate) struct FloatOverflowSite {
+    pub expr_id: crate::ast::ExprId,
+    pub value: f64,
+    /// The declared type when the literal is the direct value of an annotated
+    /// binding/field — a bare literal's own solved type stays `Float`, so the
+    /// Float32 context lives on the binding and must be pinned here (the same
+    /// reason `IntOverflowSite` carries it).
     pub context_ty: Option<Ty>,
     pub span: Option<crate::ast::Span>,
 }
@@ -316,6 +334,22 @@ pub(crate) fn int_literal_chain(
                 negated = !negated;
                 cur = operand;
             }
+            _ => return None,
+        }
+    }
+}
+
+/// The float sibling of [`int_literal_chain`]: reach a FLOAT literal through any
+/// paren/unary-minus chain. Magnitude is sign-symmetric for the f32 range check,
+/// so no negation flag is carried.
+pub(crate) fn float_literal_chain(value: &crate::ast::Expr) -> Option<(crate::ast::ExprId, f64)> {
+    use crate::ast::ExprKind;
+    let mut cur = value;
+    loop {
+        match &cur.kind {
+            ExprKind::Float { value: v } => return Some((cur.id, *v)),
+            ExprKind::Paren { expr } => cur = expr,
+            ExprKind::Unary { op, operand, .. } if op.as_str() == "-" => cur = operand,
             _ => return None,
         }
     }
@@ -445,6 +479,7 @@ impl Checker {
             deferred_ord_elem_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
+            deferred_float_overflow_checks: Vec::new(),
             deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_unknown_type_checks: Vec::new(),
@@ -824,6 +859,7 @@ impl Checker {
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
+        self.validate_float_overflow_literals();
         self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
         // Unused import warnings

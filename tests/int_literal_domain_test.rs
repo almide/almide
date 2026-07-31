@@ -261,3 +261,33 @@ fn radix_forms_are_classified_the_same() {
         "hex past the width must be the magnitude deviation, got:\n{out}"
     );
 }
+
+/// The FLOAT sibling (Wave 4 L7): a Float32-annotated literal beyond f32's
+/// finite range passed `almide check` and native rustc then rejected the
+/// emitted `<lit>f32` ("literal out of range for f32") — the same
+/// check-vs-build gap as the sized-int cases above, at the float domain.
+/// An in-range excess-PRECISION literal stays accepted (it narrows, C-182).
+#[test]
+fn float32_range_is_checked_and_precision_is_not() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = check(dir.path(), &body("let p: Float32 = 1e100"));
+    assert!(
+        out.contains("E024") && out.contains("out of range for Float32"),
+        "an out-of-f32-range Float32 literal must be E024, got:\n{out}"
+    );
+    let out = check(dir.path(), &body("let p: Float32 = -1e100"));
+    assert!(
+        out.contains("E024") && out.contains("out of range for Float32"),
+        "the negated form must face the same range check, got:\n{out}"
+    );
+    let out = check(dir.path(), &body("let p: Float32 = 123456789.12345679"));
+    assert!(
+        !out.contains("E024"),
+        "an in-range excess-precision literal narrows and stays accepted, got:\n{out}"
+    );
+    let out = check(dir.path(), &body("let p: Float = 1e100"));
+    assert!(
+        !out.contains("E024"),
+        "a plain Float context has no f32 bound, got:\n{out}"
+    );
+}

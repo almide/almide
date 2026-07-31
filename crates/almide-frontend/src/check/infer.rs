@@ -33,6 +33,19 @@ impl Checker {
                 expr_id: expr.id, raw: raw.clone(), negated: false, context_ty: None, span: expr.span,
             });
         }
+        // Wave 4 L7: a float literal beyond f32's finite range is queued for the
+        // post-solve Float32 range check — an error only if its type RESOLVES to
+        // Float32 (its own solved type carries the context per C-182), where the
+        // emitted `<lit>f32` would be rustc's "literal out of range for f32".
+        // Only such literals are queued (cheap pre-filter); magnitude is
+        // sign-symmetric so a negated parent needs no flag.
+        if let ExprKind::Float { value } = &expr.kind {
+            if value.is_finite() && (*value as f32).is_infinite() {
+                self.deferred_float_overflow_checks.push(super::FloatOverflowSite {
+                    expr_id: expr.id, value: *value, context_ty: None, span: expr.span,
+                });
+            }
+        }
         let ity = self.infer_expr_inner(expr);
         self.type_map.insert(expr.id, ity.clone());
         // #662 extension (fuzz seed-20260718 index 145): a CALL's instantiated
