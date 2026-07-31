@@ -453,3 +453,21 @@ silently admit ids the ledger's own tooling cannot resolve.
 `almide-gates`: **~750 lines across nine modules**, four byte-identical subcommands, and
 three decision rules extracted under test (parity verdict, nightly streak, link symmetry).
 All three were reachable in the bash only through their I/O.
+
+## v0.44.0 release blocked on a CI infra condition (2026-08-01)
+
+PR #1035 is open and NOT merged. `Build (macos-latest)` and `Build (windows-latest)` fail the
+`#983` tool-arming tripwire: `ALMIDE_EXPECT_TOOLS=1 but wasmtime is not runnable`, even though
+that job's own `Install wasmtime` step reports success.
+
+Not caused by the PR's diff — the same commit is green on develop (those two legs run only on
+a PR to main), PR #1034 had both legs pass 40 minutes earlier on the same workflow, and this
+PR's only workflow change adds a step to a DIFFERENT job (`test-rust`).
+
+**Left red deliberately.** The tripwire exists so a leg that loses its tools turns red instead
+of skipping 18 suites as pass. Merging past it would defeat exactly what it was built for, and
+"green on develop" is the reasoning it was designed to reject.
+
+Next: find why an installed `wasmtime` is not runnable in the `build` job — the gap is between
+the install step and the test step's environment (PATH propagation or a cache restore), not a
+missing install.
