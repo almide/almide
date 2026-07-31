@@ -2491,3 +2491,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_block_err_list_order.almd", class = "fixture" },
 ]
+
+# ── FAN SIBLING TRAP ─
+[[contract]]
+id        = "C-200"
+spec      = "ALS-T6"
+title     = "A trap in a fan sibling exits through the unified main-error abort, convergently"
+statement = "A runtime trap inside a `fan` sibling (division by zero, integer overflow, index out of bounds) terminates the program through the SAME unified `Error: <msg>` + exit 1 the effect-main path uses — never a native panic (101) nor a wasm trap (134) — and the two targets agree, including on what reached stdout first. In-flight siblings are NOT waited for: measured with a 1.5s-sleeping second sibling, both targets abort in ~0s with an empty stdout. This closes #1026's third complaint (the block's documented outcomes — a tuple, or the first Err in list order per C-199 — were not the only exits, and the trap exit was uncontracted). It does NOT require the per-arm output buffering the Unit's design note proposed: that was written on the assumption that the trap case diverged, and the measurement says it converges. Buffering remains the answer to a DIFFERENT question — C-004's EXCEPTION clause, where two siblings both PRINT and native interleaves by wall clock while wasm is sequential."
+since     = "0.42.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_sibling_trap.almd", class = "fixture" },
+]
