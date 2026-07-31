@@ -49,18 +49,30 @@ use almide_ir::IrProgram;
 /// resolved module set, which differ between the project path and the single-file path.
 /// What every caller shares — and what kept drifting — is what happens AFTER lowering.
 pub fn link_ir(ir: &mut IrProgram) {
+    optimize_half(ir);
+    link_half(ir);
+}
+
+/// The stages BEFORE the CLI's integrity gates: optimize, then the top-level-let
+/// reclassification that cross-reference const detection needs.
+///
+/// Split out because `src/compile_driver.rs` runs `verify_ir_or_err` and the
+/// `[permissions]` check BETWEEN optimize and monomorphize, on the post-optimize
+/// pre-mono IR. Folding those gates to either side of a single `link_ir` call would
+/// change WHICH IR they inspect — a behaviour change, and this Unit is a plumbing
+/// change. Exposing the two halves keeps the ORDER owned here (a caller cannot
+/// reorder what it cannot spell) while making the gate insertion point explicit
+/// rather than implicit in a hand-copied sequence.
+pub fn optimize_half(ir: &mut IrProgram) {
     almide_optimize::optimize::optimize_program(ir);
+    almide_ir::reclassify_top_lets(ir);
+}
+
+/// The stages AFTER those gates: monomorphize, then link. `ir_link` last so the
+/// linker sees the monomorphized call graph.
+pub fn link_half(ir: &mut IrProgram) {
     almide_optimize::mono::monomorphize(ir);
     almide_frontend::ir_link::ir_link(ir);
 }
 
-/// As [`link_ir`], plus the top-level-let reclassification the CLI path runs after
-/// optimization (cross-reference const detection). Split out rather than folded in because
-/// the MIR pipeline and the interp deliberately do not run it — folding it in would change
-/// their behaviour, which this Unit is not allowed to do.
-pub fn link_ir_with_top_let_reclassify(ir: &mut IrProgram) {
-    almide_optimize::optimize::optimize_program(ir);
-    almide_ir::reclassify_top_lets(ir);
-    almide_optimize::mono::monomorphize(ir);
-    almide_frontend::ir_link::ir_link(ir);
-}
+

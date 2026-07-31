@@ -121,6 +121,7 @@ name = "almide-interp"
 version = "0.1.0"
 dependencies = [
  "almide-base",
+ "almide-driver",
  "almide-frontend",
  "almide-ir",
  "almide-lang",
@@ -153,6 +154,7 @@ name = "almide-mir"
 version = "0.1.0"
 dependencies = [
  "almide",
+ "almide-driver",
  "almide-frontend",
  "almide-ir",
  "almide-lang",

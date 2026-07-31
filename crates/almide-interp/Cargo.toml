@@ -11,6 +11,7 @@ almide-lang = { path = "../almide-lang" }
 almide-ir = { path = "../almide-ir" }
 almide-frontend = { path = "../almide-frontend" }
 almide-optimize = { path = "../almide-optimize" }
+almide-driver = { path = "../almide-driver" }
 
 [dev-dependencies]
 # The test battery lowers .almd source to IR through the same public frontend

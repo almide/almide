@@ -43,15 +43,7 @@ const ALLOWED: &[&str] = &[
 /// found NINE. `classify_corpus_parts/classify_corpus_b.rs`,
 /// `render_wasm/tests_part1.rs`, and `wasm_runtime_test_parts/p4_corpus.rs` were not in
 /// the issue's inventory — which is itself the argument for a gate over a hand count.
-const MIGRATION_BACKLOG: &[&str] = &[
-    "src/cli/emit.rs",
-    "src/compile_driver.rs",
-    "crates/almide-interp/tests/eval_test.rs",
-    "crates/almide-mir/examples/classify_corpus_parts/classify_corpus_b.rs",
-    "crates/almide-mir/src/render_wasm/tests_part1.rs",
-    "crates/almide-mir/src/pipeline.rs",
-    "tests/wasm_runtime_test_parts/p4_corpus.rs",
-];
+const MIGRATION_BACKLOG: &[&str] = &[];
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -73,19 +65,34 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// A file "spells the order" when it calls `ir_link` next to a `monomorphize`.
-/// That pair is the signature of a hand-written driver; a file that merely re-exports or
-/// mentions one of them in a comment does not qualify.
+/// A file "spells the order" when it calls `ir_link` and `monomorphize` CLOSE TOGETHER.
+///
+/// Proximity, not mere co-occurrence: a hand-written driver spells the stages adjacently,
+/// while a file can legitimately mention both far apart in unrelated functions —
+/// `src/cli/emit.rs` calls `ir_link` at line 108 inside `emit_codegen_output` and
+/// `monomorphize` at 164 inside something else, and flagging it as a seventh driver was a
+/// false positive that would have been "fixed" by an exemption entry hiding a real one
+/// later. Ten lines is comfortably wider than any real driver (the widest was six) and far
+/// narrower than the emit.rs gap.
+const ADJACENCY_LINES: usize = 10;
+
 fn spells_the_order(src: &str) -> bool {
-    let code: String = src
-        .lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            !t.starts_with("//") && !t.starts_with("///") && !t.starts_with("//!")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    code.contains("ir_link(") && code.contains("monomorphize(")
+    let mut link: Vec<usize> = Vec::new();
+    let mut mono: Vec<usize> = Vec::new();
+    for (i, l) in src.lines().enumerate() {
+        let t = l.trim_start();
+        if t.starts_with("//") || t.starts_with("///") || t.starts_with("//!") {
+            continue;
+        }
+        if l.contains("ir_link(") {
+            link.push(i);
+        }
+        if l.contains("monomorphize(") {
+            mono.push(i);
+        }
+    }
+    link.iter()
+        .any(|a| mono.iter().any(|b| a.abs_diff(*b) <= ADJACENCY_LINES))
 }
 
 #[test]

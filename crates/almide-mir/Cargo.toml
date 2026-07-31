@@ -20,6 +20,7 @@ almide-lang = { path = "../almide-lang" }
 # almide-frontend nor almide-optimize depends on almide-mir.
 almide-frontend = { path = "../almide-frontend" }
 almide-optimize = { path = "../almide-optimize" }
+almide-driver = { path = "../almide-driver" }
 
 [dev-dependencies]
 # The workspace-root `almide` binary crate's lib — reused ONLY by the org-sweep

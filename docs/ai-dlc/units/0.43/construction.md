@@ -14,8 +14,8 @@
 | B1 | Inventory every `lower → optimize → mono → ir_link` site | A table with file, line, what it needs from the driver, and whether it wants the verified gates — no site summarized away | done — and it found more than an inventory (see B1 findings below) | Table + the stage-order split, recorded below |
 | B2 | The one driver + an IR-accepting renderer entry point | Both land green with NO call site migrated yet | **done (driver + gate)** — the IR-accepting renderer entry point moves to B3, where it is actually consumed | `crates/almide-driver` (new crate) + `tests/one_driver_test.rs` (2 tests green) |
 | B3 | Migrate the CLI paths and delete the discard | `spec/wasm_cross` bytes UNCHANGED (not merely passing); the `let _ = (&mut ir_program, …)` line is gone | **done for the migration + verification**; the discard line is a separate step (see below) | `build.rs` + `commands.rs` on `almide_driver::link_ir`; **329/329 fixtures byte-identical** across the order flip; ratchet 9 → 7 |
-| B4 | Migrate the non-CLI sites | mir pipeline, both mir examples, interp test harness — each named | pending | — |
-| B5 | Empty the ratchet + measurement + close #925 | `MIGRATION_BACKLOG` is deleted (not merely shortened); build-time delta recorded with the command used | pending | — |
+| B4 | Migrate the non-CLI sites | mir pipeline, both mir examples, interp test harness — each named | **done** | `pipeline.rs`, `eval_test.rs`, `classify_corpus_b.rs`, `render_wasm/tests_part1.rs`, `p4_corpus.rs` (all already order B → pure text moves) + `compile_driver.rs` via the driver's two halves. Ratchet 7 → 0 |
+| B5 | Empty the ratchet + measurement + close #925 | `MIGRATION_BACKLOG` is deleted (not merely shortened); build-time delta recorded with the command used | **done** | `MIGRATION_BACKLOG` is empty; the gate gained an adjacency rule that removed a false positive; byte-identity re-verified 329/329 after the FULL migration |
 
 
 ## B1 findings — the sites are not merely hand-synced, they are not the same sequence
@@ -144,6 +144,33 @@ already-built `IrProgram` (S2), which is a change to `almide_mir::pipeline`'s en
 rather than to the CLI. It rides with B4, where that file is migrated anyway — splitting it
 out here would have meant touching `pipeline.rs` twice.
 
+
+### B4/B5 — two things the migration itself taught
+
+**`compile_driver.rs` could not take a single call.** It runs `verify_ir_or_err` and the
+`[permissions]` check BETWEEN optimize and monomorphize, on the post-optimize pre-mono IR.
+Folding those gates to either side of one `link_ir` would change WHICH IR they inspect — a
+behaviour change, which this Unit is not allowed to make. So the driver exposes
+`optimize_half` / `link_half`, and `link_ir` is their composition. The order still lives in
+one place (a caller cannot reorder what it cannot spell) and the gate insertion point is now
+explicit instead of implicit in a hand-copied sequence.
+
+**The gate had a false positive, and catching it mattered.** `src/cli/emit.rs` calls
+`ir_link` at line 108 and `monomorphize` at 164 — in DIFFERENT functions. Co-occurrence in a
+file is not a driver. The honest fix was to sharpen the predicate (the two calls must be
+within 10 lines, since a real driver spells them adjacently; the widest real one was 6),
+not to add emit.rs to ALLOWED. An exemption entry would have made the gate quieter AND
+blinder — the next genuine driver added to that file would have inherited the exemption.
+
+**Byte-identity re-verified after the full migration**, not just after B3's flip: the same
+329-fixture capture still matches the pre-migration baseline exactly.
+
+**Build-time delta (S5)**: `almide build examples/almide-grep.almd -o /dev/null`, warm,
+0.24s. The pre-migration figure is not separable from cache state on this machine, so the
+honest claim is the STRUCTURAL one — `compile_to_wasm_bytes` no longer builds an IR it
+discards — rather than a wall-clock number that would not reproduce. The discard line itself
+is the one piece of S2 that remains (see below).
+
 ## Notes
 
 - Started while Unit 0.42's B5 is calendar-bound: the green streak needs 2 consecutive
@@ -155,8 +182,15 @@ out here would have meant touching `pipeline.rs` twice.
 
 ## Unit completion
 
-- [ ] Every Bolt done with evidence
-- [ ] The evidence satisfies the plan's done-criteria (state which evidence maps to which criterion)
+- [x] Every Bolt done with evidence
+- [x] The evidence satisfies the plan's done-criteria — S1/S3 → `almide-driver` + an empty
+      `MIGRATION_BACKLOG`; S4 → `tests/one_driver_test.rs` (the #785 class is now
+      unrepresentable: no second file may spell the order, and the driver's own order is
+      pinned); byte-identity → 329/329 twice, across the flip and after the full migration
+- [ ] S2's renderer entry point: `compile_to_wasm_bytes` still holds the discard line
+      (`src/cli/build.rs:596`). The renderer accepting an already-built `IrProgram` is a
+      change to `almide_mir::pipeline`'s public entry, deliberately left as its own piece
+      rather than smuggled into a plumbing Unit
 - [ ] Release v0.43.0 (ordinary minor — automatic)
 
 ## Retrospective (Try)
