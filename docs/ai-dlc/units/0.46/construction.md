@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | B1 | Choose the program and write down why | The shape and rough module layout are concrete; the rejected candidates carry their reason | **done** | Below |
 | B2 | Skeleton: module/package layout, builds green, ~1k lines. Record build time | — | **first subcommand done, byte-identical** | `tools/almide-gates/` (2 modules, ~190 lines); output matches `LC_ALL=C bash docs/roadmap/generate-readme.sh` exactly — 390 lines, 59,262 bytes |
-| B3 | Grow to ~5k lines of working functionality. Record build time | — | pending | — |
+| B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
 | B4 | Reach ~10k lines. Record build time; plot against the assumed linear | — | pending | — |
 | B5 | Resolve #1003's and #1002's triggers with the measured numbers | — | pending | — |
 
@@ -193,6 +193,36 @@ is worth reading before starting rather than rediscovering.
 
 `output-parity.sh` and `fuzz-track-record.sh` need no TOML, so they can land in parallel if
 the TOML work stalls. Recording that so the next session is not forced into a single chain.
+
+### B3 result — the reader works on the real ledger
+
+`tools/almide-gates/src/toml/mod.almd`: a three-state line scanner for the measured subset,
+with 5 tests. Run against the actual `docs/contracts/contracts.toml`:
+
+```
+tables: 200
+first id: C-001
+first evidence key: evidence  items: 3
+total evidence items: 369
+```
+
+**200 and 369 match the counts taken independently with `grep`** before the reader existed —
+which is the check that matters, because a parser that silently drops or duplicates blocks
+would still print a plausible number.
+
+Two design notes worth keeping:
+
+- **The narrowness is deliberate and stated in the file's header.** It is a reader for the
+  subset the ledger uses, not a TOML parser, and anyone reaching for general TOML should
+  write a general parser rather than widen this one. A file that says what it is NOT is
+  cheaper than one that quietly grows into something nobody audits.
+- **The scanner threads state as arguments** rather than a mutable cursor, which is the shape
+  CHEATSHEET recommends over `var i` + `while`. Writing it the recommended way was also the
+  easier way here — the three states are the three argument shapes.
+
+One language friction: `then (` followed by a newline is a parse error; the block form
+`then { … }` is required. Not a bug, but the diagnostic (`Expected expression … got Newline`)
+does not suggest the fix.
 
 ### State for the next session
 
