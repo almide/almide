@@ -1,0 +1,167 @@
+{
+  "repo_notes": [
+    {
+      "content": "Removed subsystems — never document these as current features. (1) The TypeScript/JavaScript codegen target was permanently removed in March 2026; the playground now runs on the WASM target. Almide is dual-target — Rust and WebAssembly — plus a WGSL compute-shader emitter. Any page or section describing a TypeScript target is wrong. (2) The unverified v0 WASM emitter was retired (issue #782): `--target wasm` has exactly one path, the verified v1 MIR renderer in crates/almide-mir; a wall is a hard diagnosed error, there is no fallback emitter. (3) The old stdlib codegen pipeline (stdlib/defs/*.toml) and runtime/rust/ no longer exist. The stdlib is self-hosted: pure-Almide .almd files in stdlib/, registered in crates/almide-types/src/self_host_registry.rs; the only native runtime is the thin @intrinsic layer in runtime/rs/.",
+      "author": "almide maintainers"
+    },
+    {
+      "content": "Archived material — do not create pages from it or present it as an existing feature. docs/wasm/archive/ (agent-container.md, bubblewrap.md, hatch-design.md, memory-model.md, wasm3-features.md, ecosystem.md) holds historical design explorations that were superseded or never shipped; in particular there is no 'WASM agent container platform' in the product. research/benchmark/msr/ and research/benchmark/framework/ are archived — daily MSR (Modification Survival Rate) measurement and the task bank live in the separate repo almide/almide-dojo. research/spike/ is throwaway experiments.",
+      "author": "almide maintainers"
+    },
+    {
+      "content": "Authoritative sources — prefer these over inference from code or from stale docs: docs/ARCHITECTURE.md (pipeline and crate map), docs/CHEATSHEET.md (language reference), docs/specs/ (language specifications), docs/contracts/ (cross-target behavior contract ledger, C-NNN identifiers), docs/stdlib/ (per-module stdlib docs). The compiler is a pure-Rust workspace: the CLI binary in src/, 13 library crates in crates/, the cargo-excluded SIMD crate almide-kernel, and the Lean 4 proof project almide-perceus-belt. proofs/ is a Coq development with an extracted OCaml checker.",
+      "author": "almide maintainers"
+    },
+    {
+      "content": "Framing: Almide's mission is to be the language LLMs can write most accurately; every design decision is judged by modification survival rate. Cross-target equivalence (native Rust vs wasm32: identical stdout, stderr, exit code) is a core promise, enforced by a 3-way oracle (native, WASM, and the almide-interp tree-walking interpreter) plus the contract ledger in docs/contracts/. This repo owns compiler correctness; LLM-writability measurement lives in almide/almide-dojo.",
+      "author": "almide maintainers"
+    }
+  ],
+  "pages": [
+    {
+      "title": "Overview",
+      "purpose": "Introduce Almide: a programming language designed so LLMs can write it accurately, with modification survival rate as the guiding metric. Cover the repository layout, the dual compilation targets (Rust and WebAssembly), the .almd source format, and the division of labor with the almide/almide-dojo repo.",
+      "parent": null
+    },
+    {
+      "title": "Language Reference & Syntax",
+      "purpose": "The .almd language from docs/CHEATSHEET.md, docs/GRAMMAR.md, and docs/specs/: bindings, functions, match, pipes, UFCS, string interpolation, heredocs, Option/Result operators (??, ?, !), effect fn, test blocks, and idiomatic style rules.",
+      "parent": null
+    },
+    {
+      "title": "Getting Started & CLI",
+      "purpose": "Installation (make install) and the almide CLI subcommands implemented in src/main.rs and src/cli/: init, run, build, test, check, fmt, compile, clean, add, deps, dep-path, lsp, ide, explain, and the REPL. Include --target rust|wasm|wgsl usage and passing program arguments after --.",
+      "parent": null
+    },
+    {
+      "title": "Compiler Architecture",
+      "purpose": "The end-to-end pipeline from docs/ARCHITECTURE.md: lexer → parser → AST → type checker → typed IR lowering → optimize/monomorphize/ir_link → per-target backends, and the workspace crate map (almide-base, almide-syntax, almide-types, almide-lang, almide-frontend, almide-ir, almide-mir, almide-optimize, almide-codegen, almide-interp, almide-tools, almide-dialect, almide-egg-lab).",
+      "parent": null
+    },
+    {
+      "title": "Frontend: Lexer, Parser & AST",
+      "purpose": "Lexing, recursive-descent parsing, and the untyped AST in crates/almide-syntax; symbol interning, spans, and diagnostics primitives in crates/almide-base; AST→typed-IR lowering and canonicalization in crates/almide-frontend.",
+      "parent": "Compiler Architecture"
+    },
+    {
+      "title": "Type System & Checker",
+      "purpose": "Constraint-based inference (Infer → Solve → Resolve) in crates/almide-frontend, unification and protocol definitions in crates/almide-types, UFCS method dispatch via builtin_module_for_type, and the desugaring of pipes, UFCS, and string interpolation during lowering so codegen never sees them.",
+      "parent": "Compiler Architecture"
+    },
+    {
+      "title": "Typed IR & Optimization",
+      "purpose": "The typed IR (IrProgram/IrExpr where every node carries its type, VarId/VarTable, visitors) in crates/almide-ir, and the passes in crates/almide-optimize: monomorphization, dead-code elimination, constant propagation, stream fusion, and ir_link.",
+      "parent": "Compiler Architecture"
+    },
+    {
+      "title": "Code Generation",
+      "purpose": "Overview of the backends: codegen v3 for the Rust target, the verified MIR trust-spine for WASM, and the WGSL compute-shader emitter. Emphasize the design rule that all semantic decisions are made in IR passes before any text is emitted.",
+      "parent": null
+    },
+    {
+      "title": "Rust Target: Codegen v3",
+      "purpose": "The three-layer Rust backend in crates/almide-codegen: nanopass pipeline (pass_*.rs semantic rewrites such as StdlibLowering, ResultPropagation, CloneInsertion, BuiltinLowering, FanLowering), the TOML template renderer driven by codegen/templates/rust.toml, and the target-agnostic walker. Cover effect fn → Result<T, String> lowering with automatic ? propagation and the almide_eq! equality macro.",
+      "parent": "Code Generation"
+    },
+    {
+      "title": "WASM Target: Verified MIR Trust-Spine",
+      "purpose": "The v1 MIR pipeline in crates/almide-mir (#![forbid(unsafe_code)]): linked IR → MIR → WAT → wat assembly, Perceus-style ownership and reference counting, linear memory + WASI, self-hosted stdlib linking via crates/almide-types/src/self_host_registry.rs, and walls as hard diagnosed errors. This is the only WASM path — the unverified v0 emitter was retired. Also cover the opt-in --wasm-opt with its differential parity gate.",
+      "parent": "Code Generation"
+    },
+    {
+      "title": "WGSL / GPU Compute Target",
+      "purpose": "The emit_wgsl backend in crates/almide-codegen that lowers Almide to WGSL compute shaders, and how --target wgsl fits alongside the Rust and WASM targets.",
+      "parent": "Code Generation"
+    },
+    {
+      "title": "Standard Library",
+      "purpose": "The self-hosted stdlib: ~280 pure-Almide modules in stdlib/*.almd, the module registry and bundled sources in crates/almide-types/src/stdlib_info.rs, auto-import rules (the import_table.rs seed plus AUTO_IMPORT_BUNDLED), and the two consumption paths — native signature/template embedding versus WASM self-host compilation. The former stdlib/defs/*.toml generation pipeline no longer exists.",
+      "parent": null
+    },
+    {
+      "title": "Stdlib Module Catalog",
+      "purpose": "Tour of the stdlib modules documented in docs/stdlib/: string, int, float, bool, list, map, set, math, datetime, bytes, sized integers, value, error, args, and the explicit-import modules json, fs, http, env, io, random, regex, process, testing. Group them as auto-imported versus explicit-import.",
+      "parent": "Standard Library"
+    },
+    {
+      "title": "Native Intrinsics (runtime/rs)",
+      "purpose": "The thin native runtime: @intrinsic(\"almide_rt_*\") declarations inside stdlib .almd files dispatch to hand-written Rust in runtime/rs/src/, embedded by almide-codegen/build.rs. Explain when a native intrinsic is justified versus a pure-Almide implementation.",
+      "parent": "Standard Library"
+    },
+    {
+      "title": "Codec & Serialization",
+      "purpose": "The Codec system (stdlib/codec_encode.almd, stdlib/codec_decode.almd): encoding/decoding across records, variants, lists, options and defaults, its type-coverage matrix, and JSON interop via the json module.",
+      "parent": "Standard Library"
+    },
+    {
+      "title": "Module & Package System",
+      "purpose": "How Almide programs are organized into modules and packages, following docs/specs/module-system.md and docs/specs/package-system.md.",
+      "parent": null
+    },
+    {
+      "title": "Module System & Interfaces",
+      "purpose": "import declarations, submodules, diamond dependencies, module resolution in src/resolve.rs, per-module namespaces through check/lower/codegen, and the module interface (.almdi) produced by almide compile in crates/almide-tools, including permissions.",
+      "parent": "Module & Package System"
+    },
+    {
+      "title": "Package System & Dependencies",
+      "purpose": "almide.toml and PkgId (src/project.rs), git dependency fetching (src/project_fetch.rs), minimal version selection, version coexistence, package self-reference via import self, and the almide add / deps / dep-path / clean commands.",
+      "parent": "Module & Package System"
+    },
+    {
+      "title": "Effect System & Concurrency",
+      "purpose": "How Almide tracks side effects and provides structured concurrency, and how both are preserved identically across the Rust and WASM targets.",
+      "parent": null
+    },
+    {
+      "title": "Effect Isolation & Capability System",
+      "purpose": "effect fn semantics with automatic error propagation, capability-based isolation of fs/http/env access, docs/wasm/capability-system.md, and the machine-checked capability bounds in proofs/CapabilityBound.v and proofs/CapabilityReach.v.",
+      "parent": "Effect System & Concurrency"
+    },
+    {
+      "title": "Fan Concurrency & Flow[T]",
+      "purpose": "The fan structured-concurrency construct and Flow[T] streaming: language surface, the FanLowering codegen pass, and cross-target execution behavior.",
+      "parent": "Effect System & Concurrency"
+    },
+    {
+      "title": "Testing & Quality Assurance",
+      "purpose": "The testing strategy: the spec/ tree (lang, stdlib, integration, wasm_cross), inline test blocks and *_test.almd discovery by almide test, Rust unit/integration tests under tests/, and the tiered lang → stdlib → integration flow.",
+      "parent": null
+    },
+    {
+      "title": "Test Infrastructure & 3-Way Oracle",
+      "purpose": "How fixtures run on native, on WASM (wasmtime), and on the almide-interp tree-walking interpreter, with all three required to agree on stdout, stderr, and exit code. almide-interp executes linked IR before any target lowering, shares no codegen with either backend, and serves as the executable specification.",
+      "parent": "Testing & Quality Assurance"
+    },
+    {
+      "title": "Behavior Contracts & Cross-Target Parity",
+      "purpose": "The contract ledger docs/contracts/contracts.toml: named C-NNN contracts for every observable cross-target promise, evidence classes (fixture, differential fuzz, emit-time Σ-probe, theorem), mandatory bidirectional links via // @contract: headers in spec/wasm_cross/ fixtures, enforcement by scripts/check-contracts.sh, and the proven-versus-trusted boundary in docs/contracts/proven-vs-trusted.md.",
+      "parent": "Testing & Quality Assurance"
+    },
+    {
+      "title": "Formal Verification & Trust Spine",
+      "purpose": "The verification stack: the Coq development in proofs/ (WASM encode/decode/execution model, ownership and COW safety, stack balance, termination, capability bounds) with its extracted OCaml checker and gate scripts; the Lean 4 Perceus proof belt in crates/almide-perceus-belt; and what is proven versus trusted per docs/TRUST-SPINE.md and proofs/TRUSTED_BASE.md.",
+      "parent": null
+    },
+    {
+      "title": "Diagnostics & Error Reporting",
+      "purpose": "The diagnostic format: error codes E001–E030 and E420 catalogued in docs/diagnostics/, file:line:col locations with underlined source context and an actionable hint on every error, --json output, and the role of diagnostics as the feedback loop that lets LLMs repair their own code.",
+      "parent": null
+    },
+    {
+      "title": "Tooling & Developer Experience",
+      "purpose": "almide fmt and the ALMDI module-interface tooling in crates/almide-tools, the LSP server (src/cli/lsp.rs), almide ide semantic queries for agents (outline, doc, stdlib-snapshot), the grammar/ submodule feeding the tree-sitter and TextMate generators, the REPL, and the WASM-powered playground/.",
+      "parent": null
+    },
+    {
+      "title": "Performance & Benchmarks",
+      "purpose": "Native and WASM performance: docs/BENCHMARKS.md, research/benchmark/perf and research/benchmark/lang-bench harnesses, WASM binary size and speed compared against hand-written Rust compiled to wasm32, and the cargo-excluded almide-kernel SIMD crate.",
+      "parent": null
+    },
+    {
+      "title": "LLM Writability Research",
+      "purpose": "The research program behind the mission: research/grammar-lab experiments, lang-bench cross-language comparisons, and the design ledgers docs/REJECTED_PATTERNS.md and docs/HIDDEN_OPERATIONS.md. State clearly that daily MSR measurement and the task bank live in the almide/almide-dojo repo, and that research/benchmark/msr and research/benchmark/framework here are archived.",
+      "parent": null
+    }
+  ]
+}
