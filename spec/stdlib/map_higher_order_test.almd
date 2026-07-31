@@ -271,6 +271,34 @@ test "option-valued map literal churn" {
   assert_eq(hits, 5)
 }
 
+test "list of option-maps: literal and get_or" {
+  let n1: Map[String, Bool] = ["x": true]
+  let y2: Option[Map[String, Bool]] = none
+  let xs = [
+    some(["a": true]),
+    some(n1),
+    none
+  ]
+  assert_eq(list.len(xs), 3)
+  let got = list.get_or(xs, 0, y2)
+  assert_eq(map.contains(option.unwrap_or(got, n1), "a"), true)
+}
+
+test "option-map list churn" {
+  var hits = 0
+  for i in [1, 2, 3] {
+    let m: Map[String, Bool] = ["k": true]
+    let xs = [
+      some(m),
+      some(["b": false]),
+      none
+    ]
+    assert_eq(list.len(xs), 3)
+    hits = hits + 1
+  }
+  assert_eq(hits, 3)
+}
+
 test "map.get_or and remove on a result-valued map" {
   let s0: Result[Int, String] = err("boom")
   let okv: Result[Int, String] = ok(7)

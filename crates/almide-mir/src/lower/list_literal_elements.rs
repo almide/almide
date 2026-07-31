@@ -176,7 +176,7 @@ impl LowerCtx {
             | ListElemDrop::StrMapSkv
             | ListElemDrop::StrListOpt => self.lower_heap_pair_tuple_element(e_ref),
             ListElemDrop::Closure => self.lower_lambda_list_element(e_ref, elem_ty),
-            ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop => {
+            ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop | ListElemDrop::OptMapSkv => {
                 self.lower_option_ctor_element(e_ref, elem_ty)
             }
             _ => ListElemArm::Fallthrough,

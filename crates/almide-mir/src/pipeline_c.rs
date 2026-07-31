@@ -128,6 +128,25 @@ fn runtime_entry_is_called(
                     f.ops.iter().any(|op| matches!(op, crate::Op::CallFn { name, .. } if name == call))
                 })
             });
+            // The msv/msb-family STATIC drops (`$__drop_map_msv`, `$__drop_list_omb`, …)
+            // render from DropVariant ops, not CallFn — a program whose ONLY demand on
+            // the module is a drop (a `List[Option[Map]]` literal that never calls a
+            // map.* entry, Wave 4 L6) must still pull map_msv.almd, or the rendered
+            // call dangles. Same principle as the value_core force below.
+            if entries.iter().any(|(_, c)| *c == "map.get_or_msv") {
+                const MSV_STATIC_DROPS: &[&str] =
+                    &["map_msv", "map_msb", "list_str_mss", "list_str_msb", "list_omb"];
+                any_called = any_called
+                    || functions.iter().any(|f| {
+                        f.ops.iter().any(|op| {
+                            matches!(
+                                op,
+                                crate::Op::DropVariant { ty, .. }
+                                    if MSV_STATIC_DROPS.contains(&ty.as_str())
+                            )
+                        })
+                    });
+            }
             // A Value drop renders `(call $__drop_value …)` — a value_core helper that is NOT a
             // registered call_name, so force value_core when ANY Value-drop op is present.
             if entries.iter().any(|(_, c)| *c == "value.null") {

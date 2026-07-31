@@ -261,3 +261,26 @@ fn __drop_list_str_msb(xs: List[(String, Map[String, Bool])]) -> Unit = {
   if prim.load32(h + 0) == 1 then __drop_list_str_msb_loop(h, prim.load32(h + 4), 0) else ()
   prim.rc_dec(h)
 }
+
+// The omb list drop: `List[Option[Map[String, <scalar>]]]` (Wave 4 L6) — a static
+// THREE-level sweep. Per element: the option block is a 0-or-1 DynListStr; when
+// last-ref and `len@4 == 1`, its slot-0 MAP payload key-sweeps via __drop_msb_inner
+// (the low-32 of the slot; a `none` has len 0 and owns nothing), then the option
+// block itself frees. The len-loop discipline COMPOSES: list slots → option
+// len-slot → map key slots.
+fn __drop_list_omb_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let ob = prim.load64(h + 12 + i * 8)
+    if prim.load32(ob + 0) == 1 then {
+      if prim.load32(ob + 4) == 1 then __drop_msb_inner(prim.load64(ob + 12)) else ()
+    } else ()
+    prim.rc_dec(ob)
+    __drop_list_omb_loop(h, n, i + 1)
+  }
+
+fn __drop_list_omb(xs: List[Option[Map[String, Bool]]]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_omb_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}

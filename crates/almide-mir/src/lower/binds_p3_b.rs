@@ -238,6 +238,21 @@ impl LowerCtx {
             // (B24) double-frees this shape.
             return Some(ListElemDrop::ScalarAggregate);
         }
+        // An `Option[Map[String, <scalar>]]` element (`[some(["k0": true]), some(n1),
+        // none]` — Wave 4 L6): the payload map breaks the lenlist "one-level-exact"
+        // rule (its interior owns key Strings), so it takes its OWN class with the
+        // static 3-level `$__drop_list_omb` (list → option block len-slot → the msb
+        // key sweep) instead of widening the shared `$__drop_list_lenlist` in place.
+        // Decided BEFORE the lenlist arm on purpose — lenlist_elem_class would
+        // return None for a map payload and fall to the nested-ownership wall.
+        if matches!(elem_ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
+            if o.len() == 1
+                && matches!(&o[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
+                    if b.len() == 2 && matches!(b[0], Ty::String)
+                        && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float)))
+        {
+            return Some(ListElemDrop::OptMapSkv);
+        }
         if let Some(class) = crate::lower::lenlist_elem_class(elem_ty) {
             return Some(match class {
                 crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
@@ -378,6 +393,9 @@ impl LowerCtx {
             }
             ListElemDrop::StrMapSkv => {
                 self.variant_drop_handles.insert(dst, "list_str_msb".to_string());
+            }
+            ListElemDrop::OptMapSkv => {
+                self.variant_drop_handles.insert(dst, "list_omb".to_string());
             }
             ListElemDrop::StrListOpt => {
                 self.variant_drop_handles.insert(dst, "list_str_mlo".to_string());
