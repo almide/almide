@@ -88,11 +88,23 @@ FLIPS them from order A (`ir_link` first) to order B (`ir_link` last). That is a
 behaviour-affecting change to the shipped native path, not a code move.
 
 So B3 starts by building the corpus BOTH ways and diffing, and it cannot start while a
-local fuzz campaign is running, because verifying requires swapping the installed binary and
-the campaign's own evidence rule forbids that mid-run. Concretely, in this order:
+local fuzz campaign is running.
 
-1. `make install` on the pre-migration tree; record `spec/wasm_cross` output for every fixture.
-2. Migrate `build.rs` + `commands.rs` to `almide_driver::link_ir`; `make install` again.
+**Correction to the rule as first written here.** The operation that would break a running
+campaign is `cargo build --release`, NOT `make install`. `tools/xtarget-fuzz`'s
+`resolve_almide` (main.rs:91) takes `target/release/almide` directly and only falls back to
+PATH; `make install` merely copies that file to `~/.local/bin`. So a `cargo build --release`
+mid-campaign silently swaps the compiler under a run in progress, while `cargo build` /
+`cargo test` (debug profile) are harmless. Getting this backwards would let someone
+"safely" invalidate a whole campaign's evidence — which is the same class of mistake as the
+retracted P2 bracket, so it is written down rather than remembered.
+
+Concretely, in this order:
+
+1. `cargo build --release` on the pre-migration tree; record `spec/wasm_cross` output for
+   every fixture.
+2. Migrate `build.rs` + `commands.rs` to `almide_driver::link_ir`; `cargo build --release`
+   again.
 3. Diff. Byte-identical everywhere → migrate the rest and remove the two rows from
    `MIGRATION_BACKLOG`. **Any moved byte → STOP.** That is a real semantic finding about
    `ir_link` position, it gets its own issue and contract question, and it is exactly the
