@@ -27,13 +27,13 @@ impl LowerCtx {
             IrExprKind::Record { .. } if self.aggregate_field_tys(&expr.ty).is_some() => {
                 self.try_opt_record_aggregate_payload(expr, ty)
             }
-            IrExprKind::Tuple { .. } if Self::is_all_scalar_tuple(&expr.ty) => {
+            _ if Self::is_all_scalar_tuple(&expr.ty) => {
                 self.try_opt_scalar_tuple_payload(expr, ty)
             }
-            IrExprKind::Tuple { .. } if Self::is_str_str_tuple(&expr.ty) => {
+            _ if Self::is_str_str_tuple(&expr.ty) => {
                 self.try_opt_str_str_tuple_payload(expr, ty)
             }
-            IrExprKind::Tuple { .. } if Self::is_str_int_tuple(&expr.ty) => {
+            _ if Self::is_str_int_tuple(&expr.ty) => {
                 self.try_opt_str_int_tuple_payload(expr, ty)
             }
             _ if Self::is_value_or_liststr(&expr.ty) => self.try_opt_value_or_liststr_payload(expr, ty),
@@ -126,21 +126,47 @@ impl LowerCtx {
 
     fn try_opt_scalar_tuple_payload(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
         let repr = repr_of(ty).ok()?;
-        let IrExprKind::Tuple { elements } = &expr.kind else {
-            return None;
+        // A literal `(a, b)` builds its slots directly; ANY OTHER payload expression — a
+        // call result, a var — materializes as an owned heap value via
+        // `lower_owned_heap_field`, which is exactly what the `(Int, String)` cell has
+        // always done. Without this fallback the cell was keyed by SHAPE while its sibling
+        // was keyed by TYPE, so `some(<call returning (String, Int)>)` walled while
+        // `some(<call returning (Int, String)>)` built (Wave 6 R3).
+        //
+        // The two paths are interchangeable here because `materialize_opt_str_some` takes
+        // ownership of the piece the same way regardless of who built it (`Op::Consume` +
+        // removal from `live_heap_handles`), and the drop is keyed by the payload's TYPE —
+        // a layout property — not by the construction path.
+        let piece = match &expr.kind {
+            IrExprKind::Tuple { elements } => {
+                let elements = elements.clone();
+                self.try_lower_scalar_tuple_construct(&elements)?
+            }
+            _ => self.lower_owned_heap_field(expr)?,
         };
-        let elements = elements.clone();
-        let piece = self.try_lower_scalar_tuple_construct(&elements)?;
         Some(self.materialize_opt_str_some(piece, repr))
     }
 
     fn try_opt_str_str_tuple_payload(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
         let repr = repr_of(ty).ok()?;
-        let IrExprKind::Tuple { elements } = &expr.kind else {
-            return None;
+        // A literal `(a, b)` builds its slots directly; ANY OTHER payload expression — a
+        // call result, a var — materializes as an owned heap value via
+        // `lower_owned_heap_field`, which is exactly what the `(Int, String)` cell has
+        // always done. Without this fallback the cell was keyed by SHAPE while its sibling
+        // was keyed by TYPE, so `some(<call returning (String, Int)>)` walled while
+        // `some(<call returning (Int, String)>)` built (Wave 6 R3).
+        //
+        // The two paths are interchangeable here because `materialize_opt_str_some` takes
+        // ownership of the piece the same way regardless of who built it (`Op::Consume` +
+        // removal from `live_heap_handles`), and the drop is keyed by the payload's TYPE —
+        // a layout property — not by the construction path.
+        let piece = match &expr.kind {
+            IrExprKind::Tuple { elements } => {
+                let elements = elements.clone();
+                self.try_lower_tuple_construct(&elements)?
+            }
+            _ => self.lower_owned_heap_field(expr)?,
         };
-        let elements = elements.clone();
-        let piece = self.try_lower_tuple_construct(&elements)?;
         let obj = self.materialize_opt_str_some(piece, repr);
         self.variant_drop_handles
             .insert(obj, "opt_str_str".to_string());
@@ -149,11 +175,24 @@ impl LowerCtx {
 
     fn try_opt_str_int_tuple_payload(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
         let repr = repr_of(ty).ok()?;
-        let IrExprKind::Tuple { elements } = &expr.kind else {
-            return None;
+        // A literal `(a, b)` builds its slots directly; ANY OTHER payload expression — a
+        // call result, a var — materializes as an owned heap value via
+        // `lower_owned_heap_field`, which is exactly what the `(Int, String)` cell has
+        // always done. Without this fallback the cell was keyed by SHAPE while its sibling
+        // was keyed by TYPE, so `some(<call returning (String, Int)>)` walled while
+        // `some(<call returning (Int, String)>)` built (Wave 6 R3).
+        //
+        // The two paths are interchangeable here because `materialize_opt_str_some` takes
+        // ownership of the piece the same way regardless of who built it (`Op::Consume` +
+        // removal from `live_heap_handles`), and the drop is keyed by the payload's TYPE —
+        // a layout property — not by the construction path.
+        let piece = match &expr.kind {
+            IrExprKind::Tuple { elements } => {
+                let elements = elements.clone();
+                self.try_lower_tuple_construct(&elements)?
+            }
+            _ => self.lower_owned_heap_field(expr)?,
         };
-        let elements = elements.clone();
-        let piece = self.try_lower_tuple_construct(&elements)?;
         let obj = self.materialize_opt_str_some(piece, repr);
         self.variant_drop_handles
             .insert(obj, "opt_str_int".to_string());

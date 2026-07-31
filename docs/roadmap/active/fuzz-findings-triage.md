@@ -233,7 +233,7 @@ were a surface that had been grown a point at a time.
 
 | # | seed / index | Kind | Status |
 |---|---|---|---|
-| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **fully diagnosed, fix designed, NOT yet implemented** |
+| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **FIXED for 3 of the 4 cells**; the all-scalar cell has a named remainder (below) |
 
 ### R3 — the tuple payload family is keyed three different ways
 
@@ -285,3 +285,31 @@ implementation is mechanical-with-care rather than exploratory.
 
 Probe files: `s_s1`..`s_s11` in the session scratchpad; the discriminating trio is s9
 (`(Int, String)` call result → builds), s5 (`(String, Int)` → walls), s11 (`(Int, Int)` → walls).
+
+### R3 outcome (2026-07-31)
+
+The drop-discipline risk that held this back **did not materialize, and the reason is
+checkable**: `materialize_opt_int_str_some` and `materialize_opt_str_some` are byte-for-byte
+identical except for which ownership set they register the result in. Both take the piece
+with `Op::Consume` + `live_heap_handles.retain(…)`, so the piece's construction path cannot
+affect how it is freed, and the drop is selected by the payload's TYPE — a layout property.
+That made the fallback safe rather than merely plausible.
+
+All three shape-keyed cells are now type-keyed with the `lower_owned_heap_field` fallback the
+`(Int, String)` cell always had. Verified on one binary, one run: s5 `(String, Int)`, s6 (the
+lambda form), s9 `(Int, String)`, s10 `(String, String)` all build AND agree native ⇄ wasm.
+312 spec files green (lang 159 / stdlib 112 / integration 41), plus 5 new tests including a
+churn loop, which is what would expose a refcount error if the ownership reasoning were wrong.
+
+**Named remainder — the all-scalar cell.** `(Int, Int)` (probe s11) still walls, because
+`lower_owned_heap_field` does not materialize an ALL-SCALAR tuple call result — its tuple arms
+cover heap pairs (`is_flat_heap_pair_ty`, `is_str_closure_pair_ty`,
+`is_flat_heap_scalar_pair_ty`) and an all-scalar tuple matches none of them. So the family is
+3/4 symmetric, not 4/4, and this line exists so the last cell is a named gap rather than a
+rediscovery. Closing it means teaching `lower_owned_heap_field` the all-scalar tuple call
+result, not touching the Option cells again.
+
+**The original R3 program now walls one step LATER**, on `List argument cannot be faithfully
+materialized (would borrow an empty deferred heap value)` — the `list.fold(list.sort(tmp3), …)`
+over an empty list. Still an honest wall (exit 1, no output), not wrong bytes; a different
+cell, not a regression.
