@@ -597,3 +597,40 @@ invisible until it is wrong:
 
 `almide-gates`: **~1,050 lines across eleven modules**, six byte-identical subcommands, 28
 tests. Remaining: `check-contracts` (426 lines — the one that composes everything).
+
+## Where the port stands, and what `check-contracts` needs (2026-08-01)
+
+Six of seven subcommands are done and byte-identical. The last one is
+`scripts/check-contracts.sh` — 426 lines, and unlike the others it is not one transformation
+but **ten independent checks over one parse**, each emitting its own `::error::` lines:
+
+| # | check | state |
+|---|---|---|
+| (e) | id shape `C-` + THREE digits, uniqueness, status enum, `doc=` file exists | rule pinned in `contract_audit.almd` |
+| (a) | every evidence `path` exists; class in the shared vocabulary; `fuzz` requires `n>=1` | — |
+| — | named-unit grep for `*.rs` / `*.lean` / `*.toml` and for fuzz/lean/exhaustive | — |
+| (b) | every ACTIVE contract carries evidence of class >= `fixture` | — |
+| (c)(d) | the two edge sets — ledger→fixture and `// @contract:`→contract — must be IDENTICAL | **done** in `contract_audit.almd`, both asymmetries reported separately |
+| (j) | cited source paths must not name a retired subsystem | — |
+| (f) | ids contiguous `C-001..C-NNN`, no gaps | — |
+| (f) | flagged-for-revision count is a down-only ratchet | — |
+| — | spec-keying: every contract names an ALS section, every section resolves | — |
+| — | spec-COVERAGE: every normative section is cited by >=1 contract | — |
+| (g)(h)(i) | freshness of the README claims block, the contract index, the conformance report | — |
+
+**Why it is last and not first**: it composes what the other six built. The TOML reader
+(`toml/mod.almd`), the class vocabulary (`contracts.almd`), the link symmetry
+(`contract_audit.almd`), and the two generators whose freshness it checks are all already
+byte-identical, so the remaining work is the checks themselves plus the `::error::` emission
+order — which IS the byte-identity surface, since a gate's output is a list of errors in a
+fixed sequence.
+
+**The acceptance check stays the same and is available now**: `bash scripts/check-contracts.sh`
+currently prints an OK block over 201 contracts and 330 fixtures, so every increment can be
+diffed against a real, non-trivial output rather than a constructed one. Port order that keeps
+that property: the PARSER first (it feeds everything), then the checks in the order the bash
+emits them, diffing after each.
+
+**One caution recorded from B6**: the checks are independent but their OUTPUT is not — an
+error emitted in a different order is a byte difference even when the finding is identical. So
+the port must preserve the sequence, not merely the set.
