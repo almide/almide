@@ -103,7 +103,7 @@ A `fan` block can only appear inside an `effect fn` or `test` block. Using `fan`
 fn bad() -> (Int, Int) = fan { compute_a(); compute_b() }
 ```
 
-The same check applies to `fan.map()` and `fan.race()` calls via `static_dispatch.rs`.
+The same check applies to `fan.map()` and `fan.any()` calls via `static_dispatch.rs`.
 
 ### E008: No mutable variable capture
 
@@ -141,7 +141,8 @@ effect fn example() -> Result[Unit, String] = {
 契約台帳 C-004、fixture: `spec/wasm_cross/fan_deterministic.almd`,
 `spec/wasm_cross/fan_pure_thunks.almd`):
 
-- `fan.race(thunks)` — **thunk[0] の settled 結果**(リスト順決定、wall-clock ではない)。
+- `fan.race` は 0.42.0 で撤去された(E027 トンボストーン)。決定的モデルの下では
+  `thunks[0]()` そのものであり、名前だけが言語にないタイミング意味論を約束していた。
   thunk[0] **のみ**が評価される: 副作用順序も決定的。
   (Go の select が仕様で RANDOM を要求するのと対照的な設計選択。)
 - `fan.any(thunks)` — リスト順に逐次試行し最初の Ok。副作用順序も決定的。
@@ -159,7 +160,7 @@ effect fn example() -> Result[Unit, String] = {
 (`(x) => ok(x * 10)`)— mapper の戻り型推論は thunk と違い困難なため、
 純粋 mapper は check 時に拒否される(意図的な非対称、診断改善は #547)。
 
-Test: `spec/lang/fan_test.almd`, `spec/lang/fan_race_test.almd`, `spec/lang/fan_map_test.almd`, `spec/wasm_cross/fan_pure_thunks.almd`
+Test: `spec/lang/fan_test.almd`, `spec/lang/fan_map_test.almd`, `spec/wasm_cross/fan_pure_thunks.almd`, `spec/wasm_cross/fan_block_err_list_order.almd` (C-199), `spec/wasm_cross/fan_sibling_trap.almd` (C-200)
 
 ## 6. `test` Blocks
 
