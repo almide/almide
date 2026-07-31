@@ -209,7 +209,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-179 | UInt64 reaches its full declared domain, with every observer reading the slot unsigned | 0.37.0 | active | fixture | 2 |
 | C-180 | Sized-integer +, -, * and ^ wrap at the declared width on both targets | 0.37.0 | active | fixture | 1 |
 | C-181 | args.positional returns every non-flag argument, and the args surface agrees across targets | 0.37.0 | active | fixture | 1 |
-| C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 1 |
+| C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 2 |
 | C-183 | A loop-carried append of a list-of-scalar-records executes on both targets | 0.37.0 | active | fixture | 1 |
 | C-184 | The integer `^` operator is the same total exponentiation as math.pow on both targets | 0.37.0 | active | fixture | 1 |
 | C-185 | fan.any returns the first Ok in list order on both targets, whatever position it is in | 0.37.0 | active | fixture | 1 |

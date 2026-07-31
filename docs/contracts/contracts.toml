@@ -2291,6 +2291,7 @@ since     = "0.37.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/negative_float_literal_sized.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float32_literal_excess_precision.almd", class = "fixture" },
 ]
 
 # ── NESTED SCALAR-RECORD LIST APPEND ─

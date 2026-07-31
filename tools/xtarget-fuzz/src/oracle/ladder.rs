@@ -343,10 +343,17 @@ pub fn run_ladder(
     if let Some(reference) = reference {
         if let Some(expected) = reference.evaluate(source) {
             if expected != nat_ev.stdout {
+                // Name the first differing line: without it the finding's evidence
+                // carried both TARGET outputs but never what the interp expected,
+                // so adjudicating "which judge is wrong" required rebuilding the
+                // oracle by hand (Wave 4 L3's reporting gap).
                 return Outcome::Finding(Finding {
                     rung: Rung::Run,
                     kind: FindingKind::OutputDivergence,
-                    summary: "both targets disagree with reference interpreter".into(),
+                    summary: format!(
+                        "both targets disagree with reference interpreter ({})",
+                        first_line_diff(&expected, &nat_ev.stdout)
+                    ),
                     native: Some(nat_ev),
                     wasm: Some(wasm_ev),
                 });
@@ -411,6 +418,43 @@ fn divergence_summary(native: &RunEvidence, wasm: &RunEvidence) -> String {
 /// at wasm's 4GB ceiling long before native's; both are non-terminating).
 fn native_hang_is_finding(wasm_built: bool, wasm_timed_out: bool, wasm_succeeded: bool) -> bool {
     wasm_built && !wasm_timed_out && wasm_succeeded
+}
+
+/// The first line where the interp's expected stdout and the targets' agreed stdout
+/// differ, rendered for a finding summary. A pure helper so the diff logic is
+/// unit-testable; falls back to a length note when one output is a prefix of the other.
+fn first_line_diff(expected: &str, actual: &str) -> String {
+    for (i, (e, a)) in expected.lines().zip(actual.lines()).enumerate() {
+        if e != a {
+            return format!("line {}: interp={e:?} vs targets={a:?}", i + 1);
+        }
+    }
+    format!(
+        "line counts differ: interp={} vs targets={}",
+        expected.lines().count(),
+        actual.lines().count()
+    )
+}
+
+#[cfg(test)]
+mod first_line_diff_tests {
+    use super::first_line_diff;
+
+    #[test]
+    fn names_the_first_differing_line() {
+        assert_eq!(
+            first_line_diff("a\nb\nc\n", "a\nX\nc\n"),
+            "line 2: interp=\"b\" vs targets=\"X\""
+        );
+    }
+
+    #[test]
+    fn prefix_case_reports_line_counts() {
+        assert_eq!(
+            first_line_diff("a\n", "a\nb\n"),
+            "line counts differ: interp=1 vs targets=2"
+        );
+    }
 }
 
 /// C-196's decision, extracted pure so it is unit-testable like

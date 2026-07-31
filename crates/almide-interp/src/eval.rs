@@ -66,7 +66,19 @@ impl<'a> Interpreter<'a> {
         Some(match &expr.kind {
             // ── Literals ──
             IrExprKind::LitInt { value } => Flow::val(Value::Int(*value)),
-            IrExprKind::LitFloat { value } => Flow::val(Value::Float(*value)),
+            // A Float32-typed literal narrows AT BIRTH to the value an f32 can hold,
+            // exactly as both backends do (native emits the literal as f32, wasm folds
+            // to f32.const) — the widened-carrier convention (bridge.rs "f2f32") is
+            // about the CARRIER, not which value it carries. Without this the interp
+            // read the f64 spelling of `let p: Float32 = 123456789.12345679` and cast
+            // a wrong third vote against two agreeing backends (Wave 4 L3).
+            IrExprKind::LitFloat { value } => Flow::val(Value::Float(
+                if matches!(expr.ty, almide_lang::types::Ty::Float32) {
+                    *value as f32 as f64
+                } else {
+                    *value
+                },
+            )),
             IrExprKind::LitStr { value } => Flow::val(Value::str(value.clone())),
             IrExprKind::LitBool { value } => Flow::val(Value::Bool(*value)),
             IrExprKind::Unit => Flow::val(Value::Unit),
