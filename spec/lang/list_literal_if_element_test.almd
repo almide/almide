@@ -33,3 +33,32 @@ test "if element inside a HOF condition list" {
   ], ((s) => s == "ﬁle"))
   assert_eq(hit, true)
 }
+
+test "if element with a call-valued condition" {
+  let s = "hello world"
+  let xs: List[String] = [
+    (if string.starts_with(s, "hello") then "yes" else s),
+    "tail"
+  ]
+  assert_eq(list.len(xs), 2)
+  assert_eq(list.get_or(xs, 0, ""), "yes")
+}
+
+test "if element whose else arm is a variable" {
+  let fallback = "fb"
+  let xs: List[String] = [
+    (if string.contains(fallback, "z") then "hit" else fallback),
+    "tail"
+  ]
+  assert_eq(list.get_or(xs, 0, ""), "fb")
+}
+
+test "if element nested inside the condition of another if" {
+  let r = "abc"
+  let xs: List[String] = [
+    (if string.starts_with(r, (if true then "a" else r)) then "outer" else r),
+    "z"
+  ]
+  assert_eq(list.get_or(xs, 0, ""), "outer")
+  assert_eq(list.len(xs), 2)
+}

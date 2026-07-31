@@ -191,8 +191,8 @@ the whole run). **2 unique findings**, so B4's "0 findings" criterion is NOT met
 
 | # | seed / index | Kind | Shape | Status |
 |---|---|---|---|---|
-| R1 | 1785489842024900000 / 5 | WasmBuildFailure (honest wall) | `List[String]` literal whose element is an `if` whose CONDITION is a call (`string.starts_with(r2, if true then … else r2)`). The L2 fix admitted `if` elements with a tracked Var / Bool-literal condition; a call-valued condition still declines | open |
-| R2 | 1785489842024900000 / 3132 | **Hang, native only** | `matrix.masked_multi_head_attention(q, k, v, n_heads = -2147483648)`. native hangs, wasm prints a shape and exits 0 | open — root-caused, see below |
+| R1 | 1785489842024900000 / 5 | WasmBuildFailure (honest wall) | `List[String]` literal whose element is an `if` whose CONDITION is a call | **FIXED** — the admission predicate was STRICTER than the builder it guards. `try_lower_heap_result_if` already materializes a general condition (a pure scalar, or a Bool/Int-returning pure call with heap args, freed in a per-cond frame) and rolls back as a unit when it cannot; the predicate re-stated a narrower rule ("cond must be a tracked Var or a Bool literal") and walled shapes the builder handles. Fixed by RECURSING the predicate on the arms and leaving the condition to the builder — `str_list_literal_elem_lowerable` in `binds_p3`/`binds_b.rs`. 3 spec tests |
+| R2 | 1785489842024900000 / 3132 | **Hang, native only** | `matrix.masked_multi_head_attention(q, k, v, n_heads = -2147483648)`. native hangs, wasm prints a shape and exits 0 | **FIXED** — C-198: one domain rule for the whole head-count family, defined abort on both targets, + a 4-test matrix gate. See below |
 
 ### R2 root cause — one function, two divergences, and a family that guards inconsistently
 
@@ -220,3 +220,8 @@ which is precisely the point-wise growth CLAUDE.md's API-family rule exists to p
 reports it the same way on both targets. Three current behaviours (hang / trap / silent clamp
 to 1) collapse to one. The gate is a matrix test over the family × {i32::MIN, -1, 0}, and it
 is what stops the next member from shipping unguarded.
+
+**Both Wave 5 findings closed the same day.** The lesson they share is the one CLAUDE.md's
+API-family rule already states: R2 was three point-wise answers to one question, and R1 was a
+guard restated more narrowly than the thing it guards. Neither was a missing feature — both
+were a surface that had been grown a point at a time.
