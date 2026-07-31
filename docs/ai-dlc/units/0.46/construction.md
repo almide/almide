@@ -122,8 +122,15 @@ Recorded because a dogfood's job is also to report ergonomics:
 
 ### State for the next session
 
-`tools/almide-gates/src/` is committed and type-checks. B2 resumes by fixing #1029 (or
-working around the loop shape), then diffing the output against
+**#1029 has a verified workaround** — `out = out + [one(p)!]` prints `[1, 2]` on native — so
+B2 is NOT blocked; it can proceed with explicit `!` while the checker fix lands separately.
+The fix direction is confirmed and recorded on the issue: stop unwrapping in NON-binding
+positions and require `!`, which is what this codebase already did for the `if`/`match`
+Result-ctor shape after the same class of failure. One step remains — locating which
+unification path lets `[one(p)]` satisfy `List[Int]`.
+
+`tools/almide-gates/src/` is committed and type-checks. B2 resumes by applying the `!`
+workaround, then diffing the output against
 `bash docs/roadmap/generate-readme.sh` — the byte-match is the acceptance check, and the
 first attempt at that diff was a FALSE PASS (both sides empty, because the compile error was
 swallowed and `cd` had moved the bash script's relative paths). Check both outputs are
