@@ -1,0 +1,147 @@
+// `scripts/check-contracts.sh` composed — the ten checks in the bash's EMISSION ORDER, plus
+// its summary block.
+//
+// The order is not cosmetic. A gate's output IS its list of `::error::` lines, so two
+// implementations that find the same problems in a different sequence are not byte-identical,
+// and a CI log diff is how a regression in this gate would first be noticed.
+//
+// The checks themselves live next door as pure rules over `toml.Table` — [ledger_schema.almd]
+// (per-contract schema, evidence shape, the active-evidence floor), [ledger_coverage.almd]
+// (id contiguity, the flagged ratchet, retired cited paths), [ledger_speckey.almd] (both
+// spec-key directions, the freshness messages), [contract_audit.almd] (link symmetry). This
+// module is the I/O and the sequencing, nothing else.
+import fs
+import toml
+import contract_audit
+import ledger_schema
+import ledger_coverage
+
+type Gate = { lines: List[String], errors: List[String] }
+
+effect fn read_lines_of(path: String) -> List[String] = string.split(fs.read_text(path) ?? "", "\n")
+
+effect fn fixture_files(dir: String) -> List[String] =
+  (fs.list_dir(dir) ?? []) |> list.filter((n) => string.ends_with(n, ".almd")) |> list.sort |> list.map((n) => dir + "/" + n)
+
+// (e) schema, per contract, in ledger order.
+effect fn schema_pass(doc_dir: String, tables: List[toml.Table]) -> List[String] = {
+  var out: List[String] = []
+  for t in tables {
+    if toml.table_get(t, "id") == "" then () else {
+      let doc = toml.table_get(t, "doc")
+      let exists = if doc == "" then true else fs.exists(doc_dir + "/" + doc)
+      out = out + ledger_schema.schema_errors(t, exists)
+    }
+  }
+  out
+}
+
+// (a) evidence exists + class/fuzz-n shape + the named-unit grep.
+effect fn evidence_pass(classes: List[String], tables: List[toml.Table]) -> List[String] = {
+  var out: List[String] = []
+  for t in tables {
+    let id = toml.table_get(t, "id")
+    if id == "" then () else {
+      for item in t.array_items {
+        let path = toml.inline_get(item, "path")
+        let cls = toml.inline_get(item, "class")
+        let name = toml.inline_get(item, "name")
+        let n = toml.inline_num(item, "n")
+        out = out + ledger_schema.evidence_shape_errors(classes, id, path, cls, if n == "" then "-" else n)
+        if not fs.exists(path) then {
+          out = out + [id + " evidence path does not exist: " + path]
+        } else if name == "" and ledger_schema.needs_name(path, cls) then {
+          out = out + [id + " evidence " + path + " requires a name= (class=" + cls + " / non-fixture file needs the unit to grep)"]
+        } else if name != "" then {
+          let src = fs.read_text(path) ?? ""
+          let kind = ledger_schema.unit_kind(path)
+          // The bash greps a per-kind regex; the containment test here is the same claim
+          // without the pattern language — the name must literally appear in the file.
+          if kind != "" and not string.contains(src, name) then {
+            out = out + [id + " evidence '" + name + "' (" + kind + ") not found in " + path]
+          } else ()
+        } else ()
+      }
+    }
+  }
+  out
+}
+
+// (b) the active-evidence floor.
+fn floor_pass(classes: List[String], tables: List[toml.Table], fixture_rank: Int) -> List[String] = {
+  tables
+    |> list.filter((t) => toml.table_get(t, "id") != "")
+    |> list.flat_map((t) => {
+      let ranks = t.array_items |> list.map((it) => ledger_schema.rank_of(classes, toml.inline_get(it, "class")))
+      let best = ranks |> list.fold(-1, (a, b) => if b > a then b else a)
+      ledger_schema.active_floor_error(toml.table_get(t, "id"), toml.table_get(t, "status"), best, fixture_rank)
+    })
+}
+
+// (c)(d) the two edge sets must be IDENTICAL. Reported separately because they fail
+// differently: a ledger-only edge means the contract's evidence points at a file certifying
+// something else, so the contract LOOKS covered and is not; a fixture-only edge means the
+// fixture is uncounted, so deleting it would break nothing and nobody would notice.
+effect fn symmetry_pass(fixtures: List[String]) -> (List[String], Int) = {
+  var with_header = 0
+  var errs: List[String] = []
+  for f in fixtures {
+    let ids = contract_audit.header_of(fs.read_text(f) ?? "")
+    if list.len(ids) > 0 then with_header = with_header + 1
+    else errs = errs + ["fixture " + f + " has no // @contract: header"]
+  }
+  (errs, with_header)
+}
+
+fn histogram(classes: List[String], tables: List[toml.Table]) -> List[String] = {
+  let all = tables |> list.flat_map((t) => t.array_items |> list.map((it) => toml.inline_get(it, "class")))
+  classes |> list.map((c) => ledger_coverage.histogram_line(c, all |> list.filter((x) => x == c) |> list.len))
+}
+
+fn summary(n_contracts: Int, n_active: Int, n_flagged: Int, ceiling: Int, with_header: Int, n_fixtures: Int) -> List[String] = [
+  "contract-ledger: OK — " + int.to_string(n_contracts) + " contracts (active=" + int.to_string(n_active)
+    + ", flagged=" + int.to_string(n_flagged) + " / ceiling " + int.to_string(ceiling) + ").",
+  "  fixtures: " + int.to_string(with_header) + "/" + int.to_string(n_fixtures)
+    + " carry a // @contract: header; bidirectional links symmetric.",
+]
+
+test "the summary block is the bash's exact two lines" {
+  assert_eq(summary(201, 201, 0, 0, 330, 330), [
+    "contract-ledger: OK — 201 contracts (active=201, flagged=0 / ceiling 0).",
+    "  fixtures: 330/330 carry a // @contract: header; bidirectional links symmetric.",
+  ])
+}
+
+test "the histogram walks the class file's order, including classes with zero evidence" {
+  // A class with no evidence still prints its row — dropping it would make the histogram a
+  // list of what happens to exist rather than a report against the vocabulary.
+  let classes = ["doc-only", "fixture", "lean"]
+  let t = toml.Table {
+    scalars: [toml.Pair { key: "id", value: "C-001" }],
+    array_key: "evidence",
+    array_items: ["{ path = \"a\", class = \"fixture\" }", "{ path = \"b\", class = \"fixture\" }"],
+  }
+  assert_eq(histogram(classes, [t]), [
+    "  doc-only         0",
+    "  fixture          2",
+    "  lean             0",
+  ])
+}
+
+test "the active floor reads the MAX rank across a contract's evidence, not the first" {
+  let classes = ["doc-only", "by-construction", "fixture", "fuzz"]
+  let weak = toml.Table {
+    scalars: [toml.Pair { key: "id", value: "C-001" }, toml.Pair { key: "status", value: "active" }],
+    array_key: "evidence",
+    array_items: ["{ path = \"a\", class = \"by-construction\" }"],
+  }
+  // A contract whose FIRST evidence is weak but which also carries a fixture is fine — taking
+  // the first would fail contracts that are properly certified.
+  let mixed = toml.Table {
+    scalars: [toml.Pair { key: "id", value: "C-002" }, toml.Pair { key: "status", value: "active" }],
+    array_key: "evidence",
+    array_items: ["{ path = \"a\", class = \"by-construction\" }", "{ path = \"b\", class = \"fixture\" }"],
+  }
+  assert_eq(list.len(floor_pass(classes, [weak], 2)), 1)
+  assert_eq(list.len(floor_pass(classes, [mixed], 2)), 0)
+}

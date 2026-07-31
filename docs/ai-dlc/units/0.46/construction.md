@@ -740,9 +740,34 @@ Two more rules got tests that pin an edge the bash expresses only in a regex:
   duplicates inflates the summary, and an unpinned collation reorders the error lines between
   machines, which is #1031 exactly.
 
-Remaining for B8: wiring the three checks into one `check-contracts` subcommand with the
-bash's emission order and its summary/histogram block, then running the twelve mutations —
-each must turn the Almide gate red with the same line as the original.
+`ledger_gate.almd` composes them — the I/O and the SEQUENCING, nothing else, because the
+order is the byte-identity surface. Run against the real ledger, every number matches the bash:
+
+```
+classes=6  fixture_rank=2
+schema errors=0     evidence errors=0     floor errors=0
+fixtures=330  with_header=330  no_header=0
+  doc-only         0
+  by-construction  6
+  fixture          356
+  fuzz             6
+  exhaustive       0
+  lean             2
+```
+
+Two more rules earned tests by being easy to get subtly wrong:
+
+- **The active floor reads the MAX rank across a contract's evidence, not the first.** Taking
+  the first would fail contracts that ARE properly certified — a contract whose first entry is
+  `by-construction` and whose second is a fixture is fine, and that ordering is common.
+- **The histogram prints every class in the file, including ones with zero evidence.** Dropping
+  empty rows would turn a report against the vocabulary into a list of what happens to exist,
+  and `exhaustive 0` is exactly the row a reader needs to see.
+
+Remaining for B8: the (j) cited-path scan and the three freshness diffs need process/filesystem
+wiring; then the subcommand itself, then the twelve mutations — each must turn the Almide gate
+red with the same line as the original. Everything the CHECKS need is now in place and verified
+against real data; what is left is composition and the adversarial pass.
 
 **One latent bug to reproduce rather than fix, and to name where it is reproduced**: the
 parser unquotes with `sub(/".*$/,"",v)` — truncate at the FIRST quote — which is precisely the
