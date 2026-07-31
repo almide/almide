@@ -112,6 +112,26 @@ impl LowerCtx {
             return Some(ListElemDrop::StrMapStr);
         }
         if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && (matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
+                if b.len() == 2 && matches!(b[0], Ty::String)
+                    && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float))
+                || matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
+                    if o.len() == 1 && matches!(o[0], Ty::String))
+                || matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, e)
+                    if e.len() == 2 && matches!(e[1], Ty::String)
+                        && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))
+                || matches!(&tys[1], Ty::Tuple(ts)
+                    if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::String)))))
+        {
+            // A `(String, Map[String, <scalar>])` or `(String, Option[String])` TUPLE
+            // element (the msb pairs list — both value shapes follow the len@4-counted
+            // String-slot discipline, see `is_map_msb_ty`): slot1 owns exactly its
+            // len-counted String slots — the static `$__drop_list_str_msb`
+            // (map_msv.almd) frees slot0 flat and len-sweeps the last-ref value block.
+            // Same placement rationale as StrMapStr above.
+            return Some(ListElemDrop::StrMapSkv);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
             && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
                 if b.len() == 1
                     && matches!(&b[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
@@ -219,6 +239,36 @@ impl LowerCtx {
             // full free. The OWNED route (build + Consume) — the raw-handle view trap
             // (B24) double-frees this shape.
             return Some(ListElemDrop::ScalarAggregate);
+        }
+        // An `Option[Map[String, <scalar>]]` element (`[some(["k0": true]), some(n1),
+        // none]` — Wave 4 L6): the payload map breaks the lenlist "one-level-exact"
+        // rule (its interior owns key Strings), so it takes its OWN class with the
+        // static 3-level `$__drop_list_omb` (list → option block len-slot → the msb
+        // key sweep) instead of widening the shared `$__drop_list_lenlist` in place.
+        // Decided BEFORE the lenlist arm on purpose — lenlist_elem_class would
+        // return None for a map payload and fall to the nested-ownership wall.
+        if matches!(elem_ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
+            if o.len() == 1
+                && matches!(&o[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
+                    if b.len() == 2 && matches!(b[0], Ty::String)
+                        && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float)))
+        {
+            return Some(ListElemDrop::OptMapSkv);
+        }
+        // A BARE `Map[String, <scalar>]` element (`[["k0": true], ["k1": false]]` —
+        // Wave 4 P2, reduced to `let xs: List[Map[String, Bool]] = [["k0": true]]`).
+        // Same reasoning as the `Option[Map[…]]` arm directly above, one indirection
+        // shorter: the element map's interior owns its key Strings, which breaks the
+        // lenlist "one-level-exact" rule, so it takes its own class with the static
+        // 2-level `$__drop_list_mb` (list -> the msb key sweep, which also rc_decs the
+        // element block). Decided BEFORE the lenlist arm for the same reason the
+        // Option sibling is — lenlist_elem_class returns None for a map element and it
+        // would fall through to the nested-ownership wall.
+        if matches!(elem_ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
+            if b.len() == 2 && matches!(b[0], Ty::String)
+                && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float))
+        {
+            return Some(ListElemDrop::MapSkv);
         }
         if let Some(class) = crate::lower::lenlist_elem_class(elem_ty) {
             return Some(match class {
@@ -357,6 +407,15 @@ impl LowerCtx {
             }
             ListElemDrop::StrMapStr => {
                 self.variant_drop_handles.insert(dst, "list_str_mss".to_string());
+            }
+            ListElemDrop::StrMapSkv => {
+                self.variant_drop_handles.insert(dst, "list_str_msb".to_string());
+            }
+            ListElemDrop::OptMapSkv => {
+                self.variant_drop_handles.insert(dst, "list_omb".to_string());
+            }
+            ListElemDrop::MapSkv => {
+                self.variant_drop_handles.insert(dst, "list_mb".to_string());
             }
             ListElemDrop::StrListOpt => {
                 self.variant_drop_handles.insert(dst, "list_str_mlo".to_string());

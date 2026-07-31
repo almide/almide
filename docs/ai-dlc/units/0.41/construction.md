@@ -39,5 +39,20 @@ until after 0.42 clears the findings. Deferred-work record kept on #924.
   - "3 consecutive full-budget nights" → B5 evidence (streak 3/14, three run URLs)
   - "programs/night in the run summary, build tax ~zero" → B3 evidence (`fuzz-night:` line) + B1 evidence (job split)
   - "#917 closed or residuals as Bolts" → B4 evidence (closed with evidence comment)
-- [ ] Release v0.41.0 (ordinary minor — automatic). #924 stays open until its 14-night
+- [x] Release v0.41.0 (ordinary minor — automatic): PR [#1015](https://github.com/almide/almide/pull/1015)
+      merged (74c8749f), tag pushed, [release](https://github.com/almide/almide/releases/tag/v0.41.0)
+      carries all 5 platform binaries + checksums. #924 stays open until its 14-night
       condition and carries over into 0.42
+
+## Retrospective (Try)
+
+First AI-DLC Unit. Three Trys, all applied:
+
+- T1 **An inception must verify the present state of its target** — this plan was drafted
+  from #924's text while the repair had already landed on develop; B1/B5 were done before
+  construction started. Applied: the inception template's Background hint now requires
+  checking the target's current state, not just the issue that described it.
+- T2 **A Mob wait is a watch, not an exit** — the first M0 wait stopped the loop and needed
+  a manual restart. Applied in 6454ab2f (loop waits on the mob issue under `/loop`).
+- T3 **Mob issues are written in English** — the first M0 issue was Japanese. Applied in
+  38e50619.

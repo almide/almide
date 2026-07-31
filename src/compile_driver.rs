@@ -332,11 +332,12 @@ fn typecheck_and_lower_for_compile(
 /// integrity, check `[permissions]`, monomorphize, and link dependency
 /// modules into the root. Extracted verbatim.
 fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, parsed_project: &Option<project::Project>) -> Result<(), String> {
-    // Optimize IR: constant folding + dead code elimination
+    // The driver's FIRST half (optimize + top-let reclassify). The integrity gates below
+    // deliberately run on the post-optimize, pre-mono IR, so this site takes the two halves
+    // rather than one `link_ir` call — the order still lives in `almide-driver`, and the
+    // gate insertion point is now explicit instead of implicit in a hand-copied sequence.
     if let Some(ir) = ir_program.as_mut() {
-        almide::optimize::optimize_program(ir);
-        // Reclassify top-level lets after optimization (cross-reference const detection)
-        almide::ir::reclassify_top_lets(ir);
+        almide_driver::optimize_half(ir);
     }
 
     // Verify IR integrity
@@ -351,14 +352,9 @@ fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, pars
         }
     }
 
-    // Monomorphize row-polymorphic functions (Rust target only)
+    // The driver's SECOND half (monomorphize + link), after the gates above.
     if let Some(ir) = ir_program.as_mut() {
-        almide::mono::monomorphize(ir);
-    }
-
-    // IR link: merge dependency modules into root program
-    if let Some(ir) = ir_program.as_mut() {
-        almide::ir_link::ir_link(ir);
+        almide_driver::link_half(ir);
     }
 
     Ok(())

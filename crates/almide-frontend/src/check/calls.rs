@@ -163,6 +163,33 @@ impl Checker {
                         self.record_int_literal_context(a, pty);
                     }
                 }
+                // E024, ctor-payload edition (Wave 4 N1): a literal flowing into a
+                // TUPLE-VARIANT constructor payload must fit the DECLARED payload
+                // type — `Click(<out-of-i32>, …)` with `Click(Int32, Int)` passed
+                // check while native rustc rejected the emitted literal. Ctor calls
+                // carry no `call_sig`, so none of the binding / record-field /
+                // call-arg hooks ever saw these positions; pin the declared payload
+                // type the same way (the float twin rides the same hook).
+                if call_sig.is_none() {
+                    // A capitalized ctor callee parses as TypeName, not Ident —
+                    // match both (the N1 first attempt matched Ident only and
+                    // silently never fired).
+                    let ctor_name: Option<String> = match &callee.kind {
+                        ExprKind::Ident { name, .. } => Some(name.as_str().to_string()),
+                        ExprKind::TypeName { name, .. } => Some(name.as_str().to_string()),
+                        _ => None,
+                    };
+                    if let Some(n) = ctor_name {
+                        if let Some((_, case)) = self.env.lookup_ctor(&sym(&n)) {
+                            if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
+                                if let Some(ety) = expected.get(i) {
+                                    let ety = ety.clone();
+                                    self.record_int_literal_context(a, &ety);
+                                }
+                            }
+                        }
+                    }
+                }
                 // Accumulate generic bindings from this arg so later lambda params can be pinned. Lambdas contribute nothing new here.
                 if let Some(sig) = &call_sig {
                     if let Some((_, pty)) = sig.params.get(i) {

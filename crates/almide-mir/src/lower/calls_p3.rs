@@ -234,7 +234,18 @@ impl LowerCtx {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
                 match self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, ty) {
                     Ok(dst) => Some(dst),
-                    Err(_) => {
+                    Err(e) => {
+                        // The reason was computed and then DISCARDED here, so a
+                        // caller's fallback wall could only name the shape, not the
+                        // cause (Wave 4 L2's diagnosis cost — the same
+                        // report-the-right-side lesson as #904).
+                        crate::trace::trace("ALMIDE_DBG_ANF", || {
+                            format!(
+                                "[scalar-call] {}.{} declined: {e:?}",
+                                module.as_str(),
+                                func.as_str()
+                            )
+                        });
                         self.ops.truncate(ops_mark);
                         self.live_heap_handles.truncate(lhh_mark);
                         None

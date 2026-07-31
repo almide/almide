@@ -458,6 +458,42 @@ impl Checker {
         }
     }
 
+    /// Post-solve range check for float literals at a Float32 effective type
+    /// whose magnitude exceeds f32's finite range (Wave 4 L7): check accepted
+    /// `let p: Float32 = 1e300…` while native rustc rejected the emitted
+    /// `1e300f32` ("literal out of range for f32") — a check-green build-red
+    /// split, the float sibling of the E024 integer domain. Only pre-filtered
+    /// literals (finite as f64, infinite as f32) reach here; a Float/Float64
+    /// effective type passes trivially.
+    fn validate_float_overflow_literals(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_float_overflow_checks);
+        for site in checks {
+            let eff = site
+                .context_ty
+                .clone()
+                .map(|t| resolve_ty(&t, &self.uf))
+                .or_else(|| self.type_map.get(&site.expr_id).map(|t| resolve_ty(t, &self.uf)));
+            if !matches!(eff, Some(Ty::Float32)) {
+                continue;
+            }
+            let mut diag = err(
+                format!("float literal '{}' is out of range for Float32", site.value),
+                "Float32's finite range is ±3.4028235e38; use a literal within it, \
+                 or use Float (f64) for larger magnitudes"
+                    .to_string(),
+                format!("float literal {}", site.value),
+            )
+            .with_code("E024");
+            if let Some(s) = site.span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+                if s.end_col > s.col { diag.end_col = Some(s.end_col); }
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
     /// Post-solve directional check for annotated bindings (#867): a narrow
     /// sized numeric VALUE does not flow into an `Int`/`Float` annotation —
     /// the emitted Rust would be an E0308 (i32 where i64 expected), so the

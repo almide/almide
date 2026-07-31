@@ -37,9 +37,7 @@ fn lower(src: &str) -> almide_ir::IrProgram {
     assert!(errors.is_empty(), "type errors: {:#?}", errors);
 
     let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
-    optimize::optimize_program(&mut ir);
-    mono::monomorphize(&mut ir);
-    ir_link::ir_link(&mut ir);
+    almide_driver::link_ir(&mut ir);
     ir
 }
 

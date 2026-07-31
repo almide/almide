@@ -420,21 +420,23 @@ fn noncapturing_lambda_returned_as_funcref() {
 }
 
 #[test]
-fn fan_race_and_any_inline_literal_thunk_lists() {
-    // `fan.race`/`fan.any` over a LITERAL thunk list, deterministic on wasm: race takes thunk[0]'s
-    // result (head even if it errs); any takes the FIRST Ok in order (else v0's fixed `fan.any: all
-    // candidates failed`). Both inline into a plain match chain, avoiding a List[funcref] — race the
-    // first thunk's body, any the outer arms folded into each thunk level.
+fn fan_any_inlines_a_literal_thunk_list() {
+    // `fan.any` over a LITERAL thunk list, deterministic on wasm: the FIRST Ok in list order,
+    // else the fixed `fan.any: all candidates failed`. It inlines into a plain match chain,
+    // avoiding an unrepresentable List[funcref] — the outer arms folded into each thunk level.
+    //
+    // This test also covered `fan.race`, which was REMOVED in 0.42.0 (E027 tombstone): under
+    // the deterministic model it was exactly `thunks[0]()`, so its name promised a race the
+    // language does not have. `fan.any` exercises the same literal-thunk-list lowering path.
     let src = "effect fn okn(n: Int) -> Result[Int, String] = ok(n * 3)\n\
         effect fn failing() -> Result[Int, String] = err(\"boom\")\n\
         effect fn main() -> Unit = {\n\
-        match fan.race([() => okn(10), () => okn(20)]) { ok(v) => println(\"r=\" + int.to_string(v)), err(e) => println(e) }\n\
-        match fan.race([() => failing(), () => okn(9)]) { ok(v) => println(\"ok\"), err(e) => println(\"e=\" + e) }\n\
+        match fan.any([() => okn(10), () => okn(20)]) { ok(v) => println(\"r=\" + int.to_string(v)), err(e) => println(e) }\n\
         match fan.any([() => failing(), () => okn(7)]) { ok(v) => println(\"any=\" + int.to_string(v)), err(e) => println(e) }\n\
         match fan.any([() => failing(), () => failing()]) { ok(v) => println(\"ok\"), err(e) => println(\"af=\" + e) } }\n";
     let prog = lower_source(src);
-    if let Some(out) = build_and_run("fan_race_any", &render_wasm_program(&prog)) {
-        assert_eq!(out, "r=30\ne=boom\nany=21\naf=fan.any: all candidates failed");
+    if let Some(out) = build_and_run("fan_any_literal", &render_wasm_program(&prog)) {
+        assert_eq!(out, "r=30\nany=21\naf=fan.any: all candidates failed");
     }
 }
 

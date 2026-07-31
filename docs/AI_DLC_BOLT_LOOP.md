@@ -53,6 +53,22 @@ No work starts before the plan is approved.
   - `cargo test` for the touched crates must be zero-error before pushing
   - `almide test` on the relevant spec directories for changes visible from the language or stdlib
   - `make install` after compiler changes, so the PATH binary is current
+  - `almide fmt` every NEW or EDITED `.almd` file — the fmt gate holds `spec/` and
+    `examples/` formatted, and an unformatted test file is a red CI an hour later
+    (it happened: commit abccf0b7's repair)
+  - REMOVING a language surface: sweep for it in `spec/`, `docs/`, AND the Rust sources —
+    unit tests carry `.almd` programs as inline STRING LITERALS, so a `spec/`-only sweep
+    misses them. Removing `fan.race` left
+    `crates/almide-mir/src/render_wasm/tests_part5_c.rs` referencing it and turned Trust
+    Spine red an hour later, after the same removal's spec migrations had all been done
+    carefully. Check the tombstone's own migration targets too: a hint pointing at a surface
+    the next removal deletes rots silently
+  - a NEW `spec/wasm_cross` fixture also needs the interp abstain ledger regenerated in the
+    SAME commit: `ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test -p almide --test wasm_runtime_test
+    interp_abstain_ledger`. A fixture the interpreter cannot evaluate — anything reaching a
+    `prim.*`, which every self-hosted stdlib body does — is an UNLEDGERED abstain and turns
+    CI red an hour later. This cost two repairs in one day (C-197's and C-198's fixtures),
+    which is two more than reading this line costs
 - **Two tripwires that stop the iteration:**
   - Observable cross-target behavior changes without a contract (`C-NNN`) in the same commit
     → stop, call M2
@@ -69,13 +85,26 @@ No work starts before the plan is approved.
 ## 5. Release check
 
 - When the ledger's "Unit completion" section is fully satisfied:
-  - **Ordinary minor** → release automatically: bump `Cargo.toml` → push → PR develop→main →
-    merge on green (never force-merge) → tag the merge commit → let release.yml create the
-    release → verify the 5 binaries + checksums → close the finished issues.
-    (Detailed steps: `.claude/commands/almide-release.md`)
+  - **Ordinary minor** → release automatically, as ONE set (detailed steps:
+    `.claude/commands/almide-release.md`):
+    1. Bump `Cargo.toml` (+ `Cargo.lock`) and record the release narrative in `llms.txt` —
+       rewrite the "Current stable" line, demote the old one to "Previous" — in one commit:
+       "Bump to X.Y.Z and record the release in llms.txt"
+    2. PR develop→main; merge on green (never force-merge)
+    3. Tag the merge commit; release.yml owns release creation (never `gh release create`)
+    4. Verify the 5 platform binaries + checksums are attached
+    5. **Polish the auto-generated release notes** (`gh release edit vX.Y.Z --notes`,
+       categorized per the template in `almide-release.md`) — auto-notes are a commit list,
+       not a release story; polishing is part of the release, not optional
+    6. Close the finished issues and tick the ledger's release box with the PR / tag /
+       release links as evidence
   - **Milestone (0.50 / 0.60 / 0.70 / 0.80 / 0.90)** → write the audit brief on the issue and
     call M1. Never release without approval.
-- After a release, the next iteration starts with the next Unit's plan.
+- After a release, close the Unit with a **retrospective** before leaving it: a
+  "Retrospective (Try)" section in the ledger with at least one Try — a concrete process
+  improvement — applied in the same iteration to the next Unit's plan, the templates, or
+  this procedure. A Unit without a Try was not looked at hard enough.
+- Then the next iteration starts with the next Unit's plan.
 
 ## 6. When to act next
 

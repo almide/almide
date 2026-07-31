@@ -345,6 +345,16 @@ impl Checker {
         // NET sign comes from the same walk; the `Unary` inference writes it onto
         // the site independently, and this branch keeps it in step for the site
         // it has to enqueue itself.
+        // The FLOAT twin (Wave 4 L7): pin the annotated context onto an enqueued
+        // out-of-f32-range float literal — a bare literal's own solved type stays
+        // `Float`, so `let p: Float32 = 1e300` is only decidable with the pin.
+        if let Some((fid, _v)) = super::float_literal_chain(value) {
+            if let Some(site) =
+                self.deferred_float_overflow_checks.iter_mut().find(|s| s.expr_id == fid)
+            {
+                site.context_ty = Some(declared.clone());
+            }
+        }
         let Some((id, raw, negated)) = super::int_literal_chain(value) else { return };
         if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
             site.context_ty = Some(declared.clone());

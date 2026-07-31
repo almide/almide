@@ -66,6 +66,23 @@ fn map_get_str(m: Map[String, String], k: String) -> Option[String] = {
   else __mget_str_some(h, idx)
 }
 
+// get_or on the interleaved str layout: the hit arm deep-copies the stored value
+// (the str family's copy discipline, __mget_str_some's exact load), the miss arm
+// hands back `default` — the map_get_or_hval branch shape.
+fn __mgetor_str_hit(h: Int, idx: Int) -> String = {
+  let v = prim.load_str(h + 12 + idx * 16 + 8)
+  string.repeat(v, 1)
+}
+
+fn map_get_or_str(m: Map[String, String], k: String, default: String) -> String = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let entries = n / 2
+  let idx = __mstr_find(h, entries, k, 0)
+  if idx < 0 then default
+  else __mgetor_str_hit(h, idx)
+}
+
 // Deep-copy String `s` into the result slot at `addr` (the copy is created AND consumed here —
 // no cross-branch conditional consume).
 fn __store_copy(addr: Int, s: String) -> Int = {

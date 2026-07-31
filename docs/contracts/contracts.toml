@@ -111,8 +111,8 @@ evidence  = [
 [[contract]]
 id        = "C-004"
 spec      = "ALS-R3"
-title     = "fan.race / fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle."
+title     = "fan.any / fan.map / fan.settle are deterministic by list order"
+statement = "`fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (any skips failures to find an Ok.) `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -126,14 +126,13 @@ evidence  = [
 id        = "C-005"
 spec      = "ALS-R3"
 title     = "fan error propagation surfaces as the unified main-error abort"
-statement = "The first element fn returning Err in `fan.map` (named or inline lambda), a head-Err in `fan.race`, and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) all propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134)."
+statement = "The first element fn returning Err in `fan.map` (named or inline lambda) and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) all propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_map_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_inline_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
-  { path = "spec/wasm_cross/fan_race_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
 ]
 
@@ -2291,6 +2290,7 @@ since     = "0.37.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/negative_float_literal_sized.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float32_literal_excess_precision.almd", class = "fixture" },
 ]
 
 # ── NESTED SCALAR-RECORD LIST APPEND ─
@@ -2443,4 +2443,63 @@ since     = "0.38.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/checked_conversion_value_match.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-196"
+spec      = "ALS-T6"
+title     = "Call-stack exhaustion is a resource limit, not an observable-behavior promise"
+statement = "Termination that depends on recursion depth beyond a target's call-stack resources is TARGET-DEPENDENT, and the divergence is contracted rather than silent: when one leg's optimizer legally transforms an unbounded self-recursion into iteration (LLVM's accumulator tail-recursion elimination on native — Wave 4 finding 57, a mutated C-044 fixture whose `factorial(n - -2147483648)` recursion is ~4.29e9 frames deep) while the other leg recurses faithfully and traps (`call stack exhausted` on wasmtime; `stack overflow` on the native guard page), neither leg is wrong — no finite stack absorbs the recursion, and termination-by-transformation is not a semantic promise. The convergent boundary IS promised: recursion within both targets' limits stays byte-identical (the fixture). The differential oracle classifies the one-sided stack-exhaustion case as this contracted class (ladder.rs `one_sided_stack_exhaustion`, unit-tested, mirroring the pre-existing both-legs-exhausted skip). A depth-guard normalization — a defined T6 abort at the same depth on both targets — remains the strengthening follow-up that would retire this exception."
+since     = "0.41.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/recursion_depth_within_limits.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-197"
+spec      = "ALS-T6"
+title     = "Linear-memory exhaustion is a resource limit with a defined abort"
+statement = "Allocation that exceeds a target's memory resources is TARGET-DEPENDENT, and the divergence is contracted rather than silent: wasm32's linear memory is architecturally smaller than native's 64-bit address space, so a program whose completion requires more memory than wasm32 can grow (Wave 4 L5: ~4.29e9 pushes ≈ 34 GB — native completed, wasm32 could not) diverges by RESOURCE, not semantics. What IS promised: (1) the failure shape — wasm exhaustion is the DEFINED abort `Error: out of memory` + exit 1, never an out-of-bounds fault (the $oom primitive fires on a refused memory.grow, on an i32 frontier overflow in $alloc/$alloc8, and on a cap whose byte size would wrap the $list_new multiply — the L5 layer-2 wrap class that previously ran past the memory end and read as a memory-safety bug); (2) the convergent boundary — allocation within both targets' limits stays byte-identical (the fixture). The differential oracle classifies the one-sided memory-exhaustion case as this contracted class, mirroring C-196's stack rule."
+since     = "0.41.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/allocation_within_limits.almd", class = "fixture" },
+]
+
+# ── MATRIX HEAD-COUNT DOMAIN ─
+[[contract]]
+id        = "C-198"
+spec      = "ALS-T6"
+title     = "A head count below 1 is a defined abort, identically on both targets"
+statement = "Every `matrix` entry point taking a head count (`multi_head_attention`, `masked_multi_head_attention`, `rope_rotate`/`_at`/`_neox_at`, `rms_norm_heads`, and the GQA forms taking `n_q_heads`/`n_kv_heads`) treats a head count below 1 as OUT OF DOMAIN and aborts with `Error: head count must be positive` + exit 1 on BOTH targets — the same unified abort `list.chunk` / `list.windows` / `int.rotate_*` already use, never a native hang, a wasm divide-by-zero trap, or a silent clamp. Within the domain the two targets compute byte-identically, including a head count that does not divide the model dim (the head width truncates the same way on both). This replaced THREE point-wise answers to one question, which is what Wave 5 R2 exposed: native `rope_rotate_at` clamped a negative count to 0, native `rms_norm_heads` clamped it to 1, and native `mha_core` did not guard at all — `n_heads = i32::MIN` cast to `usize` as 18446744071562067968 and the head loop HUNG, while the same program on wasm exited 0 and printed a shape. The self-hosted wasm bodies agreed with none of the three: they divided by the raw count, so 0 trapped and a negative value silently returned a zero-filled matrix of the input shape. Totality is now held by one helper per leg (`almide_rt_matrix_head_count` / `__mx_head_count`) and by a matrix gate that fails when a family member spells its own answer."
+since     = "0.42.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_head_count_domain.almd", class = "fixture" },
+  { path = "tests/matrix_head_count_domain_test.rs", class = "by-construction", name = "no_native_site_totalizes_a_head_count_on_its_own" },
+]
+
+# ── FAN BLOCK ERR IS LIST-ORDER, AND NOTHING IS CANCELLED ─
+[[contract]]
+id        = "C-199"
+spec      = "ALS-R3"
+title     = "A fan block joins every sibling and reports the first Err in list order"
+statement = "`fan { a b c }` JOINS every sibling — there is no cancellation — and the block's failure value is the FIRST `Err` in LIST ORDER, surfaced as `Error: <msg>` + exit 1 identically on both targets via the effect-main termination. Not the first to fail in wall-clock time: with two failing siblings the two rules give different answers, and the fixture pins the list-order one. Cancellation is excluded BY DESIGN under the deterministic-data-parallelism stance (#1000): how far a cancelled sibling got before it stopped is a function of scheduling, which is the dependence the model exists to remove — so a `fan` whose sibling does not terminate does not terminate, exactly as sequential evaluation would. SPEC.md §9.9 and §13.3 claimed fail-fast cancellation in two places and #1023 reported that neither was observable; the implementation was correct and the prose was corrected to match, rather than the reverse."
+since     = "0.42.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_block_err_list_order.almd", class = "fixture" },
+]
+
+# ── FAN SIBLING TRAP ─
+[[contract]]
+id        = "C-200"
+spec      = "ALS-T6"
+title     = "A trap in a fan sibling exits through the unified main-error abort, convergently"
+statement = "A runtime trap inside a `fan` sibling (division by zero, integer overflow, index out of bounds) terminates the program through the SAME unified `Error: <msg>` + exit 1 the effect-main path uses — never a native panic (101) nor a wasm trap (134) — and the two targets agree, including on what reached stdout first. In-flight siblings are NOT waited for: measured with a 1.5s-sleeping second sibling, both targets abort in ~0s with an empty stdout. This closes #1026's third complaint (the block's documented outcomes — a tuple, or the first Err in list order per C-199 — were not the only exits, and the trap exit was uncontracted). It does NOT require the per-arm output buffering the Unit's design note proposed: that was written on the assumption that the trap case diverged, and the measurement says it converges. Buffering remains the answer to a DIFFERENT question — C-004's EXCEPTION clause, where two siblings both PRINT and native interleaves by wall clock while wasm is sequential."
+since     = "0.42.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_sibling_trap.almd", class = "fixture" },
 ]

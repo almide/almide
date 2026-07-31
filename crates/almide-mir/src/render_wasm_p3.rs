@@ -50,6 +50,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   ;; integer div/mod abort messages (C-001/C-035: identical stderr + exit 1 on
   ;; BOTH targets — the native almide_div!/almide_mod! and v0-wasm __div_trap twins).
   (data (i32.const {DIVZERO_MSG_ADDR}) "Error: division by zero\n")
+  (data (i32.const {OOM_MSG_ADDR}) "Error: out of memory\n")
   (data (i32.const {OVERFLOW_MSG_ADDR}) "Error: integer overflow\n")
   (data (i32.const {BOUNDS_MSG_ADDR}) "Error: index out of bounds\n")
   ;; the fs.read_text path_open error message — a CONST byte run the Err arm copies.
@@ -84,6 +85,12 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
       (i32.const 1) (i32.const {NWRITTEN_ADDR})))
     (call $proc_exit (i32.const 1))
     (unreachable))
+  ;; $oom: the DEFINED out-of-memory abort (C-197). A failed memory.grow means the
+  ;; wasm32 linear-memory resource is exhausted; print the named line and exit 1
+  ;; instead of letting the caller store past the old end — an OOB fault reads as a
+  ;; memory-safety bug, which the trust surface cannot afford (Wave 4 L5). Uses only
+  ;; pre-reserved low memory (the iovec scratch + a data segment), safe under OOM.
+  (func $oom (call $__div_trap (i32.const {OOM_MSG_ADDR}) (i32.const 21)) (unreachable))
   ;; __main_err(s): the explicit-Result main Err protocol — v0 prints `Error: <msg>` to
   ;; STDERR and exits 1 (the native main wrapper); this writes the same three spans
   ;; (prefix / payload bytes / newline) and proc_exit(1). The prefix + newline reuse the
@@ -165,22 +172,31 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     ;; not found: bump the frontier (a genuinely fresh block)
     (local.set $p (global.get $bump))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
+    ;; A single request that OVERFLOWS the i32 frontier (p + n ≥ 2^32) can never be
+    ;; satisfied on wasm32 — and the wrapped bump would SKIP the grow check below and
+    ;; hand out a block whose writes run past the end (Wave 4 L5 layer 2: the ~34 GB
+    ;; push probe faulted at exactly the memory boundary). Unsigned wrap test.
+    (if (i32.lt_u (global.get $bump) (local.get $p))
+      (then (call $oom)))
     ;; GROW the linear memory if the new frontier passed the last allocated page. The wasm memory
     ;; starts at 1 page (64 KiB) with no max; a program that allocates more (a deep recursive
     ;; List-accumulator, a large file read) MUST grow it or the next store traps OOB. `memory.size`
     ;; returns the current page count; grow by exactly enough whole pages to cover `$bump`. This
     ;; touches ONLY the page count — no rc cell, no free-list link, no allocation identity — so the
     ;; FreeList.v / ownership accounting is unchanged (the proof surface is byte addresses below the
-    ;; frontier, which growing only extends). `memory.grow` returning -1 (host refused) leaves the
-    ;; trap-on-OOB behavior exactly as before — never a silent wrong value.
+    ;; frontier, which growing only extends). `memory.grow` returning -1 (host refused: the wasm32
+    ;; linear-memory ceiling) is a DEFINED abort — `$oom` prints "Error: out of memory" and exits 1
+    ;; — never a store past the old end (the OOB fault Wave 4 L5 observed; C-197 contracts memory
+    ;; exhaustion as a resource limit, and the abort is its honest failure shape).
     (if (i32.gt_u (global.get $bump) (i32.mul (memory.size) (i32.const 65536)))
       (then
-        (drop (memory.grow
+        (if (i32.eq (memory.grow
           (i32.add
             (i32.div_u (i32.sub (i32.sub (global.get $bump) (i32.const 1))
                                 (i32.mul (memory.size) (i32.const 65536)))
                        (i32.const 65536))
-            (i32.const 1))))))
+            (i32.const 1))) (i32.const -1))
+          (then (call $oom)))))
     (local.get $p))
 
   ;; 8-byte-ALIGNED bump alloc for TRANSIENT WASI out-param scratch (fd_out/stat/iov/
@@ -194,20 +210,31 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (local $p i32)
     (local.set $p (i32.and (i32.add (global.get $bump) (i32.const 7)) (i32.const -8)))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
+    ;; Same frontier-overflow guard as $alloc (Wave 4 L5 layer 2).
+    (if (i32.lt_u (global.get $bump) (local.get $p))
+      (then (call $oom)))
     ;; Grow the linear memory past the last page if this (possibly large — a 4 KiB readdir buffer, a
-    ;; file-content buffer) scratch alloc crossed it. Same page-count-only grow as `$alloc`.
+    ;; file-content buffer) scratch alloc crossed it. Same page-count-only grow as `$alloc`, and the
+    ;; same C-197 discipline: a refused grow is the defined `$oom` abort, never an OOB store.
     (if (i32.gt_u (global.get $bump) (i32.mul (memory.size) (i32.const 65536)))
       (then
-        (drop (memory.grow
+        (if (i32.eq (memory.grow
           (i32.add
             (i32.div_u (i32.sub (i32.sub (global.get $bump) (i32.const 1))
                                 (i32.mul (memory.size) (i32.const 65536)))
                        (i32.const 65536))
-            (i32.const 1))))))
+            (i32.const 1))) (i32.const -1))
+          (then (call $oom)))))
     (local.get $p))
 
   (func $list_new (param $len i32) (param $cap i32) (result i32)
     (local $p i32)
+    ;; A cap whose byte size (header + cap*8) would WRAP the i32 multiply is an
+    ;; unsatisfiable single block on wasm32 — without this guard the wrapped size
+    ;; under-allocates and the element stores run past the block (the mul-wrap
+    ;; sibling of the frontier-overflow guard in $alloc; Wave 4 L5 layer 2).
+    (if (i32.gt_u (local.get $cap) (i32.const 268435454))
+      (then (call $oom)))
     (local.set $p (call $alloc (i32.add (i32.const {LIST_HEADER})
                                         (i32.mul (local.get $cap) (i32.const {ELEM_SIZE})))))
     (i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))

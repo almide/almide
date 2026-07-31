@@ -233,12 +233,67 @@ impl<'a> Interpreter<'a> {
             return self.eval_hof(module, func, args, scope);
         }
 
+        // Second: is this an in-place `mut`-receiver mutator? Those must also
+        // be intercepted BEFORE the eager arg evaluation below — once the
+        // receiver is a value, the binding it came from is unrecoverable and
+        // the mutation has nowhere to land. See `inplace.rs`.
+        if crate::hofs::is_inplace_mutating_op(module.as_str(), func.as_str()) {
+            return self.eval_inplace_mutation(module, func, args, scope);
+        }
+
         // Otherwise evaluate all args eagerly, then dispatch.
         let mut evaled = Vec::with_capacity(args.len());
         for a in args {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
         self.dispatch_module_resolved(module, func, evaled)
+    }
+
+    /// An in-place `mut`-receiver mutator, evaluated as a read → transform →
+    /// write-back on the receiver's binding. Faithful only when the receiver
+    /// names a binding this frame can actually assign to; every other shape
+    /// abstains under its own name rather than dropping the effect silently.
+    fn eval_inplace_mutation(
+        &mut self,
+        module: Sym,
+        func: Sym,
+        args: &[IrExpr],
+        scope: &Scope,
+    ) -> Flow {
+        let (m, f) = (module.as_str(), func.as_str());
+        if !crate::inplace::writes_back(m, f) {
+            return Flow::Unsupported(format!(
+                "in-place byte-level buffer write `{m}.{f}` (writes a scalar into a \
+                 buffer at an offset; each carries its own bounds rule and byte \
+                 order — issue #1021)"
+            ));
+        }
+        let Some(recv) = args.first().and_then(crate::inplace::receiver_var) else {
+            return Flow::Unsupported(format!(
+                "in-place container mutation `{m}.{f}` through a non-variable receiver \
+                 (a record field / index / temporary has no single binding to write back to)"
+            ));
+        };
+        if self.mut_param_vars.contains(&recv) {
+            return Flow::Unsupported(format!(
+                "in-place container mutation `{m}.{f}` through a `mut` parameter \
+                 (the callee's frame owns the binding, so a write-back here would not \
+                 reach the caller's slot the way MutParamLoweringPass does — C-132, issue #1022)"
+            ));
+        }
+        let mut rest = Vec::with_capacity(args.len().saturating_sub(1));
+        for a in &args[1..] {
+            rest.push(val!(self.eval_expr(a, scope)));
+        }
+        // The mutation runs against the binding's own storage — `with_slot`
+        // rather than get/assign, so `Rc::make_mut` inside can keep a push loop
+        // linear. Every argument is already a value by here, so nothing under
+        // this closure re-enters the scope.
+        match scope.with_slot(recv, |slot| crate::inplace::apply(m, f, slot, rest)) {
+            Some(Some(out)) => Flow::val(out),
+            Some(None) => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
+            None => Flow::Abort(format!("internal: `{m}.{f}` on an unbound receiver")),
+        }
     }
 
     /// Dispatch a `(module, func)` whose args are already evaluated. Tiers:

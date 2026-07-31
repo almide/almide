@@ -492,6 +492,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_matrix_gather_rows" => &[false, false],
         "almide_rt_matrix_gelu" => &[false],
         "almide_rt_matrix_get" => &[false, false, false],
+        "almide_rt_matrix_head_count" => &[false],
         "almide_rt_matrix_layer_norm_rows" => &[false, false, false, false],
         "almide_rt_matrix_linear_f32_row_no_bias" => &[false, false, false, false, false],
         "almide_rt_matrix_linear_q1_0_row_no_bias" => &[false, false, false, false, false],

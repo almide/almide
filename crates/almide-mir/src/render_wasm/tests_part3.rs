@@ -575,8 +575,18 @@
     // `$__main_err` is C-035's v1 realization (the explicit-Result main Err protocol:
     // `Error: <msg>` on STDERR + proc_exit(1)) — the same diverging-stderr-writer class as
     // `$__div_trap`, pinned by C-035's spec/wasm_cross fixtures.
-    const TERMINATION_FLOOR_FNS: &[&str] =
-        &["$__div_trap", "$__chk_div", "$__chk_rem", "$__die", "$elem_addr_chk", "$__main_err"];
+    const TERMINATION_FLOOR_FNS: &[&str] = &[
+        "$__div_trap",
+        "$__chk_div",
+        "$__chk_rem",
+        "$__die",
+        "$elem_addr_chk",
+        "$__main_err",
+        // C-197: the defined out-of-memory abort — a refused memory.grow terminates
+        // with a named line instead of an OOB store (Wave 4 L5). A termination
+        // primitive by the same principle as $__div_trap.
+        "$oom",
+    ];
 
     #[test]
     fn handwritten_wasm_runtime_does_not_grow() {

@@ -27,15 +27,24 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 | Version | 大機能 | Issue |
 |---|---|---|
 | 0.41 | fuzz-nightly を毎夜使える計測器に戻す（20 夜中 1 夜の根治）。perf scoreboard/ratchet（#917）の close-out | [#924](https://github.com/almide/almide/issues/924), [#917](https://github.com/almide/almide/issues/917) |
-| 0.42 | fuzz true green — 残 findings 0 + 連続緑 2 夜 | [#796](https://github.com/almide/almide/issues/796) |
-| 0.43 | 単一ドライバ — フロントエンド 1 回実行、手同期ドライバシーケンス 6 → 1 | [#925](https://github.com/almide/almide/issues/925) |
-| 0.44 | concurrency モデルの立場決定と文書化 — structured concurrency vs data-parallel-only。cross-target 契約・cranelift 実行モデル・critical profile・仕様凍結すべての上流 | [#1000](https://github.com/almide/almide/issues/1000) |
+| 0.42 | 単一ドライバ — フロントエンド 1 回実行、手書き段順序 9 → 1。**出荷済** | [#925](https://github.com/almide/almide/issues/925) |
+| 0.43 | concurrency モデルの立場決定と、それに基づく fan 族の根治。立場は**決定的データ並列**に確定（[concurrency-stance.md](./active/concurrency-stance.md)）— `fan` はスケジューリングの構文であって意味論の構文ではない。実装: E008 の引数拡張(#1025) → `fan.race` トンボストーン(#1024) → キャンセル記述の削除(#1023) → arm 出力のリスト順フラッシュと trap 契約(#1026、C-004 の EXCEPTION 退役) | [#1000](https://github.com/almide/almide/issues/1000), [#1025](https://github.com/almide/almide/issues/1025), [#1024](https://github.com/almide/almide/issues/1024), [#1023](https://github.com/almide/almide/issues/1023), [#1026](https://github.com/almide/almide/issues/1026) |
+| 0.44 | fuzz true green — 残 findings 0 + 連続緑 2 夜 | [#796](https://github.com/almide/almide/issues/796) |
 | 0.45 | feature-gated runtime（http/zlib）の rtlib 化 — fresh dir の 8.4s 初回ビルド解消 | [#1002](https://github.com/almide/almide/issues/1002) |
 | 0.46 | 10k 行 dogfood プロジェクト着工 — スケール主張を実測に変える | [#1001](https://github.com/almide/almide/issues/1001) |
 | 0.47 | クエリ/インクリメンタル基盤 phase 1 — LSP を per-keystroke 全再解析から解放 | [#928](https://github.com/almide/almide/issues/928) |
 | 0.48 | クエリ基盤 phase 2 — ビルドパイプライン本体をクエリ上に | [#928](https://github.com/almide/almide/issues/928) |
 | 0.49 | モジュール単位コンパイルキャッシュ — クエリ fingerprint を鍵にした永続層（module rlib + typed-IR）。dogfood のフルビルド 2-3s 超がトリガー | [#1003](https://github.com/almide/almide/issues/1003) |
 | 0.50 | ゲートリリース — build-speed / runtime-perf / safety 三点セットの実測数字を README に載せ切り、0.4x 出口監査をラチェットとして発効 | [#999](https://github.com/almide/almide/issues/999) |
+
+
+> **0.42–0.44 の順序を入れ替えた（2026-07-31）。** 元は 0.42=fuzz true green /
+> 0.43=単一ドライバ / 0.44=concurrency。fuzz true green の DoD は「連続緑 2 夜」で、
+> これは作業量ではなく**観測期間**に律速される — どれだけ手を動かしても今日は閉じない。
+> 一方 単一ドライバと concurrency は完成した。ラダー自身の運用ルール
+> 「decade 内で番号が前後にずれるのは構わない — 不変条件は decade ゲートであって
+> バージョン番号ではない」に従い、完成した 2 つを先に出荷し、観測待ちの行を 0.44 へ
+> スライドした。Gate 0.50 の条件は変わっていない。
 
 **Gate 0.50**: fuzz 連続緑が常態 / dogfood フルビルドがキャッシュ効きで 2-3s 未満 / 三点の数字が public かつラチェット管理。
 
@@ -46,7 +55,7 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 | Version | 大機能 | Issue |
 |---|---|---|
 | 0.51 | QualifiedRef newtype — v1 MIR 上で bare type identity を表現不能にする（#433 クラスの型による根絶）。以後の optimizer 追加はこの型の上で行う | [#908](https://github.com/almide/almide/issues/908) |
-| 0.52 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存。optimizer 手術の前に検出器を立てる | [#912](https://github.com/almide/almide/issues/912) |
+| 0.52 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存。optimizer 手術の前に検出器を立てる。実例棚: [#1018](https://github.com/almide/almide/issues/1018)（map.fold closure の under-check） | [#912](https://github.com/almide/almide/issues/912), [#1018](https://github.com/almide/almide/issues/1018) |
 | 0.53 | wasm leg に nanopass optimizer 群を接続 | [#929](https://github.com/almide/almide/issues/929) |
 | 0.54 | wasm SIMD | [#929](https://github.com/almide/almide/issues/929) |
 | 0.55 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |
@@ -121,7 +130,7 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 
 | Version | 大機能 | Issue |
 |---|---|---|
-| 0.91 | almide-interp を第三審から規範意味論（normative semantics）へ昇格 | [#564](https://github.com/almide/almide/issues/564) |
+| 0.91 | almide-interp を第三審から規範意味論（normative semantics）へ昇格。前提は abstain 台帳を 0 に寄せること — 残る in-place 系の穴が [#1021](https://github.com/almide/almide/issues/1021)（bytes バイト単位ライタ）と [#1022](https://github.com/almide/almide/issues/1022)（mut パラメータの copy-out） | [#564](https://github.com/almide/almide/issues/564), [#1021](https://github.com/almide/almide/issues/1021), [#1022](https://github.com/almide/almide/issues/1022) |
 | 0.92 | ALS 文法・構文章 — grammar の規範化 | [#530](https://github.com/almide/almide/issues/530) |
 | 0.93 | ALS 型システム章 — 推論・単一化・protocol 制約の規範化 | [#530](https://github.com/almide/almide/issues/530) |
 | 0.94 | ALS 動的意味論章 — 0.91 で昇格した interp 準拠で記述 | [#530](https://github.com/almide/almide/issues/530) |

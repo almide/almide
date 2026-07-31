@@ -49,6 +49,8 @@ Unit は「計画書（inception.md）」と「実行台帳（construction.md）
   - 触った crate の `cargo test` がエラーゼロになってから push
   - 言語や stdlib から見える変更なら、該当ディレクトリの `almide test`
   - コンパイラを触ったら `make install`（PATH のバイナリを最新にする）
+  - **新規・編集した `.almd` は必ず `almide fmt`** — fmt ゲートが `spec/` と `examples/` の
+    整形を強制しており、未整形のテストは 1 時間後の赤 CI になる（実際になった: abccf0b7 の修理）
 - **止まるべき地雷が 2 つあります:**
   - ターゲット間で観測できる挙動が変わるのに、同じ commit に contract（C-NNN）が無い → 止めて M2
   - ratchet や wall をゆるめないと緑にならない → 止めて M4。ゆるめる操作は選択肢に無い
@@ -63,12 +65,23 @@ Unit は「計画書（inception.md）」と「実行台帳（construction.md）
 ## 5. リリース判定
 
 - 実行台帳の「Unit 完了判定」が全部埋まったら:
-  - **普通の minor** → 自動でリリースします。`Cargo.toml` を bump → push → develop→main の PR →
-    CI 緑でマージ（force-merge 禁止）→ マージ commit にタグ → release.yml に任せる →
-    バイナリ 5 個と checksums を確認 → 済んだ issue を閉じる。
-    （詳細な手順は `.claude/commands/almide-release.md`）
+  - **普通の minor** → 自動でリリースします。以下を**ワンセット**で（詳細は
+    `.claude/commands/almide-release.md`）:
+    1. `Cargo.toml`（+ `Cargo.lock`）を bump し、`llms.txt` にリリースの物語を記録する —
+       「Current stable」行を書き換え、旧行を「Previous」に降ろす — 1 コミットで:
+       "Bump to X.Y.Z and record the release in llms.txt"
+    2. develop→main の PR。CI 緑でマージ（force-merge 禁止）
+    3. マージ commit にタグ。リリース作成は release.yml の仕事（`gh release create` 禁止）
+    4. バイナリ 5 個 + checksums が付いたことを確認
+    5. **自動生成のリリースノートを磨く**（`gh release edit vX.Y.Z --notes`、
+       カテゴリ構成は `almide-release.md` のテンプレート通り）— 自動ノートはコミットの羅列で
+       あってリリースの物語ではない。磨きはリリースの一部で、任意ではない
+    6. 済んだ issue を閉じ、実行台帳のリリース欄に PR / タグ / リリースのリンクを証拠として記入
   - **節目（0.50 / 0.60 / 0.70 / 0.80 / 0.90）** → 監査ブリーフを issue に書いて M1。承認なしにリリースしない。
-- リリース後、次の iteration は次の Unit の計画書から始まります。
+- リリース後、Unit を離れる前に**振り返り**で締めます: 実行台帳に「振り返り（Try）」の節を書き、
+  Try（具体的なプロセス改善）を最低 1 つ、同じ iteration の中で次の計画書・テンプレート・この手順書の
+  どれかに反映します。Try が出ない Unit は、見方が甘かったということです。
+- そのあと、次の iteration は次の Unit の計画書から始まります。
 
 ## 6. 次にいつ動くか
 

@@ -227,9 +227,9 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
     if r.val_heap && r.key_is_string {
         return Some(if matches!(
             r.func,
-            "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
-                | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count"
-                | "fold" | "entries"
+            "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "get_or"
+                | "keys" | "values" | "len" | "is_empty" | "contains" | "all" | "any"
+                | "count" | "fold" | "entries"
         ) {
             MapName::Suffix("_str")
         } else {
@@ -320,6 +320,29 @@ fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
 /// caller chaining the deciders with `.or_else` IS the former match's top-to-bottom
 /// fall-through. Reached only with a heap key AND a heap value; the `(key_heap,
 /// val_heap)` match is kept so each arm reads exactly as it did in the one body.
+/// The msv/msb-family INNER value set, shared by the three admitted funcs below and
+/// mirrored by `is_map_msb_ty` (which owns the msb subset) — every value shape whose
+/// block is "len@4-counted low-32 String handles" under the family drops: an inner
+/// String-keyed map (String or scalar values), `Option[String]` (a 0-or-1 DynListStr),
+/// and `Result[T, String]` with T scalar or String (len-as-tag / cap-as-tag; the
+/// slot's high-32 tag is inert under the `$rc_dec (param i32)` wrap).
+fn is_msv_family_inner(v: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(v, Ty::Applied(TypeConstructorId::Map, b)
+        if b.len() == 2 && matches!(b[0], Ty::String)
+            && matches!(b[1], Ty::String | Ty::Bool | Ty::Int | Ty::Float))
+        || matches!(v, Ty::Applied(TypeConstructorId::Option, o)
+            if o.len() == 1 && matches!(o[0], Ty::String))
+        || matches!(v, Ty::Applied(TypeConstructorId::Result, e)
+            if e.len() == 2 && matches!(e[1], Ty::String)
+                && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))
+        // An all-String TUPLE value (`Map[String, (String, String)]` — Wave 4 N2):
+        // the tuple block is `DynList { len = slot count }` with every slot a String
+        // handle — the len-counted discipline verbatim.
+        || matches!(v, Ty::Tuple(ts)
+            if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::String)))
+}
+
 fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {
     use almide_lang::types::constructor::TypeConstructorId;
     let MapRoute { func, arg_tys, result_ty, .. } = r;
@@ -327,24 +350,23 @@ fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {
     // `Map[String, Map[String, String]]` get_or / from_list — the msv family
     // (map_fold_heap_acc's nested-map literal + get_or default).
     (true, true)
-        if func == "get_or"
+        if matches!(func, "get_or" | "remove")
             && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
                 if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
-                        if b.len() == 2
-                            && matches!(b[0], Ty::String)
-                            && matches!(b[1], Ty::String))) =>
+                    && is_msv_family_inner(&a[1])) =>
     {
+        // Inner Map[String,String] = msv proper; inner scalar-value map,
+        // Option[String], or Result[T, String] = the msb DROP variants. All share
+        // the handle-generic `_msv` impls (from_list/get_or/remove never inspect a
+        // value payload) — only the drop routing differs (`is_map_msb_ty` →
+        // `$__drop_map_msb` len-sweep).
         Some(MapName::Suffix("_msv"))
     }
     (true, true)
         if func == "from_list"
             && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
                 if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
-                        if b.len() == 2
-                            && matches!(b[0], Ty::String)
-                            && matches!(b[1], Ty::String))) =>
+                    && is_msv_family_inner(&a[1])) =>
     {
         Some(MapName::Suffix("_msv"))
     }

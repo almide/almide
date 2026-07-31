@@ -97,3 +97,29 @@ test "lines trailing newline ignored" {
   let ls = bytes.lines(b)
   assert_eq(list.len(ls), 2)
 }
+
+// Wave 4 P1: an out-of-range read must be +0.0 on BOTH targets even when the
+// offset OVERFLOWS the index math. The old guard `pos + k > n` wrapped negative
+// at huge pos, passed the check, and let the wasm leg read a neighbouring value
+// (native 0.0 vs wasm 2.0 — the silent-wrong-value class). The overflow-safe
+// form `pos > n - k` is what every read_* in the family now uses.
+test "bytes reads are +0.0 at an overflowing offset" {
+  let b = bytes.from_list([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ])
+  assert_eq(bytes.read_f32_le(b, 9223372036854775807), 0.0)
+  assert_eq(bytes.read_f64_le(b, 9223372036854775807), 0.0)
+  assert_eq(bytes.read_u32_le(b, 9223372036854775807), 0)
+  assert_eq(bytes.read_u16_le(b, 9223372036854775807), 0)
+  assert_eq(bytes.read_i32_le(b, 9223372036854775807), 0)
+  // The ordinary out-of-range and in-range answers are unchanged.
+  assert_eq(bytes.read_f32_le(b, 100), 0.0)
+  assert_eq(bytes.read_u16_le(b, 0), 513)
+}

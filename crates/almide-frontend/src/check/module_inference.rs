@@ -46,6 +46,7 @@ impl Checker {
         self.validate_map_key_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
+        self.validate_float_overflow_literals();
         self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
         self.current_module_prefix = saved_prefix;
@@ -94,6 +95,7 @@ impl Checker {
             self.deferred_int_overflow_checks.len(),
             self.deferred_unresolved_binding_checks.len(),
             self.deferred_numeric_narrowing_checks.len(),
+            self.deferred_float_overflow_checks.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -137,6 +139,7 @@ impl Checker {
         self.deferred_int_overflow_checks.truncate(saved_deferred_lens.6);
         self.deferred_unresolved_binding_checks.truncate(saved_deferred_lens.7);
         self.deferred_numeric_narrowing_checks.truncate(saved_deferred_lens.8);
+        self.deferred_float_overflow_checks.truncate(saved_deferred_lens.9);
     }
 
     /// Upgrade `env.top_lets` entries from the POST-solve resolution of their

@@ -1,0 +1,3 @@
+expects_code = "E027"
+expects_error = "fan.race was removed"
+hint_substring = "fan.any"

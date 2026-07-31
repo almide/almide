@@ -36,7 +36,7 @@ impl Checker {
         }
         // Built-in generic types -> stdlib module UFCS
         let builtin_module = builtin_module_for_type(&obj_concrete);
-        if let Some(ty) = self.check_call_target_builtin_ufcs(builtin_module, &field, &obj_ty, arg_tys) {
+        if let Some(ty) = self.check_call_target_builtin_ufcs(builtin_module, &field, &obj_ty, arg_tys, object, args) {
             return ty;
         }
         if let Some(ty) = self.check_call_target_convention(&obj_concrete, &field, &obj_ty, arg_tys) {
@@ -80,7 +80,28 @@ impl Checker {
         None
     }
     /// Built-in generic types -> stdlib module UFCS (`xs.len()` -> `list.len(xs)`). Verbatim text move out of [`Self::check_call_target_member`].
-    fn check_call_target_builtin_ufcs(&mut self, builtin_module: Option<&str>, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
+    /// Validate `mut`-parameter arguments for a UFCS METHOD call.
+    ///
+    /// `obj.m(a, b)` desugars to `module.m(obj, a, b)`, so the receiver is argument 0 —
+    /// and for the in-place stdlib mutators (`list.push(mut xs, x)`, `map.insert(mut m, …)`,
+    /// `bytes.set_at(mut b, …)`) argument 0 IS the `mut` parameter. The static-resolution
+    /// branch above passes only the explicit args, which is right for `module.fn(...)`
+    /// where there is no receiver; reusing that list here indexed a vector the receiver was
+    /// not in, so the receiver was never checked.
+    ///
+    /// The consequence was not a missing diagnostic. `xs.push(n)` inside a fn whose `xs`
+    /// parameter is NOT declared `mut` compiled, and then native propagated the mutation to
+    /// the caller while wasm dropped it — a checker-accepted program printing different
+    /// numbers on the two targets (#1027). The module spelling of the same body was
+    /// correctly rejected with E007 the whole time.
+    fn validate_ufcs_mut_args(&mut self, name: &str, object: &ast::Expr, args: &[ast::Expr]) {
+        let mut arg_refs: Vec<&ast::Expr> = Vec::with_capacity(args.len() + 1);
+        arg_refs.push(object);
+        arg_refs.extend(args.iter());
+        self.validate_mut_args(name, &arg_refs);
+    }
+
+    fn check_call_target_builtin_ufcs(&mut self, builtin_module: Option<&str>, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty], object: &ast::Expr, arg_exprs: &[ast::Expr]) -> Option<Ty> {
         let module = builtin_module?;
         let key = format!("{}.{}", module, field);
         if self.env.functions.contains_key(&sym(&key))
@@ -88,7 +109,11 @@ impl Checker {
         {
             let mut all_args = vec![obj_ty.clone()];
             all_args.extend(arg_tys.iter().cloned());
-            return Some(self.check_named_call(&key, &all_args));
+            let ty = self.check_named_call(&key, &all_args);
+            // `check_named_call` populated `last_mut_params`; validate BEFORE returning,
+            // with the receiver at argument 0 where the desugaring puts it.
+            self.validate_ufcs_mut_args(&key, object, arg_exprs);
+            return Some(ty);
         }
         None
     }

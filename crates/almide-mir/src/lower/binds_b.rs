@@ -255,13 +255,19 @@ impl LowerCtx {
     /// Extracted verbatim from `try_lower_str_list_literal` (codopsy r2, #852, phase 2 of 3):
     /// the former `all_lowerable` closure, arms and their order unchanged, no behavior change.
     fn str_list_literal_elems_lowerable(&self, elements: &[IrExpr], class: &StrListLiteralClass) -> bool {
+        elements.iter().all(|e| self.str_list_literal_elem_lowerable(e, class))
+    }
+
+    /// One element's admissibility. Split out of `str_list_literal_elems_lowerable` so the
+    /// `If` arm can RECURSE into its own arms instead of hard-coding what an arm may be.
+    fn str_list_literal_elem_lowerable(&self, e: &IrExpr, class: &StrListLiteralClass) -> bool {
         use almide_ir::BinOp;
         let &StrListLiteralClass {
             elem_str, elem_scalar_aggregate, elem_value, elem_str_value, elem_list_scalar,
             elem_list_flat, elem_int_str, elem_str_int, ref elem_recdrop, elem_flat_variant,
             ref elem_rich_variant, ..
         } = class;
-        elements.iter().all(|e| match &e.kind {
+        match &e.kind {
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
             // A `${...}` interpolation element (`["", "[[${emit_path(...)}]]"]` — the toml
             // emit_sections shape): a fresh owned String, moved into the slot exactly like a concat.
@@ -309,8 +315,29 @@ impl LowerCtx {
                 // same fresh-owned move-in; the list's DropListListStr reclaims it two levels deep.
                 (elem_value && is_value_ty(&e.ty)) || elem_str || elem_list_flat
             }
+            // A String-result `if` ELEMENT with LITERAL arms (`["a", (if r2 then "b" else
+            // "d")]` — Wave 4 L2's fuzz shape, reachable whenever const-fold declines to
+            // collapse the cond): lowered via the proven heap-result-if machinery.
+            // Admitted only in the shape that machinery ALWAYS lowers — both arms LitStr,
+            // the cond a tracked scalar Var or a Bool literal — so the build loop's `?`
+            // never fails mid-build (the partial-ops-leak guard the Member arm documents).
+            // An `if` ELEMENT. Admissibility is decided by the ARMS, recursively — an arm
+            // is admissible exactly when it would be admissible as a bare element, so
+            // `[if p then "a" else r2, "b"]` works for the same reason `[r2, "b"]` does.
+            //
+            // The CONDITION is deliberately NOT constrained here. `try_lower_heap_result_if`
+            // already materializes a general cond (a pure scalar, or a Bool/Int-returning
+            // pure call with heap args, whose arg temps it frees in a per-cond frame) and
+            // rolls the whole attempt back as a unit when it cannot. Re-stating a narrower
+            // rule here made the predicate STRICTER than the builder, which is what walled
+            // Wave 5 R1: `if string.starts_with(r2, …) then "Привет" else r2` has a
+            // call-valued condition and a Var arm, both of which the builder handles.
+            IrExprKind::If { then, else_, .. } => {
+                self.str_list_literal_elem_lowerable(then, class)
+                    && self.str_list_literal_elem_lowerable(else_, class)
+            }
             _ => false,
-        })
+        }
     }
 
     /// Build ONE element of an admitted string-list literal: a fresh OWNED value (or a
@@ -332,6 +359,16 @@ impl LowerCtx {
                 let obj = self.fresh_value();
                 self.ops.push(Op::Alloc { dst: obj, repr: ptr, init: Init::Str(s.clone()) });
                 obj
+            }
+            // The String-result literal-arm `if` element the pre-check admitted: one
+            // owned rc=1 String from the taken arm (the heap-result-if merge), moved
+            // into the slot like any fresh element — the caller does NOT scope-track it.
+            // The builder mirrors the admission predicate: the arms are whatever an element
+            // may be, and the condition is left to `try_lower_heap_result_if` (which rolls
+            // the attempt back as a unit if it cannot materialize one). Keeping a narrower
+            // shape here would silently decline lists the predicate admitted.
+            IrExprKind::If { cond, then, else_ } => {
+                self.try_lower_heap_result_if(cond, then, else_, &elem.ty)?
             }
             // A Var element: acquire a fresh owned reference (Dup) the list will own; the original
             // binding keeps its own reference. The dup is then Consume'd (moved) into the slot.

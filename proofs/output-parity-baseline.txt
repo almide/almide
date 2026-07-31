@@ -16,8 +16,8 @@ spec/lang/closure_capturing_wasm.almd
 spec/lang/closure_return_noncapturing_wasm.almd
 spec/lang/codec_method_roundtrip_wasm.almd
 spec/lang/codec_option_field_wasm.almd
+spec/lang/fan_any_wasm.almd
 spec/lang/fan_map_int_wasm.almd
-spec/lang/fan_race_any_wasm.almd
 spec/lang/guarded_variant_match_wasm.almd
 spec/lang/higher_order_heap_return_wasm.almd
 spec/lang/higher_order_result_traverse_wasm.almd
@@ -58,6 +58,7 @@ spec/programs/validate_age.almd
 spec/stdlib/heredoc_test.almd
 spec/wasm_cross/alias_combinator_rc.almd
 spec/wasm_cross/alias_cow.almd
+spec/wasm_cross/allocation_within_limits.almd
 spec/wasm_cross/anon_record_variant_payloads.almd
 spec/wasm_cross/anon_records_and_fusion.almd
 spec/wasm_cross/append_accumulator.almd
@@ -119,12 +120,13 @@ spec/wasm_cross/env_args.almd
 spec/wasm_cross/env_platform_reporting.almd
 spec/wasm_cross/fan_any_allfail.almd
 spec/wasm_cross/fan_any_early_winner.almd
+spec/wasm_cross/fan_block_err_list_order.almd
 spec/wasm_cross/fan_deterministic.almd
 spec/wasm_cross/fan_map_err.almd
 spec/wasm_cross/fan_map_inline_err.almd
 spec/wasm_cross/fan_map_inline_lambda.almd
 spec/wasm_cross/fan_pure_thunks.almd
-spec/wasm_cross/fan_race_err.almd
+spec/wasm_cross/fan_sibling_trap.almd
 spec/wasm_cross/fan_var_thunk_list.almd
 spec/wasm_cross/filter_map_conditional_arm.almd
 spec/wasm_cross/float_clamp_invalid.almd
@@ -244,6 +246,7 @@ spec/wasm_cross/math_log_gamma.almd
 spec/wasm_cross/math_pow.almd
 spec/wasm_cross/matrix_dims_guard.almd
 spec/wasm_cross/matrix_dims_guard_overflow.almd
+spec/wasm_cross/matrix_head_count_domain.almd
 spec/wasm_cross/memory_stress.almd
 spec/wasm_cross/mg_rebuild_two_phase.almd
 spec/wasm_cross/module_global_const.almd
@@ -290,6 +293,7 @@ spec/wasm_cross/random_int_entropy.almd
 spec/wasm_cross/rc_alloc_stress.almd
 spec/wasm_cross/rc_reclaim_churn.almd
 spec/wasm_cross/records_variants.almd
+spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/recursive_generic_repr_interp.almd
 spec/wasm_cross/reduce_str.almd
 spec/wasm_cross/regex_engine.almd

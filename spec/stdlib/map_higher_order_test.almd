@@ -224,3 +224,172 @@ test "map.get_or missing" {
   let m = ["a": 10]
   assert_eq(map.get_or(m, "z", 99), 99)
 }
+
+test "map.get_or string values existing" {
+  let m = ["a": "x", "b": "y"]
+  assert_eq(map.get_or(m, "b", "fallback"), "y")
+}
+
+test "map.get_or string values missing" {
+  let m = ["a": "x"]
+  assert_eq(map.get_or(m, "z", "fallback"), "fallback")
+}
+
+test "map.get_or nested scalar-value map" {
+  let inner: Map[String, Bool] = ["x": true]
+  let nested: Map[String, Map[String, Bool]] = [
+    "k0": ["a": false],
+    "k1": ["b": true]
+  ]
+  let hit = map.get_or(nested, "k0", inner)
+  let miss = map.get_or(nested, "zz", inner)
+  assert_eq(map.contains(hit, "a"), true)
+  assert_eq(map.contains(miss, "x"), true)
+}
+
+test "map.get_or option-valued map" {
+  let m: Map[String, Option[String]] = ["k": some("z"), "n": none]
+  assert_eq(map.get_or(m, "k", none), some("z"))
+  assert_eq(map.get_or(m, "n", some("x")), none)
+  assert_eq(map.get_or(m, "zz", some("fb")), some("fb"))
+}
+
+test "map.fold into an option-valued map accumulator" {
+  let src: Map[String, Int] = ["a": 1, "b": 2]
+  let acc0: Map[String, Option[String]] = [:]
+  let r = map.fold(src, acc0, ((acc, k, v) => ["k": some("v")]))
+  assert_eq(map.get_or(r, "k", none), some("v"))
+}
+
+test "option-valued map literal churn" {
+  var hits = 0
+  for i in [1, 2, 3, 4, 5] {
+    let m: Map[String, Option[String]] = ["k": some("z"), "n": none]
+    assert_eq(map.get_or(m, "k", none), some("z"))
+    hits = hits + 1
+  }
+  assert_eq(hits, 5)
+}
+
+test "map.get_or on a tuple-valued map" {
+  let m: Map[String, (String, String)] = ["k0": ("a", "b"), "k1": ("c", "d")]
+  let got = map.get_or(m, "k0", ("x", "y"))
+  let (l, r) = got
+  assert_eq(l + r, "ab")
+  let miss = map.get_or(m, "zz", ("x", "y"))
+  let (l2, r2) = miss
+  assert_eq(l2 + r2, "xy")
+}
+
+test "tuple-valued map literal churn" {
+  var hits = 0
+  for i in [1, 2, 3] {
+    let m: Map[String, (String, String)] = ["k": ("p", "q")]
+    let (l, r) = map.get_or(m, "k", ("x", "y"))
+    assert_eq(l + r, "pq")
+    hits = hits + 1
+  }
+  assert_eq(hits, 3)
+}
+
+test "list of option-maps: literal and get_or" {
+  let n1: Map[String, Bool] = ["x": true]
+  let y2: Option[Map[String, Bool]] = none
+  let xs = [
+    some(["a": true]),
+    some(n1),
+    none
+  ]
+  assert_eq(list.len(xs), 3)
+  let got = list.get_or(xs, 0, y2)
+  assert_eq(map.contains(option.unwrap_or(got, n1), "a"), true)
+}
+
+test "option-map list churn" {
+  var hits = 0
+  for i in [1, 2, 3] {
+    let m: Map[String, Bool] = ["k": true]
+    let xs = [
+      some(m),
+      some(["b": false]),
+      none
+    ]
+    assert_eq(list.len(xs), 3)
+    hits = hits + 1
+  }
+  assert_eq(hits, 3)
+}
+
+test "map.get_or and remove on a result-valued map" {
+  let s0: Result[Int, String] = err("boom")
+  let okv: Result[Int, String] = ok(7)
+  let m: Map[String, Result[Int, String]] = ["k0": s0, "k1": okv]
+  assert_eq(result.unwrap_or(map.get_or(m, "k1", err("d")), 0), 7)
+  assert_eq(result.unwrap_or(map.get_or(m, "k0", err("d")), 42), 42)
+  let m2 = map.remove(m, "k0")
+  assert_eq(result.unwrap_or(map.get_or(m2, "k0", ok(9)), 0), 9)
+  assert_eq(result.unwrap_or(map.get_or(m2, "k1", err("d")), 0), 7)
+}
+
+test "result-valued map literal churn" {
+  var total = 0
+  for i in [1, 2, 3] {
+    let m: Map[String, Result[Int, String]] = ["a": ok(i), "b": err("x")]
+    total = total + result.unwrap_or(map.get_or(m, "a", ok(0)), 0)
+  }
+  assert_eq(total, 6)
+}
+
+test "nested scalar-value map literal churn" {
+  var count = 0
+  for i in [1, 2, 3, 4, 5] {
+    let nested: Map[String, Map[String, Int]] = [
+      "k0": ["v": i],
+      "k1": ["w": i + 1]
+    ]
+    let d: Map[String, Int] = [:]
+    let got = map.get_or(nested, "k0", d)
+    count = count + map.get_or(got, "v", 0)
+  }
+  assert_eq(count, 15)
+}
+
+test "list of bare maps: literal, index and get_or" {
+  let xs: List[Map[String, Bool]] = [
+    ["k0": true, "k1": false],
+    ["k2": true]
+  ]
+  assert_eq(list.len(xs), 2)
+  let d: Map[String, Bool] = [:]
+  assert_eq(map.get_or(list.get_or(xs, 0, d), "k0", false), true)
+  assert_eq(map.get_or(list.get_or(xs, 0, d), "k1", true), false)
+  assert_eq(map.get_or(list.get_or(xs, 1, d), "k2", false), true)
+  assert_eq(map.get_or(list.get_or(xs, 9, d), "k0", false), false)
+}
+
+test "bare-map list literal churn" {
+  var hits = 0
+  for i in [1, 2, 3, 4, 5] {
+    let xs: List[Map[String, Int]] = [
+      ["a": i],
+      ["b": i + 1],
+      ["c": i + 2]
+    ]
+    let d: Map[String, Int] = [:]
+    hits = hits + map.get_or(list.get_or(xs, 2, d), "c", 0)
+  }
+  assert_eq(hits, 25)
+}
+
+test "bare-map list literal with a computed element" {
+  let one: Map[String, Bool] = ["x": true]
+  let xs: List[Map[String, Bool]] = [
+    one,
+    ["y": false],
+    ["z": true]
+  ]
+  let d: Map[String, Bool] = [:]
+  assert_eq(list.len(xs), 3)
+  assert_eq(map.get_or(list.get_or(xs, 0, d), "x", false), true)
+  assert_eq(map.contains(one, "x"), true)
+}

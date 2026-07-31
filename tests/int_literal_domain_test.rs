@@ -261,3 +261,59 @@ fn radix_forms_are_classified_the_same() {
         "hex past the width must be the magnitude deviation, got:\n{out}"
     );
 }
+
+/// The FLOAT sibling (Wave 4 L7): a Float32-annotated literal beyond f32's
+/// finite range passed `almide check` and native rustc then rejected the
+/// emitted `<lit>f32` ("literal out of range for f32") — the same
+/// check-vs-build gap as the sized-int cases above, at the float domain.
+/// An in-range excess-PRECISION literal stays accepted (it narrows, C-182).
+#[test]
+fn float32_range_is_checked_and_precision_is_not() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = check(dir.path(), &body("let p: Float32 = 1e100"));
+    assert!(
+        out.contains("E024") && out.contains("out of range for Float32"),
+        "an out-of-f32-range Float32 literal must be E024, got:\n{out}"
+    );
+    let out = check(dir.path(), &body("let p: Float32 = -1e100"));
+    assert!(
+        out.contains("E024") && out.contains("out of range for Float32"),
+        "the negated form must face the same range check, got:\n{out}"
+    );
+    let out = check(dir.path(), &body("let p: Float32 = 123456789.12345679"));
+    assert!(
+        !out.contains("E024"),
+        "an in-range excess-precision literal narrows and stays accepted, got:\n{out}"
+    );
+    let out = check(dir.path(), &body("let p: Float = 1e100"));
+    assert!(
+        !out.contains("E024"),
+        "a plain Float context has no f32 bound, got:\n{out}"
+    );
+}
+
+/// The CTOR-PAYLOAD edition (Wave 4 N1): a literal flowing into a tuple-variant
+/// constructor payload must fit the DECLARED payload type. `Click(4294967295, 9)`
+/// with `Click(Int32, Int)` passed `almide check` and native rustc then rejected
+/// the emitted literal ("literal out of range for i32") — ctor calls carry no
+/// call_sig, so no context hook ever saw the position. In-range payloads stay
+/// accepted, and the capitalized callee parses as TypeName (the first fix matched
+/// Ident only and silently never fired — pinned here).
+#[test]
+fn ctor_payloads_are_range_checked() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = "type Event = | Click(Int32, Int) | Quit\n\n\
+               fn main() -> Unit = {\n  let c = Click(4294967295, 9)\n  println(\"${c}\")\n}\n";
+    let out = check(dir.path(), src);
+    assert!(
+        out.contains("E024") && out.contains("out of range for Int32"),
+        "an out-of-i32-range ctor payload literal must be E024, got:\n{out}"
+    );
+    let src_ok = "type Event = | Click(Int32, Int) | Quit\n\n\
+                  fn main() -> Unit = {\n  let c = Click(2147483647, 9)\n  println(\"${c}\")\n}\n";
+    let out = check(dir.path(), src_ok);
+    assert!(
+        !out.contains("E024"),
+        "an in-range ctor payload literal stays accepted, got:\n{out}"
+    );
+}

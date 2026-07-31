@@ -97,6 +97,74 @@ implies. The F3 gate should make each structural: an Opaque that flows into a
 display/eq/observed op must wall the fn, and a self-host link must carry a
 repr-compatibility check (the `_h`/`_x` suffix discipline, mechanically).
 
+## Wave 4 (2026-07-28..30 nightly findings — the first post-revival campaigns, Unit 0.42)
+
+The 0.41 instrument revival made the campaign complete every night; these are the findings
+the completed nights recorded. Replayed and classified 2026-07-31 on develop e610331d
+(macOS; check/build-stage verdicts are host-independent).
+
+| # | Night / seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| 861 | 7/28, 1785217538023450905 | OutputDivergence | native `r15 = 100`, wasm `r15 = 0` — `result.unwrap_or_else(err, closure returning captured Float)` | **RESOLVED — attributed (B2)**: `020021df` ("Let a closure capture any scalar by reading is_heap_ty… so Float and every sized int width stop walling the lift"). The finding's closure `(s14) => r12` captures a FLOAT; before the commit the lift walled and the HOF ran with a missing closure producing the zero-filled result (wasm `r15 = 0`), after it the capture lifts and both targets read 100. Mechanism-exact match; earlier 7021f11f suspicion retracted |
+| 535 | 7/28, same seed | NativeBuildFailure | check accepted `let m: Int8 = --9223372036854775808`; rustc then rejected | **RESOLVED — attributed (B2)**: `6ac44503` ("Reach the int literal through its whole paren and unary-minus chain so a narrow annotation ranges it and the net sign decides"). C-173 (18f96604) was ALREADY in the 7/28 night's compiler but could not see through the DOUBLE unary minus; the chain walk with the net sign is exactly what rejects `--9223372036854775808` at E024. Mechanism-exact match |
+| 57 | 7/29, 1785304212462799529 | RunFailureDivergence | mutated C-044 fixture: `factorial(n - -2147483648)` — native terminates (LLVM's accumulator tail-recursion elimination turns the ~4-billion-deep non-tail recursion into a loop that wraps to ≤ 1 and unwinds); wasm recurses faithfully and traps `call stack exhausted` at ~16k frames | **CONTRACTED (2026-07-31, M2 #1017 option 1)** — C-196: call-stack exhaustion is a resource limit outside the observable-behavior promise. Convergent-boundary fixture `recursion_depth_within_limits.almd` (byte-identical at depth 1000); the oracle's `one_sided_stack_exhaustion` rule (unit-tested ×4) classifies the class as a skip, mirroring the both-legs rule; replay now reads SKIPPED naming C-196. The depth-guard normalization (same T6 abort depth on both targets) is the recorded strengthening follow-up |
+| 12 | 7/29, same seed | WasmBuildFailure | The wall named the outermost symptom ("If of Bool with a call-bearing arm"); minimization (m1–m9) proved the ROOT is elsewhere: the nested-map literal `Map[String, Map[String, Bool]]` never materializes. The msv route (`map_heap_val_nested_route`) admits only inner `Map[String, String]`, and for good reason — `$__drop_map_msv` sweeps ALL 2m inner slots as Strings, so an inner scalar-value map would be freed as garbage handles (accept-but-unsafe). The if-condition chain above it then declines all the way up to the statement wall | **FIXED (2026-07-31)** — the designed msb extension landed: `__drop_map_msb` / `__drop_list_str_msb` key-sweep drops in `map_msv.almd`, `is_map_msb_ty` type routing at both drop-registration sites + the pairs-literal `StrMapSkv` classifier arm, and the msv from_list/get_or gates widened to inner scalar-value maps (the impls are handle-generic; only the drop is type-specific). Replay CLEAN; churn spec test exercises the drop on the wasm leg. Known honest residual: `len`/`contains`/`set` on the OUTER nested map still wall (not needed by this finding) |
+| 29 | 7/30, 1785389912282950207 | WasmBuildFailure | unlinked stdlib call `map.get_or_str_wall` — the String-valued `map.get_or` variant was not in the self-host registry | **FIXED (2026-07-31)** — `map_get_or_str` twin in `stdlib/map_str.almd` (hit arm deep-copies per the str family's copy discipline, miss arm returns default per the hval branch shape), registry entry, and `get_or` admitted to the `_str` routing list in `mod_p4_e.rs`; replay CLEAN, spec test added |
+
+### Wave 4 additions (the loop-until-dry tail)
+
+Round-2 local campaign (2026-07-31, 1,283 programs / 1,093 clean / 165 raw finding events
+deduped to 2 unique classes):
+
+| # | Seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L2 | 1785460667454423000 idx 5 | WasmBuildFailure | The wall message ("if over an unresolvable condition (Call of Bool)") is a MISREPORT — the second instance of the #904 arm-decline-named-as-condition trap. Delta-debugging (p1–p8, g5a–g5f) proved a THRESHOLD interaction: the full program walls, but EVERY single simplification passes — drop r6, simplify r1's unwrap-over-nested-if chain, replace the r4 alias with r1, shorten the 5-element list, or replace the 1e-300 denormal default with 0.5. No single construct is the culprit; some lowering budget/interaction (suspected: the elided-call/caps class — the #848 lane) declines only on the combined shape | **FIXED (2026-07-31)** — the decline chain was named by two new instruments (the cond-side trace and the discarded module-call reason trace), and the root turned out to be an ABSENT MATCH ARM: `str_list_literal_elems_lowerable` had no arm for an `If` element, so `["a", (if r2 then "b" else "d")]` fell to `_ => false` → the whole literal declined → Opaque → the honest reject. The "threshold" mystery was CONST-FOLD: every simplified variant's `if` collapsed at optimization, so only the full program ever reached the missing arm. Fix: admit the String-result literal-arm `if` element (cond = tracked scalar Var or Bool literal — the shape the proven `try_lower_heap_result_if` always lowers, honoring the no-mid-build-decline guard) in both the pre-check and the element builder. Replay CLEAN; `spec/lang/list_literal_if_element_test.almd` (runtime conds so fold cannot mask the path) on the wasm leg; mir 601/0 |
+| L3 | 1785460667454423000 idx 54 | OutputDivergence vs the REFERENCE INTERPRETER | A mutated C-182 fixture (Float32/Float64 negated-literal context typing): native and wasm agree EXACTLY (7 lines, `-2.5 … 123456792.0 -1.5`) but BOTH disagree with almide-interp — either a shared-lowering bug (the class the third judge exists to catch) or an interp Float32-model gap. The replay does not print the interp's expected output — a fuzzer reporting gap to fix in passing | **FIXED (2026-07-31)** — the INTERP was the wrong judge: `let p: Float32 = 123456789.12345679` kept its f64 spelling because the interp never narrowed Float32-typed literals at birth (the widened-carrier convention narrows at the float32.* bridge, but a literal never crosses it). Both backends correctly fold to f32 (`123456792.0`). Fixed in eval.rs literal evaluation (`as f32 as f64` when `ty == Float32`); the reporting gap fixed in passing — the finding summary now names the first differing line (`first_line_diff`, unit-tested ×2); fixture `float32_literal_excess_precision.almd` added under C-182 so the 3-way gate holds the class forever. Replay CLEAN, interp tests 56/0 |
+
+| # | Source / seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L0 | 2026-07-31 local B4 campaign (707 programs, 607 clean), seed 1785458401504935000 index 0 | WasmBuildFailure | wall: "map.fold with an unliftable/closure-list higher-order argument cannot execute faithfully in this brick (walled, not mis-valued)". Minimized (t3): `map.fold` with a HEAP-map accumulator and a map-literal-returning closure | **FIXED (2026-07-31)** — the key insight: `Some(s)` for Option[String] IS a 1-element DynListStr (`materialize_opt_str_some`), so Option[String] values follow the same "len@4-counted String slots" discipline as the skv inner maps — the msb drops serve them VERBATIM. The fix is pure type-gate widening: `is_map_msb_ty`, the `StrMapSkv` pairs classifier, and the two msv routes now admit inner `Option[String]`. The fold needed nothing — `map.fold_skv_hacc` (any-heap-acc over a skv subject) already existed, and the closure lifted once its literal body lowered. Replay CLEAN; spec tests (get_or some/none/miss, fold-into-mso-acc, churn) on the wasm leg. Known residual cell: `??` over an mso `get_or` result lacks read-shape seeding (falls back honestly; recorded, not needed by L0) |
+| L1 | found while minimizing L0 (probe t1) | Checker hole (ICE, both targets) | `map.fold`'s closure argument is under-checked for a SCALAR accumulator: an ill-typed body (`Int + String` via the (k,v,acc) order mistake) passes `almide check` and dies at IR verify. list.fold and the concrete-heap-acc map.fold case both reject correctly | **FILED** — [#1018](https://github.com/almide/almide/issues/1018), assigned to the 0.52 hole-hunt row (loud, not silent; not a nightly-red risk — the generator only emits well-typed closures) |
+
+Round-3 campaign (2026-07-31, 1,304 programs / 1,108 clean / 163 raw → 1 unique):
+
+| # | Seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L4 | 1785464182375979000 idx 0 | WasmBuildFailure | `Map[String, Result[Int, String]]` values (get_or / remove) feeding `result.unwrap_or` — the STRICT-mode "scalar binding outside the value subset" refusal | **FIXED (2026-07-31)** — the recorded edit list landed verbatim: the family inner set centralized as `is_msv_family_inner` (inner String-keyed maps, Option[String], and Result[T,String] with T scalar or String — every "len@4-counted low-32 String handles" block, tag-safe under the `$rc_dec (param i32)` wrap), the three routes (get_or / remove / from_list) unified on it, `is_map_msb_ty` + the pairs classifier widened, and the NEW `map_remove_msv` (set_copy's discipline with one slot skipped) registered. One extra trap re-confirmed from the issue-sweep ledger: an rc_inc-using helper must ALSO join the `coown_names.rs` whitelist or it renders unlinked. Replay CLEAN; spec tests (ok/err get_or, remove, churn) on the wasm leg; mir 601/0 |
+
+Round-4 campaign (2026-07-31, 1,271 programs / 1,072 clean / 3 unique):
+
+| # | Seed 1785466162321453000 | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L5 | idx 985 | RunFailureDivergence | Mutated C-045: `for i in 0..<4294967295 { list.push(ys, i*2) }` (~34 GB of pushes). Native completes in its 64-bit address space; wasm32 hits the linear-memory ceiling and dies with an OOB memory fault at exactly the memory-size boundary (0x80010000) — the allocator runs PAST the end after a failed grow instead of aborting cleanly | **FIXED + CONTRACTED (2026-07-31, M2 #1019 option 1 complete)** — three layers: (1) `$oom` fires on a refused `memory.grow`; (2) the LAYER-2 ROOT was an **i32 frontier overflow** — a single ~2.1 GB request made `$bump = p + n` wrap PAST 2^32, the wrapped bump skipped the grow check, and the block's writes ran off the memory end at exactly the boundary (the observed 0x80010000 fault). Fixed with the unsigned wrap guard (`new < old → $oom`) in `$alloc`/`$alloc8` plus the cap×8 mul-wrap guard in `$list_new`; the probe now prints the defined `Error: out of memory` + exit 1; (3) C-197 landed (197 active / 0 flagged, convergent fixture `allocation_within_limits.almd` byte-identical) with the oracle's `one_sided_memory_exhaustion` skip rule (unit-tested ×3, fuzzer 26/0), mirroring C-196's stack rule |
+| L6 | idx 33 | WasmBuildFailure | The same "List argument cannot be faithfully materialized" class — the next list-element cell outside the admitted set (element kind TBD from the source) | **LIVE — classified**: a `List[Option[Map[String, Bool]]]` literal (`[some(["k0": true, …]), some(n1), …]`) chained into `list.get_or` with an Option-map default. The composition BREAKS the "len-counted String slots" discipline — a `some(map)` block's slot 0 is a MAP handle, so the flat rc_dec leaks the map's keys at last-ref; the drop needs payload ROUTING. The rails exist: `materialize_opt_aggregate_some` + the `optrec:<drop_fn>` route (`Op::DropWrapperRec`) already do exactly this for `Option[record]` — the fix is an opt-of-map sibling (payload drop_fn = the msb/skv map sweep) + the list-element admission + `list.get_or` on the element type. IMPLEMENTATION DESIGN (probed q1/q2 — the wall is the explicit nested-ownership gate in `try_lower_bind_heap_fresh_scalar_list`, binds_p2_b.rs): (1) a static 3-level drop in map_msv.almd — `__drop_list_omb` / `__drop_list_omb_loop`: per element, if the option block (1-slot DynListStr) is last-ref and `len@4 == 1`, route the slot-0 MAP payload through `__drop_msb_inner`, then rc_dec the block; (2) construction — a new `ListElemDrop::OptMapSkv` classifier arm (Tuple→Option[Map[String,scalar]] elements) + an element lowering that materializes `some(<map literal|tracked var>)` via the opt-aggregate block (map handle moved/Dup'd into slot 0) and `none` as the 0-len block, registered as drop `"list_omb"`; (3) `list.get_or` admission for the element type (the heapelem hshare route); (4) fmt'd spec tests incl. a churn. REFINED (second pass): `List[Option[String]]` / `List[Option[Int]]` literals ALREADY build — the machinery is the CtorFlat/CtorLenLoop path, gated by `lenlist_elem_class` (repr_sources_d.rs), which admits only "one-level-exact" payloads (scalar → Flat; String / flat scalar list → LenLoop via the shared generated `$__drop_list_lenlist`). Map payloads are excluded exactly because they need an interior sweep — and the msb insight COMPOSES: the len-loop discipline is recursive (option block len-slots → map len-slots → Strings), which is what the static `__drop_list_omb` expresses. Do NOT widen `lenlist_elem_class`/`$__drop_list_lenlist` in place (it would change the shared drop for existing users); add the separate `OptMapSkv` class → drop `"list_omb"`, decided BEFORE the lenlist arm in binds_p3_b's classifier (~line 243). The element payload materialization (some(map-literal)) must route the map through its from_list machinery — verify `try_lower_option_ctor`'s aggregate-payload piece reaches it, else extend the piece. **FIXED (2026-07-31, fourth pass)** — the brick turned out SMALLER than spec'd because two pieces already existed: map literals desugar to `map.from_list` calls, and the opt-ctor's computed-map piece arm (`is_str_int_map_ty` = any heap-key/scalar-value map) already materializes them (probe q6). What landed: (1) the static 3-level `__drop_list_omb` (list slots → option len-slot → the msb key sweep — the len-loop discipline COMPOSES); (2) `ListElemDrop::OptMapSkv` decided before the lenlist arm, routing to the ctor element path with drop `"list_omb"`; (3) a NEW link-trap discovered and fixed: static drops render from DropVariant ops which the demand-linker's CallFn scan cannot see — a program whose only demand on map_msv.almd is a DROP left `$__drop_list_omb` dangling; the linker now forces the module when any msv-family static-drop op is present (the value_core precedent). i33 replay CLEAN, spec tests (literal + get_or + churn) on the wasm leg, mir 601/0. [#1020](https://github.com/almide/almide/issues/1020) (the standalone `let o = some(map_var)` bind exposure) was REFUTED and closed the same day: the C-197 OOM abort made leaks observable, and three churn variants — including the hypothesized worst drop order (`keep = some(n1)`, the option outliving the map var) — ran 1.5–2M iterations with 32-byte keys and never aborted. `some(<live heap var>)` **Dups**, so the option co-owns a +1 and the flat rc_dec balances whichever side drops first. Lesson recorded: a code-reading hypothesis is not a finding — measure before filing, and today's own instrument was what settled it | 
+
+Nightly 2026-07-31 (run 30608326062, head at 05:59 UTC — includes every fix through the B2
+attribution): the campaign COMPLETED (full-budget streak 4/14) and recorded 2 findings —
+| # | Seed 1785477905242041784 | Kind | Status |
+|---|---|---|---|
+| N1 | idx 93 | NativeBuildFailure: `literal out of range for i32` | **FIXED (2026-07-31)** — the declared tuple-variant payload type is now pinned onto literal ctor args in the call-arg loop (ctor calls carry no call_sig, so no hook ever saw the position). One trap pinned in the regression test: a capitalized ctor callee parses as TypeName, not Ident — the first fix matched Ident only and silently never fired. Both repros now E024; in-range payloads stay accepted; frontend + literal-domain (8/8) + spec/lang (159) green |
+| N2 | idx 9 | WasmBuildFailure (the condition-wall misreport shape again) | **FIXED (2026-07-31)** — the earlier "discipline does NOT hold" call was WRONG: `try_lower_tuple_construct` builds tuples as `DynList {{ len = slot count }}` with heap slots stored as handles, so an all-String tuple IS the len-counted discipline verbatim (len=2, both slots String handles) and `__drop_msb_inner` frees it exactly. N2 reduced to pure gate widening: `is_msv_family_inner` + `is_map_msb_ty` + the pairs classifier admit all-String tuple values. Replay CLEAN, both-target probe identical, spec tests (get_or hit/miss + churn) on the wasm leg, mir 601/0. **Wave 4 live count: 0** |
+
+Strategic note (rounds 1–4): each ~1,300-program campaign surfaces 1–3 NEW cells of ever-deeper type composition (map values → option values → result values → option-of-map elements). The hand-listed family/drop registry grows a cell per finding; the mechanical end-state is the completeness-by-construction arc (type-derived drop routing). Until then the grind is the design — and the streak-based DoD absorbs it.
+| L7 | idx 757 | NativeBuildFailure | Check accepted a Float32 literal that rustc rejects: `error: literal out of range for f32` — the float sibling of the 535 integer-literal-domain class (C-173 was integer-only) | **FIXED (2026-07-31)** — E024's float twin: a `FloatOverflowSite` queue (pre-filtered to literals finite as f64 but infinite as f32) + the annotated-binding context pin (`float_literal_chain` through paren/unary, mirroring the int hook — a bare literal's own solved type stays `Float`, so the Float32 context lives on the binding) + the post-solve validator. Replay now GENERATOR REJECT with E024; regression test `float32_range_is_checked_and_precision_is_not` (range rejected both signs, excess-precision and plain-Float accepted); frontend + literal-domain + spec/lang all green. Amusing provenance: the fuzzer found this by mutating the C-182 fixture added THIS session |
+
+Round-5 campaign (2026-07-31, 1,385 programs / 1,198 clean — every Wave 4 + nightly fix aboard):
+2 unique, BOTH new classes (no fixed cell regressed).
+
+| # | Seed 1785481464003870000 | Kind | Symptom | Status |
+|---|---|---|---|---|
+| P1 | idx 961 | **OutputDivergence — the silent-wrong-value class** | `bytes.read_f32_le(verts, dst + 9223372036854775807)` (an i64::MAX offset that overflows the index math): native reads `z=0.0`, wasm reads `z=2.0` — i.e. an OUT-OF-BOUNDS byte read is not equal-by-construction across targets. HIGHEST priority of the two: the bounds discipline for `bytes.read_*` is the memory-safety surface, and the wasm leg returning a neighbouring value where native returns 0.0 means the read is unchecked (or checked differently) on one leg | **FIXED (2026-07-31)** — no contract decision needed: the documented behavior ("out of range → +0.0") was already normative, and BOTH legs simply failed to enforce it at an overflowing offset. Root: the guard `pos + k > n` — at `pos = i64::MAX` the add wraps NEGATIVE, the check passes, and the read proceeds (wasm returned a neighbouring value; native's address math happened to land on zeros). Ordinary out-of-range offsets were always correct — only the overflow band leaked. Fixed FAMILY-WIDE by the API-completeness rule: all **14** sites in `bytes_core.almd` rewritten to the overflow-safe `pos > n - k` (a length is non-negative and ≤ 2^31, so `n - k` cannot overflow). Replay CLEAN; regression test `bytes reads are +0.0 at an overflowing offset` covers f32/f64/u32/u16/i32 plus the unchanged in-range and ordinary-OOR answers; spec/stdlib 112 files green |
+| P2 | idx 27 | WasmBuildFailure (scalar-element list literal, element outside the subset) | The element is `map.get_or(list.get_or([<map literals>], 1, ["k0": true]), "ΑΒΓ", false)` — a `List[Map[String, Bool]]` LITERAL fed to `list.get_or`. The map-VALUE matrix is now broad, but a list whose ELEMENTS are maps is the next composition frontier (the L6 shape one level out: option-of-map → bare map elements) | **FIXED (2026-07-31)** — the bare-map list element class landed: `ListElemDrop::MapSkv` (classifier arm in `binds_p3_b.rs`, before the lenlist arm), the static 2-level `$__drop_list_mb` in `stdlib/map_msv.almd`, `list_mb` in the demand linker's `MSV_STATIC_DROPS`, and three spec tests (literal/index/get_or, a churn loop, a computed element). p27 and every probe b3–b15 now build AND agree native ⇄ wasm; spec/lang 159 + spec/stdlib 112 files green, almide-mir 601 unit tests green. Investigation history below, kept because the wrong turns cost a session. **my first classification was WRONG, corrected by probes**: it is NOT a missing map-element cell. Seven probes (w1–w7) all BUILD, including the exact-looking pieces — a bound `List[Map[String,Bool]]` literal, an inline one in argument position, a `map.map` HOF result as an element, and a fold-derived-String map — so no single construct is missing. The decline chain is real and traced (`[defunc] fold route declined (rolled back)` → `[scalar-call] map.get_or declined: "List argument cannot be faithfully materialized"`), which means the FOLD's defunctionalization rollback is what poisons the later list-argument materialization — a state/threshold interaction like L2's, not a type-cell gap. BISECTED (b1–b5), and the wall needs THREE conditions at once — removing ANY ONE builds: (a) the `list.fold`-derived String (b2: inline it as a literal → builds); (b) the `map.map` HOF element inside the inner list (b4: replace with a plain map literal → builds); (c) **four** elements in the inner list (b3: two → builds; b5: three → builds). A 3→4 element cliff with an HOF element and a fold upstream is a BUDGET/state signature, not a type-cell gap — the same class as L2 but with a countable threshold, which makes it the sharpest lead of the session. CORRECTED (b6): the cliff is NOT the element count — 4 elements whose last two are 1-key maps BUILDS. Ranking the probes by TOTAL key-value pairs in the inner list: b3 = 4 pairs ✅, b6 = 6 ✅, b5 = 8 ✅, p27 = 12 ❌. So the threshold is a SIZE budget between 8 and 12 pairs (an ops / value-id / instruction count that scales with total entries), reached only when the fold and the HOF element also contribute — hence the earlier three-condition reading. BRACKETED (b7 = 10 pairs ✅, b8 = 11 ✅, p27 = 12 ❌) — the cliff is EXACTLY at the 12th entry, one key either way. A shared-key-set hypothesis was tested and REFUTED (b9: two elements with an identical key set at only 6 pairs builds fine), so it is the count, not interning. Every probe is consistent with a hard capacity limit around 11→12 map entries on the list-argument materialization path when a fold and an HOF element also contribute. Remaining work is mechanical and needs fresh context: instrument the path (dump the ops/value-id count for b8 vs p27 — the two differ by ONE key, so the diff is a handful of ops and the crossing counter should be obvious), then raise or remove that limit and pin it with a spec test at 2× the old bound. NOTE for whoever picks this up: this is a capacity wall, so it is an HONEST wall (no wrong bytes) — it costs coverage, not correctness. **CORRECTED AGAIN — and this time the probe set is reproducible on ONE binary (2026-07-31).** Every "BUILDS" in the bracket above is INVALID: re-running b3/b5/b6/b7/b8/b9/p27 with `almide build <f> --target wasm` on a single binary walls ALL of them, including b3 (2 elements, 4 pairs). There is no cliff, no size budget, and no 12th-entry threshold — those readings came from probe runs whose success criterion did not exercise the wasm path, and they should never have been recorded as evidence. The lesson is procedural: a bracket is only evidence if every cell in it was measured with the same command on the same binary, in one run.
+Reduced to a THREE-LINE repro, which restores the FIRST classification: `let xs: List[Map[String, Bool]] = [["k0": true]]` followed by any use walls with `non-empty List[heap] literal with nested-ownership elements`. A `List[Int]` literal in the same position builds (m9 control). So P2 is exactly what it first looked like — a **missing cell: a list LITERAL whose elements are maps** — the bare-map sibling of the option-of-map case L6 already closed. Not a capacity wall, not a fold/HOF interaction. FIX DESIGN (worked out, ready to implement — the L6 option-of-map path is the exact template, one indirection shorter):
+(1) `stdlib/map_msv.almd` — add the 2-level drop next to `__drop_list_omb_loop`. `__drop_msb_inner(ih)` already sweeps a map's key Strings AND rc_decs the map block, so the loop body is one call, with none of omb's option-block len-slot dance:
+`fn __drop_list_mb_loop(h, n, i) = if i >= n then () else { __drop_msb_inner(prim.load64(h + 12 + i * 8)); __drop_list_mb_loop(h, n, i + 1) }` and `fn __drop_list_mb(xs: List[Map[String, Bool]]) = { let h = prim.handle(xs); if prim.load32(h + 0) == 1 then __drop_list_mb_loop(h, prim.load32(h + 4), 0) else (); prim.rc_dec(h) }`.
+(2) `crates/almide-mir/src/lower/binds_p3.rs` — `ListElemDrop::MapSkv`.
+(3) `binds_p3_b.rs` — classifier arm for `Map[String, Bool|Int|Float]`, placed with the `OptMapSkv` arm and BEFORE the `lenlist_elem_class` call for the same reason that one is (lenlist returns None for a map payload and the element would fall through to the nested-ownership wall); register `list_mb` in the drop-handle match.
+(4) `pipeline_c.rs` — add `"list_mb"` to `MSV_STATIC_DROPS` so the demand linker forces `map_msv` in.
+(5) Spec test in `spec/stdlib/` next to the existing "list of option-maps" test, plus a `spec/wasm_cross` fixture if the shape turns out to be observable cross-target.
+Element MATERIALIZATION should already work — `OptMapSkv` builds a map literal inside an option block today, so the bare map is that minus the wrapper; verify with the m5 repro before writing the drop. Recorded dead end that remains true: binding the list to a variable first does NOT avoid it (b12) — it walls one message earlier, at the literal itself, which is the cleaner repro |
+
 ## Definition of done
 
 1. Every finding minimized (`gen` → delta), root-caused, and either FIXED
@@ -115,3 +183,133 @@ The fuzzer itself (generator, oracle ladder, delta-debugger) lives in
 `tools/xtarget-fuzz` and is NOT the subject of this stream — only its
 findings are. A fuzzer bug discovered during triage (e.g. a misclassified
 verdict) gets fixed in passing with its own test.
+
+## Wave 5 — Round 6 local campaign (2026-07-31)
+
+3,990 programs / 30 min / `--jobs 6` on the P2-fixed binary (0.41.0 install, one binary for
+the whole run). **2 unique findings**, so B4's "0 findings" criterion is NOT met.
+
+| # | seed / index | Kind | Shape | Status |
+|---|---|---|---|---|
+| R1 | 1785489842024900000 / 5 | WasmBuildFailure (honest wall) | `List[String]` literal whose element is an `if` whose CONDITION is a call | **FIXED** — the admission predicate was STRICTER than the builder it guards. `try_lower_heap_result_if` already materializes a general condition (a pure scalar, or a Bool/Int-returning pure call with heap args, freed in a per-cond frame) and rolls back as a unit when it cannot; the predicate re-stated a narrower rule ("cond must be a tracked Var or a Bool literal") and walled shapes the builder handles. Fixed by RECURSING the predicate on the arms and leaving the condition to the builder — `str_list_literal_elem_lowerable` in `binds_p3`/`binds_b.rs`. 3 spec tests |
+| R2 | 1785489842024900000 / 3132 | **Hang, native only** | `matrix.masked_multi_head_attention(q, k, v, n_heads = -2147483648)`. native hangs, wasm prints a shape and exits 0 | **FIXED** — C-198: one domain rule for the whole head-count family, defined abort on both targets, + a 4-test matrix gate. See below |
+
+### R2 root cause — one function, two divergences, and a family that guards inconsistently
+
+`almide_rt_matrix_mha_core` (runtime/rs/src/matrix.rs:480) opens with
+`let n_heads = n_heads as usize;`. For `n_heads = i64::from(i32::MIN)` that is
+18446744071562067968, the `n_heads == 0` early-out does not fire, and `for h in 0..n_heads`
+runs ~1.8e19 iterations — the hang.
+
+The self-hosted `__mha_impl` (stdlib/matrix_activations.almd:285) has NO head-count guard at
+all: `let dh = dm / n_heads`. So the SAME function diverges twice:
+
+| `n_heads` | native | wasm |
+|---|---|---|
+| `0` | returns the empty matrix (explicit early-out) | **divide-by-zero trap** |
+| `< 0` | `as usize` → ~1.8e19-iteration loop → **hang** | ~zero iterations → returns a zeroed (sq, d) matrix |
+
+Neither is a point defect. `almide_rt_matrix_rms_norm_heads` (matrix_p2.rs:450) already writes
+`n_heads.max(1) as usize` — the same hazard, guarded in one family member and not in another,
+which is precisely the point-wise growth CLAUDE.md's API-family rule exists to prevent.
+
+**Family**: every `matrix` fn taking a head count — `multi_head_attention`,
+`masked_multi_head_attention`, `rope_rotate`, `rope_rotate_at`, `rope_rotate_neox_at`,
+`rms_norm_heads`, and the GQA entry points taking `n_q_heads` / `n_kv_heads`.
+**Completeness rule**: a head count `< 1` is out of domain for every member, and every member
+reports it the same way on both targets. Three current behaviours (hang / trap / silent clamp
+to 1) collapse to one. The gate is a matrix test over the family × {i32::MIN, -1, 0}, and it
+is what stops the next member from shipping unguarded.
+
+**Both Wave 5 findings closed the same day.** The lesson they share is the one CLAUDE.md's
+API-family rule already states: R2 was three point-wise answers to one question, and R1 was a
+guard restated more narrowly than the thing it guards. Neither was a missing feature — both
+were a surface that had been grown a point at a time.
+
+## Wave 6 — Round 7 local campaign (2026-07-31)
+
+3,424 programs / 25 min / `--jobs 6` on the Wave-5-fixed binary. **1 unique finding**
+(down from Round 6's 2), so B4's "0 findings" criterion is still not met.
+
+| # | seed / index | Kind | Status |
+|---|---|---|---|
+| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **FIXED for 3 of the 4 cells**; the all-scalar cell has a named remainder (below) |
+
+### R3 — the tuple payload family is keyed three different ways
+
+Minimal repro (2 lines):
+
+```almide
+let s0: Option[(String, Int)] = none
+let r: (String, Int) = option.unwrap_or(some(option.unwrap_or(s0, ("a", 1))), ("b", 2))
+```
+
+The payload is a CALL RESULT rather than a tuple literal. Measured sweep, one binary, one run:
+
+| `Some` payload type | admission key (`binds_p4_b.rs::try_lower_opt_tuple_and_variant_payloads`) | call-result payload |
+|---|---|---|
+| `(Int, String)` | `_ if Self::is_int_str_tuple(&expr.ty)` — **TYPE only** | ✅ builds |
+| `(String, Int)` | `IrExprKind::Tuple { .. } if is_str_int_tuple(…)` — **SHAPE + type** | ❌ walls |
+| `(String, String)` | `IrExprKind::Tuple { .. } if is_str_str_tuple(…)` | ❌ walls |
+| `(Int, Int)` (all-scalar) | `IrExprKind::Tuple { .. } if is_all_scalar_tuple(…)` | ❌ walls |
+
+One cell of four is type-keyed; three are shape-keyed. A tuple literal payload works for all
+four (probe s1), and binding the call result to a `let` first works for all four (probe s8) —
+only the inline call-result payload divides them. This is the THIRD instance of the same class
+today, after R2 (three answers to one head-count question) and R1 (an admission predicate
+restated more narrowly than the builder it guards).
+
+### Fix design, and why it was not implemented in the same pass
+
+The asymmetry is in the BUILDERS, not just the match arms:
+
+* `try_opt_int_str_tuple_payload` → `self.lower_owned_heap_field(expr)` — materializes an
+  owned heap value from an ARBITRARY expression, which is why its cell is type-keyed.
+* `try_opt_str_int_tuple_payload` / `_str_str_` / `_scalar_` → destructure
+  `IrExprKind::Tuple { elements }` and call `try_lower_tuple_construct(&elements)` /
+  `try_lower_scalar_tuple_construct(&elements)` — literal-only by construction.
+
+So the fix is to give the three shape-keyed builders the same fallback the int_str one already
+has: when the payload is not a literal `Tuple`, go through `lower_owned_heap_field`, then the
+existing `materialize_opt_str_some` + the existing `variant_drop_handles` entry
+(`opt_str_int` / `opt_str_str`).
+
+**The risk that makes this a separate pass**: the drop handle registered for each cell assumes
+the piece's SHAPE, and `lower_owned_heap_field` may not produce the same shape as
+`try_lower_tuple_construct`. If it does not, the fallback is a double-free or a leak — a
+memory-safety-shaped defect, not a wall. Verifying that requires reading both piece
+constructions against the `opt_str_int` / `opt_str_str` drop bodies and then running the
+churn-loop tests that expose a refcount error. That is careful work, and it was deliberately
+not started at the tail of a long session; the diagnosis above is complete enough that the
+implementation is mechanical-with-care rather than exploratory.
+
+Probe files: `s_s1`..`s_s11` in the session scratchpad; the discriminating trio is s9
+(`(Int, String)` call result → builds), s5 (`(String, Int)` → walls), s11 (`(Int, Int)` → walls).
+
+### R3 outcome (2026-07-31)
+
+The drop-discipline risk that held this back **did not materialize, and the reason is
+checkable**: `materialize_opt_int_str_some` and `materialize_opt_str_some` are byte-for-byte
+identical except for which ownership set they register the result in. Both take the piece
+with `Op::Consume` + `live_heap_handles.retain(…)`, so the piece's construction path cannot
+affect how it is freed, and the drop is selected by the payload's TYPE — a layout property.
+That made the fallback safe rather than merely plausible.
+
+All three shape-keyed cells are now type-keyed with the `lower_owned_heap_field` fallback the
+`(Int, String)` cell always had. Verified on one binary, one run: s5 `(String, Int)`, s6 (the
+lambda form), s9 `(Int, String)`, s10 `(String, String)` all build AND agree native ⇄ wasm.
+312 spec files green (lang 159 / stdlib 112 / integration 41), plus 5 new tests including a
+churn loop, which is what would expose a refcount error if the ownership reasoning were wrong.
+
+**Named remainder — the all-scalar cell.** `(Int, Int)` (probe s11) still walls, because
+`lower_owned_heap_field` does not materialize an ALL-SCALAR tuple call result — its tuple arms
+cover heap pairs (`is_flat_heap_pair_ty`, `is_str_closure_pair_ty`,
+`is_flat_heap_scalar_pair_ty`) and an all-scalar tuple matches none of them. So the family is
+3/4 symmetric, not 4/4, and this line exists so the last cell is a named gap rather than a
+rediscovery. Closing it means teaching `lower_owned_heap_field` the all-scalar tuple call
+result, not touching the Option cells again.
+
+**The original R3 program now walls one step LATER**, on `List argument cannot be faithfully
+materialized (would borrow an empty deferred heap value)` — the `list.fold(list.sort(tmp3), …)`
+over an empty list. Still an honest wall (exit 1, no output), not wrong bytes; a different
+cell, not a regression.

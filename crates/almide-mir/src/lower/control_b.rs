@@ -199,6 +199,17 @@ impl LowerCtx {
                 match heap_eq {
                     Some(v) => v,
                     None => {
+                        // The COND-side decline had no trace while the arm side did
+                        // (#904's report-the-right-side lesson): a threshold-class
+                        // decline here surfaces downstream as lower_branch's
+                        // "unresolvable condition" wall with no way to tell which
+                        // side actually refused (Wave 4 L2's diagnosis cost).
+                        crate::trace::trace("ALMIDE_DBG_ANF", || {
+                            format!(
+                                "[unit-if] cond declined scalar lowering: {}",
+                                kind_name(&cond.kind)
+                            )
+                        });
                         self.ops.truncate(ops_mark);
                         self.live_heap_handles.truncate(lhh_mark);
                         return false;

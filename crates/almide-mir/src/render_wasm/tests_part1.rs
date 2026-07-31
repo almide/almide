@@ -311,9 +311,7 @@
             let mut checker = Checker::from_env(canon.env);
             let _ = checker.infer_program(&mut prog);
             let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
-            optimize::optimize_program(&mut ir);
-            mono::monomorphize(&mut ir);
-            ir_link::ir_link(&mut ir);
+            almide_driver::link_ir(&mut ir);
             ir
         };
         let ir = to_ir(src);

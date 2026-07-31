@@ -106,6 +106,30 @@ pub fn almide_rt_matrix_dims(rows: i64, cols: i64) -> (usize, usize) {
     (r as usize, c as usize)
 }
 
+/// Normalize a HEAD COUNT. A head count below 1 has no meaning — it is not a
+/// degenerate case with an obvious answer the way a negative dimension is (that
+/// clamps to the empty matrix, C-034) — so it aborts with the unified
+/// `Error: <msg>` + exit 1 that `list.chunk` / `list.windows` / `int.clamp`
+/// already use for their domain violations.
+///
+/// This exists because the family had THREE answers to the same question:
+/// `almide_rt_matrix_rope_rotate_at` clamped with `.max(0)` (negative → no
+/// heads), `almide_rt_matrix_rms_norm_heads` clamped with `.max(1)` (negative →
+/// one head), and `almide_rt_matrix_mha_core` did not guard at all — it cast
+/// straight to `usize`, so `n_heads = i32::MIN` became 18446744071562067968 and
+/// `for h in 0..n_heads` hung the process (Wave 5 R2). The self-hosted wasm
+/// bodies diverged from all three, dividing by a zero head count.
+///
+/// Every head-count-taking entry point goes through here, and
+/// `matrix_head_count_domain_test.rs` is the matrix gate that keeps it that way.
+pub fn almide_rt_matrix_head_count(n: i64) -> usize {
+    if n < 1 {
+        eprintln!("Error: head count must be positive");
+        std::process::exit(1);
+    }
+    n as usize
+}
+
 pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     vec![vec![0.0; c]; r].into()
@@ -478,8 +502,8 @@ pub fn almide_rt_matrix_masked_multi_head_attention(q: &AlmideMatrix, k: &Almide
 }
 
 pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideMatrix, n_heads: i64, causal: bool) -> AlmideMatrix {
-    let n_heads = n_heads as usize;
-    if q.is_empty() || n_heads == 0 { return vec![].into(); }
+    let n_heads = almide_rt_matrix_head_count(n_heads);
+    if q.is_empty() { return vec![].into(); }
     let sq = q.len();
     let sk = k.len();
     let d = q[0].len();

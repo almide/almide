@@ -10,24 +10,28 @@ impl<'a> Interpreter<'a> {
         func: &str,
         args: &[Value],
     ) -> Option<Flow> {
-        // In-place container MUTATION cannot be faithfully modeled here: the
-        // dispatch path evaluates every arg by VALUE before reaching us, so the
-        // `var` binding identity of the receiver is already lost. These stdlib
-        // ops have a `mut` receiver and (mostly) return Unit — the program reads
-        // the EFFECT on the variable, not a returned value (e.g.
-        // `for i in 0..100 { list.push(xs, ..) }` then indexes `xs`). Modeling
-        // them functionally (returning a fresh container that the caller drops)
-        // is silently WRONG and would emit a misleading third vote into the
-        // cross-target oracle — strictly worse than an honest skip. So we report
-        // `Unsupported`, which the 3-way gate logs as a reasoned skip. (The
-        // FUNCTIONAL siblings that return a new container — `list.set`,
-        // `list.insert`, `map.set`, `set.insert` — are NOT here and stay
-        // supported.) Index-assign (`xs[i] = v`) keeps its binding and IS
-        // modeled correctly via `IrStmtKind::IndexAssign`.
+        // In-place container MUTATION cannot be modeled from HERE: by the time
+        // args are values, the `var` binding identity of the receiver is gone,
+        // and these stdlib ops have a `mut` receiver that (mostly) returns Unit
+        // — the program reads the EFFECT on the variable, not a returned value
+        // (e.g. `for i in 0..100 { list.push(xs, ..) }` then indexes `xs`).
+        // Modeling them functionally (returning a fresh container the caller
+        // drops) is silently WRONG and would emit a misleading third vote into
+        // the cross-target oracle — strictly worse than an honest skip.
+        //
+        // `eval_module_call` therefore intercepts the whole family one step
+        // EARLIER, while the receiver is still an expression, and writes the
+        // mutation back into its binding (`inplace.rs`). Reaching this arm means
+        // the call arrived on a path with no receiver expression left to name —
+        // the residual-UFCS `Method` target, which evaluates its object first.
+        // That stays an honest skip. (The FUNCTIONAL siblings that return a new
+        // container — `list.set`, `list.insert`, `map.set`, `set.insert` — are
+        // NOT in the predicate and are handled below either way.)
         if is_inplace_mutating_op(module, func) {
             return Some(Flow::Unsupported(format!(
-                "in-place container mutation `{module}.{func}` (mut receiver; \
-                 interp args are by-value so the binding cannot be written back)"
+                "in-place container mutation `{module}.{func}` reached through a \
+                 residual-UFCS method call (the receiver was evaluated to a value \
+                 before dispatch, so its binding cannot be written back)"
             )));
         }
         // Per-module dispatch below — grouping by `module` first (rather than
@@ -712,7 +716,7 @@ impl<'a> Interpreter<'a> {
 /// `write_*` in `stdlib/bytes.almd` returns Unit and mutates in place, and the
 /// functional `bytes.set(b, i, v) -> Bytes` is excluded by the underscore — the
 /// prefix is the whole rule, and a new family member is covered on arrival.
-fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
+pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
     if module == "bytes"
         && (func.starts_with("set_") || func.starts_with("append_") || func.starts_with("write_"))
     {

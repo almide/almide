@@ -23,17 +23,18 @@ mod dispatch;
 mod env;
 mod eval;
 mod hofs;
+mod inplace;
 mod stdlib_pool;
 mod value;
 
 pub use value::{Closure, Value, VariantPayload};
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use almide_base::intern::Sym;
-use almide_ir::{IrFunction, IrProgram};
+use almide_ir::{IrFunction, IrProgram, VarId};
 
 /// The observable result of an interpreter run — the SAME 3-tuple shape as the
 /// existing `run_native_capture` / `run_wasm_capture` harness helpers, plus a
@@ -112,6 +113,12 @@ pub struct Interpreter<'a> {
     /// Current call-stack depth, bounded to avoid a native stack overflow on
     /// adversarial deep recursion.
     pub(crate) depth: Cell<u32>,
+    /// Every `VarId` bound as a `mut` parameter, anywhere in the program.
+    /// `VarId`s are globally unique by construction (lowering assigns one per
+    /// binding — see the crates/CLAUDE.md design principle), so one flat set is
+    /// exact and needs no per-frame bookkeeping. The in-place write-back tier
+    /// reads it to refuse a receiver whose binding lives in the callee's frame.
+    pub(crate) mut_param_vars: HashSet<VarId>,
 }
 
 /// Default fuel budget — high enough for any real corpus program, low enough to
@@ -229,6 +236,21 @@ impl<'a> Interpreter<'a> {
             }
         }
 
+        // Index every `mut` parameter binding. The in-place write-back tier
+        // refuses these receivers: `call_function` binds a parameter in the
+        // callee's own frame, so assigning there would never reach the
+        // caller's slot the way the backends' mut-param lowering does.
+        // `fns` is scanned rather than `program.functions` alone so the
+        // self-hosted stdlib bodies layered in above are covered too.
+        let mut mut_param_vars: HashSet<VarId> = HashSet::new();
+        for f in fns.values() {
+            for p in &f.params {
+                if p.is_mut {
+                    mut_param_vars.insert(p.var);
+                }
+            }
+        }
+
         Interpreter {
             program,
             fns,
@@ -240,6 +262,7 @@ impl<'a> Interpreter<'a> {
             stderr: String::new(),
             fuel: Cell::new(DEFAULT_FUEL),
             depth: Cell::new(0),
+            mut_param_vars,
         }
     }
 

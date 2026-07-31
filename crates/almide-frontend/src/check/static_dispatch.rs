@@ -220,22 +220,27 @@ impl Checker {
                 Some(Ty::result(Ty::list(resolve_ty(&result_elem, &self.uf)), Ty::String))
             }
             "race" => {
-                // fan.race(thunks) -> Result[T, String] — the FIRST thunk in
-                // LIST ORDER to SETTLE (deterministic, NOT wall-clock): thunk[0]'s
-                // result, Ok(v) or Err(e). Distinct from fan.any, which SKIPS
-                // failures to find the first Ok. EFFECTFUL like fan.any: a head Err
-                // is auto-`?` propagated to the unified main-error exit. (The
-                // wall-clock "fastest wins" has no portable, deterministic meaning;
-                // every async model's deterministic kernel is source/list order.)
-                if arg_tys.len() != 1 {
-                    self.emit(super::err(
-                        format!("fan.race() expects 1 argument but got {}", arg_tys.len()),
-                        "Usage: fan.race([fn() => a, fn() => b])",
-                        "call to fan.race()".to_string()));
-                    return Some(Ty::Unknown);
-                }
-                let list_ty = resolve_ty(&arg_tys[0], &self.uf);
-                Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String))
+                // fan.race was REMOVED (0.42.0). Under the concurrency stance
+                // (docs/roadmap/active/concurrency-stance.md, the answer to #1000) Almide's
+                // model is DETERMINISTIC DATA-PARALLELISM: `fan` may execute in parallel,
+                // but observable behaviour is defined to be sequential evaluation in list
+                // order. A name promising "first to complete wins" has no meaning in that
+                // model — and the implementation never raced anyway. `desugar_fan.rs`'s
+                // `rewrite_race_head` replaced `fan.race([t0, t1, …])` with `t0`; the other
+                // thunks were not even evaluated, so the combinator was a no-op wrapper
+                // whose name was the only thing it added. SPEC.md sold it as a race in two
+                // places while C-004 correctly documented list order — the prose and the
+                // contract contradicted each other, and the prose was wrong.
+                //
+                // Same treatment as fan.timeout (E027, 0.29.0): a check-time tombstone with
+                // an actionable migration, not an alias. No coexistence.
+                self.emit(super::err(
+                    "fan.race was removed: under Almide's deterministic model it returned thunk[0] in list order, so the name promised a race the language does not have",
+                    "Call the thunk directly if you meant thunk[0] (`thunks[0]()`), or use \
+                     `fan.any(thunks)` if you meant the first candidate that SUCCEEDS in list \
+                     order. `fan.map` / `fan.settle` are unchanged.",
+                    "call to fan.race()".to_string()).with_code("E027"));
+                Some(Ty::Unknown)
             }
             _ => return None,
         }
@@ -289,7 +294,7 @@ impl Checker {
                     "fan.timeout was removed: a wall-clock timeout has no portable cross-target meaning",
                     "Enforce deadlines at the host boundary that invokes the program \
                      (e.g. `timeout 5 ./app`). Inside Almide every fan combinator is \
-                     deterministic by list order: fan.map, fan.race, fan.any, fan.settle.",
+                     deterministic by list order: fan.map, fan.any, fan.settle.",
                     "call to fan.timeout()".to_string()).with_code("E027"));
                 Some(Ty::Unknown)
             }

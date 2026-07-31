@@ -83,7 +83,7 @@ almide run hello.almd
 - **Bidirectional type inference** — Type annotations flow into expressions (`let xs: List[Int] = []`)
 - **Codec system** — `Type.decode(value)` / `Type.encode(value)` convention with auto-derive
 - **Map literals** — `["key": value]` syntax with `m[key]` access and `for (k, v) in m` iteration
-- **Fan** — structured concurrency surface: `fan { a(); b() }` and `fan.settle` run on real threads natively (sequential on wasm); `fan.map` / `fan.race` / `fan.any` are deterministic by list order on both targets
+- **Fan** — structured concurrency surface: `fan { a(); b() }` and `fan.settle` run on real threads natively (sequential on wasm); `fan.map` / `fan.any` are deterministic by list order on both targets
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
@@ -100,7 +100,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 195 contracts — 195 active, 0 flagged-for-revision.**
+> **Ledger: 200 contracts — 200 active, 0 flagged-for-revision.**
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one

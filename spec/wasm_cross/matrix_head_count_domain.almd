@@ -1,0 +1,42 @@
+// @contract: C-198
+// The head-count domain of the `matrix` attention/rope family is CONVERGENT: a head
+// count below 1 aborts with the same `Error: head count must be positive` line and
+// exit 1 on both targets, and a valid head count computes identically.
+//
+// Before this, one question had three answers. Native `rope_rotate_at` clamped a
+// negative count to 0, native `rms_norm_heads` clamped it to 1, and native
+// `mha_core` did not guard at all — it cast straight to `usize`, so
+// `n_heads = i32::MIN` became 18446744071562067968 and `for h in 0..n_heads` HUNG
+// the process. The self-hosted wasm bodies agreed with none of them: they divided
+// by the head count, so 0 was a trap and a negative value silently produced a
+// zero-filled matrix of the input shape. Wave 5 R2 caught the native hang against
+// a wasm run that exited 0 and printed a shape.
+//
+// This fixture pins the CONVERGENT side — the valid counts, plus the boundary at 1.
+// The abort itself is exercised by `spec/stdlib/matrix_head_count_test.almd`, which
+// runs the whole family × the out-of-domain values; a fixture cannot assert an
+// abort and a normal exit in one program.
+fn main() -> Unit = {
+  let x = matrix.ones(4, 16)
+  // The boundary: 1 is IN the domain and must compute, not abort.
+  let a1 = matrix.masked_multi_head_attention(x, x, x, 1)
+  let (r1, c1) = matrix.shape(a1)
+  println("mha1 " + int.to_string(r1) + "x" + int.to_string(c1))
+  // A dividing head count, and one that does not divide the model dim (the head
+  // width truncates identically on both targets — that is defined, not a hole).
+  let a4 = matrix.masked_multi_head_attention(x, x, x, 4)
+  let (r4, c4) = matrix.shape(a4)
+  println("mha4 " + int.to_string(r4) + "x" + int.to_string(c4))
+  let a5 = matrix.masked_multi_head_attention(x, x, x, 5)
+  let (r5, c5) = matrix.shape(a5)
+  println("mha5 " + int.to_string(r5) + "x" + int.to_string(c5))
+  // The unmasked sibling shares the same core and the same guard.
+  let u2 = matrix.multi_head_attention(x, x, x, 2)
+  let (ru, cu) = matrix.shape(u2)
+  println("mha_unmasked " + int.to_string(ru) + "x" + int.to_string(cu))
+  // rope_rotate takes a head count through a different path (its own row/head
+  // walk, not the MHA core), so it is pinned separately.
+  let rp = matrix.rope_rotate(x, 2, 8, 10000.0)
+  let (rr, rc) = matrix.shape(rp)
+  println("rope " + int.to_string(rr) + "x" + int.to_string(rc))
+}

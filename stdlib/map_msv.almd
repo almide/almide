@@ -109,6 +109,37 @@ fn map_from_list_msv(
   __msv_from_at(ph, n, 0, map_new_msv())
 }
 
+// remove on the msv split layout: build a new map excluding `k` — keys deep-copied
+// (__msv_store_key), surviving values co-owned (rc_inc), exactly map_set_msv's copy
+// discipline with one slot skipped. A missing key (idx -1, skip matches nothing)
+// copies everything through the same walk.
+fn __msv_remove_copy(sh: Int, rh: Int, n: Int, rn: Int, skip: Int, i: Int, j: Int) -> Int =
+  if i >= n then 0
+  else if i == skip then __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j)
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __msv_store_key(rh + 12 + j * 8, kk)
+    let old = prim.load64(sh + 12 + (n + i) * 8)
+    prim.rc_inc(old)
+    prim.store64(rh + 12 + (rn + j) * 8, old)
+    __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j + 1)
+  }
+
+fn map_remove_msv(
+  m: Map[String, Map[String, String]],
+  k: String,
+) -> Map[String, Map[String, String]] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let idx = __msv_find(sh, n, k, 0)
+  let rn = if idx < 0 then n else n - 1
+  let r = prim.alloc_map_kv(rn * 2)
+  let rh = prim.handle(r)
+  let _c = __msv_remove_copy(sh, rh, n, rn, idx, 0, 0)
+  prim.store32(rh + 4, rn)
+  r
+}
+
 // The stored value (or the default) via the hshare co-own idiom.
 fn __msv_elem(h: Int, n: Int, idx: Int) -> Map[String, String] = {
   let v: Map[String, String] = prim.load_handle(h + 12 + (n + idx) * 8)
@@ -175,5 +206,97 @@ fn __drop_list_str_mss_loop(h: Int, n: Int, i: Int) -> Unit =
 fn __drop_list_str_mss(xs: List[(String, Map[String, String])]) -> Unit = {
   let h = prim.handle(xs)
   if prim.load32(h + 0) == 1 then __drop_list_str_mss_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
+// ── msb: value blocks following the "len@4-counted String slots" discipline ──
+// Two value shapes share this sweep: an inner map in the map_skv SPLIT layout
+// (Map[String, Bool/Int/Float] — @4 is the KEY count `entries`; only the key slots
+// 0..entries-1 own Strings, the value region is scalar) and an Option[String]
+// (a 0-or-1-element DynListStr — @4 counts the payload String at slot 0; none = 0).
+// Both own exactly `@4` String handles at slots 0..len-1, so one sweep serves both —
+// where the msv sweep (all @4 slots as Strings) would free scalar values as handles.
+fn __drop_msb_inner_slots(ih: Int, m2: Int, j: Int) -> Unit =
+  if j >= m2 then ()
+  else {
+    prim.rc_dec(prim.load64(ih + 12 + j * 8))
+    __drop_msb_inner_slots(ih, m2, j + 1)
+  }
+
+fn __drop_msb_inner(ih: Int) -> Unit = {
+  if prim.load32(ih + 0) == 1 then __drop_msb_inner_slots(ih, prim.load32(ih + 4), 0) else ()
+  prim.rc_dec(ih)
+}
+
+fn __drop_map_msb_slots(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(h + 12 + i * 8))
+    __drop_msb_inner(prim.load64(h + 12 + (n + i) * 8))
+    __drop_map_msb_slots(h, n, i + 1)
+  }
+
+fn __drop_map_msb(m: Map[String, Map[String, Bool]]) -> Unit = {
+  let h = prim.handle(m)
+  if prim.load32(h + 0) == 1 then __drop_map_msb_slots(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
+// The msb pairs-literal drop: `List[(String, Map[String, <scalar>])]` — per element:
+// free the String slot flat, key-sweep the last-ref inner map.
+fn __drop_list_str_msb_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let th = prim.load64(h + 12 + i * 8)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      __drop_msb_inner(prim.load64(th + 20))
+    } else ()
+    prim.rc_dec(th)
+    __drop_list_str_msb_loop(h, n, i + 1)
+  }
+
+fn __drop_list_str_msb(xs: List[(String, Map[String, Bool])]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_str_msb_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
+// The omb list drop: `List[Option[Map[String, <scalar>]]]` (Wave 4 L6) — a static
+// THREE-level sweep. Per element: the option block is a 0-or-1 DynListStr; when
+// last-ref and `len@4 == 1`, its slot-0 MAP payload key-sweeps via __drop_msb_inner
+// (the low-32 of the slot; a `none` has len 0 and owns nothing), then the option
+// block itself frees. The len-loop discipline COMPOSES: list slots → option
+// len-slot → map key slots.
+// The bare-map list drop: `List[Map[String, <scalar>]]` — the omb sibling with
+// the Option indirection removed. `__drop_msb_inner` already sweeps the map's
+// key Strings AND rc_decs the map block, so an element is exactly one call.
+fn __drop_list_mb_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    __drop_msb_inner(prim.load64(h + 12 + i * 8))
+    __drop_list_mb_loop(h, n, i + 1)
+  }
+
+fn __drop_list_mb(xs: List[Map[String, Bool]]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_mb_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
+fn __drop_list_omb_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let ob = prim.load64(h + 12 + i * 8)
+    if prim.load32(ob + 0) == 1 then {
+      if prim.load32(ob + 4) == 1 then __drop_msb_inner(prim.load64(ob + 12)) else ()
+    } else ()
+    prim.rc_dec(ob)
+    __drop_list_omb_loop(h, n, i + 1)
+  }
+
+fn __drop_list_omb(xs: List[Option[Map[String, Bool]]]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_omb_loop(h, prim.load32(h + 4), 0) else ()
   prim.rc_dec(h)
 }

@@ -325,9 +325,7 @@ fn source_to_ir_with(
 
     resolve_user_module_calls(&mut ir);
 
-    optimize::optimize_program(&mut ir);
-    mono::monomorphize(&mut ir);
-    ir_link::ir_link(&mut ir);
+    almide_driver::link_ir(&mut ir);
     // Transparent-newtype erasure LAST (post-link, pre-lowering): `mod type X = String`
     // ctor calls/patterns/Ty tags become the inner type (see newtype_erase.rs).
     crate::lower::erase_transparent_newtypes(&mut ir);
