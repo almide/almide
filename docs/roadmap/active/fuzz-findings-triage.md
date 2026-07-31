@@ -183,3 +183,40 @@ The fuzzer itself (generator, oracle ladder, delta-debugger) lives in
 `tools/xtarget-fuzz` and is NOT the subject of this stream — only its
 findings are. A fuzzer bug discovered during triage (e.g. a misclassified
 verdict) gets fixed in passing with its own test.
+
+## Wave 5 — Round 6 local campaign (2026-07-31)
+
+3,990 programs / 30 min / `--jobs 6` on the P2-fixed binary (0.41.0 install, one binary for
+the whole run). **2 unique findings**, so B4's "0 findings" criterion is NOT met.
+
+| # | seed / index | Kind | Shape | Status |
+|---|---|---|---|---|
+| R1 | 1785489842024900000 / 5 | WasmBuildFailure (honest wall) | `List[String]` literal whose element is an `if` whose CONDITION is a call (`string.starts_with(r2, if true then … else r2)`). The L2 fix admitted `if` elements with a tracked Var / Bool-literal condition; a call-valued condition still declines | open |
+| R2 | 1785489842024900000 / 3132 | **Hang, native only** | `matrix.masked_multi_head_attention(q, k, v, n_heads = -2147483648)`. native hangs, wasm prints a shape and exits 0 | open — root-caused, see below |
+
+### R2 root cause — one function, two divergences, and a family that guards inconsistently
+
+`almide_rt_matrix_mha_core` (runtime/rs/src/matrix.rs:480) opens with
+`let n_heads = n_heads as usize;`. For `n_heads = i64::from(i32::MIN)` that is
+18446744071562067968, the `n_heads == 0` early-out does not fire, and `for h in 0..n_heads`
+runs ~1.8e19 iterations — the hang.
+
+The self-hosted `__mha_impl` (stdlib/matrix_activations.almd:285) has NO head-count guard at
+all: `let dh = dm / n_heads`. So the SAME function diverges twice:
+
+| `n_heads` | native | wasm |
+|---|---|---|
+| `0` | returns the empty matrix (explicit early-out) | **divide-by-zero trap** |
+| `< 0` | `as usize` → ~1.8e19-iteration loop → **hang** | ~zero iterations → returns a zeroed (sq, d) matrix |
+
+Neither is a point defect. `almide_rt_matrix_rms_norm_heads` (matrix_p2.rs:450) already writes
+`n_heads.max(1) as usize` — the same hazard, guarded in one family member and not in another,
+which is precisely the point-wise growth CLAUDE.md's API-family rule exists to prevent.
+
+**Family**: every `matrix` fn taking a head count — `multi_head_attention`,
+`masked_multi_head_attention`, `rope_rotate`, `rope_rotate_at`, `rope_rotate_neox_at`,
+`rms_norm_heads`, and the GQA entry points taking `n_q_heads` / `n_kv_heads`.
+**Completeness rule**: a head count `< 1` is out of domain for every member, and every member
+reports it the same way on both targets. Three current behaviours (hang / trap / silent clamp
+to 1) collapse to one. The gate is a matrix test over the family × {i32::MIN, -1, 0}, and it
+is what stops the next member from shipping unguarded.
