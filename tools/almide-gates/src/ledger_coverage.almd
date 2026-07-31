@@ -37,6 +37,50 @@ fn is_source_prefix(path: String) -> Bool =
 fn has_source_suffix(path: String) -> Bool =
   [".rs", ".almd", ".lean", ".toml", ".sh"] |> list.any((e) => string.ends_with(path, e))
 
+// The extraction the bash does with `grep -rhoE` over the ledger and every fixture. A path is
+// a candidate when it starts at one of the source prefixes and ends at one of the suffixes;
+// the scan walks each line looking for a prefix and then takes the longest run of path
+// characters from there. Written as a scanner rather than a regex because the regex is the
+// part that has silently mis-read its input three times in this Unit already.
+fn is_path_char(c: String) -> Bool =
+  string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-/", c)
+
+fn take_path_run(s: String, start: Int) -> String = {
+  let e = scan_path(s, start)
+  string.slice(s, start, e)
+}
+
+fn scan_path(s: String, p: Int) -> Int =
+  if p < string.len(s) and is_path_char(string.slice(s, p, p + 1)) then scan_path(s, p + 1)
+  else p
+
+// One line's candidates, in the order they appear — the bash sorts and de-dups them globally,
+// so per-line order does not survive, but keeping it makes the function testable.
+fn cited_paths_in(line: String, at: Int, acc: List[String]) -> List[String] =
+  if at >= string.len(line) then acc
+  else {
+    let rest = string.slice(line, at)
+    if is_source_prefix(rest) then {
+      let run = take_path_run(line, at)
+      cited_paths_in(line, at + string.len(run), if has_source_suffix(run) then acc + [run] else acc)
+    } else cited_paths_in(line, at + 1, acc)
+  }
+
+test "a cited path is extracted from prose, and only when it looks like a source file" {
+  // Statements legitimately contain prose around the path, and a bare directory or a doc file
+  // is not this rule's business.
+  assert_eq(cited_paths_in("see crates/almide-mir/src/x.rs for the pass", 0, []),
+            ["crates/almide-mir/src/x.rs"])
+  assert_eq(cited_paths_in("the docs/contracts/README.md index", 0, []), [])
+  assert_eq(cited_paths_in("spec/wasm_cross/ has fixtures", 0, []), [])
+  assert_eq(cited_paths_in("both tests/a.rs and proofs/b.lean", 0, []), ["tests/a.rs", "proofs/b.lean"])
+}
+
+test "the scan does not run off the end or loop on a non-prefix line" {
+  assert_eq(cited_paths_in("", 0, []), [])
+  assert_eq(cited_paths_in("no paths here at all", 0, []), [])
+}
+
 // ── (f) COVERAGE: the ids must be contiguous C-001..C-NNN ───────────────────
 //
 // A gap means a contract was DELETED rather than superseded. Retiring a promise is a real

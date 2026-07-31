@@ -764,8 +764,16 @@ Two more rules earned tests by being easy to get subtly wrong:
   empty rows would turn a report against the vocabulary into a list of what happens to exist,
   and `exhaustive 0` is exactly the row a reader needs to see.
 
-Remaining for B8: the (j) cited-path scan and the three freshness diffs need process/filesystem
-wiring; then the subcommand itself, then the twelve mutations — each must turn the Almide gate
+The **(j) cited-path scan** landed too, as a SCANNER rather than a regex — deliberately, since
+the regex is the part that has silently mis-read its input three times in this Unit already. It
+walks each line for a source prefix, takes the longest run of path characters, and keeps the
+run only if it ends in a source suffix. Validated against the real data: **396 distinct cited
+paths extracted from the ledger and all 330 fixtures, 0 dead** — matching the bash's
+`cited-paths: every source path named in a statement or fixture header resolves to a live
+directory.`
+
+Remaining for B8: the three freshness diffs need process wiring; then the subcommand itself,
+then the twelve mutations — each must turn the Almide gate
 red with the same line as the original. Everything the CHECKS need is now in place and verified
 against real data; what is left is composition and the adversarial pass.
 
