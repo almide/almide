@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-198 contracts
+199 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -226,4 +226,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-196 | Call-stack exhaustion is a resource limit, not an observable-behavior promise | 0.41.0 | active | fixture | 1 |
 | C-197 | Linear-memory exhaustion is a resource limit with a defined abort | 0.41.0 | active | fixture | 1 |
 | C-198 | A head count below 1 is a defined abort, identically on both targets | 0.42.0 | active | fixture | 1 |
+| C-199 | A fan block joins every sibling and reports the first Err in list order | 0.42.0 | active | fixture | 1 |
 

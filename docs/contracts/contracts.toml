@@ -2479,3 +2479,15 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_head_count_domain.almd", class = "fixture" },
   { path = "tests/matrix_head_count_domain_test.rs", class = "by-construction", name = "no_native_site_totalizes_a_head_count_on_its_own" },
 ]
+
+# ── FAN BLOCK ERR IS LIST-ORDER, AND NOTHING IS CANCELLED ─
+[[contract]]
+id        = "C-199"
+spec      = "ALS-R3"
+title     = "A fan block joins every sibling and reports the first Err in list order"
+statement = "`fan { a b c }` JOINS every sibling — there is no cancellation — and the block's failure value is the FIRST `Err` in LIST ORDER, surfaced as `Error: <msg>` + exit 1 identically on both targets via the effect-main termination. Not the first to fail in wall-clock time: with two failing siblings the two rules give different answers, and the fixture pins the list-order one. Cancellation is excluded BY DESIGN under the deterministic-data-parallelism stance (#1000): how far a cancelled sibling got before it stopped is a function of scheduling, which is the dependence the model exists to remove — so a `fan` whose sibling does not terminate does not terminate, exactly as sequential evaluation would. SPEC.md §9.9 and §13.3 claimed fail-fast cancellation in two places and #1023 reported that neither was observable; the implementation was correct and the prose was corrected to match, rather than the reverse."
+since     = "0.42.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_block_err_list_order.almd", class = "fixture" },
+]
