@@ -309,3 +309,165 @@ non-empty before believing a match.
 
 - B1 was a decision Bolt by design (plan R1): sizing the program is the first real decision,
   and the Unit had to have a reviewable answer before any code.
+
+## The two remaining TOML-free subcommands — analysed, not started
+
+Both need capabilities `almide-gates` does not yet have, and they need DIFFERENT ones, so
+neither unlocks the other:
+
+**`scripts/fuzz-track-record.sh`** (85 lines) — needs **process invocation** (`gh api`) and
+**JSON parsing**. The stdlib has `json` (99 fns) and `process`, so both exist; what does not
+exist is any use of them in this program. Its logic is a streak fold over nightly runs.
+Risk: it hits the network, so a "byte-identical" check is against a moving target — the
+acceptance check has to be a FIXED captured JSON input, not a live `gh` call, or the diff is
+untestable.
+
+**`proofs/output-parity.sh`** (190 lines) — needs **process invocation** (`almide build`/`run`
+per fixture) and a 382-row baseline. No JSON. Its bash version already refuses to run when
+the PATH binary and the workspace build disagree — a guard worth preserving verbatim, since
+it is the same one-binary discipline the fuzz campaigns depend on.
+
+**`scripts/check-contracts.sh`** is the largest overall (TOML + the bidirectional link audit
++ freshness checks) and the one whose correctness matters most, since it gates every contract
+change. It goes LAST, when the reader and the process-invocation pieces are both proven by
+smaller subcommands.
+
+Suggested order: `output-parity` (process invocation, no JSON) → `fuzz-track-record` (adds
+JSON) → `check-contracts` (composes everything). Each step adds exactly one capability.
+
+## Note for whoever picks up #1033
+
+`git stash list` on this machine shows `stash@{0}: sibling: codegen render_expr Var-arm
+extraction WIP`. That is the exact area #1033 lives in (`render_expr` on a `Var` deciding
+ownership per-occurrence). It is NOT mine and was not touched. Check with its owner before
+starting there — the fix may already be in flight.
+
+## B6 — the toolchain stamp (2026-08-01)
+
+`proofs/lib/stamp.sh`'s `stamp_toolchain` is ported and **byte-identical** (7 lines).
+`almide-gates` is now ~570 lines across six modules, with **four** matching subcommands.
+
+Ported before the rest of `output-parity.sh` on purpose: it is the SHARED piece every proof
+gate calls first, it is small, and its failure mode is silently-wrong evidence rather than a
+crash. It also earned its keep during this very session — a parity run refused to start until
+`make install` caught the PATH binary up with the workspace build.
+
+The Almide version reproduced that: run against a tree where `cargo build --release` had
+outrun `make install`, it printed the same FATAL and exited 1.
+
+```
+FATAL: PATH almide (f35f6fc687fe538e) != workspace build (4bbc743d07767e9a).
+```
+
+Two language-surface notes:
+
+- **`ok` cannot be a binding name** — it is the `Result` constructor. The parse error
+  (`Expected identifier … got Ok 'ok'`) names the token but not the reason.
+- The stamp arm must NOT go through `main`'s trailing-character trim. That trim exists
+  because the GENERATORS' bash originals end with `echo ""`; `stamp_toolchain` ends with its
+  rule and no blank. The arm prints and exits instead of returning a body — a reminder that
+  "every subcommand ends the same way" was an assumption, not a fact.
+
+Remaining: `output-parity` proper (the 382-row fixture sweep on top of this stamp),
+`fuzz-track-record` (adds JSON), `check-contracts` (composes everything).
+
+## B7 — the parity verdict rule, extracted and tested (2026-08-01)
+
+`tools/almide-gates/src/parity.almd`: `verdict_of` is `output-parity.sh`'s `run_one` decision
+as a PURE function of what the three commands did, with 4 tests.
+
+That extraction is the point. In the bash the five verdicts (match / mismatch / wall /
+runerr / v0fail) are interleaved with process invocation, so the RULE cannot be exercised
+without running the whole 382-fixture sweep. Pulled out, it is four assertions that run in
+milliseconds — including the two whose order is load-bearing:
+
+    render fails + oracle also failed  → v0fail
+    render fails + oracle succeeded    → wall
+
+Getting those backwards reports every broken fixture as a v1 wall, and **the wall count is a
+ratchet** — so a mislabel there inflates a number the project manages as debt. The bash has
+it right; nothing tested that it stayed right.
+
+This is a second kind of value from the port, distinct from finding defects: the
+reimplementation can be STRUCTURED so the decision logic is testable, where the original's
+shape made it reachable only through its I/O.
+
+Remaining for `output-parity`: the sweep itself (382 fixtures × 3 processes) on top of this
+rule and the B6 stamp. Then `fuzz-track-record` (adds JSON), then `check-contracts`.
+
+## B8 — the nightly streak rule, extracted and tested (2026-08-01)
+
+`tools/almide-gates/src/streak.almd`: the fold from `scripts/fuzz-track-record.sh`, pure,
+with 6 tests. Same treatment as B7's verdict rule and for the same reason — in the bash it is
+interleaved with `gh api` calls, so the RULE can only be exercised by hitting the network.
+
+The rule worth pinning is that **the two streaks stop independently**:
+
+| night | green streak (#796, closes at 2) | full-budget streak (#924, closes at 14) |
+|---|---|---|
+| no findings | continues | continues |
+| findings | **ends** | **continues** — the instrument ran to completion |
+| truncated | ends | ends |
+
+A night with findings ends one and not the other, because #924 measures whether the
+instrument RAN, not whether it was quiet. Collapsing them into one counter — the obvious
+simplification, and what someone reading the bash quickly would write — makes #924
+unmeasurable: every finding would reset it, and the 14-night streak could never accumulate on
+a compiler that is still being fixed.
+
+One test pins the state this session actually measured (four full-budget nights, all with
+findings → #924 at 4/14, #796 at 0/2), so the rule is anchored to a real observation rather
+than only to invented cases.
+
+`almide-gates` is now **~680 lines across eight modules**, with four byte-identical
+subcommands and two extracted decision rules under test.
+
+## B9 — the bidirectional-link rule, extracted and verified on the real ledger (2026-08-01)
+
+`tools/almide-gates/src/contract_audit.almd`: `check-contracts.sh`'s symmetry rule, pure,
+with 5 tests — and run against the actual ledger:
+
+```
+fixture evidence links checked: 346
+asymmetric (ledger says, fixture does not): 0
+```
+
+An independent implementation reaching the same conclusion as the bash audit is the strongest
+check available short of byte-identity, and it is available NOW, before the full subcommand
+is ported.
+
+The rule reports its two asymmetries **separately**, because they fail differently:
+
+- **ledger lists the fixture, the fixture does not name the contract** — the contract's
+  evidence points at a file certifying something else. The contract looks covered and is not.
+- **the fixture names the contract, the ledger does not list it** — the fixture is not
+  counted, so deleting it would break nothing and nobody would notice.
+
+Collapsing them into one "links disagree" error would lose which side is lying, and the
+repair differs: the first is a wrong evidence entry, the second is a missing one.
+
+Also pinned: the id shape is exactly `C-` + THREE digits. `C-1` and `C-1000` are malformed
+rather than leniently accepted — the bash regex says so, and a lenient reimplementation would
+silently admit ids the ledger's own tooling cannot resolve.
+
+`almide-gates`: **~750 lines across nine modules**, four byte-identical subcommands, and
+three decision rules extracted under test (parity verdict, nightly streak, link symmetry).
+All three were reachable in the bash only through their I/O.
+
+## v0.44.0 release blocked on a CI infra condition (2026-08-01)
+
+PR #1035 is open and NOT merged. `Build (macos-latest)` and `Build (windows-latest)` fail the
+`#983` tool-arming tripwire: `ALMIDE_EXPECT_TOOLS=1 but wasmtime is not runnable`, even though
+that job's own `Install wasmtime` step reports success.
+
+Not caused by the PR's diff — the same commit is green on develop (those two legs run only on
+a PR to main), PR #1034 had both legs pass 40 minutes earlier on the same workflow, and this
+PR's only workflow change adds a step to a DIFFERENT job (`test-rust`).
+
+**Left red deliberately.** The tripwire exists so a leg that loses its tools turns red instead
+of skipping 18 suites as pass. Merging past it would defeat exactly what it was built for, and
+"green on develop" is the reasoning it was designed to reject.
+
+Next: find why an installed `wasmtime` is not runnable in the `build` job — the gap is between
+the install step and the test step's environment (PATH propagation or a cache restore), not a
+missing install.

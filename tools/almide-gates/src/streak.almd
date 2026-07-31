@@ -1,0 +1,68 @@
+// The nightly streak rule of `scripts/fuzz-track-record.sh`.
+//
+// Two streaks are counted over the same run list, and they stop INDEPENDENTLY — that
+// independence is the whole rule, and it is what #924 and #796 are measured against:
+//
+//   green streak (#796 closes at 2)  — consecutive nights with NO findings
+//   full-budget streak (#924 at 14)  — consecutive nights where the campaign STEP completed,
+//                                      whether or not it found anything
+//
+// A night with findings ends the green streak but CONTINUES the full-budget one: the
+// instrument ran to completion, which is what #924 measures. A truncated night ends both.
+// Collapsing them into one counter — the obvious simplification — would make #924
+// unmeasurable, because every finding would reset it.
+type Streaks = { green: Int, full: Int }
+
+// Per-night verdict, from the run's conclusion and its campaign step.
+fn verdict(conclusion: String, step: String) -> String = if conclusion == "success" then "GREEN"
+else if step == "success" then "FINDINGS" else "TRUNCATED"
+
+// Fold newest-first, which is the order the API returns. `green_done` / `full_done` latch:
+// once a streak is broken it cannot resume further down the list.
+fn fold(verdicts: List[String], i: Int, green: Int, full: Int, green_done: Bool, full_done: Bool) -> Streaks = if i >= list.len(verdicts) then Streaks { green: green, full: full } else {
+  let v = list.get_or(verdicts, i, "TRUNCATED")
+  if v == "GREEN" then fold(verdicts, i + 1, if green_done then green else green + 1, if full_done then full else full + 1, green_done, full_done)
+  else if v == "FINDINGS" then fold(verdicts, i + 1, green, if full_done then full else full + 1, true, full_done)
+  else fold(verdicts, i + 1, green, full, true, true)
+}
+
+fn streaks(verdicts: List[String]) -> Streaks = fold(verdicts, 0, 0, 0, false, false)
+
+test "verdict classification" {
+  assert_eq(verdict("success", "success"), "GREEN")
+  assert_eq(verdict("failure", "success"), "FINDINGS")
+  assert_eq(verdict("failure", "absent"), "TRUNCATED")
+  assert_eq(verdict("cancelled", "cancelled"), "TRUNCATED")
+}
+
+test "findings end the green streak but continue the full-budget one" {
+  let s = streaks(["GREEN", "FINDINGS", "GREEN"])
+  assert_eq(s.green, 1)
+  assert_eq(s.full, 3)
+}
+
+test "a truncated night ends both streaks" {
+  let s = streaks(["GREEN", "TRUNCATED", "GREEN"])
+  assert_eq(s.green, 1)
+  assert_eq(s.full, 1)
+}
+
+test "an unbroken green run counts for both" {
+  let s = streaks(["GREEN", "GREEN", "GREEN"])
+  assert_eq(s.green, 3)
+  assert_eq(s.full, 3)
+}
+
+test "a broken streak does not resume" {
+  // The latch is the point: a later GREEN must not revive a streak already ended.
+  let s = streaks(["FINDINGS", "GREEN", "GREEN"])
+  assert_eq(s.green, 0)
+  assert_eq(s.full, 3)
+}
+
+test "today's real shape: four full-budget nights, all with findings" {
+  // The state this session measured — #924 at 4/14, #796 at 0/2.
+  let s = streaks(["FINDINGS", "FINDINGS", "FINDINGS", "FINDINGS", "TRUNCATED"])
+  assert_eq(s.green, 0)
+  assert_eq(s.full, 4)
+}

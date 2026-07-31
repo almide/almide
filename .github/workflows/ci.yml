@@ -197,6 +197,16 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test examples/
 
+      # The dogfood program (Unit 0.46, #1001). Its own tests cover the decision rules
+      # extracted from the shell gates — the parity verdict, the nightly streak fold, the
+      # contract link symmetry — which in bash are reachable only through their I/O. Gated
+      # here so the program cannot grow unverified: it is written IN Almide, so a compiler
+      # regression breaks it, and that is the point of dogfooding it.
+      - name: Almide dogfood tests (tools/almide-gates)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE test tools/almide-gates/
+
       - name: Frees churn gate (ALMIDE_WASM_FREES over spec/churn)
         # Was wired into NOTHING since it landed (#980) — the free-list-cycle
         # gate never fired anywhere. This job has both requirements: wasmtime
@@ -543,7 +553,33 @@ jobs:
 
       - name: Install wasmtime
         if: runner.os != 'Windows'
-        run: curl https://wasmtime.dev/install.sh -sSf | bash && echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+        run: |
+          # Pinned + retried + VERIFIED, matching the Linux leg above. The previous
+          # spelling — `curl https://wasmtime.dev/install.sh -sSf | bash && echo … >>
+          # $GITHUB_PATH` — had two defects (#1036):
+          #
+          #   1. upstream's install.sh now resolves "latest" to the literal `{` (an
+          #      unexpanded template) and requests a release that does not exist;
+          #   2. `curl | bash` hides the installer's exit status behind the pipe, so the
+          #      `&&` chain still ran and the STEP REPORTED SUCCESS while installing
+          #      nothing. The failure surfaced 10 minutes later in the #983 tripwire
+          #      instead of here.
+          #
+          # An install that cannot install must fail its own step. The trailing
+          # `wasmtime --version` is what makes that true.
+          VERSION=v42.0.1
+          case "${{ runner.os }}" in
+            macOS) ARCH_TRIPLE="aarch64-macos" ;;
+            *)     ARCH_TRIPLE="x86_64-linux"  ;;
+          esac
+          TARBALL="wasmtime-${VERSION}-${ARCH_TRIPLE}.tar.xz"
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+          done
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
 
       - name: Install wasm-opt (binaryen)
         if: runner.os == 'macOS'

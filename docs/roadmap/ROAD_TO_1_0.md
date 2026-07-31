@@ -31,7 +31,7 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 | 0.43 | **v0.42.0 で出荷済**（0.42 と同一タグ — 下の注記参照）。concurrency モデルの立場決定と、それに基づく fan 族の根治。立場は**決定的データ並列**に確定（[concurrency-stance.md](./active/concurrency-stance.md)）— `fan` はスケジューリングの構文であって意味論の構文ではない。実装: E008 の引数拡張(#1025) → `fan.race` トンボストーン(#1024) → キャンセル記述の削除(#1023) → arm 出力のリスト順フラッシュと trap 契約(#1026、C-004 の EXCEPTION 退役) | [#1000](https://github.com/almide/almide/issues/1000), [#1025](https://github.com/almide/almide/issues/1025), [#1024](https://github.com/almide/almide/issues/1024), [#1023](https://github.com/almide/almide/issues/1023), [#1026](https://github.com/almide/almide/issues/1026) |
 | 0.44 | fuzz true green — 残 findings 0 + 連続緑 2 夜 | [#796](https://github.com/almide/almide/issues/796) |
 | 0.45 | **測定して着手しないと決定（2026-07-31）**。feature-gated runtime（http/zlib）の rtlib 化 — 8.4s は再現したが（全 4 キャッシュ層クリアで 9s）、rlib cache が編集ループでは吸収し、CI では container あたり 1 回 ~9s＝ジョブの約 2%。issue 自身の「それ以前ではない」が正しい。再武装条件を鋭利化して #1002 に記録 | [#1002](https://github.com/almide/almide/issues/1002) |
-| 0.46 | 10k 行 dogfood プロジェクト着工 — スケール主張を実測に変える | [#1001](https://github.com/almide/almide/issues/1001) |
+| 0.46 | **進行中（v0.43.0 で途中成果を出荷）**。10k 行 dogfood プロジェクト着工 — スケール主張を実測に変える。`tools/almide-gates` がサブコマンド 3/6 でバイト一致、~490 行で欠陥 6 件を検出 | [#1001](https://github.com/almide/almide/issues/1001) |
 | 0.47 | クエリ/インクリメンタル基盤 phase 1 — LSP を per-keystroke 全再解析から解放 | [#928](https://github.com/almide/almide/issues/928) |
 | 0.48 | クエリ基盤 phase 2 — ビルドパイプライン本体をクエリ上に | [#928](https://github.com/almide/almide/issues/928) |
 | 0.49 | モジュール単位コンパイルキャッシュ — クエリ fingerprint を鍵にした永続層（module rlib + typed-IR）。dogfood のフルビルド 2-3s 超がトリガー | [#1003](https://github.com/almide/almide/issues/1003) |
@@ -53,6 +53,27 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 > しない。以降の版番号は行番号より 1 つ後ろにずれる — ラダーの不変条件は decade ゲートで
 > あってバージョン番号ではない、というルールの範囲内。**教訓は「Unit が閉じた時点で出荷
 > する」**こと。まとめて出すこと自体は誤りではないが、行↔版の対応が静かに崩れる。
+
+
+### 0.4x 出荷状況（2026-08-01 時点）
+
+行番号と版番号は 1:1 ではない。0.42–0.44 は観測律速の行を後ろへスライドさせ、完成した 2 行を
+1 タグでまとめて出したため。**どの行がどの版で出たかはこの表が正**：
+
+| 行 | 内容 | 出荷 |
+|---|---|---|
+| 0.42 | 単一ドライバ（#925） | **v0.42.0** |
+| 0.43 | concurrency 立場決定 + fan 族 4 件（#1000 #1023 #1024 #1025 #1026、全てクローズ済） | **v0.42.0**（0.42 と同一タグ） |
+| 0.44 | fuzz true green（#796） | 未出荷 — nightly 連続緑 2 夜が条件、観測律速 |
+| 0.45 | rtlib 化（#1002） | 出荷なし — 測定して発動条件を満たさないと決定。コードを書かないことが正解 |
+| 0.46 | 10k 行 dogfood（#1001） | 途中成果を **v0.43.0** で出荷（サブコマンド 3/6 バイト一致） |
+| 0.47 | クエリ基盤 phase 1（#928） | 未着手 — 指標が現存規模では測定不能、0.46 待ち |
+| 0.48 | クエリ基盤 phase 2（#928） | 未着手 — 0.47 の答え待ち |
+| 0.49 | モジュールキャッシュ（#1003） | 未着手 — issue が「実プロジェクトのフルビルド 2–3s 超まで着手するな」と明記、0.46 待ち |
+| 0.50 | ゲートリリース（#999） | B1 のみ完了（ビルド速度を README に公開） |
+
+**0.45 / 0.47 / 0.49 の 3 行は、issue 自身が発動条件を書いており、いずれも 0.46 に依存する。**
+0.4x 後半は独立した 4 行ではなく、0.46 を根とする 1 本の依存鎖である。
 
 **Gate 0.50**: fuzz 連続緑が常態 / dogfood フルビルドがキャッシュ効きで 2-3s 未満 / 三点の数字が public かつラチェット管理。
 

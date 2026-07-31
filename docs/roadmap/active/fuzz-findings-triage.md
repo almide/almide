@@ -384,3 +384,123 @@ than the one I would have written for #1029 on its own.
 
 Regression: 335 files green (spec 324 + examples 11), diagnostic harness green, plus
 `tests/diagnostics/e001-concat-element-mismatch`.
+
+### R3 remainder — one hypothesis REFUTED (2026-08-01)
+
+Tested and eliminated: **"an all-scalar tuple is not heap, so it takes a different route."**
+It is heap. `crates/almide-types/src/types/heap.rs:62` classifies `Ty::Tuple(..)` as heap
+unconditionally — the match is exhaustive without a wildcard, and there is a unit test at
+line 113 pinning `Ty::Tuple(vec![Ty::Int, Ty::Bool])` on the heap side.
+
+So heap-ness is NOT what distinguishes `(Int, Int)` from `(String, Int)` in the OptionSome
+payload path. Both reach `lower_owned_heap_field` through the same fallback and both are
+heap; only the arm that selected them differs (`is_all_scalar_tuple`, checked first, vs
+`is_str_int_tuple`).
+
+Recorded as a refutation rather than dropped, because it is the obvious first guess and
+someone will otherwise spend the same twenty minutes on it. What remains is to instrument
+which early return in `lower_pure_module_value_call` (`calls.rs:89`) fires for
+`option.unwrap_or(s0, (1, 2))` but not for `option.unwrap_or(s0, ("a", 1))` — the two probes
+are `s_s11` and `s_s5` in the session scratchpad, two lines each.
+
+**Second hypothesis also eliminated**: `repr_of` (`lower/mod.rs`) does not reject a tuple —
+its early `Err` is for `Ty::Unknown` only, and the scalar-width table below it is a
+classification, not a gate. So the decline is not in `repr_of` either.
+
+**Stopping the chase here, deliberately.** Three hypotheses in a row have been eliminated
+without closing the cell, which is the signal that the next step needs instrumentation
+(printing which branch of `lower_pure_module_value_call` is taken for each probe) rather than
+more reading. Continuing to guess is how the P2 bracket earlier in this cycle became a
+retraction — the discipline that cost is worth paying here too.
+
+What is NOT in doubt: the cell is an honest wall (exit 1, no output, no wrong bytes), it
+costs coverage rather than correctness, and the two-line probes that discriminate it are
+`s_s5` (builds) and `s_s11` (walls) in the session scratchpad.
+
+### R3 remainder — the decline is localised to ONE call, with a named next hypothesis (2026-08-01)
+
+Traced by reading, confirmed by the two probes:
+
+- `s_s5` `Option[(String, Int)]` → `try_opt_str_int_tuple_payload` → `lower_owned_heap_field(expr)` → **succeeds**
+- `s_s11` `Option[(Int, Int)]` → `try_opt_scalar_tuple_payload` → `lower_owned_heap_field(expr)` → **fails**
+
+Two different arms, but they make the SAME call with the SAME expression shape
+(`option.unwrap_or(s0, <tuple literal>)`, a `CallTarget::Module`). Only the result TYPE
+differs. So the decline is inside `lower_pure_module_value_call` (`calls.rs:89`) and it is
+type-dependent.
+
+**Next hypothesis to test** (more specific than "instrument the early returns"): the stdlib's
+`option.unwrap_or` is routed or monomorphized BY PAYLOAD TYPE, and there is a cell for a
+String-carrying tuple but not for an all-scalar one. Check `self_host_registry.rs` /
+`stdlib_info.rs` for how `option.unwrap_or` specializations are registered, and whether the
+all-scalar tuple instantiation exists.
+
+If that is it, the fix is a registry entry rather than a lowering change — which is a much
+smaller and safer edit than the ownership-analysis change the earlier hypotheses implied.
+
+### R3 remainder — a WRONG root cause, retracted (2026-08-01)
+
+The hypothesis named above was right, and the gap is exact. `unwrap_or` is routed by payload
+type, and the two modules' cell sets are asymmetric:
+
+| payload | `result` | `option` |
+|---|---|---|
+| String | `result.str_unwrap_or` | `option.unwrap_or_str` |
+| Value | `result.value_unwrap_or` | `option.value_unwrap_or` |
+| List[Value] | `result.list_value_unwrap_or` | `option.listvalue_unwrap_or` |
+| List[Int] / List[String] | (via flat) | `option.listint_unwrap_or` / `option.liststr_unwrap_or` |
+| **flat scalar block** (an all-scalar TUPLE, `List[<scalar>]`, `Bytes`) | **`result.flat_unwrap_or`** | **— MISSING —** |
+| heap fallback | `result.unwrap_or_hx` | `option.unwrap_or_hx` |
+
+`Option[(Int, Int)]` matches no cell, so the routing returns `None` and the caller walls.
+`Option[(String, Int)]` is not all-scalar, so it takes the heap path and builds. That is the
+whole difference between probes `s_s11` and `s_s5`.
+
+**This is the same class as everything else found this cycle**: a family grown a point at a
+time. `result` got its flat cell when `result.zip`'s `(Int, Int)` needed it; nobody added the
+`option` twin because nothing had asked for it until a fuzz program did.
+
+**The fix, concretely:**
+
+1. Add `option_flat_unwrap_or` to `stdlib/value_core.almd`, modelled on
+   `result_flat_unwrap_or` (line 705) but for the OPTION layout — Option is len-as-tag, not
+   the Result's cap-as-tag-at-@16, so the body is NOT a copy: read the len slot, `0` = none →
+   return the fallback, else load the payload handle and let the bare-Var tail auto-acquire.
+   The neighbouring `?? d`-over-`Option[List[String]]` helper in the same file is the closer
+   template — its comment even says "the SAME len-as-tag prim".
+2. Register it in `self_host_registry.rs` next to `("result_flat_unwrap_or",
+   "result.flat_unwrap_or")`.
+3. Add the routing arm to `unwrap_or_call_name_option` (`lower/mod_p4_f.rs`), mirroring the
+   `result` arm's predicate (`Ty::Tuple(ts)` all-scalar, or a non-heap-element `List`).
+4. **Land a matrix gate in the same PR** — the family rule is that `option` and `result` carry
+   the SAME payload cells, and a test asserting cell-set equality is what stops the next
+   divergence. This gap existed precisely because nothing checked that.
+
+Probes: `s_s11` (walls) and `s_s5` (builds), two lines each, in the session scratchpad.
+
+**RETRACTED — the above is wrong.** I compared the two modules by grepping the emitted NAMES
+(`Some("option.*"` vs `Some("result.*"`) and concluded `option` had no flat cell. It does:
+`unwrap_or_call_name_option_flat_scalar` (`lower/mod_p4_f.rs`) matches
+`Ty::Tuple(ts) if all non-heap` and routes to `option.listint_unwrap_or`. The option side
+REUSES that name for the whole flat family instead of minting a separate
+`option.flat_unwrap_or`, so a name-level comparison reads as a gap that is not there.
+
+**Reading names instead of predicates is what produced a confident wrong answer** — the same
+failure mode as the retracted P2 bracket, in a different disguise. The rule that would have
+caught it: when comparing two families, compare what they MATCH, not what they are called.
+
+The changes that conclusion produced (an `option_flat_unwrap_or` in `stdlib/value_core.almd`
+plus its registration) were reverted. The revert itself went wrong twice and is worth
+recording: the removal logic walked back over the preceding comment block and took the
+NEIGHBOURING `option_liststr_unwrap_or` with it, and `almide fmt` had meanwhile reformatted
+the entire 1100-line file, so the diff no longer isolated my edit. Restoring the file from
+HEAD was the correct move; a function-inventory diff against HEAD is what caught the missing
+neighbour, and re-running `spec/stdlib` caught a second symptom (43 native fallbacks where 6
+is normal) that the inventory check alone would have missed.
+
+**So R3's cause is still unknown.** Eliminated so far: heap classification (`Ty::Tuple` IS
+heap), `repr_of` (rejects only `Ty::Unknown`), and now a missing routing cell (the cell
+exists and its predicate covers the case). What is still true: `s_s5` builds, `s_s11` walls,
+they differ only in element type, and both reach `lower_owned_heap_field` through the same
+call. The next step remains instrumentation — printing which branch is taken — not more
+reading.

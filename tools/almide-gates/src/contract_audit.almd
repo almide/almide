@@ -1,0 +1,74 @@
+// The bidirectional-link rule of `scripts/check-contracts.sh`.
+//
+// Every `spec/wasm_cross/*.almd` fixture must declare the contract(s) it certifies on a
+// `// @contract: C-NNN[, C-MMM]` header line, AND every contract must list that fixture as
+// evidence. **Both directions, or the link is a lie in one of them**:
+//
+//   ledger lists the fixture, fixture does not name the contract → the contract's evidence
+//       points at a file that certifies something else
+//   fixture names the contract, ledger does not list it → the fixture is not counted, so
+//       deleting it would break nothing and nobody would notice
+//
+// The rule is small; what makes it worth extracting is that it gates EVERY contract change,
+// and in the bash it is reachable only by running the whole audit over 329 fixtures.
+fn parse_contract_header(line: String) -> List[String] = {
+  let t = string.trim(line)
+  if not string.starts_with(t, "// @contract:") then []
+  else {
+    let rest = string.slice(t, 13, string.len(t))
+    string.split(rest, ",") |> list.map((p) => string.trim(p)) |> list.filter((p) => p != "")
+  }
+}
+
+// The header's grammar: `// @contract: C-001` or `// @contract: C-001, C-002`.
+fn is_contract_id(s: String) -> Bool = string.starts_with(s, "C-") and string.len(s) == 5 and (string.chars(string.slice(s, 2, 5)) |> list.all((c) => string.is_digit(c)))
+
+// A well-formed id is `C-` plus three digits — the bash pins the width, so `C-1` and
+// `C-1000` are both malformed rather than leniently accepted.
+fn header_of(content: String) -> List[String] = {
+  let hit = list.find(string.split(content, "\n"), (l) => string.contains(l, "@contract:"))
+  match hit {
+    some(l) => parse_contract_header(l),
+    none => [],
+  }
+}
+
+fn ledger_says_fixture_does_not(ledger_ids: List[String], fixture_ids: List[String]) -> List[String] = ledger_ids |> list.filter((id) => not list.contains(fixture_ids, id))
+
+// The two asymmetries, reported separately because they mean different things.
+fn fixture_says_ledger_does_not(ledger_ids: List[String], fixture_ids: List[String]) -> List[String] = fixture_ids |> list.filter((id) => not list.contains(ledger_ids, id))
+
+test "header parsing, single and multiple" {
+  assert_eq(parse_contract_header("// @contract: C-001"), ["C-001"])
+  assert_eq(parse_contract_header("// @contract: C-001, C-002"), ["C-001", "C-002"])
+  assert_eq(parse_contract_header("  // @contract:  C-050 "), ["C-050"])
+  assert_eq(parse_contract_header("// something else"), [])
+}
+
+test "id shape is pinned to three digits" {
+  assert_eq(is_contract_id("C-001"), true)
+  assert_eq(is_contract_id("C-200"), true)
+  assert_eq(is_contract_id("C-1"), false)
+  assert_eq(is_contract_id("C-1000"), false)
+  assert_eq(is_contract_id("X-001"), false)
+}
+
+test "header extraction finds the line anywhere in the preamble" {
+  let c = "// a comment\n// @contract: C-199\nfn main() -> Unit = ()"
+  assert_eq(header_of(c), ["C-199"])
+  assert_eq(header_of("fn main() -> Unit = ()"), [])
+}
+
+test "the two asymmetries are reported separately" {
+  // The ledger claims C-001 and C-002; the fixture declares C-002 and C-003.
+  let ledger = ["C-001", "C-002"]
+  let fixture = ["C-002", "C-003"]
+  assert_eq(ledger_says_fixture_does_not(ledger, fixture), ["C-001"])
+  assert_eq(fixture_says_ledger_does_not(ledger, fixture), ["C-003"])
+}
+
+test "a symmetric link reports nothing in either direction" {
+  let ids = ["C-199", "C-200"]
+  assert_eq(list.len(ledger_says_fixture_does_not(ids, ids)), 0)
+  assert_eq(list.len(fixture_says_ledger_does_not(ids, ids)), 0)
+}

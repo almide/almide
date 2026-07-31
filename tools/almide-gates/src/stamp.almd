@@ -1,0 +1,77 @@
+// The toolchain stamp — `proofs/lib/stamp.sh` in Almide.
+//
+// Every proof gate prints this before doing anything, and it does one load-bearing check:
+// if the `almide` on PATH is not the same binary as `target/release/almide`, the gate ABORTS,
+// because the evidence it would produce describes a different compiler than the tree under
+// test. This session hit that guard for real — a parity run refused to start until
+// `make install` caught the PATH binary up, which is exactly the "one command, one binary"
+// rule the fuzz campaigns depend on. It is worth porting first: it is small, it is shared by
+// every other gate, and it is the piece whose failure mode is silently-wrong evidence.
+import process
+
+type Stamp = { ok: Bool, lines: List[String] }
+
+effect fn run(cmd: String, args: List[String]) -> String = string.trim(process.exec(cmd, args) ?? "")
+
+// `shasum -a 256 <file> | cut -c1-16` — the first 16 hex chars identify the build.
+effect fn sha16(path: String) -> String = {
+  let out = run("shasum", ["-a", "256", path])!
+  if out == "" then ""
+  else string.slice(out, 0, 16)
+}
+
+effect fn which(cmd: String) -> String = run("command", ["-v", cmd])!
+
+// `stat -f '%Sm'` (BSD) with the GNU `stat -c '%y'` fallback, as the bash does.
+effect fn mtime(path: String) -> String = {
+  let bsd = run("stat", ["-f", "%Sm", path])!
+  if bsd != "" then bsd
+  else run("stat", ["-c", "%y", path])!
+}
+
+// The stamp, as the bash prints it. `ok = false` means the caller must abort — the PATH
+// binary and the workspace build disagree, so no measurement taken now would describe the
+// tree being tested.
+effect fn toolchain(root: String) -> Stamp = {
+  let alm = which("almide")!
+  let ws = root + "/target/release/almide"
+  var lines: List[String] = ["── toolchain stamp ──"]
+  // `ok` is the Result constructor and cannot be a binding name here.
+  var agrees = true
+  if alm == "" then {
+    lines = lines + ["  almide: NOT ON PATH"]
+  } else {
+    let ver = run("almide", ["--version"])!
+    let hash = sha16(alm)!
+    let mt = mtime(alm)!
+    lines = lines + ["  almide: " + ver + "  sha256:" + hash + "  mtime:" + mt + "  (" + alm + ")"]
+    let wshash = sha16(ws)!
+    if wshash != "" and hash != wshash then {
+      lines = lines + ["  FATAL: PATH almide (" + hash + ") != workspace build (" + wshash + ")."] + [
+        "  The evidence this gate produces would not describe the tree under test."
+      ] + [
+        "  Run 'make install' (or fix PATH) and re-run."
+      ]
+      agrees = false
+    } else ()
+  }
+  lines = lines + [
+    "  rustc:    " + run("rustc", ["--version"])!
+  ]
+  lines = lines + [
+    "  wasmtime: " + run("wasmtime", ["--version"])!
+  ]
+  // `coqc --version | head -1` — the Rocq banner is multi-line.
+  let coq = run("coqc", ["--version"])!
+  lines = lines + [
+    "  coqc:     " + list.get_or(string.split(coq, "\n"), 0, "n/a")
+  ]
+  let head = run("git", ["-C", root, "rev-parse", "--short", "HEAD"])!
+  let porcelain = string.trim(run("git", ["-C", root, "status", "--porcelain"])!)
+  let dirty = if porcelain == "" then 0 else list.len(string.split(porcelain, "\n"))
+  lines = lines + ["  tree:     " + head + " " + int.to_string(dirty) + " dirty file(s)"]
+  lines = lines + [
+    "─────────────────────"
+  ]
+  Stamp { ok: agrees, lines: lines }
+}
