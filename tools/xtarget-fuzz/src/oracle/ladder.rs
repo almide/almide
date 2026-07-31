@@ -293,6 +293,24 @@ pub fn run_ladder(
                 .into(),
         };
     }
+    // ONE leg exhausted its call stack while the other terminated (C-196): the
+    // terminating leg's optimizer legally transformed the unbounded recursion into
+    // iteration (LLVM's accumulator TRE on native — Wave 4 finding 57), or vice
+    // versa. Stack depth is a RESOURCE limit, not an observable the ALS specifies,
+    // so the contracted divergence is a skip — mirroring the both-legs rule above.
+    if one_sided_stack_exhaustion(
+        native.success(),
+        wasm.success(),
+        String::from_utf8_lossy(&native.stderr).contains("stack overflow"),
+        String::from_utf8_lossy(&wasm.stderr).contains("call stack exhausted"),
+    ) {
+        return Outcome::Skipped {
+            reason: "one leg exhausted its call stack while the other's optimizer \
+                     transformed the recursion to termination — the C-196 \
+                     resource-limit divergence, not a semantic oracle"
+                .into(),
+        };
+    }
     if native.success() != wasm.success() {
         // One leg ran cleanly and the other did not — a run-failure
         // divergence in either direction (native can non-zero-exit BY DESIGN
@@ -393,6 +411,47 @@ fn divergence_summary(native: &RunEvidence, wasm: &RunEvidence) -> String {
 /// at wasm's 4GB ceiling long before native's; both are non-terminating).
 fn native_hang_is_finding(wasm_built: bool, wasm_timed_out: bool, wasm_succeeded: bool) -> bool {
     wasm_built && !wasm_timed_out && wasm_succeeded
+}
+
+/// C-196's decision, extracted pure so it is unit-testable like
+/// [`native_hang_is_finding`]: true iff exactly one leg succeeded AND the failing
+/// leg's stderr carries its stack-exhaustion signature (`call stack exhausted` on
+/// wasmtime, `stack overflow` on the native guard page).
+fn one_sided_stack_exhaustion(
+    native_ok: bool,
+    wasm_ok: bool,
+    native_stack_overflow: bool,
+    wasm_stack_exhausted: bool,
+) -> bool {
+    (native_ok && !wasm_ok && wasm_stack_exhausted)
+        || (wasm_ok && !native_ok && native_stack_overflow)
+}
+
+#[cfg(test)]
+mod stack_exhaustion_classification_tests {
+    use super::one_sided_stack_exhaustion;
+
+    #[test]
+    fn wasm_exhausted_native_terminated_is_contracted() {
+        // Wave 4 finding 57: LLVM's accumulator TRE terminated native; wasm
+        // recursed faithfully and trapped. C-196 — a skip, not a finding.
+        assert!(one_sided_stack_exhaustion(true, false, false, true));
+    }
+
+    #[test]
+    fn native_exhausted_wasm_terminated_is_contracted() {
+        assert!(one_sided_stack_exhaustion(false, true, true, false));
+    }
+
+    #[test]
+    fn wasm_failure_without_the_signature_is_still_a_finding() {
+        assert!(!one_sided_stack_exhaustion(true, false, false, false));
+    }
+
+    #[test]
+    fn both_ok_is_not_this_rule() {
+        assert!(!one_sided_stack_exhaustion(true, true, false, false));
+    }
 }
 
 #[cfg(test)]

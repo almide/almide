@@ -2444,3 +2444,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/checked_conversion_value_match.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-196"
+spec      = "ALS-T6"
+title     = "Call-stack exhaustion is a resource limit, not an observable-behavior promise"
+statement = "Termination that depends on recursion depth beyond a target's call-stack resources is TARGET-DEPENDENT, and the divergence is contracted rather than silent: when one leg's optimizer legally transforms an unbounded self-recursion into iteration (LLVM's accumulator tail-recursion elimination on native — Wave 4 finding 57, a mutated C-044 fixture whose `factorial(n - -2147483648)` recursion is ~4.29e9 frames deep) while the other leg recurses faithfully and traps (`call stack exhausted` on wasmtime; `stack overflow` on the native guard page), neither leg is wrong — no finite stack absorbs the recursion, and termination-by-transformation is not a semantic promise. The convergent boundary IS promised: recursion within both targets' limits stays byte-identical (the fixture). The differential oracle classifies the one-sided stack-exhaustion case as this contracted class (ladder.rs `one_sided_stack_exhaustion`, unit-tested, mirroring the pre-existing both-legs-exhausted skip). A depth-guard normalization — a defined T6 abort at the same depth on both targets — remains the strengthening follow-up that would retire this exception."
+since     = "0.41.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/recursion_depth_within_limits.almd", class = "fixture" },
+]
