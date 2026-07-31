@@ -11,7 +11,7 @@
 | B2 | Skeleton: module/package layout, builds green, ~1k lines. Record build time | — | **first subcommand done, byte-identical** | `tools/almide-gates/` (2 modules, ~190 lines); output matches `LC_ALL=C bash docs/roadmap/generate-readme.sh` exactly — 390 lines, 59,262 bytes |
 | B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
 | B4 | The contracts-README subcommand (the first TOML consumer) | Byte-identical to the bash original | **done** | 231 lines / 25,297 bytes identical; found and fixed a truncation bug in the original (#1032) |
-| B5 | `conformance.md` — the third TOML consumer | Byte-identical | pending — shape analysed below | — |
+| B5 | `conformance.md` — the third TOML consumer | Byte-identical | **done** | 81 lines identical; surfaced a native codegen bug (#1033) |
 
 ## B1 — the program: `almide-gates`, this repo's own gate and generator toolchain
 

@@ -11,6 +11,7 @@ import env
 import mdmeta
 import toml
 import contracts
+import conformance
 import env
 
 type Entry = { date: String, link: String, desc: String }
@@ -89,6 +90,12 @@ effect fn gen_contracts_readme(root: String) -> String = {
   header + int.to_string(list.len(rs)) + " contracts\n\n" + "| ID | Contract | Since | Status | Strongest Evidence | # Fixtures |\n" + "|----|----------|-------|--------|--------------------|-----------:|\n" + list.join(rs, "\n") + "\n\n"
 }
 
+effect fn gen_conformance(root: String) -> String = {
+  let header = fs.read_text(root + "/.conformance-header.md") ?? ""
+  let tables = toml.parse_tables(fs.read_text(root + "/contracts.toml")!)
+  header + conformance.report_body(tables)
+}
+
 effect fn main() -> Unit = {
   let args = env.args()
   // `env.args()` is the USER arguments only, 0-based — the program name is not element 0.
@@ -96,6 +103,7 @@ effect fn main() -> Unit = {
   let root = list.get_or(args, 1, "docs/roadmap")
   let body = match cmd {
     "contracts-readme" => gen_contracts_readme(root)!,
+    "conformance" => gen_conformance(root)!,
     _ => gen_roadmap_readme(root)!,
   }
   // `println` adds the newline that the bash originals' final `echo ""` produces, so the
