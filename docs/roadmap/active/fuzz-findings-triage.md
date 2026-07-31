@@ -307,7 +307,16 @@ cover heap pairs (`is_flat_heap_pair_ty`, `is_str_closure_pair_ty`,
 `is_flat_heap_scalar_pair_ty`) and an all-scalar tuple matches none of them. So the family is
 3/4 symmetric, not 4/4, and this line exists so the last cell is a named gap rather than a
 rediscovery. Closing it means teaching `lower_owned_heap_field` the all-scalar tuple call
-result, not touching the Option cells again.
+result, not touching the Option cells again. **Narrowed further (2026-07-31)**: the tuple
+LITERAL case is already handled — `owned_heap_field.rs`'s
+`IrExprKind::Record { .. } | IrExprKind::Tuple { .. }` arm admits a scalar-only aggregate via
+`try_lower_scalar_tuple_construct`. A CALL returning `(Int, Int)` takes a different arm
+entirely (the aggregate group's `CallTarget::Module` →
+`lower_pure_module_value_call`, `calls.rs:89`), and that is where it declines. So the fix is
+in the CALL path, not the tuple path: teach `lower_pure_module_value_call` (or the arm above
+it) to materialize an all-scalar aggregate result. Start by instrumenting which of its early
+returns fires for `option.unwrap_or(s0, (1, 2))` — probe `s_s11.almd` in the session
+scratchpad is the two-line repro.
 
 **The original R3 program now walls one step LATER**, on `List argument cannot be faithfully
 materialized (would borrow an empty deferred heap value)` — the `list.fold(list.sort(tmp3), …)`
