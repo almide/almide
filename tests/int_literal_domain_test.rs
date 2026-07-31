@@ -291,3 +291,29 @@ fn float32_range_is_checked_and_precision_is_not() {
         "a plain Float context has no f32 bound, got:\n{out}"
     );
 }
+
+/// The CTOR-PAYLOAD edition (Wave 4 N1): a literal flowing into a tuple-variant
+/// constructor payload must fit the DECLARED payload type. `Click(4294967295, 9)`
+/// with `Click(Int32, Int)` passed `almide check` and native rustc then rejected
+/// the emitted literal ("literal out of range for i32") — ctor calls carry no
+/// call_sig, so no context hook ever saw the position. In-range payloads stay
+/// accepted, and the capitalized callee parses as TypeName (the first fix matched
+/// Ident only and silently never fired — pinned here).
+#[test]
+fn ctor_payloads_are_range_checked() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = "type Event = | Click(Int32, Int) | Quit\n\n\
+               fn main() -> Unit = {\n  let c = Click(4294967295, 9)\n  println(\"${c}\")\n}\n";
+    let out = check(dir.path(), src);
+    assert!(
+        out.contains("E024") && out.contains("out of range for Int32"),
+        "an out-of-i32-range ctor payload literal must be E024, got:\n{out}"
+    );
+    let src_ok = "type Event = | Click(Int32, Int) | Quit\n\n\
+                  fn main() -> Unit = {\n  let c = Click(2147483647, 9)\n  println(\"${c}\")\n}\n";
+    let out = check(dir.path(), src_ok);
+    assert!(
+        !out.contains("E024"),
+        "an in-range ctor payload literal stays accepted, got:\n{out}"
+    );
+}
