@@ -71,7 +71,8 @@ const MAIN_ERR_PREFIX_LEN: u32 = 7; // "Error: "
 const MAIN_ERR_NL_ADDR: u32 = DIVZERO_MSG_ADDR + 23; // the div-zero line's "\n"
 const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
 const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
-const LABELS_ADDR: u32 = 376; // print labels (the data section) — after ALL fixed messages (incl. fs errno)
+const OOM_MSG_ADDR: u32 = 376; // "Error: out of memory\n" — 376..397 ($oom, C-197)
+const LABELS_ADDR: u32 = 400; // print labels (the data section) — after ALL fixed messages (incl. fs errno + oom)
 // fs errno → native std::io Display strings (240..376, FIXED — placed BEFORE the
 // variable-length labels region so labels can never overwrite them): path_open errors
 // map to the EXACT message native std::fs emits, so `err(e)` observes byte-identical
