@@ -41,7 +41,9 @@ effect fn entries_of(root: String, files: List[String]) -> List[Entry] = {
   // the effect at one place and lets the rest of the pipeline stay pure.
   var out: List[Entry] = []
   for f in files {
-    out = out + [entry_of(root, f)]
+    out = out + [
+      entry_of(root, f)!
+    ]
   }
   out
 }
@@ -66,7 +68,7 @@ effect fn done_section(root: String) -> String = {
   let files = md_files(root, "done")
   if list.len(files) == 0 then ""
   else {
-    let entries = entries_of(root, files)! |> list.filter((e) => e.date != "") |> list.sort_by((e) => e.date) |> list.reverse
+    let entries = entries_of(root, files)! |> list.filter((e) => e.date != "") |> list.sort_by((e) => e.date + "|" + e.link + "|" + e.desc) |> list.reverse
     let count = list.len(files)
     let rows = entries |> list.map((e) => "| " + e.date + " | " + e.link + " | " + e.desc + " |") |> list.join("\n")
     "## Done\n\n" + int.to_string(count) + " items\n\n<details>\n<summary>Show all " + int.to_string(count) + " completed items</summary>\n\n" + "| Done | Item | Description |\n|------|------|-------------|\n" + rows + "\n\n</details>\n\n"
@@ -74,12 +76,15 @@ effect fn done_section(root: String) -> String = {
 }
 
 effect fn gen_roadmap_readme(root: String) -> String = {
-  let header = "# Almide Roadmap\n\n> Auto-generated from directory structure. Run `bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md` to update.\n>\n> [GRAND_PLAN.md](GRAND_PLAN.md) — 5-phase strategy\n> [ROAD_TO_1_0.md](ROAD_TO_1_0.md) — 0.41 → 0.99 version ladder\n"
+  let header = "# Almide Roadmap\n\n> Auto-generated from directory structure. Run `bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md` to update.\n>\n> [GRAND_PLAN.md](GRAND_PLAN.md) — 5-phase strategy\n> [ROAD_TO_1_0.md](ROAD_TO_1_0.md) — 0.41 → 0.99 version ladder\n\n"
   header + plain_section(root, "active", "Active")! + plain_section(root, "on-hold", "On Hold")! + done_section(root)!
 }
 
 effect fn main() -> Unit = {
   let args = env.args()
   let root = list.get_or(args, 1, "docs/roadmap")
-  println(string.trim_end(gen_roadmap_readme(root)!))
+  // `println` adds the newline that the bash original's final `echo ""` produces, so the
+  // body is emitted with its own trailing blank line trimmed by exactly one.
+  let body = gen_roadmap_readme(root)!
+  println(string.slice(body, 0, string.len(body) - 1))
 }

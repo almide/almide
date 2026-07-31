@@ -8,7 +8,7 @@
 | Bolt | What | Done-criteria for this Bolt | Status | Evidence |
 |---|---|---|---|---|
 | B1 | Choose the program and write down why | The shape and rough module layout are concrete; the rejected candidates carry their reason | **done** | Below |
-| B2 | Skeleton: module/package layout, builds green, ~1k lines. Record build time | — | **in progress — blocked on #1029** | `tools/almide-gates/` (2 modules, ~180 lines) type-checks; native build blocked |
+| B2 | Skeleton: module/package layout, builds green, ~1k lines. Record build time | — | **first subcommand done, byte-identical** | `tools/almide-gates/` (2 modules, ~190 lines); output matches `LC_ALL=C bash docs/roadmap/generate-readme.sh` exactly — 390 lines, 59,262 bytes |
 | B3 | Grow to ~5k lines of working functionality. Record build time | — | pending | — |
 | B4 | Reach ~10k lines. Record build time; plot against the assumed linear | — | pending | — |
 | B5 | Resolve #1003's and #1002's triggers with the measured numbers | — | pending | — |
@@ -119,6 +119,40 @@ Recorded because a dogfood's job is also to report ergonomics:
   so descending order is ascending-then-reverse.
 - One diagnostic pointed at the wrong definition: an E005 for `mdmeta.parse()` cited
   `effect fn main()` as "defined here".
+
+### B2 result — one subcommand, byte-identical, and three bugs on the way
+
+`generate-readme.sh` (101 lines of bash) is reimplemented in ~190 lines of Almide across two
+modules, and its output is **byte-identical** to the original: 390 lines, 59,262 bytes.
+
+The road there produced three findings, which is the Unit's whole thesis in miniature:
+
+1. **[#1029](https://github.com/almide/almide/issues/1029)** — an `effect fn` in a `for`-loop
+   body was not auto-unwrapped: native emitted invalid Rust, wasm printed heap addresses as
+   values.
+2. **[#1030](https://github.com/almide/almide/issues/1030)** — the ROOT of #1029, and smaller:
+   list concat never constrained its right operand's element type. `[1] + ["a"]` type-checked;
+   wasm printed `[1, 8244]`. Fixed with one call (`unify_infer` → `constrain`), which closed
+   both issues and made #1029's diagnostic better than a bespoke one would have been.
+3. **[#1031](https://github.com/almide/almide/issues/1031)** — a defect in the ORIGINAL: the
+   bash generator's output depends on the machine locale (`sort`'s last-resort whole-line
+   comparison follows ambient collation, and `LC_ALL` is not pinned). The committed
+   `README.md` is therefore not reproducible; regenerating it elsewhere yields 63 lines of
+   pure row-order noise. **Invisible while there was only one implementation** — a second
+   implementation is what turned it into a diff.
+
+The Almide version sorts by explicit byte order, so it is reproducible by construction rather
+than by remembering to export a variable.
+
+### Faithfulness notes (deliberate bug-for-bug reproduction)
+
+A byte-match is the acceptance check, so the reimplementation copies the original's quirks
+rather than improving them. Each is commented at its site:
+
+- a `done/` file missing its `<!-- done: -->` line is silently DROPPED from the table (the
+  bash `[ -z "$date" ] && continue`), while still counting toward "N items"
+- equal dates are tie-broken by the whole row, descending — `sort -r`'s last-resort rule
+- the trailing newline comes from the original's final `echo ""`
 
 ### State for the next session
 
