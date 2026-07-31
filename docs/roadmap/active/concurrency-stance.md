@@ -1,4 +1,5 @@
-# Almide の並行性モデル — 立場の決定
+<!-- description: The concurrency model decision and the fan-family fixes it settles -->
+# Concurrency stance: deterministic data-parallelism
 
 > issue [#1000](https://github.com/almide/almide/issues/1000) の回答。ラダー行 0.44。
 > この決定は `fan` 関連の未解決 4 件（#1023 / #1024 / #1025 / #1026）すべての正解を導く。

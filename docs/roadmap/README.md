@@ -7,7 +7,7 @@
 
 ## Active
 
-67 items
+68 items
 
 | Item | Description |
 |------|-------------|
@@ -21,6 +21,7 @@
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) | Closing the closure feature gap between the native and wasm legs, sweep by sweep |
 | [Codegen traversal totality](active/codegen-traversal-totality.md) | Making every codegen traversal exhaustive by construction, so a new IR node cannot be silently skipped |
 | [Completeness by Construction](active/completeness-by-construction.md) | Design note: borrowing Perceus / borrow-checker style mechanical completeness guarantees for Almide's own passes |
+| [Concurrency stance: deterministic data-parallelism](active/concurrency-stance.md) | The concurrency model decision and the fan-family fixes it settles |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) | Which layers of the well-typed-source-to-correct-binary chain still lack a mechanical or mathematical proof |
 | [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
