@@ -45,7 +45,7 @@ modification survival rate である。同じ入力で走らせるたび出力�
 
 ## 4 件への帰結
 
-### #1024 `fan.race` — 撤去する（リネームではなく）
+### #1024 `fan.race` — **撤去済（2026-07-31）**
 
 実装は既にリスト順で正しい。C-004 も正しい。嘘をついているのは SPEC.md だけ。
 
@@ -58,6 +58,18 @@ modification survival rate である。同じ入力で走らせるたび出力�
 としても既存表面の重複にしかならない。`fan.timeout` と同じ扱いにする —
 **E027 系の check 時トンボストーン + 移行ヒント**（`ts[0]()` を直接呼ぶ、あるいは
 失敗をスキップしたいなら `fan.any`）。共存させない。
+
+**実施内容**: checker の `race` アームを E027 トンボストーンに置換。C-004 の題と
+statement から `fan.race` 節を削除（`fan.any`/`map`/`settle` は不変）、C-005 から
+head-Err 節と `spec/wasm_cross/fan_race_err.almd` を削除、SPEC.md §9.8/§13.2、
+README、DESIGN を更新、診断 fixture `e027-fan-race-removed` を追加。
+契約ゲート緑（198 契約 / flagged 0）。
+
+撤去中に**トンボストーンの連鎖**が 1 つ見つかった: `e027-fan-timeout-removed` の
+`fixed.almd`（0.29.0 で `fan.timeout` の移行先として書かれたもの）が `fan.race` を
+使っていて、今回の撤去でコンパイルしなくなった。**トンボストーンの移行先は生きた
+表面でなければならない** — 死んだ表面へ誘導するヒントは、次の撤去で静かに壊れる。
+`fan.any` に更新し、`fan.timeout` のヒント文からも `fan.race` を削除した。
 
 `fan.any`（リスト順で最初の Ok）は残す。失敗をスキップするという、重複でない意味がある。
 

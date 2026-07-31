@@ -83,7 +83,7 @@ almide run hello.almd
 - **Bidirectional type inference** — Type annotations flow into expressions (`let xs: List[Int] = []`)
 - **Codec system** — `Type.decode(value)` / `Type.encode(value)` convention with auto-derive
 - **Map literals** — `["key": value]` syntax with `m[key]` access and `for (k, v) in m` iteration
-- **Fan** — structured concurrency surface: `fan { a(); b() }` and `fan.settle` run on real threads natively (sequential on wasm); `fan.map` / `fan.race` / `fan.any` are deterministic by list order on both targets
+- **Fan** — structured concurrency surface: `fan { a(); b() }` and `fan.settle` run on real threads natively (sequential on wasm); `fan.map` / `fan.any` are deterministic by list order on both targets
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution

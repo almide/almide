@@ -761,8 +761,9 @@ Library forms:
 - `fan.map(xs, f)` -- map over a collection via the fan surface (deterministic, sequential in list order)
 - `fan.any(thunks)` -- the first thunk whose result is `Ok`, in list order
 
-(`fan.race` is being removed: under list-order semantics it is exactly `thunks[0]()`, so the
-name promises timing behaviour the language deliberately does not have.)
+(`fan.race` was REMOVED in 0.42.0: under list-order semantics it was exactly `thunks[0]()`,
+so the name promised timing behaviour the language deliberately does not have. Referencing it
+is a check-time `E027` tombstone with a migration hint.)
 
 ### 9.10 Pipe
 
