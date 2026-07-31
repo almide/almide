@@ -2,25 +2,34 @@
 // fuzz shape. Reachable whenever const-fold declines to collapse the cond, so the
 // conds here are RUNTIME-derived (a folded `if false then …` would not exercise
 // the lowering path this pins).
-import testing
-
 fn runtime_flag(s: String) -> Bool = string.len(s) > 2
 
 test "if element with runtime cond, then arm" {
   let c = runtime_flag("long enough")
-  let xs = ["a", (if c then "b" else "d"), "e"]
+  let xs = [
+    "a",
+    (if c then "b" else "d"),
+    "e"
+  ]
   assert_eq(list.len(xs), 3)
   assert_eq(list.join(xs, ","), "a,b,e")
 }
 
 test "if element with runtime cond, else arm" {
   let c = runtime_flag("x")
-  let xs = ["a", (if c then "b" else "d")]
+  let xs = [
+    "a",
+    (if c then "b" else "d")
+  ]
   assert_eq(list.join(xs, ","), "a,d")
 }
 
 test "if element inside a HOF condition list" {
   let c = runtime_flag("x")
-  let hit = list.any(["αβγ", (if c then "日本語" else "ﬁle"), "café"], ((s) => s == "ﬁle"))
+  let hit = list.any([
+    "αβγ",
+    (if c then "日本語" else "ﬁle"),
+    "café"
+  ], ((s) => s == "ﬁle"))
   assert_eq(hit, true)
 }
