@@ -1,0 +1,13 @@
+// E001: list concatenation must constrain BOTH operands' element types.
+//
+// Before #1030 the concat path called `unify_infer`, which binds inference variables but
+// stays silent when both sides are concrete and different. So this type-checked, native
+// then emitted invalid Rust, and wasm printed the String block's ADDRESS as an Int element
+// (`[1, 8244]`) — a checker-accepted program producing wrong bytes.
+//
+// The list LITERAL path already reported the same mismatch (`[1, "a"]` is E001), so one
+// property of the language was checked on one path and not the other.
+fn main() -> Unit = {
+  let xs: List[Int] = [1] + ["a"]
+  println("${xs}")
+}

@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let xs: List[Int] = [1] + [2]
+  println("${xs}")
+}

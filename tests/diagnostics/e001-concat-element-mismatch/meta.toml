@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "type mismatch in list concatenation element"
+hint_substring = "List"

@@ -345,8 +345,8 @@ are recorded here because this is where the live defect ledger lives.
 
 | # | Shape | Severity |
 |---|---|---|
-| [#1029](https://github.com/almide/almide/issues/1029) | an `effect fn` called in a `for`-loop body is not auto-unwrapped: native emits invalid Rust, wasm prints heap addresses as values | wrong bytes (wasm) |
-| [#1030](https://github.com/almide/almide/issues/1030) | **root cause of #1029** — list concat does not constrain the RIGHT operand's element type. `[1] + ["a"]` type-checks; native fails to build; wasm prints `[1, 8244]` | wrong bytes (wasm) |
+| [#1029](https://github.com/almide/almide/issues/1029) | an `effect fn` called in a `for`-loop body is not auto-unwrapped: native emits invalid Rust, wasm prints heap addresses as values | **FIXED via #1030** |
+| [#1030](https://github.com/almide/almide/issues/1030) | **root cause of #1029** — list concat does not constrain the RIGHT operand's element type | **FIXED** — `infer_plus_op_concat` now uses `constrain` instead of `unify_infer` |
 
 **#1030 is the smallest instance of the checker-accepts-but-lowering-reinterprets class found
 so far**: no effects, no concurrency, no generics — three lines. And the contrast is exact:
@@ -358,3 +358,29 @@ seven fuzz campaigns did not. The spec corpus is written by someone who knows th
 a program written to do a job reaches for shapes nobody thought to test. Three instances of
 this class turned up in one day (#1027, #1029, #1030), each by accident rather than by a
 detector — which is the argument for the hole-hunt lens at ladder row 0.52 (#912).
+
+### #1030 fix (2026-07-31)
+
+One call changed, in `check/infer_statements.rs::infer_plus_op_concat`:
+
+```rust
+- self.unify_infer(le, re);
++ self.constrain(le.clone(), re.clone(), "list concatenation element");
+```
+
+`unify_infer` binds inference variables and stays SILENT when both sides are concrete and
+different. `constrain` still unifies — so the inference-variable cases the rule exists for
+(`List[?0] + List[Int]`) are unaffected — but it also REPORTS when unification is impossible.
+
+Both repros are now check-time errors on both targets:
+
+- `[1] + ["a"]` → `error[E001]: type mismatch in list concatenation element: expected Int but got String`
+- `out = out + [one(p)]` (#1029) → `… expected Int but got Result[Int, String]`
+
+The second is worth noting: with concat honest, #1029's message now says exactly what is
+wrong — the effect call is a `Result` and the list wants an `Int` — which points the user at
+`!` instead of at an "Almide bug" panic. One fix, two reports, and the diagnostic is better
+than the one I would have written for #1029 on its own.
+
+Regression: 335 files green (spec 324 + examples 11), diagnostic harness green, plus
+`tests/diagnostics/e001-concat-element-mismatch`.
