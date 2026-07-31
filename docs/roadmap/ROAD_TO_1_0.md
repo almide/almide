@@ -30,7 +30,7 @@ silent-wrong-code の計測器（fuzz nightly）を復活させ、編集ルー�
 | 0.42 | 単一ドライバ — フロントエンド 1 回実行、手書き段順序 9 → 1。**出荷済** | [#925](https://github.com/almide/almide/issues/925) |
 | 0.43 | **v0.42.0 で出荷済**（0.42 と同一タグ — 下の注記参照）。concurrency モデルの立場決定と、それに基づく fan 族の根治。立場は**決定的データ並列**に確定（[concurrency-stance.md](./active/concurrency-stance.md)）— `fan` はスケジューリングの構文であって意味論の構文ではない。実装: E008 の引数拡張(#1025) → `fan.race` トンボストーン(#1024) → キャンセル記述の削除(#1023) → arm 出力のリスト順フラッシュと trap 契約(#1026、C-004 の EXCEPTION 退役) | [#1000](https://github.com/almide/almide/issues/1000), [#1025](https://github.com/almide/almide/issues/1025), [#1024](https://github.com/almide/almide/issues/1024), [#1023](https://github.com/almide/almide/issues/1023), [#1026](https://github.com/almide/almide/issues/1026) |
 | 0.44 | fuzz true green — 残 findings 0 + 連続緑 2 夜 | [#796](https://github.com/almide/almide/issues/796) |
-| 0.45 | feature-gated runtime（http/zlib）の rtlib 化 — fresh dir の 8.4s 初回ビルド解消 | [#1002](https://github.com/almide/almide/issues/1002) |
+| 0.45 | **測定して着手しないと決定（2026-07-31）**。feature-gated runtime（http/zlib）の rtlib 化 — 8.4s は再現したが（全 4 キャッシュ層クリアで 9s）、rlib cache が編集ループでは吸収し、CI では container あたり 1 回 ~9s＝ジョブの約 2%。issue 自身の「それ以前ではない」が正しい。再武装条件を鋭利化して #1002 に記録 | [#1002](https://github.com/almide/almide/issues/1002) |
 | 0.46 | 10k 行 dogfood プロジェクト着工 — スケール主張を実測に変える | [#1001](https://github.com/almide/almide/issues/1001) |
 | 0.47 | クエリ/インクリメンタル基盤 phase 1 — LSP を per-keystroke 全再解析から解放 | [#928](https://github.com/almide/almide/issues/928) |
 | 0.48 | クエリ基盤 phase 2 — ビルドパイプライン本体をクエリ上に | [#928](https://github.com/almide/almide/issues/928) |
