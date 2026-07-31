@@ -12,6 +12,7 @@
 | B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
 | B4 | The contracts-README subcommand (the first TOML consumer) | Byte-identical to the bash original | **done** | 231 lines / 25,297 bytes identical; found and fixed a truncation bug in the original (#1032) |
 | B5 | `conformance.md` — the third TOML consumer | Byte-identical | **done** | 81 lines identical; surfaced a native codegen bug (#1033) |
+| B7 | `fuzz-track-record` — the first subcommand that parses JSON | Byte-identical | **done** | 12 lines / 759 bytes identical, first try; replaced `gh api --jq` with real `json` parsing so the response shape faces the type checker |
 | B6 | `output-parity` — the first subcommand that RUNS things (3 processes/fixture, 3 observables, a retry, a ratchet) | Byte-identical | **done** | 10 lines / 607 bytes identical, both exit 0; the port's first draft produced 32 FALSE xfails and named the cause: a stream's final newline is a terminator, not an empty line |
 
 ## B1 — the program: `almide-gates`, this repo's own gate and generator toolchain
@@ -560,3 +561,39 @@ stream and a second test asserting they deliberately DISAGREE on an interior bla
 `almide-gates`: **~900 lines across ten modules**, five byte-identical subcommands, 17 tests on
 the parity rules alone — a decision surface that in bash was reachable only by producing a real
 wasmtime trap.
+
+## B7 — `fuzz-track-record`, and dropping `--jq` on purpose (2026-08-01)
+
+The streak RULE was already extracted and tested (`streak.almd`, 6 tests) — the two counters
+that stop independently, which is what makes #924 measurable at all. What was left is what it
+takes to feed it: two GitHub API calls per night, a verdict that depends on a nested step
+conclusion, and `printf` column formatting.
+
+**Byte-identical on the first run**: 12 lines, 759 bytes, matching
+`scripts/fuzz-track-record.sh 8` exactly, including the current state — full-budget 4/14, green
+0/2.
+
+**The bash reads the API through `gh api --jq`; this port parses the JSON in Almide.** That is
+a deliberate divergence in METHOD with no divergence in OUTPUT, and the reason is the pattern
+the last three ports established: `--jq` is a second language living in a shell string,
+invisible to the type checker, and untestable without the network. It is the same shape as the
+`awk` that truncated a title at the first quote (#1032) and the `sed` whose empty-line rule
+silently disagreed with its own terminator (B6, above) — expressions that look obviously
+correct and are load-bearing in an edge case nobody runs. Parsing here puts the response shape
+in front of the compiler: `get_array("jobs") |> find(name == …) |> get_array("steps")` is a
+chain the checker walks, and a wrong key is a `none` with a named fallback rather than an empty
+jq result that silently scores a night as TRUNCATED.
+
+Three rules got tests they could not have had in bash, all of them about formatting that is
+invisible until it is wrong:
+
+- **The last printf column is not padded.** `%-12s %-13s %-11s %s` — the final `%s` has no
+  width. Padding it would put trailing spaces on every row of every report.
+- **`%-12s` is a MINIMUM.** An over-wide run id is printed in full, not truncated. A port that
+  "formats to 12 columns" would corrupt exactly the rows that matter.
+- **An in-flight run is PRINTED but not SCORED.** Dropping it shifts the streak window by a
+  night; scoring it counts a night that has not happened. Both are wrong in a way that shows up
+  as a plausible number.
+
+`almide-gates`: **~1,050 lines across eleven modules**, six byte-identical subcommands, 28
+tests. Remaining: `check-contracts` (426 lines — the one that composes everything).

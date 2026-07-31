@@ -15,6 +15,7 @@ import contracts
 import conformance
 import stamp
 import parity_sweep
+import track_record
 import env
 
 type Entry = { date: String, link: String, desc: String }
@@ -112,6 +113,16 @@ effect fn main() -> Unit = {
     // The output-parity gate reports through its own exit code — a REGRESSION must stop the
     // caller, exactly as `stamp` does when the PATH binary and the workspace build disagree —
     // so it returns early rather than falling through to the trailing-newline trim below.
+    // A REPORTING tool, not a gate: it always exits 0, because "the streak is 4/14" is an
+    // answer, not a failure. Wired here anyway so the streak rule the other gates cite has one
+    // implementation rather than a shell copy and an Almide copy.
+    "fuzz-track-record" => {
+      let n = int.parse(list.get_or(args, 2, "20")) ?? 20
+      list.join(
+        track_record.report("almide/almide", n, "Generative differential fuzz", "Run fuzz campaign")!,
+        "\n",
+      ) + "\n"
+    },
     "output-parity" => {
       // F6-2: the identity of the evidence comes first. If the PATH binary and the workspace
       // build disagree, a parity result would describe a different compiler than the tree
