@@ -135,7 +135,7 @@ fn runtime_entry_is_called(
             // call dangles. Same principle as the value_core force below.
             if entries.iter().any(|(_, c)| *c == "map.get_or_msv") {
                 const MSV_STATIC_DROPS: &[&str] =
-                    &["map_msv", "map_msb", "list_str_mss", "list_str_msb", "list_omb"];
+                    &["map_msv", "map_msb", "list_str_mss", "list_str_msb", "list_omb", "list_mb"];
                 any_called = any_called
                     || functions.iter().any(|f| {
                         f.ops.iter().any(|op| {

@@ -268,6 +268,22 @@ fn __drop_list_str_msb(xs: List[(String, Map[String, Bool])]) -> Unit = {
 // (the low-32 of the slot; a `none` has len 0 and owns nothing), then the option
 // block itself frees. The len-loop discipline COMPOSES: list slots → option
 // len-slot → map key slots.
+// The bare-map list drop: `List[Map[String, <scalar>]]` — the omb sibling with
+// the Option indirection removed. `__drop_msb_inner` already sweeps the map's
+// key Strings AND rc_decs the map block, so an element is exactly one call.
+fn __drop_list_mb_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    __drop_msb_inner(prim.load64(h + 12 + i * 8))
+    __drop_list_mb_loop(h, n, i + 1)
+  }
+
+fn __drop_list_mb(xs: List[Map[String, Bool]]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_mb_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
 fn __drop_list_omb_loop(h: Int, n: Int, i: Int) -> Unit =
   if i >= n then ()
   else {

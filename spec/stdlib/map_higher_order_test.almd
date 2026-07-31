@@ -353,3 +353,43 @@ test "nested scalar-value map literal churn" {
   }
   assert_eq(count, 15)
 }
+
+test "list of bare maps: literal, index and get_or" {
+  let xs: List[Map[String, Bool]] = [
+    ["k0": true, "k1": false],
+    ["k2": true]
+  ]
+  assert_eq(list.len(xs), 2)
+  let d: Map[String, Bool] = [:]
+  assert_eq(map.get_or(list.get_or(xs, 0, d), "k0", false), true)
+  assert_eq(map.get_or(list.get_or(xs, 0, d), "k1", true), false)
+  assert_eq(map.get_or(list.get_or(xs, 1, d), "k2", false), true)
+  assert_eq(map.get_or(list.get_or(xs, 9, d), "k0", false), false)
+}
+
+test "bare-map list literal churn" {
+  var hits = 0
+  for i in [1, 2, 3, 4, 5] {
+    let xs: List[Map[String, Int]] = [
+      ["a": i],
+      ["b": i + 1],
+      ["c": i + 2]
+    ]
+    let d: Map[String, Int] = [:]
+    hits = hits + map.get_or(list.get_or(xs, 2, d), "c", 0)
+  }
+  assert_eq(hits, 25)
+}
+
+test "bare-map list literal with a computed element" {
+  let one: Map[String, Bool] = ["x": true]
+  let xs: List[Map[String, Bool]] = [
+    one,
+    ["y": false],
+    ["z": true]
+  ]
+  let d: Map[String, Bool] = [:]
+  assert_eq(list.len(xs), 3)
+  assert_eq(map.get_or(list.get_or(xs, 0, d), "x", false), true)
+  assert_eq(map.contains(one, "x"), true)
+}
