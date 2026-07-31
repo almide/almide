@@ -12,6 +12,7 @@
 | B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
 | B4 | The contracts-README subcommand (the first TOML consumer) | Byte-identical to the bash original | **done** | 231 lines / 25,297 bytes identical; found and fixed a truncation bug in the original (#1032) |
 | B5 | `conformance.md` — the third TOML consumer | Byte-identical | **done** | 81 lines identical; surfaced a native codegen bug (#1033) |
+| B6 | `output-parity` — the first subcommand that RUNS things (3 processes/fixture, 3 observables, a retry, a ratchet) | Byte-identical | **done** | 10 lines / 607 bytes identical, both exit 0; the port's first draft produced 32 FALSE xfails and named the cause: a stream's final newline is a terminator, not an empty line |
 
 ## B1 — the program: `almide-gates`, this repo's own gate and generator toolchain
 
@@ -471,3 +472,91 @@ of skipping 18 suites as pass. Merging past it would defeat exactly what it was 
 Next: find why an installed `wasmtime` is not runnable in the `build` job — the gap is between
 the install step and the test step's environment (PATH propagation or a cache restore), not a
 missing install.
+
+## B6 — `output-parity`, the first subcommand that RUNS things (2026-08-01)
+
+The four subcommands ported so far all read files and print text. This one drives three
+processes per fixture over the whole of `spec/`, compares three observables, retries under a
+different timeout, and gates on a ratchet. It is the first port where the interesting content
+is not parsing.
+
+**Split along the line the bash cannot draw.** `parity.almd` holds the decision — six verdicts,
+the trap comparison, and both stderr normalisations — as pure functions with 10 tests.
+`parity_sweep.almd` holds everything that needs a process or a filesystem, with 5 more tests on
+the parts that are still pure (the class report, the regression set difference, the skip count).
+In the bash all of this is reachable only by running the gate, which is why nothing in it was
+ever tested: exercising the "wasmtime trap frame" normaliser meant producing a wasmtime trap.
+
+**Three things the reimplementation had to be told, and would otherwise have gotten wrong:**
+
+- **`skip=N` is part of the summary.** The first draft filtered non-runnable files out of the
+  sweep and never counted them. That reads as full coverage — "300 files agree" instead of
+  "300 of the files I chose to look at agree". The count is the only thing standing between
+  those two sentences, and it is now its own test.
+- **The XFAIL heading is two lines.** A wrapped sentence, not two headings. Rewrapping it is a
+  byte difference for no gain, so `class_report_wrapped` takes a heading LIST and the
+  one-line form is the special case.
+- **`find spec` runs after a `cd $ROOT`, so its paths carry no `./`.** The baseline is a list
+  of exactly those strings, so a root of `"."` would produce `./spec/…` and match nothing —
+  every baseline entry a regression, every file a new match. Handled explicitly rather than
+  by hoping the caller passes an absolute root.
+
+**And two that look like bugs and are load-bearing**, both carried over deliberately with the
+reason written at the call site: the solo RETRY of every non-match (a load artifact can surface
+as any verdict, so only the quiet re-run counts — a non-deterministic verification result is
+not a result), and the RE-SORT before the baseline diff (the retry appends after the first
+sort, and an unsorted tail once reported three phantom regressions).
+
+**The stamp comes first.** `stamp.toolchain` was the first thing ported for exactly this
+moment: if the PATH binary and the workspace build disagree, a parity result describes a
+different compiler than the tree under test. It fired for real during this port — a rebuild had
+moved `target/release/almide` out from under the installed binary, and the gate refused to
+start rather than produce evidence about the wrong compiler.
+
+### B6 result — byte-identical, and the sweep found one more thing about `sed`
+
+Both implementations, same binary, same tree, back to back:
+
+```
+output-parity: match=383 wall=3 MISMATCH=1 RUNERR=3 XFAIL=0 v0fail=0 skip=343
+  (MISMATCH = renders and runs but the stdout bytes diverge — silent miscompile class):
+    ! spec/wasm_cross/env_get.almd
+  (RUNERR = renders but wasmtime rejects or traps where v0 succeeds):
+    r spec/wasm_cross/fs_preopen_resolve.almd
+    r spec/wasm_cross/fs_relative_path.almd
+    r spec/wasm_cross/host_floor_string_alloc.almd
+output-parity: NEW matches not yet in baseline (run --update to ratchet):
+  + spec/wasm_cross/option_tuple_payload_matrix.almd
+output-parity: OK — all 382 baseline files still byte-match v0.
+```
+
+**10 lines, 607 bytes, identical, and both exit 0.** The only difference in the captured files
+was the label naming which implementation produced them. (The toolchain stamp above this block
+names the binary's mtime and the tree's dirty count, which move between two runs for reasons
+that are not the gate — so the comparison starts at the first `output-parity:` line.)
+
+**The first draft got 351 matches and 32 XFAILs, and the 32 were all false.** The trap fixtures
+— `int_div_by_zero`, `index_bounds`, `to_fixed_domain_abort`, and 29 others — agree on stdout,
+on exit code, and on stderr byte-for-byte, and the reimplementation called every one of them a
+divergence:
+
+> **A stream's final newline is a line TERMINATOR, not an empty line.**
+
+`sed` reads it that way and `diff` compares what `sed` produced. `string.split(s, "\n")` does
+not: it yields one extra empty element at the end. That element is invisible until the two
+normalisers treat it differently — and they do, necessarily, because the wasmtime frame
+contains a REAL blank line that must be dropped while the program's own stderr may legitimately
+print one. So the phantom element survived on the oracle side and vanished on the wasm side,
+and 32 identical streams compared unequal.
+
+This is the same class as #1032 (an `awk` extractor that truncated at the first quote) and
+#1031 (an unpinned locale in eleven scripts): **a shell text operation whose edge case is
+invisible in the common case, reimplemented from what it looks like it does rather than from
+what it does.** The port is the thing that surfaces it, because the port has to state the rule
+explicitly, and the byte-diff is what refuses to let a plausible-looking restatement pass. It
+is now `lines_of`, with a test that asserts the two normalisers agree on a plain one-line
+stream and a second test asserting they deliberately DISAGREE on an interior blank line.
+
+`almide-gates`: **~900 lines across ten modules**, five byte-identical subcommands, 17 tests on
+the parity rules alone — a decision surface that in bash was reachable only by producing a real
+wasmtime trap.

@@ -14,6 +14,7 @@ import toml
 import contracts
 import conformance
 import stamp
+import parity_sweep
 import env
 
 type Entry = { date: String, link: String, desc: String }
@@ -102,10 +103,28 @@ effect fn main() -> Unit = {
   let args = env.args()
   // `env.args()` is the USER arguments only, 0-based — the program name is not element 0.
   let cmd = list.get_or(args, 0, "roadmap-readme")
-  let root = list.get_or(args, 1, "docs/roadmap")
+  // `output-parity` is the one subcommand whose root is the REPOSITORY, not a doc
+  // directory — it walks `spec/` and reads a baseline under `proofs/`.
+  let root = list.get_or(args, 1, if cmd == "output-parity" then "." else "docs/roadmap")
   let body = match cmd {
     "contracts-readme" => gen_contracts_readme(root)!,
     "conformance" => gen_conformance(root)!,
+    // The output-parity gate reports through its own exit code — a REGRESSION must stop the
+    // caller, exactly as `stamp` does when the PATH binary and the workspace build disagree —
+    // so it returns early rather than falling through to the trailing-newline trim below.
+    "output-parity" => {
+      // F6-2: the identity of the evidence comes first. If the PATH binary and the workspace
+      // build disagree, a parity result would describe a different compiler than the tree
+      // under test — so the stamp aborts BEFORE any measurement, exactly as the bash does.
+      let st = stamp.toolchain(root)!
+      println(list.join(st.lines, "\n"))
+      if st.ok then () else process.exit(1)
+      let alm = list.get_or(args, 2, root + "/target/release/almide")
+      let rp = list.get_or(args, 3, root + "/target/debug/examples/render_program")
+      let sw = parity_sweep.sweep(root, alm, rp, root + "/proofs/output-parity-baseline.txt")!
+      println(list.join(sw.lines, "\n"))
+      if sw.ok then process.exit(0) else process.exit(1)
+    },
     "stamp" => {
       // The generators' bash originals end with `echo ""`, so their bodies are emitted with
       // one trailing char trimmed (below). `stamp_toolchain` does NOT — its last line is the
