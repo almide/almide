@@ -634,3 +634,51 @@ emits them, diffing after each.
 **One caution recorded from B6**: the checks are independent but their OUTPUT is not — an
 error emitted in a different order is a byte difference even when the finding is identical. So
 the port must preserve the sequence, not merely the set.
+
+### The acceptance check for this one is MUTATION, not byte-identity alone
+
+A clean ledger makes most of these checks print NOTHING. So a port that implements two of the
+ten and skips the rest would still produce a byte-identical clean run — and the byte-match
+would be a lie, because the checks that emitted nothing were never run. Byte-identity is a
+necessary condition here and nowhere near sufficient.
+
+The bash already carries the right criterion, in its own closing comment: **every check flips
+green→red on a one-line edit**, and it enumerates the twelve edits. That list is the port's
+acceptance suite — for each mutation, the Almide gate must go red with the SAME `::error::`
+line as the bash:
+
+| # | one-line edit | must fire |
+|---|---|---|
+| 1 | delete a fixture path from a contract's evidence | (d) only_rev |
+| 2 | remove a `// @contract:` line from a fixture | (c) "no header" |
+| 3 | downgrade an active contract's only evidence to `by-construction` | (b) |
+| 4 | typo a class | (e) bad-class |
+| 5 | flag any contract | (f) ratchet |
+| 6 | renumber a contract to leave a gap | (f) coverage |
+| 7 | hand-edit a number inside README's claims markers | (g) stale-claims |
+| 8 | add a contract without regenerating the index | (h) stale-index |
+| 9 | cite a new section without regenerating conformance | (i) stale-report |
+| 10 | delete a `since = ` line | (e) missing-required |
+| 11 | point a fixture header at a retired subsystem | (j) dead-path |
+| 12 | an UNALIGNED bogus spec key (`spec = "ALS-BOGUS"`, single space) | spec-existence |
+
+Mutation 12 is the one worth reading twice: the check used to grep for a six-space-aligned
+`spec      = "..."`, so a key written with different spacing was silently DROPPED — it passed
+the presence check and skipped resolution entirely (#989). That is the same failure shape as
+B6's phantom trailing line and #1032's truncating `awk`: a text pattern that is right about the
+input it was written against and silent about the input it was not.
+
+**The parser is already there.** `toml/mod.almd` yields `Table { scalars, array_items }`, which
+is exactly what `parse_ledger`'s TAB-record protocol reconstructs by hand — the bash needs the
+protocol because awk cannot return a structure. So the port skips `parse_ledger` entirely and
+builds the ten checks on the tables. That is also why this subcommand was left for last rather
+than being the hardest thing attempted first.
+
+**One latent bug to reproduce rather than fix, and to name where it is reproduced**: the
+parser unquotes with `sub(/".*$/,"",v)` — truncate at the FIRST quote — which is precisely the
+bug #1032 fixed in `generate-readme.sh` (the fixed version anchors at `"[ \t]*$`). It is
+latent here only because the fields it reads (`id`, `status`, `doc`, `since`, `path`, `class`,
+`name`) happen never to contain an escaped quote. `title` and `statement` — the two that DO —
+are read as presence flags, so the truncation never reaches them. The port should note it at
+the call site instead of quietly hardening it, so the day a `doc =` path grows a quote, the
+divergence is a known one.
