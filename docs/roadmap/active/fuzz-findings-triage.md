@@ -438,7 +438,7 @@ all-scalar tuple instantiation exists.
 If that is it, the fix is a registry entry rather than a lowering change — which is a much
 smaller and safer edit than the ownership-analysis change the earlier hypotheses implied.
 
-### R3 remainder — ROOT CAUSE FOUND (2026-08-01): a missing cell in the option/result family
+### R3 remainder — a WRONG root cause, retracted (2026-08-01)
 
 The hypothesis named above was right, and the gap is exact. `unwrap_or` is routed by payload
 type, and the two modules' cell sets are asymmetric:
@@ -477,3 +477,30 @@ time. `result` got its flat cell when `result.zip`'s `(Int, Int)` needed it; nob
    divergence. This gap existed precisely because nothing checked that.
 
 Probes: `s_s11` (walls) and `s_s5` (builds), two lines each, in the session scratchpad.
+
+**RETRACTED — the above is wrong.** I compared the two modules by grepping the emitted NAMES
+(`Some("option.*"` vs `Some("result.*"`) and concluded `option` had no flat cell. It does:
+`unwrap_or_call_name_option_flat_scalar` (`lower/mod_p4_f.rs`) matches
+`Ty::Tuple(ts) if all non-heap` and routes to `option.listint_unwrap_or`. The option side
+REUSES that name for the whole flat family instead of minting a separate
+`option.flat_unwrap_or`, so a name-level comparison reads as a gap that is not there.
+
+**Reading names instead of predicates is what produced a confident wrong answer** — the same
+failure mode as the retracted P2 bracket, in a different disguise. The rule that would have
+caught it: when comparing two families, compare what they MATCH, not what they are called.
+
+The changes that conclusion produced (an `option_flat_unwrap_or` in `stdlib/value_core.almd`
+plus its registration) were reverted. The revert itself went wrong twice and is worth
+recording: the removal logic walked back over the preceding comment block and took the
+NEIGHBOURING `option_liststr_unwrap_or` with it, and `almide fmt` had meanwhile reformatted
+the entire 1100-line file, so the diff no longer isolated my edit. Restoring the file from
+HEAD was the correct move; a function-inventory diff against HEAD is what caught the missing
+neighbour, and re-running `spec/stdlib` caught a second symptom (43 native fallbacks where 6
+is normal) that the inventory check alone would have missed.
+
+**So R3's cause is still unknown.** Eliminated so far: heap classification (`Ty::Tuple` IS
+heap), `repr_of` (rejects only `Ty::Unknown`), and now a missing routing cell (the cell
+exists and its predicate covers the case). What is still true: `s_s5` builds, `s_s11` walls,
+they differ only in element type, and both reach `lower_owned_heap_field` through the same
+call. The next step remains instrumentation — printing which branch is taken — not more
+reading.
