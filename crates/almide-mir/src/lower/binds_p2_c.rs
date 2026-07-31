@@ -253,6 +253,12 @@ impl LowerCtx {
             self.variant_drop_handles.insert(dst, "map_msv".to_string());
             return;
         }
+        if crate::lower::is_map_msb_ty(ty) {
+            // `Map[String, Map[String, <scalar>]]` — `$__drop_map_msb` key-sweeps each
+            // last-ref inner map (the skv split layout owns no heap values).
+            self.variant_drop_handles.insert(dst, "map_msb".to_string());
+            return;
+        }
         if crate::lower::is_map_mlo_ty(ty) {
             // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
             // last-ref value list's Option slots (a flat rc_dec would leak them).

@@ -638,6 +638,12 @@ impl LowerCtx {
             self.variant_drop_handles.insert(dst, "map_msv".to_string());
             return true;
         }
+        if crate::lower::is_map_msb_ty(ty) {
+            // `Map[String, Map[String, <scalar>]]` — `$__drop_map_msb` key-sweeps each
+            // last-ref inner map (the skv split layout owns no heap values).
+            self.variant_drop_handles.insert(dst, "map_msb".to_string());
+            return true;
+        }
         false
     }
 

@@ -112,6 +112,18 @@ impl LowerCtx {
             return Some(ListElemDrop::StrMapStr);
         }
         if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
+                if b.len() == 2 && matches!(b[0], Ty::String)
+                    && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float)))
+        {
+            // A `(String, Map[String, <scalar>])` TUPLE element (the msb pairs list,
+            // `["k0": ["k0": false]]` desugared to `map.from_list_msv([...])`): slot1's
+            // inner map owns only its KEY Strings (the skv split layout) — the static
+            // `$__drop_list_str_msb` (map_msv.almd) frees slot0 flat and key-sweeps the
+            // last-ref inner map. Same placement rationale as StrMapStr above.
+            return Some(ListElemDrop::StrMapSkv);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
             && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
                 if b.len() == 1
                     && matches!(&b[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
@@ -357,6 +369,9 @@ impl LowerCtx {
             }
             ListElemDrop::StrMapStr => {
                 self.variant_drop_handles.insert(dst, "list_str_mss".to_string());
+            }
+            ListElemDrop::StrMapSkv => {
+                self.variant_drop_handles.insert(dst, "list_str_msb".to_string());
             }
             ListElemDrop::StrListOpt => {
                 self.variant_drop_handles.insert(dst, "list_str_mlo".to_string());

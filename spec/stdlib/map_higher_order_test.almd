@@ -234,3 +234,23 @@ test "map.get_or string values missing" {
   let m = ["a": "x"]
   assert_eq(map.get_or(m, "z", "fallback"), "fallback")
 }
+
+test "map.get_or nested scalar-value map" {
+  let inner: Map[String, Bool] = ["x": true]
+  let nested: Map[String, Map[String, Bool]] = ["k0": ["a": false], "k1": ["b": true]]
+  let hit = map.get_or(nested, "k0", inner)
+  let miss = map.get_or(nested, "zz", inner)
+  assert_eq(map.contains(hit, "a"), true)
+  assert_eq(map.contains(miss, "x"), true)
+}
+
+test "nested scalar-value map literal churn" {
+  var count = 0
+  for i in [1, 2, 3, 4, 5] {
+    let nested: Map[String, Map[String, Int]] = ["k0": ["v": i], "k1": ["w": i + 1]]
+    let d: Map[String, Int] = [:]
+    let got = map.get_or(nested, "k0", d)
+    count = count + map.get_or(got, "v", 0)
+  }
+  assert_eq(count, 15)
+}

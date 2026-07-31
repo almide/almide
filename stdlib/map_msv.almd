@@ -177,3 +177,54 @@ fn __drop_list_str_mss(xs: List[(String, Map[String, String])]) -> Unit = {
   if prim.load32(h + 0) == 1 then __drop_list_str_mss_loop(h, prim.load32(h + 4), 0) else ()
   prim.rc_dec(h)
 }
+
+// ── msb: the inner map is the map_skv SPLIT layout (Map[String, Bool/Int/Float]) ──
+// Its @4 is the KEY count `entries`; only the key slots 0..entries-1 own Strings, the
+// value region is scalar i64s owning no heap. The sweep frees EXACTLY the key slots —
+// map_skv's own scope-end discipline — where the msv sweep (all @4 slots) would read
+// scalar values as handles and free garbage.
+fn __drop_msb_inner_slots(ih: Int, m2: Int, j: Int) -> Unit =
+  if j >= m2 then ()
+  else {
+    prim.rc_dec(prim.load64(ih + 12 + j * 8))
+    __drop_msb_inner_slots(ih, m2, j + 1)
+  }
+
+fn __drop_msb_inner(ih: Int) -> Unit = {
+  if prim.load32(ih + 0) == 1 then __drop_msb_inner_slots(ih, prim.load32(ih + 4), 0) else ()
+  prim.rc_dec(ih)
+}
+
+fn __drop_map_msb_slots(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(h + 12 + i * 8))
+    __drop_msb_inner(prim.load64(h + 12 + (n + i) * 8))
+    __drop_map_msb_slots(h, n, i + 1)
+  }
+
+fn __drop_map_msb(m: Map[String, Map[String, Bool]]) -> Unit = {
+  let h = prim.handle(m)
+  if prim.load32(h + 0) == 1 then __drop_map_msb_slots(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
+// The msb pairs-literal drop: `List[(String, Map[String, <scalar>])]` — per element:
+// free the String slot flat, key-sweep the last-ref inner map.
+fn __drop_list_str_msb_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let th = prim.load64(h + 12 + i * 8)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      __drop_msb_inner(prim.load64(th + 20))
+    } else ()
+    prim.rc_dec(th)
+    __drop_list_str_msb_loop(h, n, i + 1)
+  }
+
+fn __drop_list_str_msb(xs: List[(String, Map[String, Bool])]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_str_msb_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}

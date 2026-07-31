@@ -333,8 +333,11 @@ fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {
                     && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
                         if b.len() == 2
                             && matches!(b[0], Ty::String)
-                            && matches!(b[1], Ty::String))) =>
+                            && matches!(b[1], Ty::String | Ty::Bool | Ty::Int | Ty::Float))) =>
     {
+        // Inner String = msv proper; inner scalar = the msb DROP variant. Both share the
+        // handle-generic `_msv` from_list/get_or impls — only the drop routing differs
+        // (`is_map_msb_ty` → `$__drop_map_msb` key-sweep).
         Some(MapName::Suffix("_msv"))
     }
     (true, true)
@@ -344,7 +347,7 @@ fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {
                     && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
                         if b.len() == 2
                             && matches!(b[0], Ty::String)
-                            && matches!(b[1], Ty::String))) =>
+                            && matches!(b[1], Ty::String | Ty::Bool | Ty::Int | Ty::Float))) =>
     {
         Some(MapName::Suffix("_msv"))
     }

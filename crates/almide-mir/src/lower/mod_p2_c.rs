@@ -493,6 +493,20 @@ pub fn is_map_msv_ty(ty: &Ty) -> bool {
             if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
 }
 
+/// `Map[String, Map[String, <scalar>]]` — the msb variant of the msv family: the INNER
+/// map is the map_skv SPLIT layout (`len@4` = KEY count; only the key slots own Strings,
+/// the value region is scalar). The handle-generic msv from_list/get_or impls serve it
+/// unchanged; the DROP differs — `$__drop_map_msb` sweeps each last-ref inner map's KEY
+/// slots only (the msv all-slot sweep would free scalar values as handles).
+pub fn is_map_msb_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+        && matches!(a[0], Ty::String)
+        && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+            if b.len() == 2 && matches!(b[0], Ty::String)
+                && matches!(b[1], Ty::Bool | Ty::Int | Ty::Float)))
+}
+
 /// `Map[String, List[Option[Int]]]` — the mlo family (String keys, LIST-OF-OPTIONS values;
 /// stdlib/map_mlo.almd — compound_repr_interp's `deep` literal). Its drop must sweep each
 /// last-ref value list's Option-block slots (`$__drop_map_mlo`), exactly the msv discipline

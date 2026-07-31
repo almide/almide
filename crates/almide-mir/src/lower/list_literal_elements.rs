@@ -173,6 +173,7 @@ impl LowerCtx {
             | ListElemDrop::IntStr
             | ListElemDrop::StrVariant(_)
             | ListElemDrop::StrMapStr
+            | ListElemDrop::StrMapSkv
             | ListElemDrop::StrListOpt => self.lower_heap_pair_tuple_element(e_ref),
             ListElemDrop::Closure => self.lower_lambda_list_element(e_ref, elem_ty),
             ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop => {

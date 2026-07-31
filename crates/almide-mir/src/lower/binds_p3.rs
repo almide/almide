@@ -13,6 +13,7 @@ enum ListElemDrop {
     IntStr,
     StrVariant(String),
     StrMapStr,
+    StrMapSkv,
     StrListOpt,
     RecordInt(String),
     MapMlo,
