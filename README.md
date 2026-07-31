@@ -212,6 +212,26 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 |---|---|
 | WASM "Hello World" binary | **703 B** verified as shipped (reachability-pruned runtime + function-name debug info) — **545 B** after `almide build --wasm-opt` (`wasm-opt -Oz`); Rust on the same target is 40 KB+ even fully size-tuned |
 | Native minigit CLI binary | **418 KB** stripped, 0 dependencies |
+
+### Build speed
+
+Measured on 0.42.0, Apple Silicon, `examples/lisp.almd` (268 lines). Cold means
+`$TMPDIR/almide-run` cleared; warm is the content-cache hit. Reproduce with
+`/usr/bin/time -p almide <cmd>`.
+
+| scenario | time |
+|---|---|
+| `almide check` | **30 ms** |
+| build, warm (content-cache hit) | **0.26 s** |
+| build, cold | **0.61 s** |
+| build, cold, `--target wasm` | **0.28 s** |
+
+Runtime-performance numbers are deliberately absent here rather than estimated: the
+benchmarks that would carry them need a harness with enough resolution to be worth
+publishing, and a figure measured with `time -p` on a sub-10ms program is noise. The
+LLM-writability row above and the artifact sizes below are the claims this README currently
+stands behind.
+
 | Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), ≤1.27× across the referenced suite — CI-gated ratio ratchet ([scoreboard](./docs/BENCHMARKS.md)) |
 
 The verified pipeline ships the exact bytes its own rendering process produced —
