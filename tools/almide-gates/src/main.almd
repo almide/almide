@@ -8,10 +8,12 @@
 // "working" in the sense that nobody checked.
 import fs
 import env
+import process
 import mdmeta
 import toml
 import contracts
 import conformance
+import stamp
 import env
 
 type Entry = { date: String, link: String, desc: String }
@@ -104,6 +106,16 @@ effect fn main() -> Unit = {
   let body = match cmd {
     "contracts-readme" => gen_contracts_readme(root)!,
     "conformance" => gen_conformance(root)!,
+    "stamp" => {
+      // The generators' bash originals end with `echo ""`, so their bodies are emitted with
+      // one trailing char trimmed (below). `stamp_toolchain` does NOT — its last line is the
+      // rule, with no extra blank — so this arm returns early instead of falling through.
+      let st = stamp.toolchain(root)!
+      // Mirrors the bash: print the stamp, then exit non-zero when the PATH binary and the
+      // workspace build disagree — the caller must not go on to produce evidence.
+      println(list.join(st.lines, "\n"))
+      if st.ok then process.exit(0) else process.exit(1)
+    },
     _ => gen_roadmap_readme(root)!,
   }
   // `println` adds the newline that the bash originals' final `echo ""` produces, so the

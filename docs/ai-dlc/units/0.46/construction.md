@@ -341,3 +341,32 @@ JSON) → `check-contracts` (composes everything). Each step adds exactly one ca
 extraction WIP`. That is the exact area #1033 lives in (`render_expr` on a `Var` deciding
 ownership per-occurrence). It is NOT mine and was not touched. Check with its owner before
 starting there — the fix may already be in flight.
+
+## B6 — the toolchain stamp (2026-08-01)
+
+`proofs/lib/stamp.sh`'s `stamp_toolchain` is ported and **byte-identical** (7 lines).
+`almide-gates` is now ~570 lines across six modules, with **four** matching subcommands.
+
+Ported before the rest of `output-parity.sh` on purpose: it is the SHARED piece every proof
+gate calls first, it is small, and its failure mode is silently-wrong evidence rather than a
+crash. It also earned its keep during this very session — a parity run refused to start until
+`make install` caught the PATH binary up with the workspace build.
+
+The Almide version reproduced that: run against a tree where `cargo build --release` had
+outrun `make install`, it printed the same FATAL and exited 1.
+
+```
+FATAL: PATH almide (f35f6fc687fe538e) != workspace build (4bbc743d07767e9a).
+```
+
+Two language-surface notes:
+
+- **`ok` cannot be a binding name** — it is the `Result` constructor. The parse error
+  (`Expected identifier … got Ok 'ok'`) names the token but not the reason.
+- The stamp arm must NOT go through `main`'s trailing-character trim. That trim exists
+  because the GENERATORS' bash originals end with `echo ""`; `stamp_toolchain` ends with its
+  rule and no blank. The arm prints and exits instead of returning a body — a reminder that
+  "every subcommand ends the same way" was an assumption, not a fact.
+
+Remaining: `output-parity` proper (the 382-row fixture sweep on top of this stamp),
+`fuzz-track-record` (adds JSON), `check-contracts` (composes everything).
