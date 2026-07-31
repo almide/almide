@@ -674,6 +674,32 @@ protocol because awk cannot return a structure. So the port skips `parse_ledger`
 builds the ten checks on the tables. That is also why this subcommand was left for last rather
 than being the hardest thing attempted first.
 
+### B8 (in progress) — the schema half, on the tables the earlier ports built
+
+`ledger_schema.almd` implements checks **(e)**, **(a)** and **(b)** as pure functions over
+`toml.Table`, with 7 tests. It runs on WASM with no native fallback, which the process-driving
+modules cannot — the schema rules touch nothing but data.
+
+The `parse_ledger` TAB-record protocol is simply gone. The bash needs it because awk cannot
+return a structure; `toml.parse_tables` returns one, so the checks read fields instead of
+re-splitting a line format. That is the compounding return on doing this subcommand last.
+
+Three rules got tests that state something the bash only implies:
+
+- **The class RANK comes from the shared file's line order**, not a list written here. Two
+  gates read `scripts/lib/contract-classes.txt` so their enums provably cannot drift; a rank
+  hard-coded in the port would reintroduce exactly the divergence the file prevents.
+- **The active-evidence floor exempts `flagged-for-revision` and nothing else.** Being flagged
+  is the honest way to say a claim currently rests on prose — and the flagged COUNT is itself a
+  down-only ratchet, so the exemption cannot be used to park a claim indefinitely.
+- **The error list is ordered, not a set.** A gate's output IS its `::error::` lines, so the
+  test asserts the five schema errors come out in the bash's emission sequence. Two
+  implementations that find the same problems in a different order are not byte-identical.
+
+Remaining for B8: (j) retired-subsystem paths, (f) id contiguity, (f) the flagged ratchet, the
+two spec-keying directions, the three freshness checks, and the summary/histogram block — then
+the twelve mutations above, each of which must turn the Almide gate red with the same line.
+
 **One latent bug to reproduce rather than fix, and to name where it is reproduced**: the
 parser unquotes with `sub(/".*$/,"",v)` — truncate at the FIRST quote — which is precisely the
 bug #1032 fixed in `generate-readme.sh` (the fixed version anchors at `"[ \t]*$`). It is

@@ -1,0 +1,178 @@
+// Checks (e), (a) and (b) of `scripts/check-contracts.sh` — the SCHEMA half of the contract
+// ledger gate: is each contract well-formed, does each piece of evidence exist and carry the
+// right shape, and does every ACTIVE contract reach the evidence floor.
+//
+// The bash reconstructs a structure out of TAB-delimited records because awk cannot return
+// one. The port skips that protocol entirely and reads `toml.Table` values, which is the whole
+// reason this subcommand was left for last rather than attempted first: six earlier ports
+// built the reader it needs.
+//
+// Ordering is part of the contract. The gate's output IS its list of `::error::` lines, so two
+// implementations that find the same problems in a different sequence are not byte-identical.
+// Every function here therefore returns a LIST in emission order rather than a set.
+import toml
+
+// The evidence-class vocabulary is a FILE (`scripts/lib/contract-classes.txt`) shared with the
+// rt-oracle-registry gate, and the LINE ORDER is the rank — line 1 is rank 0. One list, two
+// gates, so the two enums provably cannot drift apart. Reading it (rather than hard-coding the
+// six names here) is what preserves that property.
+fn rank_of(classes: List[String], c: String) -> Int = {
+  let idx = classes |> list.enumerate |> list.find((e) => e.1 == c)
+  match idx {
+    some(e) => e.0,
+    none => -1,
+  }
+}
+
+fn is_three_digit_id(id: String) -> Bool = {
+  string.starts_with(id, "C-") and string.len(id) == 5
+    and (string.slice(id, 2) |> string.chars |> list.all((c) => string.contains("0123456789", c)))
+}
+
+// MAJOR.MINOR.PATCH, every part non-empty and numeric. `since` was documented REQUIRED and
+// unenforced for a long time, so 32 contracts shipped without it and the generated README
+// published 32 blank Since cells (#938) — a field the schema calls required and the gate never
+// reads is a field that silently goes missing.
+fn is_semver(v: String) -> Bool = {
+  let parts = string.split(v, ".")
+  list.len(parts) == 3
+    and (parts |> list.all((p) => p != "" and (p |> string.chars |> list.all((c) => string.contains("0123456789", c)))))
+}
+
+fn schema_errors(t: toml.Table, doc_exists: Bool) -> List[String] = {
+  let id = toml.table_get(t, "id")
+  let status = toml.table_get(t, "status")
+  let doc = toml.table_get(t, "doc")
+  let since = toml.table_get(t, "since")
+  let bad_id = if is_three_digit_id(id) then [] else ["bad contract id '" + id + "' (must match ^C-[0-9]{3}$)"]
+  let bad_status = if status == "active" or status == "flagged-for-revision" then []
+    else [id + ": status '" + status + "' is not one of {active, flagged-for-revision}"]
+  let no_title = if toml.table_get(t, "title") != "" then [] else [id + ": REQUIRED key 'title' is missing"]
+  let no_stmt = if toml.table_get(t, "statement") != "" then [] else [id + ": REQUIRED key 'statement' is missing"]
+  let bad_since = if since == "" then
+      [id + ": REQUIRED key 'since' is missing (the version the contract became normative)"]
+    else if is_semver(since) then []
+    else [id + ": since='" + since + "' is not a MAJOR.MINOR.PATCH version"]
+  let bad_doc = if doc != "" and not doc_exists then
+      [id + ": doc='" + doc + "' does not exist under docs/contracts/"] else []
+  bad_id + bad_status + no_title + no_stmt + bad_since + bad_doc
+}
+
+// A `fuzz` evidence entry carries `n` = how many findings the campaign replayed clean. Without
+// it the class claims a campaign ran and says nothing about its size, which is the difference
+// between evidence and an assertion.
+fn evidence_shape_errors(classes: List[String], id: String, path: String, cls: String, n: String) -> List[String] = {
+  let bad_class = if rank_of(classes, cls) >= 0 then []
+    else [id + ": class '" + cls + "' not one of {" + list.join(classes, ",") + "}"]
+  let bad_n = if cls != "fuzz" then []
+    else {
+      let parsed = int.parse(n) ?? 0
+      if n != "" and n != "-" and parsed >= 1 then []
+      else [id + ": class='fuzz' evidence (" + path + ") requires n=<int >= 1> (got '" + n + "')"]
+    }
+  bad_class + bad_n
+}
+
+// A NAME is required when the evidence is a source unit rather than a whole fixture file: the
+// gate has to be able to grep for the thing being cited. A `*.rs` file certifies nothing on its
+// own — the claim is about one function in it.
+fn needs_name(path: String, cls: String) -> Bool =
+  string.ends_with(path, ".rs") or string.ends_with(path, ".lean") or string.ends_with(path, ".toml")
+    or cls == "fuzz" or cls == "lean" or cls == "exhaustive"
+
+// The grep the named unit must satisfy, per file kind. Returned as a pattern description rather
+// than run here so the rule stays pure and testable.
+fn unit_kind(path: String) -> String = if string.ends_with(path, ".rs") then "fn"
+else if string.ends_with(path, ".lean") then "theorem/def"
+else if string.ends_with(path, ".toml") then "routine"
+else if string.ends_with(path, ".almd") then "test"
+else ""
+
+// (b) — an ACTIVE contract must reach the `fixture` rank. A flagged one is EXEMPT: being
+// flagged is the honest way to say a claim currently rests on prose, and the flagged count is
+// itself a down-only ratchet, so the exemption cannot be used to hide.
+fn active_floor_error(id: String, status: String, max_rank: Int, fixture_rank: Int) -> List[String] =
+  if status == "flagged-for-revision" then []
+  else if max_rank >= fixture_rank then []
+  else [id + " is active but has no evidence of class >= fixture (by-construction/doc-only alone cannot certify observable behaviour; add a fixture or set status=flagged-for-revision)"]
+
+test "an id is C- plus exactly three digits" {
+  // `C-1` and `C-1000` are MALFORMED, not leniently accepted: the ledger's own tooling
+  // resolves ids by that exact shape, so a lenient gate admits ids nothing else can find.
+  assert_eq(is_three_digit_id("C-001"), true)
+  assert_eq(is_three_digit_id("C-201"), true)
+  assert_eq(is_three_digit_id("C-1"), false)
+  assert_eq(is_three_digit_id("C-1000"), false)
+  assert_eq(is_three_digit_id("D-001"), false)
+  assert_eq(is_three_digit_id("C-01a"), false)
+}
+
+test "since must be MAJOR.MINOR.PATCH, all numeric" {
+  assert_eq(is_semver("0.45.0"), true)
+  assert_eq(is_semver("10.2.33"), true)
+  assert_eq(is_semver("0.45"), false)
+  assert_eq(is_semver("0.45.0.1"), false)
+  assert_eq(is_semver("0.45.x"), false)
+  assert_eq(is_semver(""), false)
+}
+
+test "the class rank comes from the shared file's line order, not a hard-coded list" {
+  // Two gates read one file so their enums cannot drift. A rank hard-coded here would
+  // reintroduce exactly the divergence the shared file exists to prevent.
+  let classes = ["doc-only", "by-construction", "fixture", "fuzz", "exhaustive", "lean"]
+  assert_eq(rank_of(classes, "doc-only"), 0)
+  assert_eq(rank_of(classes, "fixture"), 2)
+  assert_eq(rank_of(classes, "lean"), 5)
+  assert_eq(rank_of(classes, "typo"), -1)
+}
+
+test "fuzz evidence without a positive n is a schema error" {
+  let classes = ["doc-only", "by-construction", "fixture", "fuzz", "exhaustive", "lean"]
+  assert_eq(list.len(evidence_shape_errors(classes, "C-001", "p", "fuzz", "12")), 0)
+  assert_eq(list.len(evidence_shape_errors(classes, "C-001", "p", "fuzz", "-")), 1)
+  assert_eq(list.len(evidence_shape_errors(classes, "C-001", "p", "fuzz", "0")), 1)
+  // A non-fuzz class carries no n and that is not an error.
+  assert_eq(list.len(evidence_shape_errors(classes, "C-001", "p", "fixture", "-")), 0)
+  assert_eq(list.len(evidence_shape_errors(classes, "C-001", "p", "typo", "-")), 1)
+}
+
+test "a source-unit citation needs a name; a fixture file does not" {
+  assert_eq(needs_name("tests/x.rs", "fixture"), true)
+  assert_eq(needs_name("proofs/x.lean", "fixture"), true)
+  assert_eq(needs_name("spec/wasm_cross/x.almd", "fixture"), false)
+  // The CLASS can require it too, whatever the file is: a fuzz claim names its campaign.
+  assert_eq(needs_name("spec/wasm_cross/x.almd", "fuzz"), true)
+  assert_eq(unit_kind("tests/x.rs"), "fn")
+  assert_eq(unit_kind("proofs/x.lean"), "theorem/def")
+  assert_eq(unit_kind("x.toml"), "routine")
+  assert_eq(unit_kind("spec/x.almd"), "test")
+}
+
+test "the active floor exempts flagged contracts and nothing else" {
+  // Being flagged is the honest way to say a claim rests on prose — and the flagged COUNT is
+  // a down-only ratchet, so the exemption cannot be used to park a claim indefinitely.
+  assert_eq(list.len(active_floor_error("C-001", "active", 1, 2)), 1)
+  assert_eq(list.len(active_floor_error("C-001", "active", 2, 2)), 0)
+  assert_eq(list.len(active_floor_error("C-001", "active", 5, 2)), 0)
+  assert_eq(list.len(active_floor_error("C-001", "flagged-for-revision", 0, 2)), 0)
+}
+
+test "the schema errors come out in the bash's emission order" {
+  // The gate's OUTPUT is its error list, so a port that finds the same problems in a
+  // different sequence is not byte-identical to the original.
+  let t = toml.Table {
+    scalars: [
+      toml.Pair { key: "id", value: "C-1" },
+      toml.Pair { key: "status", value: "maybe" },
+    ],
+    array_key: "",
+    array_items: [],
+  }
+  let errs = schema_errors(t, true)
+  assert_eq(list.len(errs), 5)
+  assert_eq(string.starts_with(list.get_or(errs, 0, ""), "bad contract id"), true)
+  assert_eq(string.contains(list.get_or(errs, 1, ""), "is not one of {active"), true)
+  assert_eq(string.contains(list.get_or(errs, 2, ""), "'title' is missing"), true)
+  assert_eq(string.contains(list.get_or(errs, 3, ""), "'statement' is missing"), true)
+  assert_eq(string.contains(list.get_or(errs, 4, ""), "'since' is missing"), true)
+}
