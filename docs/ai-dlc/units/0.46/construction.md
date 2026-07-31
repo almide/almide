@@ -173,6 +173,24 @@ The TOML reader is the load-bearing piece: three of the six need it, and it is t
 of this program that is a real component rather than glue. That makes it the natural B3 —
 build it once, with its own tests, and three subcommands follow.
 
+**Its size is bounded, and measured.** `contracts.toml` uses a SMALL subset of TOML — exactly
+eight key names, one table kind, and two value shapes:
+
+| construct | count | note |
+|---|---|---|
+| `[[contract]]` array-of-tables | 200 | the only table form used |
+| `key = "..."` string | 8 distinct keys | `id`, `spec`, `title`, `statement`, `since`, `status`, `doc`, `evidence` |
+| `key = [` multi-line array | 200 | always `evidence` |
+| `{ path = "...", class = "...", name = "..." }` inline table | 369 | array elements |
+
+No nested tables, no dotted keys, no dates, no numbers, no multi-line basic strings. A reader
+for THIS subset is a line scanner with three states — well short of a general TOML parser, and
+the reader should say so in its header so nobody later mistakes it for one.
+
+**There is a working template**: `stdlib/json*.almd` is a self-hosted parser in Almide (99
+fns across 9 files). It proves the shape works in this language and shows the idioms — which
+is worth reading before starting rather than rediscovering.
+
 `output-parity.sh` and `fuzz-track-record.sh` need no TOML, so they can land in parallel if
 the TOML work stalls. Recording that so the next session is not forced into a single chain.
 
