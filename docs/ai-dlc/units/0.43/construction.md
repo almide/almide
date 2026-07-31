@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | B1 | Inventory every `lower → optimize → mono → ir_link` site | A table with file, line, what it needs from the driver, and whether it wants the verified gates — no site summarized away | done — and it found more than an inventory (see B1 findings below) | Table + the stage-order split, recorded below |
 | B2 | The one driver + an IR-accepting renderer entry point | Both land green with NO call site migrated yet | **done (driver + gate)** — the IR-accepting renderer entry point moves to B3, where it is actually consumed | `crates/almide-driver` (new crate) + `tests/one_driver_test.rs` (2 tests green) |
-| B3 | Migrate the CLI paths and delete the discard | `spec/wasm_cross` bytes UNCHANGED (not merely passing); the `let _ = (&mut ir_program, …)` line is gone | pending | — |
+| B3 | Migrate the CLI paths and delete the discard | `spec/wasm_cross` bytes UNCHANGED (not merely passing); the `let _ = (&mut ir_program, …)` line is gone | pending — **precondition stated below** | — |
 | B4 | Migrate the non-CLI sites | mir pipeline, both mir examples, interp test harness — each named | pending | — |
 | B5 | Empty the ratchet + measurement + close #925 | `MIGRATION_BACKLOG` is deleted (not merely shortened); build-time delta recorded with the command used | pending | — |
 
@@ -79,6 +79,29 @@ the issue's inventory: `crates/almide-mir/examples/classify_corpus_parts/classif
 `crates/almide-mir/src/render_wasm/tests_part1.rs`, and
 `tests/wasm_runtime_test_parts/p4_corpus.rs`. That gap is itself the argument for a gate
 over a hand count — the hand count was already 33% low when it was written.
+
+
+### B3 precondition — this one is not a refactor, and must not be started blind
+
+Migrating `src/cli/build.rs` (433/436/439) and `src/cli/commands.rs` (395-397) to the driver
+FLIPS them from order A (`ir_link` first) to order B (`ir_link` last). That is a
+behaviour-affecting change to the shipped native path, not a code move.
+
+So B3 starts by building the corpus BOTH ways and diffing, and it cannot start while a
+local fuzz campaign is running, because verifying requires swapping the installed binary and
+the campaign's own evidence rule forbids that mid-run. Concretely, in this order:
+
+1. `make install` on the pre-migration tree; record `spec/wasm_cross` output for every fixture.
+2. Migrate `build.rs` + `commands.rs` to `almide_driver::link_ir`; `make install` again.
+3. Diff. Byte-identical everywhere → migrate the rest and remove the two rows from
+   `MIGRATION_BACKLOG`. **Any moved byte → STOP.** That is a real semantic finding about
+   `ir_link` position, it gets its own issue and contract question, and it is exactly the
+   class `spec/wasm_cross` cannot catch once both legs share a driver and move together.
+
+`src/cli/emit.rs` is a LINK-ONLY site (it calls `ir_link` but not optimize/mono — those ran
+earlier in `compile_driver`). It is in the backlog because the gate's pair-detection sees the
+file, not because it is a third driver. Migrating it means restructuring where emit gets its
+IR, which belongs with B4's non-CLI work rather than with the order flip.
 
 ## Notes
 
