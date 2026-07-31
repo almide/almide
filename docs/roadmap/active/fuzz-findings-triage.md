@@ -402,3 +402,17 @@ someone will otherwise spend the same twenty minutes on it. What remains is to i
 which early return in `lower_pure_module_value_call` (`calls.rs:89`) fires for
 `option.unwrap_or(s0, (1, 2))` but not for `option.unwrap_or(s0, ("a", 1))` — the two probes
 are `s_s11` and `s_s5` in the session scratchpad, two lines each.
+
+**Second hypothesis also eliminated**: `repr_of` (`lower/mod.rs`) does not reject a tuple —
+its early `Err` is for `Ty::Unknown` only, and the scalar-width table below it is a
+classification, not a gate. So the decline is not in `repr_of` either.
+
+**Stopping the chase here, deliberately.** Three hypotheses in a row have been eliminated
+without closing the cell, which is the signal that the next step needs instrumentation
+(printing which branch of `lower_pure_module_value_call` is taken for each probe) rather than
+more reading. Continuing to guess is how the P2 bracket earlier in this cycle became a
+retraction — the discipline that cost is worth paying here too.
+
+What is NOT in doubt: the cell is an honest wall (exit 1, no output, no wrong bytes), it
+costs coverage rather than correctness, and the two-line probes that discriminate it are
+`s_s5` (builds) and `s_s11` (walls) in the session scratchpad.
