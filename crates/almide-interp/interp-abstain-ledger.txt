@@ -38,10 +38,9 @@ env_args  out-of-interp-scope capability: prim.args_get_list
 env_get  interp fuel/recursion budget exhausted
 fan_any_allfail  out-of-interp-scope capability: fan.any
 fan_any_early_winner  out-of-interp-scope capability: fan.any
-fan_deterministic  out-of-interp-scope capability: fan.race
-fan_pure_thunks  out-of-interp-scope capability: fan.race
-fan_race_err  out-of-interp-scope capability: fan.race
-fan_var_thunk_list  out-of-interp-scope capability: fan.race
+fan_deterministic  out-of-interp-scope capability: fan.any
+fan_pure_thunks  out-of-interp-scope capability: fan.any
+fan_var_thunk_list  out-of-interp-scope capability: fan.any
 float_sign_minmax_ieee  out-of-interp-scope capability: transcendental `math.log2` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 fs_preopen_resolve  out-of-interp-scope capability: prim.write_text_file
 fs_relative_path  out-of-interp-scope capability: prim.make_dir

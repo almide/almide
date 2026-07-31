@@ -16,8 +16,8 @@ effect fn main() -> Unit = {
   let lam: List[fn() -> Result[Int, String]] = [
     () => one()
   ]
-  let r = fan.race(lam)
-  println("race=${r}")
+  let r = fan.any(lam)
+  println("any_var=${r}")
   let refs: List[fn() -> Int] = [ra, rb]
   let s = fan.settle(refs)
   println("settle=${list.len(s)}")
