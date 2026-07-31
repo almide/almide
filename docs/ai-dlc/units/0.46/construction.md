@@ -696,9 +696,31 @@ Three rules got tests that state something the bash only implies:
   test asserts the five schema errors come out in the bash's emission sequence. Two
   implementations that find the same problems in a different order are not byte-identical.
 
-Remaining for B8: (j) retired-subsystem paths, (f) id contiguity, (f) the flagged ratchet, the
-two spec-keying directions, the three freshness checks, and the summary/histogram block — then
-the twelve mutations above, each of which must turn the Almide gate red with the same line.
+`ledger_coverage.almd` adds **(j)** and both halves of **(f)** — the rules that read the ledger
+as a whole rather than one contract at a time — with 6 more tests, also WASM-clean. Verified
+against the real ledger in one run: 201 contracts, max id C-201, **0 gaps, 0 flagged, 0 bad
+ids, 0 bad or missing `since`** — the same numbers the bash reports.
+
+Each of the three carries the violation that caused it, because a gate whose reason is lost
+gets weakened by the next person who trips it:
+
+- **(j) fires on a dead PARENT DIRECTORY, never a dead file.** Deliberately narrow. Statements
+  legitimately name illustrative files (`fs.stat("spec/x.almd")`), so flagging a missing file
+  would make the check useless within a week; a vanished DIRECTORY is the retired-subsystem
+  signature. When the v0 wasm emitter went and 115 files under `emit_wasm/` with it, 16
+  citations rotted in place and kept sending readers to code that no longer existed (#941).
+  A single deleted file inside a surviving directory is the accepted blind spot — the price of
+  zero false positives, and evidence paths are checked exactly.
+- **(f) contiguity**: a gap means a contract was DELETED rather than superseded. Retiring a
+  promise is a real operation — flip its status, or replace it and say so — but silently
+  vacating a number leaves every reference dangling with nothing to notice.
+- **(f) ratchet**: the ceiling is ZERO. C-033 converged; C-006 was retired by removing
+  `fan.timeout` in 0.29.0. Raising the ceiling to admit a new divergence is precisely the move
+  this check exists to make impossible without saying so out loud.
+
+Remaining for B8: the two spec-keying directions, the three freshness checks, and the
+summary/histogram block — then the twelve mutations above, each of which must turn the Almide
+gate red with the same line.
 
 **One latent bug to reproduce rather than fix, and to name where it is reproduced**: the
 parser unquotes with `sub(/".*$/,"",v)` — truncate at the FIRST quote — which is precisely the
