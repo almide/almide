@@ -660,3 +660,19 @@ still worth pointing at the NEXT hypothesis before acting on it.** The guess tha
 `try_lower_heap_result_if` was the rejecter was written down as "most likely candidate" and
 was simply false; one `eprintln!` at its return site cost less than the reading that produced
 the guess.
+
+### A cheap rule the R3 fixture bought (2026-08-01)
+
+The new fixture passed every local gate — `spec/lang`, `spec/stdlib`, `spec/integration`,
+`spec/wasm_cross`, the full `cargo test`, the cross-target byte-compare — and turned CI red on
+`Emit & Format`, because `almide test` does not check formatting and the fmt gate covers
+`spec/` and `examples/`.
+
+**After adding or editing anything under `spec/`, run `almide fmt --check spec/ examples/`.**
+It takes seconds and it is the one gate the test commands do not imply. (The formatter also
+strips blank lines between statements, so a fixture written with paragraph spacing WILL be
+rewritten — worth knowing before the diff surprises you.)
+
+Note the scope: the gate is `spec/ examples/` only. `tools/` is deliberately outside it, and
+formatting the dogfood would collapse its multi-line signatures and pipe chains onto single
+long lines — so the right move there is to leave it alone, not to "fix" it.
