@@ -90,6 +90,7 @@ math_explog  out-of-interp-scope capability: transcendental `math.exp` (backends
 math_log_gamma  out-of-interp-scope capability: transcendental `math.fpow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 matrix_dims_guard  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
+matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
 memory_stress  out-of-interp-scope capability: prim.alloc_list
 module_global_const  out-of-interp-scope capability: prim.handle
 module_var_alias_cow  out-of-interp-scope capability: prim.alloc_list

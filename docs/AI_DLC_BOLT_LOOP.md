@@ -56,6 +56,12 @@ No work starts before the plan is approved.
   - `almide fmt` every NEW or EDITED `.almd` file — the fmt gate holds `spec/` and
     `examples/` formatted, and an unformatted test file is a red CI an hour later
     (it happened: commit abccf0b7's repair)
+  - a NEW `spec/wasm_cross` fixture also needs the interp abstain ledger regenerated in the
+    SAME commit: `ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test -p almide --test wasm_runtime_test
+    interp_abstain_ledger`. A fixture the interpreter cannot evaluate — anything reaching a
+    `prim.*`, which every self-hosted stdlib body does — is an UNLEDGERED abstain and turns
+    CI red an hour later. This cost two repairs in one day (C-197's and C-198's fixtures),
+    which is two more than reading this line costs
 - **Two tripwires that stop the iteration:**
   - Observable cross-target behavior changes without a contract (`C-NNN`) in the same commit
     → stop, call M2
