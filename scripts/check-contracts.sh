@@ -38,6 +38,11 @@
 #   (j) a source path cited in a contract statement or a fixture header lives
 #       under a directory that no longer exists (a retired subsystem — #941).
 set -uo pipefail
+
+# Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
+# locale, so an unpinned sort produces different output on differently-configured
+# machines. #1031 caught docs/roadmap/README.md changing row order with no content change.
+export LC_ALL=C
 cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 
 LEDGER="docs/contracts/contracts.toml"

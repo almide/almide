@@ -21,6 +21,11 @@
 #                             the pinned code+hint; fixed.almd must compile)
 #   tests/*.rs                a Rust gate (cargo test)
 set -euo pipefail
+
+# Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
+# locale, so an unpinned sort produces different output on differently-configured
+# machines. #1031 caught docs/roadmap/README.md changing row order with no content change.
+export LC_ALL=C
 cd "$(dirname "$0")/../.." || exit 2
 
 LEDGER="docs/contracts/contracts.toml"

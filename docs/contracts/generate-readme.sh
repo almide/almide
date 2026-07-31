@@ -10,6 +10,11 @@
 # scripts/lib/contract-classes.txt, line order = rank); fuzz shows its N. A `doc=`
 # renders the title as a link.
 set -euo pipefail
+
+# Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
+# locale, so an unpinned sort produces different output on differently-configured
+# machines. #1031 caught docs/roadmap/README.md changing row order with no content change.
+export LC_ALL=C
 cd "$(dirname "$0")/../.." || exit 2
 
 LEDGER="docs/contracts/contracts.toml"
