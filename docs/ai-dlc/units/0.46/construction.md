@@ -154,6 +154,28 @@ rather than improving them. Each is commented at its site:
 - equal dates are tie-broken by the whole row, descending — `sort -r`'s last-resort rule
 - the trailing newline comes from the original's final `echo ""`
 
+### The subcommand order, and why the next one is bigger
+
+`generate-readme.sh` was the right first target because it reads markdown front-matter — no
+parser needed beyond line scanning. The remaining generators are not uniform in difficulty,
+and the order matters:
+
+| Subcommand | bash | What it needs from Almide | Size |
+|---|---|---|---|
+| roadmap README | 101 lines | line scanning | **done, byte-identical** |
+| contracts README | 101 lines | **a TOML reader** (awk parses `contracts.toml` today) | next, and it is the real step up |
+| conformance.md | — | the same TOML reader | after |
+| `check-contracts.sh` | — | TOML + the bidirectional link audit | the largest |
+| `output-parity.sh` | 190 lines | process invocation + a 382-row baseline | independent of TOML |
+| `fuzz-track-record.sh` | — | `gh` invocation + date arithmetic | independent |
+
+The TOML reader is the load-bearing piece: three of the six need it, and it is the first part
+of this program that is a real component rather than glue. That makes it the natural B3 —
+build it once, with its own tests, and three subcommands follow.
+
+`output-parity.sh` and `fuzz-track-record.sh` need no TOML, so they can land in parallel if
+the TOML work stalls. Recording that so the next session is not forced into a single chain.
+
 ### State for the next session
 
 **#1029 has a verified workaround** — `out = out + [one(p)!]` prints `[1, 2]` on native — so
