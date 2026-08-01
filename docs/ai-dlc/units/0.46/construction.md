@@ -879,8 +879,8 @@ declaring victory on the part that went well.
 |---|---|
 | the program exists, builds green, and is actually used | **met** — 7 subcommands, gated in CI |
 | >= 10k lines of `.almd`, excluding generated code | **~1,500** — the gap |
-| a build-time table at three sizes, with the method stated | **met** — five sizes, below |
-| #1003 and #1002 each carry a comment saying whether their trigger fired, with numbers | **met** — both resolved NO |
+| a build-time table at three sizes, with the method stated | **met** — five sizes, below (first version retracted; see the correction) |
+| #1003 and #1002 each carry a comment saying whether their trigger fired, with numbers | **met** — #1003 FIRES (reopened), #1002 does not |
 | >= 10k lines | **amended, with the measurement as the reason** — see below |
 
 ### What the ladder DID produce
@@ -914,99 +914,84 @@ The recurring shape, five times over: **a rule duplicated because duplication wa
 the abstraction is a rule that will eventually be two rules** — and every one of the copies
 agreed on the day it was written.
 
-## The build-time curve, and what it does to the 10k-line criterion (2026-08-01)
+## The build-time curve — FIRST MEASUREMENT RETRACTED, corrected below (2026-08-01)
 
-**Method**: one binary (`almide 0.44.0`, `sha256:3406b02a…` — the tree was at 0.45.0 in
-`Cargo.toml` but the PATH binary predated the bump; it carries the R3 fix, and it is CONSTANT
-across every row, which is what a curve needs). Historical sizes reconstructed with
-`git archive` into separate temp trees — no checkout, nothing in the working tree touched.
-`almide clean` before the cold column; the warm column is the immediate re-run. All rows
-measured in ONE run of one script.
+**The first version of this section was wrong, and the error is worth leaving visible because
+the tell was right there in the data.**
 
-| lines | cold | warm | commit |
-|------:|-----:|-----:|--------|
-| 153 | — | — | `1ca36d0c` (excluded — see below) |
-| 382 | 0.26s | 0.26s | `3953867d` |
-| 540 | 0.27s | 0.27s | `3293fd06` |
-| 1,095 | 0.29s | 0.29s | `1b83520b` |
-| 1,694 | 0.31s | 0.30s | `7f4b09e8` |
-| 2,103 | 0.33s | 0.34s | `cd24f7d3` |
+It reported cold and warm builds as *indistinguishable at every size* — 0.26s to 0.33s across
+382→2,103 lines — and concluded from that flatness that neither #1003 nor #1002 could fire.
+Both conclusions were wrong, because **`almide clean` does not clear the cache that matters.**
+It clears the DEPENDENCY cache; the compiled-artifact cache lives in `$TMPDIR/almide-run`, and
+it survived every "cold" row. Every number in that table was a warm build wearing a cold label.
 
-Cold and warm are indistinguishable, which is itself a finding: for a dependency-free program
-the dependency cache is not on the critical path at all, so #1003's premise (a module cache
-that would pay for itself) has nothing to bite on at this scale.
+The tell was the flatness itself. A cold build that exactly equals a warm build does not mean
+caching is irrelevant — it means nothing was cleared. I read the first reading as the
+finding rather than as the symptom, which is the same mistake the R3 investigation cost five
+sessions to learn.
 
-Least-squares over the five valid rows: **38.8 µs/line, 0.247s fixed**. Linear, no visible
-knee.
+### The corrected measurement
 
-| extrapolated | build |
-|---|---|
-| 5,000 lines | 0.44s |
-| **10,000 lines** | **0.63s** |
-| 20,000 lines | 1.02s |
-| 50,000 lines | 2.19s |
+**Method**: one binary (`almide 0.45.0`, `sha256:b056d3fe…`), every row in ONE run of one
+script. TRUE cold = `rm -rf $TMPDIR/almide-run` **and** `almide clean`, before **every** row.
+Warm is the immediate re-run. Historical sizes via `git archive` into temp trees; the working
+tree was never checked out.
 
-**The excluded row is worth keeping visible.** The oldest dogfood commit no longer compiles —
-the current compiler rejects it with `type mismatch in list concatenation element: expected
-Entry but got Result[Entry, String]`. That is #1030, one of the bugs this very Unit found,
-now correctly caught. The program's own history is a regression test for the fix it produced.
+| lines | cold | warm |
+|------:|-----:|-----:|
+| 382 | 0.93s | 0.37s |
+| 540 | 1.15s | 0.37s |
+| 1,095 | 2.48s | 0.40s |
+| 1,694 | 2.97s | 0.42s |
+| 2,103 | **4.19s** | 0.45s |
 
-### The DoD's line count is amended to 2,103, and the measurement is the reason
+- **cold: 1.80 ms/line + 0.25s fixed**
+- **warm: 46 µs/line + 0.35s fixed**
+- cold/warm at 2,103 lines: **9.3×**
 
-The 10k figure was never the goal. Read the Unit's aim: #1003 and #1002 both have triggers
-phrased as *"arm this when it makes `almide test` or CI measurably slow — not before"*, and
-nothing in the repo could trip them. 10k lines was the proxy for **big enough to make the build
-slow**.
+#1003's own estimate was ~1 ms/line. It was right; the retracted measurement was the thing
+that disagreed with it, and the issue should have been believed over a table whose two columns
+were suspiciously equal.
 
-The curve says the build does not get slow at 10k. It says 0.63 seconds. Writing 8,000 more
-lines to confirm a number the fit already gives — and to confirm it in the same direction — is
-precisely the failure the Inception's own **R2** names: *"picking a throwaway target to hit the
-line count. A 10k-line program nobody uses…"*. The 2,103 lines that exist are used: they are
-seven byte-identical gates, wired into CI, that found eight defects.
+### What is NOT the cause, measured rather than assumed
 
-So the criterion is amended from *≥10k lines* to **a build-time curve with enough points to
-answer #1003 and #1002, which it now has**. Reversible: if a future measurement shows a knee
-above 2k lines, this decision is wrong and the fit is right there to be re-run. What would
-change my mind is a super-linear term — and five points spanning 5.5× show none.
+The obvious suspect is the feature-gated Rust runtime — the dogfood imports `fs`, `process`
+and `json`, and #1002 is about exactly that rlib. It is not the cause:
 
-### #1003 and #1002 both resolve NO
+| program | imports | rlib cache cleared | build |
+|---|---|---|---|
+| an 8-line probe | `fs`, `process`, `json` | yes | **0.11s** |
+| `tools/almide-gates` (2,103 lines) | same three | yes | **4.15s** |
+| `tools/almide-gates` | same three | no (own entry intact) | **0.45s** |
 
-- **#1003 (machine-wide module cache)** — the trigger does not fire. Cold and warm builds are
-  indistinguishable at every measured size, so there is no cache miss to eliminate. At 10k
-  lines the whole build is 0.63s.
-- **#1002 (rlib cache for feature-gated runtimes)** — the trigger does not fire either. It was
-  already resolved in writing during Unit 0.45 (the four-layer table); this curve is the second
-  independent measurement, and it agrees.
+Same imports, same cleared cache, 38× apart. And building the probe first does not warm
+anything for the dogfood. The 4s is **rustc compiling the dogfood's own generated crate**,
+keyed on the whole program — which is precisely the typed-IR + per-module rlib cache #1003
+designs, and precisely NOT the shared-runtime rlib #1002 designs.
 
-## Unit completion
+### #1003 — the trigger FIRES. Reopened.
 
-- [x] Every Bolt done with evidence (B1–B8; B4's line-count target amended with the curve as
-      the reason, recorded above and reversible)
-- [x] The evidence satisfies the plan's done-criteria:
-      *program exists / builds green / is used* → seven byte-identical subcommands gated in CI;
-      *build-time table at three sizes with the method stated* → five sizes, one binary, one
-      run, `git archive` into temp trees;
-      *#1003 and #1002 carry a comment saying whether their trigger fired, with numbers* →
-      both commented and both resolved NO (#1003 closed as not-triggered; #1002 already closed,
-      now carrying a second independent measurement)
-- [x] Release: the work shipped across v0.43.0, v0.44.0 and v0.45.0
+Its stop condition is "a real project's full build exceeds 2–3s (~3,000–5,000 lines single
+program)."
 
-## Retrospective (Try)
+- **2s is crossed at ~970 lines. 3s at ~1,530.** Both far below the estimated 3,000–5,000.
+- The dogfood is at **4.19s today**, at 2,103 lines.
+- Extrapolated: 5,000 lines → 9.3s cold; 10,000 → 18.3s.
 
-**Keep**: the byte-identical target. A reimplementation with no oracle "works" in the sense
-that nobody checked. Every one of the eight defects was found because a diff refused a
-plausible restatement — not one was found by reading.
+Closing it was a mistake and it is reopened with the corrected numbers.
 
-**Keep**: writing the acceptance criterion down BEFORE the port. `check-contracts`'s twelve
-mutations were pinned two sessions early, and that is the only reason the ordering bug was
-caught: the clean run was byte-identical while the emission order was wrong, and a
-clean-run-only check would have shipped it green.
+### #1002 — still does not fire, but for a measured reason rather than the retracted one
 
-**Change**: measure the proxy before committing to it. The 10k-line criterion cost nothing to
-write and would have cost 8,000 lines to satisfy, for a number the first five points already
-gave. A criterion phrased as a size should carry the measurement that makes the size the right
-size — and if that measurement is cheap, take it in Inception, not in Bolt 8.
+The 8-line probe with the same three imports builds in **0.11s with the rlib cache cleared**.
+The shared runtime rlib is not on the critical path at any size measured. That conclusion
+survives; the reasoning behind the original comment did not, and the issue now carries the
+correction.
 
-**Change**: `almide test` does not imply `almide fmt --check`. A fixture passed every local
-suite and turned CI red on formatting. The tiered-testing habit needs the fmt line appended to
-it for anything under `spec/`.
+### What this does to the 10k-line criterion — the conclusion holds, the reason inverts
+
+The amendment stands, and it is now on firmer ground. The original argument was "the build
+never gets slow, so more lines prove nothing." The truth is the opposite and stronger: **the
+build is already slow enough to answer the question at 2,103 lines.** The trigger fires at
+~970. Writing 8,000 more lines would confirm, at length, something the fifth data point
+already established.
+
