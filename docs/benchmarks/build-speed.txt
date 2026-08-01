@@ -1,0 +1,19 @@
+# Build-speed baseline — the SOURCE for the README's build-speed table (#999).
+# Regenerate: almide run tools/almide-gates/src/main.almd -- bench
+# Ratchet:    almide run tools/almide-gates/src/main.almd -- bench --check
+#
+# Every row is an N-run MEAN and N is recorded: a single run of a 30ms process is
+# scheduler noise, not a measurement. Cold clears BOTH $TMPDIR/almide-run and the
+# dependency cache before every repetition — clearing only the latter produces a warm
+# build wearing a cold label.
+version   = almide 0.46.0
+binary    = sha256:f6a9994b450fa946
+machine   = arm64 Darwin
+date      = 2026-08-01
+target    = examples/lisp.almd
+lines     = 268
+tolerance = 150
+check_ms  = 22.7   n=20
+cold_ms   = 643.9   n=3
+warm_ms   = 266.1   n=5
+wasm_ms   = 299.1   n=3

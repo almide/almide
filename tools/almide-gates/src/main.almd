@@ -17,6 +17,7 @@ import stamp
 import parity_sweep
 import track_record
 import ledger_gate
+import bench
 import env
 
 type Entry = { date: String, link: String, desc: String }
@@ -117,6 +118,7 @@ effect fn main() -> Unit = {
   let root = list.get_or(args, 1, match cmd {
     "output-parity" => ".",
     "check-contracts" => "docs/contracts",
+    "bench" => "docs/benchmarks",
     _ => "docs/roadmap",
   })
   let body = match cmd {
@@ -138,6 +140,27 @@ effect fn main() -> Unit = {
     // The contract-ledger gate. Like `output-parity` it reports through its EXIT CODE — the
     // `::error::` prefix is how GitHub Actions annotates a line, and the non-zero exit is what
     // actually stops a merge.
+    // The build-speed benchmark and its ratchet (#999). Reporting mode rewrites the
+    // baseline; `--check` re-measures and fails on a regression beyond the tolerance.
+    "bench" => {
+      let alm = list.get_or(args, 3, "almide")
+      let target = list.get_or(args, 4, "examples/lisp.almd")
+      let base = root + "/build-speed.txt"
+      let rows = bench.measure(alm, target)!
+      if list.get_or(args, 2, "") == "--check" then {
+        let v = bench.check_against(base, rows, 150)!
+        println(list.join(v.0, "\n"))
+        if v.1 then {
+          println("build-speed: OK — every row within 1.5x of the committed baseline.")
+          process.exit(0)
+        } else process.exit(1)
+      } else {
+        let text = bench.baseline_text(alm, target, rows, 150)!
+        fs.write(base, text)!
+        println(text)
+        process.exit(0)
+      }
+    },
     "check-contracts" => {
       let g = ledger_gate.run(root)!
       println(list.join(g.lines, "\n"))

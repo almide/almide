@@ -1,0 +1,166 @@
+// The build-speed benchmark — Unit 0.50 (#999), and the eighth gate this repository runs on
+// itself.
+//
+// It measures what the README publishes: `almide check`, a cold native build, a warm one, and
+// a cold wasm build. It is written in Almide rather than shell for the reason the whole
+// dogfood exists — but here there is a sharper one. A benchmark harness is the one program
+// whose own cost is part of its answer, and shell has no clock: every attempt reaches for an
+// external process to read the time, and on a 30ms measurement that process IS the
+// measurement. `datetime.monotonic_ns()` is in-process, so the only thing between the two
+// readings is the work.
+//
+// Three failure modes this is written against, each of which happened during Unit 0.50:
+//
+//   1. **A single-shot number.** `almide check` read 47ms and 28ms on the same binary twenty
+//      minutes apart; the first was one run on a loaded machine. Every row is an N-run MEAN
+//      and N is published, so a reader can tell noise from signal.
+//   2. **A "cold" build that is warm.** `almide clean` clears the DEPENDENCY cache; compiled
+//      artifacts live in `$TMPDIR/almide-run`. A whole curve was published where every cold
+//      row was a cache hit. Cold here clears BOTH, before every repetition.
+//   3. **Measuring the harness.** A first draft took its timestamps by spawning a process per
+//      reading — ~45ms each — and reported a 28ms command as 117ms. The harness was four
+//      times the size of the thing it measured.
+import process
+import fs
+import env
+
+type Row = { key: String, ms: Int, n: Int }
+
+fn ns_to_ms_x10(ns: Int) -> Int = ns / 100000
+
+// Mean of `n` runs, in tenths of a millisecond so the report can carry one decimal without
+// floats. `pre` runs before EACH repetition — that is how cold stays cold — and its own cost
+// falls outside the two clock readings.
+effect fn bench(key: String, n: Int, pre: List[String], cmd: String, cmd_args: List[String]) -> Row = {
+  var total = 0
+  for _i in 0..<n {
+    if list.len(pre) > 0 then {
+      let _ = process.exec_status(list.get_or(pre, 0, "true"), list.drop(pre, 1))
+      ()
+    } else ()
+    let t0 = datetime.monotonic_ns()
+    let _ = process.exec_status(cmd, cmd_args)
+    total = total + (datetime.monotonic_ns() - t0)
+  }
+  Row { key: key, ms: ns_to_ms_x10(total / n), n: n }
+}
+
+fn fmt_ms(x10: Int) -> String = int.to_string(x10 / 10) + "." + int.to_string(x10 % 10)
+
+fn row_line(r: Row) -> String =
+  string.pad_end(r.key, 9, " ") + " = " + fmt_ms(r.ms) + "   n=" + int.to_string(r.n)
+
+// The RATCHET. Build timing on a shared machine is noisy at the tens-of-percent level, so a
+// gate that fires at 5% gets switched off within a week — which is worse than no gate. 1.5x
+// catches a real regression (an added pass, a lost cache) and ignores load.
+fn regressed(got_x10: Int, base_x10: Int, tol_pct: Int) -> Bool = got_x10 * 100 > base_x10 * tol_pct
+
+fn regression_line(key: String, got_x10: Int, base_x10: Int, tol_pct: Int) -> String =
+  "::error::build-speed REGRESSION: " + key + " is " + fmt_ms(got_x10) + "ms against a "
+    + fmt_ms(base_x10) + "ms baseline (> " + int.to_string(tol_pct / 100) + "."
+    + int.to_string((tol_pct / 10) % 10) + "x)"
+
+fn ok_line(key: String, got_x10: Int, base_x10: Int) -> String =
+  "  " + string.pad_end(key, 9, " ") + " " + string.pad_start(fmt_ms(got_x10), 8, " ")
+    + "ms  (baseline " + fmt_ms(base_x10) + "ms)"
+
+// `key = VALUE   n=N` — the baseline file's one line shape, read back for the ratchet.
+fn baseline_of(lines: List[String], key: String) -> Int = {
+  let hit = lines |> list.find((l) => string.starts_with(string.trim(l), key + " "))
+  match hit {
+    some(l) => {
+      let after = list.get_or(string.split(l, "="), 1, "")
+      let num = string.trim(list.get_or(string.split(string.trim(after), " "), 0, "0"))
+      let parts = string.split(num, ".")
+      (int.parse(list.get_or(parts, 0, "0")) ?? 0) * 10
+        + (int.parse(list.get_or(parts, 1, "0")) ?? 0)
+    },
+    none => -1,
+  }
+}
+
+test "a mean is reported to one decimal without floats" {
+  assert_eq(fmt_ms(283), "28.3")
+  assert_eq(fmt_ms(7332), "733.2")
+  assert_eq(fmt_ms(50), "5.0")
+}
+
+test "the ratchet fires above the tolerance and not below it" {
+  // 1.5x, expressed as 150 percent so the comparison stays integer.
+  assert_eq(regressed(300, 200, 150), false)
+  assert_eq(regressed(301, 200, 150), true)
+  assert_eq(regressed(100, 200, 150), false)
+}
+
+test "a baseline row is read back with its decimal intact" {
+  let lines = ["check_ms  = 28.3   n=20", "cold_ms   = 733.2   n=3"]
+  assert_eq(baseline_of(lines, "check_ms"), 283)
+  assert_eq(baseline_of(lines, "cold_ms"), 7332)
+  assert_eq(baseline_of(lines, "absent_ms"), -1)
+}
+
+test "the report lines are the shapes the gate publishes" {
+  assert_eq(row_line(Row { key: "check_ms", ms: 283, n: 20 }), "check_ms  = 28.3   n=20")
+  assert_eq(ok_line("cold_ms", 7332, 7000), "  cold_ms      733.2ms  (baseline 700.0ms)")
+}
+
+// The four rows the README publishes, measured together so they share one machine state.
+effect fn measure(alm: String, target: String) -> List[Row] = {
+  let run_dir = (env.get("TMPDIR") ?? "/tmp") + "/almide-run"
+  // Cold clears BOTH caches. `almide clean` alone leaves the compiled artifact in place,
+  // which is how a warm build gets published under a cold label.
+  let clear = ["sh", "-c", "rm -rf '" + run_dir + "'; '" + alm + "' clean"]
+  [
+    bench("check_ms", 20, [], alm, ["check", target])!,
+    bench("cold_ms", 3, clear, alm, ["build", target, "-o", "/tmp/almide-bs-native"])!,
+    bench("warm_ms", 5, [], alm, ["build", target, "-o", "/tmp/almide-bs-native"])!,
+    bench("wasm_ms", 3, clear, alm, ["build", target, "--target", "wasm", "-o", "/tmp/almide-bs.wasm"])!,
+  ]
+}
+
+effect fn sh(cmd: String, cmd_args: List[String]) -> String = string.trim(process.exec(cmd, cmd_args) ?? "")
+
+// The baseline file, with its provenance. A figure without the binary that produced it, the
+// machine it ran on, and the date is not reproducible and therefore is not a claim.
+effect fn baseline_text(alm: String, target: String, rows: List[Row], tol_pct: Int) -> String = {
+  let ver = sh(alm, ["--version"])!
+  let sha = string.slice(sh("shasum", ["-a", "256", alm])!, 0, 16)
+  let src = fs.read_text(target) ?? ""
+  let header = """
+    # Build-speed baseline — the SOURCE for the README's build-speed table (#999).
+    # Regenerate: almide run tools/almide-gates/src/main.almd -- bench
+    # Ratchet:    almide run tools/almide-gates/src/main.almd -- bench --check
+    #
+    # Every row is an N-run MEAN and N is recorded: a single run of a 30ms process is
+    # scheduler noise, not a measurement. Cold clears BOTH $TMPDIR/almide-run and the
+    # dependency cache before every repetition — clearing only the latter produces a warm
+    # build wearing a cold label.
+    """
+  header + "\n"
+    + "version   = " + ver + "\n"
+    + "binary    = sha256:" + sha + "\n"
+    + "machine   = " + sh("uname", ["-m"])! + " " + sh("uname", ["-s"])! + "\n"
+    + "date      = " + sh("date", ["+%Y-%m-%d"])! + "\n"
+    + "target    = " + target + "\n"
+    + "lines     = " + int.to_string(list.len(string.split(src, "\n")) - 1) + "\n"
+    + "tolerance = " + int.to_string(tol_pct) + "\n"
+    + (rows |> list.map(row_line) |> list.join("\n")) + "\n"
+}
+
+effect fn check_against(path: String, rows: List[Row], tol_pct: Int) -> (List[String], Bool) = {
+  let lines = fs.read_lines(path) ?? []
+  var out: List[String] = []
+  // `ok` is the Result constructor and cannot be a binding name here.
+  var passed = true
+  for r in rows {
+    let base = baseline_of(lines, r.key)
+    if base < 0 then {
+      out = out + ["::error::build-speed: no baseline row for " + r.key]
+      passed = false
+    } else if regressed(r.ms, base, tol_pct) then {
+      out = out + [regression_line(r.key, r.ms, base, tol_pct)]
+      passed = false
+    } else out = out + [ok_line(r.key, r.ms, base)]
+  }
+  (out, passed)
+}

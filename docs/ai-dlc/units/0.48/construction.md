@@ -47,13 +47,18 @@ thing to build is cancellation, and it is independent of everything measured her
 neither has proven anything. Salsa-style memoization remains out of scope on the issue's own
 terms, not on this Unit's judgement.
 
-## The two rows are folded, and why
+## One #928 comment, but two shipping events — a correction
 
-0.47 and 0.48 were two ladder rows over **one issue with four sequenced steps** — the split was
-a sizing decision, which the 0.48 Inception says outright. The measurement collapses both to
-the same answer from the same five data points, so keeping them as two shipping events would
-put a tag on a document that adds no artifact. They ship together, and #928 carries one
-comment rather than two saying the same thing.
+An earlier draft of this document folded 0.47 and 0.48 into one release on the grounds that
+two tags over one measurement is ceremony. **That was wrong, and the ladder is the reason.**
+The decade is a numbered sequence of rows, each of which ships; collapsing two rows because
+their outcome happened to be the same answer breaks the correspondence between a version and a
+row, and the next reader cannot tell whether 0.48 was folded, skipped, or forgotten.
+
+So: **one comment on #928** — the answer really is one answer from one set of data points, and
+posting it twice would be noise — but **two releases**, v0.47.0 and v0.48.0, each carrying its
+row's numbers. A release whose content is a measurement is not an empty release: the numbers
+are the deliverable, and publishing them is what makes the deferral auditable.
 
 Recorded as reversible: if the re-arm condition below fires, the arc resumes at step (2) and
 step (3) follows it, in the issue's order.
