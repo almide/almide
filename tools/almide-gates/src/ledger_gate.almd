@@ -15,8 +15,18 @@ import toml
 import contract_audit
 import ledger_schema
 import ledger_coverage
+import ledger_speckey
+import contracts
+import process
 
-type Gate = { lines: List[String], errors: List[String] }
+// `lines` is the FULLY RENDERED output in emission order — errors already carry their
+// `::error::` prefix. Accumulating all errors and then all informational lines matches the
+// bash only on a CLEAN ledger, where there are no errors to misplace; under any real finding
+// the two interleave, because the bash echoes each error where it is found. The sequence is
+// the byte-identity surface, so it is built once, here.
+type Gate = { lines: List[String], ok: Bool }
+
+fn errs(xs: List[String]) -> List[String] = xs |> list.map((e) => "::error::" + e)
 
 effect fn read_lines_of(path: String) -> List[String] = string.split(fs.read_text(path) ?? "", "\n")
 
@@ -82,15 +92,75 @@ fn floor_pass(classes: List[String], tables: List[toml.Table], fixture_rank: Int
 // differently: a ledger-only edge means the contract's evidence points at a file certifying
 // something else, so the contract LOOKS covered and is not; a fixture-only edge means the
 // fixture is uncounted, so deleting it would break nothing and nobody would notice.
-effect fn symmetry_pass(fixtures: List[String]) -> (List[String], Int) = {
+// An edge is `contract-id TAB fixture-basename`, joined into one string so the two sets can be
+// compared as plain lists. Only `spec/wasm_cross/*.almd` evidence produces a forward edge —
+// a contract may cite a `tests/*.rs` unit, and that is not a fixture link.
+fn edge(id: String, base: String) -> String = id + "\t" + base
+
+fn basename_of(path: String) -> String = {
+  let parts = string.split(path, "/")
+  list.get_or(parts, list.len(parts) - 1, path)
+}
+
+fn forward_edges(fixture_dir: String, tables: List[toml.Table]) -> List[String] =
+  tables |> list.flat_map((t) => {
+    let id = toml.table_get(t, "id")
+    t.array_items
+      |> list.map((it) => toml.inline_get(it, "path"))
+      |> list.filter((p) => string.starts_with(p, fixture_dir + "/") and string.ends_with(p, ".almd"))
+      |> list.map((p) => edge(id, basename_of(p)))
+  }) |> list.unique |> list.sort
+
+// A fixture with NO header and a fixture with a MALFORMED one are different findings: the
+// first is an omission, the second is a header someone wrote and got wrong, which would
+// otherwise be silently treated as absent. The bash distinguishes them by looking for the bare
+// word `@contract` after the strict pattern fails.
+fn header_errors(base: String, src: String, ids: List[String]) -> List[String] =
+  if list.len(ids) > 0 then []
+  else if string.contains(src, "@contract") then
+    [base + " has a malformed // @contract: header (must match: // @contract: C-NNN[, C-MMM])"]
+  else [base + " has no // @contract: header (every cross-target fixture must name the contract(s) it certifies)"]
+
+// The two asymmetries carry DIFFERENT messages because they mean different things — see the
+// forward/reverse split in contract_audit.almd.
+fn only_forward_error(e: String) -> String = {
+  let parts = string.split(e, "\t")
+  let id = list.get_or(parts, 0, "")
+  let base = list.get_or(parts, 1, "")
+  id + " lists " + base + " as evidence but " + base + " does not declare " + id
+    + " in its // @contract: header (link must be symmetric)"
+}
+
+fn only_reverse_error(e: String) -> String = {
+  let parts = string.split(e, "\t")
+  let id = list.get_or(parts, 0, "")
+  let base = list.get_or(parts, 1, "")
+  base + " declares " + id + " but " + id + " does not list " + base + " as evidence (link must be symmetric)"
+}
+
+effect fn symmetry_pass(fixture_dir: String, fixtures: List[String], tables: List[toml.Table], ids: List[String]) -> (List[String], Int) = {
   var with_header = 0
   var errs: List[String] = []
+  var rev: List[String] = []
   for f in fixtures {
-    let ids = contract_audit.header_of(fs.read_text(f) ?? "")
-    if list.len(ids) > 0 then with_header = with_header + 1
-    else errs = errs + ["fixture " + f + " has no // @contract: header"]
+    let src = fs.read_text(f) ?? ""
+    let base = basename_of(f)
+    let hdr = contract_audit.header_of(src)
+    errs = errs + header_errors(base, src, hdr)
+    if list.len(hdr) > 0 then {
+      with_header = with_header + 1
+      for cid in hdr {
+        if not list.contains(ids, cid) then
+          errs = errs + [base + " references " + cid + " which is not in the ledger"]
+        else rev = rev + [edge(cid, base)]
+      }
+    } else ()
   }
-  (errs, with_header)
+  let reverse = rev |> list.unique |> list.sort
+  let forward = forward_edges(fixture_dir, tables)
+  let only_fwd = forward |> list.filter((e) => not list.contains(reverse, e)) |> list.map(only_forward_error)
+  let only_rev = reverse |> list.filter((e) => not list.contains(forward, e)) |> list.map(only_reverse_error)
+  (errs + only_fwd + only_rev, with_header)
 }
 
 fn histogram(classes: List[String], tables: List[toml.Table]) -> List[String] = {
@@ -104,6 +174,141 @@ fn summary(n_contracts: Int, n_active: Int, n_flagged: Int, ceiling: Int, with_h
   "  fixtures: " + int.to_string(with_header) + "/" + int.to_string(n_fixtures)
     + " carry a // @contract: header; bidirectional links symmetric.",
 ]
+
+// The three FRESHNESS checks. Each re-runs a generator and compares its STDOUT to the
+// committed file. Reading the generator's exit code instead would prove only that it ran —
+// and running it with the output redirected to /dev/null is exactly how the drift this check
+// exists to catch happened in the first place.
+effect fn stale(cmd: String, cmd_args: List[String], committed: String) -> Bool = {
+  let st = process.exec_status(cmd, cmd_args) ?? process.ProcessStatus { code: 1, stdout: "", stderr: "" }
+  if st.code != 0 then true else st.stdout != (fs.read_text(committed) ?? "")
+}
+
+effect fn freshness_pass() -> List[String] = {
+  let claims = process.exec_status("bash", ["scripts/gen-claims.sh", "--check"]) ?? process.ProcessStatus { code: 1, stdout: "", stderr: "" }
+  let claims_err = if claims.code == 0 then [] else ["README.md claims block is stale — run: bash scripts/gen-claims.sh"]
+  let conf = if stale("bash", ["docs/contracts/generate-conformance.sh"], "docs/contracts/conformance.md")!
+    then ledger_speckey.conformance_stale_error() else []
+  let idx = if stale("bash", ["docs/contracts/generate-readme.sh"], "docs/contracts/README.md")!
+    then ledger_speckey.index_stale_error() else []
+  claims_err + conf + idx
+}
+
+// The gate, in the bash's EMISSION ORDER. Every `::error::` line is accumulated in `errors`;
+// the informational lines go to `lines`. Both are returned so the caller decides the exit
+// code — the sequencing is the byte-identity surface and belongs here, not in `main`.
+effect fn run(root: String) -> Gate = {
+  let classes = contracts.parse_classes(fs.read_text("scripts/lib/contract-classes.txt") ?? "")
+  let fixture_rank = ledger_schema.rank_of(classes, "fixture")
+  let tables = toml.parse_tables(fs.read_text(root + "/contracts.toml") ?? "")
+  let real = tables |> list.filter((t) => toml.table_get(t, "id") != "")
+  let ids = real |> list.map((t) => toml.table_get(t, "id"))
+  let fixture_dir = "spec/wasm_cross"
+  let fixtures = fixture_files(fixture_dir)!
+
+  // (e) schema, then duplicate ids — the bash checks the shape per contract first, so a
+  // malformed id is reported as malformed before it is reported as a duplicate.
+  let dupes = ids |> list.unique |> list.filter((i) => (ids |> list.filter((x) => x == i) |> list.len) > 1)
+    |> list.sort |> list.map((d) => "duplicate contract id " + d)
+  let e_errs = schema_pass(root, real)! + dupes
+  // (a) evidence, (b) the active floor
+  let a_errs = evidence_pass(classes, real)!
+  let b_errs = floor_pass(classes, real, fixture_rank)
+  // (c)(d) the symmetric link
+  let sym = symmetry_pass(fixture_dir, fixtures, real, ids)!
+  // (j) cited paths — informational OK line only when nothing is dead
+  let cited = cited_pass(root, fixtures)!
+  let cited_ok = if list.len(cited) > 0 then []
+    else ["cited-paths: every source path named in a statement or fixture header resolves to a live directory."]
+  // (f) contiguity, then the ratchet
+  let f_errs = ledger_coverage.coverage_gaps(ids, ledger_coverage.max_id_num(ids))
+    + ledger_coverage.ratchet_error(ledger_coverage.count_flagged(real), 0)
+  // spec-keying, both directions
+  let spec = speckey_pass(real)!
+  let fresh = freshness_pass()!
+  let n_flagged = ledger_coverage.count_flagged(real)
+  let n_err = list.len(e_errs) + list.len(a_errs) + list.len(b_errs) + list.len(sym.0)
+    + list.len(cited) + list.len(f_errs) + list.len(spec.0) + list.len(fresh)
+  let tail = if n_err > 0 then errs(["contract-ledger gate FAILED — see messages above."])
+    else summary(list.len(ids), list.len(ids) - n_flagged, n_flagged, 0, sym.1, list.len(fixtures))
+  // The bash's order exactly: each check echoes where it runs, so the informational lines sit
+  // BETWEEN the error groups rather than after all of them.
+  Gate {
+    lines: errs(e_errs) + errs(a_errs) + errs(b_errs) + errs(sym.0)
+      + errs(cited) + cited_ok
+      + errs(f_errs)
+      + ["----", "evidence by class:"] + histogram(classes, real)
+      + errs(spec.0) + spec.1
+      + errs(fresh)
+      + tail,
+    ok: n_err == 0,
+  }
+}
+
+// (j) over the ledger and every fixture, de-duplicated and byte-sorted as `sort -u` does.
+effect fn cited_pass(root: String, fixtures: List[String]) -> List[String] = {
+  var all: List[String] = scan_cited(root + "/contracts.toml")!
+  for f in fixtures { all = all + scan_cited(f)! }
+  var out: List[String] = []
+  for p in all |> list.unique |> list.sort {
+    if not fs.exists(p) and not fs.is_dir(ledger_coverage.parent_dir(p)) then
+      out = out + ledger_coverage.dead_path_error(p, ledger_coverage.parent_dir(p))
+    else ()
+  }
+  out
+}
+
+effect fn scan_cited(path: String) -> List[String] =
+  string.split(fs.read_text(path) ?? "", "\n") |> list.flat_map((l) => ledger_coverage.cited_paths_in(l, 0, []))
+
+// Both spec-key directions, returning (errors, informational lines).
+effect fn speckey_pass(real: List[toml.Table]) -> (List[String], List[String]) = {
+  let no_key = real |> list.filter((t) => toml.table_get(t, "spec") == "") |> list.map((t) => toml.table_get(t, "id"))
+  let keys = real |> list.map((t) => toml.table_get(t, "spec")) |> ledger_speckey.distinct_sorted
+  var heads: List[String] = []
+  for f in (fs.walk("docs/specs/als") ?? []) |> list.filter((f) => string.ends_with(f, ".md")) |> list.sort {
+    heads = heads + (string.split(fs.read_text(f) ?? "", "\n") |> list.map((l) => ledger_speckey.section_of_heading(l)))
+  }
+  let sections = ledger_speckey.distinct_sorted(heads)
+  let unresolved = keys |> list.filter((k) => not list.contains(sections, k)) |> list.map(ledger_speckey.unresolved_spec_error)
+  let orphans = sections |> list.filter((s) => not list.contains(keys, s)) |> list.map(ledger_speckey.orphan_section_error)
+  let info = [ledger_speckey.speckey_summary(list.len(keys))]
+    + (if list.len(orphans) == 0 then [ledger_speckey.coverage_summary()] else [])
+  (ledger_speckey.missing_spec_errors(no_key) + unresolved + orphans, info)
+}
+
+test "a fixture with a MALFORMED header is a different finding from one with none" {
+  // A header someone wrote and got wrong would otherwise be silently treated as absent.
+  assert_eq(header_errors("x.almd", "// @contract C-001", []), [
+    "x.almd has a malformed // @contract: header (must match: // @contract: C-NNN[, C-MMM])",
+  ])
+  assert_eq(header_errors("x.almd", "fn main() -> Unit = ()", []), [
+    "x.almd has no // @contract: header (every cross-target fixture must name the contract(s) it certifies)",
+  ])
+  assert_eq(header_errors("x.almd", "// @contract: C-001", ["C-001"]), [])
+}
+
+test "the two asymmetries carry different messages, naming the side that is lying" {
+  assert_eq(only_forward_error("C-001\tf.almd"),
+    "C-001 lists f.almd as evidence but f.almd does not declare C-001 in its // @contract: header (link must be symmetric)")
+  assert_eq(only_reverse_error("C-001\tf.almd"),
+    "f.almd declares C-001 but C-001 does not list f.almd as evidence (link must be symmetric)")
+}
+
+test "only wasm_cross fixture evidence makes a forward edge" {
+  // A contract may cite a `tests/*.rs` unit; that is evidence, not a fixture link, and
+  // counting it would demand a `// @contract:` header in a Rust file.
+  let t = toml.Table {
+    scalars: [toml.Pair { key: "id", value: "C-001" }],
+    array_key: "evidence",
+    array_items: [
+      "{ path = \"spec/wasm_cross/a.almd\", class = \"fixture\" }",
+      "{ path = \"tests/b.rs\", class = \"fixture\", name = \"t\" }",
+    ],
+  }
+  assert_eq(forward_edges("spec/wasm_cross", [t]), ["C-001\ta.almd"])
+  assert_eq(basename_of("spec/wasm_cross/a.almd"), "a.almd")
+}
 
 test "the summary block is the bash's exact two lines" {
   assert_eq(summary(201, 201, 0, 0, 330, 330), [

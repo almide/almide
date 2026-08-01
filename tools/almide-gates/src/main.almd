@@ -16,6 +16,7 @@ import conformance
 import stamp
 import parity_sweep
 import track_record
+import ledger_gate
 import env
 
 type Entry = { date: String, link: String, desc: String }
@@ -113,7 +114,11 @@ effect fn main() -> Unit = {
   let cmd = list.get_or(args, 0, "roadmap-readme")
   // `output-parity` is the one subcommand whose root is the REPOSITORY, not a doc
   // directory — it walks `spec/` and reads a baseline under `proofs/`.
-  let root = list.get_or(args, 1, if cmd == "output-parity" then "." else "docs/roadmap")
+  let root = list.get_or(args, 1, match cmd {
+    "output-parity" => ".",
+    "check-contracts" => "docs/contracts",
+    _ => "docs/roadmap",
+  })
   let body = match cmd {
     "contracts-readme" => gen_contracts_readme(root)!,
     "conformance" => gen_conformance(root)!,
@@ -129,6 +134,14 @@ effect fn main() -> Unit = {
         track_record.report("almide/almide", n, "Generative differential fuzz", "Run fuzz campaign")!,
         "\n",
       ) + "\n"
+    },
+    // The contract-ledger gate. Like `output-parity` it reports through its EXIT CODE — the
+    // `::error::` prefix is how GitHub Actions annotates a line, and the non-zero exit is what
+    // actually stops a merge.
+    "check-contracts" => {
+      let g = ledger_gate.run(root)!
+      println(list.join(g.lines, "\n"))
+      if g.ok then process.exit(0) else process.exit(1)
     },
     "output-parity" => {
       // F6-2: the identity of the evidence comes first. If the PATH binary and the workspace

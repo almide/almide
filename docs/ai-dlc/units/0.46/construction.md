@@ -12,6 +12,7 @@
 | B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
 | B4 | The contracts-README subcommand (the first TOML consumer) | Byte-identical to the bash original | **done** | 231 lines / 25,297 bytes identical; found and fixed a truncation bug in the original (#1032) |
 | B5 | `conformance.md` — the third TOML consumer | Byte-identical | **done** | 81 lines identical; surfaced a native codegen bug (#1033) |
+| B8 | `check-contracts` — 426 lines, ten checks over one parse | Byte-identical + all 12 mutations | **done** | 13 lines / 542 bytes identical clean; **15/15 mutations byte-identical**, including an 809-line error output |
 | B7 | `fuzz-track-record` — the first subcommand that parses JSON | Byte-identical | **done** | 12 lines / 759 bytes identical, first try; replaced `gh api --jq` with real `json` parsing so the response shape faces the type checker |
 | B6 | `output-parity` — the first subcommand that RUNS things (3 processes/fixture, 3 observables, a retry, a ratchet) | Byte-identical | **done** | 10 lines / 607 bytes identical, both exit 0; the port's first draft produced 32 FALSE xfails and named the cause: a stream's final newline is a terminator, not an empty line |
 
@@ -772,8 +773,8 @@ paths extracted from the ledger and all 330 fixtures, 0 dead** — matching the 
 `cited-paths: every source path named in a statement or fixture header resolves to a live
 directory.`
 
-Remaining for B8: the three freshness diffs need process wiring; then the subcommand itself,
-then the twelve mutations — each must turn the Almide gate
+Remaining after this: nothing — see the B8 result below. (Historical note: what was left at
+this point was the three freshness diffs, the subcommand wiring, and the twelve mutations — each must turn the Almide gate
 red with the same line as the original. Everything the CHECKS need is now in place and verified
 against real data; what is left is composition and the adversarial pass.
 
@@ -817,3 +818,84 @@ duplication is cheaper than the abstraction is a rule that will eventually be tw
 locale pinning (#1031) was eleven copies of one `export LC_ALL=C`; the quote-truncation
 (#1032) was five copies of one unquoting expression; this is two copies of one enum. In each
 case the copies agreed on the day they were written.
+
+## B8 result — 15/15 mutations byte-identical, and the ordering trap fired exactly as predicted
+
+`check-contracts` is ported. Clean run: **13 lines, 542 bytes, identical, both exit 0.**
+
+That number proves almost nothing on its own, which is why the acceptance suite was pinned in
+advance as the twelve one-line edits the bash enumerates. Run with a FULL-OUTPUT byte compare —
+not just the error set — plus three extras (a malformed header as distinct from a missing one,
+and the two freshness checks the bash's list folds together):
+
+| # | mutation | result |
+|---|---|---|
+| 0 | clean | IDENTICAL, exit 0, 0 errors |
+| 1 | drop a fixture from a contract's evidence | IDENTICAL, exit 1, 5 errors |
+| 2 | remove a `// @contract:` header | IDENTICAL, exit 1, 3 errors |
+| 2b | MALFORMED header (`@contract` without the colon) | IDENTICAL, exit 1, 3 errors |
+| 3 | downgrade an active contract's only evidence | IDENTICAL, exit 1, 4 errors |
+| 4 | typo a class | IDENTICAL, exit 1, 2 errors |
+| 5 | flag a contract | IDENTICAL, exit 1, 4 errors |
+| 6 | renumber a contract to leave a gap | IDENTICAL, exit 1, **809 errors** |
+| 7 | hand-edit a number in README's claims block | IDENTICAL, exit 1, 2 errors |
+| 8 | add a contract without regenerating the index | IDENTICAL, exit 1, 5 errors |
+| 9 | stale conformance report | IDENTICAL, exit 1, 2 errors |
+| h | stale contract index | IDENTICAL, exit 1, 2 errors |
+| 10 | delete a `since =` line | IDENTICAL, exit 1, 3 errors |
+| 11 | cite a retired subsystem from a fixture header | IDENTICAL, exit 1, 2 errors |
+| 12 | UNALIGNED bogus spec key (single space) | IDENTICAL, exit 1, 3 errors |
+
+Mutation 6 is the one worth pointing at: renumbering `C-100` to `C-999` produces **809 error
+lines**, and all 809 match byte for byte in the same order. A set comparison would have passed
+on far less.
+
+### The trap I wrote down two sessions ago fired on the first mutation
+
+The recorded caution was: *the checks are independent but their OUTPUT is not — an error
+emitted in a different order is a byte difference even when the finding is identical.* The
+first draft accumulated every error and then every informational line, which matches the bash
+**only on a clean ledger, where there are no errors to misplace.** Mutation 4 exposed it
+immediately: the finding was word-for-word correct and the terminal
+`contract-ledger gate FAILED` line had lost its `::error::` prefix, because it was living in
+the informational list.
+
+The fix was structural rather than a patch. `run` now returns ONE fully-rendered line list in
+the bash's emission order, errors already prefixed, with a separate `ok` flag for the exit
+code — so the sequencing lives in the module whose header claims to own it, and there is no
+second list that can drift out of step.
+
+Worth stating plainly: **had I only compared the clean run, this would have shipped green and
+wrong.** The mutation suite is not extra rigour here; it is the only thing that tested the
+checks at all.
+
+## Unit 0.46 — complete
+
+`tools/almide-gates`: **~1,500 lines across thirteen modules, seven byte-identical
+subcommands, 43 tests.**
+
+| subcommand | bash original | evidence |
+|---|---|---|
+| `roadmap-readme` | `docs/roadmap/generate-readme.sh` | 390 lines / 59,262 bytes identical |
+| `contracts-readme` | `docs/contracts/generate-readme.sh` | 232 lines / 25,450 bytes identical |
+| `conformance` | `docs/contracts/generate-conformance.sh` | 81 lines identical |
+| `stamp` | `proofs/lib/stamp.sh` | identical, and it has aborted a real measurement |
+| `output-parity` | `proofs/output-parity.sh` | 10 lines / 607 bytes identical, both exit 0 |
+| `fuzz-track-record` | `scripts/fuzz-track-record.sh` | 12 lines / 759 bytes identical |
+| `check-contracts` | `scripts/check-contracts.sh` | 13 lines / 542 bytes + 15/15 mutations |
+
+**Eight defects found by writing it**, which is the Unit's thesis and the reason the target was
+a byte-identical reimplementation rather than a new program:
+
+1. #1027 — UFCS `mut` receiver not validated (compiler)
+2. #1029 — `effect fn` in a `for` body not auto-unwrapped (compiler)
+3. #1030 — list concatenation element mismatch stayed silent (compiler)
+4. #1033 — a native codegen bug surfaced by the conformance port (compiler)
+5. #1031 — locale-dependent sort in eleven scripts (tooling)
+6. #1032 — an `awk` truncating a title at the first quote, in five extractors (tooling)
+7. the phantom trailing line — 32 trap fixtures called divergent (would-be tooling bug)
+8. two implementations of the evidence-class rank inside the dogfood itself
+
+The recurring shape, five times over: **a rule duplicated because duplication was cheaper than
+the abstraction is a rule that will eventually be two rules** — and every one of the copies
+agreed on the day it was written.
