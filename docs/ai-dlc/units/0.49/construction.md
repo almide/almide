@@ -102,7 +102,41 @@ The generated crate is a single 7,733-line `main.rs`, and optimising it is the e
 **So the edit loop was paying for optimisation it throws away**, and #1003's cache would have
 been an elaborate mechanism for avoiding work that should not be done in that path at all.
 
-### The change, and what was checked before making it
+### REVERTED the same day — the change broke a cross-target contract
+
+**`opt-level` 1 → 0 was wrong and is reverted.** CI caught it: `output-parity` went from
+MISMATCH 1 to 2, and the new one is `spec/wasm_cross/mutual_tail_recursion.almd`.
+
+**MUTUAL tail recursion is turned into a loop by LLVM's tail-call optimisation, which does not
+run at opt-level 0.** Wasm has `return_call` and is unaffected, so the two targets diverged —
+1.5M-deep recursion printing `1500000` on wasm and overflowing the native stack.
+
+The pre-change check is the interesting part, because it passed:
+
+> 200,000-deep NON-tail recursion returns the same answer at both levels.
+
+True, and irrelevant. That test used **self**-recursion, which Almide's own TCO already turns
+into a loop — so it behaves identically at every opt-level and proves nothing about the case
+that is delegated to LLVM. **Testing the recursion the compiler handles tells you nothing about
+the recursion it hands off.** The fixture that caught this exists precisely because someone
+previously found the mutual case worth pinning.
+
+Filed as #1043: a native SEMANTIC property (deep mutual recursion terminates) currently rests
+on a Cargo optimisation level. That is fragile whether or not anyone lowers it — the property
+is not guaranteed by the compiler, it is bought by the build profile. The real fix is
+eliminating mutual tail calls in `almide-mir` (the same capability #864 needs), after which the
+4.4× edit-loop win can be taken.
+
+The `opt-level = 1` line now carries the measurement and the reason in a comment, so lowering
+it again means disagreeing with something written next to the value.
+
+### The measurement stands, and so does the diagnosis
+
+The attribution below is unaffected by the revert: cargo IS 90% of the edit loop, and within
+cargo it IS opt-level. What changed is the conclusion about what to do — the win is real and
+currently unavailable, blocked on #1043 rather than on #1003's cache.
+
+### The change as it was made, and what was checked before making it
 
 `[profile.dev] opt-level` 1 → 0 in all three generated-Cargo.toml templates.
 
@@ -176,8 +210,8 @@ What is already known and does constrain the design:
 - [x] The trigger is resolved with numbers from 0.46's program — **fired**, at ~970 lines
 - [x] #1003 carries the corrected measurement and is reopened
 - [x] The cost is attributed: cargo 90%, and within cargo it is `opt-level`
-- [x] The edit loop is **2.8× faster** (4.07s → 1.47s) by removing optimisation work from a
-      path that discards it — not by caching it
+- [ ] The edit loop win (4.07s → 1.47s) is **measured and currently unavailable** — the
+      profile change broke mutual tail recursion natively and was reverted; blocked on #1043
 - [ ] #1003's typed-IR + per-module rlib cache: **still open, and now correctly scoped.** With
       opt-level fixed, the remaining cargo phase is 1,127ms on 2,103 lines and still
       whole-program. The cache is the answer to THAT, and the trigger for building it should be

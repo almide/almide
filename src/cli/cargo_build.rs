@@ -20,18 +20,23 @@ edition = "2021"
 # build ("current package believes it's in a workspace when it's not").
 [workspace]
 
-# The EDIT LOOP profile. `opt-level = 0`, not 1, because opt-level is essentially the whole
-# cost of `almide run`: on a 2,103-line / 15-module program the cargo phase is 3,215ms at
-# opt-level 1 and 724ms at 0 -- 4.4x -- measured with a real source edit each time and a
-# phase trace INSIDE the pipeline (ALMIDE_TIME_PHASES=1), not by re-running cargo, which
-# hits its own cache and reports a rebuild it did not do.
-# The binary is ~1.33x slower to RUN (671ms vs 506ms on the same program), so the trade is
-# ~2.5s of compile against ~0.17s of execution, on every edit. `--release` and
-# `almide build` are unchanged for when the binary's speed is what matters.
-# Checked before changing: 200,000-deep non-tail recursion behaves identically at both
-# levels, and `almide test` is unaffected because it runs on the wasm leg.
+# `opt-level = 1` is LOAD-BEARING FOR CORRECTNESS, not a speed choice. Do not lower it.
+#
+# It was lowered to 0 once, for a real and large win: the cargo phase of `almide run` on a
+# 2,103-line program is 3,215ms at level 1 and 724ms at level 0 (4.4x), measured with a real
+# source edit each time and a phase trace inside the pipeline. It was reverted the same day
+# because `spec/wasm_cross/mutual_tail_recursion.almd` began overflowing the native stack:
+# **MUTUAL tail recursion is turned into a loop by LLVM's tail-call optimisation, which does
+# not run at opt-level 0.** Wasm is unaffected (it has `return_call`), so the two targets
+# diverged — a cross-target contract broken by a Cargo setting.
+#
+# What made the mistake possible: the pre-change check measured 200,000-deep SELF-recursion,
+# which Almide's own TCO already turns into a loop, so it passed at both levels and proved
+# nothing about the mutual case. A native semantic property must not depend on an
+# optimisation level; until the compiler eliminates mutual tail calls itself (#1043), this
+# line is what keeps the contract.
 [profile.dev]
-opt-level = 0
+opt-level = 1
 overflow-checks = false
 
 [profile.release]
@@ -52,18 +57,23 @@ edition = "2021"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 webpki-roots = "0.26"
 
-# The EDIT LOOP profile. `opt-level = 0`, not 1, because opt-level is essentially the whole
-# cost of `almide run`: on a 2,103-line / 15-module program the cargo phase is 3,215ms at
-# opt-level 1 and 724ms at 0 -- 4.4x -- measured with a real source edit each time and a
-# phase trace INSIDE the pipeline (ALMIDE_TIME_PHASES=1), not by re-running cargo, which
-# hits its own cache and reports a rebuild it did not do.
-# The binary is ~1.33x slower to RUN (671ms vs 506ms on the same program), so the trade is
-# ~2.5s of compile against ~0.17s of execution, on every edit. `--release` and
-# `almide build` are unchanged for when the binary's speed is what matters.
-# Checked before changing: 200,000-deep non-tail recursion behaves identically at both
-# levels, and `almide test` is unaffected because it runs on the wasm leg.
+# `opt-level = 1` is LOAD-BEARING FOR CORRECTNESS, not a speed choice. Do not lower it.
+#
+# It was lowered to 0 once, for a real and large win: the cargo phase of `almide run` on a
+# 2,103-line program is 3,215ms at level 1 and 724ms at level 0 (4.4x), measured with a real
+# source edit each time and a phase trace inside the pipeline. It was reverted the same day
+# because `spec/wasm_cross/mutual_tail_recursion.almd` began overflowing the native stack:
+# **MUTUAL tail recursion is turned into a loop by LLVM's tail-call optimisation, which does
+# not run at opt-level 0.** Wasm is unaffected (it has `return_call`), so the two targets
+# diverged — a cross-target contract broken by a Cargo setting.
+#
+# What made the mistake possible: the pre-change check measured 200,000-deep SELF-recursion,
+# which Almide's own TCO already turns into a loop, so it passed at both levels and proved
+# nothing about the mutual case. A native semantic property must not depend on an
+# optimisation level; until the compiler eliminates mutual tail calls itself (#1043), this
+# line is what keeps the contract.
 [profile.dev]
-opt-level = 0
+opt-level = 1
 overflow-checks = false
 
 [profile.release]
@@ -265,18 +275,23 @@ name = "{}"
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
-# The EDIT LOOP profile. `opt-level = 0`, not 1, because opt-level is essentially the whole
-# cost of `almide run`: on a 2,103-line / 15-module program the cargo phase is 3,215ms at
-# opt-level 1 and 724ms at 0 -- 4.4x -- measured with a real source edit each time and a
-# phase trace INSIDE the pipeline (ALMIDE_TIME_PHASES=1), not by re-running cargo, which
-# hits its own cache and reports a rebuild it did not do.
-# The binary is ~1.33x slower to RUN (671ms vs 506ms on the same program), so the trade is
-# ~2.5s of compile against ~0.17s of execution, on every edit. `--release` and
-# `almide build` are unchanged for when the binary's speed is what matters.
-# Checked before changing: 200,000-deep non-tail recursion behaves identically at both
-# levels, and `almide test` is unaffected because it runs on the wasm leg.
+# `opt-level = 1` is LOAD-BEARING FOR CORRECTNESS, not a speed choice. Do not lower it.
+#
+# It was lowered to 0 once, for a real and large win: the cargo phase of `almide run` on a
+# 2,103-line program is 3,215ms at level 1 and 724ms at level 0 (4.4x), measured with a real
+# source edit each time and a phase trace inside the pipeline. It was reverted the same day
+# because `spec/wasm_cross/mutual_tail_recursion.almd` began overflowing the native stack:
+# **MUTUAL tail recursion is turned into a loop by LLVM's tail-call optimisation, which does
+# not run at opt-level 0.** Wasm is unaffected (it has `return_call`), so the two targets
+# diverged — a cross-target contract broken by a Cargo setting.
+#
+# What made the mistake possible: the pre-change check measured 200,000-deep SELF-recursion,
+# which Almide's own TCO already turns into a loop, so it passed at both levels and proved
+# nothing about the mutual case. A native semantic property must not depend on an
+# optimisation level; until the compiler eliminates mutual tail calls itself (#1043), this
+# line is what keeps the contract.
 [profile.dev]
-opt-level = 0
+opt-level = 1
 overflow-checks = false
 
 [profile.release]
