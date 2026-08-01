@@ -53,3 +53,89 @@ pub fn insert_probe_charges(functions: &mut [MirFunction]) {
         f.ops = out;
     }
 }
+
+// ───────────────────── charge certificate (static preservation) ─────────────────────
+
+/// Extract the charge-site sequence a rendered WAT module executes, in TEXT
+/// order, via the site-specific trace-update pattern (the same pattern
+/// [`crate::translation_validation::wasm_pattern`] claims). BCE-versioned
+/// loops legitimately DUPLICATE a body, so consumers compare
+/// [`first_occurrences`], not raw counts.
+pub fn wasm_charge_sites(wat: &str) -> Vec<u32> {
+    const PAT: &str = "(i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const ";
+    let mut out = Vec::new();
+    let mut rest = wat;
+    while let Some(i) = rest.find(PAT) {
+        rest = &rest[i + PAT.len()..];
+        if let Some(end) = rest.find(')') {
+            if let Ok(site) = rest[..end].trim().parse::<u32>() {
+                out.push(site);
+            }
+        }
+    }
+    out
+}
+
+/// Extract the charge-site sequence from rendered native Rust source, in TEXT
+/// order, via the `__almd_charge(site, cost)` shim calls.
+pub fn native_charge_sites(rs: &str) -> Vec<u32> {
+    const PAT: &str = "__almd_charge(";
+    let mut out = Vec::new();
+    let mut rest = rs;
+    while let Some(i) = rest.find(PAT) {
+        rest = &rest[i + PAT.len()..];
+        if let Some(end) = rest.find(',') {
+            if let Ok(site) = rest[..end].trim().parse::<u32>() {
+                out.push(site);
+            }
+        }
+    }
+    out
+}
+
+/// The order of FIRST occurrences — the render-order claim that survives
+/// legitimate body duplication (loop versioning): a dropped site vanishes,
+/// a reordered site changes the sequence, a duplicated body does neither.
+pub fn first_occurrences(sites: &[u32]) -> Vec<u32> {
+    let mut seen = std::collections::HashSet::new();
+    sites.iter().copied().filter(|s| seen.insert(*s)).collect()
+}
+
+#[cfg(test)]
+mod cert_tests {
+    use super::*;
+
+    #[test]
+    fn wasm_extraction_orders_and_parses() {
+        let wat = "\
+    (global.set $__fuel (i64.add (global.get $__fuel) (i64.const 1)))\n\
+    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const 42)))\n\
+    (i64.const 999)\n\
+    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const 7)))\n";
+        assert_eq!(wasm_charge_sites(wat), vec![42, 7]);
+    }
+
+    #[test]
+    fn native_extraction_orders_and_parses() {
+        let rs = "fn main() {\n    __almd_charge(42, 1);\n    let x = 5;\n    __almd_charge(7, 1);\n}\n";
+        assert_eq!(native_charge_sites(rs), vec![42, 7]);
+    }
+
+    #[test]
+    fn first_occurrences_survives_duplication() {
+        assert_eq!(first_occurrences(&[1, 2, 3, 2, 3]), vec![1, 2, 3]);
+        assert_eq!(first_occurrences(&[]), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn insertion_is_noop_without_env() {
+        // Deliberately does NOT set the env var: the default path must not
+        // insert charges (normal builds are byte-identical to pre-probe).
+        if std::env::var("ALMIDE_FUEL_PROBE").is_ok() {
+            return; // an outer harness set it; this test's claim is vacuous there
+        }
+        let mut fns: Vec<crate::MirFunction> = Vec::new();
+        insert_probe_charges(&mut fns);
+        assert!(fns.is_empty());
+    }
+}

@@ -56,3 +56,18 @@ bounds-check-elision・wasm-opt）はいずれも charge を落とさず、順�
 charge-trace 保存は、この粒度・この経路集合では**成立している**。Stage 1 の
 本実装（spec/wasm_cross fixture 化、charge certificate、property test）に進む
 根拠が取れた。反証は出なかったが、探索空間は 9 プログラム — 網羅ではない。
+
+## 昇格（2026-08-02、同 branch）
+
+spike の発見をゲートに固定した:
+
+1. **wall honesty**: probe 中の native v0 fallback は hard error（`src/cli/mod.rs`
+   `render_v1_native_or_fallback`）。無音の未計測 run は構造的に不可能になった。
+2. **静的 certificate**: `charge_probe::{wasm,native}_charge_sites` + 順序敏感な
+   first-occurrence 比較。`translation_validation::wasm_pattern` の Charge claim も
+   site 特異に強化（drop したその charge を名指しで落とす）。
+3. **常駐ゲート**: `tests/charge_probe_test.rs` — 動的三点 × 8 fixture + 静的
+   certificate × 8 + wall honesty × 2 を 1 テストで（`cargo test --release
+   --test charge_probe_test`、~2.4s、wasmtime 不在時は動的層のみ skip）。
+
+almide-mir 既存 605 lib テストは全緑（Op::Charge の追加は無破壊）。

@@ -106,6 +106,16 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
             v1_code
         }
         Err(e) => {
+            // Stage 1 probe: fuel is built on the trust spine ONLY. A v0
+            // fallback has no Charge ops, so the probe would silently report
+            // nothing — the exact silent-miss the probe exists to prevent.
+            // Hard error instead of a quiet unmeasured run.
+            if almide_mir::charge_probe::probe_enabled() {
+                err(&format!(
+                    "error: ALMIDE_FUEL_PROBE requires the v1 native render, but it walled\n  reason: {e}\n  hint: the probe cannot measure a v0-codegen binary; fix the wall or drop the probe"
+                ));
+                std::process::exit(1);
+            }
             // The fallback is SILENT no more (#931): the user asked for the
             // verified render, so tell them in one line that they did not get
             // it and why — the full reason, not a Debug dump. The env var now
