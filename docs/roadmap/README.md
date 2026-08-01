@@ -7,7 +7,7 @@
 
 ## Active
 
-68 items
+72 items
 
 | Item | Description |
 |------|-------------|
@@ -25,8 +25,10 @@
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) | Which layers of the well-typed-source-to-correct-binary chain still lack a mechanical or mathematical proof |
 | [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
+| [Deterministic Bounds — legalising a bound on computation under byte-identity](active/deterministic-bounds.md) | Legalising fan.timeout under byte-identity — fuel, deterministic allocation, winner order, effect isolation |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) | Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause |
+| [Fan v2 — one execution-policy grammar](active/fan-v2.md) | Fan v2: the execution-policy grammar — heads x forms, thunk-free, labeled fuel |
 | [Flight Evidence Gaps — 実地監査所見台帳](active/flight-evidence-gaps.md) | Hands-on internal audit findings (2026-07-03) — the measured distance between DAL-A philosophy and DAL-A evidence, as 7 findings with corrective work items and acceptance criteria |
 | [Flight Profile — 航空品質への接地分析と2つのキーストーン](active/flight-profile.md) | DO-178C flight-grade gap analysis: 6 pillars status + 2 engineering keystones |
 | [Flight Qualification — DO-178C/DO-330/DO-333 マッピング + 資格化キット(G-F5 + G-F6)](active/flight-qualification.md) | Flight gates G-F5 + G-F6 — how the PCC certificate/receipt maps to DO-178C Table A objectives, the DO-330 "prove-the-checker" tool-qualification argument (compiler→TQL-5 output-verified, checker→qualified-by-proof), the DO-333 formal-methods credit per proven property, and the G-F6 qualification kit as a product (AbsInt/SCADE-KCG model): what's in the kit, the boundary (kit provides vs customer's domain process), and the customer integration story. |
@@ -39,6 +41,7 @@
 | [StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`](active/interp-is-desugar-to-tostring.md) | Retiring StringInterp as special syntax by desugaring it to concat + to_string(part) |
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) | The issue-ledger burn-down gauge: keeping the open-issue count an honest measure of remaining work |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
+| [Logical-Time Async — the async grammar design](active/logical-time-async.md) | The async grammar: fuel as the logical clock, deterministic race, oracle tier |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) | Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field |
 | [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) | Routing almide build --target rust through the same v1 Perceus MIR as wasm, so one memory model serves both legs |
@@ -79,6 +82,7 @@
 | [WASM Reference-Count Frees: the Ownership-Discipline Drain](active/wasm-frees-ownership-discipline.md) | Draining the reference-count frees backlog by making the ownership discipline mechanical |
 | [WASM 所有権 emit 層の機械化 (Perceus drift の構造的封じ込め)](active/wasm-ownership-emit-mechanization.md) | Mechanizing the WASM ownership emit layer to contain Perceus drift structurally |
 | [WASM Platform Frontier — beyond core Wasm 3.0](active/wasm-platform-frontier.md) | Post-Wasm-3.0 platform tracking — WASI 0.3 / Component Model, stack switching, shared-everything-threads |
+| [Zero Committed Shell](active/zero-committed-shell.md) | Drive committed shell to zero; the two primitives that block it |
 
 ## On Hold
 

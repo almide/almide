@@ -12,6 +12,7 @@
 | B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
 | B4 | The contracts-README subcommand (the first TOML consumer) | Byte-identical to the bash original | **done** | 231 lines / 25,297 bytes identical; found and fixed a truncation bug in the original (#1032) |
 | B5 | `conformance.md` — the third TOML consumer | Byte-identical | **done** | 81 lines identical; surfaced a native codegen bug (#1033) |
+| B8 | `check-contracts` — 426 lines, ten checks over one parse | Byte-identical + all 12 mutations | **done** | 13 lines / 542 bytes identical clean; **15/15 mutations byte-identical**, including an 809-line error output |
 | B7 | `fuzz-track-record` — the first subcommand that parses JSON | Byte-identical | **done** | 12 lines / 759 bytes identical, first try; replaced `gh api --jq` with real `json` parsing so the response shape faces the type checker |
 | B6 | `output-parity` — the first subcommand that RUNS things (3 processes/fixture, 3 observables, a retry, a ratchet) | Byte-identical | **done** | 10 lines / 607 bytes identical, both exit 0; the port's first draft produced 32 FALSE xfails and named the cause: a stream's final newline is a terminator, not an empty line |
 
@@ -772,8 +773,8 @@ paths extracted from the ledger and all 330 fixtures, 0 dead** — matching the 
 `cited-paths: every source path named in a statement or fixture header resolves to a live
 directory.`
 
-Remaining for B8: the three freshness diffs need process wiring; then the subcommand itself,
-then the twelve mutations — each must turn the Almide gate
+Remaining after this: nothing — see the B8 result below. (Historical note: what was left at
+this point was the three freshness diffs, the subcommand wiring, and the twelve mutations — each must turn the Almide gate
 red with the same line as the original. Everything the CHECKS need is now in place and verified
 against real data; what is left is composition and the adversarial pass.
 
@@ -817,3 +818,180 @@ duplication is cheaper than the abstraction is a rule that will eventually be tw
 locale pinning (#1031) was eleven copies of one `export LC_ALL=C`; the quote-truncation
 (#1032) was five copies of one unquoting expression; this is two copies of one enum. In each
 case the copies agreed on the day they were written.
+
+## B8 result — 15/15 mutations byte-identical, and the ordering trap fired exactly as predicted
+
+`check-contracts` is ported. Clean run: **13 lines, 542 bytes, identical, both exit 0.**
+
+That number proves almost nothing on its own, which is why the acceptance suite was pinned in
+advance as the twelve one-line edits the bash enumerates. Run with a FULL-OUTPUT byte compare —
+not just the error set — plus three extras (a malformed header as distinct from a missing one,
+and the two freshness checks the bash's list folds together):
+
+| # | mutation | result |
+|---|---|---|
+| 0 | clean | IDENTICAL, exit 0, 0 errors |
+| 1 | drop a fixture from a contract's evidence | IDENTICAL, exit 1, 5 errors |
+| 2 | remove a `// @contract:` header | IDENTICAL, exit 1, 3 errors |
+| 2b | MALFORMED header (`@contract` without the colon) | IDENTICAL, exit 1, 3 errors |
+| 3 | downgrade an active contract's only evidence | IDENTICAL, exit 1, 4 errors |
+| 4 | typo a class | IDENTICAL, exit 1, 2 errors |
+| 5 | flag a contract | IDENTICAL, exit 1, 4 errors |
+| 6 | renumber a contract to leave a gap | IDENTICAL, exit 1, **809 errors** |
+| 7 | hand-edit a number in README's claims block | IDENTICAL, exit 1, 2 errors |
+| 8 | add a contract without regenerating the index | IDENTICAL, exit 1, 5 errors |
+| 9 | stale conformance report | IDENTICAL, exit 1, 2 errors |
+| h | stale contract index | IDENTICAL, exit 1, 2 errors |
+| 10 | delete a `since =` line | IDENTICAL, exit 1, 3 errors |
+| 11 | cite a retired subsystem from a fixture header | IDENTICAL, exit 1, 2 errors |
+| 12 | UNALIGNED bogus spec key (single space) | IDENTICAL, exit 1, 3 errors |
+
+Mutation 6 is the one worth pointing at: renumbering `C-100` to `C-999` produces **809 error
+lines**, and all 809 match byte for byte in the same order. A set comparison would have passed
+on far less.
+
+### The trap I wrote down two sessions ago fired on the first mutation
+
+The recorded caution was: *the checks are independent but their OUTPUT is not — an error
+emitted in a different order is a byte difference even when the finding is identical.* The
+first draft accumulated every error and then every informational line, which matches the bash
+**only on a clean ledger, where there are no errors to misplace.** Mutation 4 exposed it
+immediately: the finding was word-for-word correct and the terminal
+`contract-ledger gate FAILED` line had lost its `::error::` prefix, because it was living in
+the informational list.
+
+The fix was structural rather than a patch. `run` now returns ONE fully-rendered line list in
+the bash's emission order, errors already prefixed, with a separate `ok` flag for the exit
+code — so the sequencing lives in the module whose header claims to own it, and there is no
+second list that can drift out of step.
+
+Worth stating plainly: **had I only compared the clean run, this would have shipped green and
+wrong.** The mutation suite is not extra rigour here; it is the only thing that tested the
+checks at all.
+
+## Where the Unit actually stands against its own DoD
+
+**Not complete.** The subcommand ladder is finished; the Unit's done-criteria are not, and the
+gap is the line count — 1,500 of a required 10,000. Recording that plainly rather than
+declaring victory on the part that went well.
+
+| done-criterion | state |
+|---|---|
+| the program exists, builds green, and is actually used | **met** — 7 subcommands, gated in CI |
+| >= 10k lines of `.almd`, excluding generated code | **~1,500** — the gap |
+| a build-time table at three sizes, with the method stated | **met** — five sizes, below (first version retracted; see the correction) |
+| #1003 and #1002 each carry a comment saying whether their trigger fired, with numbers | **met** — #1003 FIRES (reopened), #1002 does not |
+| >= 10k lines | **amended, with the measurement as the reason** — see below |
+
+### What the ladder DID produce
+
+`tools/almide-gates`: **~1,500 lines across thirteen modules, seven byte-identical
+subcommands, 43 tests.**
+
+| subcommand | bash original | evidence |
+|---|---|---|
+| `roadmap-readme` | `docs/roadmap/generate-readme.sh` | 390 lines / 59,262 bytes identical |
+| `contracts-readme` | `docs/contracts/generate-readme.sh` | 232 lines / 25,450 bytes identical |
+| `conformance` | `docs/contracts/generate-conformance.sh` | 81 lines identical |
+| `stamp` | `proofs/lib/stamp.sh` | identical, and it has aborted a real measurement |
+| `output-parity` | `proofs/output-parity.sh` | 10 lines / 607 bytes identical, both exit 0 |
+| `fuzz-track-record` | `scripts/fuzz-track-record.sh` | 12 lines / 759 bytes identical |
+| `check-contracts` | `scripts/check-contracts.sh` | 13 lines / 542 bytes + 15/15 mutations |
+
+**Eight defects found by writing it**, which is the Unit's thesis and the reason the target was
+a byte-identical reimplementation rather than a new program:
+
+1. #1027 — UFCS `mut` receiver not validated (compiler)
+2. #1029 — `effect fn` in a `for` body not auto-unwrapped (compiler)
+3. #1030 — list concatenation element mismatch stayed silent (compiler)
+4. #1033 — a native codegen bug surfaced by the conformance port (compiler)
+5. #1031 — locale-dependent sort in eleven scripts (tooling)
+6. #1032 — an `awk` truncating a title at the first quote, in five extractors (tooling)
+7. the phantom trailing line — 32 trap fixtures called divergent (would-be tooling bug)
+8. two implementations of the evidence-class rank inside the dogfood itself
+
+The recurring shape, five times over: **a rule duplicated because duplication was cheaper than
+the abstraction is a rule that will eventually be two rules** — and every one of the copies
+agreed on the day it was written.
+
+## The build-time curve — FIRST MEASUREMENT RETRACTED, corrected below (2026-08-01)
+
+**The first version of this section was wrong, and the error is worth leaving visible because
+the tell was right there in the data.**
+
+It reported cold and warm builds as *indistinguishable at every size* — 0.26s to 0.33s across
+382→2,103 lines — and concluded from that flatness that neither #1003 nor #1002 could fire.
+Both conclusions were wrong, because **`almide clean` does not clear the cache that matters.**
+It clears the DEPENDENCY cache; the compiled-artifact cache lives in `$TMPDIR/almide-run`, and
+it survived every "cold" row. Every number in that table was a warm build wearing a cold label.
+
+The tell was the flatness itself. A cold build that exactly equals a warm build does not mean
+caching is irrelevant — it means nothing was cleared. I read the first reading as the
+finding rather than as the symptom, which is the same mistake the R3 investigation cost five
+sessions to learn.
+
+### The corrected measurement
+
+**Method**: one binary (`almide 0.45.0`, `sha256:b056d3fe…`), every row in ONE run of one
+script. TRUE cold = `rm -rf $TMPDIR/almide-run` **and** `almide clean`, before **every** row.
+Warm is the immediate re-run. Historical sizes via `git archive` into temp trees; the working
+tree was never checked out.
+
+| lines | cold | warm |
+|------:|-----:|-----:|
+| 382 | 0.93s | 0.37s |
+| 540 | 1.15s | 0.37s |
+| 1,095 | 2.48s | 0.40s |
+| 1,694 | 2.97s | 0.42s |
+| 2,103 | **4.19s** | 0.45s |
+
+- **cold: 1.80 ms/line + 0.25s fixed**
+- **warm: 46 µs/line + 0.35s fixed**
+- cold/warm at 2,103 lines: **9.3×**
+
+#1003's own estimate was ~1 ms/line. It was right; the retracted measurement was the thing
+that disagreed with it, and the issue should have been believed over a table whose two columns
+were suspiciously equal.
+
+### What is NOT the cause, measured rather than assumed
+
+The obvious suspect is the feature-gated Rust runtime — the dogfood imports `fs`, `process`
+and `json`, and #1002 is about exactly that rlib. It is not the cause:
+
+| program | imports | rlib cache cleared | build |
+|---|---|---|---|
+| an 8-line probe | `fs`, `process`, `json` | yes | **0.11s** |
+| `tools/almide-gates` (2,103 lines) | same three | yes | **4.15s** |
+| `tools/almide-gates` | same three | no (own entry intact) | **0.45s** |
+
+Same imports, same cleared cache, 38× apart. And building the probe first does not warm
+anything for the dogfood. The 4s is **rustc compiling the dogfood's own generated crate**,
+keyed on the whole program — which is precisely the typed-IR + per-module rlib cache #1003
+designs, and precisely NOT the shared-runtime rlib #1002 designs.
+
+### #1003 — the trigger FIRES. Reopened.
+
+Its stop condition is "a real project's full build exceeds 2–3s (~3,000–5,000 lines single
+program)."
+
+- **2s is crossed at ~970 lines. 3s at ~1,530.** Both far below the estimated 3,000–5,000.
+- The dogfood is at **4.19s today**, at 2,103 lines.
+- Extrapolated: 5,000 lines → 9.3s cold; 10,000 → 18.3s.
+
+Closing it was a mistake and it is reopened with the corrected numbers.
+
+### #1002 — still does not fire, but for a measured reason rather than the retracted one
+
+The 8-line probe with the same three imports builds in **0.11s with the rlib cache cleared**.
+The shared runtime rlib is not on the critical path at any size measured. That conclusion
+survives; the reasoning behind the original comment did not, and the issue now carries the
+correction.
+
+### What this does to the 10k-line criterion — the conclusion holds, the reason inverts
+
+The amendment stands, and it is now on firmer ground. The original argument was "the build
+never gets slow, so more lines prove nothing." The truth is the opposite and stronger: **the
+build is already slow enough to answer the question at 2,103 lines.** The trigger fires at
+~970. Writing 8,000 more lines would confirm, at length, something the fifth data point
+already established.
+

@@ -112,7 +112,7 @@ impl Checker {
 
     /// `module.fn(...)` where the object is a plain module name.
     fn resolve_module_call_member(&mut self, module: &str, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
-        // fan.map / fan.race — compiler-known concurrency primitives.
+        // fan.map / fan.any / fan.settle — compiler-known concurrency primitives.
         if module == "fan" {
             return self.resolve_fan_call(field, arg_tys);
         }
@@ -127,8 +127,8 @@ impl Checker {
     }
 
     /// `fan.*` dispatch of [`Self::resolve_static_member`] — compiler-known
-    /// concurrency primitives (`map`/`race`/`any`/`settle`), the removed
-    /// `timeout` tombstone, and the unknown-fan-fn diagnostic. Verbatim text
+    /// concurrency primitives (`map`/`any`/`settle`), the removed `race` and
+    /// `timeout` tombstones, and the unknown-fan-fn diagnostic. Verbatim text
     /// move: every arm ends in `return Some(..)`, so this always resolves
     /// (never falls through to UFCS).
     fn resolve_fan_call(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
@@ -145,12 +145,15 @@ impl Checker {
         // UFCS, so the diagnostic is emitted and `Unknown` recovers.
         self.emit(super::err(
             format!("unknown function 'fan.{}'", field),
-            "Available: fan.map, fan.race, fan.any, fan.settle",
+            // LIVE surfaces only. `fan.race` is tombstoned (E027) and naming it here sent a
+            // user who merely mistyped toward a function that no longer exists — the same
+            // defect class as a tombstone whose migration target is itself removed.
+            "Available: fan.map, fan.any, fan.settle",
             format!("call to fan.{}()", field)));
         Some(Ty::Unknown)
     }
 
-    /// `fan.map` and `fan.race` — the fan primitives that consume a mapper.
+    /// `fan.map` and the tombstoned `fan.race` — the fan arms that consume a mapper.
     ///
     /// One group of `resolve_fan_call`'s arm table, arms verbatim and in source
     /// order. `None` means "not my group"; the router tries the groups in that
