@@ -215,16 +215,20 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 
 ### Build speed
 
-Measured on 0.42.0, Apple Silicon, `examples/lisp.almd` (268 lines). Cold means
-`$TMPDIR/almide-run` cleared; warm is the content-cache hit. Reproduce with
-`/usr/bin/time -p almide <cmd>`.
+<!-- build-speed:generated:start — derived from docs/benchmarks/build-speed.txt by the almide-gates `bench` subcommand; DO NOT EDIT between the markers -->
+Measured on almide 0.46.0, arm64 Darwin, `examples/lisp.almd` (268 lines), 2026-08-01. Every row is an N-run MEAN —
+a single run of a 30ms process is scheduler noise. Cold clears BOTH `$TMPDIR/almide-run`
+and the dependency cache before each repetition; clearing only the latter measures a warm
+build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; the ratchet
+(`-- bench --check`) fails CI at 1.5x.
 
-| scenario | time |
-|---|---|
-| `almide check` | **30 ms** |
-| build, warm (content-cache hit) | **0.26 s** |
-| build, cold | **0.61 s** |
-| build, cold, `--target wasm` | **0.28 s** |
+| scenario | time | runs |
+|---|---|---|
+| `almide check` | **22.7 ms** | 20 |
+| build, warm (content-cache hit) | **266.1 ms** | 5 |
+| build, cold | **643.9 ms** | 3 |
+| build, cold, `--target wasm` | **299.1 ms** | 3 |
+<!-- build-speed:generated:end -->
 
 Runtime-performance numbers are deliberately absent here rather than estimated: the
 benchmarks that would carry them need a harness with enough resolution to be worth

@@ -146,6 +146,27 @@ effect fn main() -> Unit = {
       let alm = list.get_or(args, 3, "almide")
       let target = list.get_or(args, 4, "examples/lisp.almd")
       let base = root + "/build-speed.txt"
+      // `--readme` renders the committed baseline into README.md and does NOT measure: a
+      // generated block whose content depended on the generator's machine would be stale for
+      // everyone but its author. Measuring and publishing are separate acts.
+      let mode = list.get_or(args, 2, "")
+      if mode == "--readme" or mode == "--check-readme" then {
+        let base_lines = fs.read_lines(base) ?? []
+        let block = bench.readme_block(base_lines)
+        let readme = fs.read_text("README.md")!
+        let rendered = bench.splice_block(readme, block)
+        if mode == "--readme" then {
+          fs.write("README.md", rendered)!
+          println("build-speed: README block rendered from " + base)
+          process.exit(0)
+        } else if rendered == readme then {
+          println("build-speed: README block is fresh.")
+          process.exit(0)
+        } else {
+          println("::error::README build-speed block is stale — run: almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --readme")
+          process.exit(1)
+        }
+      } else ()
       let rows = bench.measure(alm, target)!
       if list.get_or(args, 2, "") == "--check" then {
         let v = bench.check_against(base, rows, 150)!

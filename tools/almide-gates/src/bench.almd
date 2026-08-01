@@ -164,3 +164,80 @@ effect fn check_against(path: String, rows: List[Row], tol_pct: Int) -> (List[St
   }
   (out, passed)
 }
+
+// The README block, rendered FROM the baseline file — never re-measured at render time. A
+// generated block whose content depends on the machine that ran the generator would be stale
+// on every other machine, and the freshness check would fail for everyone but its author.
+// Measuring and publishing are separate acts: `bench` measures, this renders what was measured.
+fn readme_block(lines: List[String]) -> List[String] = {
+  let field = (k: String) => {
+    let hit = lines |> list.find((l) => string.starts_with(string.trim(l), k + " "))
+    match hit {
+      some(l) => string.trim(list.get_or(string.split(l, "="), 1, "")),
+      none => "?",
+    }
+  }
+  let ms = (k: String) => list.get_or(string.split(field(k), " "), 0, "?")
+  [
+    "Measured on " + field("version") + ", " + field("machine") + ", `" + field("target")
+      + "` (" + field("lines") + " lines), " + field("date") + ". Every row is an N-run MEAN —",
+    "a single run of a 30ms process is scheduler noise. Cold clears BOTH `$TMPDIR/almide-run`",
+    "and the dependency cache before each repetition; clearing only the latter measures a warm",
+    "build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; the ratchet",
+    "(`-- bench --check`) fails CI at 1.5x.",
+    "",
+    "| scenario | time | runs |",
+    "|---|---|---|",
+    "| `almide check` | **" + ms("check_ms") + " ms** | 20 |",
+    "| build, warm (content-cache hit) | **" + ms("warm_ms") + " ms** | 5 |",
+    "| build, cold | **" + ms("cold_ms") + " ms** | 3 |",
+    "| build, cold, `--target wasm` | **" + ms("wasm_ms") + " ms** | 3 |",
+  ]
+}
+
+test "the README block is rendered from the baseline, values and provenance both" {
+  let base = [
+    "version   = almide 0.46.0", "machine   = arm64 Darwin", "date      = 2026-08-01",
+    "target    = examples/lisp.almd", "lines     = 268",
+    "check_ms  = 22.7   n=20", "cold_ms   = 643.9   n=3",
+    "warm_ms   = 266.1   n=5", "wasm_ms   = 299.1   n=3",
+  ]
+  let b = readme_block(base)
+  assert_eq(list.get_or(b, 8, ""), "| `almide check` | **22.7 ms** | 20 |")
+  assert_eq(list.get_or(b, 10, ""), "| build, cold | **643.9 ms** | 3 |")
+  // The provenance line carries the binary, the machine and the date — a figure without them
+  // is not reproducible and therefore not a claim.
+  assert_eq(string.contains(list.get_or(b, 0, ""), "almide 0.46.0, arm64 Darwin"), true)
+  assert_eq(string.contains(list.get_or(b, 0, ""), "2026-08-01"), true)
+}
+
+// Rewrite everything between the markers, leaving both markers in place. Same discipline as
+// `scripts/gen-claims.sh`: the block is DERIVED, so hand-editing it is a defect the freshness
+// check catches rather than a change the reader is trusted not to make.
+fn splice_block(doc: String, block: List[String]) -> String = {
+  let start = "<!-- build-speed:generated:start — derived from docs/benchmarks/build-speed.txt by the almide-gates `bench` subcommand; DO NOT EDIT between the markers -->"
+  let stop = "<!-- build-speed:generated:end -->"
+  let lines = string.split(doc, "\n")
+  var out: List[String] = []
+  var inside = false
+  for l in lines {
+    if l == start then {
+      out = out + [start] + block
+      inside = true
+    } else if l == stop then {
+      out = out + [stop]
+      inside = false
+    } else if not inside then out = out + [l] else ()
+  }
+  list.join(out, "\n")
+}
+
+test "the splice replaces only what is between the markers" {
+  let start = "<!-- build-speed:generated:start — derived from docs/benchmarks/build-speed.txt by the almide-gates `bench` subcommand; DO NOT EDIT between the markers -->"
+  let stop = "<!-- build-speed:generated:end -->"
+  let doc = "before\n" + start + "\nSTALE\nALSO STALE\n" + stop + "\nafter"
+  assert_eq(splice_block(doc, ["fresh"]), "before\n" + start + "\nfresh\n" + stop + "\nafter")
+  // Idempotent: rendering the same block twice is a no-op, which is what makes the freshness
+  // check a string comparison rather than a diff.
+  assert_eq(splice_block(splice_block(doc, ["fresh"]), ["fresh"]), splice_block(doc, ["fresh"]))
+}

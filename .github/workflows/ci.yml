@@ -207,6 +207,17 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test tools/almide-gates/
 
+      # The published build-speed table is DERIVED from docs/benchmarks/build-speed.txt, the
+      # same discipline as the contract index and the claims block: a hand-edited number in the
+      # README is a defect this catches rather than a change a reader is trusted not to make.
+      # Freshness only — the numbers themselves are machine-dependent, so re-measuring here
+      # would fail for every machine but the one that produced the baseline. The RATCHET
+      # (`-- bench --check`, 1.5x) is a separate, opt-in job for that reason.
+      - name: README build-speed block is fresh (#999)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE run tools/almide-gates/src/main.almd -- bench docs/benchmarks --check-readme
+
       - name: Frees churn gate (ALMIDE_WASM_FREES over spec/churn)
         # Was wired into NOTHING since it landed (#980) — the free-list-cycle
         # gate never fired anywhere. This job has both requirements: wasmtime
