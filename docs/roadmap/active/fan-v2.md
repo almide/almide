@@ -29,7 +29,7 @@ v2 はこれを **head × form の直積 1 枚**に置き換える。
 | any | **index 最小**の成功 | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 | 逐次（意味論ごと逐次） |
 | race | **(spend, index) 最小**の成功 | `fan.race { a; b }` → `T`（`fan.race(compute.ms(500)) { … }` は任意の発散ガード） | `fan.race(xs, f)` / `fan.race(compute.ms(500), xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
 | bounded | 単一 body の計量 | `fan.bounded(compute.ms(100)) { body }` → `T` | —（map と合成） | **pure** | — |
-| timeout | 環境が切る（oracle 層） | `fan.timeout(duration.s(5)) { body }` → `T` | — | oracle 可 | ホスト相対 |
+| timeout | 環境が切る（壁時計 — oracle 層、[ADR-0001 S8](../../adr/0001-deterministic-time-units.md)） | `fan.timeout(duration.s(5)) { body }` → `T` | — | oracle 可 | ホスト相対 |
 
 - block form の arm は **式**（`fan {}` と同じ arm 契約: Result auto-unwrap、外側 `var`
   キャプチャ禁止）。any/race の arm は同一の `T` に unify する。all/settle は tuple なので

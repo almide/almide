@@ -6,6 +6,8 @@
 - **関連**: [async-inception.md](../roadmap/active/async-inception.md)（憲章）、
   [logical-time-async.md](../roadmap/active/logical-time-async.md)（意味論）、
   [fan-v2.md](../roadmap/active/fan-v2.md)（文法）
+- **批准**: 2026-08-01 の 2 要件討議（「従来の ms で書けること」×「完全性」）で現行形を批准。
+  単一 Duration 型案は検討のうえ却下（Alternatives 参照）、壁時計側の完全性機構を S8 に追補
 
 ## 前提 — 「時間」は 1 つではない
 
@@ -238,15 +240,17 @@ Decision（D1–D6）を、実装 PR がそのまま転写できる完全な表�
 
 ### S4. 消費者 matrix — どこに何の型が現れるか
 
-| 表面 | 取る型 | 多重度 |
-|---|---|---|
-| `fan.bounded(c) { body }` | `Compute` | 必須 1 |
-| `fan.race { arms }` / `fan.race(c) { arms }` | `Compute` | 任意 0..1（発散ガード） |
-| `fan.race(xs, f)` / `fan.race(c, xs, f)` | `Compute` | 任意 0..1 |
-| `fan.timeout(d) { body }`（Stage 4、oracle 層） | `Duration` | 必須 1 |
-| 効果表面の期限（http / process 等 — 形は将来の設計。型だけここで pin） | `Duration` | — |
-| CLI `almide run/test --budget 500ms` | `Compute`（CLI 文字列は同じ 6 単位の接尾辞表記 — CLI は言語構文ではないので接尾辞可） | 任意 |
-| レポート（`--time-report`） | 両方併記: `0.42ms deterministic (≈0.31ms wall here)` | D5 |
+| 表面 | 取る型 | 時計 | 多重度 |
+|---|---|---|---|
+| `fan.bounded(c) { body }` | `Compute` | 決定的 | 必須 1 |
+| `fan.race { arms }` / `fan.race(c) { arms }` | `Compute` | 決定的 | 任意 0..1（発散ガード） |
+| `fan.race(xs, f)` / `fan.race(c, xs, f)` | `Compute` | 決定的 | 任意 0..1 |
+| `fan.timeout(d) { body }`（Stage 4、oracle 層） | `Duration` | 壁時計（S8） | 必須 1 |
+| 効果表面の期限（http / process 等 — 形は将来の設計。型だけここで pin） | `Duration` | 壁時計（S8） | — |
+| CLI `almide run/test --budget 500ms` | `Compute`（CLI 文字列は同じ 6 単位の接尾辞表記 — CLI は言語構文ではないので接尾辞可） | 決定的 | 任意 |
+| レポート（`--time-report`） | 両方併記: `0.42ms deterministic (≈0.31ms wall here)` | 両方 | D5 |
+
+「時計」列は契約台帳の宣言と 1:1 に対応し、S6-6 のゲートがこの面を検査する。
 
 誤配置の診断は fixture で文言ごと pin する（`expected Compute, found Duration` +
 head 誘導ヒント — fan-v2-examples/diagnostics.almd と一致させる）。
@@ -266,6 +270,8 @@ head 誘導ヒント — fan-v2-examples/diagnostics.almd と一致させる）�
 3. 型エラー各 1 の診断 fixture: 裸整数 / 時計混合 / `T * T` / UFCS 曖昧
 4. CLI の単位名集合 = 言語の単位名集合（単一ソースからの生成を検査）
 5. 飽和演算の境界 fixture（オーバーフロー構築、`T - T` の 0 飽和）
+6. **時計宣言の面検査**: `Compute` / `Duration` を取る表面の全数と、S4「時計」列
+   （= 契約台帳の宣言）の全数が一致すること — 時計宣言のない時間消費表面を CI が拒否する
 
 ### S7. 意図的省略の台帳（再開条件つき）
 
@@ -278,6 +284,29 @@ head 誘導ヒント — fan-v2-examples/diagnostics.almd と一致させる）�
 | accessor（`in_ms(c)` 等の読み出し） | 表示は `Repr` で足りる | 予算を計算に使う実例 |
 | `Codec` derive | 直列化境界を跨ぐ用例がない | 用例の出現 |
 | リテラル接尾辞 `100ms` | D3 のとおり（lexer 拡張の取引が不成立）。脱糖先は確定済み | D3-F（dojo 実測） |
+
+### S8. 壁時計側の完全性 — timeout が従来の ms で書けて、なお完全である理由
+
+`fan.timeout(duration.ms(5000))` と効果表面の期限は、汎用言語の慣習どおりの ms で
+書ける。これが決定層の完全性と矛盾しない構造は 3 段で立つ（壁時計で勝者や結果を
+決める構文が決定層に入れないこと自体は T9 の定理であり、選好ではない）。
+
+1. **時計宣言 matrix（S4 の「時計」列）**: 時間量を消費する全表面は、自分の読む
+   時計を契約台帳で宣言する。宣言のない表面はゲート（S6-6）が拒否する。「この ms は
+   どちらの時計か」に台帳が常に答えられることが、単位を共有しても時計が混ざらない
+   根拠である。
+2. **timeout 事象は ω の一部**: 期限切れは「環境がどの charge site で期限を切ったか」
+   という oracle 入力として扱う（中断点統一原理 — oracle 系構文は決定層と同じ site で
+   環境を読む）。契約クラスは oracle-relative（R_Ω）: 主張は「∀ω で観測が一致する」
+   という相対形になる。
+3. **record/replay が実行可能な証拠**: 採録した ω での replay は観測を byte 一致で
+   再現する（native で採録して wasm で replay、も定義から成立する）。ライブ実行の
+   クロスターゲット一致は**主張しない** — それが oracle 層の誠実な境界であり、
+   主張するのは「ω を固定すれば一致」である。
+
+一文に畳む: **壁時計は非決定性ではなく、宣言された入力である。** 入力なら記録でき、
+記録できれば再現でき、再現できれば契約とゲートの射程に入る。従来の ms インター
+フェースと完全性は、この構造の上で両立する。
 
 ## Rationale
 
@@ -385,6 +414,7 @@ tick を ns と読み替えても [race belt](../../crates/almide-race-belt/) �
 | **言語所有の閉じたリテラル接尾辞**（CSS 方式、`100ms`） | **見送り（却下ではない）**。CSS は閉じた集合が機能する反証であり設計として健全だが、lexer への数値サフィックス追加＝**言語構文の新規追加**が要る。`fan` の表面のためだけに字句規則を広げる取引は割に合わない。関数形と意味は同じで、将来入れるならその脱糖先になる（D3） |
 | **コンストラクタ関数のみ**（Rust / Swift 方式） | **採用**（D3）。Kotlin が 1.5 で簡潔形を廃止して静的ファクトリに寄せ 1.6 で差し戻した事実は「簡潔形が好まれる」証拠だが、Kotlin の簡潔形は**拡張プロパティ**という既存の言語機能で実現されており、新しい字句規則は要らなかった。Almide にはその機能がないので、同じ簡潔さを買う価格が違う |
 | **裸の整数 + ドキュメント**（Go 方式） | Go の `time.Sleep(10)` は 10 ナノ秒。実事故（hudl/fargo #56）があり staticcheck が SA1004 を持ち、`Duration × Duration` が型検査を通る問題（#64420）は *not planned* で閉じ専用リンタが必要になった。Go チーム自身が #20757 で「Go の Duration は Rust/Java/C#/Python より危険」と認めている。Swift と Zig はどちらも最近ベア整数 API から型付き Duration へ移行した |
+| **単一 Duration 型 + 時計は消費構文が名乗る**（`ulimit -t` / Cloudflare `cpu_ms` の形） | **検討のうえ却下（2026-08-01 討議）**。bounded / race の枝は pure で I/O 待ちがなく、計算時間と壁時計が校正の範囲で一致するため呼び出しサイトの混入実害は小さい — という論拠まで含めて検討した。却下理由: config・変数経由の時計混入（`cfg.timeout` を `bounded` へ）は型でしか止まらず、その防火壁こそ二型の存在理由（Ada 前例、D2）。語彙の短さより防火壁を採る、がユーザー決定 |
 
 ### 前回の却下を訂正する
 
