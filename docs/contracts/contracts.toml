@@ -2503,3 +2503,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_sibling_trap.almd", class = "fixture" },
 ]
+
+# ── OPTION TUPLE-PAYLOAD MATRIX ─
+[[contract]]
+id        = "C-201"
+spec      = "ALS-M1"
+title     = "An Option combinator's tuple result is materializable as an owned element for every element-type combination"
+statement = "`some(option.unwrap_or(o, d))` — an Option combinator RESULT, not a tuple literal, sitting in an owned-aggregate element position — compiles and agrees native == wasm for ALL FOUR element-type combinations of a 2-tuple over {Int, String}: all-scalar, both mixed orders, and all-heap. The claim is the MATRIX, not a sample: the family was previously keyed four different ways (one cell type-keyed, three shape-keyed), so an inline call result divided cells that a tuple literal or a `let`-bound result did not, and the differential fuzzer found the seam (R3, seed 1785492509375906000 index 17) as `OptionSome argument cannot be faithfully materialized`. The last cell fell because the owned-heap-element lowering's `Match` arm recognised only LITERAL arm chains, so the `some`/`none` pair the combinator desugars to was declined outright — every OTHER match-lowering site already tried the variant value-match ladder first. KNOWN REMAINDER, unchanged by this contract: the NATIVE verified render still walls this family on ownership verification and falls back to the standard codegen, which is why the promise here is stdout+exit equality rather than a v1-verified native render. That wall predates the fix and reproduces without it, on a program that never reaches the arm above (#1037)."
+since     = "0.44.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/option_tuple_payload_matrix.almd", class = "fixture" },
+]

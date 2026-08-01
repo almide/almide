@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-200 contracts
+201 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -228,4 +228,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-198 | A head count below 1 is a defined abort, identically on both targets | 0.42.0 | active | fixture | 1 |
 | C-199 | A fan block joins every sibling and reports the first Err in list order | 0.42.0 | active | fixture | 1 |
 | C-200 | A trap in a fan sibling exits through the unified main-error abort, convergently | 0.42.0 | active | fixture | 1 |
+| C-201 | An Option combinator's tuple result is materializable as an owned element for every element-type combination | 0.44.0 | active | fixture | 1 |
 

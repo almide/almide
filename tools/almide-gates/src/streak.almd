@@ -28,6 +28,20 @@ fn fold(verdicts: List[String], i: Int, green: Int, full: Int, green_done: Bool,
 
 fn streaks(verdicts: List[String]) -> Streaks = fold(verdicts, 0, 0, 0, false, false)
 
+// The report PRINTS a verdict with its reason attached ("TRUNCATED (campaign step: absent)"),
+// and the fold classifies on the bare key. Recovering the key by prefix keeps one source for
+// the classification: the alternative — carrying both strings through the report — lets them
+// drift, and the drift would be silent, because a mislabelled night still prints fine and only
+// the streak number is wrong.
+fn verdict_key(text: String) -> String = if string.starts_with(text, "GREEN") then "GREEN"
+else if string.starts_with(text, "FINDINGS") then "FINDINGS" else "TRUNCATED"
+
+test "the printed verdict maps back to the key the fold counts" {
+  assert_eq(verdict_key("GREEN"), "GREEN")
+  assert_eq(verdict_key("FINDINGS (full budget, red on findings)"), "FINDINGS")
+  assert_eq(verdict_key("TRUNCATED (campaign step: absent)"), "TRUNCATED")
+}
+
 test "verdict classification" {
   assert_eq(verdict("success", "success"), "GREEN")
   assert_eq(verdict("failure", "success"), "FINDINGS")

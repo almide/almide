@@ -1,0 +1,135 @@
+// The reporting half of `scripts/fuzz-track-record.sh` — the streak RULE lives in
+// [streak.almd], already extracted and tested; this is what it takes to feed it.
+//
+// The tool answers two closure conditions with one command:
+//
+//   #924 — 14 consecutive FULL-BUDGET nights (the campaign step completed, findings or not)
+//   #796 —  2 consecutive GREEN nights       (the campaign completed and found nothing)
+//
+// The bash reads both from the GitHub API through `gh api --jq`, which means jq does the
+// extraction and the shell only formats. This port parses the API's JSON in Almide instead.
+// That is not a stylistic preference: `--jq` is a second language embedded in string literals,
+// invisible to the type checker and untestable without the network, and it is exactly the
+// class of thing the previous ports kept finding bugs in (an `awk` that truncated at the first
+// quote, a `sed` that mistook a terminator for an empty line). Parsing here puts the shape of
+// the response in front of the compiler.
+//
+// Reporting tool, NOT a CI gate — it needs `gh` auth and network.
+import process
+import json
+import streak
+
+type Night = { date: String, id: String, conclusion: String, verdict: String, scored: Bool }
+
+effect fn gh_api(path: String) -> String = {
+  let st = process.exec_status("gh", ["api", path]) ?? process.ProcessStatus { code: 1, stdout: "", stderr: "" }
+  if st.code == 0 then st.stdout else ""
+}
+
+// `(.conclusion // .status)` — a run still executing has no conclusion, and the bash's `//`
+// falls back to its status so the row can be printed as unscored rather than dropped.
+fn run_state(run: json.Value) -> String = {
+  let c = json.get_string(run, "conclusion") ?? ""
+  if c != "" then c else json.get_string(run, "status") ?? ""
+}
+
+// `created_at` is an ISO timestamp; the report shows the date only.
+fn date_of(run: json.Value) -> String =
+  list.get_or(string.split(json.get_string(run, "created_at") ?? "", "T"), 0, "")
+
+// The campaign STEP's conclusion, which is what separates a night that ran out of budget from
+// one whose runner was reclaimed. The step's script only reaches its exit after the campaign
+// returns, so a reclaimed runner cannot leave it `success` — that is the whole reason the
+// verdict reads the step and not just the run.
+fn campaign_step(jobs_json: json.Value, job_name: String, step_name: String) -> String = {
+  let jobs = json.get_array(jobs_json, "jobs") ?? []
+  let job = jobs |> list.find((j) => (json.get_string(j, "name") ?? "") == job_name)
+  match job {
+    some(j) => {
+      let steps = json.get_array(j, "steps") ?? []
+      let st = steps |> list.find((s) => (json.get_string(s, "name") ?? "") == step_name)
+      match st {
+        some(s) => json.get_string(s, "conclusion") ?? "absent",
+        none => "absent",
+      }
+    },
+    none => "absent",
+  }
+}
+
+// `printf '%-12s %-13s %-11s %s\n'` — left-justified, space-padded, and the LAST column is not
+// padded at all. Padding it would add trailing spaces to every row.
+fn row(date: String, id: String, conclusion: String, verdict: String) -> String =
+  string.pad_end(date, 12, " ") + " " + string.pad_end(id, 13, " ") + " "
+    + string.pad_end(conclusion, 11, " ") + " " + verdict
+
+// A run still in flight is PRINTED but not SCORED. Dropping it would silently shift the streak
+// window by one night; scoring it would count a night that has not happened yet.
+fn in_flight(state: String) -> Bool = state == "in_progress" or state == "queued"
+
+fn verdict_text(conclusion: String, step: String) -> String = {
+  let v = streak.verdict(conclusion, step)
+  match v {
+    "GREEN" => "GREEN",
+    "FINDINGS" => "FINDINGS (full budget, red on findings)",
+    _ => "TRUNCATED (campaign step: " + step + ")",
+  }
+}
+
+effect fn night_of(repo: String, run: json.Value, job_name: String, step_name: String) -> Night = {
+  let state = run_state(run)
+  let id = int.to_string(json.get_int(run, "id") ?? 0)
+  if in_flight(state) then
+    Night { date: date_of(run), id: id, conclusion: state, verdict: "IN PROGRESS (not scored)", scored: false }
+  else {
+    let jobs = json.parse(gh_api("repos/" + repo + "/actions/runs/" + id + "/jobs")!) ?? json.null()
+    let step = campaign_step(jobs, job_name, step_name)
+    Night { date: date_of(run), id: id, conclusion: state, verdict: verdict_text(state, step), scored: true }
+  }
+}
+
+effect fn report(repo: String, n: Int, job_name: String, step_name: String) -> List[String] = {
+  let url = "repos/" + repo + "/actions/workflows/fuzz-nightly.yml/runs?event=schedule&per_page=" + int.to_string(n)
+  let runs = json.get_array(json.parse(gh_api(url)!) ?? json.null(), "workflow_runs") ?? []
+  var nights: List[Night] = []
+  for r in runs {
+    nights = nights + [night_of(repo, r, job_name, step_name)!]
+  }
+  let header = row("date", "run", "conclusion", "verdict")
+  let rows = nights |> list.map((x) => row(x.date, x.id, x.conclusion, x.verdict))
+  // Only SCORED nights reach the fold — an in-flight run is not a night.
+  let s = streak.streaks(
+    nights |> list.filter((x) => x.scored) |> list.map((x) => streak.verdict_key(x.verdict))
+  )
+  [header] + rows + [
+    "",
+    "full-budget streak: " + int.to_string(s.full) + "/14  (#924 closes at 14)",
+    "green streak:       " + int.to_string(s.green) + "/2   (#796 needs 2 consecutive)",
+  ]
+}
+
+test "the row format is the printf widths, and the last column is not padded" {
+  // A padded final column adds trailing spaces to every line — invisible on screen, and a
+  // byte difference against the original on every row.
+  assert_eq(row("2026-08-01", "123", "success", "GREEN"), "2026-08-01   123           success     GREEN")
+  assert_eq(row("date", "run", "conclusion", "verdict"), "date         run           conclusion  verdict")
+}
+
+test "an over-wide field is not truncated, only under-wide ones are padded" {
+  // `printf`'s `%-12s` is a MINIMUM width. Truncating instead would corrupt a long run id.
+  assert_eq(row("2026-08-01", "99999999999999999", "x", "y"), "2026-08-01   99999999999999999 x           y")
+}
+
+test "a run still in flight is printed but not scored" {
+  assert_eq(in_flight("in_progress"), true)
+  assert_eq(in_flight("queued"), true)
+  assert_eq(in_flight("success"), false)
+  assert_eq(in_flight("failure"), false)
+}
+
+test "the verdict text carries the step name only when the night was truncated" {
+  assert_eq(verdict_text("success", "success"), "GREEN")
+  assert_eq(verdict_text("failure", "success"), "FINDINGS (full budget, red on findings)")
+  assert_eq(verdict_text("failure", "absent"), "TRUNCATED (campaign step: absent)")
+  assert_eq(verdict_text("cancelled", "cancelled"), "TRUNCATED (campaign step: cancelled)")
+}

@@ -233,7 +233,7 @@ were a surface that had been grown a point at a time.
 
 | # | seed / index | Kind | Status |
 |---|---|---|---|
-| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **FIXED for 3 of the 4 cells**; the all-scalar cell has a named remainder (below) |
+| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **CLOSED (2026-08-01)** — all 4 cells build and agree native ⇄ wasm; C-201 + `spec/wasm_cross/option_tuple_payload_matrix.almd` is the matrix gate. Native-render remainder → #1037 |
 
 ### R3 — the tuple payload family is keyed three different ways
 
@@ -504,3 +504,175 @@ exists and its predicate covers the case). What is still true: `s_s5` builds, `s
 they differ only in element type, and both reach `lower_owned_heap_field` through the same
 call. The next step remains instrumentation — printing which branch is taken — not more
 reading.
+
+### R3 — narrowed again: the decline is BEFORE the call, not inside it (2026-08-01)
+
+Read `lower_pure_module_value_call` to its end (`calls.rs:227+`): after `repr_of` it selects a
+name and pushes `Op::CallFn`, returning `Ok`. There is no type-dependent failure in its tail —
+for a well-formed `option.unwrap_or` it succeeds for BOTH payload types.
+
+So the earlier localisation ("the decline is inside `lower_pure_module_value_call`, and it is
+type-dependent") was wrong in its second half. The call is not where they diverge; **one of
+them never reaches it.**
+
+That points at `lower_owned_heap_field`'s group dispatch. Its `_leaf` group returns
+`Option<Option<ValueId>>` where the two negatives are DISTINCT and documented as such:
+`None` = "not my group, try the next", `Some(None)` = "my group DECLINES this field". If an
+arm in `_leaf` matches an all-scalar tuple and returns `Some(None)`, the router stops there
+and never tries `_aggregate` — which is where the `CallTarget::Module` arm lives.
+
+**Next probe** (cheap, and it settles it): in `owned_heap_field.rs`, check whether any `_leaf`
+arm can match a `Call` expression whose type is an all-scalar tuple. If one does and declines,
+that is the bug and the fix is in the arm's guard, not in the call path at all.
+
+Hypotheses eliminated so far: heap classification, `repr_of`, a missing routing cell
+(retracted — the cell exists), and now a type-dependent failure inside
+`lower_pure_module_value_call`. Each elimination has been recorded rather than dropped, which
+is the only reason this has narrowed instead of circling.
+
+### R3 — fifth hypothesis eliminated, and a note on when to stop reading (2026-08-01)
+
+The `_leaf` group has NO `Call` arm at all — its arms are `LitStr`, `BinOp::ConcatStr`,
+`BinOp::ConcatList`, `StringInterp`, `Lambda`, `Var`, `Member`, `TupleIndex`. So a `Call`
+expression falls through it to `_aggregate` (which does have the `CallTarget::Module` arm)
+regardless of payload type. The "a `_leaf` arm declines the all-scalar tuple" hypothesis is
+wrong.
+
+**Five hypotheses eliminated by reading, none confirmed.** That ratio is the signal: reading
+has stopped paying, and every further guess costs a retraction risk (one already happened
+this cycle — the "missing routing cell" claim, which also produced a damaged stdlib file
+during its revert).
+
+**The next session should instrument, not read.** Concretely: add a temporary `eprintln!` at
+each `return`/`?` site in `lower_owned_heap_field` and `try_opt_scalar_tuple_payload`, build,
+run `s_s5` and `s_s11`, diff the traces, remove the prints. Two builds and a diff — it will
+name the site in one pass, where five careful readings did not.
+
+Eliminated so far, all recorded so nobody repeats them:
+1. all-scalar tuples are not heap → they are (`heap.rs:62`, with a unit test)
+2. `repr_of` rejects them → it rejects only `Ty::Unknown`
+3. `option` lacks a flat routing cell → it has one, and its predicate covers the case (retracted)
+4. `lower_pure_module_value_call` fails type-dependently → its tail always reaches `Op::CallFn`
+5. a `_leaf` arm declines the Call → `_leaf` has no `Call` arm
+
+Unchanged throughout: `s_s5` builds, `s_s11` walls, they differ only in element type, and the
+wall is honest (exit 1, no output, no wrong bytes) — it costs coverage, not correctness.
+
+### R3 — INSTRUMENTED, and the answer arrived in one pass (2026-08-01)
+
+Five readings found nothing; two builds with a temporary `eprintln!` found it immediately.
+Recording both the answer and the method, because the method is the transferable part.
+
+**The expression is not a `Call`. It is a `Match`.**
+
+```
+[R3] NO group claimed it
+[R3] scalar_tuple: lower_owned_heap_field -> false for kind
+     Match { subject: IrExpr { kind: Var { id: VarId(0) },
+     ty: Applied(Option, [Tuple([Int, Int …
+```
+
+`option.unwrap_or(s0, (1, 2))` is desugared to a `match` before it reaches
+`lower_owned_heap_field`. **Every one of the five eliminated hypotheses was about the `Call`
+path — a path this expression never takes.** That is why careful reading kept missing it: the
+reasoning was sound and the premise was wrong, and only a trace could show the premise.
+
+**Where it actually declines.** `owned_heap_field.rs:476` DOES have a `Match` arm:
+
+```rust
+IrExprKind::Match { subject, arms } => {
+    let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
+    let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return Some(None) };
+    let obj = self.try_lower_heap_result_if(cond, then, else_, &expr.ty)?;
+    …
+}
+```
+
+So the decline is inside `desugar_match_to_if` or `try_lower_heap_result_if`. The `(String, Int)`
+probe reaches this same arm 10 times and builds, so the arm works — it is the all-scalar tuple
+that one of those two rejects. Most likely candidate: the desugared `else` arm is a TUPLE
+LITERAL `(1, 2)`, and `try_lower_heap_result_if` must materialize it as an arm value.
+(`try_lower_heap_result_if`'s own `is_heap_ty(result_ty)` guard is not it — `Ty::Tuple` is heap.)
+
+**Next step**: the same trace, one level down — print at each `?`/`return` inside
+`try_lower_heap_result_if` / `lower_heap_result_if_inner`, run `s_s11`, read which arm
+declines. One build.
+
+**The method, generalised.** Five careful readings cost more than two instrumented builds and
+were wrong. The tell was the ratio — five hypotheses eliminated, none confirmed — and the rule
+worth keeping is: *when eliminations outnumber confirmations and nothing converges, the
+premise is probably wrong, and only a trace can show which premise.*
+
+### R3 — CLOSED, and the trace beat five readings by two builds (2026-08-01)
+
+**The cause, in one line.** `lower_owned_heap_field`'s `Match` arm only knew LITERAL arm
+chains, so the `some`/`none` pair that `option.unwrap_or` desugars to was declined outright.
+
+The previous entry's guess was wrong, and worth leaving visible: it named
+`try_lower_heap_result_if` as the likely rejecter. A trace printing `inner -> {is_some}` at
+that call fired zero times with `false` across the whole compile — that function never
+declines. The decline is one step earlier, in `desugar_match_to_if`, and the second trace
+printed the shape that reaches it:
+
+```
+[R3m] subj_ty=Applied(Option, [Tuple([Int, Int])]) arms=2
+[R3m]   pat=Some { inner: Bind { var: VarId(2), ty: Tuple([Int, Int]) } } guard=false
+[R3m]   pat=None                                                        guard=false
+```
+
+`desugar_match_to_if` handles a Bool 2-arm form and otherwise falls to `build_match_chain`,
+which wants int-literal arms plus a catch-all. A variant pattern pair matches neither.
+
+**The fix is not new machinery — it is a call that six other sites already make.**
+`try_lower_variant_value_match` is exactly "lower an Option/Result-subject match to a value",
+it rolls its own `ops`/`lifted`/`live_heap_handles` marks back on decline, and it is tried
+FIRST by `binds_p2`, `calls_p4`, `control_p3`, `tail_b`, and `heap_result_ctrl_arms`.
+`owned_heap_field` was the one match-lowering site that skipped straight to the literal
+desugar. One arm, ahead of the existing one, gated on `is_variant_ty(&subject.ty)`.
+
+**The family is now a matrix, not a sample.** All four element-type combinations measured on
+one binary in one run — `(Int, Int)`, `(String, Int)`, `(Int, String)`, `(String, String)` —
+build and agree native ⇄ wasm. `spec/wasm_cross/option_tuple_payload_matrix.almd` (C-201) is
+the executable gate, so a future change that re-divides the family by element type fails
+there instead of waiting for a fuzzer to rediscover it.
+
+**A remainder that was measured rather than waved past.** With the fix, the NATIVE verified
+render walls this family on `ownership verification failed` and falls back to the standard
+codegen. That reads like the fix broke something, so it was A/B'd on ONE binary by putting the
+new arm behind a temporary env guard:
+
+| program | without the arm | with the arm |
+|---|---|---|
+| `option.unwrap_or(s0, (1,2))` bound to a `let` (never reaches the arm) | ownership verification failed | ownership verification failed |
+| the matrix fixture | outside the MIR-lowering subset | ownership verification failed |
+
+The first row settles it: the ownership wall exists on a program the arm cannot touch. What
+the fix changed is the second program's wall REASON, from "subset" to "ownership" — both
+walls, one strictly more informative. Filed as #1037 and named inside C-201's statement, so the
+contract promises stdout+exit equality and does not claim a verified native render it does not
+have.
+
+**The method, again.** Two instrumented builds found what five careful readings missed, and
+then a third trace corrected the guess the second one produced. The rule from the last entry
+held — *when eliminations outnumber confirmations and nothing converges, the premise is
+probably wrong* — and this run adds a corollary: **a trace that confirms one hypothesis is
+still worth pointing at the NEXT hypothesis before acting on it.** The guess that
+`try_lower_heap_result_if` was the rejecter was written down as "most likely candidate" and
+was simply false; one `eprintln!` at its return site cost less than the reading that produced
+the guess.
+
+### A cheap rule the R3 fixture bought (2026-08-01)
+
+The new fixture passed every local gate — `spec/lang`, `spec/stdlib`, `spec/integration`,
+`spec/wasm_cross`, the full `cargo test`, the cross-target byte-compare — and turned CI red on
+`Emit & Format`, because `almide test` does not check formatting and the fmt gate covers
+`spec/` and `examples/`.
+
+**After adding or editing anything under `spec/`, run `almide fmt --check spec/ examples/`.**
+It takes seconds and it is the one gate the test commands do not imply. (The formatter also
+strips blank lines between statements, so a fixture written with paragraph spacing WILL be
+rewritten — worth knowing before the diff surprises you.)
+
+Note the scope: the gate is `spec/ examples/` only. `tools/` is deliberately outside it, and
+formatting the dogfood would collapse its multi-line signatures and pipe chains onto single
+long lines — so the right move there is to leave it alone, not to "fix" it.

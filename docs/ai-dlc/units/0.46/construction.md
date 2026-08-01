@@ -12,6 +12,8 @@
 | B3 | The TOML reader (the load-bearing component) | Parses the real `contracts.toml`; its own tests | **done** | `tools/almide-gates/src/toml/mod.almd`; 200 tables / 369 evidence items on the real ledger — matching independent `grep` counts; 5 tests green |
 | B4 | The contracts-README subcommand (the first TOML consumer) | Byte-identical to the bash original | **done** | 231 lines / 25,297 bytes identical; found and fixed a truncation bug in the original (#1032) |
 | B5 | `conformance.md` — the third TOML consumer | Byte-identical | **done** | 81 lines identical; surfaced a native codegen bug (#1033) |
+| B7 | `fuzz-track-record` — the first subcommand that parses JSON | Byte-identical | **done** | 12 lines / 759 bytes identical, first try; replaced `gh api --jq` with real `json` parsing so the response shape faces the type checker |
+| B6 | `output-parity` — the first subcommand that RUNS things (3 processes/fixture, 3 observables, a retry, a ratchet) | Byte-identical | **done** | 10 lines / 607 bytes identical, both exit 0; the port's first draft produced 32 FALSE xfails and named the cause: a stream's final newline is a terminator, not an empty line |
 
 ## B1 — the program: `almide-gates`, this repo's own gate and generator toolchain
 
@@ -471,3 +473,347 @@ of skipping 18 suites as pass. Merging past it would defeat exactly what it was 
 Next: find why an installed `wasmtime` is not runnable in the `build` job — the gap is between
 the install step and the test step's environment (PATH propagation or a cache restore), not a
 missing install.
+
+## B6 — `output-parity`, the first subcommand that RUNS things (2026-08-01)
+
+The four subcommands ported so far all read files and print text. This one drives three
+processes per fixture over the whole of `spec/`, compares three observables, retries under a
+different timeout, and gates on a ratchet. It is the first port where the interesting content
+is not parsing.
+
+**Split along the line the bash cannot draw.** `parity.almd` holds the decision — six verdicts,
+the trap comparison, and both stderr normalisations — as pure functions with 10 tests.
+`parity_sweep.almd` holds everything that needs a process or a filesystem, with 5 more tests on
+the parts that are still pure (the class report, the regression set difference, the skip count).
+In the bash all of this is reachable only by running the gate, which is why nothing in it was
+ever tested: exercising the "wasmtime trap frame" normaliser meant producing a wasmtime trap.
+
+**Three things the reimplementation had to be told, and would otherwise have gotten wrong:**
+
+- **`skip=N` is part of the summary.** The first draft filtered non-runnable files out of the
+  sweep and never counted them. That reads as full coverage — "300 files agree" instead of
+  "300 of the files I chose to look at agree". The count is the only thing standing between
+  those two sentences, and it is now its own test.
+- **The XFAIL heading is two lines.** A wrapped sentence, not two headings. Rewrapping it is a
+  byte difference for no gain, so `class_report_wrapped` takes a heading LIST and the
+  one-line form is the special case.
+- **`find spec` runs after a `cd $ROOT`, so its paths carry no `./`.** The baseline is a list
+  of exactly those strings, so a root of `"."` would produce `./spec/…` and match nothing —
+  every baseline entry a regression, every file a new match. Handled explicitly rather than
+  by hoping the caller passes an absolute root.
+
+**And two that look like bugs and are load-bearing**, both carried over deliberately with the
+reason written at the call site: the solo RETRY of every non-match (a load artifact can surface
+as any verdict, so only the quiet re-run counts — a non-deterministic verification result is
+not a result), and the RE-SORT before the baseline diff (the retry appends after the first
+sort, and an unsorted tail once reported three phantom regressions).
+
+**The stamp comes first.** `stamp.toolchain` was the first thing ported for exactly this
+moment: if the PATH binary and the workspace build disagree, a parity result describes a
+different compiler than the tree under test. It fired for real during this port — a rebuild had
+moved `target/release/almide` out from under the installed binary, and the gate refused to
+start rather than produce evidence about the wrong compiler.
+
+### B6 result — byte-identical, and the sweep found one more thing about `sed`
+
+Both implementations, same binary, same tree, back to back:
+
+```
+output-parity: match=383 wall=3 MISMATCH=1 RUNERR=3 XFAIL=0 v0fail=0 skip=343
+  (MISMATCH = renders and runs but the stdout bytes diverge — silent miscompile class):
+    ! spec/wasm_cross/env_get.almd
+  (RUNERR = renders but wasmtime rejects or traps where v0 succeeds):
+    r spec/wasm_cross/fs_preopen_resolve.almd
+    r spec/wasm_cross/fs_relative_path.almd
+    r spec/wasm_cross/host_floor_string_alloc.almd
+output-parity: NEW matches not yet in baseline (run --update to ratchet):
+  + spec/wasm_cross/option_tuple_payload_matrix.almd
+output-parity: OK — all 382 baseline files still byte-match v0.
+```
+
+**10 lines, 607 bytes, identical, and both exit 0.** The only difference in the captured files
+was the label naming which implementation produced them. (The toolchain stamp above this block
+names the binary's mtime and the tree's dirty count, which move between two runs for reasons
+that are not the gate — so the comparison starts at the first `output-parity:` line.)
+
+**The first draft got 351 matches and 32 XFAILs, and the 32 were all false.** The trap fixtures
+— `int_div_by_zero`, `index_bounds`, `to_fixed_domain_abort`, and 29 others — agree on stdout,
+on exit code, and on stderr byte-for-byte, and the reimplementation called every one of them a
+divergence:
+
+> **A stream's final newline is a line TERMINATOR, not an empty line.**
+
+`sed` reads it that way and `diff` compares what `sed` produced. `string.split(s, "\n")` does
+not: it yields one extra empty element at the end. That element is invisible until the two
+normalisers treat it differently — and they do, necessarily, because the wasmtime frame
+contains a REAL blank line that must be dropped while the program's own stderr may legitimately
+print one. So the phantom element survived on the oracle side and vanished on the wasm side,
+and 32 identical streams compared unequal.
+
+This is the same class as #1032 (an `awk` extractor that truncated at the first quote) and
+#1031 (an unpinned locale in eleven scripts): **a shell text operation whose edge case is
+invisible in the common case, reimplemented from what it looks like it does rather than from
+what it does.** The port is the thing that surfaces it, because the port has to state the rule
+explicitly, and the byte-diff is what refuses to let a plausible-looking restatement pass. It
+is now `lines_of`, with a test that asserts the two normalisers agree on a plain one-line
+stream and a second test asserting they deliberately DISAGREE on an interior blank line.
+
+`almide-gates`: **~900 lines across ten modules**, five byte-identical subcommands, 17 tests on
+the parity rules alone — a decision surface that in bash was reachable only by producing a real
+wasmtime trap.
+
+## B7 — `fuzz-track-record`, and dropping `--jq` on purpose (2026-08-01)
+
+The streak RULE was already extracted and tested (`streak.almd`, 6 tests) — the two counters
+that stop independently, which is what makes #924 measurable at all. What was left is what it
+takes to feed it: two GitHub API calls per night, a verdict that depends on a nested step
+conclusion, and `printf` column formatting.
+
+**Byte-identical on the first run**: 12 lines, 759 bytes, matching
+`scripts/fuzz-track-record.sh 8` exactly, including the current state — full-budget 4/14, green
+0/2.
+
+**The bash reads the API through `gh api --jq`; this port parses the JSON in Almide.** That is
+a deliberate divergence in METHOD with no divergence in OUTPUT, and the reason is the pattern
+the last three ports established: `--jq` is a second language living in a shell string,
+invisible to the type checker, and untestable without the network. It is the same shape as the
+`awk` that truncated a title at the first quote (#1032) and the `sed` whose empty-line rule
+silently disagreed with its own terminator (B6, above) — expressions that look obviously
+correct and are load-bearing in an edge case nobody runs. Parsing here puts the response shape
+in front of the compiler: `get_array("jobs") |> find(name == …) |> get_array("steps")` is a
+chain the checker walks, and a wrong key is a `none` with a named fallback rather than an empty
+jq result that silently scores a night as TRUNCATED.
+
+Three rules got tests they could not have had in bash, all of them about formatting that is
+invisible until it is wrong:
+
+- **The last printf column is not padded.** `%-12s %-13s %-11s %s` — the final `%s` has no
+  width. Padding it would put trailing spaces on every row of every report.
+- **`%-12s` is a MINIMUM.** An over-wide run id is printed in full, not truncated. A port that
+  "formats to 12 columns" would corrupt exactly the rows that matter.
+- **An in-flight run is PRINTED but not SCORED.** Dropping it shifts the streak window by a
+  night; scoring it counts a night that has not happened. Both are wrong in a way that shows up
+  as a plausible number.
+
+`almide-gates`: **~1,050 lines across eleven modules**, six byte-identical subcommands, 28
+tests. Remaining: `check-contracts` (426 lines — the one that composes everything).
+
+## Where the port stands, and what `check-contracts` needs (2026-08-01)
+
+Six of seven subcommands are done and byte-identical. The last one is
+`scripts/check-contracts.sh` — 426 lines, and unlike the others it is not one transformation
+but **ten independent checks over one parse**, each emitting its own `::error::` lines:
+
+| # | check | state |
+|---|---|---|
+| (e) | id shape `C-` + THREE digits, uniqueness, status enum, `doc=` file exists | rule pinned in `contract_audit.almd` |
+| (a) | every evidence `path` exists; class in the shared vocabulary; `fuzz` requires `n>=1` | — |
+| — | named-unit grep for `*.rs` / `*.lean` / `*.toml` and for fuzz/lean/exhaustive | — |
+| (b) | every ACTIVE contract carries evidence of class >= `fixture` | — |
+| (c)(d) | the two edge sets — ledger→fixture and `// @contract:`→contract — must be IDENTICAL | **done** in `contract_audit.almd`, both asymmetries reported separately |
+| (j) | cited source paths must not name a retired subsystem | — |
+| (f) | ids contiguous `C-001..C-NNN`, no gaps | — |
+| (f) | flagged-for-revision count is a down-only ratchet | — |
+| — | spec-keying: every contract names an ALS section, every section resolves | — |
+| — | spec-COVERAGE: every normative section is cited by >=1 contract | — |
+| (g)(h)(i) | freshness of the README claims block, the contract index, the conformance report | — |
+
+**Why it is last and not first**: it composes what the other six built. The TOML reader
+(`toml/mod.almd`), the class vocabulary (`contracts.almd`), the link symmetry
+(`contract_audit.almd`), and the two generators whose freshness it checks are all already
+byte-identical, so the remaining work is the checks themselves plus the `::error::` emission
+order — which IS the byte-identity surface, since a gate's output is a list of errors in a
+fixed sequence.
+
+**The acceptance check stays the same and is available now**: `bash scripts/check-contracts.sh`
+currently prints an OK block over 201 contracts and 330 fixtures, so every increment can be
+diffed against a real, non-trivial output rather than a constructed one. Port order that keeps
+that property: the PARSER first (it feeds everything), then the checks in the order the bash
+emits them, diffing after each.
+
+**One caution recorded from B6**: the checks are independent but their OUTPUT is not — an
+error emitted in a different order is a byte difference even when the finding is identical. So
+the port must preserve the sequence, not merely the set.
+
+### The acceptance check for this one is MUTATION, not byte-identity alone
+
+A clean ledger makes most of these checks print NOTHING. So a port that implements two of the
+ten and skips the rest would still produce a byte-identical clean run — and the byte-match
+would be a lie, because the checks that emitted nothing were never run. Byte-identity is a
+necessary condition here and nowhere near sufficient.
+
+The bash already carries the right criterion, in its own closing comment: **every check flips
+green→red on a one-line edit**, and it enumerates the twelve edits. That list is the port's
+acceptance suite — for each mutation, the Almide gate must go red with the SAME `::error::`
+line as the bash:
+
+| # | one-line edit | must fire |
+|---|---|---|
+| 1 | delete a fixture path from a contract's evidence | (d) only_rev |
+| 2 | remove a `// @contract:` line from a fixture | (c) "no header" |
+| 3 | downgrade an active contract's only evidence to `by-construction` | (b) |
+| 4 | typo a class | (e) bad-class |
+| 5 | flag any contract | (f) ratchet |
+| 6 | renumber a contract to leave a gap | (f) coverage |
+| 7 | hand-edit a number inside README's claims markers | (g) stale-claims |
+| 8 | add a contract without regenerating the index | (h) stale-index |
+| 9 | cite a new section without regenerating conformance | (i) stale-report |
+| 10 | delete a `since = ` line | (e) missing-required |
+| 11 | point a fixture header at a retired subsystem | (j) dead-path |
+| 12 | an UNALIGNED bogus spec key (`spec = "ALS-BOGUS"`, single space) | spec-existence |
+
+Mutation 12 is the one worth reading twice: the check used to grep for a six-space-aligned
+`spec      = "..."`, so a key written with different spacing was silently DROPPED — it passed
+the presence check and skipped resolution entirely (#989). That is the same failure shape as
+B6's phantom trailing line and #1032's truncating `awk`: a text pattern that is right about the
+input it was written against and silent about the input it was not.
+
+**The parser is already there.** `toml/mod.almd` yields `Table { scalars, array_items }`, which
+is exactly what `parse_ledger`'s TAB-record protocol reconstructs by hand — the bash needs the
+protocol because awk cannot return a structure. So the port skips `parse_ledger` entirely and
+builds the ten checks on the tables. That is also why this subcommand was left for last rather
+than being the hardest thing attempted first.
+
+### B8 (in progress) — the schema half, on the tables the earlier ports built
+
+`ledger_schema.almd` implements checks **(e)**, **(a)** and **(b)** as pure functions over
+`toml.Table`, with 7 tests. It runs on WASM with no native fallback, which the process-driving
+modules cannot — the schema rules touch nothing but data.
+
+The `parse_ledger` TAB-record protocol is simply gone. The bash needs it because awk cannot
+return a structure; `toml.parse_tables` returns one, so the checks read fields instead of
+re-splitting a line format. That is the compounding return on doing this subcommand last.
+
+Three rules got tests that state something the bash only implies:
+
+- **The class RANK comes from the shared file's line order**, not a list written here. Two
+  gates read `scripts/lib/contract-classes.txt` so their enums provably cannot drift; a rank
+  hard-coded in the port would reintroduce exactly the divergence the file prevents.
+- **The active-evidence floor exempts `flagged-for-revision` and nothing else.** Being flagged
+  is the honest way to say a claim currently rests on prose — and the flagged COUNT is itself a
+  down-only ratchet, so the exemption cannot be used to park a claim indefinitely.
+- **The error list is ordered, not a set.** A gate's output IS its `::error::` lines, so the
+  test asserts the five schema errors come out in the bash's emission sequence. Two
+  implementations that find the same problems in a different order are not byte-identical.
+
+`ledger_coverage.almd` adds **(j)** and both halves of **(f)** — the rules that read the ledger
+as a whole rather than one contract at a time — with 6 more tests, also WASM-clean. Verified
+against the real ledger in one run: 201 contracts, max id C-201, **0 gaps, 0 flagged, 0 bad
+ids, 0 bad or missing `since`** — the same numbers the bash reports.
+
+Each of the three carries the violation that caused it, because a gate whose reason is lost
+gets weakened by the next person who trips it:
+
+- **(j) fires on a dead PARENT DIRECTORY, never a dead file.** Deliberately narrow. Statements
+  legitimately name illustrative files (`fs.stat("spec/x.almd")`), so flagging a missing file
+  would make the check useless within a week; a vanished DIRECTORY is the retired-subsystem
+  signature. When the v0 wasm emitter went and 115 files under `emit_wasm/` with it, 16
+  citations rotted in place and kept sending readers to code that no longer existed (#941).
+  A single deleted file inside a surviving directory is the accepted blind spot — the price of
+  zero false positives, and evidence paths are checked exactly.
+- **(f) contiguity**: a gap means a contract was DELETED rather than superseded. Retiring a
+  promise is a real operation — flip its status, or replace it and say so — but silently
+  vacating a number leaves every reference dangling with nothing to notice.
+- **(f) ratchet**: the ceiling is ZERO. C-033 converged; C-006 was retired by removing
+  `fan.timeout` in 0.29.0. Raising the ceiling to admit a new divergence is precisely the move
+  this check exists to make impossible without saying so out loud.
+
+`ledger_speckey.almd` adds both spec-keying directions and the freshness messages, with 6 more
+tests. Verified against the real ledger and `docs/specs/als/` in one run: **64 distinct spec
+keys, 64 normative sections, 0 contracts without a key, 0 unresolved keys, 0 orphan sections**
+— the same numbers the bash prints.
+
+The REVERSE direction is the one worth keeping in view. Forward — every contract names a
+section that exists — is bookkeeping. Reverse — every normative section is cited by at least
+one contract — is not: an uncited section is a claim the spec makes that no executable evidence
+certifies, and its first run found ALS-T4 adjudicating `chunk/windows(n <= 0)` while BOTH
+targets disagreed with it (native raising a raw panic, wasm silently returning `len+1` empty
+windows). Nothing else in the project would have caught it, because every test agreed with the
+implementation and nothing read the section.
+
+Two more rules got tests that pin an edge the bash expresses only in a regex:
+
+- **A section heading matches on a BOUNDARY.** `grep -qE "^## $sec( |$)"` — without the
+  trailing alternation, `ALS-T1` resolves against `## ALS-T14 …` and a bogus key passes
+  validation by prefix.
+- **Keys are counted DISTINCT and byte-sorted.** `sort -u` under a pinned `LC_ALL=C`: counting
+  duplicates inflates the summary, and an unpinned collation reorders the error lines between
+  machines, which is #1031 exactly.
+
+`ledger_gate.almd` composes them — the I/O and the SEQUENCING, nothing else, because the
+order is the byte-identity surface. Run against the real ledger, every number matches the bash:
+
+```
+classes=6  fixture_rank=2
+schema errors=0     evidence errors=0     floor errors=0
+fixtures=330  with_header=330  no_header=0
+  doc-only         0
+  by-construction  6
+  fixture          356
+  fuzz             6
+  exhaustive       0
+  lean             2
+```
+
+Two more rules earned tests by being easy to get subtly wrong:
+
+- **The active floor reads the MAX rank across a contract's evidence, not the first.** Taking
+  the first would fail contracts that ARE properly certified — a contract whose first entry is
+  `by-construction` and whose second is a fixture is fine, and that ordering is common.
+- **The histogram prints every class in the file, including ones with zero evidence.** Dropping
+  empty rows would turn a report against the vocabulary into a list of what happens to exist,
+  and `exhaustive 0` is exactly the row a reader needs to see.
+
+The **(j) cited-path scan** landed too, as a SCANNER rather than a regex — deliberately, since
+the regex is the part that has silently mis-read its input three times in this Unit already. It
+walks each line for a source prefix, takes the longest run of path characters, and keeps the
+run only if it ends in a source suffix. Validated against the real data: **396 distinct cited
+paths extracted from the ledger and all 330 fixtures, 0 dead** — matching the bash's
+`cited-paths: every source path named in a statement or fixture header resolves to a live
+directory.`
+
+Remaining for B8: the three freshness diffs need process wiring; then the subcommand itself,
+then the twelve mutations — each must turn the Almide gate
+red with the same line as the original. Everything the CHECKS need is now in place and verified
+against real data; what is left is composition and the adversarial pass.
+
+**One latent bug to reproduce rather than fix, and to name where it is reproduced**: the
+parser unquotes with `sub(/".*$/,"",v)` — truncate at the FIRST quote — which is precisely the
+bug #1032 fixed in `generate-readme.sh` (the fixed version anchors at `"[ \t]*$`). It is
+latent here only because the fields it reads (`id`, `status`, `doc`, `since`, `path`, `class`,
+`name`) happen never to contain an escaped quote. `title` and `statement` — the two that DO —
+are read as presence flags, so the truncation never reaches them. The port should note it at
+the call site instead of quietly hardening it, so the day a `doc =` path grows a quote, the
+divergence is a known one.
+
+## The dogfood found a bug in the dogfood (2026-08-01)
+
+Writing `ledger_schema.almd`'s `rank_of` — which reads the evidence-class vocabulary from
+`scripts/lib/contract-classes.txt` — put it side by side with `contracts.almd`, which had the
+six names hard-coded in a `match`. Two rank implementations, in the same program, for the enum
+whose entire reason for living in a file is that **two gates must not be able to disagree about
+it**.
+
+The hard-coding was deliberate and argued, in a comment: a reader for a one-column list is more
+machinery than six stable strings are worth, and a mismatch shows up immediately as a wrong
+"Strongest Evidence" column. Both halves of that are true and the conclusion is still wrong.
+The file is not an implementation detail of the bash — it is the mechanism by which the ledger
+gate and the rt-oracle-registry gate provably share one vocabulary. A third copy inside the
+tool that CHECKS them reintroduces exactly the drift the file was created to prevent, and it
+does so invisibly, because it is byte-identical today. That is how such a copy survives long
+enough to matter.
+
+Fixed by threading the class list in as a PARAMETER — the caller reads the file once, and
+`class_rank` / `strongest` / `rows` stay pure and testable without a filesystem. The parser
+strips comments and blanks exactly as `grep -vE '^[[:space:]]*(#|$)'` does, with a test saying
+why: the line order AFTER stripping is the rank, so a comment counted as a class silently
+demotes `fixture` — which is the FLOOR an active contract must reach.
+
+`docs/contracts/README.md` re-verified after the change: **232 lines, 25,450 bytes, still
+byte-identical** to the bash original.
+
+The general shape, now three for three across this Unit: **a rule that is duplicated because
+duplication is cheaper than the abstraction is a rule that will eventually be two rules.** The
+locale pinning (#1031) was eleven copies of one `export LC_ALL=C`; the quote-truncation
+(#1032) was five copies of one unquoting expression; this is two copies of one enum. In each
+case the copies agreed on the day they were written.

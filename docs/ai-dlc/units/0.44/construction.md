@@ -70,3 +70,63 @@
 ## Retrospective (Try)
 
 (written when the Unit closes)
+
+## The B5 blocker chain, made explicit (2026-08-01)
+
+Measured after this cycle's fixes: **full-budget 4/14, green 0/2** — unchanged, because
+today's nightly ran BEFORE the fixes landed.
+
+The chain matters more than the numbers, and it is not just "wait two nights":
+
+    R3 (the last live Wave 6 finding, still open)
+      └─> tonight's nightly will find it too → FINDINGS, not GREEN
+            └─> the green streak cannot START, let alone reach 2
+                  └─> #796 cannot close
+                        └─> Unit 0.44 cannot ship
+
+So **the green streak is gated on R3, not on the calendar alone.** Two clean nights is the
+DoD, but night one cannot be clean while a reproducible finding remains. The calendar cost is
+two nights AFTER R3 closes, not two nights from now.
+
+R3's state, for whoever picks it up: an honest wall (exit 1, no output, no wrong bytes), so it
+costs coverage rather than correctness. Three hypotheses eliminated (heap classification,
+`repr_of`, a missing routing cell — the last one retracted after I read NAMES instead of
+PREDICATES). The discriminating probes are two lines each, `s_s5` (builds) and `s_s11`
+(walls), and the next step is instrumentation rather than more reading.
+
+The full-budget streak (#924, 4/14) is genuinely calendar-bound and independent: it counts
+nights the instrument RAN, so it accumulates even while findings remain — which is exactly
+why the two counters are kept separate (see `tools/almide-gates/src/streak.almd`, where that
+rule is now pinned by tests).
+
+## The B5 blocker chain, resolved at its head (2026-08-01)
+
+**R3 is closed.** The chain's first link is gone, so the green streak is now genuinely
+calendar-bound rather than gated on a reproducible finding:
+
+    R3 CLOSED (4428dc9f, C-201 + the matrix fixture)
+      └─> tonight's nightly no longer has a known reproducible finding to hit
+            └─> the green streak can START
+                  └─> two clean nights → #796 closes
+                        └─> Unit 0.44 ships
+
+What closed it: `lower_owned_heap_field`'s `Match` arm recognised only LITERAL arm chains, so
+the `some`/`none` pair `option.unwrap_or` desugars to was declined outright — while six other
+match-lowering sites already try `try_lower_variant_value_match` FIRST. One arm, ahead of the
+existing one. The full trace-vs-reading account is in
+`docs/roadmap/active/fuzz-findings-triage.md`.
+
+Two things worth carrying forward from how it was closed:
+
+- The previous entry's named "most likely candidate" (`try_lower_heap_result_if`) was FALSE,
+  and one `eprintln!` at its return site refuted it in one build — cheaper than the reading
+  that produced the guess. A trace that confirms one hypothesis should still be pointed at the
+  next hypothesis before acting on it.
+- The fix appeared to break the native leg (`ownership verification failed` where there had
+  been a subset wall). Rather than assume either way, the new arm went behind a temporary env
+  guard so both halves were measured on ONE binary in one run — and the wall reproduced on a
+  program the arm cannot reach. Pre-existing, filed as #1037, and named inside C-201's
+  statement so the contract does not claim a verified native render it does not have.
+
+**Remaining for the DoD**: two consecutive clean nights (the calendar part), and the
+full-budget streak (#924) at 4/14, which accumulates independently.

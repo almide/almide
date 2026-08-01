@@ -275,6 +275,7 @@ spec/wasm_cross/option_heap_eq.almd
 spec/wasm_cross/option_match_heap_payload.almd
 spec/wasm_cross/option_none_unwrap_term.almd
 spec/wasm_cross/option_result.almd
+spec/wasm_cross/option_tuple_payload_matrix.almd
 spec/wasm_cross/option_unwrap_or_else_heap.almd
 spec/wasm_cross/phantom_type_param.almd
 spec/wasm_cross/pipe_lambda_block_value.almd

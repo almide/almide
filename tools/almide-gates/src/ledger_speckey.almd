@@ -1,0 +1,110 @@
+// The SPEC-KEYING checks of `scripts/check-contracts.sh` (CG-1 / flight-evidence-gaps F1),
+// plus the three freshness checks — the last rules the gate applies before it prints its
+// summary.
+//
+// Spec-keying runs in BOTH directions, and the reverse one is the interesting half:
+//
+//   forward — every contract names an ALS section, and that section exists
+//   reverse — every normative ALS section is cited by at least one contract
+//
+// The forward direction is bookkeeping. The reverse is not: an UNCITED section is a claim the
+// spec makes that no executable evidence certifies, which is exactly where a spec ⇄
+// implementation divergence hides. The first run of the reverse check found ALS-T4
+// adjudicating `chunk/windows(n <= 0)` while BOTH targets disagreed with it — native raising a
+// raw panic, wasm silently returning `len+1` empty windows. Nothing else in the project would
+// have noticed, because every test agreed with the implementation and nothing read the section.
+import toml
+
+// `grep -qE "^## $sec( |$)"` — the section heading, and the trailing boundary matters: without
+// it `ALS-T1` would resolve against a heading for `ALS-T14`.
+fn heading_matches(line: String, sec: String) -> Bool = {
+  let want = "## " + sec
+  line == want or string.starts_with(line, want + " ")
+}
+
+fn section_of_heading(line: String) -> String = {
+  if not string.starts_with(line, "## ALS-") then ""
+  else {
+    let rest = string.slice(line, 3)
+    let head = list.get_or(string.split(rest, " "), 0, "")
+    if head |> string.chars |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-", c)) then head else ""
+  }
+}
+
+fn missing_spec_errors(ids_without_spec: List[String]) -> List[String] =
+  ids_without_spec |> list.map((id) =>
+    "contract " + id + " has NO spec key — every contract must cite its ALS section (#565)")
+
+fn unresolved_spec_error(sec: String) -> String =
+  "contract spec key '" + sec + "' has NO normative section (## " + sec + ") under docs/specs/als/"
+
+// The reverse direction. The message spells out the repair because the finding is easy to
+// misread as paperwork — it is not; see the header.
+fn orphan_section_error(sec: String) -> String =
+  "ALS section '" + sec + "' is cited by NO contract — every normative section needs >=1 [[contract]] with spec = \"" + sec + "\" (see #565)"
+
+fn speckey_summary(n: Int) -> String =
+  "spec-keying: " + int.to_string(n) + " distinct ALS section(s) referenced; all resolve."
+
+fn coverage_summary() -> String =
+  "spec-coverage: every normative ALS section is cited by >=1 contract."
+
+// The three FRESHNESS checks. Each compares a generator's output against the committed file,
+// and each names the exact command that repairs it — a stale-derived-file error whose fix the
+// reader has to reconstruct gets worked around instead of run.
+fn stale_error(what: String, cmd: String) -> List[String] =
+  [what + " is stale — run: " + cmd]
+
+fn conformance_stale_error() -> List[String] =
+  stale_error("docs/contracts/conformance.md", "bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md")
+
+fn index_stale_error() -> List[String] =
+  stale_error("docs/contracts/README.md", "bash docs/contracts/generate-readme.sh > docs/contracts/README.md")
+
+fn distinct_sorted(xs: List[String]) -> List[String] =
+  xs |> list.filter((x) => x != "") |> list.unique |> list.sort
+
+test "a section heading matches on an exact boundary, not a prefix" {
+  // Without the boundary, ALS-T1 resolves against ALS-T14's heading and a bogus key passes.
+  assert_eq(heading_matches("## ALS-T1", "ALS-T1"), true)
+  assert_eq(heading_matches("## ALS-T1 Traps", "ALS-T1"), true)
+  assert_eq(heading_matches("## ALS-T14 Traps", "ALS-T1"), false)
+  assert_eq(heading_matches("### ALS-T1", "ALS-T1"), false)
+}
+
+test "a heading yields its section id, and non-ALS headings yield nothing" {
+  assert_eq(section_of_heading("## ALS-T14 Trap semantics"), "ALS-T14")
+  assert_eq(section_of_heading("## ALS-M1"), "ALS-M1")
+  assert_eq(section_of_heading("## Overview"), "")
+  assert_eq(section_of_heading("# ALS-T1"), "")
+}
+
+test "both directions of the spec-key check have their own message" {
+  // Forward: a contract points at a section that does not exist.
+  // Reverse: a section that exists is cited by nothing — the direction that found ALS-T4.
+  assert_eq(string.contains(unresolved_spec_error("ALS-BOGUS"), "has NO normative section"), true)
+  assert_eq(string.contains(orphan_section_error("ALS-T4"), "is cited by NO contract"), true)
+  assert_eq(list.len(missing_spec_errors(["C-001", "C-002"])), 2)
+  assert_eq(list.len(missing_spec_errors([])), 0)
+}
+
+test "the summary lines are the bash's exact wording" {
+  assert_eq(speckey_summary(64), "spec-keying: 64 distinct ALS section(s) referenced; all resolve.")
+  assert_eq(coverage_summary(), "spec-coverage: every normative ALS section is cited by >=1 contract.")
+}
+
+test "a staleness error names the command that repairs it" {
+  // A derived-file error whose fix the reader has to reconstruct gets worked around, not run.
+  assert_eq(conformance_stale_error(), [
+    "docs/contracts/conformance.md is stale — run: bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md",
+  ])
+  assert_eq(index_stale_error(), [
+    "docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md",
+  ])
+}
+
+test "spec keys are counted DISTINCT and byte-sorted" {
+  // `sort -u` under LC_ALL=C. Counting duplicates would inflate the summary; an unpinned
+  // collation would reorder the error lines between machines (#1031).
+  assert_eq(distinct_sorted(["ALS-T2", "ALS-T1", "ALS-T2", ""]), ["ALS-T1", "ALS-T2"])
+}

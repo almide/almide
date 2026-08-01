@@ -1,0 +1,58 @@
+// @contract: C-201
+// A tuple-payload Option combinator result is materializable as an owned aggregate
+// ELEMENT for EVERY element-type combination — the matrix, not a sample.
+//
+// The shape is `some(option.unwrap_or(s0, d1))`: the OptionSome constructor's argument
+// is not a tuple LITERAL but the RESULT of a combinator, which the frontend desugars to
+// `match s0 { some(x) => x, none => d1 }`. So the ctor argument is a `Match`, and the
+// owned-heap-element lowering has to execute that match to produce the rc=1 value the
+// enclosing `some(..)` moves in.
+//
+// The fuzz finding (R3, seed 1785492509375906000 index 17) walled this as `OptionSome
+// argument cannot be faithfully materialized`, and the burn-down found the family was
+// keyed FOUR different ways: one cell type-keyed, three shape-keyed, so an inline call
+// result divided cells that a tuple literal — or a `let`-bound call result — did not.
+// Three cells were unified first; the all-scalar cell needed the last gap closed, which
+// was that `lower_owned_heap_field`'s `Match` arm only knew LITERAL arm chains and so
+// declined a `some`/`none` pair outright. Every other match-lowering site already tried
+// the variant value-match ladder before the literal desugar; that one did not.
+//
+// This fixture is the family's MATRIX GATE, per the API-family rule: the completeness
+// claim is that all four element-type combinations of a 2-tuple over {Int, String} —
+// all-scalar, both mixed orders, and all-heap — build AND agree native ⇄ wasm. A future
+// change that re-divides the family by element type fails here rather than being
+// rediscovered by a fuzzer. The `String` cells are the ones with a heap payload to drop;
+// the `Int` cells are the ones with none, and the mixed cells pin that the ORDER of a
+// heap element within the tuple does not select a different path.
+fn main() -> Unit = {
+  let a: Option[(Int, Int)] = none
+  let r_a: (Int, Int) = option.unwrap_or(some(option.unwrap_or(a, (1, 2))), (3, 4))
+  println("${r_a}")
+  let b: Option[(String, Int)] = none
+  let r_b: (String, Int) = option.unwrap_or(some(option.unwrap_or(b, ("a", 1))), ("b", 2))
+  println("${r_b}")
+  let c: Option[(Int, String)] = none
+  let r_c: (Int, String) = option.unwrap_or(some(option.unwrap_or(c, (1, "a"))), (2, "b"))
+  println("${r_c}")
+  let d: Option[(String, String)] = none
+  let r_d: (String, String) = option.unwrap_or(some(option.unwrap_or(d, ("a", "b"))), ("c", "d"))
+  println("${r_d}")
+  // The SOME side of every cell too: the payload the match KEEPS must be the owned one,
+  // not a borrow of the subject that the subject's own drop then frees. An all-scalar
+  // cell cannot show that (nothing to free), so the heap cells carry the weight — and a
+  // loop is what would expose a refcount error, since a single pass can double-free once
+  // and still print correctly before the trap.
+  var acc = 0
+  for i in 0..<4 {
+    // Every result is bound to a `let` before it is interpolated. A `"${<call>}"` sitting
+    // in a call-argument position is a separate, unrelated gap in the verified renderer,
+    // and letting it in here would make this fixture fail for a reason that has nothing to
+    // do with the tuple-payload family it exists to pin.
+    let name0 = "kept" + int.to_string(i)
+    let s: Option[(String, Int)] = some((name0, i))
+    let (name, n) = option.unwrap_or(some(option.unwrap_or(s, ("miss", -1))), ("dflt", -2))
+    acc = acc + n + string.len(name)
+    println("${name} ${int.to_string(n)}")
+  }
+  println("acc=${int.to_string(acc)}")
+}

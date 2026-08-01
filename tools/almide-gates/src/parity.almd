@@ -1,17 +1,25 @@
 // The verdict rule of `proofs/output-parity.sh` — the v1 trust-spine output-parity gate.
 //
 // Per fixture: run it through the v0 oracle (`almide run`), render it with `render_program`,
-// run the WAT under wasmtime, and compare. The five verdicts and the ORDER of the tests are
+// run the WAT under wasmtime, and compare. The six verdicts and the ORDER of the tests are
 // the whole content — the bash gets them right and the order is load-bearing:
 //
 //   render fails + oracle also failed  → v0fail   (the fixture itself is broken, not v1)
 //   render fails + oracle succeeded    → wall     (v1 declines a program v0 runs — honest)
 //   oracle ok + wasmtime failed        → runerr   (v1 renders something that traps)
-//   outputs differ                     → mismatch (the silent-miscompile class)
+//   stdout differs                     → mismatch (the silent-miscompile class)
+//   oracle FAILED, stdout agrees       → the trap comparison: exit code + normalised stderr
+//                                        must ALSO agree, else xfail
 //   otherwise                          → match
 //
 // Getting the first two backwards would report every broken fixture as a v1 wall, and the
 // wall count is a ratchet — so a mislabel there inflates a number the project treats as debt.
+//
+// The trap row is why a stdout-only comparison is not enough: a fixture whose v0 run FAILS
+// (div-by-zero, index-bounds, unwrap-none) still promises identical stderr AND exit code
+// cross-target (C-001 / C-035). Comparing stdout alone put every one of them in `v0fail`,
+// which is the "the fixture is broken" bucket — so the trap contracts were being counted as
+// broken fixtures rather than checked (flight-evidence-gaps item 6).
 import process
 
 type Outcome = { verdict: String, stdout: String }
@@ -22,6 +30,81 @@ fn verdict_of(oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool, oracle_out: Strin
   if oracle_ok then "wall" else "v0fail"
 } else if oracle_ok and not wasm_ok then "runerr"
 else if oracle_out != wasm_out then "mismatch" else "match"
+
+// The full rule, trap row included. Reached only when `verdict_of` already said "match": a
+// SUCCEEDING oracle needs nothing more, but a FAILING one has two more observables to agree
+// on. Splitting it this way keeps the common path exactly as the bash wrote it and makes the
+// trap row a visible addition rather than a condition buried in a longer boolean.
+// Both stderr streams arrive RAW and are normalised here, `wat_path` included — so the whole
+// trap decision is one testable function rather than a rule split across a caller that masks a
+// path and a callee that filters lines.
+fn verdict_full(
+  oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool,
+  oracle_out: String, wasm_out: String,
+  oracle_code: Int, wasm_code: Int,
+  oracle_err: String, wasm_err: String, wat_path: String,
+) -> String = {
+  let base = verdict_of(oracle_ok, render_ok, wasm_ok, oracle_out, wasm_out)
+  if base != "match" then base
+  else if oracle_ok then "match"
+  else if oracle_code == wasm_code
+    and normalize_oracle_err(oracle_err) == normalize_wasm_err(wasm_err, wat_path) then "match"
+  else "xfail"
+}
+
+// COMPILER noise is not a program observable, and both legs emit their own kind.
+//
+// v0: `almide run` interleaves compile notes with the program's runtime stderr, and the
+// native-fallback notice went always-on in #931 — so every trap fixture that walls the
+// native-verified rung "regressed" the moment that notice appeared. It is infrastructure
+// chatter about HOW the program was built, in the same class as wasmtime's module preamble.
+fn normalize_oracle_err(s: String) -> String =
+  lines_of(s)
+    |> list.filter((l) => not string.starts_with(l, "note: verified native render walled"))
+    |> list.filter((l) => not string.starts_with(l, "  reason: "))
+    |> list.join("\n")
+
+// v1: wasmtime wraps a trap in its own frame — a preamble naming the module PATH (which is a
+// temp file, so it differs every run and can never match), a `Caused by:` header, and an
+// indented `N: ` backtrace prefix on each cause line. Strip the frame, keep the trap message.
+// `wat_path` is blanked out rather than left in, because the path is the one part guaranteed
+// to differ between the two legs for reasons that have nothing to do with the program.
+fn normalize_wasm_err(s: String, wat_path: String) -> String = {
+  let masked = if wat_path == "" then s else string.replace(s, wat_path, "<module>")
+  lines_of(masked)
+    |> list.filter((l) => not string.starts_with(l, "Error: failed to run main module"))
+    |> list.filter((l) => not string.starts_with(l, "Caused by:"))
+    |> list.map(strip_backtrace_index)
+    |> list.filter((l) => l != "")
+    |> list.join("\n")
+}
+
+// A stream's FINAL newline is a line TERMINATOR, not an empty line — which is how `sed` reads
+// it and what `diff` then compares. `string.split(s, "\n")` disagrees: it yields one extra
+// empty element at the end. That one element is not cosmetic. The wasm normaliser drops empty
+// lines (the wasmtime frame contains a real blank one) and the oracle normaliser does not, so
+// the phantom element survived on one side and vanished on the other, and 32 trap fixtures
+// that agree byte-for-byte were reported as divergent. Both sides now split the way a file
+// does.
+fn lines_of(s: String) -> List[String] = {
+  let parts = string.split(s, "\n")
+  let n = list.len(parts)
+  if n > 0 and list.get_or(parts, n - 1, "x") == "" then list.take(parts, n - 1) else parts
+}
+
+// `sed 's/^ *[0-9]*: *//'` — drop an indented `12: ` backtrace index. A line with no index is
+// returned untouched, INCLUDING its leading spaces: the sed only consumes the spaces when it
+// matches the whole prefix, and a line that merely happens to be indented is program output.
+fn strip_backtrace_index(line: String) -> String = {
+  let after_ws = scan_class(line, 0, " ")
+  let after_digits = scan_class(line, after_ws, "0123456789")
+  if string.slice(line, after_digits, after_digits + 1) != ":" then line
+  else string.slice(line, scan_class(line, after_digits + 1, " "))
+}
+
+fn scan_class(s: String, p: Int, cls: String) -> Int =
+  if p < string.len(s) and string.contains(cls, string.slice(s, p, p + 1)) then scan_class(s, p + 1, cls)
+  else p
 
 effect fn exit_ok(cmd: String, args: List[String]) -> Bool = {
   let st = process.exec_status(cmd, args)
@@ -49,4 +132,65 @@ test "a failing oracle whose output still matches is a match" {
   // Both legs erroring the SAME way is agreement, not a finding — the bash reaches its
   // stderr-normalising path for this case and can still conclude match.
   assert_eq(verdict_of(false, true, true, "boom", "boom"), "match")
+}
+
+test "a trap fixture must agree on exit code and stderr, not just stdout" {
+  // Same stdout, same exit, same message — a genuine cross-target trap agreement.
+  assert_eq(verdict_full(false, true, true, "", "", 1, 1, "Error: divide by zero", "Error: divide by zero", ""), "match")
+  // Same stdout and message, DIFFERENT exit code: not agreement.
+  assert_eq(verdict_full(false, true, true, "", "", 1, 134, "Error: divide by zero", "Error: divide by zero", ""), "xfail")
+  // Same exit, different message: not agreement either.
+  assert_eq(verdict_full(false, true, true, "", "", 1, 1, "Error: divide by zero", "Error: index out of bounds", ""), "xfail")
+}
+
+test "the trap comparison masks the module path before deciding" {
+  // The wat lives in a temp file whose name differs every run, so an unmasked path is a
+  // guaranteed xfail for a reason that has nothing to do with the program.
+  let v1 = "Error: failed to run main module `/tmp/x.wat`\n\nCaused by:\n    0: boom at /tmp/x.wat"
+  assert_eq(verdict_full(false, true, true, "", "", 1, 1, "boom at <module>", v1, "/tmp/x.wat"), "match")
+}
+
+test "a succeeding oracle never reaches the trap comparison" {
+  // Divergent stderr with a CLEAN exit is compiler chatter, not a program observable —
+  // promoting it to xfail would fail every fixture that merely printed a build note.
+  assert_eq(verdict_full(true, true, true, "x", "x", 0, 0, "note: something", "", ""), "match")
+}
+
+test "the native-fallback notice is compiler chatter, not program stderr" {
+  let raw = "note: verified native render walled — building via the standard codegen\n  reason: native: whatever\nError: divide by zero"
+  assert_eq(normalize_oracle_err(raw), "Error: divide by zero")
+}
+
+test "a stream's final newline is a terminator, not an empty line" {
+  // The bug this pins cost 32 false XFAILs: the oracle normaliser kept the phantom trailing
+  // element and the wasm one dropped it, so two identical streams compared unequal.
+  assert_eq(normalize_oracle_err("Error: boom\n"), "Error: boom")
+  assert_eq(normalize_wasm_err("Error: boom\n", ""), "Error: boom")
+  assert_eq(normalize_oracle_err("Error: boom\n"), normalize_wasm_err("Error: boom\n", ""))
+}
+
+test "an INTERIOR blank line is kept by the oracle normaliser and dropped by the wasm one" {
+  // Not symmetric on purpose: the wasmtime frame contains a real blank line, and the oracle's
+  // stream is the program's own stderr, where a blank line is output.
+  assert_eq(normalize_oracle_err("a\n\nb\n"), "a\n\nb")
+  assert_eq(normalize_wasm_err("a\n\nb\n", ""), "a\nb")
+}
+
+test "the wasmtime trap frame is stripped down to the trap message" {
+  let raw = "Error: failed to run main module `/tmp/x.wat`\n\nCaused by:\n    0: Error: divide by zero\n    1: wasm trap"
+  assert_eq(normalize_wasm_err(raw, "/tmp/x.wat"), "Error: divide by zero\nwasm trap")
+}
+
+test "the module path is masked before comparison" {
+  // The path is a temp file: it differs every run, so leaving it in guarantees a mismatch
+  // for a reason that has nothing to do with the program.
+  assert_eq(normalize_wasm_err("boom at /tmp/a.wat", "/tmp/a.wat"), "boom at <module>")
+}
+
+test "an indented line with no backtrace index keeps its indentation" {
+  // The sed only eats the prefix when the WHOLE `spaces digits colon spaces` shape matches.
+  // A program that prints indented output is not emitting a backtrace.
+  assert_eq(strip_backtrace_index("    plain output"), "    plain output")
+  assert_eq(strip_backtrace_index("    3: framed"), "framed")
+  assert_eq(strip_backtrace_index("no indent"), "no indent")
 }
