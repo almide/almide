@@ -6,6 +6,13 @@ fn exact(p: Problem) -> Result[Answer, String] = ...      // 高価だが確実
 fn heuristic(p: Problem) -> Result[Answer, String] = ...  // 安いが失敗しうる
 
 effect fn solve(p: Problem) -> Answer = {
+  fan.race { exact(p); heuristic(p) } ?? brute_force(p)
+  // → 予算なしが基本形 — 発明すべき数字がない。選択は (spend, index) 最小の成功。
+  //   停止性は fan {} と同じ仕様: 完了枝よりリスト順で先の発散枝はハング
+}
+
+// 発散が心配な枝構成には ticks: ガードを付ける（下の挙動表はこちらの形）
+effect fn solve_guarded(p: Problem) -> Answer = {
   fan.race(ticks: 1_000_000) {
     exact(p)        // 枝 0
     heuristic(p)    // 枝 1

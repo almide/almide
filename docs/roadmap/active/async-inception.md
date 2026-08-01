@@ -82,13 +82,17 @@ let plan = fan.bounded(ticks: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
 10 万 tick 以内に厳密解が出ればそれを使い、出なければ貪欲解に落ちる。計算量の上限とフォールバックが、新しいキーワードなしに 1 行へ畳まれた。race も同じ調子で書ける。
 
 ```almide
-let ans = fan.race(ticks: 1_000_000) {
+let ans = fan.race {
   exact_solve(input)
   heuristic_solve(input)
 } ?? default_answer
 ```
 
-2 本の枝を走らせ、より少ない tick で成功した方を採る。await はどこにもない。Future も task handle もない。書くのは「何を並べるか」と「どう選ぶか」だけである。
+2 本の枝を走らせ、より少ない tick で成功した方を採る。予算は書いていない — race の
+選択は予算を要さず、`ticks: n` は発散が心配な枝構成に付ける任意のガードである
+（数字の出どころ問題ごと精査した記録は [ticks-interface-audit.md](./ticks-interface-audit.md)）。
+await はどこにもない。Future も task handle もない。書くのは「何を並べるか」と
+「どう選ぶか」だけである。
 
 その「どう選ぶか」= head、「どう並べるか」= form の直積 1 枚が、fan v2 の表面のすべてになる。
 
@@ -97,7 +101,7 @@ let ans = fan.race(ticks: 1_000_000) {
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 |
 | settle | 全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 |
 | any | index 最小の成功（逐次フォールバック） | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 |
-| race | (spend, index) 最小の成功 | `fan.race(ticks: n) { a; b }` → `T` | `fan.race(ticks: n, xs, f)` → `T` | **pure**（Rung 0） |
+| race | (spend, index) 最小の成功 | `fan.race { a; b }` → `T`（`ticks:` は任意ガード） | `fan.race(xs, f)` → `T` | **pure**（Rung 0） |
 | bounded | 単一 body の計量 | `fan.bounded(ticks: n) { body }` → `T` | —（map と合成） | **pure** |
 | timeout | 環境が切る | `fan.timeout(ms: n) { body }` → `T` | — | oracle 可（Stage 4） |
 
@@ -139,7 +143,7 @@ flowchart TD
     Q1 -->|"全部"| ALL["fan { } / fan.map"]
     Q1 -->|"全部、失敗も含めて"| SETTLE["fan.settle"]
     Q1 -->|"最初の成功"| ANY["fan.any"]
-    Q1 -->|"最安の成功"| RACE["fan.race(ticks: n)"]
+    Q1 -->|"最安の成功"| RACE["fan.race（ticks: は任意）"]
     Q1 -->|"1 つに計算量の上限"| BOUNDED["fan.bounded(ticks: n)"]
 ```
 
@@ -368,6 +372,7 @@ C（KPN チャネル）には着手しない。Stage 3 のあとに設計文書�
 | logical-time-proofs.md | 証明台帳（T1–T9・訂正記録） |
 | logical-time-implementation.md | 実装方式（Op::Charge・fuel ABI・metered 特殊化・ゲート配線） |
 | fan-v2-examples.md + fan-v2-examples/*.almd | リファレンス例（コード原本は .almd、挙動注記が fixture の種） |
+| ticks-interface-audit.md | ticks の対外監査（時間にしない理由、race の任意化、数字の供給者） |
 | async-world-claim.md | 主張の監査（競合表・五手・実行順の原本） |
 | `crates/almide-race-belt/` | Lean 機械証明（0 sorry、CI 常駐） |
 | `research/spike/logical-time-race/` | 全数合流ゲート（`run-gate.sh`） |

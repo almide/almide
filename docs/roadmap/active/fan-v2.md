@@ -27,7 +27,7 @@ v2 はこれを **head × form の直積 1 枚**に置き換える。
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 | 可（観測はリスト順） |
 | settle | 選択しない。全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 | 可 |
 | any | **index 最小**の成功 | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 | 逐次（意味論ごと逐次） |
-| race | **(spend, index) 最小**の成功 | `fan.race(ticks: n) { a; b }` → `T` | `fan.race(ticks: n, xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
+| race | **(spend, index) 最小**の成功 | `fan.race { a; b }` → `T`（`ticks: n` は任意の発散ガード） | `fan.race(xs, f)` / `fan.race(ticks: n, xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
 | bounded | 単一 body の計量 | `fan.bounded(ticks: n) { body }` → `T` | —（map と合成） | **pure** | — |
 | timeout | 環境が切る（oracle 層） | `fan.timeout(ms: n) { body }` → `T` | — | oracle 可 | ホスト相対 |
 
@@ -116,10 +116,11 @@ purity wall に落としている。mapper form は「データのリスト + �
 2. mapper form を持つのは「同型の動的データに対して arm を量産できる head」
    （all / settle / any / race）に限る。bounded / timeout は単一 body head なので持たない
    — これは意図的省略である。
-3. `ticks:` はメトリクスを消費する head（race）と定義する head（bounded）に、`ms:` は
-   oracle head（timeout）に、**ちょうど**現れる。無印 fan / map / any / settle に予算
-   引数はない — fuel 次元は `fan.bounded` の合成で届くため（logical-time-async の
-   完備性規則そのまま）。
+3. `ticks:` は bounded で**必須**（bound することが存在理由）、race で**任意**
+   （選択は予算を要さない — 予算の役割は発散ガードだけ。
+   [ticks-interface-audit.md](./ticks-interface-audit.md)）。`ms:` は oracle head
+   （timeout）に現れる。無印 fan / map / any / settle に予算引数はない — 予算の
+   次元は `fan.bounded` の合成で届くため（logical-time-async の完備性規則そのまま）。
 4. 新しい head を足すときは、この表に行を足し、全列（選択規則・両 form の型・効果上限・
    並列化可能性）を埋めることが PR の受理条件（API 族の matrix 原則）。
 

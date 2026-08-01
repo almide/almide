@@ -10,11 +10,13 @@ effect fn bad_io_race(url: String) -> String = {
   //       oracle-tier fan.timeout (Stage 4)
 }
 
-// ── ticks ラベルの欠落 ──────────────────────────────────────
+// ── ラベルなしの裸の数値 ─────────────────────────────────────
 effect fn bad_unlabelled(thunks: List[Strategy]) -> Int = {
   fan.race(1000, thunks, (s) => run(s))
-  // error: fan.race requires the ticks: label
-  // hint: fan.race(ticks: 1000, ...) — the label prevents reading 1000 as milliseconds
+  // error: a bare number is not a fan.race argument
+  // hint: budgets are labelled — fan.race(ticks: 1000, ...) — or omit the budget
+  //       entirely (ticks: is an optional guard). If you meant a TIME limit,
+  //       that is fan.timeout(ms:) (oracle tier, Stage 4)
 }
 
 // ── v1 の thunk リスト形（Wave 1 で E0xx tombstone）──────────────

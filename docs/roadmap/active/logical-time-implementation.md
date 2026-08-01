@@ -90,7 +90,14 @@ bounded は metered のみ（trap は通常どおり即死 — 投機ではな�
 
 - fixture: `spec/wasm_cross/fuel_probe_*.almd` を両ターゲットで実行し、
   **result / consumed_fuel / trace_hash の三点**を比較する。1 単位・1 位置の乖離が
-  そのまま「charge-trace 保存が破れた」の反証になる。最有力容疑の
+  そのまま「charge-trace 保存が破れた」の反証になる。
+- この probe ビルドはそのままユーザー向け校正器 **`--ticks-report`** になる: region /
+  プログラムごとの消費 tick に**この機械での実測時間を併記**して印字する
+  （`52,000 ticks (≈0.4ms here)` — 数字の直感はツール側で接続する。EVM estimateGas と
+  同じ運用形）。さらに Stage 2 以降、**`almide run --ticks n` / `almide test --ticks n`**
+  — main を bounded で包むだけのホスト境界予算 — を同じ機構で提供する。数字の持ち主が
+  harness / CI になり、壁時計と違い flaky にならない決定的 hang killer になる
+  （[ticks-interface-audit.md](./ticks-interface-audit.md) 修正 2）。最有力容疑の
   `render_wasm_fuse.rs` 系 peephole には、Charge を跨ぐ融合を拒否するガードを同 PR で
   入れる。
 - **charge certificate**: `certificate.rs` 族に相似形を 1 本足す —

@@ -33,6 +33,10 @@ tiebreak（Verse / Lingua Franca / Esterel）、制限による決定性（Par m
 > **形の改訂**: 表面の形（thunk 引数の関数形）は [fan-v2.md](./fan-v2.md) の block form
 > — `fan.bounded(ticks: n) { body }` / `fan.race(ticks: n) { arm; arm }` — に置き換えられた。
 > 本文書の意味論（fuel、lockstep、trap 窓、入れ子、CM-1）はすべてそのまま適用される。
+>
+> **追補（2026-08-01）**: race の `ticks:` は**任意化**された — 選択は予算を要さず、
+> 予算の役割は発散ガードのみ（n = ∞ の特殊化。停止性の扱いは fan {} の既存仕様と同じ）。
+> 監査は [ticks-interface-audit.md](./ticks-interface-audit.md)。
 
 ```almide
 fan.bounded(ticks: n, thunk)   // Result[T, String] — n fuel 以内に完了すれば Ok
