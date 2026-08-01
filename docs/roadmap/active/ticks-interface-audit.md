@@ -1,6 +1,13 @@
 <!-- description: Audit of ticks against timeout-shaped APIs: the unwritable-number problem, three fixes -->
 # Ticks interface audit — is the demanded API shape different?
 
+> **命名は [ADR-0001](../../adr/0001-deterministic-time-units.md) が supersede した。**
+> 本監査が発見した「書けない数字」問題は正しく、修正 1（race の予算任意化）と
+> 修正 2（数字の供給者はツールとホスト境界）はそのまま生きている。ただし
+> 「時間風単位の tick 換算」を却下した節は**誤り**だった — 深刻度の混同（決定性は
+> 一切壊れない）であり、ADR-0001 がその却下を訂正して時間単位を採用した。
+> 以下は当時の記録として保存する。
+>
 > 憲章: [async-inception.md](./async-inception.md)。`ticks:` 確定（be4e7d4c）を受けて、
 > 他言語の timeout 系インターフェースとの違和感と、「求められている API の形が実は
 > 違うのではないか」を精査した記録。結論は設計修正 3 点で、各文書に反映済み。
@@ -46,7 +53,7 @@ fan.race { exact(p); heuristic(p) }   // 予算なし — 発明すべき数字�
   新しい穴ではない。ガードが欲しい枝構成（探索の暴走など）では `ticks:` を付ける:
 
 ```almide
-fan.race(ticks: 1_000_000) { search_a(p); search_b(p) }   // ガード付き
+fan.race(1s) { search_a(p); search_b(p) }   // ガード付き
 ```
 
 - `fan.bounded` の `ticks:` は**必須のまま** — bound することが構文の存在理由だから。

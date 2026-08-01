@@ -27,12 +27,12 @@ effect fn settle_static() -> (Result[A, String], Result[B, String]) = {
 // v1:  fan.race(thunks)          — 実体は thunks[0]() と等価だった
 // v2:
 effect fn race_new(p: Problem) -> Answer = {
-  fan.race(ticks: 1_000_000) { exact(p); heuristic(p) } ?? fallback(p)
+  fan.race(1s) { exact(p); heuristic(p) } ?? fallback(p)
 }
 
 // ── timeout: 0.29.0 撤去済 → Stage 4 の oracle 層で新生 ─────────────
 // v1:  fan.timeout(5000, () => http.get(url))
 // v2 (Stage 4):
 effect fn timeout_new(url: String) -> String = {
-  fan.timeout(ms: 5000) { http.get(url) } ?? cached_page(url)
+  fan.timeout(5s) { http.get(url) } ?? cached_page(url)
 }

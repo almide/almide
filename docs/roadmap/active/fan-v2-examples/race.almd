@@ -11,9 +11,9 @@ effect fn solve(p: Problem) -> Answer = {
   //   停止性は fan {} と同じ仕様: 完了枝よりリスト順で先の発散枝はハング
 }
 
-// 発散が心配な枝構成には ticks: ガードを付ける（下の挙動表はこちらの形）
+// 発散が心配な枝構成には予算ガードを付ける（下の挙動表はこちらの形）
 effect fn solve_guarded(p: Problem) -> Answer = {
-  fan.race(ticks: 1_000_000) {
+  fan.race(1s) {
     exact(p)        // 枝 0
     heuristic(p)    // 枝 1
   } ?? brute_force(p)
@@ -22,13 +22,13 @@ effect fn solve_guarded(p: Problem) -> Answer = {
 //
 //   exact(枝0)        heuristic(枝1)     結果
 //   ─────────────────────────────────────────────────────────────
-//   300 tick で Ok    500 tick で Ok     → 枝 0 の値（300 < 500）
-//   300 tick で Ok    300 tick で Ok     → 枝 0 の値（同着はソース順）
-//   300 tick で Ok    100 tick で Ok     → 枝 1 の値（100 < 300）
-//   300 tick で Ok    100 tick で trap   → プログラムが trap で落ちる（可視窓内）
-//   100 tick で Ok    300 tick で trap   → 枝 0 の値 — trap は「起こらなかった」
-//   300 tick で Ok    100 tick で Err    → 枝 0 の値 — Err 枝は候補から外れるだけ
-//   枯渇              100 tick で Ok     → 枝 1 の値
+//   300µs で Ok    500µs で Ok     → 枝 0 の値（300 < 500）
+//   300µs で Ok    300µs で Ok     → 枝 0 の値（同着はソース順）
+//   300µs で Ok    100µs で Ok     → 枝 1 の値（100 < 300）
+//   300µs で Ok    100µs で trap   → プログラムが trap で落ちる（可視窓内）
+//   100µs で Ok    300µs で trap   → 枝 0 の値 — trap は「起こらなかった」
+//   300µs で Ok    100µs で Err    → 枝 0 の値 — Err 枝は候補から外れるだけ
+//   枯渇              100µs で Ok     → 枝 1 の値
 //   枯渇              枯渇               → Err → ?? が brute_force を評価
 
 // ── 二つの文法で同じ入力をパースする ─────────────────────────
@@ -36,7 +36,7 @@ fn parse_strict(src: String) -> Result[Ast, String] = ...
 fn parse_lenient(src: String) -> Result[Ast, String] = ...
 
 effect fn parse(src: String) -> Ast = {
-  fan.race(ticks: 200_000) { parse_strict(src); parse_lenient(src) }
+  fan.race(200ms) { parse_strict(src); parse_lenient(src) }
     ?? error.fail("unparseable")!
   // → 両方成功なら「安く済んだ方」。入力が単純なら strict、複雑なら lenient が
   //   勝つ — その選択が決定的に再現する
@@ -44,5 +44,5 @@ effect fn parse(src: String) -> Ast = {
 
 // ── mapper 形（宣言済み・Wave 2 では block 形のみ実装）────────────
 effect fn pick_strategy(strategies: List[Strategy], input: Input) -> Plan = {
-  fan.race(ticks: 500_000, strategies, (s) => run_strategy(s, input)) ?? default_plan(input)
+  fan.race(500ms, strategies, (s) => run_strategy(s, input)) ?? default_plan(input)
 }

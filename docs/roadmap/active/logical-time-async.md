@@ -31,16 +31,16 @@ tiebreak（Verse / Lingua Franca / Esterel）、制限による決定性（Par m
 ## 表面 — 追加は 2 つ、キーワードはゼロ
 
 > **形の改訂**: 表面の形（thunk 引数の関数形）は [fan-v2.md](./fan-v2.md) の block form
-> — `fan.bounded(ticks: n) { body }` / `fan.race(ticks: n) { arm; arm }` — に置き換えられた。
+> — `fan.bounded(d) { body }` / `fan.race(d) { arm; arm }` — に置き換えられた。
 > 本文書の意味論（fuel、lockstep、trap 窓、入れ子、CM-1）はすべてそのまま適用される。
 >
-> **追補（2026-08-01）**: race の `ticks:` は**任意化**された — 選択は予算を要さず、
+> **追補（2026-08-01）**: race の予算は**任意化**された — 選択は予算を要さず、
 > 予算の役割は発散ガードのみ（n = ∞ の特殊化。停止性の扱いは fan {} の既存仕様と同じ）。
 > 監査は [ticks-interface-audit.md](./ticks-interface-audit.md)。
 
 ```almide
-fan.bounded(ticks: n, thunk)   // Result[T, String] — n fuel 以内に完了すれば Ok
-fan.race(ticks: n, thunks)     // Result[T, String] — 各枝に n fuel、最小消費の成功が勝つ
+fan.bounded(100ms) { body }   // Result[T, String] — n fuel 以内に完了すれば Ok
+fan.race(500ms) { arm; arm }     // Result[T, String] — 各枝に n fuel、最小消費の成功が勝つ
 ```
 
 将来の oracle 層（Stage 4、Path C 成立後）:
@@ -55,30 +55,30 @@ fan.timeout(ms, thunk)        // 環境相対。R_Ω 契約クラス。それま
 |---|---|---|
 | `fan { }` / `fan.map` | 全部（リスト順 join-all、先頭 Err） | C-004 / C-199 |
 | `fan.any` | **index 最小**の成功 | リスト順走査 |
-| `fan.race(ticks: n)` | **(spend, index) 辞書式最小**の成功 | fuel + ソース順 tiebreak |
+| `fan.race(d)` | **(spend, index) 辞書式最小**の成功 | fuel + ソース順 tiebreak |
 | `fan.settle` | 選択しない（全収集） | リスト順 |
 
 `any` は index を最小化し、`race` は fuel を最小化して index で同点を割る。族の軸は
 「何を最小化するか」の一本だけになり、点追加ではなく面として閉じる。
 
 **完備性規則**（matrix gate に載せる形で述べる）: fuel 次元は `fan.bounded` による合成で
-全コンビネータに届く（`fan.map(xs, (x) => fan.bounded(ticks: n, () => f(x)))` など）。
+全コンビネータに届く（`fan.map(xs, (x) => fan.bounded(100ms) { f(x) })` など）。
 組み込みで fuel を統合するのは `fan.race` **だけ**であり、それは選択規則がメトリクスを
 **消費する**（枝同士の spend を比較する）からである。ユーザー合成では枝間比較は書けない。
 `bounded × {map, any, settle}` の専用形を追加しないのは意図的な省略であり、この規則ごと
 ゲート化する。
 
-### なぜ `ticks:` ラベルを必須にするか
+### なぜ予算に単位を必須にするか
 
 `fan.timeout(1000)` の 1000 をミリ秒と読まない人類は存在しない、というのが 0.29.0 の教訓
 だった。`fan.race(1000, ts)` にも同じ危険が残る。ラベル必須にすると全呼び出しサイトに
-`fuel` の語が現れ、単位の誤読が構文レベルで死ぬ。
+単位名が現れ、裸の整数による単位の誤読が型で死ぬ（最終形は [ADR-0001](../../adr/0001-deterministic-time-units.md)）。
 
 **訂正（2026-08-01）**: 初稿は `fan.map(xs, limit: 16, f)` をラベル引数の前例としたが、
 これは**誤り**。`limit:` は実装されておらず（checker は fan.map を 2 引数固定で検査）、
 言語にラベル引数構文は存在しない — fan-concurrency-next.md の status 表（✅）が stale
 だった。ラベルの供給源は [fan-v2.md](./fan-v2.md) の block 文法である: fan head は関数
-呼び出しではなく構文なので、`ticks:` は fan 文法自身の要素として実装でき、汎用ラベル引数
+呼び出しではなく構文なので単位付きリテラルをそのまま受けられ、汎用ラベル引数
 機構は導入しない。
 
 ### なぜ `fan.race` の名を再利用するか
@@ -89,8 +89,8 @@ race に決定的な意味が存在する。名前を変えない理由は 2 つ
 
 1. **LLM の事前分布**。並行の最速選択を書こうとするモデルは必ず `fan.race` を書く。
    新名（`fan.least` 等）は事前分布と戦う — MSR の逆行。
-2. **署名が旧形式を弾く**。旧 `fan.race(thunks)` は 1 引数、新形式は `ticks:` 必須の
-   2 引数。E027 tombstone は「撤去済み」から「署名移行ヒント」（`ticks:` を付けよ、
+2. **署名が旧形式を弾く**。旧 `fan.race(thunks)` は 1 引数、新形式は単位付き予算の
+   2 引数。E027 tombstone は「撤去済み」から「署名移行ヒント」（単位付き予算を付けよ、
    意味論は最小消費勝者）に書き換える。tombstone の移行先は生きた表面でなければ
    ならない規則にも適合する。
 
@@ -121,7 +121,7 @@ site でカウンタを読み、将来の oracle 系構文（`fan.timeout`）は
 決定層と oracle 層の違いは「中断点で読むものが、プログラムの関数（fuel）か、環境入力
 （時計）か」だけになる。中断点の位置は両層で共有され、そこは両ターゲットで同一である。
 
-### `fan.bounded(ticks: n, thunk)`
+### `fan.bounded(100ms) { body }`
 
 - thunk は **pure**（効果制約。effect fn 呼び出し・oracle 効果を含めない）。構文自体は
   既存の fan 規則どおり effect fn 内でのみ使える（規則を 1 本に保つ）。
@@ -133,7 +133,7 @@ site でカウンタを読み、将来の oracle 系構文（`fan.timeout`）は
   エラーチャネルという言語全体の性質であり、ここで点解決しない。`fan.any` の
   defined-Err 前例に従い、メッセージを台帳定数にして検査可能性だけは確保する。
 
-### `fan.race(ticks: n, thunks)` — lockstep 定義
+### `fan.race(500ms) { arm; arm }` — lockstep 定義
 
 **定義（lockstep）**: 全枝が論理 tick ごとに 1 fuel ずつ進む。tick `s` で最初に完了
 （成功値を返す）した枝が勝つ。同一 tick 内の事象はソース順（リスト index 順）に解決する。
@@ -223,10 +223,10 @@ transactional effect で解こうとしたものの大部分が、ここでは**
 
 ## 型付け・診断・表面変更
 
-- `fan.race(ticks: n, thunks) -> Result[T, String]`、`fan.bounded(ticks: n, thunk) ->
+- `fan.race(500ms) { arm; arm } -> Result[T, String]`、`fan.bounded(100ms) { body } ->
   Result[T, String]`。thunk の auto-wrap は race/any/settle の既存契約に従う。
 - 新診断: (a) race/bounded の枝に効果呼び出し → 「branches must be pure」+ 上記 oracle
-  ヒント、(b) `ticks:` ラベル欠落 → 署名ヒント、(c) 空 thunk リスト → 旧 race 同様
+  ヒント、(b) 裸の整数 → 単位ヒント、(c) 空 thunk リスト → 旧 race 同様
   コンパイルエラー。
 - **E027 の改訂**: 「removed」から「signature migration」へ。移行先が生きた表面になる。
   `fan.timeout` tombstone のヒントは Stage 4 まで現状維持（host boundary への誘導）。
@@ -291,7 +291,7 @@ transactional effect で解こうとしたものの大部分が、ここでは**
   async/await/Future/task handle は引き続き存在しない。新キーワードもゼロ。
 - **per-branch 予算**は編集の生存率のためにある。枝の追加・削除・並べ替えが他の枝の予算を
   変えない。ソース順 tiebreak は diff で見える形で勝敗を固定する。
-- **`ticks:` ラベル**が単位の誤読クラス（ms と読む）を構文で除去する。
+- **単位付きリテラル**が裸の整数による単位誤読クラスを型で除去する。
 - **走るたび同じ**: race を含むテストが flaky にならない。並行構文がベンチ・スナップショット・
   3-way oracle にそのまま載る。決定性は性能特性ではなく正しさの定義の一部、という stance の
   文言がそのまま race にまで届く。

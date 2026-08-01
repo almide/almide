@@ -5,7 +5,7 @@
 
 ## 0. 一文
 
-**壁時計は観測を決めない。言語の時間基底は論理時間（fuel）であり、環境の時間は宣言された入力としてのみ入る。**
+**壁時計は観測を決めない。言語の時間基底は論理時間であり、環境の時間は宣言された入力としてのみ入る。**
 
 ここへたどり着くまでに、Almide は非同期の構文を二度削除している。足し算ではなく引き算でできた歴史であり、三度目にあたる本設計は、二度の削除が何を診断していたのかという問いへの答えでもある。
 
@@ -76,10 +76,10 @@ quadrantChart
 fuel が手に入った今、設計の到達点は 1 行で示せる。
 
 ```almide
-let plan = fan.bounded(ticks: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
+let plan = fan.bounded(100ms) { optimal_plan(g) } ?? greedy_plan(g)
 ```
 
-10 万 tick 以内に厳密解が出ればそれを使い、出なければ貪欲解に落ちる。計算量の上限とフォールバックが、新しいキーワードなしに 1 行へ畳まれた。race も同じ調子で書ける。
+100 ミリ秒ぶんの計算で厳密解が出ればそれを使い、出なければ貪欲解に落ちる。計算量の上限とフォールバックが、新しいキーワードなしに 1 行へ畳まれた。race も同じ調子で書ける。
 
 ```almide
 let ans = fan.race {
@@ -89,7 +89,7 @@ let ans = fan.race {
 ```
 
 2 本の枝を走らせ、より少ない tick で成功した方を採る。予算は書いていない — race の
-選択は予算を要さず、`ticks: n` は発散が心配な枝構成に付ける任意のガードである
+選択は予算を要さず、予算リテラルは発散が心配な枝構成に付ける任意のガードである
 （数字の出どころ問題ごと精査した記録は [ticks-interface-audit.md](./ticks-interface-audit.md)）。
 await はどこにもない。Future も task handle もない。書くのは「何を並べるか」と
 「どう選ぶか」だけである。
@@ -101,9 +101,9 @@ await はどこにもない。Future も task handle もない。書くのは「
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 |
 | settle | 全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 |
 | any | index 最小の成功（逐次フォールバック） | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 |
-| race | (spend, index) 最小の成功 | `fan.race { a; b }` → `T`（`ticks:` は任意ガード） | `fan.race(xs, f)` → `T` | **pure**（Rung 0） |
-| bounded | 単一 body の計量 | `fan.bounded(ticks: n) { body }` → `T` | —（map と合成） | **pure** |
-| timeout | 環境が切る | `fan.timeout(ms: n) { body }` → `T` | — | oracle 可（Stage 4） |
+| race | (spend, index) 最小の成功 | `fan.race { a; b }` → `T`（予算は任意ガード） | `fan.race(xs, f)` → `T` | **pure**（Rung 0） |
+| bounded | 単一 body の計量 | `fan.bounded(d) { body }` → `T` | —（map と合成） | **pure** |
+| timeout | 環境が切る | `fan.timeout(d) { body }` → `T` | — | oracle 可（Stage 4） |
 
 六つの head を並べると、軸は一本しかない。any は index を最小化し、race は fuel を最小化する。all と settle は選択しない。「何を最小化するか」だけが head の違いであり、head を足すときはこの表に行を足して全列を埋めることが受理条件になる（matrix gate）。
 
@@ -123,7 +123,9 @@ fan.any(mirrors, (m) => fetch(m))
 
 動的な場合も「thunk リストを組み立ててから渡す」2 段が「リスト + mapper」の 1 段になり、コードは厳密に短くなる。おまけも付く。動的 thunk リストは wasm 側で `List[funcref]` が表現できず wall に落ちていたが、mapper form は fan.map と同じ「データ + 閉包 1 個」の形なので、この wall クラスは構文の変更だけで消滅する。契約も form 単位に揃う — block の arm は `fan {}` と同じ auto-unwrap、mapper は `fan.map` と同じ Result 必須。head ごとの auto-wrap 例外はゼロになる。
 
-`ticks:` のラベルは飾りではない。`timeout(1000)` の 1000 をミリ秒と読まない人間はいない — それが 0.29.0 で fan.timeout を撤去した教訓の半分だった。ラベルを必須にすれば全呼び出しサイトに単位名が現れ、誤読は構文レベルで死ぬ。名前そのものも単位名から採った — tick は lockstep 意味論の単位であり（1 tick に 1 消費、同着はソース順）、`fan.race(ticks: n)` は「最大 n tick 走る」という仕様文の直写しになる。環境時間の `ms:` と対をなす。初案の `fuel:` は機構のメタファーが表面へ漏れるため却下し、fuel の語は機構側（内部カウンタ、`--fuel-probe`、Wasmtime の系譜）に限定する。ならば言語にラベル引数機構を足したのか、と思うだろう。足していない。fan の head は関数呼び出しではなく構文なので、`ticks:` と `ms:` は fan 文法自身の要素として供給される。汎用ラベル引数という言語全体の問いを、fan 経由で密輸しない。
+予算が `100ms` と時間で書けるのは、妥協ではなく定義である。**論理時計の単位は時間そのもの** — CM-1 は各 op に「凍結された Almide 抽象機械での所要時間」を割り当て、消費の総和はひとつの持続時間になる。それは (プログラム, 入力) の関数で、どのホストでも同じ値を返す。数えるものは決定的、呼ぶ名前は時間。この 2 つが分離できることは機械検査で担保されている — Lean の 7 定理も 74,898 構成の合流ゲートも、単位に一切依存していない。
+
+裸の整数は書けない（型エラー）。単位のない `1000` が「ミリ秒か秒か」で 1000 倍ずれる事故は Go の `time.Sleep(10)`（10 ナノ秒）から Jenkins の「300 秒が 3.5 日」まで実例に事欠かず、接尾辞を必須にすると構文レベルで死ぬ。壁時計の `fan.timeout(5s)` とは**型が違う** — 単位は共有し、どちらの時計を読むかは head が名乗り、変数を経由した混入は型が止める。決定の全体と、他言語 15 系の調査に基づく根拠は [ADR-0001](../../adr/0001-deterministic-time-units.md) にある。
 
 何を入れないかも、この文法の一部である。
 
@@ -143,17 +145,17 @@ flowchart TD
     Q1 -->|"全部"| ALL["fan { } / fan.map"]
     Q1 -->|"全部、失敗も含めて"| SETTLE["fan.settle"]
     Q1 -->|"最初の成功"| ANY["fan.any"]
-    Q1 -->|"最安の成功"| RACE["fan.race（ticks: は任意）"]
-    Q1 -->|"1 つに計算量の上限"| BOUNDED["fan.bounded(ticks: n)"]
+    Q1 -->|"最安の成功"| RACE["fan.race（予算は任意）"]
+    Q1 -->|"1 つに計算量の上限"| BOUNDED["fan.bounded(d)"]
 ```
 
 形はもう 1 問で決まる — 枝を静的に並べるなら block、データから量産するなら mapper。await の置き場所を誤るというクラスの間違いは、選択肢ごと存在しない。lexer に async / await のトークンはなく、AST に残った死んだ variant（`ExprKind::Await`、`r#async` フィールド）も Wave 1 で撤去される。「文法から書けない」は「表現できない」へ格上げされる。
 
-ただし、冒頭の 1 行にはまだ答えていない問いが埋まっている。`optimal_plan(g)` が途中でゼロ除算を踏んだら、どうなるのか。race の枝の途中で 10 万 tick が尽きたら、「途中」とはどの時点のことなのか。表のどの列にもその答えはない。文法は時計を持たないからだ。答えるには、何 tick 目に何が起きたかを言い切れる装置 — 文法の一段下で回っている論理時計 — が要る。
+ただし、冒頭の 1 行にはまだ答えていない問いが埋まっている。`optimal_plan(g)` が途中でゼロ除算を踏んだら、どうなるのか。race の枝の途中で予算が尽きたら、「途中」とはどの時点のことなのか。表のどの列にもその答えはない。文法は時計を持たないからだ。答えるには、何 tick 目に何が起きたかを言い切れる装置 — 文法の一段下で回っている論理時計 — が要る。
 
 ## 4. 意味論 — 五本の柱
 
-`fan.race(ticks: 1000) { exact(input); heuristic(input) }` と書いたとする。heuristic が途中でゼロ除算を踏んだら、プログラムは落ちるのか。exact の予算が尽きたら、それを誰がどう知るのか。文法の表はこの問いに答えない。答えは五本の柱でできた意味論の側にある。
+`fan.race(1s) { exact(input); heuristic(input) }` と書いたとする。heuristic が途中でゼロ除算を踏んだら、プログラムは落ちるのか。exact の予算が尽きたら、それを誰がどう知るのか。文法の表はこの問いに答えない。答えは五本の柱でできた意味論の側にある。
 
 ### 柱 1 — 論理時計：fuel は機械のコストではなく、ソースのコストを数える
 

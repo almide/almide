@@ -27,20 +27,20 @@ let cfg  = fan.any { fs_config(); env_config(); default_config() }
 let body = fan.any(mirrors, (m) => fetch_from(m))
 
 // bounded — 計算量の上限（Stage 2）
-let plan = fan.bounded(ticks: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
+let plan = fan.bounded(100ms) { optimal_plan(g) } ?? greedy_plan(g)
 
 // race — 最安の成功が勝つ（Stage 3、枝は pure）
-let ans = fan.race(ticks: 1_000_000) { exact(input); heuristic(input) } ?? default_ans
+let ans = fan.race(1s) { exact(input); heuristic(input) } ?? default_ans
 
 // timeout — 環境が切る（Stage 4、oracle 層。それまで tombstone）
-let page = fan.timeout(ms: 5000) { http.get(url) } ?? cached_page
+let page = fan.timeout(5s) { http.get(url) } ?? cached_page
 ```
 
 ## 2. ファイル索引
 
 | ファイル | 内容 | status |
 |---|---|---|
-| [bounded.almd](./fan-v2-examples/bounded.almd) | 全域化イディオム、`let` の書ける単一 body、`ticks: 0`/発散の端、min-cap 入れ子 | Stage 2 |
+| [bounded.almd](./fan-v2-examples/bounded.almd) | 全域化イディオム、`let` の書ける単一 body、`0ms`/発散の端、min-cap 入れ子 | Stage 2 |
 | [race.almd](./fan-v2-examples/race.almd) | ポートフォリオ解法、**全 8 ケースの挙動表**（同着・trap 可視窓・枯渇）、二文法パース、mapper 形 | Stage 3 |
 | [any.almd](./fan-v2-examples/any.almd) | 設定フォールバックチェーン、ミラー順次試行。「並行ではなくフォールバック」の意味論注記 | Wave 1 |
 | [settle.almd](./fan-v2-examples/settle.almd) | 異型 tuple の block 形、全エラー収集の mapper 形 | Wave 1 |

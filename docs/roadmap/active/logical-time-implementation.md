@@ -109,7 +109,7 @@ bounded は metered のみ（trap は通常どおり即死 — 投機ではな�
 
 ## 5. Stage 2 — `fan.bounded`: 表面と CM-1 定数の確定
 
-- parser: fan v2 の head 文法（`fan.bounded(ticks: expr) { body }`）。`ticks:` は
+- parser: fan v2 の head 文法（`fan.bounded(d) { body }`）。予算リテラルは
   fan 構文の要素としてパース（汎用ラベル引数は作らない — `parse_fan_primary` の
   member-access 分岐を head-args + block の分岐に拡張する）。
 - checker: `static_dispatch.rs` の fan アーム表に `bounded` を追加。body は pure 制約
