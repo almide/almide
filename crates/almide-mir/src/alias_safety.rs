@@ -99,6 +99,8 @@ const TRUSTED_FRESH_ALLOCATORS: &[&str] =
 /// `SetLocal` reset and the fixpoint argument this relies on.
 fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
     match op {
+        // Probe charge: no values, no aliases.
+        Op::Charge { .. } => {}
         // The canonical alias-creating op: at this op, the object has (at
         // least) TWO live owners — `src`'s existing reference AND `dst`'s new
         // one. Taint BOTH: trusting `dst` would require proving `src`'s own

@@ -357,6 +357,15 @@ fn render_op_range(
                 let close = if dst.is_some() { "))\n" } else { ")\n" };
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
+            Op::Charge { site, cost } => {
+                // Flush pending fused exprs so the charge cannot migrate across
+                // buffered computation, then emit the counter + trace update at
+                // this exact position. Same arithmetic as the native shim.
+                st.fuser.flush_all(body);
+                body.push_str(&format!(
+                    "    (global.set $__fuel (i64.add (global.get $__fuel) (i64.const {cost})))\n    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
+                ));
+            }
             _ => {
                 if render_fused_or_plain_op(ctx, st, op, op_idx, region, body) {
                     continue 'op_loop;
@@ -644,6 +653,7 @@ pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
         }
     };
     match op {
+        Op::Charge { .. } => {}
         Op::Alloc { init, .. } => match init {
             Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
                 out.push(*len)
@@ -731,6 +741,7 @@ pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
         }
     };
     match op {
+        Op::Charge { .. } => {}
         Op::Alloc { dst, init, .. } => {
             out.push(*dst);
             match init {

@@ -638,6 +638,16 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             ""
         }
     );
+    // Stage 1 probe: an in-guest epilogue prints the (consumed, trace) pair to
+    // STDERR before _start returns — the CLI shells out to the wasmtime BINARY,
+    // so the host cannot read exported globals; the guest reports its own
+    // counters in the exact format of the native shim. u64 decimal (the trace
+    // hash wraps), buffer on the untouched bump frontier.
+    let probe_epilogue = if crate::charge_probe::probe_enabled() {
+        "    (call $__probe_print)\n"
+    } else {
+        ""
+    };
     let start = if main_returns {
         // main's Result[Unit, String] is LEN-AS-TAG (scalar Ok): len@4 == 0 ⇒ Ok (discard),
         // len 1 ⇒ Err with the String handle in slot 0's low half (@12). The Err path runs
@@ -645,10 +655,10 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         // @16 read was the cap-as-tag offset — always 0 here, so an erring main silently
         // exited 0.)
         format!(
-            "  (func (export \"_start\") (local $r i32)\n{ginit}    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const {LIST_LEN_OFFSET}))) (i32.const 0))\n      (then (call $__main_err (i32.load (i32.add (local.get $r) (i32.const {LIST_HEADER}))))))\n    (call $rc_dec (local.get $r)))\n"
+            "  (func (export \"_start\") (local $r i32)\n{ginit}    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const {LIST_LEN_OFFSET}))) (i32.const 0))\n      (then (call $__main_err (i32.load (i32.add (local.get $r) (i32.const {LIST_HEADER}))))))\n    (call $rc_dec (local.get $r))\n{probe_epilogue})\n"
         )
     } else {
-        format!("  (func (export \"_start\")\n{ginit}    (call $main))\n")
+        format!("  (func (export \"_start\")\n{ginit}    (call $main)\n{probe_epilogue})\n")
     };
     let pub_exports: String = prog
         .exports

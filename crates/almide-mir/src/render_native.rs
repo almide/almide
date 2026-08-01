@@ -370,6 +370,11 @@ fn render_fn(
     // side effect), so skipping an unused one is sound — and it keeps the
     // subset honest: a USED Handle still walls below.
     let used = native_used_values(func);
+    if is_main && crate::charge_probe::probe_enabled() {
+        used_shims.push(PROBE_SHIM);
+        line!("let __almd_probe_guard = __AlmdProbeGuard;");
+        line!("let _ = &__almd_probe_guard;");
+    }
     for op in &func.ops {
         match op {
             Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), .. } if !used.contains(d) => {
@@ -391,6 +396,10 @@ fn render_fn(
                         user_fns, sigs, tys: &mut tys, out: &mut out, indent, used_shims,
                     },
                 )?
+            }
+            Op::Charge { site, cost } => {
+                used_shims.push(PROBE_SHIM);
+                line!("__almd_charge({site}, {cost});");
             }
             other => {
                 let handled = render_native_call_op(
@@ -778,3 +787,23 @@ fn render_dup(
 }
 
 include!("render_native_b.rs");
+
+
+/// Stage 1 probe shim: fuel/trace thread-locals + the charge fn + the guard
+/// that prints the triple's (consumed, trace) legs on main exit. Same hash
+/// arithmetic as the wasm leg (wrapping i64, trace*1000003+site).
+const PROBE_SHIM: &str = "thread_local! {
+    static __ALMD_FUEL: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_TRACE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+fn __almd_charge(site: i64, cost: i64) {
+    __ALMD_FUEL.with(|f| f.set(f.get().wrapping_add(cost)));
+    __ALMD_TRACE.with(|t| t.set(t.get().wrapping_mul(1000003).wrapping_add(site)));
+}
+struct __AlmdProbeGuard;
+impl Drop for __AlmdProbeGuard {
+    fn drop(&mut self) {
+        eprintln!(\"__ALMD_PROBE {} {}\",
+            __ALMD_FUEL.with(|f| f.get()) as u64, __ALMD_TRACE.with(|t| t.get()) as u64);
+    }
+}";

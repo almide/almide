@@ -49,6 +49,9 @@ pub fn validate_safety(wat: &str, mir: &crate::MirFunction) -> bool {
 pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
     use crate::{Init, IntOp, Op, RtFn};
     Some(match op {
+        // Probe charge: the fuel-global write is the presence claim — a renderer
+        // that drops a Charge fails this gate.
+        Op::Charge { .. } => "global.set $__fuel".into(),
         Op::Alloc { init: Init::IntList(_), .. } => "call $list_new".into(),
         // The rung-4 list ops: the literal's presence claim is its block alloc; the
         // element load/store both realize through the bounds-checked `$elem_addr_chk`.

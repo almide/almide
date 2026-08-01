@@ -1,0 +1,13 @@
+fn main() -> Unit = {
+  var i = 0
+  var acc = 0
+  while i < 50 {
+    var j = 0
+    while j < 50 {
+      if (i + j) % 7 == 0 then { acc = acc + 1 } else { acc = acc }
+      j = j + 1
+    }
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}

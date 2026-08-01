@@ -144,6 +144,8 @@ impl OwnershipScan {
     /// empty body, and each kept its own comment above its own pattern.
     fn step(&mut self, i: usize, op: &Op) {
         match op {
+            // Probe charge: no ownership event (no alloc, no dup, no drop).
+            Op::Charge { .. } => {}
             Op::Alloc { dst, repr, .. } => {
                 debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
                 self.own_fresh_object(*dst);

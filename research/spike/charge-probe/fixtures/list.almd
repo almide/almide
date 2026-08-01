@@ -1,0 +1,10 @@
+fn main() -> Unit = {
+  var xs: List[Int] = []
+  var i = 0
+  while i < 200 {
+    xs = xs + [i * 3]
+    i = i + 1
+  }
+  let evens = xs |> list.filter((x) => x % 2 == 0) |> list.map((x) => x + 1)
+  println(int.to_string(list.len(evens)))
+}

@@ -1,0 +1,11 @@
+fn shout(s: String) -> String = string.to_upper(s) + "!"
+
+fn main() -> Unit = {
+  var out = ""
+  var i = 0
+  while i < 50 {
+    out = out + shout("ab")
+    i = i + 1
+  }
+  println(int.to_string(string.len(out)))
+}

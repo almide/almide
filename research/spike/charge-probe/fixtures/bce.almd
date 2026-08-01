@@ -1,0 +1,15 @@
+fn main() -> Unit = {
+  var xs: List[Int] = []
+  var i = 0
+  while i < 100 {
+    xs = xs + [i * 7]
+    i = i + 1
+  }
+  var j = 0
+  var acc = 0
+  while j < 100 {
+    acc = acc + (list.get(xs, j) ?? 0)
+    j = j + 1
+  }
+  println(int.to_string(acc))
+}

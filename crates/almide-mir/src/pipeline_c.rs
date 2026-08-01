@@ -310,6 +310,10 @@ fn try_render_wasm_source_impl_rest(
     );
     let main_wall = fn_walls.get("main").cloned();
 
+    // Stage 1 probe: charge insertion on the SHARED user-fn MIR, before any
+    // leg-specific pass. The native leg calls the same pass at the same point.
+    crate::charge_probe::insert_probe_charges(&mut functions);
+
     // Self-append windows (`x = x + [e]`, incl. the `list.push` desugar) →
     // the amortized-O(1) `__list_append1` (self-hosted in list_concat.almd —
     // §4.1: the hand-written WAT floor must not grow). MUST run BEFORE the
@@ -793,6 +797,8 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             sigs.insert(f.name.clone(), (ps, Some(crate::render_native::NativeSigKind::I64)));
         }
     }
+    // Stage 1 probe: same insertion point in pass order as the wasm leg.
+    crate::charge_probe::insert_probe_charges(&mut functions);
     // #824: see the wasm leg's call above — `Op::MakeUnique` already renders to
     // nothing on native (render_native.rs's `Op::Consume | Op::Borrow |
     // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both

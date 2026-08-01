@@ -30,6 +30,7 @@ pub(crate) mod trace;
 
 pub mod alias_safety;
 pub mod certificate;
+pub mod charge_probe;
 pub mod concat_to_append;
 pub mod coown_names;
 pub mod region_alloc;
@@ -522,6 +523,13 @@ pub enum Op {
     /// — the loop-carried state). No ownership (scalar copy); `local` was already defined
     /// by its `var` bind, `src` is the freshly computed value.
     SetLocal { local: ValueId, src: ValueId },
+    /// A logical-clock charge event (Stage 1 probe, ALMIDE_FUEL_PROBE builds only).
+    /// `site` is a program-wide deterministic id; `cost` a constant weight. No dst, no
+    /// operands, no ownership. Renders to fuel-counter arithmetic + an order-sensitive
+    /// trace-hash update in BOTH renderers; the falsifier compares the resulting
+    /// (consumed, trace) across targets. Every pass MUST preserve these ops — dropping,
+    /// duplicating, or reordering one is exactly the bug the probe exists to catch.
+    Charge { site: u32, cost: u32 },
 }
 
 include!("lib_b.rs");
