@@ -379,7 +379,7 @@ jobs:
         run: scripts/check-browser-determinism.sh
 
   # ═══════════════════════════════════════════════
-  # Lean Proofs (AlmidePerceusBelt)
+  # Lean Proofs (AlmidePerceusBelt + AlmideRaceBelt)
   # ═══════════════════════════════════════════════
 
   lean-proofs:
@@ -396,7 +396,10 @@ jobs:
       #    a broken proof (or one that only ever built locally) passes CI silently.
       - name: Verify 0 sorry
         run: |
-          if grep -rn '\bsorry\b' crates/almide-perceus-belt/AlmidePerceusBelt/ --include='*.lean'; then
+          if grep -rn '\bsorry\b' \
+              crates/almide-perceus-belt/AlmidePerceusBelt/ \
+              crates/almide-race-belt/AlmideRaceBelt/ \
+              --include='*.lean'; then
             echo "::error::sorry found in Lean proofs — all theorems must be fully proven"
             exit 1
           fi
@@ -406,7 +409,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.elan
-          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain') }}
+          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain') }}
 
       - name: Install elan (retry-resilient)
         # lean-action's internal elan-init has no retry, so a transient GitHub 504
@@ -434,6 +437,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           lake-package-directory: crates/almide-perceus-belt
+
+      - name: Kernel-check race-belt proofs (lake build)
+        uses: leanprover/lean-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          lake-package-directory: crates/almide-race-belt
 
   # ═══════════════════════════════════════════════
   # Checks

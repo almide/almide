@@ -1,9 +1,15 @@
 <!-- description: The async grammar: fuel as the logical clock, deterministic race, oracle tier -->
 # Logical-Time Async — the async grammar design
 
+> 憲章: [async-inception.md](./async-inception.md)。本文書はその意味論詳細である。
+>
 > [deterministic-bounds.md](./deterministic-bounds.md) が立てた 4 設問（予算配分・勝者選択・
 > キャンセル・効果隔離）への回答。[concurrency-stance.md](./concurrency-stance.md)（#1000）の
 > 結論を 1 点だけ改訂する。これは設計文書であり、実装はステージング節の順で行う。
+>
+> **証明台帳**: 本意味論の成立は [logical-time-proofs.md](./logical-time-proofs.md) が
+> 3 層（紙の定理 / Lean kernel-check / 全数モデル検査）で固定する。証明作業による
+> 訂正 3 件（下の各訂正マーク）もそこに記録がある。
 
 ## 設計テーゼ
 
@@ -140,14 +146,17 @@ lockstep での完了 tick はその枝の spend に等しいので、両定義�
 ユーザーに語る絵（Verse と同じ「同時ならソース順」）、least-spend はスケジューラを
 消した計算式であり、**この一致こそが「物理時間なしの race」の内容**である。
 
-**trap の可視窓**: 枝 j が tick `t_j` で trap するとき、それが観測される（= プログラムが
-その trap で落ちる）のは
+**trap の可視窓 — 決定的事象規則**（*訂正 2026-08-01、証明作業による*: 初稿の窓規則は
+勝者が存在するケースしか定義しておらず、勝者不在 + trap のケースが未定義だった。
+以下の単一規則に統一する）:
 
-- `t_j < s*`（勝者確定 tick より前）、または
-- `t_j = s*` かつ `j < 勝者 index`（同 tick はソース順）
+> Complete / Trap の終端事象を merge 順（(累積 fuel, 枝 index) の辞書式）に並べ、
+> **最初の決定的事象が唯一の裁定者**である。Complete ならその枝が勝者、Trap なら
+> プログラムがその trap で落ちる、決定的事象が存在しなければ `Err(exhausted)`。
 
-のとき、**かつそのときに限る**。窓の外の trap は起こらなかったことになる（枝は tick `s*`
-で消滅している）。投機がバグを黙って飲み込むことはなく（窓内なら必ず落ちる）、かつ勝者
+初稿の窓規則（`t_j < s*`、または `t_j = s*` かつ `j <` 勝者 index）はこの規則の
+勝者存在ケースの系として従う。窓の外の trap は起こらなかったことになる（枝は
+決定的事象の tick で消滅している）。投機がバグを黙って飲み込むことはなく（窓内なら必ず落ちる）、かつ勝者
 確定後の敗者は存在ごと消える。C-200（fan{} の sibling trap 伝播）とは構文が違うのでは
 なく、**join-all は「全部必要」、race は「どれか 1 つで足りる」という買っている保証が
 違う**。その差がそのまま trap 規則の差になる。
@@ -167,13 +176,20 @@ exhaust すると、外側は remaining ~0 で継続し、次の charge で外�
 region タグ付きの伝播機構は不要 — すべて共有 charge trace 上の算術になり、両ターゲットの
 一致は trace の一致から従う。EVM のサブコール gas 上限（EIP-150）と同じ構図。
 
-**race が外側に課す消費量**は lockstep が消費する量で定義する:
+**race が外側に課す消費量**（*訂正 2026-08-01、証明作業による*: 初稿の
+`Σ_j min(end_j, s*)` は境界で過大だった — 勝者より後の index の枝の time = s\* の
+charge は merge 順で勝者の完了に後行し、発生しない。また「race site での原子的
+charge」では race 内部で外側が尽きるケースの裁定点が定義できない）:
 
-    charge(race) = Σ_j min(end_j, s*)     （勝者なしなら Σ_j end_j）
+> race の **occurred stream** — 決定的事象に merge 順で先行する charge 事象列
+> （+ 勝者自身の charge）— を、外側 region は **merge 順にそのまま streaming で**
+> 消費として観測する。途中で外側残量が尽きればその点で外側 Exhausted（race は放棄）。
+> race が完走した場合の総消費は stream の総和である。
 
-これは枝ごとの trace の関数であり、刈った実装でも正確に復元できる（cap で止まった枝の
-寄与は cap 到達の事実から確定する）。**実装が実際に費やした仕事ではなく、意味論的消費量を
-カウンタから引く** — RC を無料にしたのと同じ「意味論のコスト」原理の適用である。
+これは枝ごとの trace の関数であり、刈った実装でも cap 実行が明かしたデータだけから
+正確に復元できる（cap は可視窓の全事象を覆う — Lean `cap_admits_window`）。**実装が
+実際に費やした仕事ではなく、意味論的消費量をカウンタから引く** — RC を無料にしたのと
+同じ「意味論のコスト」原理の適用である。
 
 ### 効果隔離の梯子
 

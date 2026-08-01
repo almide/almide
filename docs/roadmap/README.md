@@ -7,11 +7,13 @@
 
 ## Active
 
-72 items
+75 items
 
 | Item | Description |
 |------|-------------|
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
+| [Async Inception — logical time as the language's time base](active/async-inception.md) | The async inception: thesis, grammar, semantics, proofs, claim and plan in one charter |
+| [The 2026 Async Claim — audit and the runaway plan](active/async-world-claim.md) | Audit of the best-async-of-2026 claim: the axis, the rivals, the five runaway moves |
 | [Behavioral Contract — 機械生成コードの「機能正しさ」を、王者の土俵を避けて取る層](active/behavioral-contract.md) | 機能正しさを王者(Dafny/F*/SPARK/Lean)の土俵を避けて取る層。C-FAITHFUL の上に C-PRESERVED(差分保存)と C-ASSERTED(批准性質)を積む。仕様の出所を機械生成レジームへずらす戦略。 |
 | [Build Speed: Runtime rlib + Hot-Fn Inlining](active/build-speed-runtime-rlib.md) | Native build-speed — precompiled almide_rt runtime rlib, and recovering the shipping-build inlining gap with #[inline] |
 | [Certificate Format v1 — design](active/certificate-format-v1.md) | The per-function ownership-certificate format — the i/a/d/m alphabet, call/branch/closure extensions, and which bricks have shipped |
@@ -42,6 +44,7 @@
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) | The issue-ledger burn-down gauge: keeping the open-issue count an honest measure of remaining work |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Logical-Time Async — the async grammar design](active/logical-time-async.md) | The async grammar: fuel as the logical clock, deterministic race, oracle tier |
+| [Logical-Time Async — the proof ledger](active/logical-time-proofs.md) | Proof ledger for the logical-time async semantics: theorems, Lean core, model gate |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) | Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field |
 | [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) | Routing almide build --target rust through the same v1 Perceus MIR as wasm, so one memory model serves both legs |
