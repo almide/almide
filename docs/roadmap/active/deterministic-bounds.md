@@ -1,6 +1,11 @@
 <!-- description: Legalising fan.timeout under byte-identity — fuel, deterministic allocation, winner order, effect isolation -->
 # Deterministic Bounds — legalising a bound on computation under byte-identity
 
+> **Design answer**: the four open questions this document poses (budget allocation, winner
+> selection, cancellation, effect isolation) are answered in
+> [logical-time-async.md](./logical-time-async.md). This document remains the problem
+> statement and the correctness argument; that one is the grammar design.
+
 **Revision note.** A first draft of this document claimed that introducing fuel would, by
 itself, make `fan` cancellation deterministic. **That was wrong**, and the error is instructive
 enough to keep visible: a *shared* fuel counter is still a function of scheduling, because
