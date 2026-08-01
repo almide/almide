@@ -1,0 +1,17 @@
+// fan {} / fan.map — v2 でも不変の面（対照用）
+// @status: current-syntax — これは今日コンパイルできる形そのもの。
+// C-004（結果リスト順）/ C-199（リスト順先頭 Err）/ C-200（sibling trap 伝播）が
+// v2 後もそのまま生存することの参照点。
+
+effect fn dashboard(id: String) -> Dashboard = {
+  // stage 1: 独立な 2 つを並行に
+  let (user, location) = fan { fetch_user(id); geo.current() }
+  // stage 2: stage 1 の結果に依存する 2 つを並行に
+  let (posts, weather) = fan { fetch_posts(user.id); forecast(location) }
+  Dashboard { user, posts, weather }
+}
+
+effect fn fetch_all(urls: List[String]) -> List[String] = {
+  fan.map(urls, (u) => http.get(u))
+  // → 結果は入力順。最初の Err（リスト順）が全体の Err
+}

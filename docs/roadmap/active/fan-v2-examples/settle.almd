@@ -1,0 +1,23 @@
+// fan.settle — 失敗も含めて全部集める
+// @status: future-syntax (Wave 1) — fuel 不要、今日の意味論のまま形だけ v2
+
+// ── block 形は異型 OK（tuple of Results）──────────────────────
+effect fn health_report() -> String = {
+  let (net, disk) = fan.settle { check_network(); check_disk() }
+  // net: Result[NetStatus, String], disk: Result[DiskStatus, String]
+  match (net, disk) {
+    (ok(_), ok(_))   => "healthy",
+    (err(n), ok(_))  => "network degraded: ${n}",
+    (ok(_), err(d))  => "disk degraded: ${d}",
+    (err(n), err(d)) => "down: ${n} / ${d}",
+  }
+}
+
+// ── mapper 形: 全部検証して全エラーを集める ─────────────────────
+effect fn validate_all(records: List[Record]) -> List[String] = {
+  let results = fan.settle(records, (r) => validate(r))
+  results |> list.filter_map((r) => match r {
+    ok(_)  => none,
+    err(e) => some(e),
+  })
+}

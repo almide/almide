@@ -1,0 +1,27 @@
+// fan.any — リスト順で最初の成功（逐次フォールバック、効果 OK）
+// @status: future-syntax (Wave 1) — fuel 不要、今日の意味論のまま形だけ v2
+
+import fs
+import env
+import io
+
+// ── 設定の探索チェーン（block 形）─────────────────────────────
+effect fn load_config() -> Config = {
+  fan.any {
+    parse_config(fs.read_text("app.toml")!)
+    parse_config(env.get("APP_CONFIG") ?? err("unset")!)
+    default_config()   // 失敗しない最後の枝 = 必ず止まるチェーン
+  }
+  // → リスト順に試し、最初の Ok で打ち切る。枝 0 が成功したら枝 1 以降の効果は
+  //   起こらない。枝 0 が失敗したらその効果（fs 読みの失敗まで）は起きている。
+  //   any は並行構文ではなくフォールバック構文である
+}
+
+// ── ミラーの順次試行（mapper 形）────────────────────────────
+import http
+
+effect fn fetch_any(mirrors: List[String]) -> String = {
+  fan.any(mirrors, (m) => http.get("https://${m}/pkg.tar"))
+  // → v1 の fan.any(mirrors |> list.map((m) => () => ...)) と同じ意味で 1 段短い。
+  //   全滅なら台帳定数の Err（"fan.any: all candidates failed"）
+}

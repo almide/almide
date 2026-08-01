@@ -1,0 +1,41 @@
+// fan.race — 最安の成功が勝つ（枝は pure、Rung 0）
+// @status: future-syntax (Stage 3) — 挙動表の各行が spec/wasm_cross/fuel_race_*.almd に 1 fixture ずつ転写される
+
+// ── アルゴリズム・ポートフォリオ ────────────────────────────
+fn exact(p: Problem) -> Result[Answer, String] = ...      // 高価だが確実
+fn heuristic(p: Problem) -> Result[Answer, String] = ...  // 安いが失敗しうる
+
+effect fn solve(p: Problem) -> Answer = {
+  fan.race(fuel: 1_000_000) {
+    exact(p)        // 枝 0
+    heuristic(p)    // 枝 1
+  } ?? brute_force(p)
+}
+// この 1 例の全ケースを言い切る（= fixture の種）:
+//
+//   exact(枝0)        heuristic(枝1)     結果
+//   ─────────────────────────────────────────────────────────────
+//   fuel 300 で Ok    fuel 500 で Ok     → 枝 0 の値（300 < 500）
+//   fuel 300 で Ok    fuel 300 で Ok     → 枝 0 の値（同着はソース順）
+//   fuel 300 で Ok    fuel 100 で Ok     → 枝 1 の値（100 < 300）
+//   fuel 300 で Ok    fuel 100 で trap   → プログラムが trap で落ちる（可視窓内）
+//   fuel 100 で Ok    fuel 300 で trap   → 枝 0 の値 — trap は「起こらなかった」
+//   fuel 300 で Ok    fuel 100 で Err    → 枝 0 の値 — Err 枝は候補から外れるだけ
+//   枯渇              fuel 100 で Ok     → 枝 1 の値
+//   枯渇              枯渇               → Err → ?? が brute_force を評価
+
+// ── 二つの文法で同じ入力をパースする ─────────────────────────
+fn parse_strict(src: String) -> Result[Ast, String] = ...
+fn parse_lenient(src: String) -> Result[Ast, String] = ...
+
+effect fn parse(src: String) -> Ast = {
+  fan.race(fuel: 200_000) { parse_strict(src); parse_lenient(src) }
+    ?? error.fail("unparseable")!
+  // → 両方成功なら「安く済んだ方」。入力が単純なら strict、複雑なら lenient が
+  //   勝つ — その選択が決定的に再現する
+}
+
+// ── mapper 形（宣言済み・Wave 2 では block 形のみ実装）────────────
+effect fn pick_strategy(strategies: List[Strategy], input: Input) -> Plan = {
+  fan.race(fuel: 500_000, strategies, (s) => run_strategy(s, input)) ?? default_plan(input)
+}
