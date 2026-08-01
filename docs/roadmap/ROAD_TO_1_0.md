@@ -203,3 +203,28 @@ codegen が安定した上に、証明のカバレッジを runtime まで広げ
 - **open issue 40 / 40 割付済み** — バージョン行に 32、プログラムトラックに 8
 - Issue 欄が「—」の行（0.59 / ゲートリリース 0.60–0.90 / 0.96 / 0.98 / 0.99）は台帳新設の作業。着工時に issue を立てて同 PR でリンクを埋める。0.50 のゲートリリースは #999 を成果物として持つ
 - この台帳と issue リストの乖離は負債 — 新 issue は同 PR でここに割付け、クローズしたら issue リンクが closed になることで進捗が見える
+
+## Release-order deviation, 2026-08-01 — recorded so the ladder can be read honestly
+
+**The ladder's rule is one Unit, one release, in order.** It was broken during the 0.4x decade
+and this note is the correction rather than a quiet renumber.
+
+What happened: v0.45.0 shipped, `Cargo.toml` was bumped to 0.46.0, and then the work and
+records for Units **0.47, 0.48, 0.49 and 0.50 all landed on `develop` before v0.46.0 was
+tagged**. The tree therefore carried five Units' worth of change under one unreleased version
+number.
+
+Why it happened, plainly: Units 0.45, 0.47 and 0.48 resolved by *measurement* rather than by
+implementation — each concluded "the trigger does not fire, here are the numbers" — so they
+produced documents rather than artifacts, and a document feels like it does not need a release.
+It does. A release is what makes a row's conclusion citable and dated, and a measurement whose
+conclusion is "we are not building this" is exactly the kind of decision that needs a fixed
+point someone can point at later.
+
+**The correction**: releases resume in order from **v0.46.0**, one per row, and no row is
+described as shipped before its tag exists. Where a release carries records that landed early,
+its notes say so instead of pretending the ordering held.
+
+**The rule, sharpened for next time**: a Unit is not done when its `construction.md` is
+written. It is done when the tag exists. Starting the next Unit before that is what produced
+this, and the ladder is only auditable if the two stay coupled.
