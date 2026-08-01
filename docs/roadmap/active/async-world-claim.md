@@ -97,6 +97,15 @@ MSR（modification survival rate）と lang-bench は同一モデル・同一タ
 
 この表を隠して「最高」と言えば、audit（この repo の academic-rigor 規範）で落ちる。
 
+Lingua Franca の行には、審査で必ず来る問いが畳まれている — 「logical time なら LF が
+先では？」。答えは一行で立つ: **LF の時計は事象の間を並べ、Almide の時計は計算の内側で
+刻む**。LF は C / Python / TS / Rust を束ねる調整層であり、reaction の中身（target 言語の
+コード）を所有しないから、計算を可搬に計量できない — 計量は codegen の所有を要求する
+（record/replay の moat と同じ構造）。逆に分散の決定的調整は LF が正しく先行しており、
+Almide が地平の先（KPN チャネル → 分散）へ踏み出す日が来れば、そこでの LF は競合では
+なく借用元である。負けの性格は「地平の負け」— 追わない Erlang とも、時間の問題の
+Go/Verse とも、奪い返す Temporal とも違う第四の型として記録する。
+
 ## ぶっちぎりの五手
 
 ### A. Stage 1–3 を実装して出荷する
