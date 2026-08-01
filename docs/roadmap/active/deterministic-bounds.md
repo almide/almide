@@ -217,6 +217,91 @@ are not the same product:
 oracle-relative contract — while the deterministic bound gets its own name and its own, much
 stronger, promise.
 
+## Prior art — every part is solved somewhere, and the parts have never been joined
+
+This design is not novel in its pieces. Knowing exactly which pieces are borrowed sharpens what
+is actually being claimed, and each borrowed piece is a working system rather than a paper.
+
+### Verse — `race` is nearly this construct already
+
+Epic's Verse has a `race` that starts several async expressions and takes the first to finish:
+
+```verse
+Winner := race:
+    A()
+    B()
+    Sleep(5.0)
+```
+
+Its semantics are strikingly close to what stage 3 needs: the first expression to complete
+wins, the losers are cancelled, lifetimes are scoped to the `race` block, and — the part worth
+pausing on — **when several complete at the same simulation time, the one written FIRST in the
+source wins.** That is the same logical-completion-plus-source-order tiebreak proposed above,
+already shipped in a language.
+
+Verse also has effect types (`transacts`, `decides`) that roll back changes made inside a
+failure context.
+
+**Two gaps remain, and they are exactly Almide's two additions.** First, Verse races on
+*simulation time*, not on a deterministic instruction budget — so it does not address making
+two backends agree on computational cost. Second, cancellation of a losing branch is not the
+same guarantee as *its effects are never observable*: Verse has winner selection, structured
+cancellation, transactions and effect types, but they are not fused into a single contract that
+says a loser's effects cannot escape.
+
+### Esterel / Lustre / Lingua Franca — logical time, done properly
+
+The synchronous-language family has attacked "give concurrency a meaning in logical rather than
+physical time" for decades. Lingua Franca executes reactions at an explicit logical time and
+orders reactions at the same logical time by declaration order, deliberately decoupled from how
+much physical time has passed. Again: earlier logical step wins, ties by source order.
+
+The gap: their logical time is an *event and timer* time, not a *computational cost*. Nothing
+in that family bounds how much work a reaction may do.
+
+### EVM — fuel and rollback, fused
+
+The EVM is the strongest existing combination of the two halves this document needs: every
+instruction has a gas cost, exhaustion halts deterministically, and an out-of-gas transaction
+**reverts its state changes**. Fuel plus effect isolation, in one mechanism, at scale.
+
+The gap: no `fan`. The EVM solves *deterministic bounded sequential execution*; it has no
+notion of running two branches and adopting the one that logically finishes first.
+
+### Haskell's `Par` monad and LVars — determinism under a free scheduler
+
+Both achieve deterministic parallelism by restricting what parallel code may do — `Par` by
+limiting the operations available, LVars by admitting only monotonic updates — so a work-
+stealing scheduler may do as it likes and the observable result is unchanged.
+
+The gap: neither is organised around a computational budget, first-finisher adoption, or a
+bound.
+
+### The map
+
+| ingredient | solved by |
+|---|---|
+| deterministic fuel | EVM gas, Wasmtime fuel |
+| logical winner selection, source-order tiebreak | Verse `race`, Lingua Franca, Esterel |
+| structured cancellation | Verse `race` |
+| loser's effects never observable | EVM rollback, Verse transactions, purity |
+| determinism under a free scheduler | Haskell `Par`, LVars |
+
+**Each row has a strong answer. No row's answer covers another row.** The one-line description
+of what is proposed here is therefore:
+
+> **Verse's `race`, run on EVM's gas clock.**
+
+And the reason it can be one construct rather than four libraries is the same reason stated
+above: `fan` is compiler-known, so budget allocation, winner selection and effect visibility
+are all decisions the compiler makes rather than decisions distributed across user code and a
+scheduler.
+
+That is the honest positioning — not a new idea, but a **confluence of three well-solved
+sub-problems that have not previously been made to hold simultaneously**, plus one requirement
+none of them has: that two backends agree on the cost, which is what makes the result
+byte-identical rather than merely deterministic-per-implementation.
+
 ## The claim, pushed to its real strength
 
 The interesting statement is not "fuel fixes timeouts." It is:
