@@ -7,7 +7,7 @@
 
 ## Active
 
-75 items
+76 items
 
 | Item | Description |
 |------|-------------|
@@ -44,6 +44,7 @@
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) | The issue-ledger burn-down gauge: keeping the open-issue count an honest measure of remaining work |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Logical-Time Async — the async grammar design](active/logical-time-async.md) | The async grammar: fuel as the logical clock, deterministic race, oracle tier |
+| [Logical-Time Async — the implementation blueprint](active/logical-time-implementation.md) | Implementation blueprint: Op::Charge, fuel ABI, metered clones, race lowering, gates |
 | [Logical-Time Async — the proof ledger](active/logical-time-proofs.md) | Proof ledger for the logical-time async semantics: theorems, Lean core, model gate |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) | Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field |
