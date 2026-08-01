@@ -51,7 +51,7 @@ Charge { site: ChargeSiteId, cost: ChargeCost /* Const(u32) | Dyn { base, per_un
 
 ## 2. Fuel の実行機構 — 新しい ABI を作らない
 
-- **wasm**: モジュール global `$__fuel: i64`。Charge の描画は
+- **wasm**: モジュール global `$__ticks: i64`。Charge の描画は
   `global.get → i64.const cost → i64.sub → global.set` + 枯渇分岐。`Dyn` は len を
   読んで積和。
 - **native**: ランタイムの thread-local `FUEL: Cell<i64>`。描画は同型の減算 + 分岐。
@@ -102,7 +102,7 @@ bounded は metered のみ（trap は通常どおり即死 — 投機ではな�
 
 ## 5. Stage 2 — `fan.bounded`: 表面と CM-1 定数の確定
 
-- parser: fan v2 の head 文法（`fan.bounded(fuel: expr) { body }`）。`fuel:` は
+- parser: fan v2 の head 文法（`fan.bounded(ticks: expr) { body }`）。`ticks:` は
   fan 構文の要素としてパース（汎用ラベル引数は作らない — `parse_fan_primary` の
   member-access 分岐を head-args + block の分岐に拡張する）。
 - checker: `static_dispatch.rs` の fan アーム表に `bounded` を追加。body は pure 制約

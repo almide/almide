@@ -76,19 +76,19 @@ quadrantChart
 fuel が手に入った今、設計の到達点は 1 行で示せる。
 
 ```almide
-let plan = fan.bounded(fuel: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
+let plan = fan.bounded(ticks: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
 ```
 
-10 万 fuel 以内に厳密解が出ればそれを使い、出なければ貪欲解に落ちる。計算量の上限とフォールバックが、新しいキーワードなしに 1 行へ畳まれた。race も同じ調子で書ける。
+10 万 tick 以内に厳密解が出ればそれを使い、出なければ貪欲解に落ちる。計算量の上限とフォールバックが、新しいキーワードなしに 1 行へ畳まれた。race も同じ調子で書ける。
 
 ```almide
-let ans = fan.race(fuel: 1_000_000) {
+let ans = fan.race(ticks: 1_000_000) {
   exact_solve(input)
   heuristic_solve(input)
 } ?? default_answer
 ```
 
-2 本の枝を走らせ、より少ない fuel で成功した方を採る。await はどこにもない。Future も task handle もない。書くのは「何を並べるか」と「どう選ぶか」だけである。
+2 本の枝を走らせ、より少ない tick で成功した方を採る。await はどこにもない。Future も task handle もない。書くのは「何を並べるか」と「どう選ぶか」だけである。
 
 その「どう選ぶか」= head、「どう並べるか」= form の直積 1 枚が、fan v2 の表面のすべてになる。
 
@@ -97,8 +97,8 @@ let ans = fan.race(fuel: 1_000_000) {
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 |
 | settle | 全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 |
 | any | index 最小の成功（逐次フォールバック） | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 |
-| race | (spend, index) 最小の成功 | `fan.race(fuel: n) { a; b }` → `T` | `fan.race(fuel: n, xs, f)` → `T` | **pure**（Rung 0） |
-| bounded | 単一 body の計量 | `fan.bounded(fuel: n) { body }` → `T` | —（map と合成） | **pure** |
+| race | (spend, index) 最小の成功 | `fan.race(ticks: n) { a; b }` → `T` | `fan.race(ticks: n, xs, f)` → `T` | **pure**（Rung 0） |
+| bounded | 単一 body の計量 | `fan.bounded(ticks: n) { body }` → `T` | —（map と合成） | **pure** |
 | timeout | 環境が切る | `fan.timeout(ms: n) { body }` → `T` | — | oracle 可（Stage 4） |
 
 六つの head を並べると、軸は一本しかない。any は index を最小化し、race は fuel を最小化する。all と settle は選択しない。「何を最小化するか」だけが head の違いであり、head を足すときはこの表に行を足して全列を埋めることが受理条件になる（matrix gate）。
@@ -119,7 +119,7 @@ fan.any(mirrors, (m) => fetch(m))
 
 動的な場合も「thunk リストを組み立ててから渡す」2 段が「リスト + mapper」の 1 段になり、コードは厳密に短くなる。おまけも付く。動的 thunk リストは wasm 側で `List[funcref]` が表現できず wall に落ちていたが、mapper form は fan.map と同じ「データ + 閉包 1 個」の形なので、この wall クラスは構文の変更だけで消滅する。契約も form 単位に揃う — block の arm は `fan {}` と同じ auto-unwrap、mapper は `fan.map` と同じ Result 必須。head ごとの auto-wrap 例外はゼロになる。
 
-`fuel:` のラベルは飾りではない。`timeout(1000)` の 1000 をミリ秒と読まない人間はいない — それが 0.29.0 で fan.timeout を撤去した教訓の半分だった。ラベルを必須にすれば全呼び出しサイトに fuel の語が現れ、単位の誤読は構文レベルで死ぬ。ならば言語にラベル引数機構を足したのか、と思うだろう。足していない。fan の head は関数呼び出しではなく構文なので、`fuel:` と `ms:` は fan 文法自身の要素として供給される。汎用ラベル引数という言語全体の問いを、fan 経由で密輸しない。
+`ticks:` のラベルは飾りではない。`timeout(1000)` の 1000 をミリ秒と読まない人間はいない — それが 0.29.0 で fan.timeout を撤去した教訓の半分だった。ラベルを必須にすれば全呼び出しサイトに単位名が現れ、誤読は構文レベルで死ぬ。名前そのものも単位名から採った — tick は lockstep 意味論の単位であり（1 tick に 1 消費、同着はソース順）、`fan.race(ticks: n)` は「最大 n tick 走る」という仕様文の直写しになる。環境時間の `ms:` と対をなす。初案の `fuel:` は機構のメタファーが表面へ漏れるため却下し、fuel の語は機構側（内部カウンタ、`--fuel-probe`、Wasmtime の系譜）に限定する。ならば言語にラベル引数機構を足したのか、と思うだろう。足していない。fan の head は関数呼び出しではなく構文なので、`ticks:` と `ms:` は fan 文法自身の要素として供給される。汎用ラベル引数という言語全体の問いを、fan 経由で密輸しない。
 
 何を入れないかも、この文法の一部である。
 
@@ -139,17 +139,17 @@ flowchart TD
     Q1 -->|"全部"| ALL["fan { } / fan.map"]
     Q1 -->|"全部、失敗も含めて"| SETTLE["fan.settle"]
     Q1 -->|"最初の成功"| ANY["fan.any"]
-    Q1 -->|"最安の成功"| RACE["fan.race(fuel: n)"]
-    Q1 -->|"1 つに計算量の上限"| BOUNDED["fan.bounded(fuel: n)"]
+    Q1 -->|"最安の成功"| RACE["fan.race(ticks: n)"]
+    Q1 -->|"1 つに計算量の上限"| BOUNDED["fan.bounded(ticks: n)"]
 ```
 
 形はもう 1 問で決まる — 枝を静的に並べるなら block、データから量産するなら mapper。await の置き場所を誤るというクラスの間違いは、選択肢ごと存在しない。lexer に async / await のトークンはなく、AST に残った死んだ variant（`ExprKind::Await`、`r#async` フィールド）も Wave 1 で撤去される。「文法から書けない」は「表現できない」へ格上げされる。
 
-ただし、冒頭の 1 行にはまだ答えていない問いが埋まっている。`optimal_plan(g)` が途中でゼロ除算を踏んだら、どうなるのか。race の枝の途中で 10 万 fuel が尽きたら、「途中」とはどの時点のことなのか。表のどの列にもその答えはない。文法は時計を持たないからだ。答えるには、何 tick 目に何が起きたかを言い切れる装置 — 文法の一段下で回っている論理時計 — が要る。
+ただし、冒頭の 1 行にはまだ答えていない問いが埋まっている。`optimal_plan(g)` が途中でゼロ除算を踏んだら、どうなるのか。race の枝の途中で 10 万 tick が尽きたら、「途中」とはどの時点のことなのか。表のどの列にもその答えはない。文法は時計を持たないからだ。答えるには、何 tick 目に何が起きたかを言い切れる装置 — 文法の一段下で回っている論理時計 — が要る。
 
 ## 4. 意味論 — 五本の柱
 
-`fan.race(fuel: 1000) { exact(input); heuristic(input) }` と書いたとする。heuristic が途中でゼロ除算を踏んだら、プログラムは落ちるのか。exact の予算が尽きたら、それを誰がどう知るのか。文法の表はこの問いに答えない。答えは五本の柱でできた意味論の側にある。
+`fan.race(ticks: 1000) { exact(input); heuristic(input) }` と書いたとする。heuristic が途中でゼロ除算を踏んだら、プログラムは落ちるのか。exact の予算が尽きたら、それを誰がどう知るのか。文法の表はこの問いに答えない。答えは五本の柱でできた意味論の側にある。
 
 ### 柱 1 — 論理時計：fuel は機械のコストではなく、ソースのコストを数える
 

@@ -4,17 +4,17 @@
 
 // ── race の枝に oracle 効果 ─────────────────────────────────
 effect fn bad_io_race(url: String) -> String = {
-  fan.race(fuel: 1000) { http.get(url); cached() }
+  fan.race(ticks: 1000) { http.get(url); cached() }
   // error: fan.race branches must be pure
   // hint: racing I/O is environment-dependent — restructure, or use the
   //       oracle-tier fan.timeout (Stage 4)
 }
 
-// ── fuel ラベルの欠落 ──────────────────────────────────────
+// ── ticks ラベルの欠落 ──────────────────────────────────────
 effect fn bad_unlabelled(thunks: List[Strategy]) -> Int = {
   fan.race(1000, thunks, (s) => run(s))
-  // error: fan.race requires a labelled fuel budget
-  // hint: fan.race(fuel: 1000, ...) — the label prevents reading 1000 as milliseconds
+  // error: fan.race requires the ticks: label
+  // hint: fan.race(ticks: 1000, ...) — the label prevents reading 1000 as milliseconds
 }
 
 // ── v1 の thunk リスト形（Wave 1 で E0xx tombstone）──────────────
@@ -26,7 +26,7 @@ effect fn bad_thunk_list() -> Int = {
 
 // ── bounded に複数 arm ─────────────────────────────────────
 effect fn bad_multi_arm() -> Int = {
-  fan.bounded(fuel: 100) { a(); b() }
+  fan.bounded(ticks: 100) { a(); b() }
   // error: fan.bounded takes one body expression
   // hint: for selection over branches use fan.race; to run all use fan { }
 }
@@ -40,5 +40,5 @@ effect fn bad_var_capture() -> Unit = {
 
 // ── pure 文脈での fan（既存規則の一貫適用）─────────────────────
 fn bad_pure_ctx() -> Int =
-  fan.bounded(fuel: 10) { 1 }
+  fan.bounded(ticks: 10) { 1 }
   // error: fan.bounded() can only be used inside an effect fn

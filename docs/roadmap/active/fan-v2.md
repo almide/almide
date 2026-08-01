@@ -1,4 +1,4 @@
-<!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, labeled fuel -->
+<!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, labeled ticks -->
 # Fan v2 — one execution-policy grammar
 
 > 憲章: [async-inception.md](./async-inception.md)。本文書はその表面詳細である。
@@ -27,8 +27,8 @@ v2 はこれを **head × form の直積 1 枚**に置き換える。
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 | 可（観測はリスト順） |
 | settle | 選択しない。全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 | 可 |
 | any | **index 最小**の成功 | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 | 逐次（意味論ごと逐次） |
-| race | **(spend, index) 最小**の成功 | `fan.race(fuel: n) { a; b }` → `T` | `fan.race(fuel: n, xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
-| bounded | 単一 body の計量 | `fan.bounded(fuel: n) { body }` → `T` | —（map と合成） | **pure** | — |
+| race | **(spend, index) 最小**の成功 | `fan.race(ticks: n) { a; b }` → `T` | `fan.race(ticks: n, xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
+| bounded | 単一 body の計量 | `fan.bounded(ticks: n) { body }` → `T` | —（map と合成） | **pure** | — |
 | timeout | 環境が切る（oracle 層） | `fan.timeout(ms: n) { body }` → `T` | — | oracle 可 | ホスト相対 |
 
 - block form の arm は **式**（`fan {}` と同じ arm 契約: Result auto-unwrap、外側 `var`
@@ -70,13 +70,18 @@ fan-concurrency.md §3.4「Why Thunks Are Needed」は、fan.* が**関数だか
 purity wall に落としている。mapper form は「データのリスト + 閉包 1 個」— `fan.map` と
 同じ形 — なので、**この wall クラスは構文の変更だけで消滅する**。意味論の犠牲はゼロ。
 
-### 3. `fuel:` ラベルの供給源になる
+### 3. `ticks:` ラベルの供給源になる
 
 言語にラベル引数構文は**存在しない**（logical-time-async.md 初稿はここを `limit:` の
 前例ありと誤認していた — 訂正済み）。v2 では fan head が関数呼び出しではなく構文なので、
-`fan.race(fuel: n)` の `fuel:` は **fan 文法自身の要素**として実装できる。汎用ラベル引数
-機構は導入しない。単位を持つ head 引数は必ずラベルを持つ（`fuel:` / `ms:`）— 単位の
+`fan.race(ticks: n)` の `ticks:` は **fan 文法自身の要素**として実装できる。汎用ラベル引数
+機構は導入しない。単位を持つ head 引数は必ずラベルを持つ（`ticks:` / `ms:`）— 単位の
 誤読クラスを構文で殺す原則はここで統一的に効く。
+
+**命名（2026-08-01 確定）**: ラベルは単位名で揃える — 環境時間は `ms:`、論理時間は
+`ticks:`（lockstep 意味論の単位そのもの。「race は最大 n tick 走る」の直写し）。初案の
+`fuel:` は機構のメタファーが表面へ漏れるため却下。fuel の語は機構側 — 内部カウンタ、
+`--fuel-probe`、Wasmtime/EVM の系譜言及 — に限定する。
 
 ## 各 head の意味論（確定事項の整理）
 
@@ -93,9 +98,9 @@ purity wall に落としている。mapper form は「データのリスト + �
   確定させる。**bounded + `??` が主要イディオムになる**:
 
   ```almide
-  let plan = fan.bounded(fuel: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
+  let plan = fan.bounded(ticks: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
 
-  let ans = fan.race(fuel: 1_000_000) {
+  let ans = fan.race(ticks: 1_000_000) {
     exact_solve(input)
     heuristic_solve(input)
   } ?? default_answer
@@ -111,7 +116,7 @@ purity wall に落としている。mapper form は「データのリスト + �
 2. mapper form を持つのは「同型の動的データに対して arm を量産できる head」
    （all / settle / any / race）に限る。bounded / timeout は単一 body head なので持たない
    — これは意図的省略である。
-3. `fuel:` はメトリクスを消費する head（race）と定義する head（bounded）に、`ms:` は
+3. `ticks:` はメトリクスを消費する head（race）と定義する head（bounded）に、`ms:` は
    oracle head（timeout）に、**ちょうど**現れる。無印 fan / map / any / settle に予算
    引数はない — fuel 次元は `fan.bounded` の合成で届くため（logical-time-async の
    完備性規則そのまま）。
@@ -139,7 +144,7 @@ tombstone（check 時、書き換え例つき）にする。共存させない �
 |---|---|---|
 | `fan.rush`（最速を返し敗者は走り続ける） | **恒久却下** | 敗者の効果が採用後も漏れ続ける構文は、決定的モデルで意味を与えられない。「リスト順の意味を与えられないものは言語に入れない」の適用例 |
 | `fan.spawn` / `fan.link` | 地平送り | 非構造化・チャネルは logical-time-async の「将来の地平」（決定的並行性）が土台になってから。v2 には入れない |
-| 汎用ラベル引数 | 導入しない | 言語全体の呼び出し規約の問いであり、fan 経由で密輸しない。`fuel:`/`ms:` は fan 構文の要素 |
+| 汎用ラベル引数 | 導入しない | 言語全体の呼び出し規約の問いであり、fan 経由で密輸しない。`ticks:`/`ms:` は fan 構文の要素 |
 | trailing lambda（`fan.map(xs) { x => … }`） | 導入しない | 綴りが 2 通りになるだけで意味が増えない |
 | `fan.map(xs, limit: n, f)` | 入れない | 実装されていなかった（fan-concurrency-next の ✅ は stale、checker は 2 引数固定）。観測を変えないスケジューリングヒントは必要が実証されてから、別の機構（pragma 類）で |
 | `fan.all { }`（無印の別名） | 導入しない | 最頻の形が最短であるべき。別名は共存負債 |
