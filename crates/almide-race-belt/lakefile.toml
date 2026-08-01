@@ -1,0 +1,6 @@
+name = "almide-race-belt"
+version = "0.1.0"
+defaultTargets = ["AlmideRaceBelt"]
+
+[[lean_lib]]
+name = "AlmideRaceBelt"
