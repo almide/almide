@@ -371,7 +371,8 @@ fn render_fn(
     // subset honest: a USED Handle still walls below.
     let used = native_used_values(func);
     if is_main && crate::charge_probe::probe_enabled() {
-        used_shims.push(PROBE_SHIM);
+        used_shims.push(COUNTER_SHIM);
+        used_shims.push(CHARGE_SHIM);
         line!("let __almd_probe_guard = __AlmdProbeGuard;");
         line!("let _ = &__almd_probe_guard;");
     }
@@ -398,8 +399,28 @@ fn render_fn(
                 )?
             }
             Op::Charge { site, cost } => {
-                used_shims.push(PROBE_SHIM);
-                line!("__almd_charge({site}, {cost});");
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(CHARGE_SHIM);
+                let tr = crate::charge_probe::probe_enabled();
+                line!("__almd_charge({site}, {cost}, {tr});");
+            }
+            Op::Prim { kind: crate::PrimKind::BudgetEnter, dst: Some(d), args } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(BUDGET_SHIM);
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_budget_enter({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::BudgetExhausted, dst: Some(d), .. } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(BUDGET_SHIM);
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_budget_exhausted();", var(*d));
+            }
+            Op::Prim { kind: crate::PrimKind::BudgetExit, dst: Some(d), args } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(BUDGET_SHIM);
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_budget_exit({});", var(*d), var(args[0]));
             }
             other => {
                 let handled = render_native_call_op(
@@ -410,9 +431,14 @@ fn render_fn(
                     crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
                 )? || render_native_flow_op(other, &mut tys, &mut out, &mut indent, &mut if_stack)?;
                 if !handled {
+                    let detail = if let Op::Prim { kind, .. } = other {
+                        format!("Prim {kind:?}")
+                    } else {
+                        op_name(other).to_string()
+                    };
                     return Err(wall(format!(
-                        "native: op {:?} — outside the rung subset",
-                        op_name(other)
+                        "native: op {detail:?} in `{}` — outside the rung subset",
+                        func.name
                     )));
                 }
             }
@@ -792,18 +818,47 @@ include!("render_native_b.rs");
 /// Stage 1 probe shim: fuel/trace thread-locals + the charge fn + the guard
 /// that prints the triple's (consumed, trace) legs on main exit. Same hash
 /// arithmetic as the wasm leg (wrapping i64, trace*1000003+site).
-const PROBE_SHIM: &str = "thread_local! {
-    static __ALMD_FUEL: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+const COUNTER_SHIM: &str = "thread_local! {
+    static __ALMD_FUEL: std::cell::Cell<i64> = const { std::cell::Cell::new(i64::MAX) };
+    static __ALMD_FUEL_ENTRY: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_B_VERDICT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
     static __ALMD_TRACE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
-}
-fn __almd_charge(site: i64, cost: i64) {
-    __ALMD_FUEL.with(|f| f.set(f.get().wrapping_add(cost)));
-    __ALMD_TRACE.with(|t| t.set(t.get().wrapping_mul(1000003).wrapping_add(site)));
+}";
+
+/// The probe charge fn: fuel counts DOWN (consumed = MAX - fuel); the trace is
+/// the order-sensitive hash. Only probe builds call it with tracing on.
+const CHARGE_SHIM: &str = "fn __almd_charge(site: i64, cost: i64, trace: bool) {
+    __ALMD_FUEL.with(|f| f.set(f.get().wrapping_sub(cost)));
+    if trace {
+        __ALMD_TRACE.with(|t| t.set(t.get().wrapping_mul(1000003).wrapping_add(site)));
+    }
 }
 struct __AlmdProbeGuard;
 impl Drop for __AlmdProbeGuard {
     fn drop(&mut self) {
         eprintln!(\"__ALMD_PROBE {} {}\",
-            __ALMD_FUEL.with(|f| f.get()) as u64, __ALMD_TRACE.with(|t| t.get()) as u64);
+            (i64::MAX.wrapping_sub(__ALMD_FUEL.with(|f| f.get()))) as u64,
+            __ALMD_TRACE.with(|t| t.get()) as u64);
     }
+}";
+
+/// Stage 2 budget fns — the exact wasm-leg arithmetic (min-cap, lazy verdict,
+/// streaming exit).
+const BUDGET_SHIM: &str = "fn __almd_budget_enter(budget_ns: i64) -> i64 {
+    let units = budget_ns / 1000;
+    __ALMD_FUEL_ENTRY.with(|e| e.set(units));
+    let saved = __ALMD_FUEL.with(|f| f.get());
+    if units < saved {
+        __ALMD_FUEL.with(|f| f.set(units));
+    }
+    saved
+}
+fn __almd_budget_exhausted() -> i64 {
+    __ALMD_B_VERDICT.with(|v| v.get())
+}
+fn __almd_budget_exit(saved: i64) -> i64 {
+    __ALMD_B_VERDICT.with(|v| v.set(i64::from(__ALMD_FUEL.with(|f| f.get()) < 0)));
+    let consumed = __ALMD_FUEL_ENTRY.with(|e| e.get()) - __ALMD_FUEL.with(|f| f.get());
+    __ALMD_FUEL.with(|f| f.set(saved - consumed));
+    0
 }";

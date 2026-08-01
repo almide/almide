@@ -71,3 +71,39 @@ spike の発見をゲートに固定した:
    --test charge_probe_test`、~2.4s、wasmtime 不在時は動的層のみ skip）。
 
 almide-mir 既存 605 lib テストは全緑（Op::Charge の追加は無破壊）。
+
+## Stage 2 垂直スライス — fan.bounded が両ターゲットで着地（2026-08-02、同 branch）
+
+`fan.bounded(compute.ms(100)) { heavy(1000) } ?? fallback` が native v1 / wasm 両レッグで
+動き、**決定的境界**が実証された:
+
+- **flip point**: `heavy(1000)` の消費は probe 実測で 1002 charge units（entry 1 +
+  ループ頭 1001）。`compute.us(1001)` は EXHAUST、`compute.us(1002)` は OK — **両ターゲット
+  で同一の 1µs 刻みの点**で切り替わる（boundary.almd、gate で assert）。理論値と実測の
+  厳密一致。
+- probe 併用でも三点一致（bounded 込み consumed=503010 / trace 一致）。
+- 診断 4 種が ADR-0001 どおり発火: bare Int / Duration 混入 / 非 call body / 未知単位
+  （閉集合を列挙）。
+
+### 実装形（logical-time-implementation.md からの差分）
+
+- **アウトライン desugar**: `fan.bounded` は合成 fn `__almd_bounded_N(budget, args…) -> T`
+  （enter → body call → exit）に外出しされ、exit が**判定を永続化**（$__b_verdict）、
+  呼び出し側がスカラーで読む。`bounded ?? fb` は**融合形**（Result 値が一度も存在しない
+  完全スカラー If）— native rung に heap-Result ABI が無いことへの解。裸の bounded は
+  ResultOk/ResultErr ノード（wasm で動作、native は既存の rung wall）。
+- budget prims は `PrimKind::{BudgetEnter,BudgetExhausted,BudgetExit}`（scalar prim floor）。
+  min-cap（EIP-150）は enter/exit の 2 op。fuel は i64::MAX から減算、probe の consumed は
+  MAX − fuel。
+- `compute.*`/`duration.*` は checker の名義型（防火壁）+ lowering での Int(ns) erasure。
+
+### 仕様からの deviation（本実装 PR までに解消 or 明記維持）
+
+1. metered-clone 特殊化なし — bounded を含むプログラムは**全関数**が計量される
+   （bounded を含まないプログラムは 1 バイトも変わらない）。
+2. 飽和演算なし（構築子は素の i64 乗算 — S3 と差分）。負値 trap も未実装。
+3. body は単一 call・非 Result 戻りに制限（v1 と宣言済み）。
+4. callee 内で発散する body は切れない（lazy verdict — モデルが検証済みの overrun 形。
+   完走後の判定は厳密）。
+5. UFCS 曖昧診断（n.ms()）未実装。matrix gate（S6）未実装。
+6. fan{} 並列 native と bounded の相互作用は未定義のまま（Stage 3）。

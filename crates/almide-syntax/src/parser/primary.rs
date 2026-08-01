@@ -202,6 +202,30 @@ impl Parser {
     }
 
     fn parse_fan_primary(&mut self) -> Result<Expr, String> {
+        // fan.bounded(budget) { body } — a HEAD with args + block, not a call
+        // (a call followed by `{` does not parse), so it gets its own node here.
+        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
+            && self.peek_at(2).map_or(false, |t| t.value == "bounded")
+        {
+            let span = Some(self.current_span());
+            self.advance(); // fan
+            self.advance(); // .
+            self.advance(); // bounded
+            self.expect(TokenType::LParen)?;
+            let budget = self.parse_expr()?;
+            self.expect(TokenType::RParen)?;
+            self.skip_newlines();
+            let open = self.current().clone();
+            self.expect(TokenType::LBrace)?;
+            self.skip_newlines();
+            let body = self.parse_expr()?;
+            self.skip_newlines();
+            self.expect_closing(TokenType::RBrace, open.line, open.col, "fan.bounded body")?;
+            return Ok(Expr::new(self.next_id(), span, ExprKind::FanBounded {
+                budget: Box::new(budget),
+                body: Box::new(body),
+            }));
+        }
         // fan { ... } = fan block; fan.map/fan.race = module-like call
         if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
             // Treat `fan` as an identifier for member access

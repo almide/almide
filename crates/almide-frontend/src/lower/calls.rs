@@ -25,6 +25,13 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     if let Some(converted) = lower_call_json_convenience(ctx, callee, args, type_args, ty.clone(), span) {
         return converted;
     }
+    // ADR-0001 time constructors ERASE here: `compute.ms(n)` / `duration.s(n)`
+    // become `n * <ns factor>` typed Int. The nominal Compute/Duration types
+    // exist only in the checker (the clock firewall); MIR and both renderers
+    // see a plain i64 of nanoseconds.
+    if let Some(erased) = lower_time_ctor(ctx, callee, args, span) {
+        return erased;
+    }
 
     let mut ir_args: Vec<IrExpr> = Vec::new();
     let ta_raw: Vec<Ty> = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
@@ -529,3 +536,39 @@ fn desugar_assert_abort(
 }
 
 include!("calls_target.rs");
+
+/// The `compute.*` / `duration.*` unit-constructor erasure (ADR-0001 S2/S3).
+/// Returns None for every other call. The unit set is closed; the checker has
+/// already diagnosed unknown units, so an unknown unit here just declines.
+fn lower_time_ctor(
+    ctx: &mut LowerCtx,
+    callee: &ast::Expr,
+    args: &[ast::Expr],
+    span: Option<ast::Span>,
+) -> Option<IrExpr> {
+    let ast::ExprKind::Member { object, field } = &callee.kind else { return None };
+    let ast::ExprKind::Ident { name: module, .. } = &object.kind else { return None };
+    if module.as_str() != "compute" && module.as_str() != "duration" {
+        return None;
+    }
+    let factor: i64 = match field.as_str() {
+        "ns" => 1,
+        "us" => 1_000,
+        "ms" => 1_000_000,
+        "s" => 1_000_000_000,
+        "min" => 60_000_000_000,
+        "h" => 3_600_000_000_000,
+        _ => return None,
+    };
+    let [arg] = args else { return None };
+    let n = lower_expr(ctx, arg);
+    Some(ctx.mk(
+        IrExprKind::BinOp {
+            op: almide_ir::BinOp::MulInt,
+            left: Box::new(n),
+            right: Box::new(ctx.mk(IrExprKind::LitInt { value: factor }, Ty::Int, span)),
+        },
+        Ty::Int,
+        span,
+    ))
+}

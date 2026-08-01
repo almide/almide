@@ -490,6 +490,7 @@ fn try_render_wasm_source_impl(
     verbose: bool,
     mode: RenderMode,
 ) -> Result<String, LowerError> {
+    crate::charge_probe::reset_budget_used();
     // STRICT VALUE MODE spans the WHOLE render, not just the IR phase. `strict_values()`
     // is read by MIR *lowering*, which runs in `try_render_wasm_source_impl_rest` below —
     // so a guard scoped to `build_ir_with_drops` would be restored before the only code

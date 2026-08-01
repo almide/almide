@@ -34,7 +34,7 @@ pub fn probe_enabled() -> bool {
 /// Insert entry + loop-head charges into every function, in place. No-op when
 /// the probe env var is not set.
 pub fn insert_probe_charges(functions: &mut [MirFunction]) {
-    if !probe_enabled() {
+    if !probe_enabled() && !budget_used() {
         return;
     }
     for f in functions.iter_mut() {
@@ -139,3 +139,36 @@ mod cert_tests {
         assert!(fns.is_empty());
     }
 }
+
+// ───────────────────── budget activation (Stage 2) ─────────────────────
+
+thread_local! {
+    /// Set during MIR lowering when a `fan.bounded` budget intrinsic lowers on
+    /// this thread; read by the charge-insertion gate and the wasm preamble so
+    /// budget machinery (fuel globals + charges) exists exactly when a program
+    /// uses `fan.bounded` — and never otherwise (normal builds byte-identical).
+    static BUDGET_USED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Record that the current program lowers a budget intrinsic.
+pub fn note_budget_used() {
+    BUDGET_USED.with(|b| b.set(true));
+}
+
+/// True when this thread's program needs the fuel machinery.
+pub fn budget_used() -> bool {
+    BUDGET_USED.with(|b| b.get())
+}
+
+/// Reset at pipeline entry (one pipeline run per thread).
+pub fn reset_budget_used() {
+    BUDGET_USED.with(|b| b.set(false));
+}
+
+/// The counters start at i64::MAX and count DOWN; consumed = MAX - remaining.
+pub const FUEL_START: i64 = i64::MAX;
+
+/// CM-1 v0 draft: nanoseconds per charge unit (1 charge site = 1µs of the
+/// frozen abstract machine). RATIO-ONLY contract — the absolute value is a
+/// draft constant to be calibrated by the D5 gate.
+pub const CM1_NS_PER_CHARGE: i64 = 1000;

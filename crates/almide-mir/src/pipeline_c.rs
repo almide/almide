@@ -610,6 +610,7 @@ pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
 }
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
+    crate::charge_probe::reset_budget_used();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without

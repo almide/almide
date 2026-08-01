@@ -78,6 +78,53 @@ fn charge_probe_gate() {
     static_certificate_first_occurrence_equality();
     native_wall_fails_loudly_under_probe();
     dynamic_three_point_comparison();
+    bounded_deterministic_across_targets();
+}
+
+/// Stage 2: `fan.bounded` — result equality WITHOUT the probe (the shipped
+/// semantics), probe-triple equality WITH it, and the deterministic budget
+/// boundary: heavy(1000) costs exactly 1002 charge units (entry + 1001 loop
+/// heads), so `compute.us(1001)` exhausts and `compute.us(1002)` succeeds —
+/// at the SAME point on both targets. That flip is the Stage 2 claim.
+fn bounded_deterministic_across_targets() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let dir = fixtures_dir();
+    for name in ["bounded", "boundary"] {
+        let fixture = dir.join(format!("{name}.almd"));
+        // Plain runs (no probe env): the user-facing semantics.
+        let plain = |wasm: bool| {
+            let mut cmd = Command::new(almide_bin());
+            cmd.arg("run").arg(&fixture);
+            cmd.env_remove("ALMIDE_FUEL_PROBE");
+            if wasm {
+                cmd.args(["--target", "wasm"]);
+            }
+            let out = cmd.output().expect("spawn almide");
+            assert!(out.status.success(), "{name}: run failed ({})", if wasm { "wasm" } else { "native" });
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let n = plain(false);
+        let w = plain(true);
+        assert_eq!(n, w, "{name}: bounded outputs diverged across targets");
+        // Probed runs: the (consumed, trace) pair must also agree.
+        let (n_ok, _, n_probe) = probed_run(&fixture, false);
+        let (w_ok, _, w_probe) = probed_run(&fixture, true);
+        assert!(n_ok && w_ok, "{name}: probed run failed");
+        assert_eq!(n_probe, w_probe, "{name}: probe triple diverged over bounded");
+    }
+    // The flip point itself: EXHAUST through us=1001, OK from us=1002.
+    let out = {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(dir.join("boundary.almd"));
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
+    };
+    assert!(out.contains("10011"), "us=1001 must exhaust (flag 1)");
+    assert!(out.contains("10020"), "us=1002 must succeed (flag 0)");
+    assert!(!out.contains("10021"), "us=1002 must not exhaust");
 }
 
 fn dynamic_three_point_comparison() {

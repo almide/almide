@@ -175,6 +175,9 @@ pub enum ExprKind {
     Match { subject: Box<Expr>, arms: Vec<MatchArm> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>> },
     Fan { exprs: Vec<Expr> },
+    /// `fan.bounded(budget) { body }` — deterministic computation budget
+    /// (Stage 2 v1: body is a single call expression; budget is a `Compute`).
+    FanBounded { budget: Box<Expr>, body: Box<Expr> },
     ForIn { var: Sym, var_tuple: Option<Vec<Sym>>, iterable: Box<Expr>, body: Vec<Stmt> },
     While { cond: Box<Expr>, body: Vec<Stmt> },
     Lambda { params: Vec<LambdaParam>, body: Box<Expr> },
@@ -517,6 +520,10 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
     match &mut expr.kind {
         ExprKind::List { elements } | ExprKind::Tuple { elements } => visit_exprs_slice_mut(elements, f),
         ExprKind::Fan { exprs } => visit_exprs_slice_mut(exprs, f),
+        ExprKind::FanBounded { budget, body } => {
+            f(budget);
+            f(body);
+        }
         ExprKind::MapLiteral { entries } => visit_map_entries_mut(entries, f),
         ExprKind::Record { fields, .. } => visit_field_inits_mut(fields, f),
         ExprKind::SpreadRecord { base, fields } => {

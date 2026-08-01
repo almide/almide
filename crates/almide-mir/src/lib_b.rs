@@ -3,6 +3,19 @@
 /// surface the self-hosted runtime is written over).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrimKind {
+    /// Stage 2 budget region entry: arg = budget in ns; converts to charge
+    /// units (CM-1 v0: 1000ns per charge), saves the outer remaining fuel
+    /// (the result), sets fuel = min(budget_units, outer) — EIP-150 min-cap.
+    BudgetEnter,
+    /// 1 iff the current region overspent (fuel went negative) — the
+    /// exhaustion verdict read AFTER the body ran (lazy check; the model's
+    /// verified overrun form).
+    BudgetExhausted,
+    /// Restore the outer counter: arg = saved; fuel = saved - consumed.
+    /// Streaming semantics: the inner spend (even past the budget) drains
+    /// the outer region too.
+    BudgetExit,
+
     /// Reinterpret a heap handle (i32 pointer) as an i64 address value — the
     /// String/List→Int bridge so all address math is `Int` `IntBinOp`.
     Handle,

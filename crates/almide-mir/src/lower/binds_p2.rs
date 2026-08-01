@@ -461,6 +461,14 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.value_of.insert(var, dst);
         if crate::lower::strict_values() {
+            if std::env::var("ALMIDE_BOUNDED_DEBUG").is_ok() {
+                eprintln!("[bounded-debug] deferred bind var={var:?} value kind = {}",
+                    match &value.kind {
+                        IrExprKind::RuntimeCall { symbol, .. } => format!("RuntimeCall {}", symbol.as_str()),
+                        IrExprKind::Call { .. } => "Call".to_string(),
+                        other => { let d = format!("{other:?}"); d.chars().take(120).collect() },
+                    });
+            }
             return Err(crate::lower::strict_const_wall("binding"));
         }
         self.ops.push(Op::Const { dst });

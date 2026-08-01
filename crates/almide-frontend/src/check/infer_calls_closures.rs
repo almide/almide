@@ -23,6 +23,7 @@ impl Checker {
         Some(match &mut expr.kind {
             ExprKind::Block { .. } => self.infer_expr_g3_block(expr),
             ExprKind::Fan { .. } => self.infer_expr_g3_fan(expr),
+            ExprKind::FanBounded { .. } => self.infer_expr_g3_fan_bounded(expr),
             ExprKind::Call { .. } => self.infer_expr_g3_call(expr),
 
             ExprKind::Pipe { left, right, .. } => {
@@ -225,6 +226,59 @@ impl Checker {
             1 => tys.into_iter().next().unwrap_or(Ty::Unknown),
             _ => Ty::Tuple(tys.iter().map(|t| resolve_ty(t, &self.uf)).collect()),
         }
+    }
+
+    /// `ExprKind::FanBounded` arm: `fan.bounded(budget) { body }` (Stage 2 v1).
+    /// Effect-fn gate; budget must be a `Compute` (the ADR-0001 clock firewall
+    /// — bare Int and wall-clock `Duration` are named type errors); the body is
+    /// checked in a PURE context (Rung 0) and, in v1, must be a single call
+    /// returning a plain (non-Result) value. Result[T, String] like fan.map.
+    fn infer_expr_g3_fan_bounded(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanBounded { budget, body } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.bounded can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.bounded".to_string()).with_code("E007"));
+        }
+        let budget_ty = self.infer_expr(budget);
+        let budget_concrete = resolve_ty(&budget_ty, &self.uf);
+        match &budget_concrete {
+            Ty::Named(n, _) if n.as_str() == "Compute" => {}
+            Ty::Named(n, _) if n.as_str() == "Duration" => {
+                self.emit(super::err(
+                    "expected Compute, found Duration".to_string(),
+                    "fan.bounded budgets deterministic computation, not wall-clock time. \
+                     Build the budget with compute.ms(...); for a wall-clock limit use \
+                     fan.timeout (oracle tier)".to_string(),
+                    "fan.bounded budget".to_string()));
+            }
+            other => {
+                self.emit(super::err(
+                    format!("expected Compute, found {}", other.display()),
+                    "Budgets carry a unit and a clock: fan.bounded(compute.ms(100)) { ... }"
+                        .to_string(),
+                    "fan.bounded budget".to_string()));
+            }
+        }
+        if !matches!(body.kind, ExprKind::Call { .. }) {
+            self.emit(super::err(
+                "fan.bounded body must be a single function call (v1)".to_string(),
+                "Wrap the work in a function: fan.bounded(c) { work(args) }".to_string(),
+                "fan.bounded body".to_string()));
+        }
+        let saved_effect = self.env.can_call_effect;
+        self.env.can_call_effect = false;
+        let body_ty = self.infer_expr(body);
+        self.env.can_call_effect = saved_effect;
+        let body_concrete = resolve_ty(&body_ty, &self.uf);
+        if body_concrete.is_result() {
+            self.emit(super::err(
+                "fan.bounded body must return a plain value in v1".to_string(),
+                "Return the value directly; the budget adds its own Err channel".to_string(),
+                "fan.bounded body".to_string()));
+        }
+        Ty::result(body_concrete, Ty::String)
     }
 
     /// `ExprKind::Call` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.

@@ -322,6 +322,35 @@ fn render_op_prim(
         );
         return format!("    (local.set {} {body})\n", local(dst.unwrap()));
     }
+    // Stage 2 budget prims: multi-statement global sequences, not a single
+    // value expression — rendered whole here (the min-cap arithmetic of
+    // ADR-0001 / EIP-150; CM-1 v0: 1000ns per charge unit).
+    if let PrimKind::BudgetEnter = kind {
+        let d = local(dst.expect("BudgetEnter has a result"));
+        let a = local(args[0]);
+        return format!(
+            "    (global.set $__fuel_entry (i64.div_s (local.get {a}) (i64.const 1000)))\n\
+                 (local.set {d} (global.get $__fuel))\n\
+                 (if (i64.lt_s (global.get $__fuel_entry) (global.get $__fuel))\n\
+                   (then (global.set $__fuel (global.get $__fuel_entry))))\n"
+        );
+    }
+    if let PrimKind::BudgetExhausted = kind {
+        // Reads the PERSISTED verdict of the most recently exited region (set
+        // by BudgetExit), so the caller can consult it after the counter was
+        // restored — the scalar path that keeps Result off the native rung.
+        let d = local(dst.expect("BudgetExhausted has a result"));
+        return format!("    (local.set {d} (global.get $__b_verdict))\n");
+    }
+    if let PrimKind::BudgetExit = kind {
+        let d = local(dst.expect("BudgetExit has a result"));
+        let a = local(args[0]);
+        return format!(
+            "    (global.set $__b_verdict (i64.extend_i32_u (i64.lt_s (global.get $__fuel) (i64.const 0))))\n\
+                 (global.set $__fuel (i64.sub (local.get {a}) (i64.sub (global.get $__fuel_entry) (global.get $__fuel))))\n\
+                 (local.set {d} (i64.const 0))\n"
+        );
+    }
     let body = render_op_prim_mem_io(kind, args)
         .unwrap_or_else(|| render_op_prim_float(kind, dst, args, floats, fuser));
     match dst {

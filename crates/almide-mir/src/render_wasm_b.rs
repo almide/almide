@@ -363,8 +363,13 @@ fn render_op_range(
                 // this exact position. Same arithmetic as the native shim.
                 st.fuser.flush_all(body);
                 body.push_str(&format!(
-                    "    (global.set $__fuel (i64.add (global.get $__fuel) (i64.const {cost})))\n    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
+                    "    (global.set $__fuel (i64.sub (global.get $__fuel) (i64.const {cost})))\n"
                 ));
+                if crate::charge_probe::probe_enabled() {
+                    body.push_str(&format!(
+                        "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
+                    ));
+                }
             }
             _ => {
                 if render_fused_or_plain_op(ctx, st, op, op_idx, region, body) {

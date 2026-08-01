@@ -116,6 +116,14 @@ impl Checker {
         if module == "fan" {
             return self.resolve_fan_call(field, arg_tys);
         }
+        // compute.ms / duration.ms — the ADR-0001 time constructors. Compiler-known
+        // NOMINAL types: the value erases to an Int of nanoseconds in lowering; the
+        // Compute/Duration distinction lives here, in the checker, as the clock
+        // firewall (bare Int and cross-clock arguments are type errors at the
+        // consuming heads).
+        if module == "compute" || module == "duration" {
+            return Some(self.resolve_time_ctor(module, field, arg_tys));
+        }
         // Codec convenience: `json.encode(t)` is String when `t` has `T.encode`.
         if field == "encode" && arg_tys.len() == 1 {
             let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
@@ -131,6 +139,29 @@ impl Checker {
     /// `timeout` tombstones, and the unknown-fan-fn diagnostic. Verbatim text
     /// move: every arm ends in `return Some(..)`, so this always resolves
     /// (never falls through to UFCS).
+    /// The closed unit set of ADR-0001 S2 — 2 clocks x 6 units, gate-checked.
+    /// Unknown units are a diagnostic naming the whole legal set (LLMs invent
+    /// `msec`/`5m`; the matrix answer beats a nearest-match guess).
+    fn resolve_time_ctor(&mut self, module: &str, field: &str, arg_tys: &[Ty]) -> Ty {
+        let ty_name = if module == "compute" { "Compute" } else { "Duration" };
+        if !matches!(field, "ns" | "us" | "ms" | "s" | "min" | "h") {
+            self.emit(super::err(
+                format!("unknown unit '{}.{}'", module, field),
+                format!("The unit set is closed: {module}.ns / us / ms / s / min / h"),
+                format!("call to {}.{}()", module, field)));
+            return Ty::Named(sym(ty_name), vec![]);
+        }
+        if arg_tys.len() != 1 {
+            self.emit(super::err(
+                format!("{}.{}() expects 1 argument but got {}", module, field, arg_tys.len()),
+                format!("Usage: {}.{}(100)", module, field),
+                format!("call to {}.{}()", module, field)));
+            return Ty::Named(sym(ty_name), vec![]);
+        }
+        self.constrain(arg_tys[0].clone(), Ty::Int, "time constructor argument");
+        Ty::Named(sym(ty_name), vec![])
+    }
+
     fn resolve_fan_call(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         if !self.env.can_call_effect {
             self.emit(super::err(
