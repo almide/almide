@@ -161,6 +161,11 @@ tombstone（check 時、書き換え例つき）にする。共存させない �
    form、thunk リスト形の E0xx tombstone、spec 8 ファイル移行、SPEC.md §13 再記述、
    CHEATSHEET、formatter、interp ブリッジ、matrix gate 新設。parser は
    `fan.IDENT` の後の `(head-args)` と `{`/`(` の分岐を追加。
+   あわせて **async/await の死骸を AST/IR から撤去する**: lexer にキーワードは既に
+   存在せず parser の `async_` は false 固定（2026-08-01 確認）だが、
+   `ExprKind::Await` / `IrExprKind::Await` / `Decl::Fn` の `r#async` フィールドと
+   fmt / interp / optimize の形骸アームが残っている。「文法から書けない」を
+   「表現できない」に格上げする。
 2. **Wave 2 — 決定層の完成**: `fan.bounded`（logical-time Stage 2）→ `fan.race`
    （Stage 3）を v2 の形で。E027 改訂もここ。
 3. **Wave 3 — oracle 層**: `fan.timeout(ms: n) { }`（Stage 4）。
