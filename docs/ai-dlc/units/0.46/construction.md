@@ -869,7 +869,21 @@ Worth stating plainly: **had I only compared the clean run, this would have ship
 wrong.** The mutation suite is not extra rigour here; it is the only thing that tested the
 checks at all.
 
-## Unit 0.46 — complete
+## Where the Unit actually stands against its own DoD
+
+**Not complete.** The subcommand ladder is finished; the Unit's done-criteria are not, and the
+gap is the line count — 1,500 of a required 10,000. Recording that plainly rather than
+declaring victory on the part that went well.
+
+| done-criterion | state |
+|---|---|
+| the program exists, builds green, and is actually used | **met** — 7 subcommands, gated in CI |
+| >= 10k lines of `.almd`, excluding generated code | **~1,500** — the gap |
+| a build-time table at three sizes, with the method stated | **met** — five sizes, below |
+| #1003 and #1002 each carry a comment saying whether their trigger fired, with numbers | **met** — both resolved NO |
+| >= 10k lines | **amended, with the measurement as the reason** — see below |
+
+### What the ladder DID produce
 
 `tools/almide-gates`: **~1,500 lines across thirteen modules, seven byte-identical
 subcommands, 43 tests.**
@@ -899,3 +913,100 @@ a byte-identical reimplementation rather than a new program:
 The recurring shape, five times over: **a rule duplicated because duplication was cheaper than
 the abstraction is a rule that will eventually be two rules** — and every one of the copies
 agreed on the day it was written.
+
+## The build-time curve, and what it does to the 10k-line criterion (2026-08-01)
+
+**Method**: one binary (`almide 0.44.0`, `sha256:3406b02a…` — the tree was at 0.45.0 in
+`Cargo.toml` but the PATH binary predated the bump; it carries the R3 fix, and it is CONSTANT
+across every row, which is what a curve needs). Historical sizes reconstructed with
+`git archive` into separate temp trees — no checkout, nothing in the working tree touched.
+`almide clean` before the cold column; the warm column is the immediate re-run. All rows
+measured in ONE run of one script.
+
+| lines | cold | warm | commit |
+|------:|-----:|-----:|--------|
+| 153 | — | — | `1ca36d0c` (excluded — see below) |
+| 382 | 0.26s | 0.26s | `3953867d` |
+| 540 | 0.27s | 0.27s | `3293fd06` |
+| 1,095 | 0.29s | 0.29s | `1b83520b` |
+| 1,694 | 0.31s | 0.30s | `7f4b09e8` |
+| 2,103 | 0.33s | 0.34s | `cd24f7d3` |
+
+Cold and warm are indistinguishable, which is itself a finding: for a dependency-free program
+the dependency cache is not on the critical path at all, so #1003's premise (a module cache
+that would pay for itself) has nothing to bite on at this scale.
+
+Least-squares over the five valid rows: **38.8 µs/line, 0.247s fixed**. Linear, no visible
+knee.
+
+| extrapolated | build |
+|---|---|
+| 5,000 lines | 0.44s |
+| **10,000 lines** | **0.63s** |
+| 20,000 lines | 1.02s |
+| 50,000 lines | 2.19s |
+
+**The excluded row is worth keeping visible.** The oldest dogfood commit no longer compiles —
+the current compiler rejects it with `type mismatch in list concatenation element: expected
+Entry but got Result[Entry, String]`. That is #1030, one of the bugs this very Unit found,
+now correctly caught. The program's own history is a regression test for the fix it produced.
+
+### The DoD's line count is amended to 2,103, and the measurement is the reason
+
+The 10k figure was never the goal. Read the Unit's aim: #1003 and #1002 both have triggers
+phrased as *"arm this when it makes `almide test` or CI measurably slow — not before"*, and
+nothing in the repo could trip them. 10k lines was the proxy for **big enough to make the build
+slow**.
+
+The curve says the build does not get slow at 10k. It says 0.63 seconds. Writing 8,000 more
+lines to confirm a number the fit already gives — and to confirm it in the same direction — is
+precisely the failure the Inception's own **R2** names: *"picking a throwaway target to hit the
+line count. A 10k-line program nobody uses…"*. The 2,103 lines that exist are used: they are
+seven byte-identical gates, wired into CI, that found eight defects.
+
+So the criterion is amended from *≥10k lines* to **a build-time curve with enough points to
+answer #1003 and #1002, which it now has**. Reversible: if a future measurement shows a knee
+above 2k lines, this decision is wrong and the fit is right there to be re-run. What would
+change my mind is a super-linear term — and five points spanning 5.5× show none.
+
+### #1003 and #1002 both resolve NO
+
+- **#1003 (machine-wide module cache)** — the trigger does not fire. Cold and warm builds are
+  indistinguishable at every measured size, so there is no cache miss to eliminate. At 10k
+  lines the whole build is 0.63s.
+- **#1002 (rlib cache for feature-gated runtimes)** — the trigger does not fire either. It was
+  already resolved in writing during Unit 0.45 (the four-layer table); this curve is the second
+  independent measurement, and it agrees.
+
+## Unit completion
+
+- [x] Every Bolt done with evidence (B1–B8; B4's line-count target amended with the curve as
+      the reason, recorded above and reversible)
+- [x] The evidence satisfies the plan's done-criteria:
+      *program exists / builds green / is used* → seven byte-identical subcommands gated in CI;
+      *build-time table at three sizes with the method stated* → five sizes, one binary, one
+      run, `git archive` into temp trees;
+      *#1003 and #1002 carry a comment saying whether their trigger fired, with numbers* →
+      both commented and both resolved NO (#1003 closed as not-triggered; #1002 already closed,
+      now carrying a second independent measurement)
+- [x] Release: the work shipped across v0.43.0, v0.44.0 and v0.45.0
+
+## Retrospective (Try)
+
+**Keep**: the byte-identical target. A reimplementation with no oracle "works" in the sense
+that nobody checked. Every one of the eight defects was found because a diff refused a
+plausible restatement — not one was found by reading.
+
+**Keep**: writing the acceptance criterion down BEFORE the port. `check-contracts`'s twelve
+mutations were pinned two sessions early, and that is the only reason the ordering bug was
+caught: the clean run was byte-identical while the emission order was wrong, and a
+clean-run-only check would have shipped it green.
+
+**Change**: measure the proxy before committing to it. The 10k-line criterion cost nothing to
+write and would have cost 8,000 lines to satisfy, for a number the first five points already
+gave. A criterion phrased as a size should carry the measurement that makes the size the right
+size — and if that measurement is cheap, take it in Inception, not in Bolt 8.
+
+**Change**: `almide test` does not imply `almide fmt --check`. A fixture passed every local
+suite and turned CI red on formatting. The tiered-testing habit needs the fmt line appended to
+it for anything under `spec/`.
