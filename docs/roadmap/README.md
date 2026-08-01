@@ -7,7 +7,7 @@
 
 ## Active
 
-68 items
+69 items
 
 | Item | Description |
 |------|-------------|
@@ -79,6 +79,7 @@
 | [WASM Reference-Count Frees: the Ownership-Discipline Drain](active/wasm-frees-ownership-discipline.md) | Draining the reference-count frees backlog by making the ownership discipline mechanical |
 | [WASM 所有権 emit 層の機械化 (Perceus drift の構造的封じ込め)](active/wasm-ownership-emit-mechanization.md) | Mechanizing the WASM ownership emit layer to contain Perceus drift structurally |
 | [WASM Platform Frontier — beyond core Wasm 3.0](active/wasm-platform-frontier.md) | Post-Wasm-3.0 platform tracking — WASI 0.3 / Component Model, stack switching, shared-everything-threads |
+| [Zero Committed Shell](active/zero-committed-shell.md) | Drive committed shell to zero; the two primitives that block it |
 
 ## On Hold
 
