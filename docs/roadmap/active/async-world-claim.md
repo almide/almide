@@ -144,6 +144,44 @@ Verse / Go / Rust / TS と同一モデル・同一タスクの lang-bench 比較
 
 「世界最高」という語そのものは使わない。上の 5 文が揃った状態は、その語より強い。
 
+## 実行順 — 2 レーン並列 + 地平 1 本
+
+依存を解くと A→B→C の直列ではない。B の大半（B1）は fuel に依存しないので並走できる。
+
+**Lane 1（本線、直列 — worktree: 主）**
+
+1. **fan v2 Wave 1** — any/settle の block/mapper 形 + thunk tombstone + spec 8 ファイル
+   移行 + matrix gate。fuel 不要で今すぐ着手可。race を最初から v2 の形で迎えるための
+   先行工事。
+2. **Stage 1: CM-1 + charge-trace 保存** — プログラム全体の falsifier なので Wave 1 の
+   直後に置く。**ここでは region 特殊化を作らない**: 隠しフラグ（例 `--fuel-probe`）で
+   全体計測ビルドを作り、fixture 三点比較（result / consumed / trace）と validator を
+   先に立てる。特殊化機構は表面が来る Stage 2 まで遅延。
+3. **Stage 2: fan.bounded** — v2 block form + region 特殊化 + CM-1 定数の確定と台帳
+   登録（同一 PR）。
+4. **Stage 3: fan.race** — 枝刈り cap、trap 遅延判定、入れ子 streaming、E027 改訂。
+   race belt / spike のゲートを CI の受理条件として配線。→ **claim 1–3 が解禁**。
+
+**Lane 2（並走可 — worktree 分離）**
+
+- **B1: record/replay 基盤** — fuel 非依存。現行言語は oracle 効果以外すべて決定的
+  なので、ω の採録・再生は今日の表面で既に意味を持つ。効果 surface の棚卸し
+  （registered surface の oracle 効果列挙）→ ω スキーマ → tape 形式 → `--record` /
+  `--replay` → replay 等価契約 + fixture。→ **claim 4 が解禁**（B2 前でも
+  「effectful プログラムの決定的再現」として主張可能）。
+- **B2: fan.timeout(ms:)** — ω 事象を charge site で読む形。これだけ Stage 1 に依存
+  するので、Lane 1 の 2 完了後に Lane 2 へ合流。
+
+**Lane 3（dojo 側）**
+
+- **D: async タスクバンク** — v0 は Wave 1 後の表面（fan{} / map / any / settle）で
+  作れる。race / bounded タスクは Stage 3 後に追加。→ **claim 5 が解禁**。
+
+**地平（着手しない）**
+
+- **C: KPN チャネル** — Stage 3 完了後に設計文書のみ起こす。実装は #1000 の再訪条件
+  （構文ごとの契約が先）を満たしてから。
+
 ## 反証条件
 
 - 軸 1 の反例: 命令粒度の決定的 race を持つ言語・処理系が見つかる（研究言語含む）。
