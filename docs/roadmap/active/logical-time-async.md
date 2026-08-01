@@ -1,6 +1,8 @@
 <!-- description: The async grammar: fuel as the logical clock, deterministic race, oracle tier -->
 # Logical-Time Async — the async grammar design
 
+> 憲章: [async-inception.md](./async-inception.md)。本文書はその意味論詳細である。
+>
 > [deterministic-bounds.md](./deterministic-bounds.md) が立てた 4 設問（予算配分・勝者選択・
 > キャンセル・効果隔離）への回答。[concurrency-stance.md](./concurrency-stance.md)（#1000）の
 > 結論を 1 点だけ改訂する。これは設計文書であり、実装はステージング節の順で行う。

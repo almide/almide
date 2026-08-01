@@ -1,6 +1,8 @@
 <!-- description: Proof ledger for the logical-time async semantics: theorems, Lean core, model gate -->
 # Logical-Time Async — the proof ledger
 
+> 憲章: [async-inception.md](./async-inception.md)。本文書はその証明台帳である。
+>
 > [logical-time-async.md](./logical-time-async.md) の意味論が非同期機能として成立することの
 > 証明台帳。証拠は 3 層:
 >

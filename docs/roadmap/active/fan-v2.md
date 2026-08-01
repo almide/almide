@@ -1,6 +1,8 @@
 <!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, labeled fuel -->
 # Fan v2 — one execution-policy grammar
 
+> 憲章: [async-inception.md](./async-inception.md)。本文書はその表面詳細である。
+>
 > [logical-time-async.md](./logical-time-async.md)（意味論）の上に、fan の**表面全体**を
 > 一つの文法に畳む設計。[concurrency-stance.md](./concurrency-stance.md) の決定
 > （決定的データ並列）は前提であり、変更しない。

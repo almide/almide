@@ -7,11 +7,12 @@
 
 ## Active
 
-74 items
+75 items
 
 | Item | Description |
 |------|-------------|
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
+| [Async Inception — logical time as the language's time base](active/async-inception.md) | The async inception: thesis, grammar, semantics, proofs, claim and plan in one charter |
 | [The 2026 Async Claim — audit and the runaway plan](active/async-world-claim.md) | Audit of the best-async-of-2026 claim: the axis, the rivals, the five runaway moves |
 | [Behavioral Contract — 機械生成コードの「機能正しさ」を、王者の土俵を避けて取る層](active/behavioral-contract.md) | 機能正しさを王者(Dafny/F*/SPARK/Lean)の土俵を避けて取る層。C-FAITHFUL の上に C-PRESERVED(差分保存)と C-ASSERTED(批准性質)を積む。仕様の出所を機械生成レジームへずらす戦略。 |
 | [Build Speed: Runtime rlib + Hot-Fn Inlining](active/build-speed-runtime-rlib.md) | Native build-speed — precompiled almide_rt runtime rlib, and recovering the shipping-build inlining gap with #[inline] |

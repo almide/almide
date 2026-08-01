@@ -1,6 +1,8 @@
 <!-- description: Audit of the best-async-of-2026 claim: the axis, the rivals, the five runaway moves -->
 # The 2026 Async Claim — audit and the runaway plan
 
+> 憲章: [async-inception.md](./async-inception.md)。本文書はその主張監査である。
+>
 > 「2026 年世界最高の非同期文法」と**言えるか**の監査と、**ぶっちぎりにする**ための五手。
 > 設計は [logical-time-async.md](./logical-time-async.md) / [fan-v2.md](./fan-v2.md)、
 > 証明は [logical-time-proofs.md](./logical-time-proofs.md)。本文書は主張の側を扱う —
