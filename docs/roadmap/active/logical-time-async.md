@@ -24,6 +24,10 @@ tiebreak（Verse / Lingua Franca / Esterel）、制限による決定性（Par m
 
 ## 表面 — 追加は 2 つ、キーワードはゼロ
 
+> **形の改訂**: 表面の形（thunk 引数の関数形）は [fan-v2.md](./fan-v2.md) の block form
+> — `fan.bounded(fuel: n) { body }` / `fan.race(fuel: n) { arm; arm }` — に置き換えられた。
+> 本文書の意味論（fuel、lockstep、trap 窓、入れ子、CM-1）はすべてそのまま適用される。
+
 ```almide
 fan.bounded(fuel: n, thunk)   // Result[T, String] — n fuel 以内に完了すれば Ok
 fan.race(fuel: n, thunks)     // Result[T, String] — 各枝に n fuel、最小消費の成功が勝つ
@@ -58,8 +62,14 @@ fan.timeout(ms, thunk)        // 環境相対。R_Ω 契約クラス。それま
 
 `fan.timeout(1000)` の 1000 をミリ秒と読まない人類は存在しない、というのが 0.29.0 の教訓
 だった。`fan.race(1000, ts)` にも同じ危険が残る。ラベル必須にすると全呼び出しサイトに
-`fuel` の語が現れ、単位の誤読が構文レベルで死ぬ。`fan.map(xs, limit: 16, f)` に前例があり、
-新しい構文機構は要らない。
+`fuel` の語が現れ、単位の誤読が構文レベルで死ぬ。
+
+**訂正（2026-08-01）**: 初稿は `fan.map(xs, limit: 16, f)` をラベル引数の前例としたが、
+これは**誤り**。`limit:` は実装されておらず（checker は fan.map を 2 引数固定で検査）、
+言語にラベル引数構文は存在しない — fan-concurrency-next.md の status 表（✅）が stale
+だった。ラベルの供給源は [fan-v2.md](./fan-v2.md) の block 文法である: fan head は関数
+呼び出しではなく構文なので、`fuel:` は fan 文法自身の要素として実装でき、汎用ラベル引数
+機構は導入しない。
 
 ### なぜ `fan.race` の名を再利用するか
 
