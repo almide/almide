@@ -228,3 +228,77 @@ its notes say so instead of pretending the ordering held.
 **The rule, sharpened for next time**: a Unit is not done when its `construction.md` is
 written. It is done when the tag exists. Starting the next Unit before that is what produced
 this, and the ladder is only auditable if the two stay coupled.
+
+## Merged past unverified CI, 2026-08-01 — the mechanism that should have stopped it
+
+**v0.47.0, v0.48.0 and v0.49.0 were tagged on commits whose CI never completed.** Not failed —
+**CANCELLED**, each superseded by the next merge while still in flight. Recorded here because
+the cause is a missing mechanism, not a missing intention.
+
+**What happened.** The first two release PRs were merged after explicitly polling their checks
+to green. Polling took ~50 minutes per release, so the remaining three switched to
+`gh pr merge --merge --auto`, expecting auto-merge to hold until checks passed. `main` requires
+a pull request but has **no required status checks**, so `--merge` executed immediately and
+`--auto` was a no-op. The command returned `MERGED` and the release proceeded.
+
+**A flag was substituted for a verification.** That is the whole failure. The intention was
+identical in all five releases; only the enforcement differed.
+
+**The damage, measured rather than assumed**: `git diff v0.49.0 v0.50.0` restricted to
+`crates/ src/ stdlib/ runtime/ spec/ tests/ tools/ .github/` is **empty** — every difference is
+documentation — and v0.50.0 (`c75f2ee8`) is green on `main`. So the three tags are verified
+transitively and nothing shipped is unverified in substance. Each release note now says so
+rather than leaving the gap to be discovered.
+
+**Not retracted, and the reason matters.** The release-deletion procedure in CLAUDE.md is for a
+BROKEN release. These are not broken; they lack a completed run on their own commit, which is a
+process defect. Deleting them would break anyone who pinned a tag, and removing 0.49 alone
+would restore the 0.48 → 0.50 gap that this ladder exists to prevent.
+
+### The fix is a mechanism, not a resolution
+
+**Required status checks on `main` are NOT configured and should be.** With them, `--merge`
+would have been refused by GitHub regardless of what the operator intended:
+
+```bash
+gh api -X PUT repos/almide/almide/branches/main/protection --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "Test Rust", "Test WASM", "Emit & Format",
+      "Cross-Target (Rust vs WASM)",
+      "Coq proofs + axiom audit + PCC gate",
+      "WASM host-arch determinism"
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+JSON
+```
+
+`"strict": true` also forces the branch to be up to date before merging, which would have
+caught the second half of this: `develop` moved under two of these PRs while they were open, so
+the checks that were cancelled were cancelled for a reason worth surfacing.
+
+This is the same discipline the repository already applies to everything else — the contract
+ledger, the ratchets, the down-only counts. **A rule that depends on the operator remembering
+is not a rule.** Until it is configured, the release procedure below is the fallback, and it is
+strictly weaker.
+
+### Until then: the release procedure has one added step
+
+Between "merge" and "tag": **confirm every check on the PR reached `SUCCESS`**, by reading the
+conclusions, not by trusting a merge flag.
+
+```bash
+gh pr view <N> --json statusCheckRollup \
+  --jq '[.statusCheckRollup[]|select(.conclusion!="SUCCESS" and .conclusion!="SKIPPED")|{name,conclusion,status}]'
+```
+
+Empty output, and only empty output, is permission to tag. `CANCELLED` counts as not-verified.
