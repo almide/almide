@@ -20,8 +20,18 @@ edition = "2021"
 # build ("current package believes it's in a workspace when it's not").
 [workspace]
 
+# The EDIT LOOP profile. `opt-level = 0`, not 1, because opt-level is essentially the whole
+# cost of `almide run`: on a 2,103-line / 15-module program the cargo phase is 3,215ms at
+# opt-level 1 and 724ms at 0 -- 4.4x -- measured with a real source edit each time and a
+# phase trace INSIDE the pipeline (ALMIDE_TIME_PHASES=1), not by re-running cargo, which
+# hits its own cache and reports a rebuild it did not do.
+# The binary is ~1.33x slower to RUN (671ms vs 506ms on the same program), so the trade is
+# ~2.5s of compile against ~0.17s of execution, on every edit. `--release` and
+# `almide build` are unchanged for when the binary's speed is what matters.
+# Checked before changing: 200,000-deep non-tail recursion behaves identically at both
+# levels, and `almide test` is unaffected because it runs on the wasm leg.
 [profile.dev]
-opt-level = 1
+opt-level = 0
 overflow-checks = false
 
 [profile.release]
@@ -42,8 +52,18 @@ edition = "2021"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 webpki-roots = "0.26"
 
+# The EDIT LOOP profile. `opt-level = 0`, not 1, because opt-level is essentially the whole
+# cost of `almide run`: on a 2,103-line / 15-module program the cargo phase is 3,215ms at
+# opt-level 1 and 724ms at 0 -- 4.4x -- measured with a real source edit each time and a
+# phase trace INSIDE the pipeline (ALMIDE_TIME_PHASES=1), not by re-running cargo, which
+# hits its own cache and reports a rebuild it did not do.
+# The binary is ~1.33x slower to RUN (671ms vs 506ms on the same program), so the trade is
+# ~2.5s of compile against ~0.17s of execution, on every edit. `--release` and
+# `almide build` are unchanged for when the binary's speed is what matters.
+# Checked before changing: 200,000-deep non-tail recursion behaves identically at both
+# levels, and `almide test` is unaffected because it runs on the wasm leg.
 [profile.dev]
-opt-level = 1
+opt-level = 0
 overflow-checks = false
 
 [profile.release]
@@ -245,8 +265,18 @@ name = "{}"
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
+# The EDIT LOOP profile. `opt-level = 0`, not 1, because opt-level is essentially the whole
+# cost of `almide run`: on a 2,103-line / 15-module program the cargo phase is 3,215ms at
+# opt-level 1 and 724ms at 0 -- 4.4x -- measured with a real source edit each time and a
+# phase trace INSIDE the pipeline (ALMIDE_TIME_PHASES=1), not by re-running cargo, which
+# hits its own cache and reports a rebuild it did not do.
+# The binary is ~1.33x slower to RUN (671ms vs 506ms on the same program), so the trade is
+# ~2.5s of compile against ~0.17s of execution, on every edit. `--release` and
+# `almide build` are unchanged for when the binary's speed is what matters.
+# Checked before changing: 200,000-deep non-tail recursion behaves identically at both
+# levels, and `almide test` is unaffected because it runs on the wasm leg.
 [profile.dev]
-opt-level = 1
+opt-level = 0
 overflow-checks = false
 
 [profile.release]

@@ -66,7 +66,67 @@ The tell in both cases was a number that was too good — a cold build exactly e
 one, and a 36× speedup from one flag — and in both cases the right move was to ask what the
 fast path actually did before reporting what it meant.
 
-## What is NOT attributed yet, stated as an open number
+## ATTRIBUTED — the trace answered it, and the answer was not a cache
+
+The section below preserved the open number and the hypothesis. Both are now resolved by
+instrumenting the pipeline instead of reconstructing it, which is the method the retractions
+kept pointing at.
+
+`PhaseTimer` in `src/cli/run.rs`, behind `ALMIDE_TIME_PHASES=1`, on an output-changing edit to
+the 2,103-line program:
+
+```
+[phase] frontend+emit          323ms   (cumulative     323ms)
+[phase] v1-native-render        16ms   (cumulative     340ms)
+[phase] cargo                 3092ms   (cumulative    3432ms)
+```
+
+**cargo is 90% of the edit loop.** The v1 native render — which retraction 2 wrongly blamed for
+97.6% — is 16ms. And the hypothesis in the section below was right: the standalone
+`cargo build` that read 0.32s was a fourth cache hit.
+
+### And the 3.1s is opt-level, not the cache design
+
+With a real Almide edit before every row so nothing can hit a cache, reading the cargo phase
+from the trace:
+
+| dev `opt-level` | cargo phase |
+|---|---|
+| 0 | **724ms** |
+| 1 (the default until now) | 3,215ms |
+| 2 | 3,970ms |
+
+The generated crate is a single 7,733-line `main.rs`, and optimising it is the entire cost.
+`CARGO_INCREMENTAL=1` cannot help — there is nothing to partition.
+
+**So the edit loop was paying for optimisation it throws away**, and #1003's cache would have
+been an elaborate mechanism for avoiding work that should not be done in that path at all.
+
+### The change, and what was checked before making it
+
+`[profile.dev] opt-level` 1 → 0 in all three generated-Cargo.toml templates.
+
+| | before | after |
+|---|---|---|
+| `almide run` after a one-module edit | 4.07s | **1.47s** |
+| — of which cargo | 3,215ms | **1,127ms** |
+
+Verified before changing, because "it is faster" is not sufficient reason to change a profile:
+
+- **Recursion depth is unaffected.** 200,000-deep NON-tail recursion returns the same answer at
+  both levels. This was the most plausible reason for the original `opt-level = 1` — the
+  language's idiom guide pushes recursion over loops — and it does not hold.
+- **`almide test` is unaffected**: 7.1s for `spec/lang` at both levels, cold or warm, because
+  the test path runs on the wasm leg and never reaches cargo.
+- **The runtime cost is real and small**: the produced binary is ~1.33× slower (671ms vs 506ms
+  on the same program). The trade is ~2.5s of compile against ~0.17s of execution per edit.
+- **`--release` and `almide build` are untouched**, so the optimised profile is still one flag
+  away and is still what ships.
+
+Reversible: the numbers are in the template's own comment, so raising the level back requires
+disagreeing with a measurement that is written next to the value.
+
+## What was NOT attributed — kept for the record
 
 The 3.98s edit loop does not decompose into anything I have measured:
 
@@ -115,8 +175,13 @@ What is already known and does constrain the design:
 
 - [x] The trigger is resolved with numbers from 0.46's program — **fired**, at ~970 lines
 - [x] #1003 carries the corrected measurement and is reopened
-- [ ] The cache is built only if it fired — **fired, but the cost is not yet attributed**;
-      building on an unattributed number is the failure this Unit has already made twice today
+- [x] The cost is attributed: cargo 90%, and within cargo it is `opt-level`
+- [x] The edit loop is **2.8× faster** (4.07s → 1.47s) by removing optimisation work from a
+      path that discards it — not by caching it
+- [ ] #1003's typed-IR + per-module rlib cache: **still open, and now correctly scoped.** With
+      opt-level fixed, the remaining cargo phase is 1,127ms on 2,103 lines and still
+      whole-program. The cache is the answer to THAT, and the trigger for building it should be
+      re-derived from the new curve rather than inherited from the pre-fix one
 
 ## Retrospective (Try)
 

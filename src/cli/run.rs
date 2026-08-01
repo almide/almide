@@ -66,19 +66,54 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 /// wasm leg; Drop erased to Rust scope-end, ownership verified pre-render) and
 /// fall back to the v0 source on a WALL — a v1-rendered program is never wrong.
 pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
+    let t = PhaseTimer::start();
     let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
+    t.lap("frontend+emit");
     let rs_code = if native_verified && !test_mode {
         super::render_v1_native_or_fallback(file, rs_code)
     } else {
         rs_code
     };
+    t.lap("v1-native-render");
 
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).
     let (native_deps, source_root) = super::load_native_build_config(file);
 
     let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
-    build_native_cached(&rs_code, use_test_harness, release, project_dir_override, &native_deps, source_root.as_deref())
+    let out = build_native_cached(&rs_code, use_test_harness, release, project_dir_override, &native_deps, source_root.as_deref());
+    t.lap("cargo");
+    out
+}
+
+/// Phase timing for the edit loop, behind `ALMIDE_TIME_PHASES=1`.
+///
+/// Unit 0.49 spent two retractions attributing the ~4s edit-loop cost by re-running the
+/// phases as separate commands and summing them: the parts came to 0.86s against a 3.98s
+/// whole, because a separately-invoked phase can hit a cache the real pipeline misses. This
+/// measures the pipeline itself, which is the only thing that can be wrong about it.
+pub(crate) struct PhaseTimer {
+    on: bool,
+    start: std::time::Instant,
+    last: std::cell::Cell<std::time::Instant>,
+}
+
+impl PhaseTimer {
+    pub(crate) fn start() -> Self {
+        let now = std::time::Instant::now();
+        Self { on: std::env::var_os("ALMIDE_TIME_PHASES").is_some(), start: now, last: std::cell::Cell::new(now) }
+    }
+    pub(crate) fn lap(&self, label: &str) {
+        if !self.on { return; }
+        let now = std::time::Instant::now();
+        eprintln!(
+            "[phase] {:<18} {:>7.0}ms   (cumulative {:>7.0}ms)",
+            label,
+            now.duration_since(self.last.get()).as_secs_f64() * 1000.0,
+            now.duration_since(self.start).as_secs_f64() * 1000.0,
+        );
+        self.last.set(now);
+    }
 }
 
 /// Build a native binary from GENERATED Rust source through a content-addressed
