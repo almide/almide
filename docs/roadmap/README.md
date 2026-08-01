@@ -7,7 +7,7 @@
 
 ## Active
 
-69 items
+70 items
 
 | Item | Description |
 |------|-------------|
@@ -25,6 +25,7 @@
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) | Which layers of the well-typed-source-to-correct-binary chain still lack a mechanical or mathematical proof |
 | [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
+| [Deterministic Bounds — the scientific path to a timeout that does not break byte-identity](active/deterministic-bounds.md) | A deterministic replacement for timeouts — fuel, quasi-determinism, oracle-relative contracts |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) | Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause |
 | [Flight Evidence Gaps — 実地監査所見台帳](active/flight-evidence-gaps.md) | Hands-on internal audit findings (2026-07-03) — the measured distance between DAL-A philosophy and DAL-A evidence, as 7 findings with corrective work items and acceptance criteria |
