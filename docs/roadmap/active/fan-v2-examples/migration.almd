@@ -1,0 +1,38 @@
+// v1 → v2 移行対訳
+// @status: 上段（v1）は撤去される形、下段（v2）が移行先。
+
+// ── any: thunk リスト → block ──────────────────────────────
+// v1:  fan.any([() => http_fetch(a), () => http_fetch(b)])
+// v2:
+effect fn any_static(a: String, b: String) -> String = {
+  fan.any { http_fetch(a); http_fetch(b) }
+}
+
+// ── any: map で thunk 量産 → mapper 形 ─────────────────────────
+// v1:  fan.any(mirrors |> list.map((m) => () => fetch(m)))
+// v2:
+effect fn any_dynamic(mirrors: List[String]) -> String = {
+  fan.any(mirrors, (m) => fetch(m))
+}
+// → wasm の List[funcref] wall もこの形の変更だけで消滅する
+
+// ── settle: 同型 ─────────────────────────────────────────
+// v1:  fan.settle([() => risky_a(), () => risky_b()])
+// v2:
+effect fn settle_static() -> (Result[A, String], Result[B, String]) = {
+  fan.settle { risky_a(); risky_b() }
+}
+
+// ── race: 0.42.0 撤去済 → fuel 付きで新生（E027 は署名移行ヒントに改訂）──
+// v1:  fan.race(thunks)          — 実体は thunks[0]() と等価だった
+// v2:
+effect fn race_new(p: Problem) -> Answer = {
+  fan.race(fuel: 1_000_000) { exact(p); heuristic(p) } ?? fallback(p)
+}
+
+// ── timeout: 0.29.0 撤去済 → Stage 4 の oracle 層で新生 ─────────────
+// v1:  fan.timeout(5000, () => http.get(url))
+// v2 (Stage 4):
+effect fn timeout_new(url: String) -> String = {
+  fan.timeout(ms: 5000) { http.get(url) } ?? cached_page(url)
+}

@@ -367,6 +367,7 @@ C（KPN チャネル）には着手しない。Stage 3 のあとに設計文書�
 | fan-v2.md | 表面の詳細（head × form・移行・却下表・Wave） |
 | logical-time-proofs.md | 証明台帳（T1–T9・訂正記録） |
 | logical-time-implementation.md | 実装方式（Op::Charge・fuel ABI・metered 特殊化・ゲート配線） |
+| fan-v2-examples.md + fan-v2-examples/*.almd | リファレンス例（コード原本は .almd、挙動注記が fixture の種） |
 | async-world-claim.md | 主張の監査（競合表・五手・実行順の原本） |
 | `crates/almide-race-belt/` | Lean 機械証明（0 sorry、CI 常駐） |
 | `research/spike/logical-time-race/` | 全数合流ゲート（`run-gate.sh`） |
