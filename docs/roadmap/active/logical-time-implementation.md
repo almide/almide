@@ -109,9 +109,10 @@ bounded は metered のみ（trap は通常どおり即死 — 投機ではな�
 
 ## 5. Stage 2 — `fan.bounded`: 表面と CM-1 定数の確定
 
-- parser: fan v2 の head 文法（`fan.bounded(d) { body }`）。予算リテラルは
-  fan 構文の要素としてパース（汎用ラベル引数は作らない — `parse_fan_primary` の
-  member-access 分岐を head-args + block の分岐に拡張する）。
+- parser: fan v2 の head 文法（`fan.bounded(<expr>) { body }`）。`parse_fan_primary` の
+  member-access 分岐を head-args + block の分岐に拡張するだけでよい。**ラベルも
+  リテラル接尾辞も要らない** — 予算はただの式（`compute.ms(100)`）であり、
+  lexer は無変更（ADR-0001）。
 - checker: `static_dispatch.rs` の fan アーム表に `bounded` を追加。body は pure 制約
   （既存 purity 機構）。型は `Result[T, String]`、auto-unwrap は race/any/settle の
   既存契約に従う。

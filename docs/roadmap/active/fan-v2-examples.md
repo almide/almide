@@ -27,13 +27,13 @@ let cfg  = fan.any { fs_config(); env_config(); default_config() }
 let body = fan.any(mirrors, (m) => fetch_from(m))
 
 // bounded — 計算量の上限（Stage 2）
-let plan = fan.bounded(100ms) { optimal_plan(g) } ?? greedy_plan(g)
+let plan = fan.bounded(compute.ms(100)) { optimal_plan(g) } ?? greedy_plan(g)
 
 // race — 最安の成功が勝つ（Stage 3、枝は pure）
-let ans = fan.race(1s) { exact(input); heuristic(input) } ?? default_ans
+let ans = fan.race(compute.s(1)) { exact(input); heuristic(input) } ?? default_ans
 
 // timeout — 環境が切る（Stage 4、oracle 層。それまで tombstone）
-let page = fan.timeout(5s) { http.get(url) } ?? cached_page
+let page = fan.timeout(duration.s(5)) { http.get(url) } ?? cached_page
 ```
 
 ## 2. ファイル索引

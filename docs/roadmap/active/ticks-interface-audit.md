@@ -34,7 +34,7 @@
 
 > `ticks: 100_000` は誰にも見積もれない。CM-1 は versioned な抽象コスト表で、人間にも
 > LLM にも事前直感がない。しかも予算は body の実装に結合する — `optimal_plan` を
-> リファクタすれば 100_000 は腐る。**編集で腐る魔法数を必須引数にするのは、
+> リファクタすれば 100_000 は腐る。**編集で腐るマジックナンバーを必須引数にするのは、
 > modification survival を掲げる言語の自己矛盾に近い。**
 
 ## 修正 1 — race の `ticks:` を任意化する
@@ -53,7 +53,7 @@ fan.race { exact(p); heuristic(p) }   // 予算なし — 発明すべき数字�
   新しい穴ではない。ガードが欲しい枝構成（探索の暴走など）では `ticks:` を付ける:
 
 ```almide
-fan.race(1s) { search_a(p); search_b(p) }   // ガード付き
+fan.race(compute.s(1)) { search_a(p); search_b(p) }   // ガード付き
 ```
 
 - `fan.bounded` の `ticks:` は**必須のまま** — bound することが構文の存在理由だから。

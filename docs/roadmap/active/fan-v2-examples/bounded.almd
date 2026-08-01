@@ -4,8 +4,8 @@
 
 // ── 基本形: 予算内なら厳密解、なければフォールバック ───────────────
 effect fn plan_route(g: Graph) -> Route = {
-  fan.bounded(100ms) { optimal_route(g) } ?? greedy_route(g)
-  // → optimal_route の消費 ≤ 100ms なら Ok(値) が ?? を素通り
+  fan.bounded(compute.ms(100)) { optimal_route(g) } ?? greedy_route(g)
+  // → optimal_route の消費が決定的時計で 100ms 以内なら Ok(値) が ?? を素通り
   // → 超えたら Err（台帳定数メッセージ）→ ?? が greedy_route(g) を評価
   // → optimal_route 自身が err(..) を返した場合も ?? に落ちる
   //   （枯渇と枝の Err はメッセージ文字列でのみ区別 — 単一エラーチャネルの仕様）
@@ -13,7 +13,7 @@ effect fn plan_route(g: Graph) -> Route = {
 
 // ── body は通常のブロック（let も書ける — bounded は「単一 body head」）──
 effect fn summarise(text: String) -> String = {
-  fan.bounded(50ms) {
+  fan.bounded(compute.ms(50)) {
     let parsed = parse_log(text)
     let ranked = parsed |> list.filter(is_error) |> rank_by_severity
     render(ranked)
@@ -22,10 +22,10 @@ effect fn summarise(text: String) -> String = {
 
 // ── 端の挙動 ────────────────────────────────────────────────
 effect fn edges() -> Unit = {
-  let a = fan.bounded(0ms) { 42 } ?? -1
+  let a = fan.bounded(compute.ms(0)) { 42 } ?? -1
   // → a == 42 — 定数は charge 前に完了する（0 消費で買える）
 
-  let b = fan.bounded(10ms) { loop_forever() } ?? -1
+  let b = fan.bounded(compute.ms(10)) { loop_forever() } ?? -1
   // → b == -1 — W1（全サイクルは charge site を通る）により発散は必ず枯れる
 
   io.println("${int.to_string(a)} ${int.to_string(b)}")
@@ -33,8 +33,8 @@ effect fn edges() -> Unit = {
 
 // ── 入れ子: min-cap は暗黙 ───────────────────────────────────
 effect fn nested(x: Int) -> Int = {
-  fan.bounded(10ms) {
-    let a = fan.bounded(50ms) { step_a(x) } ?? cheap_a(x)
+  fan.bounded(compute.ms(10)) {
+    let a = fan.bounded(compute.ms(50)) { step_a(x) } ?? cheap_a(x)
     // → 内側の実効予算は min(5_000, 外側残量) — 外側は 1_000 しか持たないので
     //   step_a は実質 1_000 未満で走る。内側が枯れたら cheap_a に落ち、
     //   その消費も外側から引かれ続ける（streaming 消費）

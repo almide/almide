@@ -4,7 +4,7 @@
 
 // ── race の枝に oracle 効果 ─────────────────────────────────
 effect fn bad_io_race(url: String) -> String = {
-  fan.race(1s) { http.get(url); cached() }
+  fan.race(compute.s(1)) { http.get(url); cached() }
   // error: fan.race branches must be pure
   // hint: racing I/O is environment-dependent — restructure, or use the
   //       oracle-tier fan.timeout (Stage 4)
@@ -35,7 +35,7 @@ effect fn bad_thunk_list() -> Int = {
 
 // ── bounded に複数 arm ─────────────────────────────────────
 effect fn bad_multi_arm() -> Int = {
-  fan.bounded(100ms) { a(); b() }
+  fan.bounded(compute.ms(100)) { a(); b() }
   // error: fan.bounded takes one body expression
   // hint: for selection over branches use fan.race; to run all use fan { }
 }
@@ -49,5 +49,5 @@ effect fn bad_var_capture() -> Unit = {
 
 // ── pure 文脈での fan（既存規則の一貫適用）─────────────────────
 fn bad_pure_ctx() -> Int =
-  fan.bounded(10ms) { 1 }
+  fan.bounded(compute.ms(10)) { 1 }
   // error: fan.bounded() can only be used inside an effect fn

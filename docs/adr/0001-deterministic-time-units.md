@@ -7,6 +7,20 @@
   [logical-time-async.md](../roadmap/active/logical-time-async.md)（意味論）、
   [fan-v2.md](../roadmap/active/fan-v2.md)（文法）
 
+## 用語集
+
+| 用語 | 意味 | 参照 |
+|---|---|---|
+| **壁時計**（wall clock） | ホストの実時間。`Date.now()` / `Instant::now()` が返す量。ホストの速度・負荷・スケジューラに依存し、(プログラム, 入力) の関数では**ない** | 一般用語 |
+| **論理時計**（logical clock） | 物理時間から独立した進行の尺度。**用語の衝突に注意** — 分散システムの Lamport 論理時計は happens-before の半順序を数えるものであり、本 ADR の用法（プログラム自身の実行が進める決定的カウンタ）とは別概念である | [Lamport 1978](https://lamport.azurewebsites.net/pubs/time-clocks.pdf)（同名の別概念） |
+| **決定的時計**（deterministic clock） | 本設計の論理時計。CM-1 のコスト表に従って charge site ごとに進む。値は (プログラム, 入力) の関数で、native / wasm / 全ホストで一致する。壁時計と対をなし、**どちらを読むかは fan の head が名乗る** | [logical-time-async.md](../roadmap/active/logical-time-async.md) |
+| **charge site** | 決定的時計が進む**唯一の点**。共有 MIR の basic block 入口などに置かれる。fuel 系の構文はここでカウンタを読み、oracle 系の構文は同じ点で環境を読む（中断点統一原理） | [logical-time-implementation.md](../roadmap/active/logical-time-implementation.md) |
+| **lockstep 意味論** | race の勝者選択を語る絵 — 全枝が決定的時計を同じ歩幅で進み、最初に完了した枝が勝つ。同着はソース順。実装が使う等価な特徴づけは「(消費, index) の辞書式最小」で、**この 2 つが一致すること**が「物理時間なしの race」の内容である | [logical-time-async.md §決定的事象規則](../roadmap/active/logical-time-async.md)、[Decisive.lean `Ev.prec`](../../crates/almide-race-belt/AlmideRaceBelt/Decisive.lean) |
+| **versioned な抽象コスト表**（CM-1） | 各 MIR op に決定的時計の進み幅を割り当てる表。契約台帳に載る**意味論的オブジェクト**であり、定数の変更は semantic change（版数バンプ）として扱う。EVM の gas schedule が同型の先例 | [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf) Appendix G |
+| **EVM**（Ethereum Virtual Machine） | Ethereum の実行環境。全ノードが同じ状態遷移に同じ gas schedule を適用し、同じ out-of-gas 判定へ到達することで合意を保つ。**決定的な計算量上限の、最大規模の実運用例** | [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf) / [ethereum.org: gas](https://ethereum.org/developers/docs/gas/) |
+| **race belt の 7 定理** | `crates/almide-race-belt/` の Lean 4 定理群（0 sorry、CI `lean-proofs` で kernel-check）。決定的事象の一意性・部分集合安定性・枝刈り cap が決定事象と trap 可視窓を隠せないこと・合流。**すべて単位に依存しない**（事象の時刻は `Nat`）ため、本 ADR の単位変更で 1 文字も変わらない | [Decisive.lean](../../crates/almide-race-belt/AlmideRaceBelt/Decisive.lean) |
+| **fuel** | 決定的時計を実装する**機構側**の語（内部カウンタ、`--fuel-probe`、Wasmtime / EVM の系譜）。表面の語彙には出さない | [Wasmtime: fuel vs epoch](https://docs.wasmtime.dev/examples-interrupting-wasm.html) |
+
 ## Context
 
 決定的な計算量予算（`fan.bounded` / `fan.race`）の表面表記を決める必要があった。
@@ -20,7 +34,7 @@
 
 3 の欠陥が本 ADR の出発点である。tick の絶対値は CM-1（versioned な抽象コスト表）に
 依存し、人間にも LLM にも事前の直感がない。さらに予算は body の実装に結合するので、
-`optimal_plan` をリファクタすれば `100_000` は腐る。**編集で腐る魔法数を必須引数に
+`optimal_plan` をリファクタすれば `100_000` は腐る。**編集で腐るマジックナンバーを必須引数に
 するのは、modification survival を掲げる言語の自己矛盾に近い。**
 
 しかも予算の誤りは**両方向とも静か**である。小さすぎれば常にフォールバックへ落ち、
@@ -28,13 +42,13 @@
 
 ## Decision
 
-**決定的な計算量予算は、時間の単位で書く。リテラルは裸（修飾なし）、区別は型が持つ。**
+**決定的な計算量予算は、時間の単位で書く。単位は型が運び、構築は現行構文の関数呼び出しで行う（新しいリテラル構文は追加しない）。**
 
 ```almide
-fan.bounded(100ms) { optimal_plan(g) } ?? greedy_plan(g)   // 決定的時計
-fan.race { exact(p); heuristic(p) } ?? fallback(p)          // 予算なしが基本形
-fan.race(500ms) { search_a(p); search_b(p) } ?? none        // 発散ガードとして任意
-fan.timeout(5s) { http.get(url) } ?? cached                 // 壁時計（oracle 層）
+fan.bounded(compute.ms(100)) { optimal_plan(g) } ?? greedy_plan(g)   // 決定的時計
+fan.race { exact(p); heuristic(p) } ?? fallback(p)                    // 予算なしが基本形
+fan.race(compute.ms(500)) { search_a(p); search_b(p) } ?? none        // 発散ガードは任意
+fan.timeout(duration.s(5)) { http.get(url) } ?? cached                // 壁時計（oracle 層）
 ```
 
 付随して以下を確定する。
@@ -51,21 +65,37 @@ CM-1 は各 MIR op に「**凍結された Almide 抽象機械での所要時間
 決定的時計の量と壁時計の量は**別の型**とする（作業名 `Compute` / `Duration`。
 最終的な型名は実装 PR で確定）。単位はどちらも ms / s を共有する。
 呼び出しサイトは head が区別するが、変数や設定レコードを経由した混入は型でしか
-止まらない。
+止まらない。Go の `time.Duration` に相当する **wrap した型**であり、現行構文で
+表現できる（`type Compute = Compute(Int)` の単一ケース variant、または `fan` と
+同じくコンパイラ既知の型）。実装形は PR で確定するが、**どちらでも言語構文の追加は
+不要**である。
 
-裸のリテラル `100ms` は**文脈から型が決まる**（`fan.bounded` の引数位置なら
-`Compute`、`fan.timeout` なら `Duration`）。文脈のない `let x = 100ms` は
-曖昧エラーとし、注釈を要求する（沈黙の既定は MSR に反する）。
+**裸の整数は型エラー**。`fan.bounded(100)` は「expected Compute, found Int」で
+コンパイルしない。単位のない整数を受ける API が起こす 1000 倍事故は Go の
+`time.Sleep(10)`（10 ナノ秒）から Jenkins の「300 秒 → 3.5 日」まで実例に事欠かない。
 
-### D3. リテラルは言語所有の閉じた接尾辞集合
+### D3. 構築は現行構文の関数呼び出し — 新しいリテラル構文は追加しない
 
-`ns` / `us` / `ms` / `s` / `min` / `h`。ASCII のみ（`µs` は採らない）。分は `min`
-（`m` は曖昧）。日以上は入れない。ユーザー拡張は**不可** — 拡張機構は作らない。
+単位はモジュール関数の名前が運ぶ。**モジュールが時計を、関数が単位を名乗る。**
 
-変数からの構築は `duration.ms(n)` 系のコンストラクタ（接尾辞はリテラルにしか付かない）。
-これは同義の 2 綴りではなく、リテラルと計算値の区別である。
+```almide
+compute.ms(100)     compute.s(2)      compute.us(500)     // 決定的時計 → Compute
+duration.s(5)       duration.ms(300)  duration.min(3)     // 壁時計 → Duration
+compute.ms(n)                                             // 変数もそのまま
+```
 
-**裸の整数は型エラー**。`fan.bounded(100)` はコンパイルしない。
+単位名の集合は `ns` / `us` / `ms` / `s` / `min` / `h`（ASCII のみ、`µs` は採らない。
+分は `min` — `m` は曖昧）。日以上は入れない（Go が Day を持たない理由と同じ）。
+この集合は**完備性 matrix としてゲートに載せる** — 手で維持される表面はドリフトし、
+LLM は `msec` や `5m` を発明する。
+
+**リテラル接尾辞（`100ms`）は採らない。** 初版の決定はこの形だったが、lexer への
+数値サフィックス追加という**言語構文の新規追加**が必要になる。現行の Almide に
+その機構はなく、`fan` の表面のためだけに言語全体の字句規則を広げる取引は割に合わない。
+関数形は語数が増えるだけで、単位の明示性・型安全・ゲート可能性はすべて同じである。
+
+将来 `100ms` を入れる場合も、**この関数形が脱糖先になる**（`100ms` ≡ `compute.ms(100)`）。
+つまり今の決定は将来の糖衣を閉じない。糖衣を足す条件は D3-F（下記 Falsifier）。
 
 ### D4. 抽象機械は凍結する
 
@@ -189,8 +219,9 @@ tick を ns と読み替えても [race belt](../../crates/almide-race-belt/) �
 | **`compute_ms:` 等の修飾ラベル** | Cloudflare が `cpu_ms` と修飾したのは設定ファイルに壁時計も同居するため。Almide は head が時計を名乗る（`bounded` / `timeout`）ので二重表示になる。型（D2）が同じ役割をより強く果たす |
 | **Postgres 型の妥協**（既定は無次元、ms は特定環境向けオプトイン） | Postgres のコスト定数は**管理者が調整する設定値**だから両建てが成立する。ソースコードに書く予算には移せず、同じ量に 2 つの綴りを許すのは共存負債 |
 | **参照機を物理マシンで定義**（F\* / ewasm 方式） | 老朽化する。ewasm は「CPU は改善し続けるので 3 年ごとに調整」と明記しており、その調整が既存プログラムの意味を壊す（EIP-1884 は 2300 gas stipend 前提の `transfer()` を壊し、Aragon の関数は 1759→2359 gas で閾値超え）。D4（凍結した抽象機械）を採る |
-| **ユーザー拡張可能なリテラル接尾辞**（C++ UDL 方式） | Google C++ スタイルガイドは標準ライブラリの `100ms` すら禁止しているが、理由は全部**拡張性の帰結**（名前空間修飾不可、`using` 必須、サードパーティは `_ms`）。CSS が反証で、言語所有の閉じた集合にはこれらの問題がない。よって**閉じた集合として採用し、拡張機構は作らない** |
-| **コンストラクタ関数のみ**（Rust / Swift 方式） | Kotlin が両方向で実験済み。1.5 で `100.milliseconds` を廃止して静的ファクトリに寄せ、1.6 で「コミュニティのフィードバックに応えて」差し戻した。逆方向の失敗例（簡潔形が書きにくくて放棄された）は見つからなかった |
+| **ユーザー拡張可能なリテラル接尾辞**（C++ UDL 方式） | Google C++ スタイルガイドは標準ライブラリの `100ms` すら禁止しているが、理由は全部**拡張性の帰結**（名前空間修飾不可、`using` 必須、サードパーティは `_ms`）。拡張機構は作らない |
+| **言語所有の閉じたリテラル接尾辞**（CSS 方式、`100ms`） | **見送り（却下ではない）**。CSS は閉じた集合が機能する反証であり設計として健全だが、lexer への数値サフィックス追加＝**言語構文の新規追加**が要る。`fan` の表面のためだけに字句規則を広げる取引は割に合わない。関数形と意味は同じで、将来入れるならその脱糖先になる（D3） |
+| **コンストラクタ関数のみ**（Rust / Swift 方式） | **採用**（D3）。Kotlin が 1.5 で簡潔形を廃止して静的ファクトリに寄せ 1.6 で差し戻した事実は「簡潔形が好まれる」証拠だが、Kotlin の簡潔形は**拡張プロパティ**という既存の言語機能で実現されており、新しい字句規則は要らなかった。Almide にはその機能がないので、同じ簡潔さを買う価格が違う |
 | **裸の整数 + ドキュメント**（Go 方式） | Go の `time.Sleep(10)` は 10 ナノ秒。実事故（hudl/fargo #56）があり staticcheck が SA1004 を持ち、`Duration × Duration` が型検査を通る問題（#64420）は *not planned* で閉じ専用リンタが必要になった。Go チーム自身が #20757 で「Go の Duration は Rust/Java/C#/Python より危険」と認めている。Swift と Zig はどちらも最近ベア整数 API から型付き Duration へ移行した |
 
 ### 前回の却下を訂正する
@@ -211,6 +242,8 @@ supersede する。
   区別は head と型が持つ
 - ラベル機構がパーサから消える。`fan.bounded(<expr>) { body }` でよく、
   head-args のラベル解析は不要になる（fan-v2 の表面が縮む）
+- **言語構文の追加がゼロ**。型と stdlib モジュールの追加だけで成立し、lexer も
+  parser も触らない
 - コスト表に外部アンカーが生まれる。tick 表は「間違いようがない」= 校正不能だが、
   時間の表は参照機械に対して**間違いうる → 直せる**。CM 改版が恣意的ドリフトではなく
   真値への収束になり、校正をゲートで機械検査できる（D5）
@@ -228,8 +261,8 @@ supersede する。
   見る。ただし**プログラムの振る舞いは全ホストで同一**であり、壊れるのは壁時計
   レイテンシの期待だけで、正しさと決定性は無傷。`fan.timeout(1000)` の事故
   （非決定性）とは深刻度が 2 桁違う
-- **リテラル接尾辞の lexer 実装**が要る（閉じた集合なので小さいが、言語に他の接尾辞は
-  ない）
+- **語数**。`compute.ms(100)` は `100ms` より長い。最頻の呼び出しサイトで 12 文字の
+  差が出る
 - **型が 2 つ増える**（`Compute` / `Duration`）。Vocabulary Economy に触れるが、
   Ada の先例と D2 の事故防止で購う
 
@@ -246,7 +279,9 @@ supersede する。
   収まる保証はまだない。**Stage 1 の probe が最初の実測を出す**
 - 誤読が事故クラスとして観測されたら（`fan.bounded` の予算を壁時計と信じたコードが
   実害を出したら）、D2 の型名を自己説明的なものに変えるか、修飾ラベルへ戻す
-- リテラル接尾辞が LLM に書けないと dojo の計測で出たら、コンストラクタ形へ寄せる
+- **D3-F**: 関数形が MSR を実測で下げたら（dojo で `compute.ms(100)` の書き誤りが
+  有意に出たら）、リテラル接尾辞 `100ms` を糖衣として足す。脱糖先は既に関数形なので、
+  意味論の変更にはならない
 - ハードウェア進化への追随（D4 の凍結の放棄）が避けられない事情が出たら、
   本 ADR ごと supersede する（凍結が ms 表記の前提条件であるため）
 

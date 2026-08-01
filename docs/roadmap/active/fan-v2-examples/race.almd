@@ -13,7 +13,7 @@ effect fn solve(p: Problem) -> Answer = {
 
 // 発散が心配な枝構成には予算ガードを付ける（下の挙動表はこちらの形）
 effect fn solve_guarded(p: Problem) -> Answer = {
-  fan.race(1s) {
+  fan.race(compute.s(1)) {
     exact(p)        // 枝 0
     heuristic(p)    // 枝 1
   } ?? brute_force(p)
@@ -36,7 +36,7 @@ fn parse_strict(src: String) -> Result[Ast, String] = ...
 fn parse_lenient(src: String) -> Result[Ast, String] = ...
 
 effect fn parse(src: String) -> Ast = {
-  fan.race(200ms) { parse_strict(src); parse_lenient(src) }
+  fan.race(compute.ms(200)) { parse_strict(src); parse_lenient(src) }
     ?? error.fail("unparseable")!
   // → 両方成功なら「安く済んだ方」。入力が単純なら strict、複雑なら lenient が
   //   勝つ — その選択が決定的に再現する
@@ -44,5 +44,5 @@ effect fn parse(src: String) -> Ast = {
 
 // ── mapper 形（宣言済み・Wave 2 では block 形のみ実装）────────────
 effect fn pick_strategy(strategies: List[Strategy], input: Input) -> Plan = {
-  fan.race(500ms, strategies, (s) => run_strategy(s, input)) ?? default_plan(input)
+  fan.race(compute.ms(500), strategies, (s) => run_strategy(s, input)) ?? default_plan(input)
 }

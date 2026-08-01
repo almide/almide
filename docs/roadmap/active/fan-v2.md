@@ -1,4 +1,4 @@
-<!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, labeled ticks -->
+<!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, typed budgets -->
 # Fan v2 — one execution-policy grammar
 
 > 憲章: [async-inception.md](./async-inception.md)。本文書はその表面詳細である。
@@ -27,9 +27,9 @@ v2 はこれを **head × form の直積 1 枚**に置き換える。
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 | 可（観測はリスト順） |
 | settle | 選択しない。全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 | 可 |
 | any | **index 最小**の成功 | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 | 逐次（意味論ごと逐次） |
-| race | **(spend, index) 最小**の成功 | `fan.race { a; b }` → `T`（`fan.race(500ms) { … }` は任意の発散ガード） | `fan.race(xs, f)` / `fan.race(500ms, xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
-| bounded | 単一 body の計量 | `fan.bounded(d) { body }` → `T` | —（map と合成） | **pure** | — |
-| timeout | 環境が切る（oracle 層） | `fan.timeout(d) { body }` → `T` | — | oracle 可 | ホスト相対 |
+| race | **(spend, index) 最小**の成功 | `fan.race { a; b }` → `T`（`fan.race(compute.ms(500)) { … }` は任意の発散ガード） | `fan.race(xs, f)` / `fan.race(compute.ms(500), xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
+| bounded | 単一 body の計量 | `fan.bounded(compute.ms(100)) { body }` → `T` | —（map と合成） | **pure** | — |
+| timeout | 環境が切る（oracle 層） | `fan.timeout(duration.s(5)) { body }` → `T` | — | oracle 可 | ホスト相対 |
 
 - block form の arm は **式**（`fan {}` と同じ arm 契約: Result auto-unwrap、外側 `var`
   キャプチャ禁止）。any/race の arm は同一の `T` に unify する。all/settle は tuple なので
@@ -75,19 +75,21 @@ purity wall に落としている。mapper form は「データのリスト + �
 言語にラベル引数構文は**存在しない**（logical-time-async.md 初稿はここを `limit:` の
 前例ありと誤認していた — 訂正済み）。当初は fan head が構文であることを利用して
 `ticks:` / `ms:` を fan 文法自身の要素として供給する設計だったが、**[ADR-0001](../../adr/0001-deterministic-time-units.md)
-でラベルごと不要になった** — 予算は単位付きの duration リテラル（`100ms` / `5s`）で
+でラベルごと不要になった** — 予算は単位付きの構築関数（`compute.ms(100)` / `duration.s(5)`）で
 書き、区別は型が持つ。パーサに head-args のラベル解析を入れる必要が消え、v2 の表面は
 一段縮む。
 
 ```almide
-fan.bounded(100ms) { body }     // 決定的時計（Compute 型）
-fan.timeout(5s)    { body }     // 壁時計（Duration 型）
-fan.bounded(100)                // 型エラー — 裸の整数は受け付けない
-fan.bounded(duration.ms(n))     // 変数はコンストラクタ形
+fan.bounded(compute.ms(100)) { body }   // 決定的時計（Compute 型）
+fan.timeout(duration.s(5))   { body }   // 壁時計（Duration 型）
+fan.bounded(compute.ms(n))   { body }   // 変数もそのまま
+fan.bounded(100)                        // 型エラー: expected Compute, found Int
 ```
 
-接尾辞は言語所有の閉じた集合（`ns`/`us`/`ms`/`s`/`min`/`h`）でユーザー拡張は不可 —
-C++ UDL への批判はすべて拡張性の帰結であり、CSS の閉じた集合には当たらない。
+単位名の集合は `ns`/`us`/`ms`/`s`/`min`/`h` で、完備性 matrix としてゲートに載せる。
+**新しいリテラル構文は追加しない** — `100ms` のような数値接尾辞は lexer の拡張が要り、
+fan の表面のためだけに字句規則を広げる取引は割に合わない（将来足す場合の脱糖先が
+この関数形になる）。
 
 ## 各 head の意味論（確定事項の整理）
 
@@ -104,16 +106,16 @@ C++ UDL への批判はすべて拡張性の帰結であり、CSS の閉じた�
   確定させる。**bounded + `??` が主要イディオムになる**:
 
   ```almide
-  let plan = fan.bounded(100ms) { optimal_plan(g) } ?? greedy_plan(g)
+  let plan = fan.bounded(compute.ms(100)) { optimal_plan(g) } ?? greedy_plan(g)
 
-  let ans = fan.race(1s) {
+  let ans = fan.race(compute.s(1)) {
     exact_solve(input)
     heuristic_solve(input)
   } ?? default_answer
   ```
 
 - **timeout**: Stage 4（Path C / R_Ω）まで tombstone 維持。再導入時の形だけここで
-  確定する — `fan.timeout(d) { body }`、中断点は charge site（logical-time-async の
+  確定する — `fan.timeout(duration.s(5)) { body }`、中断点は charge site（logical-time-async の
   中断点統一原理）、契約クラスは oracle-relative。
 
 ## 完備性規則（matrix gate に載せる文）
@@ -180,7 +182,7 @@ tombstone（check 時、書き換え例つき）にする。共存させない �
    「表現できない」に格上げする。
 2. **Wave 2 — 決定層の完成**: `fan.bounded`（logical-time Stage 2）→ `fan.race`
    （Stage 3）を v2 の形で。E027 改訂もここ。
-3. **Wave 3 — oracle 層**: `fan.timeout(d) { }`（Stage 4）。
+3. **Wave 3 — oracle 層**: `fan.timeout(duration.s(5)) { }`（Stage 4）。
 
 Wave 1 が独立に着手可能であることが v2 の要点の一つ — 表面の統一は fuel 意味論の
 実装を待たない。

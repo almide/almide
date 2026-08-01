@@ -31,7 +31,7 @@ tiebreak（Verse / Lingua Franca / Esterel）、制限による決定性（Par m
 ## 表面 — 追加は 2 つ、キーワードはゼロ
 
 > **形の改訂**: 表面の形（thunk 引数の関数形）は [fan-v2.md](./fan-v2.md) の block form
-> — `fan.bounded(d) { body }` / `fan.race(d) { arm; arm }` — に置き換えられた。
+> — `fan.bounded(compute.ms(100)) { body }` / `fan.race { arm; arm }` — に置き換えられた。
 > 本文書の意味論（fuel、lockstep、trap 窓、入れ子、CM-1）はすべてそのまま適用される。
 >
 > **追補（2026-08-01）**: race の予算は**任意化**された — 選択は予算を要さず、
@@ -39,8 +39,8 @@ tiebreak（Verse / Lingua Franca / Esterel）、制限による決定性（Par m
 > 監査は [ticks-interface-audit.md](./ticks-interface-audit.md)。
 
 ```almide
-fan.bounded(100ms) { body }   // Result[T, String] — n fuel 以内に完了すれば Ok
-fan.race(500ms) { arm; arm }     // Result[T, String] — 各枝に n fuel、最小消費の成功が勝つ
+fan.bounded(compute.ms(100)) { body }   // Result[T, String] — n fuel 以内に完了すれば Ok
+fan.race(compute.ms(500)) { arm; arm }     // Result[T, String] — 各枝に n fuel、最小消費の成功が勝つ
 ```
 
 将来の oracle 層（Stage 4、Path C 成立後）:
@@ -62,7 +62,7 @@ fan.timeout(ms, thunk)        // 環境相対。R_Ω 契約クラス。それま
 「何を最小化するか」の一本だけになり、点追加ではなく面として閉じる。
 
 **完備性規則**（matrix gate に載せる形で述べる）: fuel 次元は `fan.bounded` による合成で
-全コンビネータに届く（`fan.map(xs, (x) => fan.bounded(100ms) { f(x) })` など）。
+全コンビネータに届く（`fan.map(xs, (x) => fan.bounded(compute.ms(100)) { f(x) })` など）。
 組み込みで fuel を統合するのは `fan.race` **だけ**であり、それは選択規則がメトリクスを
 **消費する**（枝同士の spend を比較する）からである。ユーザー合成では枝間比較は書けない。
 `bounded × {map, any, settle}` の専用形を追加しないのは意図的な省略であり、この規則ごと
@@ -121,7 +121,7 @@ site でカウンタを読み、将来の oracle 系構文（`fan.timeout`）は
 決定層と oracle 層の違いは「中断点で読むものが、プログラムの関数（fuel）か、環境入力
 （時計）か」だけになる。中断点の位置は両層で共有され、そこは両ターゲットで同一である。
 
-### `fan.bounded(100ms) { body }`
+### `fan.bounded(compute.ms(100)) { body }`
 
 - thunk は **pure**（効果制約。effect fn 呼び出し・oracle 効果を含めない）。構文自体は
   既存の fan 規則どおり effect fn 内でのみ使える（規則を 1 本に保つ）。
@@ -133,7 +133,7 @@ site でカウンタを読み、将来の oracle 系構文（`fan.timeout`）は
   エラーチャネルという言語全体の性質であり、ここで点解決しない。`fan.any` の
   defined-Err 前例に従い、メッセージを台帳定数にして検査可能性だけは確保する。
 
-### `fan.race(500ms) { arm; arm }` — lockstep 定義
+### `fan.race(compute.ms(500)) { arm; arm }` — lockstep 定義
 
 **定義（lockstep）**: 全枝が論理 tick ごとに 1 fuel ずつ進む。tick `s` で最初に完了
 （成功値を返す）した枝が勝つ。同一 tick 内の事象はソース順（リスト index 順）に解決する。
@@ -223,7 +223,7 @@ transactional effect で解こうとしたものの大部分が、ここでは**
 
 ## 型付け・診断・表面変更
 
-- `fan.race(500ms) { arm; arm } -> Result[T, String]`、`fan.bounded(100ms) { body } ->
+- `fan.race(compute.ms(500)) { arm; arm } -> Result[T, String]`、`fan.bounded(compute.ms(100)) { body } ->
   Result[T, String]`。thunk の auto-wrap は race/any/settle の既存契約に従う。
 - 新診断: (a) race/bounded の枝に効果呼び出し → 「branches must be pure」+ 上記 oracle
   ヒント、(b) 裸の整数 → 単位ヒント、(c) 空 thunk リスト → 旧 race 同様
