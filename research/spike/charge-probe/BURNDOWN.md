@@ -268,6 +268,22 @@
   claim 5 の全文解禁には同一モデル比較 lang-bench(async) が残る、C(KPN) は
   設計どおり地平。「食い違いは BURNDOWN/契約台帳が正」の規則も明記。
 
+- [x] **T7-3 develop CI（Trust Spine / CI）赤の解消**（cf99b52b + b1ca8277 —
+  merge 後に Trust Spine が branch 初実行で 3 件を顕在化: ①`fan_any` が stdlib
+  purity registry 未分類（T2-3 の漏れ — keyword-pure 確認して PURE_MODULES へ）
+  ②**PCC corpus-wall 拒否**: 「scalar の if-value merge dst が外側の腕値として
+  流出すると released-merge オブジェクト化され `i{m|}`/`i{|m}`（一側 move）を
+  cert する」— binary verifier は scalar 非追跡で accept、Coq 証明済み checker
+  が reject する乖離。静的 race fold（Stage 3 から潜伏、27 オブジェクト）+
+  新 mapper fold の両方が該当。修正 = fold の AND/OR を **0/1 算術**（乗算 /
+  a+b−ab）に平坦化 + **cert モデル側で released-merge を heap merge に限定**
+  （merge_dst_i_credits も同フィルタで lockstep 維持）。ownership 45063 objects
+  ACCEPT + Rocq kernel 全認証。③spanless-wall ratchet +2 = fn 名デコレータの
+  リテラル 2 mention → `Self::Unsupported` 綴りの `with_fn_context` メソッド化。
+  副産物の実バグ修正: **free_vars が While/ForIn body 内の Bind を束縛登録して
+  いなかった**（loop-local が自由変数扱いされ outliner が幻 param を生成）。
+  spec 325/325・corpus 75/75・mir 605・charge_probe/matrix 緑）
+
 ## Branch 外（残り — 参照のみ）
 
 Rung 1 出力 transactional / AARA は別レーンの台帳へ。ADR-0002（実行順）の批准は
