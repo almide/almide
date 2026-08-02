@@ -2,7 +2,15 @@
 
 HTTP client and server. import http, effect.
 
-### `http.serve(port: Int, f: Fn[Unknown] -> Unknown) -> Unit`
+`HttpRequest` / `HttpResponse` are the module's runtime-backed nominal types.
+With `import http` they resolve in user annotations too — bare or qualified —
+so typed helpers over requests are writable:
+
+```almd
+fn handle(req: HttpRequest) -> http.HttpResponse = ...
+```
+
+### `http.serve(port: Int, f: (HttpRequest) -> HttpResponse) -> Unit`
 
 Start an HTTP server on the given port with a request handler
 
@@ -10,7 +18,7 @@ Start an HTTP server on the given port with a request handler
 http.serve(3000, (req) => http.response(200, "ok"))
 ```
 
-### `http.response(status: Int, body: String) -> Response`
+### `http.response(status: Int, body: String) -> HttpResponse`
 
 Create a plain text HTTP response with status code
 
@@ -18,7 +26,7 @@ Create a plain text HTTP response with status code
 http.response(200, "Hello!")
 ```
 
-### `http.json(status: Int, body: String) -> Response`
+### `http.json(status: Int, body: String) -> HttpResponse`
 
 Create a JSON HTTP response with status code
 
@@ -26,7 +34,7 @@ Create a JSON HTTP response with status code
 http.json(200, json.stringify(data))
 ```
 
-### `http.with_headers(status: Int, body: String, headers: Map[String, String]) -> Response`
+### `http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse`
 
 Create a response with custom headers
 
@@ -34,7 +42,7 @@ Create a response with custom headers
 http.with_headers(200, body, {"Content-Type": "text/html"})
 ```
 
-### `http.redirect(url: String) -> Response`
+### `http.redirect(url: String) -> HttpResponse`
 
 Create a 302 temporary redirect response
 
@@ -42,7 +50,7 @@ Create a 302 temporary redirect response
 http.redirect("/new-path")
 ```
 
-### `http.status(resp: Response, code: Int) -> Response`
+### `http.status(resp: HttpResponse, code: Int) -> HttpResponse`
 
 Set the status code on a response
 
@@ -50,7 +58,7 @@ Set the status code on a response
 http.status(resp, 201)
 ```
 
-### `http.body(resp: Response) -> String`
+### `http.body(resp: HttpResponse) -> String`
 
 Get the body string from a response
 
@@ -58,7 +66,7 @@ Get the body string from a response
 let text = http.body(resp)
 ```
 
-### `http.set_header(resp: Response, key: String, value: String) -> Response`
+### `http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse`
 
 Set a header on a response
 
@@ -66,7 +74,7 @@ Set a header on a response
 http.set_header(resp, "X-Custom", "value")
 ```
 
-### `http.get_header(resp: Response, key: String) -> Option[String]`
+### `http.get_header(resp: HttpResponse, key: String) -> Option[String]`
 
 Get a header value from a response
 
@@ -74,7 +82,7 @@ Get a header value from a response
 let ct = http.get_header(resp, "Content-Type")
 ```
 
-### `http.req_method(req: Request) -> String`
+### `http.req_method(req: HttpRequest) -> String`
 
 Get the HTTP method of a request (GET, POST, etc.)
 
@@ -82,7 +90,7 @@ Get the HTTP method of a request (GET, POST, etc.)
 let method = http.req_method(req)
 ```
 
-### `http.req_path(req: Request) -> String`
+### `http.req_path(req: HttpRequest) -> String`
 
 Get the URL path of a request
 
@@ -90,7 +98,7 @@ Get the URL path of a request
 let path = http.req_path(req)
 ```
 
-### `http.req_body(req: Request) -> String`
+### `http.req_body(req: HttpRequest) -> String`
 
 Get the body string of a request
 
@@ -98,7 +106,7 @@ Get the body string of a request
 let body = http.req_body(req)
 ```
 
-### `http.req_header(req: Request, key: String) -> Option[String]`
+### `http.req_header(req: HttpRequest, key: String) -> Option[String]`
 
 Get a header value from a request
 
@@ -106,7 +114,7 @@ Get a header value from a request
 let auth = http.req_header(req, "Authorization")
 ```
 
-### `http.query_params(req: Request) -> Map[String, String]`
+### `http.query_params(req: HttpRequest) -> Map[String, String]`
 
 Get all query parameters from a request as a map. Values are percent-decoded
 (`%XX` → byte, `+` → space), so `?q=%E7%8C%AB` yields `{"q": "猫"}`.

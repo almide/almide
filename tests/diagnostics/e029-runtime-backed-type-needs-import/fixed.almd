@@ -1,0 +1,7 @@
+// The fix the hint teaches: import the owner module; the annotation resolves.
+import http
+
+fn method_of(req: HttpRequest) -> String =
+  http.req_method(req)
+
+effect fn main() -> Unit = println("y")

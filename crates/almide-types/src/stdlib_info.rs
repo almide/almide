@@ -55,6 +55,35 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     // effect-surface helpers into every file unsolicited.
 ];
 
+/// Nominal types backed by runtime Rust structs, owned by a stdlib module:
+/// `(module, type name)`. They appear in the module's own signatures
+/// (`http.serve(port, f: (HttpRequest) -> HttpResponse)`) but have no `type`
+/// declaration anywhere, so without this registry a user ANNOTATION naming
+/// one is an E029 — the docs advertise a type the writer cannot spell
+/// (#1053). The checker accepts the bare and `module.`-qualified spellings
+/// whenever the owner module is imported. Completeness is machine-checked:
+/// `runtime_backed_types_matrix` (almide-frontend tests) asserts this list
+/// covers exactly the undeclared nominal leaves of every bundled signature.
+pub const RUNTIME_BACKED_TYPES: &[(&str, &str)] = &[
+    ("http", "HttpRequest"),
+    ("http", "HttpResponse"),
+    // The opaque path handle of `json.root()`/`json.field(...)` — self-hosted
+    // as a `List[String]` newtype, still spelled `JsonPath` in signatures.
+    ("json", "JsonPath"),
+];
+
+/// The owning module of a runtime-backed nominal type, accepting the bare
+/// (`HttpRequest`) and qualified (`http.HttpRequest`) spellings. `None` when
+/// the name is not runtime-backed (the common case).
+pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
+    let bare = name.rsplit_once('.').map(|(_, b)| b).unwrap_or(name);
+    let qualifier = name.rsplit_once('.').map(|(q, _)| q);
+    RUNTIME_BACKED_TYPES.iter().find_map(|(module, ty)| {
+        let qualifier_ok = qualifier.map_or(true, |q| q == *module);
+        (*ty == bare && qualifier_ok).then_some(*module)
+    })
+}
+
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
     STDLIB_MODULES.contains(&name)

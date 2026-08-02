@@ -347,6 +347,33 @@ impl Checker {
                 if s.as_str() == "Value" || self.env.types.contains_key(&s) || !reported.insert(s) {
                     continue;
                 }
+                // A runtime-backed stdlib nominal (`HttpRequest`, bare or
+                // `http.`-qualified) is a valid annotation whenever its owner
+                // module is in scope — the stdlib's own signatures use it, so
+                // the writer must be able to spell it too (#1053). Without the
+                // import, the generic "declare it" hint would be a dead end
+                // (the type can neither be declared nor selectively imported);
+                // name the one action that works instead.
+                if let Some(owner) = almide_lang::stdlib_info::runtime_backed_type_owner(s.as_str()) {
+                    if self.env.import_table.is_module(owner) {
+                        continue;
+                    }
+                    let mut diag = err(
+                        format!("unknown type '{}'", s),
+                        format!(
+                            "'{}' is the `{owner}` stdlib module's runtime-backed type — \
+                             add `import {owner}` and it resolves in annotations",
+                            s,
+                        ),
+                        ctx.clone(),
+                    ).with_code("E029").with_try(format!("import {owner}"));
+                    if let Some(sp) = span {
+                        diag.line = Some(sp.line);
+                        diag.col = Some(sp.col);
+                    }
+                    self.diagnostics.push(diag);
+                    continue;
+                }
                 let mut diag = err(
                     format!("unknown type '{}'", s),
                     format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", s),

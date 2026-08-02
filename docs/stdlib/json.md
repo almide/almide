@@ -2,6 +2,9 @@
 
 JSON parsing and querying. import json.
 
+`JsonPath` (the opaque handle of `json.root()` / `json.field(...)`) resolves
+in user annotations whenever `json` is imported — bare or `json.JsonPath`.
+
 ### `json.parse(text: String) -> Result[Value, String]`
 
 Parse a JSON string into a Value.
