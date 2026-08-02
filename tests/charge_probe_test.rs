@@ -94,7 +94,7 @@ fn charge_probe_gate() {
 /// dynamic layer already pins against wasm).
 fn interp_third_vote_on_metered_fixtures() {
     let dir = fixtures_dir();
-    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops"] {
+    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body"] {
         let source = std::fs::read_to_string(dir.join(format!("{name}.almd"))).unwrap();
         let ir = lower_for_interp(&source);
         let outcome = almide_interp::Interpreter::new(&ir).run_main();
@@ -212,6 +212,14 @@ fn time_ctor_guard_cross_target() {
         let (code, stdout, _) = run("saturate", wasm);
         assert_eq!(code, Some(0), "saturate {leg}: must succeed");
         assert_eq!(stdout, "42\n42", "saturate {leg}: saturated budgets must admit the work");
+        // T2-1: full block bodies/arms — free-var outlining, bind statements
+        // are charge-free (exact boundary preserved), zero-budget constant.
+        let (code, stdout, _) = run("block_body", wasm);
+        assert_eq!(code, Some(0), "block_body {leg}: must succeed");
+        assert_eq!(
+            stdout, "11\n496551\n42\n873250",
+            "block_body {leg}: block-body semantics drifted"
+        );
         // S3 (T2-5): the operator algebra at UNIT precision — every digit is
         // an exact-boundary verdict (see the fixture header for the map).
         let (code, stdout, _) = run("time_ops", wasm);

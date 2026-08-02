@@ -278,12 +278,6 @@ impl Checker {
         let budget_ty = self.infer_expr(budget);
         let budget_concrete = resolve_ty(&budget_ty, &self.uf);
         self.check_budget_clock("fan.bounded", &budget_concrete);
-        if !matches!(body.kind, ExprKind::Call { .. }) {
-            self.emit(super::err(
-                "fan.bounded body must be a single function call (v1)".to_string(),
-                "Wrap the work in a function: fan.bounded(c) { work(args) }".to_string(),
-                "fan.bounded body".to_string()));
-        }
         let saved_effect = self.env.can_call_effect;
         let saved_region = self.env.metered_region;
         self.env.can_call_effect = false;
@@ -324,13 +318,6 @@ impl Checker {
         self.env.metered_region = Some("fan.race");
         let mut arm_ty: Option<Ty> = None;
         for arm in arms.iter_mut() {
-            if !matches!(arm.kind, ExprKind::Call { .. }) {
-                self.emit(super::err(
-                    "fan.race arms must be single function calls (v1)".to_string(),
-                    "Wrap each strategy in a function: fan.race { exact(p); heuristic(p) }"
-                        .to_string(),
-                    "fan.race arm".to_string()));
-            }
             let t = self.infer_expr(arm);
             let concrete = resolve_ty(&t, &self.uf);
             if concrete.is_result() {

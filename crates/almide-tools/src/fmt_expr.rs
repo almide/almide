@@ -299,9 +299,18 @@ fn fmt_expr_fan_bounded(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::FanBounded { budget, body } = &expr.kind else { unreachable!() };
     out.push_str("fan.bounded(");
     fmt_expr(out, budget, depth);
-    out.push_str(") { ");
-    fmt_expr(out, body, depth);
-    out.push_str(" }");
+    out.push_str(") ");
+    // The body parses as a Block (T2-1): a one-expr block prints inline
+    // (`{ work(x) }`), a statement block prints as itself — either way the
+    // Block arm supplies its own braces.
+    match &body.kind {
+        ExprKind::Block { .. } => fmt_expr(out, body, depth),
+        _ => {
+            out.push_str("{ ");
+            fmt_expr(out, body, depth);
+            out.push_str(" }");
+        }
+    }
 }
 
 fn fmt_expr_fan_race(out: &mut String, expr: &Expr, depth: usize) {

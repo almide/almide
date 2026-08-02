@@ -86,7 +86,9 @@
   §13.6 rules。language.md §5.17 も同期）
 - [ ] **T4-3 C-NNN 契約下書き + fixture 正式化**（fuel fixtures を spec/wasm_cross へ、
   @contract 双方向。CM-1 を versioned オブジェクトとして台帳へ。番号は merge 時確定）
-- [ ] **T4-4 docs/stdlib の compute / duration ページ**
+- [x] **T4-4 docs/stdlib の compute / duration ページ**（6471c8ef — 2 ページ +
+  CHEATSHEET 表 2 行。docs-gen counter / signature-index 生成器の両方に
+  「時計ページ＝checker 表面」の carve-out（Rust 側は TIME_MODULES 直読み））
 - [ ] **T4-5 roadmap 文書の status 整合**（fan-v2.md / logical-time-*.md に
   「実装済み（branch）」マーカー。食い違い=バグ規則の適用）
 - [x] **T4-6 診断 fixture の網羅**（c50134cb — 8 fixture: bare Int / Duration 混入 /

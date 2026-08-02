@@ -1,0 +1,40 @@
+// T2-1: full BLOCK bodies/arms — the outliner parameterizes free variables.
+//   line 1: parse -> filter -> render over a free String var (11)
+//   line 2: exact boundary UNCHANGED by block wrapping: a bind statement adds
+//           zero charge, so { let n = 1000; heavy(n) } still fits 3006ns
+//   line 3: a zero budget admits a constant body (charges only at cycles/calls)
+//   line 4: race with a BLOCK arm — arm 1 (502 units) beats the block arm
+fn parse(s: String) -> Int = string.len(s)
+
+fn filter(n: Int) -> Int = n * 2
+
+fn render(n: Int) -> Int = n + 1
+
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+effect fn main() -> Unit = {
+  let input = "hello"
+  let r = fan.bounded(compute.ms(10)) {
+    let x = parse(input)
+    let y = filter(x)
+    render(y)
+  } ?? -1
+  println(int.to_string(r))
+  let u = fan.bounded(compute.ns(3006)) {
+    let n = 1000
+    heavy(n)
+  } ?? -1
+  println(int.to_string(u))
+  let z = fan.bounded(compute.ms(0)) { 42 } ?? -1
+  println(int.to_string(z))
+  let w = fan.race {
+    { let a = heavy(1000); a + 1 }
+    heavy(500)
+  } ?? -1
+  println(int.to_string(w))
+}

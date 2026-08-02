@@ -215,12 +215,14 @@ impl Parser {
             let budget = self.parse_expr()?;
             self.expect(TokenType::RParen)?;
             self.skip_newlines();
-            let open = self.current().clone();
-            self.expect(TokenType::LBrace)?;
-            self.skip_newlines();
-            let body = self.parse_expr()?;
-            self.skip_newlines();
-            self.expect_closing(TokenType::RBrace, open.line, open.col, "fan.bounded body")?;
+            if !self.check(TokenType::LBrace) {
+                return Err(format!(
+                    "fan.bounded requires a body block at line {}:{}\n  Hint: fan.bounded(compute.ms(100)) {{ work(x) }}",
+                    self.current().line, self.current().col));
+            }
+            // The body is a full BLOCK (T2-1): statements + trailing value,
+            // parsed by the same brace parser as any block expression.
+            let body = self.parse_brace_expr()?;
             return Ok(Expr::new(self.next_id(), span, ExprKind::FanBounded {
                 budget: Box::new(budget),
                 body: Box::new(body),
@@ -272,7 +274,7 @@ impl Parser {
             while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
                 let tok = self.current().clone();
                 if matches!(tok.token_type, TokenType::Let | TokenType::Var | TokenType::For | TokenType::While) {
-                    return Err(format!("`{}` is not allowed inside fan.race at line {}:{}\n  Hint: race arms are expressions (single calls in v1)", tok.value, tok.line, tok.col));
+                    return Err(format!("`{}` is not allowed inside fan.race at line {}:{}\n  Hint: race arms are expressions — wrap statements in a block arm: {{ let x = f(); g(x) }}", tok.value, tok.line, tok.col));
                 }
                 arms.push(self.parse_expr()?);
                 self.skip_newlines();
