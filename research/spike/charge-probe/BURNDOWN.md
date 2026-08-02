@@ -89,8 +89,9 @@
 - [ ] **T4-4 docs/stdlib の compute / duration ページ**
 - [ ] **T4-5 roadmap 文書の status 整合**（fan-v2.md / logical-time-*.md に
   「実装済み（branch）」マーカー。食い違い=バグ規則の適用）
-- [ ] **T4-6 診断 fixture の網羅**（bounded/race の全エラー路: bare Int / Duration 混入 /
-  非 call body / 未知単位 / pure 文脈 / 効果 arm — diagnostics harness に各 1）
+- [x] **T4-6 診断 fixture の網羅**（c50134cb — 8 fixture: bare Int / Duration 混入 /
+  非 call body / 未知単位 / pure 文脈(E007) / 効果 arm(E006) / T×T / UFCS 裸単位。
+  併せて E006 を metered-region 文脈で専用文言化（「effect fn にせよ」の循環誘導を排除））
 
 ## Branch 外（この台帳の対象外 — 参照のみ）
 

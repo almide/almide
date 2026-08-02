@@ -444,6 +444,8 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [math](stdlib/math.md) | Mathematical functions | auto-imported | 21 |
 | [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
 | [datetime](stdlib/datetime.md) | Date and time | auto-imported | 21 |
+| [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) | 6 |
+| [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) | 6 |
 | [bytes](stdlib/bytes.md) | Binary data | auto-imported | 67 |
 | [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported | 39 |
 | [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |

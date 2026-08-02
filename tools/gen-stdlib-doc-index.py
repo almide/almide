@@ -117,6 +117,11 @@ def main() -> int:
         if not name.endswith(".md"):
             continue
         module = name[:-3]
+        # Clock-constructor pages document checker surface, not a module
+        # interface (authority: almide_types::time_units::TIME_MODULES; the
+        # Rust-side counter in src/cli/docs_gen.rs reads that table directly).
+        if module in ("compute", "duration"):
+            continue
         path = os.path.join(DOCS, name)
         if apply(path, module, check):
             stale.append(module)
