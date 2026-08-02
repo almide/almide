@@ -333,6 +333,19 @@ impl Checker {
         let ExprKind::Binary { op, left, right, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_binary called on the wrong ExprKind") };
         let lt = self.infer_expr(left);
         let rt = self.infer_expr(right);
+        // #1050: operand-position implicit unwrap. In an effect-fn body the
+        // checker strips Result from a CALL in binding position and the
+        // lowering auto-?'s it; `insert_auto_try` wraps every Result-typed
+        // call, operand position included — so the checker admitting
+        // `helper() + 1` is the same one rule as `let x = helper()`. VARs are
+        // untouched: a var's unwrap is decided at its binding, and a
+        // Result-typed var operand stays a type error (whose hint names the
+        // unwrap operators). This also closes an acceptance-parity hole:
+        // `helper() == ok(0)` used to pass check and explode in the generated
+        // Rust (auto-? unwrapped the left side under a Result comparand);
+        // it is now an honest check-time mismatch.
+        let lt = self.operand_effect_unwrap(left, lt);
+        let rt = self.operand_effect_unwrap(right, rt);
         self.pin_binop_literal_context(op, left, right, &lt, &rt);
         // ADR-0001 S3: the time-type operator matrix intercepts BEFORE the
         // generic paths — `Named` types pass the generic numeric check (the
@@ -361,6 +374,19 @@ impl Checker {
             "and" | "or" => self.infer_binop_logical(op, &lt, &rt),
             _ => lt,
         }
+    }
+
+    /// The #1050 operand strip: `expr` is a binary operand; when it is a CALL
+    /// whose type resolved to `Result[T, E]` inside an auto-unwrap context
+    /// (an effect-fn body outside lambdas), give the operator `T` — the
+    /// lowering's `insert_auto_try` wraps exactly this shape in a `?`.
+    /// Anything else (vars, ctors, non-effect contexts) passes through.
+    fn operand_effect_unwrap(&mut self, operand: &ast::Expr, t: Ty) -> Ty {
+        if !self.env.auto_unwrap || !matches!(operand.kind, ExprKind::Call { .. }) {
+            return t;
+        }
+        let resolved = resolve_ty(&t, &self.uf);
+        resolved.result_ok_ty().unwrap_or(t)
     }
 
     /// ADR-0001 S3: the time-type operator matrix. `None` = no time operand
@@ -551,9 +577,17 @@ impl Checker {
                     | Ty::Float32 | Ty::Float64
             );
             if !is_numeric(&lc) || !is_numeric(&rc) {
+                // Same Result-specific hint as `+` (#1050): the generic text
+                // never named the unwrap operators.
+                let hint = if lc.is_result() || rc.is_result() {
+                    "Unwrap the Result operand first: `!` propagates the error (effect fn body), \
+                     `?? fallback` supplies a default, or `match` handles ok/err"
+                } else {
+                    "Use numeric types (Int or Float)"
+                };
                 self.emit(super::err(
                     format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
-                    "Use numeric types (Int or Float)", format!("operator {}", op)));
+                    hint, format!("operator {}", op)));
             }
             // A sized operand meeting a canonical `Int`/`Float` VALUE is the
             // same mistake with the wide side spelled differently (#902).
@@ -604,6 +638,24 @@ impl Checker {
         }
         // Unify left/right types so TypeVars in none/err/constructors get resolved
         self.unify_infer(lt, rt);
+        // #1050: a Result on exactly ONE side of ==/!= can never compare —
+        // `unify_infer` stays silent on a concrete mismatch, so this shape
+        // used to pass check and explode as an E0308 in the generated Rust
+        // (`helper() == ok(0)`: the operand strip / auto-? gives the call
+        // side `T` while the ctor side keeps `Result`). Report it here with
+        // the unwrap operators named.
+        if matches!(op.as_str(), "==" | "!=") {
+            let lc = resolve_ty(lt, &self.uf);
+            let rc = resolve_ty(rt, &self.uf);
+            let opaque = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+            if lc.is_result() != rc.is_result() && !opaque(&lc) && !opaque(&rc) {
+                self.emit(super::err(
+                    format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
+                    "Unwrap the Result operand first (`!` in an effect fn body, `?? fallback`, \
+                     or `match` on ok/err) — or compare two Results",
+                    format!("operator {}", op)));
+            }
+        }
         // Ordering (< <= > >=) is defined ONLY on scalar orderable
         // types. On a compound operand (Tuple/Option/Result/List/
         // Map/Set/Record/custom) the checker used to pass while

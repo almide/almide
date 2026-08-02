@@ -592,9 +592,18 @@ impl Checker {
                 | Ty::Matrix | Ty::Named(..)
         );
         if !is_numeric(lc) || !is_numeric(rc) {
+            // A Result operand has a specific way out — the generic "use
+            // numeric types" hint never mentioned the unwrap operators, so
+            // the one real fix was undiscoverable (#1050).
+            let hint = if lc.is_result() || rc.is_result() {
+                "Unwrap the Result operand first: `!` propagates the error (effect fn body), \
+                 `?? fallback` supplies a default, or `match` handles ok/err"
+            } else {
+                "Use + with numeric types, String, or List"
+            };
             self.emit(super::err(
                 format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
-                "Use + with numeric types, String, or List", format!("operator +")));
+                hint, format!("operator +")));
         }
     }
 
