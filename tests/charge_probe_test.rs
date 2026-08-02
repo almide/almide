@@ -108,6 +108,53 @@ fn charge_probe_gate() {
     time_ctor_guard_cross_target();
     time_report_prints_dual_time();
     interp_third_vote_on_metered_fixtures();
+    metered_clones_keep_nonregion_paths_charge_free();
+}
+
+/// T1-2: in BUDGET-ONLY mode (no probe), every charge in BOTH artifacts sits
+/// inside a region fn (`__almd_bounded_*`) or a `__fuel` clone — the
+/// non-region paths of a budget-using program pay ZERO metering.
+fn metered_clones_keep_nonregion_paths_charge_free() {
+    // Budget-only mode: the probe env must be OFF for these in-process
+    // renders (this test binary is single-threaded by design — see the
+    // combined-test SAFETY note).
+    unsafe { std::env::remove_var("ALMIDE_FUEL_PROBE") };
+    let source = std::fs::read_to_string(fixture_path("bounded")).unwrap();
+    let metered_fn = |name: &str| name.contains("__almd_bounded_") || name.contains("__fuel");
+
+    let rs = almide_mir::pipeline::try_render_rust_source(&source)
+        .expect("bounded: native render failed");
+    assert!(
+        rs.contains("__almd_charge("),
+        "native: budget-only mode emitted no charges at all (vacuous check)"
+    );
+    for block in rs.split("\nfn ").skip(1) {
+        let name = block.split(['(', '<']).next().unwrap_or("");
+        if block.contains("__almd_charge(") && name != "__almd_charge" {
+            assert!(
+                metered_fn(name),
+                "native: non-region fn `{name}` carries a charge in budget-only mode"
+            );
+        }
+    }
+
+    let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
+    let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
+        .expect("bounded: wasm render failed");
+    assert!(
+        wat.contains("global.set $__fuel (i64.sub (global.get $__fuel)"),
+        "wasm: budget-only mode emitted no charges at all (vacuous check)"
+    );
+    for block in wat.split("(func $").skip(1) {
+        let name = block.split([' ', '\n', '(']).next().unwrap_or("");
+        if block.contains("global.set $__fuel (i64.sub (global.get $__fuel)") {
+            assert!(
+                metered_fn(name),
+                "wasm: non-region fn `{name}` carries a charge in budget-only mode"
+            );
+        }
+    }
+    unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
 }
 
 /// T3-4: the interp's deterministic meter (budget prims + W1 charge mirror)

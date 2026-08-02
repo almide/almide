@@ -845,6 +845,21 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     }
     // Stage 1 probe: same insertion point in pass order as the wasm leg.
     crate::charge_probe::insert_probe_charges(&mut functions);
+    // T1-2 metered clones carry their base fn's declared signature — copy the
+    // sig entry so a call to `heavy__fuel` types exactly like `heavy` (without
+    // this the repr fallback typed a Result-returning clone as String).
+    {
+        let cloned: Vec<(String, _)> = functions
+            .iter()
+            .filter_map(|f| {
+                let base = f.name.strip_suffix("__fuel")?;
+                Some((f.name.as_str().to_string(), sigs.get(base)?.clone()))
+            })
+            .collect();
+        for (name, sig) in cloned {
+            sigs.insert(name, sig);
+        }
+    }
     // #824: see the wasm leg's call above — `Op::MakeUnique` already renders to
     // nothing on native (render_native.rs's `Op::Consume | Op::Borrow |
     // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both

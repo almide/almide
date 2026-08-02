@@ -31,27 +31,113 @@ pub fn probe_enabled() -> bool {
     std::env::var("ALMIDE_FUEL_PROBE").is_ok_and(|v| v == "1")
 }
 
-/// Insert entry + loop-head charges into every function, in place. No-op when
-/// the probe env var is not set.
-pub fn insert_probe_charges(functions: &mut [MirFunction]) {
-    if !probe_enabled() && !budget_used() {
+/// Insert deterministic charges. Two modes:
+///  - PROBE (`ALMIDE_FUEL_PROBE`): every function is metered — the probe
+///    measures the whole program, unchanged.
+///  - BUDGET-ONLY: metered-clone specialization (T1-2) — only the outlined
+///    region fns and `__fuel` CLONES of their transitive callees carry
+///    charges, so a program's non-region paths pay ZERO metering cost.
+///    Region spends are unchanged (every in-region callee IS a metered
+///    clone), and out-of-region spend is unobservable (verdicts read only
+///    the enter/exit delta), so no fixture flip point moves.
+pub fn insert_probe_charges(functions: &mut Vec<MirFunction>) {
+    if probe_enabled() {
+        for f in functions.iter_mut() {
+            charge_fn(f);
+        }
         return;
     }
-    for f in functions.iter_mut() {
-        let mut idx: u32 = 0;
-        let mut out: Vec<Op> = Vec::with_capacity(f.ops.len() + 4);
-        out.push(Op::Charge { site: site_id(&f.name, idx), cost: 1 });
-        idx += 1;
-        for op in f.ops.drain(..) {
-            let is_loop_start = matches!(op, Op::LoopStart);
-            out.push(op);
-            if is_loop_start {
-                out.push(Op::Charge { site: site_id(&f.name, idx), cost: 1 });
-                idx += 1;
+    if budget_used() {
+        specialize_metered_clones(functions);
+    }
+}
+
+/// Entry + loop-head charges for one fn, in place (the W1 placement).
+fn charge_fn(f: &mut MirFunction) {
+    let mut idx: u32 = 0;
+    let mut out: Vec<Op> = Vec::with_capacity(f.ops.len() + 4);
+    out.push(Op::Charge { site: site_id(&f.name, idx), cost: 1 });
+    idx += 1;
+    for op in f.ops.drain(..) {
+        let is_loop_start = matches!(op, Op::LoopStart);
+        out.push(op);
+        if is_loop_start {
+            out.push(Op::Charge { site: site_id(&f.name, idx), cost: 1 });
+            idx += 1;
+        }
+    }
+    f.ops = out;
+}
+
+/// T1-2: clone the region-reachable call graph into `__fuel` variants and
+/// meter ONLY those (plus the region fns themselves). Lifted lambdas cannot
+/// be cloned (table dispatch indexes by name-sorted position), so when a
+/// region reaches a `FuncRef` every `__lambda_*` fn stays metered globally —
+/// the one documented remainder of "zero metering outside regions".
+fn specialize_metered_clones(functions: &mut Vec<MirFunction>) {
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+    let names: BTreeSet<String> = functions.iter().map(|f| f.name.as_str().to_string()).collect();
+    let by_name: BTreeMap<String, usize> =
+        functions.iter().enumerate().map(|(i, f)| (f.name.as_str().to_string(), i)).collect();
+    let is_root = |n: &str| n.starts_with("__almd_bounded_");
+
+    // Transitive CallFn closure from the region roots (user fns only), plus
+    // whether any region-reachable fn takes a FuncRef (a table-dispatched
+    // lambda the clone map cannot retarget).
+    let mut reachable: BTreeSet<String> = BTreeSet::new();
+    let mut uses_funcref = false;
+    let mut queue: VecDeque<String> =
+        names.iter().filter(|n| is_root(n)).cloned().collect();
+    let mut visited: BTreeSet<String> = queue.iter().cloned().collect();
+    while let Some(n) = queue.pop_front() {
+        let Some(&i) = by_name.get(&n) else { continue };
+        for op in &functions[i].ops {
+            match op {
+                Op::CallFn { name, .. } if names.contains(name.as_str()) => {
+                    let callee = name.as_str().to_string();
+                    if !is_root(&callee) {
+                        reachable.insert(callee.clone());
+                    }
+                    if visited.insert(callee.clone()) {
+                        queue.push_back(callee);
+                    }
+                }
+                Op::FuncRef { .. } => uses_funcref = true,
+                _ => {}
             }
         }
-        f.ops = out;
     }
+
+    // Clone each reachable fn as `<name>__fuel`, retargeting region-internal
+    // calls to the clone family (recursion included).
+    let retarget = |f: &mut MirFunction, reachable: &BTreeSet<String>| {
+        for op in f.ops.iter_mut() {
+            if let Op::CallFn { name, .. } = op {
+                if reachable.contains(name.as_str()) {
+                    *name = format!("{name}__fuel");
+                }
+            }
+        }
+    };
+    let mut clones: Vec<MirFunction> = Vec::with_capacity(reachable.len());
+    for n in &reachable {
+        let i = by_name[n];
+        let mut c = functions[i].clone();
+        c.name = format!("{n}__fuel");
+        retarget(&mut c, &reachable);
+        charge_fn(&mut c);
+        clones.push(c);
+    }
+    for f in functions.iter_mut() {
+        let name = f.name.as_str().to_string();
+        if is_root(&name) {
+            retarget(f, &reachable);
+            charge_fn(f);
+        } else if uses_funcref && name.starts_with("__lambda_") {
+            charge_fn(f);
+        }
+    }
+    functions.extend(clones);
 }
 
 // ───────────────────── charge certificate (static preservation) ─────────────────────
