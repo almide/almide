@@ -12,8 +12,13 @@ fn ra() -> Int = 1
 fn rb() -> Int = 2
 
 effect fn main() -> Unit = {
-  let r = fan.any { one() }
+  let r = fan.any {
+    one()
+  }
   println("any_var=${r}")
-  let (sa, sb) = fan.settle { ra(); rb() }
+  let (sa, sb) = fan.settle {
+    ra()
+    rb()
+  }
   println("settle=${sa} ${sb}")
 }

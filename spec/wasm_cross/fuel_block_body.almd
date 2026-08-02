@@ -14,7 +14,10 @@ fn render(n: Int) -> Int = n + 1
 fn heavy(n: Int) -> Int = {
   var i = 0
   var acc = 0
-  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
   acc
 }
 
@@ -34,7 +37,10 @@ effect fn main() -> Unit = {
   let z = fan.bounded(compute.ms(0)) { 42 } ?? -1
   println(int.to_string(z))
   let w = fan.race {
-    { let a = heavy(1000); a + 1 }
+    {
+      let a = heavy(1000)
+      a + 1
+    }
     heavy(500)
   } ?? -1
   println(int.to_string(w))

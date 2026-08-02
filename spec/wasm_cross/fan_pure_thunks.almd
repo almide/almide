@@ -36,8 +36,14 @@ fn try_d() -> Result[Int, String] = {
 }
 
 effect fn main() -> Unit = {
-  let a = fan.any { try_c(); try_d() }
+  let a = fan.any {
+    try_c()
+    try_d()
+  }
   println("any=${a}")
-  let (sa, sb) = fan.settle { quiet_a(); quiet_b() }
+  let (sa, sb) = fan.settle {
+    quiet_a()
+    quiet_b()
+  }
   println("settle=${sa} ${sb}")
 }

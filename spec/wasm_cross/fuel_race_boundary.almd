@@ -6,14 +6,20 @@
 fn heavy(n: Int) -> Int = {
   var i = 0
   var acc = 0
-  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
   acc
 }
 
 effect fn main() -> Unit = {
   var ns = 1500
   while ns < 1512 {
-    let r = fan.race(compute.ns(ns)) { heavy(1000); heavy(500) } ?? -1
+    let r = fan.race(compute.ns(ns)) {
+      heavy(1000)
+      heavy(500)
+    } ?? -1
     let flag = if r == -1 then 1 else 0
     println(int.to_string(ns * 10 + flag))
     ns = ns + 1

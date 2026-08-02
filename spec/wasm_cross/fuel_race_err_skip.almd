@@ -5,7 +5,10 @@
 fn heavy(n: Int) -> Int = {
   var i = 0
   var acc = 0
-  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
   acc
 }
 
@@ -16,13 +19,23 @@ fn ok_after(n: Int) -> Result[Int, String] = ok(heavy(n))
 effect fn main() -> Unit = {
   // arm 0 is CHEAPEST but returns Err -> skipped; arm 1 (Ok, 502 units) wins
   // over arm 2 (plain, ~1002 units).
-  let w = fan.race { cheap_fail(1); ok_after(500); heavy(1000) } ?? -1
+  let w = fan.race {
+    cheap_fail(1)
+    ok_after(500)
+    heavy(1000)
+  } ?? -1
   println(int.to_string(w))
   // all Result arms Err -> no winner -> fallback
-  let x = fan.race { cheap_fail(1); cheap_fail(2) } ?? -1
+  let x = fan.race {
+    cheap_fail(1)
+    cheap_fail(2)
+  } ?? -1
   println(int.to_string(x))
   // bare form with mixed arms
-  let y = fan.race { cheap_fail(1); heavy(500) }
+  let y = fan.race {
+    cheap_fail(1)
+    heavy(500)
+  }
   match y {
     ok(v) => println(int.to_string(v)),
     err(e) => println(e),

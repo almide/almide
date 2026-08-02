@@ -5,7 +5,10 @@
 fn loop_forever(n: Int) -> Int = {
   var i = 0
   var acc = n
-  while true { acc = (acc + 7) % 999983; i = i + 1 }
+  while true {
+    acc = (acc + 7) % 999983
+    i = i + 1
+  }
   acc
 }
 
