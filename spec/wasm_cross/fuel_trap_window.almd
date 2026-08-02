@@ -1,9 +1,10 @@
 // @contract: C-205
-// T1-1 trap visibility window, INSIDE: work between the exhausting charge
-// site and the next one still runs (here the divide was INLINED into the
-// outlined arm, collapsing its charge site) — the trap fires, and it fires
-// IDENTICALLY on both targets (§13 message + exit 1). The window is
-// deterministic, never wall-clock.
+// T1-1 trap visibility window, INSIDE: work the meter has ADMITTED executes
+// normally — including its traps. The arm's spend stays within budget all the
+// way to the division, so the trap fires (§13 message + exit 1) identically
+// on both targets AND in the interp: the window is deterministic, never
+// wall-clock. (The OUTSIDE half — a trap cut off by exhaustion before it
+// runs — is fuel_trap_cut.)
 fn heavy(n: Int) -> Int = {
   var i = 0
   var acc = 0
@@ -11,11 +12,16 @@ fn heavy(n: Int) -> Int = {
   acc
 }
 
-fn trap_div(k: Int) -> Int = k / (k - k)
+fn trap_late(k: Int) -> Int = {
+  var j = 0
+  var s = k
+  while j < 10 { s = s + 1; j = j + 1 }
+  s / (s - s)
+}
 
 effect fn main() -> Unit = {
-  let w = fan.race(compute.ns(1600)) {
-    { let x = heavy(5000); trap_div(x) }
+  let w = fan.race(compute.us(100)) {
+    { let x = heavy(100); trap_late(x) }
     heavy(500)
   } ?? -1
   println(int.to_string(w))
