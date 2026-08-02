@@ -698,6 +698,14 @@ fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, P
         }
     }
 
+    // The time surfaces (compute/duration) are checker built-ins, not modules:
+    // there is nothing on disk to find, and telling the user to CREATE the file
+    // sends them away from the actual fix (delete the import line).
+    if almide_lang::time_units::TIME_MODULES.iter().any(|(m, _)| *m == name) {
+        return Err(format!(
+            "'{name}' is auto-available — it is a built-in surface, not a module\n  hint: Remove the `import {name}` line; {name}.ms(...) is always in scope",
+        ));
+    }
     Err(format!(
         "module '{}' not found\n  searched: {}\n  hint: Create {}.almd in the same directory, or add to [dependencies] in almide.toml",
         name,

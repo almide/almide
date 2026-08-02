@@ -1,0 +1,30 @@
+// @contract: C-204
+// The budget may flow through VARIABLES before reaching the head: a let-bound
+// sum fed by fn params, and a let-bound single constructor in a nested block,
+// must meter identically to the inline spelling. (The nominal time tag erases
+// at MIR — the slot holds the erased i64, never a heap pointer; before that
+// erasure this shape failed wasm validation with an i64/i32 mismatch.)
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+effect fn run_with(ns_lo: Int, ns_hi: Int) -> Int = {
+  let budget = compute.ns(ns_lo) + compute.ns(ns_hi)
+  fan.bounded(budget) { heavy(1000) } ?? -1
+}
+
+effect fn main() -> Unit = {
+  // heavy(1000) = 1002 units = 3006ns under CM-1 v0.3: 3005 cuts, 3006 admits.
+  let under = run_with(3000, 5)
+  let exact = run_with(3000, 6)
+  println(int.to_string(under))
+  println(int.to_string(exact))
+  let single = {
+    let b = compute.ns(3006)
+    fan.bounded(b) { heavy(1000) } ?? -1
+  }
+  println(int.to_string(single))
+}

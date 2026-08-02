@@ -736,6 +736,14 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                     if a.len() == 2
                         && matches!(a[0], Ty::Int | Ty::Bool)
                         && matches!(a[1], Ty::String))
+                    // A LIFTED effect fn (declared `-> Int|Bool`, `effect`) has
+                    // the same wrapped carrier ABI on this leg — the native
+                    // pipeline runs no never-err strip, so every lifted call
+                    // site reads the stereotyped consumer windows. Declared
+                    // ret_ty alone misses them (the lift lives in the ABI, not
+                    // the signature), which left the windows unrewritten and
+                    // the verifier flagging the raw LoadHandle as UseAfterFree.
+                    || (f.is_effect && matches!(f.ret_ty, Ty::Int | Ty::Bool))
             })
             .map(|f| f.name.as_str().to_string())
             .collect();
@@ -810,6 +818,11 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             let params: Option<Vec<_>> = func.params.iter().map(|p| kind(&p.ty)).collect();
             let ret = if matches!(func.ret_ty, Ty::Unit) {
                 Some(None)
+            } else if func.is_effect && matches!(func.ret_ty, Ty::Int | Ty::Bool) {
+                // A LIFTED effect fn returns the wrapped carrier on this leg
+                // (the same widening `result_fns` applies above): its declared
+                // scalar would type the call dst I64 while the value is Res.
+                Some(Some(NativeSigKind::Res))
             } else {
                 kind(&func.ret_ty).map(Some)
             };

@@ -262,7 +262,13 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
                 func.name
             )));
         }
-        let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)?;
+        let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
+            .map_err(|e| match e {
+                LowerError::Unsupported(msg) if !msg.contains(" in `") => LowerError::Unsupported(
+                    format!("{msg} (fn `{}`)", func.name),
+                ),
+                other => other,
+            })?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
@@ -460,6 +466,27 @@ fn render_fn(
             Op::Prim { kind: crate::PrimKind::ProcExit, dst: None, args } => {
                 line!("std::process::exit({} as i32);", var(args[0]));
             }
+            // The §13 termination convention's MESSAGE half — the err-abort
+            // window of a `?`-propagation in main (`Handle(msg)` + `Die`).
+            // The native render has no address model: a handle over a STRING
+            // local is an alias (the value IS the string), and `Die` is the
+            // wasm `$__die` twin — the string to stderr verbatim, exit 1.
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args }
+                if matches!(tys.get(&args[0]), Some(NTy::Str | NTy::StrRef)) =>
+            {
+                let src = match tys.get(&args[0]) {
+                    Some(NTy::Str) => format!("{}.as_str()", var(args[0])),
+                    _ => var(args[0]).to_string(),
+                };
+                tys.insert(*d, NTy::StrRef);
+                line!("let {}: &str = {};", var(*d), src);
+            }
+            Op::Prim { kind: crate::PrimKind::Die, dst: None, args }
+                if matches!(tys.get(&args[0]), Some(NTy::Str | NTy::StrRef)) =>
+            {
+                line!("eprint!(\"{{}}\", {});", var(args[0]));
+                line!("std::process::exit(1);");
+            }
             // ── T1-3 native Result carrier (native_result_rewrite) ──
             Op::Prim { kind: crate::PrimKind::ResMakeOk, dst: Some(d), args } => {
                 tys.insert(*d, NTy::Res);
@@ -567,6 +594,19 @@ fn render_fn(
         return Err(wall("native: unbalanced IfThen/EndIf markers"));
     }
 
+    // A LIFTED effect fn (declared scalar ret, wrapped carrier ABI — the sigs
+    // table widening in the pipeline): the body computes the raw scalar and
+    // the `Ok(..)` wrap happens HERE, at the single return seam. The body was
+    // already rendered with the scalar typing, so retyping the ret value now
+    // affects only the signature and the cut-marker patch below.
+    let lifted_wrap = !is_main
+        && matches!(sigs.get(func.name.as_str()), Some((_, Some(NativeSigKind::Res))))
+        && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
+    if lifted_wrap {
+        if let Some(v) = func.ret {
+            tys.insert(v, NTy::Res);
+        }
+    }
     // Signature: the return type is known only after the body typed `func.ret`.
     let mut sig = render_native_fn_sig(func, &tys, is_main)?;
     sig.push_str(" {\n");
@@ -574,7 +614,11 @@ fn render_fn(
     // The trailing return expression (moved out — fresh owned for heap).
     if let Some(v) = func.ret {
         out.push_str("    ");
-        out.push_str(&native_ret_expr(v, tys[&v]));
+        if lifted_wrap {
+            out.push_str(&format!("Ok({})", var(v)));
+        } else {
+            out.push_str(&native_ret_expr(v, tys[&v]));
+        }
         out.push('\n');
     }
     out.push_str("}\n");

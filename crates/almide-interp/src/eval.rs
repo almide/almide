@@ -452,7 +452,8 @@ impl<'a> Interpreter<'a> {
             // leg), so they are legitimately reachable at the cut point.
             // Everything else stays unreachable below.
             IrExprKind::RuntimeCall { symbol, args }
-                if symbol.as_str().starts_with("almide_rt_prim_budget_") =>
+                if symbol.as_str().starts_with("almide_rt_prim_budget_")
+                    || symbol.as_str().starts_with("almide_rt_prim_timeout_") =>
             {
                 let mut vals = Vec::with_capacity(args.len());
                 for a in args {

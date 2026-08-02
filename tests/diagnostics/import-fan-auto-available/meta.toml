@@ -1,0 +1,2 @@
+expects_error = "'fan' is auto-available"
+hint_substring = "Remove the `import fan` line"

@@ -85,6 +85,16 @@ impl Parser {
             ));
         }
 
+        // `fan` is a keyword head, not a module — without this the user gets a
+        // raw "Expected identifier (got Fan 'fan')" that hides the actual fix.
+        if self.check(TokenType::Fan) {
+            let tok = self.current();
+            return Err(format!(
+                "'fan' is auto-available — it is a built-in surface, not a module, at line {}:{}\n  Hint: Remove the `import fan` line; fan.bounded / fan.race / fan.timeout are always in scope",
+                tok.line, tok.col
+            ));
+        }
+
         let path = self.parse_module_path()?;
 
         // Selective import: import mod.{ A, B }

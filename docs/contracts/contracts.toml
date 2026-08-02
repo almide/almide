@@ -2547,7 +2547,7 @@ evidence  = [
 id        = "C-204"
 spec      = "ALS-D2"
 title     = "A fan.bounded verdict is a function of the program and its inputs alone"
-statement = "`fan.bounded(c) { body }` yields Err (the ledger-constant message) exactly when the region's metered spend in charge units exceeds `floor(ns / CM-1)`, and the Ok ⇄ Err flip happens at the SAME declared nanosecond on both targets — the boundary fixtures pin the flip at unit exactness (heavy(1000) = 1002 units flips at 3006ns under CM-1 v0.3). Bind statements inside a block body add zero charge; the bare (no-`??`) form produces the same verdict as a real `Result[T, String]` value; the region body is pure by typing, so no wall-clock input can reach the verdict."
+statement = "`fan.bounded(c) { body }` yields Err (the ledger-constant message) exactly when the region's metered spend in charge units exceeds `floor(ns / CM-1)`, and the Ok ⇄ Err flip happens at the SAME declared nanosecond on both targets — the boundary fixtures pin the flip at unit exactness (heavy(1000) = 1002 units flips at 3006ns under CM-1 v0.3). Bind statements inside a block body add zero charge; the bare (no-`??`) form produces the same verdict as a real `Result[T, String]` value; the region body is pure by typing, so no wall-clock input can reach the verdict. The budget expression may reach the head through variables (a let-bound sum, a nested-block binding, an effect-fn boundary) — the nominal time tag erases at MIR, so the variable spelling meters identically to the inline one."
 since     = "0.47.0"
 status    = "active"
 evidence  = [
@@ -2556,6 +2556,7 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_bare_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_divergence_cut.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_dyn_charge.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_var_budget.almd", class = "fixture" },
 ]
 
 # ── DETERMINISTIC RACE WINNER (fan.race) ─

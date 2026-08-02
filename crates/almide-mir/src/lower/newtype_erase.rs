@@ -55,6 +55,18 @@ fn seed_selfhost_newtype_reps(
             },
         );
     }
+    // Compute / Duration — the ADR-0001 S2 time types. Their VALUES erase to
+    // i64 nanoseconds at frontend lowering (`lower_time_ctor` / the saturating
+    // time algebra), but a let-bound budget (`let b = compute.ms(n)`) still
+    // carries the checker's nominal tag; left alone, `repr_of` reads the tag
+    // as a heap Ptr (i32 slot) while the stored value is the erased i64 — a
+    // validate-time i64/i32 mismatch. The tag erases HERE, after the checker's
+    // clock firewall has done its job, never before.
+    for (_, time_ty) in almide_lang::time_units::TIME_MODULES {
+        if !declared.contains(time_ty) {
+            map.insert((*time_ty).to_string(), almide_lang::types::Ty::Int);
+        }
+    }
     // ProcessStatus — the process stdlib record (stdlib/process.almd). Its decl lives in
     // the BUNDLED stdlib module `source_to_ir` skips, so an ANNOTATED literal
     // (`let s: process.ProcessStatus = { code: …, stdout: …, stderr: … }`) carried an
