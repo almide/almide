@@ -3,6 +3,16 @@
 
 > 非同期設計の憲章。この一枚で全体が読める。深掘りは末尾の文書地図から。
 
+> **実装状況（2026-08-03、branch `worktree-stage1-charge-probe` — 食い違いは
+> BURNDOWN/契約台帳が正。憲章本文は起草時のまま）**: §7 の計画は
+> **Lane 1（Wave 1 → Stage 1 → 2 → 3）・Lane 2 の B2（fan.timeout）・
+> Lane 3 の D（dojo async バンク、Almide 側 7/7）が完了**。§3 の matrix は
+> race の mapper 形（T7-1）まで含め全セル確定（`tests/fan_surface_matrix_test.rs`
+> が機械固定）。§6 の 5 文は: **1–3 = 解禁条件成立**（Lean 7 定理 + C-202..C-208 +
+> 3-way gates）、**4 = timeout-ω の record/replay に射程を限定すれば真**
+> （効果応答テープ = B1 の全域は未着手）、**5 = Almide 単独 MSR は取得済み、
+> 全文解禁には同一モデル比較 lang-bench(async) が残る**。C（KPN）は設計どおり地平。
+
 ## 0. 一文
 
 **壁時計は観測を決めない。言語の時間基底は論理時間であり、環境の時間は宣言された入力としてのみ入る。**

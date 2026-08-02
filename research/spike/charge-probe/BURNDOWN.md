@@ -260,6 +260,14 @@
   MSR 実測済み: dojo `race-cheapest`（cdf8edc）が **pass（retry 1** — 唯一の
   失敗は `import fan` で、T5-4b の新診断が即修正させた）。async バンク 7/7）
 
+- [x] **T7-2 async-inception / async-world-claim の status 同期** — T4-5 の整合
+  対象外だった 2 本が「これから」の体のまま stale。冒頭に実装状況ブロックを追記
+  （履歴は不変）: Lane 1 全部 + B2 + D(Almide 側) + race mapper 完了、
+  **B1 は timeout-ω スライスのみ**（効果応答テープ fs/http/random は未着手 —
+  claim 4 の全文解禁は B1 完了後、現状は「timeout 事象の決定的再現」に射程限定）、
+  claim 5 の全文解禁には同一モデル比較 lang-bench(async) が残る、C(KPN) は
+  設計どおり地平。「食い違いは BURNDOWN/契約台帳が正」の規則も明記。
+
 ## Branch 外（残り — 参照のみ）
 
 Rung 1 出力 transactional / AARA は別レーンの台帳へ。ADR-0002（実行順）の批准は
