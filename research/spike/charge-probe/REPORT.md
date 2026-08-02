@@ -139,3 +139,18 @@ lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
    領分）。逐次 + lazy のため両ターゲットで同一に落ちる（決定的だが spec より過剰報告）。
 8. arm の Err スキップ（候補から外す）は未実装 — v1 arm は非 Result 単一 call なので
    Err 経路自体が存在しない。
+
+## P0 修正 2 件（2026-08-02、同 branch）
+
+1. **fmt のコード破壊を修正**: formatter の wildcard が `fan.bounded` / `fan.race` を
+   `/* unformatted */` に置換してコードを**消していた**（データ損失クラス）。整形
+   アームを追加 — bounded はインライン、race は arm 改行の block 形。roundtrip
+   （fmt → 再パース緑）と冪等性を確認。
+2. **CM-1 を実測で再校正（v0.1 → v0.2）**: draft の 1000ns/unit は実測に対して
+   **21 倍過大**で、ADR-0001 D5 の宣言帯（5 倍）を自ら破っていた。参照測定:
+   heavy(1000) = 1002 units が release で 47.0µs → 46.9ns/unit。**50ns/unit** に
+   pin（帯比 1.07）。`compute.us(51)` で bounded が通り、`compute.us(26)` で race に
+   勝者が出る — 新フリップ点も両ターゲット同一（gate 更新済み）。
+   教訓: 「ms を名乗る」の誠実さは定数 1 つに懸かっており、D5 校正ゲートの CI 常設は
+   merge 前必須。定数は 3 箇所（charge_probe 定数 / wasm BudgetEnter render / native
+   BUDGET_SHIM）に現れる — 単一ソース化は本実装 PR で。

@@ -168,7 +168,11 @@ pub fn reset_budget_used() {
 /// The counters start at i64::MAX and count DOWN; consumed = MAX - remaining.
 pub const FUEL_START: i64 = i64::MAX;
 
-/// CM-1 v0 draft: nanoseconds per charge unit (1 charge site = 1µs of the
-/// frozen abstract machine). RATIO-ONLY contract — the absolute value is a
-/// draft constant to be calibrated by the D5 gate.
-pub const CM1_NS_PER_CHARGE: i64 = 1000;
+/// CM-1 v0.2: nanoseconds per charge unit. CALIBRATED 2026-08-02 against the
+/// reference measurement: heavy(1000) = 1002 units ran 47.0µs wall (release,
+/// Apple M-class) → 46.9ns/unit; pinned at 50 (band ratio 1.07, inside the
+/// ADR-0001 D5 declared 5x band — the v0 draft of 1000 was 21x out and would
+/// have tripped the ADR's own falsifier). RATIO-ONLY contract; this constant
+/// appears verbatim in the wasm BudgetEnter render and the native BUDGET_SHIM
+/// — keep the three sites identical.
+pub const CM1_NS_PER_CHARGE: i64 = 50;

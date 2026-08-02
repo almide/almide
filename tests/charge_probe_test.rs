@@ -84,8 +84,8 @@ fn charge_probe_gate() {
 
 /// Stage 3: `fan.race` — winner selection ((spend, index) lex-min), tie →
 /// source order, budget filtering, and the winner-appearance boundary:
-/// heavy(500) costs exactly 502 units, so the sweep flips from all-exhausted
-/// to arm-1-wins at `compute.us(502)` on BOTH targets.
+/// heavy(500) costs exactly 502 units = 25.1µs at CM-1 v0.2, so the sweep
+/// flips from all-exhausted to arm-1-wins at `compute.us(26)` on BOTH targets.
 fn race_deterministic_across_targets() {
     if !wasmtime_available() {
         eprintln!("skip: wasmtime not on PATH");
@@ -119,14 +119,15 @@ fn race_deterministic_across_targets() {
         cmd.env_remove("ALMIDE_FUEL_PROBE");
         String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
     };
-    assert!(out.contains("5011"), "us=501 must have no winner (flag 1)");
-    assert!(out.contains("5020"), "us=502 must produce the arm-1 winner (flag 0)");
+    assert!(out.contains("251"), "us=25 must have no winner (flag 1)");
+    assert!(out.contains("260"), "us=26 must produce the arm-1 winner (flag 0)");
 }
 
 /// Stage 2: `fan.bounded` — result equality WITHOUT the probe (the shipped
 /// semantics), probe-triple equality WITH it, and the deterministic budget
 /// boundary: heavy(1000) costs exactly 1002 charge units (entry + 1001 loop
-/// heads), so `compute.us(1001)` exhausts and `compute.us(1002)` succeeds —
+/// heads) = 50.1µs at CM-1 v0.2 (50ns/unit), so `compute.us(50)` exhausts and
+/// `compute.us(51)` succeeds —
 /// at the SAME point on both targets. That flip is the Stage 2 claim.
 fn bounded_deterministic_across_targets() {
     if !wasmtime_available() {
@@ -164,9 +165,9 @@ fn bounded_deterministic_across_targets() {
         cmd.env_remove("ALMIDE_FUEL_PROBE");
         String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
     };
-    assert!(out.contains("10011"), "us=1001 must exhaust (flag 1)");
-    assert!(out.contains("10020"), "us=1002 must succeed (flag 0)");
-    assert!(!out.contains("10021"), "us=1002 must not exhaust");
+    assert!(out.contains("501"), "us=50 must exhaust (flag 1)");
+    assert!(out.contains("510"), "us=51 must succeed (flag 0)");
+    assert!(!out.contains("511"), "us=51 must not exhaust");
 }
 
 fn dynamic_three_point_comparison() {

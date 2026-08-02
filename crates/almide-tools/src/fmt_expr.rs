@@ -142,6 +142,8 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Match { .. } => fmt_expr_match(out, expr, depth),
         ExprKind::Block { .. } => fmt_expr_block(out, expr, depth),
         ExprKind::Fan { .. } => fmt_expr_fan(out, expr, depth),
+        ExprKind::FanBounded { .. } => fmt_expr_fan_bounded(out, expr, depth),
+        ExprKind::FanRace { .. } => fmt_expr_fan_race(out, expr, depth),
         ExprKind::ForIn { .. } => fmt_expr_forin(out, expr, depth),
         ExprKind::While { .. } => fmt_expr_while(out, expr, depth),
         ExprKind::Lambda { .. } => fmt_expr_lambda(out, expr, depth),
@@ -260,6 +262,31 @@ fn fmt_expr_fan(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Fan { exprs, .. } = &expr.kind else { unreachable!() };
     out.push_str("fan {\n");
     for e in exprs {
+        out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
+    }
+    out.push_str(&ind(depth)); out.push('}');
+}
+
+fn fmt_expr_fan_bounded(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanBounded { budget, body } = &expr.kind else { unreachable!() };
+    out.push_str("fan.bounded(");
+    fmt_expr(out, budget, depth);
+    out.push_str(") { ");
+    fmt_expr(out, body, depth);
+    out.push_str(" }");
+}
+
+fn fmt_expr_fan_race(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanRace { budget, arms } = &expr.kind else { unreachable!() };
+    out.push_str("fan.race");
+    if let Some(b) = budget {
+        out.push('(');
+        fmt_expr(out, b, depth);
+        out.push(')');
+    }
+    out.push_str(" {
+");
+    for e in arms {
         out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
     }
     out.push_str(&ind(depth)); out.push('}');

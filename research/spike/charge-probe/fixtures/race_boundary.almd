@@ -6,8 +6,8 @@ fn heavy(n: Int) -> Int = {
 }
 
 effect fn main() -> Unit = {
-  var us = 495
-  while us < 510 {
+  var us = 20
+  while us < 35 {
     let r = fan.race(compute.us(us)) { heavy(1000); heavy(500) } ?? -1
     let flag = if r == -1 then 1 else 0
     println(int.to_string(us * 10 + flag))

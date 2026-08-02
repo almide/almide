@@ -329,7 +329,7 @@ fn render_op_prim(
         let d = local(dst.expect("BudgetEnter has a result"));
         let a = local(args[0]);
         return format!(
-            "    (global.set $__fuel_entry (i64.div_s (local.get {a}) (i64.const 1000)))\n\
+            "    (global.set $__fuel_entry (i64.div_s (local.get {a}) (i64.const 50)))\n\
                  (local.set {d} (global.get $__fuel))\n\
                  (if (i64.lt_s (global.get $__fuel_entry) (global.get $__fuel))\n\
                    (then (global.set $__fuel (global.get $__fuel_entry))))\n"

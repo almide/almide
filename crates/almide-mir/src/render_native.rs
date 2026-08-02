@@ -852,7 +852,7 @@ impl Drop for __AlmdProbeGuard {
 /// Stage 2 budget fns — the exact wasm-leg arithmetic (min-cap, lazy verdict,
 /// streaming exit).
 const BUDGET_SHIM: &str = "fn __almd_budget_enter(budget_ns: i64) -> i64 {
-    let units = budget_ns / 1000;
+    let units = budget_ns / 50;
     __ALMD_FUEL_ENTRY.with(|e| e.set(units));
     let saved = __ALMD_FUEL.with(|f| f.get());
     if units < saved {
