@@ -236,10 +236,27 @@ tuple 契約は本実装 PR での deviation 項目に追加）。
 > **後日談（2026-08-03）**: 上の 2 点は Wave 1 時点の記述で、その後どちらも解消
 > 済み。settle の tuple 契約は T2-4（FanSettle 実ノード）で実装され
 > `let (ra, rb) = fan.settle { a(); b() }` が動く。mapper 形は any/settle が
-> T2-3 で実装済み。**race の mapper セルだけが fan-v2 の規定どおり「宣言済み・
-> 実ユース待ち」**で、その状態自体を `tests/fan_surface_matrix_test.rs`（6 head ×
-> 2 form の全セル gate）が機械固定している — 誤爆していた thunk 移行ヒントは
-> セル状態を正しく答える専用診断に置換（T6-1）。
+> T2-3、**race は T7-1（同日、ユーザー指示で実装）** — これで matrix の全セルが
+> implemented（11）か設計上不在（bounded/timeout の mapper、2）になり、
+> `tests/fan_surface_matrix_test.rs`（6 head × 2 form の全セル gate）が
+> その状態を機械固定している。誤爆していた thunk 移行ヒントは T6-1 で
+> セル回答の専用診断に置換済み。
+
+## Tier 7 — race mapper 実装（2026-08-03、ユーザー指示でセル閉鎖）
+
+`fan.race(xs, f)` / `fan.race(budget, xs, f)` が実装され、fan v2 matrix の最後の
+宣言済みセルが埋まった。意味論は block 形と同一法則の動的拡張: arm i = `f(xs[i])`
+（pure な 1 引数 lambda、Result 必須 — ok が競技、err は自己失格）、index = リスト
+順、budget は per-element、勝者 = (spend, index) 辞書式最小、全滅 = 台帳定数 Err。
+
+- 実装形: checker が mapper の戻りを **Result[T, String] に直接 pin**（自由 Err
+  変数は ConcretizeTypes 拒否を生む — 実装中に踏んで確定した規則）。lowering は
+  while + list.len/get + 要素ごとの outlined metered region（outliner を IR-body
+  版に分割、lambda param は自由変数として region param 化）の動的 fold。
+- 検証: fixture `fan_race_mapper.almd` の 6 プローブ（lex-min / 同着→先頭 index /
+  err 失格 / 全滅 / 1ns 枯渇 / bare auto-`?`）が wasm + interp で一致。native は
+  list ops が rung floor 外の honest wall（@xt-allow tracked — corpus
+  346 equal + 1 tracked / stale 0）。C-205 に mapper 条項を追補。
 
 ## Tier 5 — oracle 層の完遂（2026-08-02/03、同 branch）
 
