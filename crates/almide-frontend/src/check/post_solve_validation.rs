@@ -1,4 +1,35 @@
 
+/// Fill each undecidable slot (an unbound `?` inference var or `Unknown`) in
+/// `ty` with an example concrete type, so the E025 hint shows an annotation
+/// whose SHAPE matches the reported binding. Result's err slot fills as
+/// `String` (the stdlib's uniform error channel); every other hole fills as
+/// `Int`. Both are examples, marked `e.g.` at the emit site.
+fn fill_example_ty(ty: &Ty) -> Ty {
+    fn go(ty: &Ty, in_result_err: bool) -> Ty {
+        let hole = || if in_result_err { Ty::String } else { Ty::Int };
+        match ty {
+            Ty::Unknown => hole(),
+            Ty::TypeVar(n) if n.as_str().starts_with('?') => hole(),
+            Ty::Applied(ctor, args) => {
+                let is_result = *ctor == almide_lang::types::TypeConstructorId::Result;
+                Ty::Applied(ctor.clone(), args.iter().enumerate().map(|(i, a)|
+                    go(a, is_result && i == 1)).collect())
+            }
+            Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| go(t, false)).collect()),
+            Ty::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(|t| go(t, false)).collect(),
+                ret: Box::new(go(ret, false)),
+            },
+            Ty::Named(n, args) => Ty::Named(*n, args.iter().map(|t| go(t, false)).collect()),
+            Ty::Union(ts) => Ty::Union(ts.iter().map(|t| go(t, false)).collect()),
+            Ty::Record { fields } =>
+                Ty::Record { fields: fields.iter().map(|(n, t)| (*n, go(t, false))).collect() },
+            _ => ty.clone(),
+        }
+    }
+    go(ty, false)
+}
+
 /// Infer types for default value expressions in type declarations.
 /// Prevents ICE "missing type for expr" during lowering.
 fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
@@ -602,24 +633,28 @@ impl Checker {
     /// The wording splits on whether the site has a NAME: a named binding can be
     /// annotated in place and gets a `try` line naming it, while a bare
     /// expression has to be bound first before there is anywhere to put the
-    /// annotation.
+    /// annotation. The example annotation is derived from the REPORTED shape
+    /// (`List[Unknown]` → `List[Int]`), never a fixed exemplar — a hint whose
+    /// example cannot be correct for the binding teaches a false move (#1054).
     fn emit_unresolved_binding_diagnostic(&mut self, site: &UnresolvedBindingSite, resolved: &Ty) {
         let what = match &site.name {
             Some(n) => format!("binding '{}'", n),
             None => "this expression".to_string(),
         };
+            let example = fill_example_ty(resolved).display();
             let fix = match &site.name {
                 Some(n) => format!(
-                    "Annotate the binding with the full type, e.g. `let {}: Result[Int, String] = ...`. \
+                    "Annotate the binding with the full type, e.g. `let {}: {} = ...`. \
                      An unconstrained slot (such as the error type of a value that is always `ok(...)`, \
                      reachable only through an un-exercised branch) cannot be inferred and is never \
                      silently defaulted (Almide follows Rust/Swift; cf. Rust E0282).",
-                    n,
+                    n, example,
                 ),
-                None => "Bind the expression to an explicitly-typed `let`, e.g. \
-                     `let r: Result[Int, String] = ...`, so the unconstrained slot is pinned. \
+                None => format!(
+                    "Bind the expression to an explicitly-typed `let`, e.g. \
+                     `let r: {} = ...`, so the unconstrained slot is pinned. \
                      An unconstrained type slot cannot be inferred and is never silently defaulted \
-                     (Almide follows Rust/Swift; cf. Rust E0282).".to_string(),
+                     (Almide follows Rust/Swift; cf. Rust E0282).", example),
             };
             let mut diag = err(
                 format!("cannot infer a concrete type for {} (type {})", what, resolved.display()),
@@ -627,7 +662,7 @@ impl Checker {
                 format!("{} with an unconstrained type", what),
             ).with_code("E025");
             if let Some(n) = &site.name {
-                diag = diag.with_try(format!("let {}: Result[Int, String] = ...", n));
+                diag = diag.with_try(format!("let {}: {} = ...", n, example));
             }
             if let Some(s) = site.span {
                 diag.file = self.source_file.clone();

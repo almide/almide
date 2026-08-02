@@ -1,0 +1,7 @@
+// The fix the hint teaches: annotate with the SHAPE the diagnostic reported —
+// the list wrapper included — so the undecidable err slot is pinned.
+fn main() -> Unit = {
+  let r0: Result[Int, String] = ok(7)
+  let rs: List[Result[Int, String]] = [result.or_else(r0, (e) => ok(0))]
+  println("done")
+}
