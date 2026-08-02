@@ -25,6 +25,7 @@ impl Checker {
             ExprKind::Fan { .. } => self.infer_expr_g3_fan(expr),
             ExprKind::FanBounded { .. } => self.infer_expr_g3_fan_bounded(expr),
             ExprKind::FanRace { .. } => self.infer_expr_g3_fan_race(expr),
+            ExprKind::FanRaceMap { .. } => self.infer_expr_g3_fan_race_map(expr),
             ExprKind::FanSettle { .. } => self.infer_expr_g3_fan_settle(expr),
             ExprKind::FanTimeout { .. } => self.infer_expr_g3_fan_timeout(expr),
             ExprKind::Call { .. } => self.infer_expr_g3_call(expr),
@@ -348,6 +349,67 @@ impl Checker {
         self.env.metered_region = saved_region;
         let t = arm_ty.map(|t| resolve_ty(&t, &self.uf)).unwrap_or(Ty::Unknown);
         Ty::result(t, Ty::String)
+    }
+
+    /// `ExprKind::FanRaceMap` arm: `fan.race(xs, f)` / `fan.race(budget, xs, f)`
+    /// (T7-1 — the mapper cell). Effect-fn gate + budget clock like the block
+    /// form; `xs` unifies to `List[X]`; the mapper is a PURE 1-param lambda
+    /// `(X) -> Result[T, E]` (mapper form contract: Result REQUIRED — ok
+    /// competes, err self-disqualifies). Result[T, String] like the block form.
+    fn infer_expr_g3_fan_race_map(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanRaceMap { budget, list, mapper } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.race can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.race".to_string()).with_code("E007"));
+        }
+        if let Some(b) = budget {
+            let budget_ty = self.infer_expr(b);
+            let budget_concrete = resolve_ty(&budget_ty, &self.uf);
+            self.check_budget_clock("fan.race", &budget_concrete);
+        }
+        let list_ty = self.infer_expr(list);
+        let elem = self.fresh_var();
+        self.constrain(
+            list_ty,
+            Ty::Applied(TypeConstructorId::List, vec![elem.clone()]),
+            "fan.race mapper list",
+        );
+        // The mapper body is a metered PURE region, exactly like a block arm.
+        let saved_effect = self.env.can_call_effect;
+        let saved_region = self.env.metered_region;
+        self.env.can_call_effect = false;
+        self.env.metered_region = Some("fan.race");
+        let mapper_ty = self.infer_expr(mapper);
+        self.env.can_call_effect = saved_effect;
+        self.env.metered_region = saved_region;
+        // The mapper's return is pinned to `Result[T, String]` OUTRIGHT (not a
+        // free Err var): the Err payload only self-disqualifies — it is never
+        // read — and an unconstrained E left `Result[T, Unknown]` in the
+        // lowered fold (a ConcretizeTypes refusal). String is the fan world's
+        // uniform error channel. A concretely non-Result mapper gets the
+        // contract named before the unification error would garble it.
+        let mapper_concrete = resolve_ty(&mapper_ty, &self.uf);
+        if let Ty::Fn { ret, .. } = &mapper_concrete {
+            let r = resolve_ty(ret, &self.uf);
+            if !matches!(r, Ty::Applied(TypeConstructorId::Result, _) | Ty::TypeVar(_) | Ty::Unknown) {
+                self.emit(super::err(
+                    format!("fan.race mapper must return a Result, got {}", r.display()),
+                    "Return ok(value) to compete and err(reason) to disqualify the element — the mapper-form contract (like fan.map)",
+                    "fan.race mapper".to_string()));
+            }
+        }
+        let winner = self.fresh_var();
+        self.constrain(
+            mapper_ty,
+            Ty::Fn {
+                params: vec![elem],
+                ret: Box::new(Ty::result(winner.clone(), Ty::String)),
+            },
+            "fan.race mapper",
+        );
+        Ty::result(resolve_ty(&winner, &self.uf), Ty::String)
     }
 
     /// `ExprKind::FanTimeout` arm: `fan.timeout(deadline) { body }` (T5-1,

@@ -37,7 +37,7 @@ v2 はこれを **head × form の直積 1 枚**に置き換える。
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 | 可（観測はリスト順） |
 | settle | 選択しない。全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 | 可 |
 | any | **index 最小**の成功 | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 | 逐次（意味論ごと逐次） |
-| race | **(spend, index) 最小**の成功 | `fan.race { a; b }` → `T`（`fan.race(compute.ms(500)) { … }` は任意の発散ガード） | `fan.race(xs, f)` / `fan.race(compute.ms(500), xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
+| race | **(spend, index) 最小**の成功 | `fan.race { a; b }` → `T`（`fan.race(compute.ms(500)) { … }` は任意の発散ガード） | `fan.race(xs, f)` / `fan.race(compute.ms(500), xs, f)` → `T`（**実装済み 2026-08-03、T7-1** — f は pure な 1 引数 lambda で `Result` 必須、budget は per-element、同着はリスト順） | **pure**（Rung 0） | 可（枝刈り付き） |
 | bounded | 単一 body の計量 | `fan.bounded(compute.ms(100)) { body }` → `T` | —（map と合成） | **pure** | — |
 | timeout | 環境が切る（壁時計 — oracle 層、[ADR-0001 S8](../../adr/0001-deterministic-time-units.md)） | `fan.timeout(duration.s(5)) { body }` → `T` | — | oracle 可 | ホスト相対 |
 
@@ -207,7 +207,8 @@ Wave 1 が独立に着手可能であることが v2 の要点の一つ — 表�
 - mapper form の race に実ユースが出ない。→ セルは宣言のまま Wave 2 では
   block form だけ実装し、matrix gate に「宣言済み・未実装」を明示させる。
   （2026-08-03 発効: `tests/fan_surface_matrix_test.rs` が 6 head × 2 form の
-  全セルを機械固定 — race mapper は専用診断つき宣言済み・未実装、bounded /
-  timeout の mapper は設計上不在。セルを変えるなら同 PR で gate を更新する）
+  全セルを機械固定。**同日、ユーザー指示でセルを実装で閉じた（T7-1）** — gate は
+  race mapper を implemented 側へ遷移済み。bounded / timeout の mapper は
+  設計上不在のまま。セルを変えるなら同 PR で gate を更新する）
 - 「block か mapper か」の 2 択が LLM に不利に働く証拠が dojo の計測で出る。→
   MSR タスクバンクに fan v2 セットを足して測る。設計の当否は計測が決める。

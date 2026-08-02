@@ -1,0 +1,29 @@
+// @contract: C-205
+// @xt-allow: metered mapper needs list.len/list.get — outside the native rung floor (trust-spine lane)
+// The MAPPER form `fan.race(budget?, xs, f)` (T7-1): one pure lambda raced
+// over a dynamic list, winner = (spend, index) lexicographic minimum among
+// successes. spend ∝ heavy(x) makes the SMALLEST element the cheapest arm;
+// equal spends tie-break to the earlier index; err and exhaustion
+// self-disqualify; all-fail takes the fused fallback.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+effect fn main() -> Unit = {
+  // spend ∝ x ⇒ the smallest element wins ⇒ 300
+  println(int.to_string(fan.race([900, 300, 600], (x) => ok(heavy(x) * 0 + x)) ?? -1))
+  // constant spend ⇒ tie ⇒ earlier index wins ⇒ 7
+  println(int.to_string(fan.race([7, 9], (x) => ok(x)) ?? -1))
+  // err self-disqualifies ⇒ 8
+  println(int.to_string(fan.race([-1, 8], (x) => if x < 0 then err("neg") else ok(x)) ?? -1))
+  // all err ⇒ fallback ⇒ -1
+  println(int.to_string(fan.race([-1, -2], (x) => if x < 0 then err("neg") else ok(x)) ?? -1))
+  // a 1ns budget exhausts every arm ⇒ fallback ⇒ -1
+  println(int.to_string(fan.race(compute.ns(1), [500, 600], (x) => ok(heavy(x))) ?? -1))
+  // bare form: the Result value auto-propagates in an effect fn ⇒ 40
+  let r = fan.race([50, 40], (x) => ok(heavy(x) * 0 + x))
+  println(int.to_string(r))
+}

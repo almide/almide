@@ -143,6 +143,7 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Fan { .. } => fmt_expr_fan(out, expr, depth),
         ExprKind::FanBounded { .. } => fmt_expr_fan_bounded(out, expr, depth),
         ExprKind::FanRace { .. } => fmt_expr_fan_race(out, expr, depth),
+        ExprKind::FanRaceMap { .. } => fmt_expr_fan_race_map(out, expr, depth),
         ExprKind::FanSettle { .. } => fmt_expr_fan_settle(out, expr, depth),
         ExprKind::FanTimeout { .. } => fmt_expr_fan_timeout(out, expr, depth),
         ExprKind::ForIn { .. } => fmt_expr_forin(out, expr, depth),
@@ -329,6 +330,19 @@ fn fmt_expr_fan_race(out: &mut String, expr: &Expr, depth: usize) {
         out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
     }
     out.push_str(&ind(depth)); out.push('}');
+}
+
+fn fmt_expr_fan_race_map(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanRaceMap { budget, list, mapper } = &expr.kind else { unreachable!() };
+    out.push_str("fan.race(");
+    if let Some(b) = budget {
+        fmt_expr(out, b, depth);
+        out.push_str(", ");
+    }
+    fmt_expr(out, list, depth);
+    out.push_str(", ");
+    fmt_expr(out, mapper, depth);
+    out.push(')');
 }
 
 fn fmt_expr_fan_timeout(out: &mut String, expr: &Expr, depth: usize) {

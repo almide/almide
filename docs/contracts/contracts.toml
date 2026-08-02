@@ -2564,7 +2564,7 @@ evidence  = [
 id        = "C-205"
 spec      = "ALS-D3"
 title     = "The fan.race winner is the (spend, index) lexicographic minimum among admitted arms"
-statement = "Every arm is metered on the deterministic clock; an arm is ADMITTED iff it completes within the (optional) budget AND — when it returns a `Result` — it returned Ok (an arm's Err self-disqualifies it, never propagates). The winner is the admitted arm with the least `(spend, index)`: the cheapest arm, ties to source order; no admitted arm yields the ledger-constant Err. The winner-appearance boundary is unit-exact and identical on both targets (heavy(500) = 502 units appears at 1506ns under CM-1 v0.3)."
+statement = "Every arm is metered on the deterministic clock; an arm is ADMITTED iff it completes within the (optional) budget AND — when it returns a `Result` — it returned Ok (an arm's Err self-disqualifies it, never propagates). The winner is the admitted arm with the least `(spend, index)`: the cheapest arm, ties to source order; no admitted arm yields the ledger-constant Err. The winner-appearance boundary is unit-exact and identical on both targets (heavy(500) = 502 units appears at 1506ns under CM-1 v0.3). The MAPPER form `fan.race(budget?, xs, f)` obeys the SAME law over a dynamic list — arm i is `f(xs[i])` (a pure 1-param lambda returning `Result[T, String]`), index order is list order, the budget is per-element — so an equal-spend tie takes the earlier element and an empty list is the no-admitted-arm Err."
 since     = "0.47.0"
 status    = "active"
 evidence  = [
@@ -2573,6 +2573,7 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_bare_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_trap_cut.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_trap_window.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_race_mapper.almd", class = "fixture" },
 ]
 
 # ── SETTLE TUPLE ─

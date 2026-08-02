@@ -232,7 +232,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-202 | Time constructors guard their domain: negative aborts, overflow saturates | 0.47.0 | active | fixture | 3 |
 | C-203 | The time-type operator algebra is unit-exact and saturating on both targets | 0.47.0 | active | fixture | 1 |
 | C-204 | A fan.bounded verdict is a function of the program and its inputs alone | 0.47.0 | active | fixture | 6 |
-| C-205 | The fan.race winner is the (spend, index) lexicographic minimum among admitted arms | 0.47.0 | active | fixture | 5 |
+| C-205 | The fan.race winner is the (spend, index) lexicographic minimum among admitted arms | 0.47.0 | active | fixture | 6 |
 | C-206 | A settle block settles every arm into its own tuple slot, in arm order | 0.47.0 | active | fixture | 1 |
 | C-207 | CM-1 is a versioned constant with a ratio-only wall-clock claim | 0.47.0 | active | fixture | 1 |
 | C-208 | fan.timeout is omega-relative: fixed ends everywhere, fixed omega replays byte-identically | 0.47.0 | active | fixture | 1 |

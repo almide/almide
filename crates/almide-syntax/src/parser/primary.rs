@@ -343,16 +343,39 @@ impl Parser {
                 let b = self.parse_expr()?;
                 if self.check(TokenType::Comma) {
                     let (line, col) = (self.current().line, self.current().col);
-                    // A 1-param lambda tail = the DECLARED mapper spelling
-                    // `fan.race(xs, f)` / `fan.race(budget, xs, f)` — answer
-                    // with the cell's real status (fan-v2: declared, awaiting
-                    // a real use), not the thunk-migration hint.
-                    if self.extra_head_args_end_in_mapper()? {
-                        return Err(format!(
-                            "the fan.race mapper form is declared but not implemented (fan-v2 Wave 2 keeps the cell open until a real use appears), at line {line}:{col}\n  Hint: static arms use the block form — fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }}; a dynamic list with first-success semantics is fan.any(xs, f)"));
+                    // A 1-param lambda tail = the MAPPER form `fan.race(xs, f)`
+                    // / `fan.race(budget, xs, f)`; anything else with a comma
+                    // is the retired thunk spelling — the migration hint.
+                    let mut rest = Vec::new();
+                    while self.check(TokenType::Comma) {
+                        self.advance();
+                        self.skip_newlines();
+                        if self.check(TokenType::RParen) {
+                            break;
+                        }
+                        rest.push(self.parse_expr()?);
+                    }
+                    let mapper_tail = matches!(
+                        rest.last().map(|a| &a.kind),
+                        Some(ExprKind::Lambda { params, .. }) if params.len() == 1
+                    );
+                    if mapper_tail && rest.len() <= 2 {
+                        self.expect(TokenType::RParen)?;
+                        let mapper = rest.pop().unwrap();
+                        let (budget, list) = match rest.pop() {
+                            // fan.race(budget, xs, f)
+                            Some(xs) => (Some(Box::new(b)), Box::new(xs)),
+                            // fan.race(xs, f)
+                            None => (None, Box::new(b)),
+                        };
+                        return Ok(Expr::new(self.next_id(), span, ExprKind::FanRaceMap {
+                            budget,
+                            list,
+                            mapper: Box::new(mapper),
+                        }));
                     }
                     return Err(format!(
-                        "fan.race takes a BLOCK of arms, not thunk arguments, at line {line}:{col}\n  Hint: fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }} — arms are expressions separated by `;`, no `() =>` wrappers"));
+                        "fan.race takes a BLOCK of arms, not thunk arguments, at line {line}:{col}\n  Hint: fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }} — arms are expressions separated by `;`, no `() =>` wrappers; a dynamic list races via the mapper form fan.race(xs, (x) => ok(work(x)))"));
                 }
                 self.expect(TokenType::RParen)?;
                 Some(b)

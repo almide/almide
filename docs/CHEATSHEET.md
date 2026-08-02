@@ -340,6 +340,10 @@ let win   = fan.race { solve_fast(); solve_slow() } ?? d  // deterministic winne
 let r = fan.bounded(compute.ms(100)) { work(input) } ?? -1   // Err if work exceeds 100ms of deterministic compute
 let w = fan.race(compute.us(50)) { a(); b() } ?? -1          // arms over budget are excluded
 
+// Mapper form: race ONE pure lambda over a dynamic list (winner = cheapest, tie → list order)
+let m = fan.race(xs, (x) => ok(solve(x))) ?? fallback        // mapper returns Result: err(...) disqualifies
+let n = fan.race(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback  // per-element budget
+
 // Wall-clock deadline (oracle tier): checked cooperatively at charge sites
 let t = fan.timeout(duration.ms(5000)) { work(input) } ?? -1 // Err if the wall deadline fires first
 ```

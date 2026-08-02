@@ -1074,12 +1074,19 @@ let r = fan.bounded(compute.ms(100)) { work(input) } ?? fallback
 ```
 let w = fan.race { solve_fast(); solve_slow() } ?? fallback
 let b = fan.race(compute.us(50)) { a(); b() } ?? fallback   // per-arm budget
+let m = fan.race(xs, (x) => ok(solve(x))) ?? fallback       // mapper form
+let n = fan.race(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback
 ```
 
 - Every arm is metered on the deterministic clock; the winner is the arm with
   the LEXICOGRAPHICALLY least `(spend, index)` — the cheapest arm, ties
   resolved by source order. With a budget, arms whose spend exceeds it are
   excluded; no admitted arm yields `Err`. Type: `Result[T, String]`.
+- The MAPPER form races one PURE 1-param lambda over a dynamic list: arm `i`
+  is `f(xs[i])`, index order is list order, and the budget (when given) is
+  per-element — the same law as the block form. The mapper must return a
+  `Result` (the mapper-form contract): `ok(v)` competes, `err(_)`
+  self-disqualifies the element. An empty list is the no-admitted-arm `Err`.
 - History: an earlier spec revision promised both "results are identical on
   every target" (§13.1) and "the first arm to COMPLETE wins" (then-§13.2) —
   incompatible, since the second makes wall-clock scheduling observable. The

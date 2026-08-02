@@ -182,6 +182,12 @@ pub enum ExprKind {
     /// the (spend, index)-lexicographic minimum completion. The optional budget
     /// is a per-branch divergence guard (Stage 3 v1: arms are single calls).
     FanRace { budget: Option<Box<Expr>>, arms: Vec<Expr> },
+    /// `fan.race(xs, f)` / `fan.race(budget, xs, f)` — the MAPPER form: one
+    /// pure 1-param lambda raced over a dynamic list, winner = the
+    /// (spend, index) lexicographic minimum among successes (the mapper
+    /// returns Result — Err self-disqualifies, matching the block form's
+    /// Result-arm rule). The budget is per-element (per-branch semantics).
+    FanRaceMap { budget: Option<Box<Expr>>, list: Box<Expr>, mapper: Box<Expr> },
     /// `fan.timeout(deadline) { body }` — the ORACLE-tier deadline (Stage 4):
     /// the body runs under a WALL-CLOCK deadline checked cooperatively at
     /// charge sites (the Go-context cancellation model). The verdict is
@@ -541,6 +547,13 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
                 f(b);
             }
             visit_exprs_slice_mut(arms, f);
+        }
+        ExprKind::FanRaceMap { budget, list, mapper } => {
+            if let Some(b) = budget {
+                f(b);
+            }
+            f(list);
+            f(mapper);
         }
         ExprKind::FanSettle { arms } => visit_exprs_slice_mut(arms, f),
         ExprKind::FanTimeout { deadline, body } => {

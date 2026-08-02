@@ -12,12 +12,12 @@
 //!   (all)    | compiles          | compiles (fan.map)
 //!   settle   | compiles          | compiles
 //!   any      | compiles          | compiles
-//!   race     | compiles          | DECLARED-UNIMPLEMENTED (Wave 2 waits
-//!            |                   | for a real use — fan-v2 反証条件)
+//!   race     | compiles          | compiles (T7-1 — (spend, index) lex-min
+//!            |                   | over a dynamic list, 1-param lambda)
 //!   bounded  | compiles (body)   | DESIGN-NONE (compose with fan.map)
 //!   timeout  | compiles (body)   | DESIGN-NONE (single deadlined body)
 //!
-//! Changing any cell (implementing the race mapper, adding a bounded mapper)
+//! Changing any cell (adding a bounded mapper, retiring a form)
 //! MUST update this table in the same PR — that is the point of the gate.
 
 use std::io::Write;
@@ -62,6 +62,8 @@ fn fan_surface_matrix() {
         ("any_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.any {{ ea(); eb() }}\n  println(int.to_string(v))\n}}\n")),
         ("any_mapper", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.any([1, 2], (x) => ok(pure_work(x)))\n  println(int.to_string(v))\n}}\n")),
         ("race_block", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race(compute.ms(5)) {{ pure_work(1); pure_work(2) }} ?? -1\n  println(int.to_string(v))\n}}\n")),
+        ("race_mapper", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race([1, 2], (x) => ok(pure_work(x))) ?? -1\n  println(int.to_string(v))\n}}\n")),
+        ("race_mapper_budget", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race(compute.ms(5), [1, 2], (x) => ok(pure_work(x))) ?? -1\n  println(int.to_string(v))\n}}\n")),
         ("bounded_body", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.bounded(compute.ms(50)) {{ pure_work(21) }} ?? -1\n  println(int.to_string(v))\n}}\n")),
         ("timeout_body", format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.timeout(duration.ms(50)) {{ pure_work(21) }} ?? -1\n  println(int.to_string(v))\n}}\n")),
     ];
@@ -73,14 +75,10 @@ fn fan_surface_matrix() {
     // ── Intentionally-absent cells: the EXACT matrix answer, no drift. ──
     let absent: &[(&str, String, &str)] = &[
         (
-            "race_mapper",
-            format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race([1, 2], (x) => ok(pure_work(x)))\n  println(int.to_string(v ?? -1))\n}}\n"),
-            "the fan.race mapper form is declared but not implemented",
-        ),
-        (
-            "race_mapper_budget",
-            format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race(compute.ms(5), [1, 2], (x) => ok(pure_work(x)))\n  println(int.to_string(v ?? -1))\n}}\n"),
-            "the fan.race mapper form is declared but not implemented",
+            "race_mapper_nonresult",
+            // The mapper-form contract: the mapper must return a Result.
+            format!("{HELPERS}\neffect fn main() -> Unit = {{\n  let v = fan.race([1, 2], (x) => pure_work(x)) ?? -1\n  println(int.to_string(v))\n}}\n"),
+            "fan.race mapper",
         ),
         (
             "bounded_mapper",
