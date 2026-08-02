@@ -240,6 +240,25 @@
   （fs.read_text + auto-`?`）は既存の trust-spine brick（variant match in tail）で
   honest fallback — 別レーンの既知残（project_v1_mir_trust_spine）
 
+## Tier 7 — race mapper 実装（2026-08-03、ユーザー決定でセルを閉じる）
+
+- [x] **T7-1 fan.race mapper 形の実装**（e7046fe1 — ユーザー指示でセルを実装で
+  閉鎖。`fan.race(xs, f)` / `fan.race(budget, xs, f)`: FanRaceMap AST + checker
+  G3 arm（E007 / budget clock / List[X] unify / mapper は **Result[T, String]
+  に直接 pin** — 自由な Err 型変数は Result[Int, Unknown] を lowering に残し
+  ConcretizeTypes 拒否になる罠を踏んで学習）+ 動的 fold lowering（while +
+  list.len/get + 要素ごと outlined metered region — outliner を IR-body 版
+  `outline_metered_arm_ir` に分割し lambda param を自由変数として region param
+  化）。bare / `?? fb` 融合の両形、fmt roundtrip 冪等。
+  検証: fixture fan_race_mapper.almd（lex-min 300 / 同着→index 0 の 7 / err
+  失格 8 / 全滅 -1 / 1ns 枯渇 -1 / bare auto-`?` 40）が wasm + interp 一致、
+  native は list ops が rung floor 外の honest wall（@xt-allow で tracked、
+  346 equal + 1 tracked / stale 0）。test ブロックレグ緑（inline subject /
+  空リスト込み）。matrix gate はセル遷移済み（implemented 11 + 設計上不在 2 +
+  非 Result mapper 契約エラー）。C-205 statement に mapper 条項 + evidence 追加
+  （347/347 双方向）。fan-v2 matrix / CHEATSHEET / SPEC §13.5 更新。
+  残: mapper 形の MSR タスクは次の dojo daily で計測（クレーム材料の追補））
+
 ## Branch 外（残り — 参照のみ）
 
 Rung 1 出力 transactional / AARA は別レーンの台帳へ。ADR-0002（実行順）の批准は
