@@ -314,7 +314,11 @@ impl Checker {
             ast::Pattern::Some { inner } => self.bind_pattern_some(inner, ty),
             ast::Pattern::Ok { inner } => self.bind_pattern_ok(inner, ty),
             ast::Pattern::Err { inner } => self.bind_pattern_err(inner, ty),
-            ast::Pattern::None | ast::Pattern::Literal { .. } => {}
+            ast::Pattern::None => {
+                let resolved = resolve_ty(ty, &self.uf);
+                self.reject_ctor_pattern_on_scalar("none", "an Option", &resolved);
+            }
+            ast::Pattern::Literal { .. } => {}
         }
     }
 
@@ -439,9 +443,41 @@ impl Checker {
                 self.unify_infer(&resolved, &Ty::option(inner_v.clone()));
                 inner_v
             }
-            _ => Ty::Unknown,
+            _ => {
+                self.reject_ctor_pattern_on_scalar("some(..)", "an Option", &resolved);
+                Ty::Unknown
+            }
         };
         self.bind_pattern(inner, &it);
+    }
+
+    /// A Option/Result CONSTRUCTOR pattern over a plain scalar subject is a
+    /// type error, not a silent `Unknown` bind — silence here let the wrong
+    /// mental model (`fan.bounded` "returns an Option") sail through to a
+    /// backend wall (dojo budget-units, MSR round 3). The classic source is
+    /// an effect fn's auto-`?`: the bound value is ALREADY the payload.
+    fn reject_ctor_pattern_on_scalar(&mut self, ctor: &str, want: &str, resolved: &Ty) {
+        if matches!(
+            resolved,
+            Ty::Int | Ty::Bool | Ty::Float | Ty::String
+                | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                | Ty::Float32 | Ty::Float64
+        ) {
+            self.emit(super::err(
+                format!(
+                    "pattern `{ctor}` cannot match {} — the subject is not {want}",
+                    resolved.display()
+                ),
+                format!(
+                    "the value is already a plain {}. If it comes from an effect-fn call, \
+                     auto-`?` has unwrapped it — use the value directly, or `?? <default>` \
+                     on the producing call for a fallback",
+                    resolved.display()
+                ),
+                "match pattern".to_string(),
+            ));
+        }
     }
 
     /// `ast::Pattern::Ok` arm of [`Self::bind_pattern`]. Verbatim text move.
@@ -455,7 +491,10 @@ impl Checker {
                 self.unify_infer(&resolved, &Ty::result(ok_v.clone(), err_v));
                 ok_v
             }
-            _ => Ty::Unknown,
+            _ => {
+                self.reject_ctor_pattern_on_scalar("ok(..)", "a Result", &resolved);
+                Ty::Unknown
+            }
         };
         self.bind_pattern(inner, &it);
     }
@@ -471,7 +510,10 @@ impl Checker {
                 self.unify_infer(&resolved, &Ty::result(ok_v, err_v.clone()));
                 err_v
             }
-            _ => Ty::Unknown,
+            _ => {
+                self.reject_ctor_pattern_on_scalar("err(..)", "a Result", &resolved);
+                Ty::Unknown
+            }
         };
         self.bind_pattern(inner, &it);
     }

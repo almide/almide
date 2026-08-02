@@ -1,0 +1,18 @@
+// A `some(..)` pattern over a plain Int subject: in an effect fn the metered
+// call is auto-`?`-propagated, so the bound value is already the payload.
+// This used to bind `v: Unknown` silently and sail through to a backend wall
+// (dojo budget-units, MSR round 3) — now it is a checker error.
+fn count_to(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = acc + i; i = i + 1 }
+  acc
+}
+
+effect fn run_with_budget(ms: Int, n: Int) -> Int = {
+  let r = fan.bounded(compute.ms(ms)) { count_to(n) }
+  match r {
+    some(v) => v,
+    _ => -1
+  }
+}
