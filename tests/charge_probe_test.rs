@@ -50,6 +50,9 @@ fn fixture_path(name: &str) -> PathBuf {
         "bare_result" => Some("fuel_bare_result"),
         "race_err_skip" => Some("fuel_race_err_skip"),
         "settle_tuple" => Some("fan_settle_tuple"),
+        "divergence_cut" => Some("fuel_divergence_cut"),
+        "trap_cut" => Some("fuel_trap_cut"),
+        "trap_window" => Some("fuel_trap_window"),
         _ => None,
     };
     match relocated {
@@ -164,7 +167,7 @@ fn metered_clones_keep_nonregion_paths_charge_free() {
 /// dynamic layer already pins against wasm).
 fn interp_third_vote_on_metered_fixtures() {
     let dir = fixtures_dir();
-    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip"] {
+    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip", "divergence_cut", "trap_cut"] {
         let source = std::fs::read_to_string(fixture_path(name)).unwrap();
         let ir = lower_for_interp(&source);
         let outcome = almide_interp::Interpreter::new(&ir).run_main();
@@ -305,6 +308,21 @@ fn time_ctor_guard_cross_target() {
         assert_eq!(
             stdout, "5\ndisk-7\ncfg failed\nnet degraded: net down",
             "settle_tuple {leg}: tuple-settle semantics drifted"
+        );
+        // T1-1 strict cut: a diverging body is CUT (Err + the program lives).
+        let (code, stdout, _) = run("divergence_cut", wasm);
+        assert_eq!(code, Some(0), "divergence_cut {leg}: must terminate and succeed");
+        assert_eq!(stdout, "-1\n42", "divergence_cut {leg}: cut semantics drifted");
+        // T1-1 trap window, OUTSIDE: the loser's trap is cut before it fires.
+        let (code, stdout, _) = run("trap_cut", wasm);
+        assert_eq!(code, Some(0), "trap_cut {leg}: must succeed");
+        assert_eq!(stdout, "873250", "trap_cut {leg}: window semantics drifted");
+        // T1-1 trap window, INSIDE: the inlined trap fires identically.
+        let (code, _, stderr) = run("trap_window", wasm);
+        assert_eq!(code, Some(1), "trap_window {leg}: must abort");
+        assert!(
+            stderr.contains("Error: division by zero"),
+            "trap_window {leg}: §13 trap message missing, got: {stderr}"
         );
         // T2-2: race arms may return Result — Err self-disqualifies.
         let (code, stdout, _) = run("race_err_skip", wasm);

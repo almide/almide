@@ -1,0 +1,26 @@
+// @contract: C-205
+// T1-1 trap visibility window, OUTSIDE: the loser arm WOULD divide by zero,
+// but its budget exhausts at a charge site (the callee's loop head) BEFORE
+// the division — the trap never happens and the cheap arm wins, identically
+// on both targets.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+fn trap_late(k: Int) -> Int = {
+  var j = 0
+  var s = k
+  while j < 10 { s = s + 1; j = j + 1 }
+  s / (s - s)
+}
+
+effect fn main() -> Unit = {
+  let w = fan.race(compute.ns(1600)) {
+    { let x = heavy(5000); trap_late(x) }
+    heavy(500)
+  } ?? -1
+  println(int.to_string(w))
+}

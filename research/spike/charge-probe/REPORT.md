@@ -97,16 +97,20 @@ almide-mir 既存 605 lib テストは全緑（Op::Charge の追加は無破壊�
   MAX − fuel。
 - `compute.*`/`duration.*` は checker の名義型（防火壁）+ lowering での Int(ns) erasure。
 
-### 仕様からの deviation（本実装 PR までに解消 or 明記維持）
+### 仕様からの deviation — **全件解消（2026-08-02 深夜）**
 
-1. metered-clone 特殊化なし — bounded を含むプログラムは**全関数**が計量される
-   （bounded を含まないプログラムは 1 バイトも変わらない）。
-2. 飽和演算なし（構築子は素の i64 乗算 — S3 と差分）。負値 trap も未実装。
-3. body は単一 call・非 Result 戻りに制限（v1 と宣言済み）。
-4. callee 内で発散する body は切れない（lazy verdict — モデルが検証済みの overrun 形。
-   完走後の判定は厳密）。
-5. UFCS 曖昧診断（n.ms()）未実装。matrix gate（S6）未実装。
-6. fan{} 並列 native と bounded の相互作用は未定義のまま（Stage 3）。
+1. ~~metered-clone なし~~ → **解消**（T1-2、de7c2d20）: budget-only モードは
+   region+`__fuel` クローンのみ計量、非 region 経路の charge ゼロを両 artifact で
+   機械検査。残: FuncRef 到達時の `__lambda_*` は全域 charged（table 複製不可 —
+   仕様注記に昇格）。
+2. ~~飽和/負値 trap なし~~ → **解消**（T3-1/T2-5）: 構築子 guard + S3 飽和代数、
+   fixture 群で unit-exact pin。
+3. ~~単一 call 制限~~ → **解消**（T2-1 block 化、T2-2 Result arm、T1-3 裸形）。
+4. ~~発散が切れない~~ → **解消**（T1-1）: check-and-return の strict cut。
+   `while true` body が budget で切れ、可視窓（次 charge site まで）は決定的
+   （inline 化は窓を広げるが両レグ同一 — fuel_trap_window が pin）。
+5. ~~UFCS 診断 / S6 gate なし~~ → **解消**（T3-2 / T3-3）。
+6. ~~fan{} × budget 未定義~~ → **解消**（T3-8 裁定: 型システムが排除）。
 
 ## Stage 3 垂直スライス — fan.race が両ターゲットで着地（2026-08-02、同 branch）
 
@@ -134,11 +138,9 @@ lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
 
 ### Stage 3 の deviation（Stage 2 の 6 件に追加）
 
-7. **trap は保守的**: 実行された trap はプログラムを落とす（可視窓による敗者 trap の
-   消去は未実装 — strict per-site cap + unwind が必要で、これは metered-ABI 本実装の
-   領分）。逐次 + lazy のため両ターゲットで同一に落ちる（決定的だが spec より過剰報告）。
-8. arm の Err スキップ（候補から外す）は未実装 — v1 arm は非 Result 単一 call なので
-   Err 経路自体が存在しない。
+7. ~~trap 保守的~~ → **解消**（T1-1）: 可視窓の外の敗者 trap は「起こらなかったことに
+   なる」（fuel_trap_cut）、窓の内側は両レグ同一に落ちる（fuel_trap_window）。
+8. ~~Err スキップなし~~ → **解消**（T2-2、fuel_race_err_skip）。
 
 ## P0 修正 2 件（2026-08-02、同 branch）
 

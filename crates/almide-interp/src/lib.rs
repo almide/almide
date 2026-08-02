@@ -133,6 +133,10 @@ pub struct Interpreter<'a> {
     /// stdlib pool bodies are unmetered on every leg (both backends meter
     /// user functions only), so a pool fn's internal loops must not charge.
     pub(crate) det_in_user: Cell<bool>,
+    /// Open metered regions (budget_enter +1 / budget_exit -1): the strict
+    /// cut (T1-1) fires only inside a region — outside one, fuel below zero
+    /// is impossible in budget mode and irrelevant in probe mode.
+    pub(crate) det_region_depth: Cell<u32>,
     /// The user program's own fn names — captured BEFORE the stdlib pool is
     /// layered into `fns`, so the meter can tell the two apart at call time.
     pub(crate) user_fn_names: HashSet<Sym>,
@@ -293,6 +297,7 @@ impl<'a> Interpreter<'a> {
             det_verdict: Cell::new(0),
             det_spend: Cell::new(0),
             det_in_user: Cell::new(false),
+            det_region_depth: Cell::new(0),
             user_fn_names,
         }
     }
@@ -304,6 +309,15 @@ impl<'a> Interpreter<'a> {
         if self.det_in_user.get() {
             self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
         }
+    }
+
+    /// T1-1 strict cut: inside an open metered region with the meter below
+    /// zero, execution returns from the current fn with a dummy value (never
+    /// observed — the region verdict is already Err). Mirrors the backends'
+    /// check-and-return at charge sites.
+    #[inline]
+    pub(crate) fn det_cut(&self) -> bool {
+        self.det_region_depth.get() > 0 && self.det_fuel.get() < 0
     }
 
     /// Override the fuel budget (for tests / the fuzz oracle).
@@ -534,6 +548,11 @@ impl<'a> Interpreter<'a> {
         self.det_in_user.set(det_is_user);
         if det_is_user {
             self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
+            if self.det_cut() {
+                self.det_in_user.set(det_was_user);
+                self.depth.set(d);
+                return Flow::Value(Value::Int(0));
+            }
         }
 
         let frame = base.child();
@@ -561,6 +580,10 @@ impl<'a> Interpreter<'a> {
         // Deterministic meter: a closure invocation is a lifted lambda's
         // entry charge on the backends.
         self.det_charge();
+        if self.det_cut() {
+            self.depth.set(d);
+            return Flow::Value(Value::Int(0));
+        }
 
         let frame = clo.captured.child();
         for (param, arg) in clo.params.iter().zip(args.into_iter()) {

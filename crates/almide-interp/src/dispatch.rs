@@ -315,6 +315,7 @@ impl<'a> Interpreter<'a> {
                 if units < saved {
                     self.det_fuel.set(units);
                 }
+                self.det_region_depth.set(self.det_region_depth.get() + 1);
                 Flow::val(Value::Int(saved))
             }
             "almide_rt_prim_budget_exhausted" => Flow::val(Value::Int(self.det_verdict.get())),
@@ -323,6 +324,7 @@ impl<'a> Interpreter<'a> {
                 let consumed = self.det_entry.get() - self.det_fuel.get();
                 self.det_spend.set(consumed);
                 self.det_fuel.set(int0() - consumed);
+                self.det_region_depth.set(self.det_region_depth.get().saturating_sub(1));
                 Flow::val(Value::Int(0))
             }
             "almide_rt_prim_budget_spend" => Flow::val(Value::Int(self.det_spend.get())),

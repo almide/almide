@@ -2554,6 +2554,7 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_bounded_boundary.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_block_body.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_bare_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_divergence_cut.almd", class = "fixture" },
 ]
 
 # ── DETERMINISTIC RACE WINNER (fan.race) ─
@@ -2568,6 +2569,8 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_race_boundary.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_race_err_skip.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_bare_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_trap_cut.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_trap_window.almd", class = "fixture" },
 ]
 
 # ── SETTLE TUPLE ─

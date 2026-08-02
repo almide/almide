@@ -1,0 +1,22 @@
+// @contract: C-205
+// T1-1 trap visibility window, INSIDE: work between the exhausting charge
+// site and the next one still runs (here the divide was INLINED into the
+// outlined arm, collapsing its charge site) — the trap fires, and it fires
+// IDENTICALLY on both targets (§13 message + exit 1). The window is
+// deterministic, never wall-clock.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+fn trap_div(k: Int) -> Int = k / (k - k)
+
+effect fn main() -> Unit = {
+  let w = fan.race(compute.ns(1600)) {
+    { let x = heavy(5000); trap_div(x) }
+    heavy(500)
+  } ?? -1
+  println(int.to_string(w))
+}

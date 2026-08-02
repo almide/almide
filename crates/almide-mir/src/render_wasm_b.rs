@@ -370,6 +370,23 @@ fn render_op_range(
                         "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
                     ));
                 }
+                // T1-1 strict cut: an exhausted meter RETURNS from this fn with
+                // a dummy value (never observed — the region's verdict is
+                // already Err, and every charge-bearing fn in budget-only mode
+                // is a metered clone). W1 bounds the post-exhaustion work: the
+                // chain of cuts reaches the outlined fn, whose exit persists
+                // verdict + spend on the normal path. In probe mode the fuel
+                // counts down from i64::MAX and never goes negative.
+                let dflt = match ctx.func.ret {
+                    None => String::new(),
+                    Some(r) => {
+                        let vt = wasm_ty(ctx.reprs.get(&r).copied().unwrap_or(SCALAR_REPR));
+                        format!(" ({vt}.const 0)")
+                    }
+                };
+                body.push_str(&format!(
+                    "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
+                ));
             }
             _ => {
                 if render_fused_or_plain_op(ctx, st, op, op_idx, region, body) {

@@ -420,7 +420,12 @@ fn render_fn(
                 used_shims.push(COUNTER_SHIM);
                 used_shims.push(CHARGE_SHIM);
                 let tr = crate::charge_probe::probe_enabled();
+                used_shims.push(FUEL_LT0_SHIM);
                 line!("__almd_charge({site}, {cost}, {tr});");
+                // T1-1 strict cut (see the wasm arm): the dummy return value's
+                // type is known only after the body typed `func.ret`, so a
+                // marker is emitted here and patched at the end of render_fn.
+                line!("if __almd_fuel_lt0() {{ {CUT_RET_MARKER} }}");
             }
             // The §13 termination convention's exit half (assert desugar tail,
             // time-ctor negative trap): a user exit code, no message of its own.
@@ -531,6 +536,19 @@ fn render_fn(
     }
     out.push_str("}\n");
     let ret_nty = func.ret.map(|v| tys[&v]);
+    // T1-1: patch every strict-cut marker with the now-known typed default
+    // (never observed — the region verdict is Err by the time a cut fires).
+    if out.contains(CUT_RET_MARKER) {
+        let cut_ret = match ret_nty {
+            None => "return;",
+            Some(NTy::I64) => "return 0;",
+            Some(NTy::F64) => "return 0.0;",
+            Some(NTy::Str | NTy::StrRef) => "return String::new();",
+            Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
+            Some(NTy::Res) => "return Ok(0);",
+        };
+        out = out.replace(CUT_RET_MARKER, cut_ret);
+    }
     Ok((format!("{sig}{out}"), ret_nty))
 }
 
@@ -892,6 +910,16 @@ fn render_dup(
 
 include!("render_native_b.rs");
 
+
+/// T1-1: the strict-cut return marker — every Charge site emits
+/// `if __almd_fuel_lt0() { <marker> }` and `render_fn` patches the marker
+/// with a `return <default of the fn's ret type>;` once the ret NTy is known
+/// (the same late-patch technique as the if-value JOIN markers).
+const CUT_RET_MARKER: &str = "/*__CUT_RET__*/";
+
+/// The exhaustion read the strict cut branches on.
+const FUEL_LT0_SHIM: &str =
+    "fn __almd_fuel_lt0() -> bool { __ALMD_FUEL.with(|f| f.get()) < 0 }";
 
 /// Stage 1 probe shim: fuel/trace thread-locals + the charge fn + the guard
 /// that prints the triple's (consumed, trace) legs on main exit. Same hash

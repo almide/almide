@@ -10,11 +10,13 @@
 
 ## Tier 1 — 意味論の大物
 
-- [ ] **T1-1 strict cap + unwind（trap 可視窓 + 発散カット）**
-  charge site を check-then-charge 化し、枯渇を region 境界へ巻き戻す metered-ABI。
-  完了条件: race の敗者 trap が可視窓の外で「起こらなかったことになる」fixture
-  （spec の挙動表の trap 行 2 種）が両ターゲット一致。発散 callee が budget で
-  切れる fixture。deviation 4/7 の閉鎖。
+- [x] **T1-1 strict cap + unwind（trap 可視窓 + 発散カット）**（unwind 不要の
+  check-and-return 方式で実装 — charge site が「subtract → fuel<0 → その fn から
+  ダミー値 return」、W1 により連鎖 return が outlined fn の exit（通常経路の
+  verdict/spend persist）へ収束。両レグ + interp（det_region_depth gate）同型。
+  fixture: `fuel_divergence_cut`（while true が切れて続行）/ `fuel_trap_cut`
+  （窓の外の敗者 trap は不発）/ `fuel_trap_window`（inline で窓内に入った trap は
+  両レグ同一に発火）— 全て C-204/C-205 evidence。deviation 4/7 閉鎖）
   **確定設計（unwind 不要・両レグ同型の check-and-return）**: metered fn の
   charge site を「subtract → if fuel<0 → その fn からダミー値 return」に。
   W1（全サイクルは charge site を通る）により枯渇後の残実行は有限、region の
