@@ -14,6 +14,9 @@ pub use almide_types::stdlib_info;
 /// The self-hosted stdlib runtime registry (call name -> impl fn + embedded
 /// source) — one table read by the wasm renderer AND the interp oracle.
 pub use almide_types::self_host_registry;
+/// ADR-0001 time-unit surface (closed unit set, clocks, S4 clock column) —
+/// single source for checker, lowering, and the matrix gates.
+pub use almide_types::time_units;
 
 // Re-export almide-base for convenience
 pub use almide_base;

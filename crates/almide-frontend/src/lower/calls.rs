@@ -560,18 +560,10 @@ fn lower_time_ctor(
 ) -> Option<IrExpr> {
     let ast::ExprKind::Member { object, field } = &callee.kind else { return None };
     let ast::ExprKind::Ident { name: module, .. } = &object.kind else { return None };
-    if module.as_str() != "compute" && module.as_str() != "duration" {
+    if almide_lang::time_units::clock_type_of_module(module.as_str()).is_none() {
         return None;
     }
-    let factor: i64 = match field.as_str() {
-        "ns" => 1,
-        "us" => 1_000,
-        "ms" => 1_000_000,
-        "s" => 1_000_000_000,
-        "min" => 60_000_000_000,
-        "h" => 3_600_000_000_000,
-        _ => return None,
-    };
+    let factor: i64 = almide_lang::time_units::unit_factor(field.as_str())?;
     let [arg] = args else { return None };
     let n = lower_expr(ctx, arg);
     Some(ctx.mk(

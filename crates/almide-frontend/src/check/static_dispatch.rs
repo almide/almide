@@ -143,11 +143,12 @@ impl Checker {
     /// Unknown units are a diagnostic naming the whole legal set (LLMs invent
     /// `msec`/`5m`; the matrix answer beats a nearest-match guess).
     fn resolve_time_ctor(&mut self, module: &str, field: &str, arg_tys: &[Ty]) -> Ty {
-        let ty_name = if module == "compute" { "Compute" } else { "Duration" };
-        if !matches!(field, "ns" | "us" | "ms" | "s" | "min" | "h") {
+        let ty_name = almide_lang::time_units::clock_type_of_module(module)
+            .expect("resolve_time_ctor called for a non-clock module");
+        if almide_lang::time_units::unit_factor(field).is_none() {
             self.emit(super::err(
                 format!("unknown unit '{}.{}'", module, field),
-                format!("The unit set is closed: {module}.ns / us / ms / s / min / h"),
+                almide_lang::time_units::unit_set_hint(module),
                 format!("call to {}.{}()", module, field)));
             return Ty::Named(sym(ty_name), vec![]);
         }

@@ -54,8 +54,9 @@
 - [ ] **T3-5 Dyn charge**（可変コスト op の従量課金 `1 + ⌈size/16⌉` 系。CM-1 v0.3）
 - [x] **T3-6 CM-1 定数の単一ソース化**（13135f61 — wasm render は補間、native shim は
   template 注入で `CM1_NS_PER_CHARGE` の 1 定義に。統合ゲートに artifact 検査を追加）
-- [ ] **T3-7 D5 校正ゲートの常設**（決定的 ms vs 実測壁時計の比を測り宣言帯
-  （5 倍）内を assert する cargo test。21 倍ずれの再発防止 — 検出実績あり）
+- [x] **T3-7 D5 校正ゲートの常設**（9c3d78a7 — 常設した瞬間 v0.2 の混入測定を
+  ratio 0.05 で検出。CM-1 v0.3 = 3ns/unit に再校正、境界 fixture は ns 精度の
+  exact flip（bounded 3006ns / race 1506ns、両ターゲット同一）に強化）
 - [ ] **T3-8 fan{} 並列 native × budget の裁定**（最低限: 併用を checker で拒否 or
   atomic 化 + 決定順序の設計判断を文書化。無定義状態の解消）
 - [ ] **T3-9 レポート表示 `--time-report`**（決定的 ms + 実測壁時計の併記出力 —

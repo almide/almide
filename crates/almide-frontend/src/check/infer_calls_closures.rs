@@ -227,6 +227,41 @@ impl Checker {
         }
     }
 
+    /// Budget clock firewall (ADR-0001 S4 / S6-6): the EXPECTED clock comes
+    /// from the declared `TIME_CONSUMING_SURFACES` table, never from the call
+    /// site — this lookup is the S6-6 face check's reading side, so a new
+    /// time-consuming surface that skipped the declaration fails loudly on its
+    /// first type-check anywhere in the test suite.
+    fn check_budget_clock(&mut self, surface: &'static str, budget_concrete: &Ty) {
+        let clock = almide_lang::time_units::surface_clock(surface).unwrap_or_else(|| {
+            panic!(
+                "{surface} consumes a time quantity but is not declared in \
+                 TIME_CONSUMING_SURFACES (ADR-0001 S6-6)"
+            )
+        });
+        match budget_concrete {
+            Ty::Named(n, _) if n.as_str() == clock => {}
+            Ty::Named(n, _) if n.as_str() == "Duration" && clock == "Compute" => {
+                self.emit(super::err(
+                    format!("expected {clock}, found Duration"),
+                    format!(
+                        "{surface} budgets deterministic computation, not wall-clock time. \
+                         Build the budget with compute.ms(...); for a wall-clock limit use \
+                         fan.timeout (oracle tier)"
+                    ),
+                    format!("{surface} budget")));
+            }
+            other => {
+                self.emit(super::err(
+                    format!("expected {clock}, found {}", other.display()),
+                    format!(
+                        "Budgets carry a unit and a clock: {surface}(compute.ms(100)) {{ ... }}"
+                    ),
+                    format!("{surface} budget")));
+            }
+        }
+    }
+
     /// `ExprKind::FanBounded` arm: `fan.bounded(budget) { body }` (Stage 2 v1).
     /// Effect-fn gate; budget must be a `Compute` (the ADR-0001 clock firewall
     /// — bare Int and wall-clock `Duration` are named type errors); the body is
@@ -242,24 +277,7 @@ impl Checker {
         }
         let budget_ty = self.infer_expr(budget);
         let budget_concrete = resolve_ty(&budget_ty, &self.uf);
-        match &budget_concrete {
-            Ty::Named(n, _) if n.as_str() == "Compute" => {}
-            Ty::Named(n, _) if n.as_str() == "Duration" => {
-                self.emit(super::err(
-                    "expected Compute, found Duration".to_string(),
-                    "fan.bounded budgets deterministic computation, not wall-clock time. \
-                     Build the budget with compute.ms(...); for a wall-clock limit use \
-                     fan.timeout (oracle tier)".to_string(),
-                    "fan.bounded budget".to_string()));
-            }
-            other => {
-                self.emit(super::err(
-                    format!("expected Compute, found {}", other.display()),
-                    "Budgets carry a unit and a clock: fan.bounded(compute.ms(100)) { ... }"
-                        .to_string(),
-                    "fan.bounded budget".to_string()));
-            }
-        }
+        self.check_budget_clock("fan.bounded", &budget_concrete);
         if !matches!(body.kind, ExprKind::Call { .. }) {
             self.emit(super::err(
                 "fan.bounded body must be a single function call (v1)".to_string(),
@@ -295,23 +313,7 @@ impl Checker {
         if let Some(b) = budget {
             let budget_ty = self.infer_expr(b);
             let budget_concrete = resolve_ty(&budget_ty, &self.uf);
-            match &budget_concrete {
-                Ty::Named(n, _) if n.as_str() == "Compute" => {}
-                Ty::Named(n, _) if n.as_str() == "Duration" => {
-                    self.emit(super::err(
-                        "expected Compute, found Duration".to_string(),
-                        "fan.race budgets deterministic computation. Build it with \
-                         compute.ms(...); wall-clock racing is the oracle tier".to_string(),
-                        "fan.race budget".to_string()));
-                }
-                other => {
-                    self.emit(super::err(
-                        format!("expected Compute, found {}", other.display()),
-                        "Budgets carry a unit and a clock: fan.race(compute.ms(5)) { ... }"
-                            .to_string(),
-                        "fan.race budget".to_string()));
-                }
-            }
+            self.check_budget_clock("fan.race", &budget_concrete);
         }
         let saved_effect = self.env.can_call_effect;
         self.env.can_call_effect = false;
