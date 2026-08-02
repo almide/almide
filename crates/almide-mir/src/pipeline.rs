@@ -354,6 +354,10 @@ fn source_to_ir_with(
     crate::lower::normalize_tail_err_raise_ifs(&mut ir);
     // Block call-arguments absorb their call (shared with classify: desugar-before-both).
     crate::lower::hoist_block_call_args(&mut ir);
+    // Call-bearing assert subjects bind first (shared with classify: desugar-before-both;
+    // must precede the never-err/auto-wrap classification so the bind rewraps like a
+    // user-written `let`).
+    crate::lower::hoist_assert_call_subjects(&mut ir);
     crate::lower::desugar_loop_early_returns(&mut ir);
     crate::lower::hoist_spread_call_bases(&mut ir);
     crate::lower::hoist_record_literal_args(&mut ir);
