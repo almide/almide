@@ -4,8 +4,9 @@
 > 潰したら `[x]` + コミット SHA を記す。新しく見つけた残件はこの台帳に**追記してから**
 > 潰す（台帳外の作業を作らない）。develop への merge はユーザーの明示 GO まで行わない。
 >
-> 現在地: 決定層（probe / bounded / race）+ 表面統一（Wave 1）+ P0 2 件まで完了、
-> 全 workspace テスト緑。以下が残り。
+> 現在地（2026-08-02 深夜）: 23 項目中 20 完了。残り 3 = T1-1（strict cap +
+> unwind — 発散カットの本丸）、T1-2（metered-clone 特殊化）、T3-5（Dyn charge）。
+> 全 workspace テスト緑を維持したまま進行中。
 
 ## Tier 1 — 意味論の大物
 
@@ -99,8 +100,9 @@
 - [x] **T4-4 docs/stdlib の compute / duration ページ**（6471c8ef — 2 ページ +
   CHEATSHEET 表 2 行。docs-gen counter / signature-index 生成器の両方に
   「時計ページ＝checker 表面」の carve-out（Rust 側は TIME_MODULES 直読み））
-- [ ] **T4-5 roadmap 文書の status 整合**（fan-v2.md / logical-time-*.md に
-  「実装済み（branch）」マーカー。食い違い=バグ規則の適用）
+- [x] **T4-5 roadmap 文書の status 整合**（be4c13d2 — fan-v2.md /
+  logical-time-implementation.md に実装状況ブロック。「食い違いは BURNDOWN/契約台帳が
+  正」の規則を明文化）
 - [x] **T4-6 診断 fixture の網羅**（c50134cb — 8 fixture: bare Int / Duration 混入 /
   非 call body / 未知単位 / pure 文脈(E007) / 効果 arm(E006) / T×T / UFCS 裸単位。
   併せて E006 を metered-region 文脈で専用文言化（「effect fn にせよ」の循環誘導を排除））
