@@ -47,7 +47,7 @@ pub fn insert_probe_charges(functions: &mut Vec<MirFunction>) {
         }
         return;
     }
-    if budget_used() {
+    if budget_used() || timeout_used() {
         specialize_metered_clones(functions);
     }
 }
@@ -259,6 +259,37 @@ pub fn budget_used() -> bool {
 /// Reset at pipeline entry (one pipeline run per thread).
 pub fn reset_budget_used() {
     BUDGET_USED.with(|b| b.set(false));
+    TIMEOUT_USED.with(|b| b.set(false));
+}
+
+thread_local! {
+    /// Set when a `fan.timeout` prim lowers on this thread (T5-1) — drives
+    /// the wall-check emission at charge sites and the clone pass.
+    static TIMEOUT_USED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Record that the current program lowers a wall-deadline intrinsic.
+pub fn note_timeout_used() {
+    TIMEOUT_USED.with(|b| b.set(true));
+}
+
+/// True when this thread's program needs the wall-deadline machinery.
+pub fn timeout_used() -> bool {
+    TIMEOUT_USED.with(|b| b.get())
+}
+
+/// T5-2 replay: the baked ω ordinal (`ALMIDE_OMEGA=<n>` at COMPILE time —
+/// the artifact cuts at the n-th wall check without reading the clock).
+/// `-1` = live mode (read the clock).
+pub fn omega_replay() -> i64 {
+    std::env::var("ALMIDE_OMEGA").ok().and_then(|v| v.parse().ok()).unwrap_or(-1)
+}
+
+/// T5-2 record: `ALMIDE_OMEGA_RECORD=1` at compile time — the NATIVE artifact
+/// prints `__ALMD_OMEGA <ord>` on stderr at each region exit whose deadline
+/// fired (record on native, replay anywhere — ADR-0001 S8's claim shape).
+pub fn omega_record() -> bool {
+    std::env::var("ALMIDE_OMEGA_RECORD").is_ok_and(|v| v == "1")
 }
 
 /// The counters start at i64::MAX and count DOWN; consumed = MAX - remaining.

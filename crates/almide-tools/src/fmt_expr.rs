@@ -144,6 +144,7 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::FanBounded { .. } => fmt_expr_fan_bounded(out, expr, depth),
         ExprKind::FanRace { .. } => fmt_expr_fan_race(out, expr, depth),
         ExprKind::FanSettle { .. } => fmt_expr_fan_settle(out, expr, depth),
+        ExprKind::FanTimeout { .. } => fmt_expr_fan_timeout(out, expr, depth),
         ExprKind::ForIn { .. } => fmt_expr_forin(out, expr, depth),
         ExprKind::While { .. } => fmt_expr_while(out, expr, depth),
         ExprKind::Lambda { .. } => fmt_expr_lambda(out, expr, depth),
@@ -328,6 +329,21 @@ fn fmt_expr_fan_race(out: &mut String, expr: &Expr, depth: usize) {
         out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
     }
     out.push_str(&ind(depth)); out.push('}');
+}
+
+fn fmt_expr_fan_timeout(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanTimeout { deadline, body } = &expr.kind else { unreachable!() };
+    out.push_str("fan.timeout(");
+    fmt_expr(out, deadline, depth);
+    out.push_str(") ");
+    match &body.kind {
+        ExprKind::Block { .. } => fmt_expr(out, body, depth),
+        _ => {
+            out.push_str("{ ");
+            fmt_expr(out, body, depth);
+            out.push_str(" }");
+        }
+    }
 }
 
 fn fmt_expr_fan_settle(out: &mut String, expr: &Expr, depth: usize) {

@@ -302,7 +302,7 @@ impl<'a> Interpreter<'a> {
     /// the native BUDGET_SHIM (see `render_wasm_p2_b.rs` / `render_native.rs`).
     /// Reached from the eval's `RuntimeCall` arm: the fan.bounded/race
     /// frontend lowering emits these symbols directly, pre-codegen.
-    pub(crate) fn budget_prim_rt(&self, symbol: &str, args: &[Value]) -> Flow {
+    pub(crate) fn budget_prim_rt(&mut self, symbol: &str, args: &[Value]) -> Flow {
         let int0 = || match args.first() {
             Some(Value::Int(n)) => *n,
             _ => 0,
@@ -328,6 +328,28 @@ impl<'a> Interpreter<'a> {
                 Flow::val(Value::Int(0))
             }
             "almide_rt_prim_budget_spend" => Flow::val(Value::Int(self.det_spend.get())),
+            "almide_rt_prim_timeout_enter" => {
+                let saved = self.t_deadline.get();
+                let now = if Self::omega_replay() >= 0 { 0 } else { self.wall_now_ns() };
+                let dl = now.saturating_add(int0());
+                if dl < saved {
+                    self.t_deadline.set(dl);
+                }
+                self.det_region_depth.set(self.det_region_depth.get() + 1);
+                Flow::val(Value::Int(saved))
+            }
+            "almide_rt_prim_timeout_exit" => {
+                let hit = self.t_hit.get();
+                self.t_verdict.set(hit as i64);
+                if hit && std::env::var("ALMIDE_OMEGA_RECORD").is_ok_and(|v| v == "1") {
+                    self.stderr.push_str(&format!("__ALMD_OMEGA {}\n", self.t_ord.get()));
+                }
+                self.t_hit.set(false);
+                self.t_deadline.set(int0());
+                self.det_region_depth.set(self.det_region_depth.get().saturating_sub(1));
+                Flow::val(Value::Int(0))
+            }
+            "almide_rt_prim_timeout_hit" => Flow::val(Value::Int(self.t_verdict.get())),
             other => Flow::Unsupported(format!("budget prim `{other}`")),
         }
     }

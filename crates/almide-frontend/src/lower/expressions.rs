@@ -238,6 +238,42 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
                 .collect();
             ctx.mk(IrExprKind::Tuple { elements: elems }, ty, span)
         }
+        ast::ExprKind::FanTimeout { .. } => {
+            let (call, verdict) = lower_fan_timeout_call(ctx, expr, span);
+            let body_ty = call.ty.clone();
+            let result_ty = ty.clone();
+            let val_var = ctx.var_table.alloc(sym("__t_v"), body_ty.clone(), almide_ir::Mutability::Let, span);
+            let ex_var = ctx.var_table.alloc(sym("__t_hit2"), Ty::Int, almide_ir::Mutability::Let, span);
+            let stmts = vec![
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind {
+                    var: val_var, mutability: almide_ir::Mutability::Let, ty: body_ty.clone(), value: call,
+                }, span },
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind {
+                    var: ex_var, mutability: almide_ir::Mutability::Let, ty: Ty::Int, value: verdict,
+                }, span },
+            ];
+            let cond = ctx.mk(IrExprKind::BinOp {
+                op: almide_ir::BinOp::Eq,
+                left: Box::new(ctx.mk(IrExprKind::Var { id: ex_var }, Ty::Int, span)),
+                right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
+            }, Ty::Bool, span);
+            let err_arm = ctx.mk(IrExprKind::ResultErr {
+                expr: Box::new(ctx.mk(IrExprKind::LitStr {
+                    value: "fan.timeout: deadline exceeded".to_string(),
+                }, Ty::String, span)),
+            }, result_ty.clone(), span);
+            let ok_arm = ctx.mk(IrExprKind::ResultOk {
+                expr: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, body_ty, span)),
+            }, result_ty.clone(), span);
+            let tail = ctx.mk(IrExprKind::If {
+                cond: Box::new(cond),
+                then: Box::new(err_arm),
+                else_: Box::new(ok_arm),
+            }, result_ty.clone(), span);
+            let full = ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, result_ty.clone(), span);
+            // Same BARE-form outlining as bounded (a tracked direct CallFn).
+            outline_ir_as_fn(ctx, full, "__almd_res", span)
+        }
         ast::ExprKind::FanRace { .. } => {
             let result_ty = ty.clone();
             let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_fold(ctx, expr, span);
@@ -415,6 +451,36 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
                 else_: Box::new(fb_ir),
             }, arm_ty.clone(), span);
             ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, arm_ty, span)
+        }
+        ast::ExprKind::UnwrapOr { expr, fallback, .. }
+            if matches!(expr.kind, ast::ExprKind::FanTimeout { .. }) =>
+        {
+            // FUSED `timeout ?? fb` — the same fully-scalar shape as
+            // bounded's below, with the wall-clock bracket instead.
+            let (call, verdict) = lower_fan_timeout_call(ctx, expr, span);
+            let body_ty = call.ty.clone();
+            let fb_ir = lower_expr(ctx, fallback);
+            let val_var = ctx.var_table.alloc(sym("__t_v"), body_ty.clone(), almide_ir::Mutability::Let, span);
+            let ex_var = ctx.var_table.alloc(sym("__t_hit2"), Ty::Int, almide_ir::Mutability::Let, span);
+            let stmts = vec![
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind {
+                    var: val_var, mutability: almide_ir::Mutability::Let, ty: body_ty.clone(), value: call,
+                }, span },
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind {
+                    var: ex_var, mutability: almide_ir::Mutability::Let, ty: Ty::Int, value: verdict,
+                }, span },
+            ];
+            let cond = ctx.mk(IrExprKind::BinOp {
+                op: almide_ir::BinOp::Eq,
+                left: Box::new(ctx.mk(IrExprKind::Var { id: ex_var }, Ty::Int, span)),
+                right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
+            }, Ty::Bool, span);
+            let tail = ctx.mk(IrExprKind::If {
+                cond: Box::new(cond),
+                then: Box::new(fb_ir),
+                else_: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, body_ty.clone(), span)),
+            }, body_ty.clone(), span);
+            ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, body_ty, span)
         }
         ast::ExprKind::UnwrapOr { expr, fallback, .. }
             if matches!(expr.kind, ast::ExprKind::FanBounded { .. }) =>
@@ -783,6 +849,25 @@ fn lower_fan_bounded_call(
     (call, verdict)
 }
 
+/// The timeout twin of [`lower_fan_bounded_call`]: the region brackets with
+/// the WALL-clock prims and the verdict is the persisted deadline-hit flag.
+fn lower_fan_timeout_call(
+    ctx: &mut LowerCtx,
+    expr: &ast::Expr,
+    span: Option<ast::Span>,
+) -> (IrExpr, IrExpr) {
+    let ast::ExprKind::FanTimeout { deadline, body } = &expr.kind else { unreachable!() };
+    let deadline_ir = lower_expr(ctx, deadline);
+    let verdict = ctx.mk(IrExprKind::RuntimeCall {
+        symbol: sym("almide_rt_prim_timeout_hit"), args: vec![],
+    }, Ty::Int, span);
+    let call = outline_metered_arm_with(
+        ctx, deadline_ir, body, span,
+        "almide_rt_prim_timeout_enter", "almide_rt_prim_timeout_exit",
+    );
+    (call, verdict)
+}
+
 /// Outline an arbitrary lowered expression into a synthesized plain fn whose
 /// params are the expression's FREE VARIABLES (each renamed to a fresh param
 /// id via substitution), returning the replacement call expr. The T2-1
@@ -847,6 +932,23 @@ fn outline_metered_arm(
     budget_arg: IrExpr,
     body: &ast::Expr,
     span: Option<ast::Span>,
+) -> IrExpr {
+    outline_metered_arm_with(
+        ctx, budget_arg, body, span,
+        "almide_rt_prim_budget_enter", "almide_rt_prim_budget_exit",
+    )
+}
+
+/// [`outline_metered_arm`] with explicit enter/exit runtime symbols — the
+/// timeout head (T5-1) shares the outliner but brackets with the WALL-clock
+/// prims instead of the fuel ones.
+fn outline_metered_arm_with(
+    ctx: &mut LowerCtx,
+    budget_arg: IrExpr,
+    body: &ast::Expr,
+    span: Option<ast::Span>,
+    enter_sym: &str,
+    exit_sym: &str,
 ) -> IrExpr {
     use almide_ir::{CallTarget, IrFunction, IrParam, IrStmt, IrStmtKind, IrVisibility, Mutability, ParamBorrow};
     // A `{ single_call() }` body parses as a one-expr Block — unwrap it so the
@@ -927,7 +1029,7 @@ fn outline_metered_arm(
     let stmts = vec![
         IrStmt { kind: IrStmtKind::Bind {
             var: saved_var, mutability: Mutability::Let, ty: Ty::Int,
-            value: mk_rt(ctx, "almide_rt_prim_budget_enter",
+            value: mk_rt(ctx, enter_sym,
                 vec![ctx.mk(IrExprKind::Var { id: budget_param }, Ty::Int, span)]),
         }, span },
         IrStmt { kind: IrStmtKind::Bind {
@@ -936,7 +1038,7 @@ fn outline_metered_arm(
         }, span },
         IrStmt { kind: IrStmtKind::Bind {
             var: exit_var, mutability: Mutability::Let, ty: Ty::Int,
-            value: mk_rt(ctx, "almide_rt_prim_budget_exit",
+            value: mk_rt(ctx, exit_sym,
                 vec![ctx.mk(IrExprKind::Var { id: saved_var }, Ty::Int, span)]),
         }, span },
     ];

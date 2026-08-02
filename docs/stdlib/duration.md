@@ -6,8 +6,9 @@ not a stdlib module). Normative rules:
 
 A `Duration` value is a quantity of **wall-clock time** — what a stopwatch
 measures on the machine the program happens to run on. It is the clock of the
-oracle tier (`fan.timeout` and effect-surface deadlines, future); the
-deterministic tier reads the other clock — [compute](compute.md). The two
+oracle tier — `fan.timeout(duration.ms(n)) { body }` checks it cooperatively
+at charge sites (effect-surface deadlines reserve the same type, future);
+the deterministic tier reads the other clock — [compute](compute.md). The two
 types never mix and there is no conversion between them: that firewall is the
 reason both can share the familiar `ms` vocabulary safely.
 

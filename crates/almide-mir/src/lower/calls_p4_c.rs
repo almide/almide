@@ -440,6 +440,14 @@ impl LowerCtx {
                 _ => crate::PrimKind::BudgetExit,
             });
         }
+        if matches!(func, "timeout_enter" | "timeout_exit" | "timeout_hit") {
+            crate::charge_probe::note_timeout_used();
+            return Ok(match func {
+                "timeout_enter" => crate::PrimKind::TimeoutEnter,
+                "timeout_hit" => crate::PrimKind::TimeoutHit,
+                _ => crate::PrimKind::TimeoutExit,
+            });
+        }
         if matches!(
             func,
             "handle" | "die" | "load8" | "load32" | "load64" | "load_str" | "load_handle"

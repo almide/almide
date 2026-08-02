@@ -38,7 +38,7 @@ pub const TIME_MODULES: &[(&str, &str)] = &[("compute", "Compute"), ("duration",
 /// through [`surface_clock`] — a time-consuming surface missing from this
 /// table fails loudly on its first type-check (the S6-6 face check).
 pub const TIME_CONSUMING_SURFACES: &[(&str, &str)] =
-    &[("fan.bounded", "Compute"), ("fan.race", "Compute")];
+    &[("fan.bounded", "Compute"), ("fan.race", "Compute"), ("fan.timeout", "Duration")];
 
 /// Nanoseconds per unit, `None` for a name outside the closed set.
 pub fn unit_factor(unit: &str) -> Option<i64> {
@@ -90,5 +90,6 @@ mod tests {
         }
         assert_eq!(surface_clock("fan.bounded"), Some("Compute"));
         assert_eq!(surface_clock("fan.race"), Some("Compute"));
+        assert_eq!(surface_clock("fan.timeout"), Some("Duration"));
     }
 }

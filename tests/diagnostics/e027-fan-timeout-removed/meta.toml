@@ -1,3 +1,3 @@
 expects_code = "E027"
-expects_error = "fan.timeout was removed"
-hint_substring = "host boundary"
+expects_error = "fan.timeout changed signature"
+hint_substring = "fan.timeout(duration.ms(5000)) { work(x) }"

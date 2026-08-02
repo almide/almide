@@ -197,7 +197,11 @@ fn s6_6_clock_declaration_matrix_matches_s4() {
     declared.sort();
     assert_eq!(
         declared,
-        vec![("fan.bounded", "Compute"), ("fan.race", "Compute")],
+        vec![
+            ("fan.bounded", "Compute"),
+            ("fan.race", "Compute"),
+            ("fan.timeout", "Duration"),
+        ],
         "S4 clock column drifted — update ADR-0001 S4, the table, and this pin together"
     );
 }

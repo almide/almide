@@ -12,7 +12,7 @@ pub(crate) fn preamble() -> String {
 pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     // Stage 2 fuel core: present when the program uses fan.bounded OR the
     // probe is on. Counters count DOWN from i64::MAX (consumed = MAX - fuel).
-    let fuel_core = if crate::charge_probe::probe_enabled() || crate::charge_probe::budget_used() {
+    let fuel_core = if crate::charge_probe::probe_enabled() || crate::charge_probe::budget_used() || crate::charge_probe::timeout_used() {
         "  (global $__fuel (export \"__fuel\") (mut i64) (i64.const 9223372036854775807))\n  (global $__fuel_entry (mut i64) (i64.const 0))\n  (global $__b_verdict (mut i64) (i64.const 0))\n  (global $__b_spend (mut i64) (i64.const 0))\n"
     } else {
         ""
@@ -22,6 +22,20 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
         "  (global $__trace (export \"__trace\") (mut i64) (i64.const 0))\n  ;; u64 decimal digits, written BACKWARDS ending at $p (exclusive); returns the start.\n  (func $__probe_digits (param $v i64) (param $p i32) (result i32)\n    (loop $l\n      (local.set $p (i32.sub (local.get $p) (i32.const 1)))\n      (i32.store8 (local.get $p)\n        (i32.add (i32.const 48) (i32.wrap_i64 (i64.rem_u (local.get $v) (i64.const 10)))))\n      (local.set $v (i64.div_u (local.get $v) (i64.const 10)))\n      (br_if $l (i64.ne (local.get $v) (i64.const 0))))\n    (local.get $p))\n  ;; `__ALMD_PROBE <fuel> <trace>\\n` on STDERR — the exact native-shim format.\n  ;; The buffer sits on the untouched bump frontier (probe runs at _start exit).\n  (func $__probe_print\n    (local $end i32) (local $cur i32)\n    (local.set $end (i32.add (global.get $bump) (i32.const 128)))\n    (local.set $cur (local.get $end))\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 10))\n    (local.set $cur (call $__probe_digits (global.get $__trace) (local.get $cur)))\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 32))\n    (local.set $cur (call $__probe_digits (i64.sub (i64.const 9223372036854775807) (global.get $__fuel)) (local.get $cur)))\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 32))  ;; ' '\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 69))  ;; 'E'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 66))  ;; 'B'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 79))  ;; 'O'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 82))  ;; 'R'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 80))  ;; 'P'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 95))  ;; '_'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 68))  ;; 'D'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 77))  ;; 'M'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 76))  ;; 'L'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 65))  ;; 'A'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 95))  ;; '_'\n    (local.set $cur (i32.sub (local.get $cur) (i32.const 1)))\n    (i32.store8 (local.get $cur) (i32.const 95))  ;; '_'\n    (i32.store (i32.const 8) (local.get $cur))\n    (i32.store (i32.const 12) (i32.sub (local.get $end) (local.get $cur)))\n    (drop (call $fd_write (i32.const 2) (i32.const 8) (i32.const 1) (i32.const 0))))"
     } else {
         ""
+    };
+    // T5-1 wall-deadline support (fan.timeout): deadline/hit/verdict/ordinal
+    // globals + the $__wall_hit helper each charge site calls. In REPLAY mode
+    // (ALMIDE_OMEGA baked at compile time) the clock is never read — the
+    // baked ordinal decides the cut, which is what makes an observed omega
+    // reproducible on ANY host (T5-2). Clock scratch: the i64 at address 24
+    // (the 0..16 iovec area is the printer's).
+    let timeout_support = if crate::charge_probe::timeout_used() {
+        let omega = crate::charge_probe::omega_replay();
+        format!(
+            "  (global $__t_deadline (mut i64) (i64.const 9223372036854775807))\n  (global $__t_hit (mut i32) (i32.const 0))\n  (global $__t_verdict (mut i64) (i64.const 0))\n  (global $__t_ord (mut i64) (i64.const 0))\n  (func $__wall_now (result i64)\n    (drop (call $clock_time_get (i32.const 1) (i64.const 1) (i32.const 24)))\n    (i64.load (i32.const 24)))\n  (func $__wall_hit (result i32)\n    (if (i64.eq (global.get $__t_deadline) (i64.const 9223372036854775807)) (then (return (i32.const 0))))\n    (if (i32.ne (global.get $__t_hit) (i32.const 0)) (then (return (i32.const 1))))\n    (global.set $__t_ord (i64.add (global.get $__t_ord) (i64.const 1)))\n    (if (i64.ge_s (i64.const {omega}) (i64.const 0))\n      (then\n        (if (i64.ge_s (global.get $__t_ord) (i64.const {omega}))\n          (then (global.set $__t_hit (i32.const 1))))\n        (return (global.get $__t_hit))))\n    (if (i64.ge_s (call $__wall_now) (global.get $__t_deadline))\n      (then (global.set $__t_hit (i32.const 1))))\n    (global.get $__t_hit))\n"
+        )
+    } else {
+        String::new()
     };
     format!(
         r#"(module
@@ -81,7 +95,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   ;; the fs.remove_all path_remove_directory/path_unlink_file error message — a CONST byte run.
   (data (i32.const {REMOVE_ERR_ADDR}) "remove failed")
   (global $bump (mut i32) (i32.const {bump_base}))
-{fuel_core}{probe_globals}
+{fuel_core}{timeout_support}{probe_globals}
   ;; env.get's ONE-TIME environ snapshot (the environment is immutable for the
   ;; guest's lifetime): 0 = not yet read; else the pointer array + entry count.
   ;; Caching bounds the WASI scratch to one allocation (a per-call re-read leaked

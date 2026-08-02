@@ -2598,3 +2598,16 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_bounded_boundary.almd", class = "fixture" },
   { path = "tests/charge_probe_test.rs", class = "by-construction", name = "cm1_calibration_within_declared_band" },
 ]
+
+# ── WALL-CLOCK DEADLINE (fan.timeout) — the R_OMEGA contract ─
+[[contract]]
+id        = "C-208"
+spec      = "ALS-D5"
+title     = "fan.timeout is omega-relative: fixed ends everywhere, fixed omega replays byte-identically"
+statement = "`fan.timeout(duration.ms(n)) { body }` checks its wall deadline COOPERATIVELY at charge sites (never mid-operation) and nests by min-cap on the absolute deadline. The contract is RELATIVE TO omega (which check the deadline fires at — a host input, ADR-0001 S8): a recorded omega REPLAYED (the ordinal baked at compile time, the clock never read) reproduces the observations byte-identically on EVERY target — record on native, replay on wasm included. Only the two ends are absolute: a deadline larger than the work always completes Ok, and a diverging body under any finite deadline is always cut at a charge site (Err, the fallback runs, the program continues). The v1 omega encoding is the single ordinal of the FIRST hit."
+since     = "0.47.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fuel_timeout_ends.almd", class = "fixture" },
+  { path = "tests/charge_probe_test.rs", class = "by-construction", name = "timeout_deterministic_ends_and_replay" },
+]

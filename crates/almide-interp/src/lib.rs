@@ -140,6 +140,15 @@ pub struct Interpreter<'a> {
     /// The user program's own fn names — captured BEFORE the stdlib pool is
     /// layered into `fns`, so the meter can tell the two apart at call time.
     pub(crate) user_fn_names: HashSet<Sym>,
+    /// T5-1 wall-deadline mirror (fan.timeout): absolute deadline (ns since
+    /// interp start; i64::MAX = none), hit flag, persisted verdict, and the
+    /// wall-check ordinal (the ω of T5-2). Replay/record ride the same env
+    /// contract as the backends (`ALMIDE_OMEGA` / `ALMIDE_OMEGA_RECORD`).
+    pub(crate) t_deadline: Cell<i64>,
+    pub(crate) t_hit: Cell<bool>,
+    pub(crate) t_verdict: Cell<i64>,
+    pub(crate) t_ord: Cell<i64>,
+    pub(crate) t_start: std::time::Instant,
 }
 
 /// Default fuel budget — high enough for any real corpus program, low enough to
@@ -299,7 +308,46 @@ impl<'a> Interpreter<'a> {
             det_in_user: Cell::new(false),
             det_region_depth: Cell::new(0),
             user_fn_names,
+            t_deadline: Cell::new(i64::MAX),
+            t_hit: Cell::new(false),
+            t_verdict: Cell::new(0),
+            t_ord: Cell::new(0),
+            t_start: std::time::Instant::now(),
         }
+    }
+
+    /// T5-1: monotonic ns since interp start (0 in replay mode — the baked
+    /// ordinal decides instead, mirroring both backends).
+    pub(crate) fn wall_now_ns(&self) -> i64 {
+        self.t_start.elapsed().as_nanos() as i64
+    }
+
+    /// T5-2: the replay ordinal (env, same contract as the compile-time bake).
+    pub(crate) fn omega_replay() -> i64 {
+        std::env::var("ALMIDE_OMEGA").ok().and_then(|v| v.parse().ok()).unwrap_or(-1)
+    }
+
+    /// T5-1: the wall-deadline check at a charge site — ordinal + replay or
+    /// live clock, exactly the backends' `__wall_hit`.
+    pub(crate) fn wall_hit(&self) -> bool {
+        if self.t_deadline.get() == i64::MAX {
+            return false;
+        }
+        if self.t_hit.get() {
+            return true;
+        }
+        self.t_ord.set(self.t_ord.get() + 1);
+        let omega = Self::omega_replay();
+        if omega >= 0 {
+            if self.t_ord.get() >= omega {
+                self.t_hit.set(true);
+            }
+            return self.t_hit.get();
+        }
+        if self.wall_now_ns() >= self.t_deadline.get() {
+            self.t_hit.set(true);
+        }
+        self.t_hit.get()
     }
 
     /// One deterministic charge unit, if the meter applies here (inside a
@@ -317,7 +365,7 @@ impl<'a> Interpreter<'a> {
     /// check-and-return at charge sites.
     #[inline]
     pub(crate) fn det_cut(&self) -> bool {
-        self.det_region_depth.get() > 0 && self.det_fuel.get() < 0
+        self.det_region_depth.get() > 0 && (self.det_fuel.get() < 0 || self.wall_hit())
     }
 
     /// Override the fuel budget (for tests / the fuzz oracle).

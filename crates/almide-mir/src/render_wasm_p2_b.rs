@@ -337,6 +337,38 @@ fn render_op_prim(
                    (then (global.set $__fuel (global.get $__fuel_entry))))\n"
         );
     }
+    // T5-1 wall-deadline prims: enter min-caps the ABSOLUTE deadline
+    // (now + ns vs the outer), exit restores + persists the hit verdict.
+    // In replay mode "now" is a constant 0 — the ordinal decides instead,
+    // and the min-cap arithmetic still nests correctly (0 + ns vs outer).
+    if let PrimKind::TimeoutEnter = kind {
+        let d = local(dst.expect("TimeoutEnter has a result"));
+        let a = local(args[0]);
+        let now = if crate::charge_probe::omega_replay() >= 0 {
+            "(i64.const 0)".to_string()
+        } else {
+            "(call $__wall_now)".to_string()
+        };
+        return format!(
+            "    (local.set {d} (global.get $__t_deadline))\n\
+                 (if (i64.lt_s (i64.add {now} (local.get {a})) (global.get $__t_deadline))\n\
+                   (then (global.set $__t_deadline (i64.add {now} (local.get {a})))))\n"
+        );
+    }
+    if let PrimKind::TimeoutExit = kind {
+        let d = local(dst.expect("TimeoutExit has a result"));
+        let a = local(args[0]);
+        return format!(
+            "    (global.set $__t_verdict (i64.extend_i32_u (global.get $__t_hit)))\n\
+                 (global.set $__t_hit (i32.const 0))\n\
+                 (global.set $__t_deadline (local.get {a}))\n\
+                 (local.set {d} (i64.const 0))\n"
+        );
+    }
+    if let PrimKind::TimeoutHit = kind {
+        let d = local(dst.expect("TimeoutHit has a result"));
+        return format!("    (local.set {d} (global.get $__t_verdict))\n");
+    }
     if let PrimKind::BudgetExhausted = kind {
         // Reads the PERSISTED verdict of the most recently exited region (set
         // by BudgetExit), so the caller can consult it after the counter was

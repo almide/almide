@@ -182,6 +182,12 @@ pub enum ExprKind {
     /// the (spend, index)-lexicographic minimum completion. The optional budget
     /// is a per-branch divergence guard (Stage 3 v1: arms are single calls).
     FanRace { budget: Option<Box<Expr>>, arms: Vec<Expr> },
+    /// `fan.timeout(deadline) { body }` — the ORACLE-tier deadline (Stage 4):
+    /// the body runs under a WALL-CLOCK deadline checked cooperatively at
+    /// charge sites (the Go-context cancellation model). The verdict is
+    /// ω-relative (ADR-0001 S8): which site the deadline hits depends on the
+    /// host — record/replay (T5-2) makes an observed ω reproducible.
+    FanTimeout { deadline: Box<Expr>, body: Box<Expr> },
     /// `fan.settle { arm; arm; … }` — collect EVERYTHING: each arm settles to
     /// its own `Result` slot, heterogeneous arm types allowed. The value is a
     /// TUPLE `(Result[A, String], Result[B, String], …)` in arm order (T2-4).
@@ -537,6 +543,10 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
             visit_exprs_slice_mut(arms, f);
         }
         ExprKind::FanSettle { arms } => visit_exprs_slice_mut(arms, f),
+        ExprKind::FanTimeout { deadline, body } => {
+            f(deadline);
+            f(body);
+        }
         ExprKind::MapLiteral { entries } => visit_map_entries_mut(entries, f),
         ExprKind::Record { fields, .. } => visit_field_inits_mut(fields, f),
         ExprKind::SpreadRecord { base, fields } => {

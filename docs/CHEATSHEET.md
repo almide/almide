@@ -339,6 +339,9 @@ let win   = fan.race { solve_fast(); solve_slow() } ?? d  // deterministic winne
 // Budgets: deterministic compute-time limits, built with compute.* constructors
 let r = fan.bounded(compute.ms(100)) { work(input) } ?? -1   // Err if work exceeds 100ms of deterministic compute
 let w = fan.race(compute.us(50)) { a(); b() } ?? -1          // arms over budget are excluded
+
+// Wall-clock deadline (oracle tier): checked cooperatively at charge sites
+let t = fan.timeout(duration.ms(5000)) { work(input) } ?? -1 // Err if the wall deadline fires first
 ```
 
 ### Time constructors (closed set)
@@ -347,7 +350,7 @@ Two clock types, six units each — `ns / us / ms / s / min / h`:
 
 ```
 compute.ms(100)     // Compute — deterministic compute-time (fan.bounded / fan.race budgets)
-duration.ms(5000)   // Duration — wall-clock time (future oracle-tier surfaces)
+duration.ms(5000)   // Duration — wall-clock time (fan.timeout deadlines)
 ```
 
 - A bare `Int` is NEVER a time: `fan.bounded(5000) {...}` is a type error — write `compute.ms(5000)`

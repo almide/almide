@@ -228,6 +228,63 @@ impl Parser {
                 body: Box::new(body),
             }));
         }
+        // fan.timeout(deadline) { body } — the oracle-tier head (T5-1),
+        // parsed exactly like bounded (deadline in parens, block body).
+        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
+            && self.peek_at(2).map_or(false, |t| t.value == "timeout")
+            && self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LParen)
+        {
+            let span = Some(self.current_span());
+            self.advance(); // fan
+            self.advance(); // .
+            self.advance(); // timeout
+            self.expect(TokenType::LParen)?;
+            let deadline = self.parse_expr()?;
+            // Legacy `fan.timeout(ms, thunk)` (2+ args) — rebuild the member
+            // CALL so the checker's E027 signature-migration hint fires,
+            // exactly like race's legacy rebuild.
+            if self.check(TokenType::Comma) {
+                let mut args = vec![deadline];
+                while self.check(TokenType::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                    args.push(self.parse_expr()?);
+                }
+                self.expect(TokenType::RParen)?;
+                let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
+                let member = Expr::new(self.next_id(), span, ExprKind::Member {
+                    object: Box::new(fan_ident),
+                    field: sym("timeout"),
+                });
+                return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
+                    callee: Box::new(member),
+                    args,
+                    named_args: Vec::new(),
+                    type_args: None,
+                }));
+            }
+            self.expect(TokenType::RParen)?;
+            self.skip_newlines();
+            if !self.check(TokenType::LBrace) {
+                // `fan.timeout(e)` with no block: same legacy rebuild -> E027.
+                let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
+                let member = Expr::new(self.next_id(), span, ExprKind::Member {
+                    object: Box::new(fan_ident),
+                    field: sym("timeout"),
+                });
+                return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
+                    callee: Box::new(member),
+                    args: vec![deadline],
+                    named_args: Vec::new(),
+                    type_args: None,
+                }));
+            }
+            let body = self.parse_brace_expr()?;
+            return Ok(Expr::new(self.next_id(), span, ExprKind::FanTimeout {
+                deadline: Box::new(deadline),
+                body: Box::new(body),
+            }));
+        }
         // fan.race(budget?) { arm; … } — like bounded, a head with an optional
         // budget and an arm block. `fan.race(e)` NOT followed by `{` is the
         // REMOVED 0.42.0 thunk-list form: reconstruct the legacy member call so

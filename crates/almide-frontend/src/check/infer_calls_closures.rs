@@ -26,6 +26,7 @@ impl Checker {
             ExprKind::FanBounded { .. } => self.infer_expr_g3_fan_bounded(expr),
             ExprKind::FanRace { .. } => self.infer_expr_g3_fan_race(expr),
             ExprKind::FanSettle { .. } => self.infer_expr_g3_fan_settle(expr),
+            ExprKind::FanTimeout { .. } => self.infer_expr_g3_fan_timeout(expr),
             ExprKind::Call { .. } => self.infer_expr_g3_call(expr),
 
             ExprKind::Pipe { left, right, .. } => {
@@ -252,6 +253,16 @@ impl Checker {
                     ),
                     format!("{surface} budget")));
             }
+            Ty::Named(n, _) if n.as_str() == "Compute" && clock == "Duration" => {
+                self.emit(super::err(
+                    format!("expected {clock}, found Compute"),
+                    format!(
+                        "{surface} takes a WALL-CLOCK deadline. Build it with \
+                         duration.ms(...); for a deterministic compute budget use \
+                         fan.bounded"
+                    ),
+                    format!("{surface} budget")));
+            }
             other => {
                 self.emit(super::err(
                     format!("expected {clock}, found {}", other.display()),
@@ -337,6 +348,40 @@ impl Checker {
         self.env.metered_region = saved_region;
         let t = arm_ty.map(|t| resolve_ty(&t, &self.uf)).unwrap_or(Ty::Unknown);
         Ty::result(t, Ty::String)
+    }
+
+    /// `ExprKind::FanTimeout` arm: `fan.timeout(deadline) { body }` (T5-1,
+    /// the ORACLE tier). The deadline is a `Duration` (the S4 matrix's first
+    /// wall-clock row — Compute and bare Int are named errors via the same
+    /// S6-6 table lookup); the body is PURE like bounded's (v1) and the
+    /// verdict is ω-relative: Err iff the wall deadline fires at a charge
+    /// site before the body completes. Result[T, String].
+    fn infer_expr_g3_fan_timeout(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanTimeout { deadline, body } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.timeout can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.timeout".to_string()).with_code("E007"));
+        }
+        let deadline_ty = self.infer_expr(deadline);
+        let deadline_concrete = resolve_ty(&deadline_ty, &self.uf);
+        self.check_budget_clock("fan.timeout", &deadline_concrete);
+        let saved_effect = self.env.can_call_effect;
+        let saved_region = self.env.metered_region;
+        self.env.can_call_effect = false;
+        self.env.metered_region = Some("fan.timeout");
+        let body_ty = self.infer_expr(body);
+        self.env.can_call_effect = saved_effect;
+        self.env.metered_region = saved_region;
+        let body_concrete = resolve_ty(&body_ty, &self.uf);
+        if body_concrete.is_result() {
+            self.emit(super::err(
+                "fan.timeout body must return a plain value in v1".to_string(),
+                "Return the value directly; the deadline adds its own Err channel".to_string(),
+                "fan.timeout body".to_string()));
+        }
+        Ty::result(body_concrete, Ty::String)
     }
 
     /// `ExprKind::FanSettle` arm: `fan.settle { arms }` (T2-4). Every arm

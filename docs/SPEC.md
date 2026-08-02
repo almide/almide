@@ -1089,7 +1089,23 @@ let b = fan.race(compute.us(50)) { a(); b() } ?? fallback   // per-arm budget
   is. Selecting a winner by wall clock is impossible in the deterministic
   tier by theorem (T9), not by preference.
 
-### 13.6 Rules
+### 13.6 fan.timeout — the oracle-tier wall-clock deadline
+
+```
+let t = fan.timeout(duration.ms(5000)) { work(input) } ?? fallback
+```
+
+- The deadline is a `Duration` (wall clock); it is checked COOPERATIVELY at
+  charge sites — never mid-operation (the Go-context cancellation model) —
+  and nested deadlines min-cap on the absolute deadline.
+- The verdict is ω-RELATIVE: which check the deadline fires at is a host
+  input (ADR-0001 S8). A recorded ω replays byte-identically on every target
+  (`ALMIDE_OMEGA_RECORD=1` to record on native, `ALMIDE_OMEGA=<n>` to
+  replay anywhere — the replay never reads the clock). Two ends are
+  absolute: a deadline larger than the work always completes, and a
+  diverging body under any finite deadline is always cut.
+
+### 13.7 Rules
 
 - All `fan` forms only inside `effect fn` — pure functions cannot fork
   (`fan.bounded` / `fan.race` bodies and arms are themselves checked PURE)

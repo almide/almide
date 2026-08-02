@@ -54,6 +54,7 @@ fn fixture_path(name: &str) -> PathBuf {
         "trap_cut" => Some("fuel_trap_cut"),
         "trap_window" => Some("fuel_trap_window"),
         "dyn_charge" => Some("fuel_dyn_charge"),
+        "timeout_ends" => Some("fuel_timeout_ends"),
         _ => None,
     };
     match relocated {
@@ -113,6 +114,64 @@ fn charge_probe_gate() {
     time_report_prints_dual_time();
     interp_third_vote_on_metered_fixtures();
     metered_clones_keep_nonregion_paths_charge_free();
+    timeout_deterministic_ends_and_replay();
+}
+
+/// T5-1/T5-2: the wall-deadline's two deterministic ends agree everywhere,
+/// and a RECORDED omega replays byte-identically — including RECORD ON
+/// NATIVE, REPLAY ON WASM (the ADR-0001 S8 / claim-4 shape). The borderline
+/// live verdict itself is omega-relative and deliberately NOT asserted.
+fn timeout_deterministic_ends_and_replay() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let run_env = |name: &str, wasm: bool, envs: &[(&str, &str)]| {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(fixture_path(name));
+        if wasm {
+            cmd.args(["--target", "wasm"]);
+        }
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        cmd.env_remove("ALMIDE_OMEGA");
+        cmd.env_remove("ALMIDE_OMEGA_RECORD");
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        let out = cmd.output().expect("spawn almide");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+    // Deterministic ends, both targets.
+    for wasm in [false, true] {
+        let leg = if wasm { "wasm" } else { "native" };
+        let (code, stdout, _) = run_env("timeout_ends", wasm, &[]);
+        assert_eq!(code, Some(0), "timeout_ends {leg}: must succeed");
+        assert_eq!(
+            stdout, "496551\n-1\n42",
+            "timeout_ends {leg}: deterministic ends drifted"
+        );
+    }
+    // Record on native: the borderline fixture prints its omega ordinals.
+    let (code, _, stderr) = run_env("omega_replay", false, &[("ALMIDE_OMEGA_RECORD", "1")]);
+    assert_eq!(code, Some(0), "omega record run failed");
+    let omega = stderr
+        .lines()
+        .find_map(|l| l.strip_prefix("__ALMD_OMEGA "))
+        .and_then(|n| n.trim().parse::<i64>().ok())
+        .expect("no __ALMD_OMEGA line recorded");
+    // Replay the recorded omega on BOTH targets + a repeat: byte-identical.
+    let omega_s = omega.to_string();
+    let envs: &[(&str, &str)] = &[("ALMIDE_OMEGA", omega_s.as_str())];
+    let (c1, n1, _) = run_env("omega_replay", false, envs);
+    let (c2, n2, _) = run_env("omega_replay", false, envs);
+    let (c3, w1, _) = run_env("omega_replay", true, envs);
+    assert_eq!(c1, Some(0));
+    assert_eq!((c1, &n1), (c2, &n2), "native replay is not stable");
+    assert_eq!((c1, &n1), (c3, &w1), "cross-target replay diverged (claim 4)");
 }
 
 /// T1-2: in BUDGET-ONLY mode (no probe), every charge in BOTH artifacts sits

@@ -44,6 +44,17 @@ pub enum PrimKind {
     /// self-host arm of the §13 termination convention (math.pow negative
     /// exponent, int.rotate nonpositive width). Never returns.
     Die,
+    /// ── T5-1 wall-clock deadline prims (fan.timeout, oracle tier) ────────
+    /// `dst = saved deadline` — computes `min(now + args[0] ns, outer)` as the
+    /// new deadline (EIP-150-style min-cap nesting on the WALL clock) and
+    /// returns the outer deadline for restore. In replay mode the clock is
+    /// never read (the baked ω ordinal decides the cut instead).
+    TimeoutEnter,
+    /// Restore the outer deadline from args[0]; persist the region's
+    /// deadline-hit verdict and clear the hit flag.
+    TimeoutExit,
+    /// `dst = the persisted verdict` of the most recently exited region.
+    TimeoutHit,
     /// ── NATIVE-ONLY Result carrier prims (T1-3) ──────────────────────────
     /// Inserted exclusively by `native_result_rewrite` (never by the shared
     /// lowering, never seen by the wasm renderer): the stereotyped

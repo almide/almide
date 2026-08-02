@@ -121,7 +121,7 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
             // that do not exist, so the fallback would die later as an opaque
             // rustc E0425 in generated code. Refuse with the wall reason
             // instead (same honesty rule as the probe above).
-            if rs_code.contains("almide_rt_prim_budget_") {
+            if rs_code.contains("almide_rt_prim_budget_") || rs_code.contains("almide_rt_prim_timeout_") {
                 err(&format!(
                     "error: fan.bounded / fan.race require the v1 native render, but it walled\n  reason: {e}\n  hint: budgets are metered on the trust spine only; simplify the program to the v1 subset or build for --target wasm"
                 ));

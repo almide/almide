@@ -373,18 +373,17 @@ impl Checker {
                 Some(Ty::Unknown)
             }
             "timeout" => {
-                // Tombstone (contract C-006): `fan.timeout` was REMOVED in 0.29.0.
-                // A wall-clock timeout has no portable cross-target meaning (wasm
-                // has no clock, scheduler, or threads), and it was the sole stdlib
-                // surface whose result was not a function of the program + its
-                // inputs. Deadlines belong at the host boundary that invokes the
-                // program. The dedicated arm (instead of the unknown-member arm
-                // below) keeps the migration actionable.
+                // fan.timeout RETURNED in T5-1 as the ORACLE-tier block head
+                // (`fan.timeout(duration.ms(n)) { body }` — a cooperative
+                // wall-clock deadline checked at charge sites, ω-relative per
+                // ADR-0001 S8; record/replay makes an observed ω
+                // reproducible). The legacy CALL spelling gets a
+                // signature-migration hint, mirroring race's E027 revision.
                 self.emit(super::err(
-                    "fan.timeout was removed: a wall-clock timeout has no portable cross-target meaning",
-                    "Enforce deadlines at the host boundary that invokes the program \
-                     (e.g. `timeout 5 ./app`). Inside Almide every fan combinator is \
-                     deterministic by list order: fan.map, fan.any, fan.settle.",
+                    "fan.timeout changed signature: it is now a block head with a Duration deadline",
+                    "New form: `fan.timeout(duration.ms(5000)) { work(x) }` — the deadline \
+                     is checked cooperatively at charge sites (never mid-operation), and \
+                     the verdict is host-relative (record/replay reproduces it)",
                     "call to fan.timeout()".to_string()).with_code("E027"));
                 Some(Ty::Unknown)
             }

@@ -426,6 +426,11 @@ fn render_fn(
                 // type is known only after the body typed `func.ret`, so a
                 // marker is emitted here and patched at the end of render_fn.
                 line!("if __almd_fuel_lt0() {{ {CUT_RET_MARKER} }}");
+                // T5-1: the wall-deadline check rides the same cut mechanism.
+                if crate::charge_probe::timeout_used() {
+                    used_shims.push(TIMEOUT_SHIM.as_str());
+                    line!("if __almd_wall_hit() {{ {CUT_RET_MARKER} }}");
+                }
             }
             // T3-5 dynamic charge — the native twin of the wasm arm above:
             // 1 + byte_len/16 of the result string, same trace + cut rules.
@@ -445,6 +450,10 @@ fn render_fn(
                 };
                 line!("__almd_charge_dyn({site}, {sref}, {tr});");
                 line!("if __almd_fuel_lt0() {{ {CUT_RET_MARKER} }}");
+                if crate::charge_probe::timeout_used() {
+                    used_shims.push(TIMEOUT_SHIM.as_str());
+                    line!("if __almd_wall_hit() {{ {CUT_RET_MARKER} }}");
+                }
             }
             // The §13 termination convention's exit half (assert desugar tail,
             // time-ctor negative trap): a user exit code, no message of its own.
@@ -491,6 +500,21 @@ fn render_fn(
                     var(*d),
                     var(args[0])
                 );
+            }
+            Op::Prim { kind: crate::PrimKind::TimeoutEnter, dst: Some(d), args } => {
+                used_shims.push(TIMEOUT_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_timeout_enter({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::TimeoutExit, dst: Some(d), args } => {
+                used_shims.push(TIMEOUT_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_timeout_exit({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::TimeoutHit, dst: Some(d), .. } => {
+                used_shims.push(TIMEOUT_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_timeout_hit();", var(*d));
             }
             Op::Prim { kind: crate::PrimKind::BudgetEnter, dst: Some(d), args } => {
                 used_shims.push(COUNTER_SHIM);
@@ -947,6 +971,71 @@ const CHARGE_DYN_SHIM: &str = "fn __almd_charge_dyn(site: i64, len: i64, trace: 
     if trace {
         __ALMD_TRACE.with(|t| t.set(t.get().wrapping_mul(1000003).wrapping_add(site)));
     }
+}";
+
+/// T5-1: the wall-deadline shims (fan.timeout). The clock is monotonic
+/// (`Instant` since first use); in REPLAY mode (`ALMIDE_OMEGA` baked at
+/// compile time) the clock is never read — the baked ordinal decides the
+/// cut. RECORD mode (`ALMIDE_OMEGA_RECORD=1` baked) prints
+/// `__ALMD_OMEGA <ord>` on stderr at each fired region exit.
+static TIMEOUT_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    TIMEOUT_SHIM_TEMPLATE
+        .replace("__ALMD_OMEGA_V__", &crate::charge_probe::omega_replay().to_string())
+        .replace("__ALMD_OMEGA_REC__", if crate::charge_probe::omega_record() { "true" } else { "false" })
+});
+
+const TIMEOUT_SHIM_TEMPLATE: &str = "const __ALMD_OMEGA: i64 = __ALMD_OMEGA_V__;
+const __ALMD_OMEGA_RECORD: bool = __ALMD_OMEGA_REC__;
+static __ALMD_T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+fn __almd_now_ns() -> i64 {
+    __ALMD_T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i64
+}
+thread_local! {
+    static __ALMD_T_DEADLINE: std::cell::Cell<i64> = const { std::cell::Cell::new(i64::MAX) };
+    static __ALMD_T_HIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static __ALMD_T_VERDICT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_T_ORD: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+fn __almd_timeout_enter(d_ns: i64) -> i64 {
+    let saved = __ALMD_T_DEADLINE.with(|d| d.get());
+    let now = if __ALMD_OMEGA >= 0 { 0 } else { __almd_now_ns() };
+    let dl = now.saturating_add(d_ns);
+    if dl < saved {
+        __ALMD_T_DEADLINE.with(|d| d.set(dl));
+    }
+    saved
+}
+fn __almd_timeout_exit(saved: i64) -> i64 {
+    let hit = __ALMD_T_HIT.with(|h| h.get());
+    __ALMD_T_VERDICT.with(|v| v.set(hit as i64));
+    if __ALMD_OMEGA_RECORD && hit {
+        eprintln!(\"__ALMD_OMEGA {}\", __ALMD_T_ORD.with(|o| o.get()));
+    }
+    __ALMD_T_HIT.with(|h| h.set(false));
+    __ALMD_T_DEADLINE.with(|d| d.set(saved));
+    0
+}
+fn __almd_timeout_hit() -> i64 {
+    __ALMD_T_VERDICT.with(|v| v.get())
+}
+fn __almd_wall_hit() -> bool {
+    if __ALMD_T_DEADLINE.with(|d| d.get()) == i64::MAX {
+        return false;
+    }
+    if __ALMD_T_HIT.with(|h| h.get()) {
+        return true;
+    }
+    let ord = __ALMD_T_ORD.with(|o| { o.set(o.get() + 1); o.get() });
+    if __ALMD_OMEGA >= 0 {
+        if ord >= __ALMD_OMEGA {
+            __ALMD_T_HIT.with(|h| h.set(true));
+        }
+        return __ALMD_T_HIT.with(|h| h.get());
+    }
+    if __almd_now_ns() >= __ALMD_T_DEADLINE.with(|d| d.get()) {
+        __ALMD_T_HIT.with(|h| h.set(true));
+    }
+    __ALMD_T_HIT.with(|h| h.get())
 }";
 
 /// Stage 1 probe shim: fuel/trace thread-locals + the charge fn + the guard

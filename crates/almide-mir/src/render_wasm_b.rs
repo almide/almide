@@ -387,6 +387,12 @@ fn render_op_range(
                 body.push_str(&format!(
                     "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
                 ));
+                // T5-1: the wall-deadline check rides the SAME cut mechanism.
+                if crate::charge_probe::timeout_used() {
+                    body.push_str(&format!(
+                        "    (if (i32.ne (call $__wall_hit) (i32.const 0)) (then (return{dflt})))\n"
+                    ));
+                }
             }
             // T3-5 dynamic charge: 1 + result_len/16 read from the block's
             // len field (@4) — result-keyed, so both legs subtract the same
@@ -413,6 +419,12 @@ fn render_op_range(
                 body.push_str(&format!(
                     "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
                 ));
+                // T5-1: the wall-deadline check rides the SAME cut mechanism.
+                if crate::charge_probe::timeout_used() {
+                    body.push_str(&format!(
+                        "    (if (i32.ne (call $__wall_hit) (i32.const 0)) (then (return{dflt})))\n"
+                    ));
+                }
             }
             _ => {
                 if render_fused_or_plain_op(ctx, st, op, op_idx, region, body) {

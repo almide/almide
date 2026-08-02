@@ -39,3 +39,14 @@ Fixtures: `spec/wasm_cross/fuel_race_boundary.almd`, `fuel_race_err_skip.almd`,
 異型 arm 可、素の arm は Ok に包まれ、効果 arm の Err はその slot に捕捉される
 （伝播しない）。評価は arm 順で決定的。
 Fixtures: `spec/wasm_cross/fan_settle_tuple.almd`。
+
+## ALS-D5 壁時計期限（fan.timeout、oracle 層）
+
+`fan.timeout(duration.ms(n)) { body }` は壁時計期限を **charge site で協調
+チェック**する（中断点統一原理 — 操作の途中では決して切らない、Go の context と
+同じ協調モデル）。判定は ω 相対（R_Ω）: どのチェックで期限が切れたかは host の
+入力であり、**ω を固定した replay は観測を byte 一致で再現する**（native で採録
+した ω を wasm で replay しても定義から成立）。決定的に主張できるのは両端のみ —
+十分大きい期限は常に完走し、発散 body + 微小期限は常に charge site で切れる。
+Fixtures: `spec/wasm_cross/fuel_timeout_ends.almd`（両端）+ record/replay gate
+（`tests/charge_probe_test.rs::timeout_deterministic_ends_and_replay`）。
