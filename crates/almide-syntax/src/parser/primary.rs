@@ -226,6 +226,70 @@ impl Parser {
                 body: Box::new(body),
             }));
         }
+        // fan.race(budget?) { arm; … } — like bounded, a head with an optional
+        // budget and an arm block. `fan.race(e)` NOT followed by `{` is the
+        // REMOVED 0.42.0 thunk-list form: reconstruct the legacy member call so
+        // the checker's E027 tombstone (now a signature-migration hint) fires.
+        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
+            && self.peek_at(2).map_or(false, |t| t.value == "race")
+        {
+            let span = Some(self.current_span());
+            self.advance(); // fan
+            self.advance(); // .
+            self.advance(); // race
+            let budget = if self.check(TokenType::LParen) {
+                self.advance();
+                let b = self.parse_expr()?;
+                self.expect(TokenType::RParen)?;
+                Some(b)
+            } else {
+                None
+            };
+            self.skip_newlines();
+            if !self.check(TokenType::LBrace) {
+                if let Some(b) = budget {
+                    // Legacy `fan.race(thunks)` call — rebuild it verbatim.
+                    let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
+                    let member = Expr::new(self.next_id(), span, ExprKind::Member {
+                        object: Box::new(fan_ident),
+                        field: sym("race"),
+                    });
+                    return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
+                        callee: Box::new(member),
+                        args: vec![b],
+                        named_args: Vec::new(),
+                        type_args: None,
+                    }));
+                }
+                return Err(format!(
+                    "fan.race requires an arm block at line {}:{}\n  Hint: fan.race {{ a(); b() }} or fan.race(compute.ms(5)) {{ a(); b() }}",
+                    self.current().line, self.current().col));
+            }
+            let open = self.current().clone();
+            self.expect(TokenType::LBrace)?;
+            let mut arms = Vec::new();
+            self.skip_newlines();
+            while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+                let tok = self.current().clone();
+                if matches!(tok.token_type, TokenType::Let | TokenType::Var | TokenType::For | TokenType::While) {
+                    return Err(format!("`{}` is not allowed inside fan.race at line {}:{}\n  Hint: race arms are expressions (single calls in v1)", tok.value, tok.line, tok.col));
+                }
+                arms.push(self.parse_expr()?);
+                self.skip_newlines();
+                if self.check(TokenType::Semicolon) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.expect_closing(TokenType::RBrace, open.line, open.col, "fan.race block")?;
+            if arms.is_empty() {
+                return Err(format!("fan.race must contain at least one arm at line {}:{}", open.line, open.col));
+            }
+            return Ok(Expr::new(self.next_id(), span, ExprKind::FanRace {
+                budget: budget.map(Box::new),
+                arms,
+            }));
+        }
         // fan { ... } = fan block; fan.map/fan.race = module-like call
         if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
             // Treat `fan` as an identifier for member access

@@ -422,6 +422,12 @@ fn render_fn(
                 tys.insert(*d, NTy::I64);
                 line!("let {} = __almd_budget_exit({});", var(*d), var(args[0]));
             }
+            Op::Prim { kind: crate::PrimKind::BudgetSpend, dst: Some(d), .. } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(BUDGET_SHIM);
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_budget_spend();", var(*d));
+            }
             other => {
                 let handled = render_native_call_op(
                     other,
@@ -822,6 +828,7 @@ const COUNTER_SHIM: &str = "thread_local! {
     static __ALMD_FUEL: std::cell::Cell<i64> = const { std::cell::Cell::new(i64::MAX) };
     static __ALMD_FUEL_ENTRY: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
     static __ALMD_B_VERDICT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_B_SPEND: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
     static __ALMD_TRACE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
 }";
 
@@ -859,6 +866,10 @@ fn __almd_budget_exhausted() -> i64 {
 fn __almd_budget_exit(saved: i64) -> i64 {
     __ALMD_B_VERDICT.with(|v| v.set(i64::from(__ALMD_FUEL.with(|f| f.get()) < 0)));
     let consumed = __ALMD_FUEL_ENTRY.with(|e| e.get()) - __ALMD_FUEL.with(|f| f.get());
+    __ALMD_B_SPEND.with(|s| s.set(consumed));
     __ALMD_FUEL.with(|f| f.set(saved - consumed));
     0
+}
+fn __almd_budget_spend() -> i64 {
+    __ALMD_B_SPEND.with(|s| s.get())
 }";

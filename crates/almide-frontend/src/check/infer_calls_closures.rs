@@ -24,6 +24,7 @@ impl Checker {
             ExprKind::Block { .. } => self.infer_expr_g3_block(expr),
             ExprKind::Fan { .. } => self.infer_expr_g3_fan(expr),
             ExprKind::FanBounded { .. } => self.infer_expr_g3_fan_bounded(expr),
+            ExprKind::FanRace { .. } => self.infer_expr_g3_fan_race(expr),
             ExprKind::Call { .. } => self.infer_expr_g3_call(expr),
 
             ExprKind::Pipe { left, right, .. } => {
@@ -279,6 +280,68 @@ impl Checker {
                 "fan.bounded body".to_string()));
         }
         Ty::result(body_concrete, Ty::String)
+    }
+
+    /// `ExprKind::FanRace` arm: `fan.race(budget?) { arms }` (Stage 3 v1).
+    /// Effect-fn gate; the optional budget is a `Compute` (same firewall as
+    /// bounded); every arm is a single pure call and all arms unify to one T.
+    /// Result[T, String] — Err is the ledger-constant no-winner verdict.
+    fn infer_expr_g3_fan_race(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanRace { budget, arms } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.race can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.race".to_string()).with_code("E007"));
+        }
+        if let Some(b) = budget {
+            let budget_ty = self.infer_expr(b);
+            let budget_concrete = resolve_ty(&budget_ty, &self.uf);
+            match &budget_concrete {
+                Ty::Named(n, _) if n.as_str() == "Compute" => {}
+                Ty::Named(n, _) if n.as_str() == "Duration" => {
+                    self.emit(super::err(
+                        "expected Compute, found Duration".to_string(),
+                        "fan.race budgets deterministic computation. Build it with \
+                         compute.ms(...); wall-clock racing is the oracle tier".to_string(),
+                        "fan.race budget".to_string()));
+                }
+                other => {
+                    self.emit(super::err(
+                        format!("expected Compute, found {}", other.display()),
+                        "Budgets carry a unit and a clock: fan.race(compute.ms(5)) { ... }"
+                            .to_string(),
+                        "fan.race budget".to_string()));
+                }
+            }
+        }
+        let saved_effect = self.env.can_call_effect;
+        self.env.can_call_effect = false;
+        let mut arm_ty: Option<Ty> = None;
+        for arm in arms.iter_mut() {
+            if !matches!(arm.kind, ExprKind::Call { .. }) {
+                self.emit(super::err(
+                    "fan.race arms must be single function calls (v1)".to_string(),
+                    "Wrap each strategy in a function: fan.race { exact(p); heuristic(p) }"
+                        .to_string(),
+                    "fan.race arm".to_string()));
+            }
+            let t = self.infer_expr(arm);
+            let concrete = resolve_ty(&t, &self.uf);
+            if concrete.is_result() {
+                self.emit(super::err(
+                    "fan.race arms must return a plain value in v1".to_string(),
+                    "Return the value directly; the race adds its own Err channel".to_string(),
+                    "fan.race arm".to_string()));
+            }
+            match &arm_ty {
+                None => arm_ty = Some(t),
+                Some(t0) => self.constrain(t.clone(), t0.clone(), "fan.race arm type"),
+            }
+        }
+        self.env.can_call_effect = saved_effect;
+        let t = arm_ty.map(|t| resolve_ty(&t, &self.uf)).unwrap_or(Ty::Unknown);
+        Ty::result(t, Ty::String)
     }
 
     /// `ExprKind::Call` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.

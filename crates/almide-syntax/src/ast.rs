@@ -178,6 +178,10 @@ pub enum ExprKind {
     /// `fan.bounded(budget) { body }` — deterministic computation budget
     /// (Stage 2 v1: body is a single call expression; budget is a `Compute`).
     FanBounded { budget: Box<Expr>, body: Box<Expr> },
+    /// `fan.race(budget?) { arm; arm; … }` — deterministic race: the winner is
+    /// the (spend, index)-lexicographic minimum completion. The optional budget
+    /// is a per-branch divergence guard (Stage 3 v1: arms are single calls).
+    FanRace { budget: Option<Box<Expr>>, arms: Vec<Expr> },
     ForIn { var: Sym, var_tuple: Option<Vec<Sym>>, iterable: Box<Expr>, body: Vec<Stmt> },
     While { cond: Box<Expr>, body: Vec<Stmt> },
     Lambda { params: Vec<LambdaParam>, body: Box<Expr> },
@@ -523,6 +527,12 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         ExprKind::FanBounded { budget, body } => {
             f(budget);
             f(body);
+        }
+        ExprKind::FanRace { budget, arms } => {
+            if let Some(b) = budget {
+                f(b);
+            }
+            visit_exprs_slice_mut(arms, f);
         }
         ExprKind::MapLiteral { entries } => visit_map_entries_mut(entries, f),
         ExprKind::Record { fields, .. } => visit_field_inits_mut(fields, f),

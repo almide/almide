@@ -202,6 +202,33 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             }, result_ty.clone(), span);
             ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, result_ty, span)
         }
+        // fan.race(budget?) { arms } — the bare form yields ok/err Result nodes
+        // over the lex-min fold (wasm renders it; the native rung's heap-Result
+        // wall applies as with bare bounded — the fused `?? fb` form below is
+        // the fully scalar path).
+        ast::ExprKind::FanRace { .. } => {
+            let result_ty = ty.clone();
+            let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_fold(ctx, expr, span);
+            let cond = ctx.mk(IrExprKind::BinOp {
+                op: almide_ir::BinOp::Eq,
+                left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
+                right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
+            }, Ty::Bool, span);
+            let ok_arm = ctx.mk(IrExprKind::ResultOk {
+                expr: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty, span)),
+            }, result_ty.clone(), span);
+            let err_arm = ctx.mk(IrExprKind::ResultErr {
+                expr: Box::new(ctx.mk(IrExprKind::LitStr {
+                    value: "fan.race: no branch completed within budget".to_string(),
+                }, Ty::String, span)),
+            }, result_ty.clone(), span);
+            let tail = ctx.mk(IrExprKind::If {
+                cond: Box::new(cond),
+                then: Box::new(ok_arm),
+                else_: Box::new(err_arm),
+            }, result_ty.clone(), span);
+            ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, result_ty, span)
+        }
         // ── Loops ──
         ast::ExprKind::ForIn { var, var_tuple, iterable, body, .. } => lower_expr_for_in(ctx, expr, ty, span),
         ast::ExprKind::While { cond, body, .. } => {
@@ -340,6 +367,25 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             ctx.mk(IrExprKind::Unwrap { expr: Box::new(inner) }, ty, span)
         }
         // expr ?? fallback — lower to match: ok(v)/some(v) → v, else → fallback
+        ast::ExprKind::UnwrapOr { expr, fallback, .. }
+            if matches!(expr.kind, ast::ExprKind::FanRace { .. }) =>
+        {
+            // FUSED `race ?? fb`: winner-or-fallback as a scalar If — no Result
+            // value exists, so the shape renders on the native rung today.
+            let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_fold(ctx, expr, span);
+            let fb_ir = lower_expr(ctx, fallback);
+            let cond = ctx.mk(IrExprKind::BinOp {
+                op: almide_ir::BinOp::Eq,
+                left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
+                right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
+            }, Ty::Bool, span);
+            let tail = ctx.mk(IrExprKind::If {
+                cond: Box::new(cond),
+                then: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty.clone(), span)),
+                else_: Box::new(fb_ir),
+            }, arm_ty.clone(), span);
+            ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, arm_ty, span)
+        }
         ast::ExprKind::UnwrapOr { expr, fallback, .. }
             if matches!(expr.kind, ast::ExprKind::FanBounded { .. }) =>
         {
@@ -698,21 +744,37 @@ fn lower_fan_bounded_call(
     expr: &ast::Expr,
     span: Option<ast::Span>,
 ) -> (IrExpr, IrExpr) {
-    use almide_ir::{CallTarget, IrFunction, IrParam, IrStmt, IrStmtKind, IrVisibility, Mutability, ParamBorrow};
     let ast::ExprKind::FanBounded { budget, body } = &expr.kind else { unreachable!() };
     let budget_ir = lower_expr(ctx, budget);
+    let verdict = ctx.mk(IrExprKind::RuntimeCall {
+        symbol: sym("almide_rt_prim_budget_exhausted"), args: vec![],
+    }, Ty::Int, span);
+    let call = outline_metered_arm(ctx, budget_ir, body, span);
+    (call, verdict)
+}
+
+/// Outline ONE metered region: synthesize `__almd_bounded_N(budget, args…) -> T`
+/// (enter → body call → exit; exit persists verdict + spend) and return the
+/// call expr. Shared by `fan.bounded` (one region) and `fan.race` (one per arm).
+fn outline_metered_arm(
+    ctx: &mut LowerCtx,
+    budget_arg: IrExpr,
+    body: &ast::Expr,
+    span: Option<ast::Span>,
+) -> IrExpr {
+    use almide_ir::{CallTarget, IrFunction, IrParam, IrStmt, IrStmtKind, IrVisibility, Mutability, ParamBorrow};
     let body_ir = lower_expr(ctx, body);
     let body_ty = body_ir.ty.clone();
+    let budget_ir = budget_arg;
 
     let mk_rt = |ctx: &LowerCtx, name: &str, args: Vec<IrExpr>| -> IrExpr {
         ctx.mk(IrExprKind::RuntimeCall { symbol: sym(name), args }, Ty::Int, span)
     };
-    let verdict = mk_rt(ctx, "almide_rt_prim_budget_exhausted", vec![]);
 
     let IrExprKind::Call { target, args: body_args, type_args } = body_ir.kind else {
         // Checker already diagnosed the non-call body (v1 rule); recover with
         // the plain lowered body (no metering) so downstream stays well-formed.
-        return (IrExpr { kind: body_ir.kind, ty: body_ty, span, def_id: None }, verdict);
+        return IrExpr { kind: body_ir.kind, ty: body_ty, span, def_id: None };
     };
 
     ctx.bounded_counter += 1;
@@ -780,10 +842,115 @@ fn lower_fan_bounded_call(
 
     let mut call_args = vec![budget_ir];
     call_args.extend(body_args);
-    let call = ctx.mk(IrExprKind::Call {
+    ctx.mk(IrExprKind::Call {
         target: CallTarget::Named { name: sym(&fn_name) },
         args: call_args,
         type_args: vec![],
-    }, body_ty, span);
-    (call, verdict)
+    }, body_ty, span)
+}
+
+/// Lower `fan.race(budget?) { arms }` into the sequential lex-min fold: each
+/// arm is an outlined metered region; after each call the PERSISTED verdict and
+/// spend are read as scalars; the winner is the (spend, index)-lexicographic
+/// minimum among non-exhausted arms — folded with scalar if-values, so the
+/// whole thing (bar the arm bodies) stays on the native rung. Returns
+/// (stmts, ok_var, val_var, arm_ty): tail construction is the caller's
+/// (fused fallback vs ok/err Result nodes).
+fn lower_fan_race_fold(
+    ctx: &mut LowerCtx,
+    expr: &ast::Expr,
+    span: Option<ast::Span>,
+) -> (Vec<almide_ir::IrStmt>, almide_ir::VarId, almide_ir::VarId, Ty) {
+    use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
+    let ast::ExprKind::FanRace { budget, arms } = &expr.kind else { unreachable!() };
+
+    let mk_rt = |ctx: &LowerCtx, name: &str| -> IrExpr {
+        ctx.mk(IrExprKind::RuntimeCall { symbol: sym(name), args: vec![] }, Ty::Int, span)
+    };
+    let mk_var = |ctx: &LowerCtx, id: VarId, ty: Ty| -> IrExpr {
+        ctx.mk(IrExprKind::Var { id }, ty, span)
+    };
+    let mk_int = |ctx: &LowerCtx, v: i64| -> IrExpr {
+        ctx.mk(IrExprKind::LitInt { value: v }, Ty::Int, span)
+    };
+    let mk_if_int = |ctx: &LowerCtx, c: IrExpr, t: IrExpr, e: IrExpr, ty: Ty| -> IrExpr {
+        ctx.mk(IrExprKind::If { cond: Box::new(c), then: Box::new(t), else_: Box::new(e) }, ty, span)
+    };
+    let mk_cmp = |ctx: &LowerCtx, op: almide_ir::BinOp, l: IrExpr, r: IrExpr| -> IrExpr {
+        ctx.mk(IrExprKind::BinOp { op, left: Box::new(l), right: Box::new(r) }, Ty::Bool, span)
+    };
+    let bind = |ctx: &mut LowerCtx, name: &str, ty: Ty, value: IrExpr| -> (VarId, IrStmt) {
+        let v = ctx.var_table.alloc(sym(name), ty.clone(), Mutability::Let, span);
+        (v, IrStmt { kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty, value }, span })
+    };
+
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    // The budget is evaluated ONCE; the no-budget form is the i64::MAX sentinel
+    // (effectively infinite — the divergence-guard is simply absent).
+    let budget_ir = match budget {
+        Some(b) => lower_expr(ctx, b),
+        None => mk_int(ctx, i64::MAX),
+    };
+    let (bv, st) = bind(ctx, "__r_budget", Ty::Int, budget_ir);
+    stmts.push(st);
+
+    let mut arm_ty = Ty::Unknown;
+    let mut ok_var: Option<VarId> = None;
+    let mut bs_var: Option<VarId> = None;
+    let mut val_var: Option<VarId> = None;
+
+    for (i, arm) in arms.iter().enumerate() {
+        let call = outline_metered_arm(ctx, mk_var(ctx, bv, Ty::Int), arm, span);
+        arm_ty = call.ty.clone();
+        let (vi, st) = bind(ctx, &format!("__r_v{i}"), arm_ty.clone(), call);
+        stmts.push(st);
+        let ex = mk_rt(ctx, "almide_rt_prim_budget_exhausted");
+        let (exi, st) = bind(ctx, &format!("__r_ex{i}"), Ty::Int, ex);
+        stmts.push(st);
+        let sp = mk_rt(ctx, "almide_rt_prim_budget_spend");
+        let (spi, st) = bind(ctx, &format!("__r_sp{i}"), Ty::Int, sp);
+        stmts.push(st);
+
+        // candidate = (exhausted == 0)
+        let cand = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, exi, Ty::Int), mk_int(ctx, 0));
+        match (ok_var, bs_var, val_var) {
+            (None, None, None) => {
+                let cand2 = cand.clone();
+                let (ok0, st) = bind(ctx, "__r_ok0", Ty::Int,
+                    mk_if_int(ctx, cand, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int));
+                stmts.push(st);
+                let _ = cand2;
+                ok_var = Some(ok0);
+                bs_var = Some(spi);
+                val_var = Some(vi);
+            }
+            (Some(ok_p), Some(bs_p), Some(val_p)) => {
+                // better = candidate AND (no winner yet OR spend < best) —
+                // spelled as nested scalar ifs (strict <: ties keep the
+                // earlier index, the source-order rule).
+                let no_winner = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, ok_p, Ty::Int), mk_int(ctx, 0));
+                let cheaper = mk_cmp(ctx, almide_ir::BinOp::Lt, mk_var(ctx, spi, Ty::Int), mk_var(ctx, bs_p, Ty::Int));
+                let inner = mk_if_int(ctx, no_winner, mk_int(ctx, 1),
+                    mk_if_int(ctx, cheaper, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int), Ty::Int);
+                let (bet, st) = bind(ctx, &format!("__r_bet{i}"), Ty::Int,
+                    mk_if_int(ctx, cand, inner, mk_int(ctx, 0), Ty::Int));
+                stmts.push(st);
+                let is_bet = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, bet, Ty::Int), mk_int(ctx, 1));
+                let (ok_n, st) = bind(ctx, &format!("__r_ok{i}"), Ty::Int,
+                    mk_if_int(ctx, is_bet.clone(), mk_int(ctx, 1), mk_var(ctx, ok_p, Ty::Int), Ty::Int));
+                stmts.push(st);
+                let (bs_n, st) = bind(ctx, &format!("__r_bs{i}"), Ty::Int,
+                    mk_if_int(ctx, is_bet.clone(), mk_var(ctx, spi, Ty::Int), mk_var(ctx, bs_p, Ty::Int), Ty::Int));
+                stmts.push(st);
+                let (val_n, st) = bind(ctx, &format!("__r_val{i}"), arm_ty.clone(),
+                    mk_if_int(ctx, is_bet, mk_var(ctx, vi, arm_ty.clone()), mk_var(ctx, val_p, arm_ty.clone()), arm_ty.clone()));
+                stmts.push(st);
+                ok_var = Some(ok_n);
+                bs_var = Some(bs_n);
+                val_var = Some(val_n);
+            }
+            _ => unreachable!(),
+        }
+    }
+    (stmts, ok_var.unwrap(), val_var.unwrap(), arm_ty)
 }

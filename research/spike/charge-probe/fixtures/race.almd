@@ -1,0 +1,24 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+fn cheap(n: Int) -> Int = n * 100 + 1
+fn mid(n: Int) -> Int = heavy(n) + 1000000
+
+effect fn main() -> Unit = {
+  // arm 1 (cheap, ~2 units) beats arm 0 (heavy(2000), ~2003 units)
+  let a = fan.race { heavy(2000); cheap(7) } ?? -1
+  // tie on spend: identical calls -> source order, arm 0 wins
+  let b = fan.race { cheap(3); cheap(9) } ?? -1
+  // budget cuts BOTH long arms -> fallback
+  let c = fan.race(compute.us(5)) { heavy(2000); mid(3000) } ?? -1
+  // budget admits only the cheap arm
+  let d = fan.race(compute.us(100)) { heavy(2000); cheap(4) } ?? -1
+  println(int.to_string(a))
+  println(int.to_string(b))
+  println(int.to_string(c))
+  println(int.to_string(d))
+}

@@ -107,3 +107,35 @@ almide-mir 既存 605 lib テストは全緑（Op::Charge の追加は無破壊�
    完走後の判定は厳密）。
 5. UFCS 曖昧診断（n.ms()）未実装。matrix gate（S6）未実装。
 6. fan{} 並列 native と bounded の相互作用は未定義のまま（Stage 3）。
+
+## Stage 3 垂直スライス — fan.race が両ターゲットで着地（2026-08-02、同 branch）
+
+`fan.race(budget?) { arm; arm }` が native v1 / wasm 両レッグで動き、**証明済みの
+lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
+
+- 勝者 = 最小消費の完了（cheap(7)=~2 units が heavy(2000)=~2003 units に勝つ）
+- **同着はソース順**（同一 spend の 2 arm → arm 0）
+- budget は候補集合だけを変える（全滅 → 台帳定数 Err → `??` fallback、選別 → 残った arm）
+- **勝者出現境界**: heavy(500) の spend = 502 units。`compute.us(501)` は全滅、
+  `compute.us(502)` で arm 1 が勝者に — 両ターゲット同一の 1µs 点（gate で assert）
+- probe 併用でも三点一致（consumed 9018 / trace 同一）
+- legacy `fan.race(thunks)` は parser が旧 AST を再構築して **E027 を署名移行ヒント**
+  として発火（設計どおりの改訂。fixture 更新済み）
+
+### 実装形
+
+- 各 arm を `outline_metered_arm`（Stage 2 の bounded と同一のアウトライナ）で計量領域化。
+  BudgetExit が verdict に加えて **spend を永続化**（$__b_spend / 新 prim BudgetSpend）し、
+  呼び出し側が arm ごとに読む。
+- 勝者選択は**スカラー if-value の逐次 fold**（candidate = 非枯渇、better = 無勝者 or
+  spend 厳密小 — 同着でソース順が自然に出る）。`?? fb` 融合形は Result 値ゼロの完全
+  スカラーで native rung を通る。
+- 予算なし形は i64::MAX 番兵（発散ガード不在 = fan {} と同じ停止性規約）。
+
+### Stage 3 の deviation（Stage 2 の 6 件に追加）
+
+7. **trap は保守的**: 実行された trap はプログラムを落とす（可視窓による敗者 trap の
+   消去は未実装 — strict per-site cap + unwind が必要で、これは metered-ABI 本実装の
+   領分）。逐次 + lazy のため両ターゲットで同一に落ちる（決定的だが spec より過剰報告）。
+8. arm の Err スキップ（候補から外す）は未実装 — v1 arm は非 Result 単一 call なので
+   Err 経路自体が存在しない。

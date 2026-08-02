@@ -15,6 +15,9 @@ pub enum PrimKind {
     /// Streaming semantics: the inner spend (even past the budget) drains
     /// the outer region too.
     BudgetExit,
+    /// Read the PERSISTED consumed amount of the most recently exited region
+    /// (set by BudgetExit) — the per-arm spend the race winner fold compares.
+    BudgetSpend,
 
     /// Reinterpret a heap handle (i32 pointer) as an i64 address value — the
     /// String/List→Int bridge so all address math is `Int` `IntBinOp`.

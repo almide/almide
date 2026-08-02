@@ -1,4 +1,7 @@
-// E027: fan.race was removed in 0.42.0.
+// E027: the thunk-list fan.race was removed in 0.42.0; the name returned in
+// Stage 3 as a deterministic BLOCK HEAD (fan.race { a(); b() } — least
+// deterministic computation wins, ties to source order). The legacy call
+// form still gets this signature-migration tombstone.
 //
 // Almide's concurrency model is deterministic data-parallelism (the answer to #1000,
 // docs/roadmap/active/concurrency-stance.md): `fan` may execute in parallel, but

@@ -179,7 +179,7 @@ impl Checker {
             // LIVE surfaces only. `fan.race` is tombstoned (E027) and naming it here sent a
             // user who merely mistyped toward a function that no longer exists — the same
             // defect class as a tombstone whose migration target is itself removed.
-            "Available: fan.map, fan.any, fan.settle",
+            "Available: fan.map, fan.any, fan.settle, fan.race (block head), fan.bounded (block head)",
             format!("call to fan.{}()", field)));
         Some(Ty::Unknown)
     }
@@ -269,10 +269,12 @@ impl Checker {
                 // Same treatment as fan.timeout (E027, 0.29.0): a check-time tombstone with
                 // an actionable migration, not an alias. No coexistence.
                 self.emit(super::err(
-                    "fan.race was removed: under Almide's deterministic model it returned thunk[0] in list order, so the name promised a race the language does not have",
-                    "Call the thunk directly if you meant thunk[0] (`thunks[0]()`), or use \
-                     `fan.any(thunks)` if you meant the first candidate that SUCCEEDS in list \
-                     order. `fan.map` / `fan.settle` are unchanged.",
+                    "fan.race changed signature: the thunk-list form was removed; race is now a deterministic block head",
+                    "New form: `fan.race { a(); b() }` — the winner is the branch that \
+                     completes with the LEAST deterministic computation ((spend, index) \
+                     minimum; ties go to source order). An optional per-branch budget is \
+                     `fan.race(compute.ms(5)) { … }`. If you meant the first candidate \
+                     that SUCCEEDS in list order, use `fan.any`.",
                     "call to fan.race()".to_string()).with_code("E027"));
                 Some(Ty::Unknown)
             }

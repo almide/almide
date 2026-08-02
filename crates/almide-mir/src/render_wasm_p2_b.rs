@@ -347,9 +347,14 @@ fn render_op_prim(
         let a = local(args[0]);
         return format!(
             "    (global.set $__b_verdict (i64.extend_i32_u (i64.lt_s (global.get $__fuel) (i64.const 0))))\n\
-                 (global.set $__fuel (i64.sub (local.get {a}) (i64.sub (global.get $__fuel_entry) (global.get $__fuel))))\n\
+                 (global.set $__b_spend (i64.sub (global.get $__fuel_entry) (global.get $__fuel)))\n\
+                 (global.set $__fuel (i64.sub (local.get {a}) (global.get $__b_spend)))\n\
                  (local.set {d} (i64.const 0))\n"
         );
+    }
+    if let PrimKind::BudgetSpend = kind {
+        let d = local(dst.expect("BudgetSpend has a result"));
+        return format!("    (local.set {d} (global.get $__b_spend))\n");
     }
     let body = render_op_prim_mem_io(kind, args)
         .unwrap_or_else(|| render_op_prim_float(kind, dst, args, floats, fuser));

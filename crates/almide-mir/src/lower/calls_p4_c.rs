@@ -431,11 +431,12 @@ impl LowerCtx {
     /// Extracted from `Self::lower_prim_call_generic` (thirteenth-round split, cog
     /// reduction): the structural-vs-float name-group dispatch, verbatim.
     fn prim_kind_for_name(&self, func: &str) -> Result<crate::PrimKind, LowerError> {
-        if matches!(func, "budget_enter" | "budget_exhausted" | "budget_exit") {
+        if matches!(func, "budget_enter" | "budget_exhausted" | "budget_exit" | "budget_spend") {
             crate::charge_probe::note_budget_used();
             return Ok(match func {
                 "budget_enter" => crate::PrimKind::BudgetEnter,
                 "budget_exhausted" => crate::PrimKind::BudgetExhausted,
+                "budget_spend" => crate::PrimKind::BudgetSpend,
                 _ => crate::PrimKind::BudgetExit,
             });
         }

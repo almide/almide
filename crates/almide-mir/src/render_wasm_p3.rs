@@ -13,7 +13,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     // Stage 2 fuel core: present when the program uses fan.bounded OR the
     // probe is on. Counters count DOWN from i64::MAX (consumed = MAX - fuel).
     let fuel_core = if crate::charge_probe::probe_enabled() || crate::charge_probe::budget_used() {
-        "  (global $__fuel (export \"__fuel\") (mut i64) (i64.const 9223372036854775807))\n  (global $__fuel_entry (mut i64) (i64.const 0))\n  (global $__b_verdict (mut i64) (i64.const 0))\n"
+        "  (global $__fuel (export \"__fuel\") (mut i64) (i64.const 9223372036854775807))\n  (global $__fuel_entry (mut i64) (i64.const 0))\n  (global $__b_verdict (mut i64) (i64.const 0))\n  (global $__b_spend (mut i64) (i64.const 0))\n"
     } else {
         ""
     };
