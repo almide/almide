@@ -43,6 +43,9 @@ enum NTy {
     /// carries Float as i64 BITS; the boundary into a float op converts via
     /// `f64::from_bits` (bit-exact), and every float-op result stays `f64`.
     F64,
+    /// An OWNED `Result<i64, String>` local — the T1-3 native Result carrier
+    /// (produced by the `native_result_rewrite` prims / a Res-returning call).
+    Res,
 }
 
 impl NTy {
@@ -63,6 +66,8 @@ pub enum NativeSigKind {
     Str,
     ListI64,
     F64,
+    /// `Result<i64, String>` — the T1-3 native Result carrier (returns only).
+    Res,
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -90,6 +95,7 @@ fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::StrRef => code.to_string(),
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
         NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
+        NTy::Res => unreachable!("as_str_arg on a Result carrier"),
     }
 }
 
@@ -343,6 +349,11 @@ fn seed_param_ntys(
             Some(NativeSigKind::Str) => NTy::StrRef,
             Some(NativeSigKind::I64) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
+            // Result params are rejected by the sig gate; a Res kind can
+            // only name a RETURN.
+            Some(NativeSigKind::Res) => {
+                return Err(wall("native: Result-typed param — outside the rung subset"))
+            }
             None => repr_nty(&p.repr, true)?,
         };
         tys.insert(p.value, nty);
@@ -416,6 +427,47 @@ fn render_fn(
             Op::Prim { kind: crate::PrimKind::ProcExit, dst: None, args } => {
                 line!("std::process::exit({} as i32);", var(args[0]));
             }
+            // ── T1-3 native Result carrier (native_result_rewrite) ──
+            Op::Prim { kind: crate::PrimKind::ResMakeOk, dst: Some(d), args } => {
+                tys.insert(*d, NTy::Res);
+                line!("let {}: Result<i64, String> = Ok({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::ResMakeErrStr, dst: Some(d), args } => {
+                let src = match tys.get(&args[0]) {
+                    Some(NTy::Str) => format!("{}.clone()", var(args[0])),
+                    Some(NTy::StrRef) => format!("{}.to_string()", var(args[0])),
+                    other => {
+                        return Err(wall(format!(
+                            "native: ResMakeErrStr over a non-string payload ({other:?})"
+                        )))
+                    }
+                };
+                tys.insert(*d, NTy::Res);
+                line!("let {}: Result<i64, String> = Err({});", var(*d), src);
+            }
+            Op::Prim { kind: crate::PrimKind::ResTag, dst: Some(d), args } => {
+                tys.insert(*d, NTy::I64);
+                line!("let {}: i64 = {}.is_err() as i64;", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::ResOkScalar, dst: Some(d), args } => {
+                tys.insert(*d, NTy::I64);
+                line!(
+                    "let {}: i64 = match &{} {{ Ok(x) => *x, Err(_) => 0 }};",
+                    var(*d),
+                    var(args[0])
+                );
+            }
+            Op::Prim { kind: crate::PrimKind::ResErrStr, dst: Some(d), args } => {
+                // A BORROW of the Err payload (the verifier aliases it to the
+                // Result's object); "" on the Ok side (unreached — the tag
+                // dispatch guards it).
+                tys.insert(*d, NTy::StrRef);
+                line!(
+                    "let {}: &str = match &{} {{ Err(e) => e.as_str(), Ok(_) => \"\" }};",
+                    var(*d),
+                    var(args[0])
+                );
+            }
             Op::Prim { kind: crate::PrimKind::BudgetEnter, dst: Some(d), args } => {
                 used_shims.push(COUNTER_SHIM);
                 used_shims.push(BUDGET_SHIM.as_str());
@@ -486,7 +538,7 @@ fn render_fn(
 /// owned value; everything else returns the local directly.
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
-        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec => var(v),
+        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res => var(v),
         NTy::StrRef => format!("{}.to_string()", var(v)),
         NTy::VecRef => format!("{}.to_vec()", var(v)),
     }
@@ -517,6 +569,7 @@ fn render_native_fn_sig(
                 NTy::VecRef | NTy::Vec => "&[i64]",
                 NTy::I64 => "i64",
                 NTy::F64 => "f64",
+                NTy::Res => "Result<i64, String>",
             };
             format!("{}: {}", var(p.value), spelled)
         })
@@ -530,6 +583,7 @@ fn render_native_fn_sig(
             Some(NTy::Vec) => " -> Vec<i64>".to_string(),
             Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
             Some(NTy::F64) => " -> f64".to_string(),
+            Some(NTy::Res) => " -> Result<i64, String>".to_string(),
             None => return Err(wall("native: return value untyped")),
         },
     };
@@ -768,6 +822,8 @@ fn render_native_drop_op(
         Op::DropListStr { v } => {
             match tys.get(v) {
                 Some(NTy::Vec) => line!("// drop(record/list block): scope-end"),
+                // The T1-3 Result carrier frees like any owned Rust value.
+                Some(NTy::Res) => line!("// drop(result carrier): scope-end"),
                 Some(NTy::VecRef) => {
                     return Err(wall("native: DropListStr of a borrowed param — MIR call-mode violation"))
                 }
@@ -803,6 +859,10 @@ fn render_dup(
         NTy::I64 => {
             tys.insert(*dst, NTy::I64);
             line!("let mut {} = {};", var(*dst), var(*src));
+        }
+        NTy::Res => {
+            tys.insert(*dst, NTy::Res);
+            line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
         NTy::Str => {
             tys.insert(*dst, NTy::Str);

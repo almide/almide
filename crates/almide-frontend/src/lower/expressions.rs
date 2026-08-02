@@ -200,7 +200,12 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
                 then: Box::new(err_arm),
                 else_: Box::new(ok_arm),
             }, result_ty.clone(), span);
-            ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, result_ty, span)
+            let full = ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, result_ty.clone(), span);
+            // The BARE form outlines the whole region+wrap into a synthesized
+            // Result-returning plain fn (T1-3): the call site becomes a DIRECT
+            // `CallFn` bind both renderers track — wasm materializes the fn's
+            // result block as for any user fn, native rides the Res carrier.
+            outline_ir_as_fn(ctx, full, "__almd_res", span)
         }
         // fan.race(budget?) { arms } — the bare form yields ok/err Result nodes
         // over the lex-min fold (wasm renders it; the native rung's heap-Result
@@ -227,7 +232,9 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
                 then: Box::new(ok_arm),
                 else_: Box::new(err_arm),
             }, result_ty.clone(), span);
-            ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, result_ty, span)
+            let full = ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, result_ty.clone(), span);
+            // Same BARE-form outlining as bounded (see there).
+            outline_ir_as_fn(ctx, full, "__almd_res", span)
         }
         // ── Loops ──
         ast::ExprKind::ForIn { var, var_tuple, iterable, body, .. } => lower_expr_for_in(ctx, expr, ty, span),
@@ -749,6 +756,62 @@ fn lower_fan_bounded_call(
     (call, verdict)
 }
 
+/// Outline an arbitrary lowered expression into a synthesized plain fn whose
+/// params are the expression's FREE VARIABLES (each renamed to a fresh param
+/// id via substitution), returning the replacement call expr. The T2-1
+/// free-var machinery, reusable: the BARE fan forms use it to become a DIRECT
+/// `CallFn` bind (a tracked match subject on both renderers).
+fn outline_ir_as_fn(
+    ctx: &mut LowerCtx,
+    body: IrExpr,
+    fn_prefix: &str,
+    span: Option<ast::Span>,
+) -> IrExpr {
+    use almide_ir::{CallTarget, IrFunction, IrParam, IrVisibility, Mutability, ParamBorrow};
+    let ret_ty = body.ty.clone();
+    ctx.bounded_counter += 1;
+    let fn_name = format!("{fn_prefix}_{}", ctx.bounded_counter);
+    let mut body = body;
+    let free = almide_ir::free_vars::free_vars(&body, &std::collections::HashSet::new());
+    let mut params = Vec::with_capacity(free.len());
+    let mut call_args = Vec::with_capacity(free.len());
+    for fv in free {
+        let info = ctx.var_table.get(fv);
+        let (fv_ty, fv_name) = (info.ty.clone(), info.name);
+        let pv = ctx.var_table.alloc(fv_name, fv_ty.clone(), Mutability::Let, span);
+        let pv_expr = ctx.mk(IrExprKind::Var { id: pv }, fv_ty.clone(), span);
+        body = almide_ir::substitute::substitute_var_in_expr(&body, fv, &pv_expr);
+        params.push(IrParam {
+            var: pv, ty: fv_ty.clone(), name: fv_name,
+            borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![],
+        });
+        call_args.push(ctx.mk(IrExprKind::Var { id: fv }, fv_ty, span));
+    }
+    ctx.synthesized_fns.push(IrFunction {
+        name: sym(&fn_name),
+        params,
+        ret_ty: ret_ty.clone(),
+        body,
+        is_effect: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: IrVisibility::Private,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        module_origin: None,
+        mutated_params: Vec::new(),
+    });
+    ctx.mk(IrExprKind::Call {
+        target: CallTarget::Named { name: sym(&fn_name) },
+        args: call_args,
+        type_args: vec![],
+    }, ret_ty, span)
+}
+
 /// Outline ONE metered region: synthesize `__almd_bounded_N(budget, args…) -> T`
 /// (enter → body call → exit; exit persists verdict + spend) and return the
 /// call expr. Shared by `fan.bounded` (one region) and `fan.race` (one per arm).
@@ -935,18 +998,99 @@ fn lower_fan_race_fold(
 
     for (i, arm) in arms.iter().enumerate() {
         let call = outline_metered_arm(ctx, mk_var(ctx, bv, Ty::Int), arm, span);
-        arm_ty = call.ty.clone();
-        let (vi, st) = bind(ctx, &format!("__r_v{i}"), arm_ty.clone(), call);
-        stmts.push(st);
-        let ex = mk_rt(ctx, "almide_rt_prim_budget_exhausted");
-        let (exi, st) = bind(ctx, &format!("__r_ex{i}"), Ty::Int, ex);
-        stmts.push(st);
-        let sp = mk_rt(ctx, "almide_rt_prim_budget_spend");
-        let (spi, st) = bind(ctx, &format!("__r_sp{i}"), Ty::Int, sp);
-        stmts.push(st);
+        let call_ty = call.ty.clone();
+        // T2-2: a Result arm SELF-DISQUALIFIES on Err (symmetric with
+        // fan.any). Its Ok payload is the candidate value.
+        use almide_lang::types::constructor::TypeConstructorId;
+        let res_elem = match &call_ty {
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => Some(a[0].clone()),
+            _ => None,
+        };
+        arm_ty = res_elem.clone().unwrap_or_else(|| call_ty.clone());
 
-        // candidate = (exhausted == 0)
-        let cand = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, exi, Ty::Int), mk_int(ctx, 0));
+        let (vi, exi, spi, arm_ok) = if let Some(elem) = res_elem {
+            let (ri, st) = bind(ctx, &format!("__r_r{i}"), call_ty.clone(), call);
+            stmts.push(st);
+            let ex = mk_rt(ctx, "almide_rt_prim_budget_exhausted");
+            let (exi, st) = bind(ctx, &format!("__r_ex{i}"), Ty::Int, ex);
+            stmts.push(st);
+            let sp = mk_rt(ctx, "almide_rt_prim_budget_spend");
+            let (spi, st) = bind(ctx, &format!("__r_sp{i}"), Ty::Int, sp);
+            stmts.push(st);
+            use almide_ir::{IrMatchArm, IrPattern};
+            // arm_ok = match ri { ok(_) => 1, err(_) => 0 }
+            let subj = mk_var(ctx, ri, call_ty.clone());
+            let one = mk_int(ctx, 1);
+            let zero = mk_int(ctx, 0);
+            let m_ok = ctx.mk(IrExprKind::Match {
+                subject: Box::new(subj),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: one,
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: zero,
+                    },
+                ],
+            }, Ty::Int, span);
+            let (oki, st) = bind(ctx, &format!("__r_isok{i}"), Ty::Int, m_ok);
+            stmts.push(st);
+            // vi = match ri { ok(v) => v, err(_) => <default of T> } — the
+            // default is dead (the ok flag guards it), it only types the arm.
+            let payload = ctx.var_table.alloc(sym("__r_okv"), elem.clone(), Mutability::Let, span);
+            let payload_body = mk_var(ctx, payload, elem.clone());
+            let default = match &elem {
+                Ty::String => ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span),
+                _ => mk_int(ctx, 0),
+            };
+            let subj2 = mk_var(ctx, ri, call_ty.clone());
+            let m_val = ctx.mk(IrExprKind::Match {
+                subject: Box::new(subj2),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Ok {
+                            inner: Box::new(IrPattern::Bind { var: payload, ty: elem.clone() }),
+                        },
+                        guard: None,
+                        body: payload_body,
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: default,
+                    },
+                ],
+            }, elem.clone(), span);
+            let (vi, st) = bind(ctx, &format!("__r_v{i}"), elem, m_val);
+            stmts.push(st);
+            (vi, exi, spi, Some(oki))
+        } else {
+            let (vi, st) = bind(ctx, &format!("__r_v{i}"), arm_ty.clone(), call);
+            stmts.push(st);
+            let ex = mk_rt(ctx, "almide_rt_prim_budget_exhausted");
+            let (exi, st) = bind(ctx, &format!("__r_ex{i}"), Ty::Int, ex);
+            stmts.push(st);
+            let sp = mk_rt(ctx, "almide_rt_prim_budget_spend");
+            let (spi, st) = bind(ctx, &format!("__r_sp{i}"), Ty::Int, sp);
+            stmts.push(st);
+            (vi, exi, spi, None)
+        };
+
+        // candidate = (exhausted == 0) AND (the arm's own Ok, when Result)
+        let within = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, exi, Ty::Int), mk_int(ctx, 0));
+        let cand = match arm_ok {
+            None => within,
+            Some(oki) => {
+                let ok_flag = mk_if_int(ctx, within, mk_var(ctx, oki, Ty::Int), mk_int(ctx, 0), Ty::Int);
+                let (ci, st) = bind(ctx, &format!("__r_cand{i}"), Ty::Int, ok_flag);
+                stmts.push(st);
+                mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, ci, Ty::Int), mk_int(ctx, 1))
+            }
+        };
         match (ok_var, bs_var, val_var) {
             (None, None, None) => {
                 let cand2 = cand.clone();

@@ -18,17 +18,19 @@
   bounded/race から到達可能な関数だけを `__fuel$` 変種に複製（mono の追加次元）。
   完了条件: bounded を含むプログラムの非 region 経路が計量ゼロ（生成物 diff で
   確認）+ 既存 fixture 全緑。deviation 1 の閉鎖。
-- [ ] **T1-3 native heap-Result ABI（裸形の開通）**
-  `?? ` なしの `let r = fan.bounded(...)` / race が native v1 で描画される。
-  前提となる既存 rung 制限（Result 返し plain fn）の解除を含む — 影響は fan を
-  超える（rung 全体の前進）。完了条件: 裸形 fixture が native v1 で緑。
+- [x] **T1-3 native heap-Result ABI（裸形の開通）**（native-only 認識パス
+  `native_result_rewrite.rs` + NTy::Res carrier。裸形 bounded/race が native v1 緑
+  （`bare_result` fixture、exact boundary 同値）、**一般 Result[Int,String] plain fn
+  + match も開通**（differential 行 `result_fn_match`）。wasm レグ完全不変。
+  意図的 wall: String-Ok payload / Result param / mono 付き generic。詳細 REPORT）
 
 ## Tier 2 — 意味論の中物
 
-- [ ] **T2-1 body/arm の full block 化**
-  単一 call 制限の解除（`let` の書ける block を bounded body / race arm に）。
-  完了条件: ADR の bounded.almd 例（parse→filter→render の 3 行 body）が動く。
-  実装はアウトライナの一般化（自由変数のパラメタ化）。
+- [x] **T2-1 body/arm の full block 化**（2e26138a — parser を parse_brace_expr に、
+  outliner に自由変数パラメタ化の一般経路（単一 call は従来の args-as-params 維持）、
+  fmt の Block body 対応。ADR の parse→filter→render 例が両ターゲット+interp 一致、
+  bind 文は charge 0 で exact boundary 不変（3006ns の pin が block 形でも同値）。
+  race の block arm も動作。旧 single-call 診断 fixture は撤去）
 - [ ] **T2-2 Result arm の Err スキップ（race）**
   arm が Result を返せて、Err arm は候補から外れる（any と対称の仕様）。
   完了条件: Err/Ok 混在 arm の fixture が仕様表どおり、両ターゲット一致。

@@ -320,15 +320,16 @@ impl Checker {
         for arm in arms.iter_mut() {
             let t = self.infer_expr(arm);
             let concrete = resolve_ty(&t, &self.uf);
-            if concrete.is_result() {
-                self.emit(super::err(
-                    "fan.race arms must return a plain value in v1".to_string(),
-                    "Return the value directly; the race adds its own Err channel".to_string(),
-                    "fan.race arm".to_string()));
-            }
+            // T2-2: an arm may return Result[T, E] — its Err SELF-DISQUALIFIES
+            // the arm (symmetric with fan.any), and its Ok type joins the
+            // unification. Plain arms are always candidates.
+            let candidate = match &concrete {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[0].clone(),
+                _ => t,
+            };
             match &arm_ty {
-                None => arm_ty = Some(t),
-                Some(t0) => self.constrain(t.clone(), t0.clone(), "fan.race arm type"),
+                None => arm_ty = Some(candidate),
+                Some(t0) => self.constrain(candidate, t0.clone(), "fan.race arm type"),
             }
         }
         self.env.can_call_effect = saved_effect;

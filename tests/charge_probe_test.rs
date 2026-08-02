@@ -94,7 +94,7 @@ fn charge_probe_gate() {
 /// dynamic layer already pins against wasm).
 fn interp_third_vote_on_metered_fixtures() {
     let dir = fixtures_dir();
-    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body"] {
+    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip"] {
         let source = std::fs::read_to_string(dir.join(format!("{name}.almd"))).unwrap();
         let ir = lower_for_interp(&source);
         let outcome = almide_interp::Interpreter::new(&ir).run_main();
@@ -219,6 +219,21 @@ fn time_ctor_guard_cross_target() {
         assert_eq!(
             stdout, "11\n496551\n42\n873250",
             "block_body {leg}: block-body semantics drifted"
+        );
+        // T1-3: the BARE forms produce a real Result on both targets; the
+        // exact boundary shows the wrap costs the region nothing.
+        let (code, stdout, _) = run("bare_result", wasm);
+        assert_eq!(code, Some(0), "bare_result {leg}: must succeed");
+        assert_eq!(
+            stdout, "496551\nfan.bounded: budget exhausted\n873250",
+            "bare_result {leg}: bare-form semantics drifted"
+        );
+        // T2-2: race arms may return Result — Err self-disqualifies.
+        let (code, stdout, _) = run("race_err_skip", wasm);
+        assert_eq!(code, Some(0), "race_err_skip {leg}: must succeed");
+        assert_eq!(
+            stdout, "873250\n-1\n873250",
+            "race_err_skip {leg}: Err-skip semantics drifted"
         );
         // S3 (T2-5): the operator algebra at UNIT precision — every digit is
         // an exact-boundary verdict (see the fixture header for the map).

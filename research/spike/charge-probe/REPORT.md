@@ -163,6 +163,30 @@ lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
    宣言時計上の 1ns が判定を変える、が現在の決定性の主張形。二度の誤校正
    （21 倍過大 → 18 倍過大）を人手レビューは素通りし、ゲートだけが両方を捕えた。
 
+## T1-3 — native heap-Result ABI（Res carrier、2026-08-02）
+
+裸形（`let r = fan.bounded(...)` / race、`??` なし）の native v1 開通。副産物として
+**一般の `Result[Int|Bool, String]` 返し plain fn + match 消費も native v1 で開通**
+（台帳が予告した「rung 全体の前進」）。
+
+設計: 共有 lowering は Result を生ブロック（`Alloc DynListStr` + Handle + アドレス
+演算 + Store/Load、tag@4/payload@12）で降ろす — native にはメモリモデルがなく
+op 単位の対応は不可能。採った形は **native レグ専用の認識パス**
+（`native_result_rewrite.rs`）: 定型化した materialize/consume 窓を検出して
+5 つの native-only prim（ResMakeOk/ResMakeErrStr/ResTag/ResOkScalar/ResErrStr）へ
+書き換え、renderer が Rust の `Result<i64, String>`（NTy::Res）へ写像する。
+**wasm レグは 1 バイトも変わらない**（パスは native パイプラインでのみ走る）。
+
+- 検証整合: CallFn の Ptr result / DropListStr の天秤は温存（born/release 不変）、
+  ResErrStr は Handle 同様の alias 規則を verifier に追加、消えた result ブロックの
+  Alloc/Consume は対で消える。dead-op sweep は完全な read walker で誤削除を排除。
+- 裸形は「region+wrap 全体を自由変数 outline」（T2-1 の機構を再利用）して
+  `let r = <直接 CallFn>` の追跡可能形に — Block-tail call を match subject に
+  すると両レグとも未追跡で wall する（最初の試行で実証）。
+- 境界 3006/3005ns の pin が裸形でも同値 = wrap は region に 1 unit も課さない。
+- 未対応（意図的 wall のまま）: Ok payload が String の Result（tag/payload 窓が
+  Err と曖昧）、Result 型の param、mono サフィックス付き generic Result fn。
+
 ## fan{} 並列 × budget の裁定（T3-8、2026-08-02）
 
 「native の fan{} は実スレッド、fuel カウンタは thread-local — 併用したら計数は

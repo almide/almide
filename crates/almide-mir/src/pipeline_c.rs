@@ -608,6 +608,13 @@ pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
 }
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
+    // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
+    // same view `debug_dump_mir` builds) before the native render runs.
+    if std::env::var("ALMIDE_DUMP_MIR").is_ok() {
+        if let Ok(dump) = debug_dump_mir(source) {
+            eprintln!("{dump}");
+        }
+    }
     crate::charge_probe::reset_budget_used();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
@@ -670,6 +677,15 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
                     && matches!(**ret, Ty::Int | Ty::Bool))
         };
+        // T1-3: Result[scalar, String] returns ride a dedicated native
+        // carrier (NTy::Res — Rust Result<i64, String>). String-Ok payloads
+        // stay walled (their tag/payload windows are ambiguous with Err's).
+        let is_native_result = |t: &Ty| {
+            matches!(t, Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2
+                    && matches!(a[0], Ty::Int | Ty::Bool)
+                    && matches!(a[1], Ty::String))
+        };
         let sig_ok = |t: &Ty| {
             matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
                 || is_scalar_list(t)
@@ -677,6 +693,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 || is_flat_variant(t)
                 || is_scalar_fn(t)
         };
+        let sig_ok_ret = |t: &Ty| sig_ok(t) || is_native_result(t);
         for p in &func.params {
             if !sig_ok(&p.ty) {
                 return Err(LowerError::Unsupported(format!(
@@ -685,7 +702,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 )));
             }
         }
-        if !matches!(func.ret_ty, Ty::Unit) && !sig_ok(&func.ret_ty) {
+        if !matches!(func.ret_ty, Ty::Unit) && !sig_ok_ret(&func.ret_ty) {
             return Err(LowerError::Unsupported(format!(
                 "native: fn `{}` return type {:?} — outside the native rung subset",
                 func.name, func.ret_ty
@@ -705,6 +722,27 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         })?;
         functions.extend(all);
     }
+    // T1-3: rewrite the stereotyped Result block windows onto the native
+    // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
+    // sees these ops. Runs BEFORE verification/render (both are downstream).
+    {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use almide_lang::types::Ty;
+        let result_fns: std::collections::BTreeSet<String> = ir
+            .functions
+            .iter()
+            .filter(|f| {
+                matches!(&f.ret_ty, Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2
+                        && matches!(a[0], Ty::Int | Ty::Bool)
+                        && matches!(a[1], Ty::String))
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+        for f in functions.iter_mut() {
+            crate::native_result_rewrite::rewrite_result_ops(f, &result_fns);
+        }
+    }
     if !functions.iter().any(|f| f.name == "main") {
         return Err(LowerError::Unsupported(
             "native: main is outside the MIR-lowering subset".into(),
@@ -723,6 +761,15 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
                 Ty::Float => Some(NativeSigKind::F64),
                 Ty::String => Some(NativeSigKind::Str),
+                // T1-3: the native Result carrier (return position only — the
+                // param gate rejects Result params before this table is read).
+                Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2
+                        && matches!(a[0], Ty::Int | Ty::Bool)
+                        && matches!(a[1], Ty::String) =>
+                {
+                    Some(NativeSigKind::Res)
+                }
                 Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
                 {

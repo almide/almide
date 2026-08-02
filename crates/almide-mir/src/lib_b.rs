@@ -44,6 +44,26 @@ pub enum PrimKind {
     /// self-host arm of the §13 termination convention (math.pow negative
     /// exponent, int.rotate nonpositive width). Never returns.
     Die,
+    /// ── NATIVE-ONLY Result carrier prims (T1-3) ──────────────────────────
+    /// Inserted exclusively by `native_result_rewrite` (never by the shared
+    /// lowering, never seen by the wasm renderer): the stereotyped
+    /// `materialize_result_*` block windows and their tag/payload read
+    /// windows are recognized post-verification-input and rewritten to these,
+    /// which the native renderer maps onto a real Rust `Result<i64, String>`
+    /// local (`NTy::Res`).
+    /// `Ok(args[0])` — args[0] is the scalar Ok payload; dst is the Result.
+    ResMakeOk,
+    /// `Err(args[0].clone())` — args[0] is an owned String local (its own
+    /// Alloc/Consume accounting is untouched); dst is the Result.
+    ResMakeErrStr,
+    /// `dst = src.is_err() as i64` — the tag read (0 = Ok, 1 = Err).
+    ResTag,
+    /// `dst = ok payload (scalar)`; 0 on the Err side (unreached: the tag
+    /// dispatch guards it).
+    ResOkScalar,
+    /// `dst = &err String` — a BORROW of the Result's Err payload (the
+    /// verifier aliases dst to the Result's object, like `Handle`).
+    ResErrStr,
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no

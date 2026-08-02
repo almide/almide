@@ -433,6 +433,18 @@ impl OwnershipScan {
                     self.object_of.insert(*d, o);
                 }
             }
+            // T1-3 native Result carrier: the borrowed Err-String read ALIASES
+            // the Result's object (exactly the `Handle` rule) so a downstream
+            // borrowing use (a `CallArg::Handle` into println) live-checks
+            // against the Result value the caller still owns.
+            PrimKind::ResErrStr => {
+                if let (Some(d), Some(&o)) =
+                    (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
+                {
+                    self.object_of.insert(*d, o);
+                    self.dead.insert(*d, false);
+                }
+            }
             PrimKind::RcInc => {
                 if let Some(&o) = args.first().and_then(|a| self.object_of.get(a)) {
                     *self.rc.entry(o).or_insert(0) += 1;
