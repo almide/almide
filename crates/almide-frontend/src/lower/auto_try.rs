@@ -374,11 +374,43 @@ fn insert_try_control(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
                 }).collect(),
             }
         },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op,
-            left: Box::new(insert_try(*left, false, ctx)),
-            right: Box::new(insert_try(*right, false, ctx)),
-        },
+        IrExprKind::BinOp { op, left, right } => {
+            let left = insert_try(*left, false, ctx);
+            let right = insert_try(*right, false, ctx);
+            // #1050: a Try (auto-?) OPERAND is not a MIR brick — the proven
+            // shape is the heap-result BIND (`let t = call()?`). A-normalize
+            // in place: hoist a Try operand into a fresh bind, so
+            // `int.parse(s) + 1` reaches MIR as the same bricks as
+            // `let t = int.parse(s); t + 1`. When the RIGHT operand hoists,
+            // the left hoists with it so the left still evaluates first.
+            let l_try = matches!(left.kind, IrExprKind::Try { .. });
+            let r_try = matches!(right.kind, IrExprKind::Try { .. });
+            if l_try || r_try {
+                let mut stmts = Vec::new();
+                let mut hoist = |e: IrExpr, name: &str, stmts: &mut Vec<IrStmt>, ctx: &mut TryCtx| -> IrExpr {
+                    let ty = e.ty.clone();
+                    let span = e.span;
+                    let var = ctx.var_table.alloc(sym(name), ty.clone(), Mutability::Let, span);
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty: ty.clone(), value: e },
+                        span,
+                    });
+                    IrExpr { kind: IrExprKind::Var { id: var }, ty, span, def_id: None }
+                };
+                let bin_ty = ty.clone();
+                let left = hoist(left, "__opnd_l", &mut stmts, ctx);
+                let right = if r_try { hoist(right, "__opnd_r", &mut stmts, ctx) } else { right };
+                let bin = IrExpr {
+                    kind: IrExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) },
+                    ty: bin_ty,
+                    span: None,
+                    def_id: None,
+                };
+                IrExprKind::Block { stmts, expr: Some(Box::new(bin)) }
+            } else {
+                IrExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) }
+            }
+        }
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op,
             operand: Box::new(insert_try(*operand, false, ctx)),

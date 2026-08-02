@@ -1,8 +1,7 @@
 // #1050 err-propagation twin: a can-err CALL as a binary operand takes the
 // auto-? — the failure propagates out of the operand exactly as it would out
-// of a `let`. Separate file: the String err payload walls the wasm test leg
-// (heap-result match — trust-spine lane), so the sibling file keeps its
-// pure-Int tests on the wasm leg.
+// of a `let`. The lowering A-normalizes a Try operand into the proven
+// heap-result-bind brick (auto_try), so this renders on the trust spine.
 effect fn parse_sum(s: String) -> Int = int.parse(s) + 1
 
 test "a can-err call operand propagates its err" {
