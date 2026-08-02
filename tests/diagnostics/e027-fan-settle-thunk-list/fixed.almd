@@ -1,6 +1,9 @@
 effect fn a() -> Result[Int, String] = ok(1)
 
 effect fn main() -> Unit = {
-  let rs = fan.settle { a() }
-  println(int.to_string(list.len(rs)))
+  let (ra) = fan.settle { a() }
+  match ra {
+    ok(v) => println(int.to_string(v)),
+    err(e) => println(e),
+  }
 }
