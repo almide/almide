@@ -1,6 +1,16 @@
 <!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, typed budgets -->
 # Fan v2 — one execution-policy grammar
 
+> **実装状況（worktree-stage1-charge-probe、2026-08-02）**: 表面は実装済み —
+> block heads 全部（fan{} / any / settle / race / bounded、settle は tuple 契約）、
+> mapper 形 any/settle、budgets（compute.* 構築子 + S3 代数 + min-cap）、
+> Result arm の Err スキップ、裸形 Result（native Res carrier 含む）、full block
+> body/arm。fixtures = spec/wasm_cross/fuel_* / time_* / fan_settle_tuple、契約 =
+> C-202..C-207。未了: strict cap + unwind（T1-1）と metered-clone（T1-2）—
+> research/spike/charge-probe/BURNDOWN.md が正。本文の表と食い違う場合は
+> BURNDOWN/契約台帳が勝つ。
+
+
 > 憲章: [async-inception.md](./async-inception.md)。本文書はその表面詳細である。
 >
 > [logical-time-async.md](./logical-time-async.md)（意味論）の上に、fan の**表面全体**を

@@ -1,6 +1,12 @@
 <!-- description: Implementation blueprint: Op::Charge, fuel ABI, metered clones, race lowering, gates -->
 # Logical-Time Async — the implementation blueprint
 
+> **実装状況（worktree-stage1-charge-probe、2026-08-02）**: Stage 1 probe /
+> Stage 2 bounded / Stage 3 race / Wave 1 表面統一 / T2 全部 / T1-3 native
+> Res carrier まで実装済み（CM-1 v0.3 = 3ns/unit、unit-exact 境界 fixture）。
+> 残 = strict cap + unwind、metered clone、Dyn charge。台帳:
+> research/spike/charge-probe/BURNDOWN.md（食い違いはこの台帳が正）。
+
 > 憲章: [async-inception.md](./async-inception.md)。意味論は
 > [logical-time-async.md](./logical-time-async.md)、証明は
 > [logical-time-proofs.md](./logical-time-proofs.md)。本文書は「コンパイラのどこに、

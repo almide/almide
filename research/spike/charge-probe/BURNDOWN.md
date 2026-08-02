@@ -35,9 +35,11 @@
   Ok 型で unify、fold に per-arm の is-ok match + candidate 合成。`race_err_skip`
   fixture: 最安 Err arm の除外 / Ok Result arm が plain arm に spend 勝ち / 全 Err
   fallback / 裸形混在 — 全て両ターゲット+interp 一致。native も Res carrier 経由で緑）
-- [ ] **T2-3 mapper 形 any/settle（Wave 2 宣言分）**
-  `fan.any(xs, f)` / `fan.settle(xs, f)` — 動的リスト + 1 閉包。早期打ち切り
-  （any）を含む。完了条件: 「宣言済み・未実装」診断の撤去 + fixture 両ターゲット。
+- [x] **T2-3 mapper 形 any/settle（Wave 2 宣言分）**（6aa779fb — any は self-host
+  `fan_any.almd`（4 型対 + 構造的早期打ち切り）+ `any_map` 内部名で v0/wasm/checker
+  全配線 + `is_self_host_result_module_fn` 登録（match/auto-unwrap 消費が wasm で
+  EXECUTE）。settle mapper は list.map への脱糖（意味論同一・既存制限を継承）。
+  `spec/lang/fan_mapper_test.almd` が WASM レグ含め緑）
 - [x] **T2-4 settle block の tuple 戻り**（f0c3b900 — FanSettle 実ノード化（parser/
   checker/lowering/fmt）、値は arm 順 tuple リテラル（要素順評価が逐次確定契約を実現、
   v0 native の実スレッド interleave flake も消滅）。異型 arm + effect arm の Err 捕捉
