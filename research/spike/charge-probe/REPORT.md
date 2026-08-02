@@ -232,3 +232,44 @@ thunk-list）を解消:
 
 settle block 形の戻り型は v1 では legacy どおり `List[Result]`（fan-v2.md の
 tuple 契約は本実装 PR での deviation 項目に追加）。
+
+## Tier 5 — oracle 層の完遂（2026-08-02/03、同 branch）
+
+決定的 tier（bounded/race）で止めず、インセプションの oracle 層まで同 branch で
+着地させた（台帳 T5-1..T5-4f）:
+
+- **fan.timeout（T5-1）**: 壁時計期限を charge site で協調チェック（中断点統一
+  原理 — T1-1 の check-and-return カットにそのまま乗る）。判定は ω 相対（R_Ω
+  契約クラス、C-208 + ALS-D5）。決定的な両端（余裕期限→Ok / 発散+微小期限→Err）
+  は両ターゲット byte 一致。
+- **ω record/replay（T5-2、claim 4 の実行可能な証拠)**: ω=期限が切れた wall check
+  の序数。`ALMIDE_OMEGA_RECORD=1` で native が採録、`ALMIDE_OMEGA=<n>` で
+  **コンパイル時に bake**して全レグが時計を読まずに再生。record(native) →
+  replay(native×2 + wasm) の byte 一致を常設 gate で検査。
+- **dojo async タスクバンク + 初回実測（T5-4、claim 5 の材料）**: fan v2 /
+  決定的時間の 6 タスクを almide-dojo に追加し cli:claude で実測。**6/6 pass
+  （retry 込み、first-attempt 2/6）**。初回失敗は全て診断ギャップか実バグで、
+  ラウンド間に修正して収束させた。
+
+### 実測が炙り出して本体側で潰したもの（dogfood ループの回収）
+
+1. **診断 3 件**（dojo MH-003..005）: thunk 綴りの誤誘導 "Missing ')'" → 移行
+   ヒント / `import compute` の「ファイルを作れ」→ auto-available 明示 /
+   unwrap 済み値への unwrap_or → 「nothing to unwrap、`?? <default>` は
+   producing call へ」。
+2. **checker 穴（T5-4f）**: scalar subject への `some(..)/ok(..)/err(..)/none`
+   パターンが黙って `Unknown` bind → backend wall まで落ちていた。型エラー +
+   auto-`?` 説明に。
+3. **wasm validate 破壊（T5-4d）**: let 束縛 budget の時間型タグが MIR layout に
+   届き heap Ptr 誤解（値は erase 済み i64）。MIR newtype eraser に
+   Compute/Duration → Int を追加。頻出形（budget を変数に束ねる）が丸ごと
+   コンパイル不能だった — dojo の合格解はこの修正がないと通らない。
+4. **native レグ開通（T5-4e）**: metered effect fn を呼び出し越しに使う形を
+   5 レンガ（result_fns の lift 盲目 / NativeSigs 同罪 / err-abort window の
+   Handle+Die / def 側 `Ok(..)` wrap / interp の timeout prim ルーティング）で
+   開通。3-way corpus（native == wasm == interp）75/75 緑、新 fixture
+   fuel_var_budget を C-204 の evidence に追加。
+
+**Deviation 節: 空**（Tier 5 で仕様から外れた実装はなし。v1 の意図的な範囲限定
+— ω 符号化=最初の hit の単一序数、settle の List[Result] — は契約と roadmap に
+明記済みの「仕様側の記載」であり deviation ではない）。

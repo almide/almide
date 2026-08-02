@@ -153,10 +153,15 @@
   （opaque E0425 の根絶）。(b) bind-first 形で wasm test レグ緑（bounded/race/
   timeout の 3 種 probe 確認）。インライン call subject assert の untracked wall は
   既知形としてタスク記法規約に）
-- [ ] **T5-4 dojo async タスクバンク + 初回実測（claim 5）** — almide-dojo repo に
-  fan v2 / 決定的時間のタスク群を追加し、branch ビルドの almide で MSR 初回
-  ラウンドを実測・記録。完了条件: タスクが dojo ハーネスで green + 実測結果の
-  記録（数値は claim 5 の解禁判定材料）。
+- [x] **T5-4 dojo async タスクバンク + 初回実測（claim 5）**（dojo 09fb90d=タスク
+  6 件、21dbf08=実測記録。**6/6 pass（retry 込み MSR 100%、first-attempt 2/6）**:
+  bounded-total r0 / settle-health r0 / deadline-guard r1 / any-candidates r1 /
+  race-strategies r2 / budget-units r3。初回失敗 2 件は全てモデル起因ではなく
+  診断ギャップ or 実バグで、ラウンド間に本体側で修正（MH-003/004/005 +
+  T5-4d/T5-4f）→ 再測で収束。budget-units の合格解は T5-4d 修正がないと
+  コンパイル不能だった let 束縛 budget 形 — dogfood ループが 2 重に本懐。
+  ハーネスの datestamp バグ（"YYYY-MM-DD" リテラル素通り→ %Y-%m-%d）も修正。
+  記録: dojo runs/2026-08-02/summary.md + malicious-hints.md MH-003..005）
 - [x] **T5-4b auto-available import の誤誘導ヒント**（3078f557 — 実測 round 2 の
   発見。`import compute` → 「Create compute.almd」と教えていた（auto-available な
   checker surface なのに）。resolve.rs の TIME_MODULES 分岐 + parser の Fan token
