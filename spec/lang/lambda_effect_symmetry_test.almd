@@ -13,7 +13,9 @@ effect fn count_readable(paths: List[String]) -> Int = {
 }
 
 test "list.map lambda may call effect fns inside an effect fn" {
-  fs.write("/tmp/almide_i1051_sym.txt", "x")!
-  let n = count_readable(["/tmp/almide_i1051_sym.txt", "/almide_i1051_missing"])
+  // Repo files by RELATIVE path (the fs_stat_test precedent): readable on
+  // every leg, no write, no cleanup — /tmp does not exist on Windows and
+  // fs.remove sits outside the wasm test leg's floor.
+  let n = count_readable(["Cargo.toml", "almide_i1051_missing"])
   assert_eq(n!, 1)
 }
