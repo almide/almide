@@ -148,12 +148,11 @@
   docs/stdlib/duration.md に「effect-surface deadlines reserve the same type,
   future」を明記。S6-6 テーブルが将来行の追加を機械強制（宣言なき Duration 消費
   表面は panic））
-- [ ] **T5-4a test ブロック × budget の経路整備**（T5-4 の途中で発見）:
-  (a) native TEST mode（v0 ハーネス）に budget/timeout prim が流れると opaque な
-  rustc E0425 — run 側と同じ honest 拒否を test 経路にも。(b) wasm test レグは
-  インライン call subject の assert（`assert_eq(pick(5), ok(5))`）が untracked
-  wall — bind-first 形は通る（タスクの tests は bind-first で書く + 既知形として
-  文書化）。完了条件: (a) の明示診断 + dojo probe が wasm レグ緑。
+- [x] **T5-4a test ブロック × budget の経路整備**（af8041a5 — (a) native test
+  harness への budget/timeout prim 流入を「WASM test レグで走る」明示診断で拒否
+  （opaque E0425 の根絶）。(b) bind-first 形で wasm test レグ緑（bounded/race/
+  timeout の 3 種 probe 確認）。インライン call subject assert の untracked wall は
+  既知形としてタスク記法規約に）
 - [ ] **T5-4 dojo async タスクバンク + 初回実測（claim 5）** — almide-dojo repo に
   fan v2 / 決定的時間のタスク群を追加し、branch ビルドの almide で MSR 初回
   ラウンドを実測・記録。完了条件: タスクが dojo ハーネスで green + 実測結果の
