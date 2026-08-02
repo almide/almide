@@ -1294,12 +1294,36 @@ fn lower_fan_race_fold(
             }
             (Some(ok_p), Some(bs_p), Some(val_p)) => {
                 // better = candidate AND (no winner yet OR spend < best) —
-                // spelled as nested scalar ifs (strict <: ties keep the
-                // earlier index, the source-order rule).
+                // strict <: ties keep the earlier index, the source-order
+                // rule. The OR is 0/1 ARITHMETIC (a + b − ab) over const-arm
+                // flag ifs, never a nested if-value flowing out as an arm
+                // value: that shape certs the inner merge as `i{m|}` /
+                // `i{|m}` — a one-sided released-merge object the
+                // kernel-proven ownership checker rejects (the PCC
+                // corpus-wall catch, 2026-08-03).
                 let no_winner = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, ok_p, Ty::Int), mk_int(ctx, 0));
+                let (nw, st) = bind(ctx, &format!("__r_nw{i}"), Ty::Int,
+                    mk_if_int(ctx, no_winner, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int));
+                stmts.push(st);
                 let cheaper = mk_cmp(ctx, almide_ir::BinOp::Lt, mk_var(ctx, spi, Ty::Int), mk_var(ctx, bs_p, Ty::Int));
-                let inner = mk_if_int(ctx, no_winner, mk_int(ctx, 1),
-                    mk_if_int(ctx, cheaper, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int), Ty::Int);
+                let (ch, st) = bind(ctx, &format!("__r_ch{i}"), Ty::Int,
+                    mk_if_int(ctx, cheaper, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int));
+                stmts.push(st);
+                let ab = ctx.mk(IrExprKind::BinOp {
+                    op: almide_ir::BinOp::MulInt,
+                    left: Box::new(mk_var(ctx, nw, Ty::Int)),
+                    right: Box::new(mk_var(ctx, ch, Ty::Int)),
+                }, Ty::Int, span);
+                let a_plus_b = ctx.mk(IrExprKind::BinOp {
+                    op: almide_ir::BinOp::AddInt,
+                    left: Box::new(mk_var(ctx, nw, Ty::Int)),
+                    right: Box::new(mk_var(ctx, ch, Ty::Int)),
+                }, Ty::Int, span);
+                let inner = ctx.mk(IrExprKind::BinOp {
+                    op: almide_ir::BinOp::SubInt,
+                    left: Box::new(a_plus_b),
+                    right: Box::new(ab),
+                }, Ty::Int, span);
                 let (bet, st) = bind(ctx, &format!("__r_bet{i}"), Ty::Int,
                     mk_if_int(ctx, cand, inner, mk_int(ctx, 0), Ty::Int));
                 stmts.push(st);
@@ -1337,7 +1361,7 @@ fn lower_fan_race_map_fold(
     expr: &ast::Expr,
     span: Option<ast::Span>,
 ) -> (Vec<almide_ir::IrStmt>, almide_ir::VarId, almide_ir::VarId, Ty) {
-    use almide_ir::{CallTarget, IrMatchArm, IrPattern, IrStmt, IrStmtKind, Mutability, VarId};
+    use almide_ir::{IrMatchArm, IrPattern, IrStmt, IrStmtKind, Mutability, VarId};
     use almide_lang::types::constructor::TypeConstructorId;
     let ast::ExprKind::FanRaceMap { budget, list, mapper } = &expr.kind else { unreachable!() };
 
@@ -1362,12 +1386,6 @@ fn lower_fan_race_map_fold(
     };
     let assign = |v: VarId, value: IrExpr| -> IrStmt {
         IrStmt { kind: IrStmtKind::Assign { var: v, value }, span }
-    };
-    let list_call = |ctx: &LowerCtx, func: &str, args: Vec<IrExpr>, ty: Ty| -> IrExpr {
-        ctx.mk(IrExprKind::Call {
-            target: CallTarget::Module { module: sym("list"), func: sym(func), def_id: None },
-            args, type_args: vec![],
-        }, ty, span)
     };
     // The winner type's dead placeholder — the ok flag guards every read, it
     // only types the slot (the block form's exact convention).
@@ -1399,12 +1417,6 @@ fn lower_fan_race_map_fold(
     stmts.push(st);
     let list_ty = list_ir.ty.clone();
     let (xs, st) = bind(ctx, "__rm_xs", Mutability::Let, list_ty.clone(), list_ir);
-    stmts.push(st);
-    let len_call = list_call(ctx, "len", vec![mk_var(ctx, xs, list_ty.clone())], Ty::Int);
-    let (len, st) = bind(ctx, "__rm_len", Mutability::Let, Ty::Int, len_call);
-    stmts.push(st);
-    let zero = mk_int(ctx, 0);
-    let (iv, st) = bind(ctx, "__rm_i", Mutability::Var, Ty::Int, zero);
     stmts.push(st);
     let zero = mk_int(ctx, 0);
     let (okv, st) = bind(ctx, "__rm_ok", Mutability::Var, Ty::Int, zero);
@@ -1456,17 +1468,45 @@ fn lower_fan_race_map_fold(
     }, Ty::Int, span);
     let (isokv, st) = bind(ctx, "__rm_isok", Mutability::Let, Ty::Int, m_ok);
     arm_stmts.push(st);
-    // cand = if ex == 0 then isok else 0
+    // The admission/lex-min combination is PURE 0/1 ARITHMETIC over const-arm
+    // ifs — never an if-value whose ARM is another if's merge dst. That shape
+    // classifies the inner merge as a RELEASED object and its one-sided flow
+    // certs as `i{m|}`, which the kernel-proven ownership checker rejects
+    // (the PCC corpus-wall catch, 2026-08-03). AND = multiply, OR = a + b − ab.
+    let mk_flag = |ctx: &mut LowerCtx, c: IrExpr| -> IrExpr {
+        mk_if(ctx, c, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int)
+    };
+    let mk_mul = |ctx: &LowerCtx, l: IrExpr, r: IrExpr| -> IrExpr {
+        ctx.mk(IrExprKind::BinOp { op: almide_ir::BinOp::MulInt, left: Box::new(l), right: Box::new(r) }, Ty::Int, span)
+    };
+    // within01 = (ex == 0); cand = within01 * isok
     let within = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, exv, Ty::Int), mk_int(ctx, 0));
-    let cand_e = mk_if(ctx, within, mk_var(ctx, isokv, Ty::Int), mk_int(ctx, 0), Ty::Int);
+    let within01 = mk_flag(ctx, within);
+    let cand_e = mk_mul(ctx, within01, mk_var(ctx, isokv, Ty::Int));
     let (candv, st) = bind(ctx, "__rm_cand", Mutability::Let, Ty::Int, cand_e);
     arm_stmts.push(st);
-    // bet = cand AND (no winner yet OR sp < best) — strict <, ties keep index.
+    // bet = cand * (no_winner OR cheaper) — strict <, ties keep the earlier
+    // element. OR over 0/1 flags = a + b − a·b.
     let no_winner = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, okv, Ty::Int), mk_int(ctx, 0));
+    let nw01 = mk_flag(ctx, no_winner);
+    let (nwv, st) = bind(ctx, "__rm_nw", Mutability::Let, Ty::Int, nw01);
+    arm_stmts.push(st);
     let cheaper = mk_cmp(ctx, almide_ir::BinOp::Lt, mk_var(ctx, spv, Ty::Int), mk_var(ctx, bsv, Ty::Int));
-    let inner = mk_if(ctx, no_winner, mk_int(ctx, 1), mk_if(ctx, cheaper, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int), Ty::Int);
-    let is_cand = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, candv, Ty::Int), mk_int(ctx, 1));
-    let bet_e = mk_if(ctx, is_cand, inner, mk_int(ctx, 0), Ty::Int);
+    let ch01 = mk_flag(ctx, cheaper);
+    let (chv, st) = bind(ctx, "__rm_ch", Mutability::Let, Ty::Int, ch01);
+    arm_stmts.push(st);
+    let ab = mk_mul(ctx, mk_var(ctx, nwv, Ty::Int), mk_var(ctx, chv, Ty::Int));
+    let a_plus_b = ctx.mk(IrExprKind::BinOp {
+        op: almide_ir::BinOp::AddInt,
+        left: Box::new(mk_var(ctx, nwv, Ty::Int)),
+        right: Box::new(mk_var(ctx, chv, Ty::Int)),
+    }, Ty::Int, span);
+    let or_e = ctx.mk(IrExprKind::BinOp {
+        op: almide_ir::BinOp::SubInt,
+        left: Box::new(a_plus_b),
+        right: Box::new(ab),
+    }, Ty::Int, span);
+    let bet_e = mk_mul(ctx, mk_var(ctx, candv, Ty::Int), or_e);
     let (betv, st) = bind(ctx, "__rm_bet", Mutability::Let, Ty::Int, bet_e);
     arm_stmts.push(st);
     // if bet == 1 then { ok = 1; bs = sp; val = payload } else ()
@@ -1496,36 +1536,21 @@ fn lower_fan_race_map_fold(
     let is_bet = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, betv, Ty::Int), mk_int(ctx, 1));
     let take = mk_if(ctx, is_bet, win_block, unit, Ty::Unit);
     arm_stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: take }, span });
-    let arm_block = ctx.mk(IrExprKind::Block { stmts: arm_stmts, expr: None }, Ty::Unit, span);
 
-    let get_call = list_call(
-        ctx, "get",
-        vec![mk_var(ctx, xs, list_ty.clone()), mk_var(ctx, iv, Ty::Int)],
-        Ty::Applied(TypeConstructorId::Option, vec![elem_ty.clone()]),
-    );
-    let unit2 = ctx.mk(IrExprKind::Unit, Ty::Unit, span);
-    let elem_match = ctx.mk(IrExprKind::Match {
-        subject: Box::new(get_call),
-        arms: vec![
-            IrMatchArm {
-                pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: px, ty: elem_ty.clone() }) },
-                guard: None, body: arm_block,
-            },
-            IrMatchArm { pattern: IrPattern::None, guard: None, body: unit2 },
-        ],
+    // The scan is a ForIn over the list — the PROVEN loop shape (balanced
+    // ownership certs everywhere in the corpus). Iteration order = list order
+    // and the fold's strict `<` keeps the FIRST minimum, so the lex-min
+    // tie-break needs no index variable at all. (Earlier shapes — a while +
+    // `list.get` + Option match — emitted an `i{m|}` subject cert the
+    // kernel-proven checker rejects: the Some arm consumes, the None arm
+    // leaks. The PCC corpus-wall catch, 2026-08-03.)
+    let for_e = ctx.mk(IrExprKind::ForIn {
+        var: px,
+        var_tuple: None,
+        iterable: Box::new(mk_var(ctx, xs, list_ty.clone())),
+        body: arm_stmts,
     }, Ty::Unit, span);
-    let step = ctx.mk(IrExprKind::BinOp {
-        op: almide_ir::BinOp::AddInt,
-        left: Box::new(mk_var(ctx, iv, Ty::Int)),
-        right: Box::new(mk_int(ctx, 1)),
-    }, Ty::Int, span);
-    let loop_body = vec![
-        IrStmt { kind: IrStmtKind::Expr { expr: elem_match }, span },
-        assign(iv, step),
-    ];
-    let cond = mk_cmp(ctx, almide_ir::BinOp::Lt, mk_var(ctx, iv, Ty::Int), mk_var(ctx, len, Ty::Int));
-    let while_e = ctx.mk(IrExprKind::While { cond: Box::new(cond), body: loop_body }, Ty::Unit, span);
-    stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: while_e }, span });
+    stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: for_e }, span });
 
     (stmts, okv, valv, winner_ty)
 }

@@ -263,12 +263,7 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
             )));
         }
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
-            .map_err(|e| match e {
-                LowerError::Unsupported(msg) if !msg.contains(" in `") => LowerError::Unsupported(
-                    format!("{msg} (fn `{}`)", func.name),
-                ),
-                other => other,
-            })?;
+            .map_err(|e| e.with_fn_context(&func.name))?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
