@@ -72,6 +72,22 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
     let rs_code = if native_verified && !test_mode {
         super::render_v1_native_or_fallback(file, rs_code)
     } else {
+        // The NATIVE TEST harness rides v0, which has no deterministic meter:
+        // a budget/timeout prim reaching it would die later as an opaque
+        // rustc E0425 in generated code. Refuse with the real reason instead
+        // (the wasm test leg is the metered one; it runs first by default).
+        if test_mode
+            && (rs_code.contains("almide_rt_prim_budget_")
+                || rs_code.contains("almide_rt_prim_timeout_"))
+        {
+            return Err(
+                "fan.bounded / fan.race / fan.timeout tests run on the WASM test leg \
+                 (the native test harness has no deterministic meter). This file fell \
+                 back to the native harness, so its wasm render declined — fix that \
+                 wall (run with ALMIDE_WALL_REASON=1 to see it)"
+                    .to_string(),
+            );
+        }
         rs_code
     };
     t.lap("v1-native-render");
