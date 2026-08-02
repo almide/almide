@@ -245,6 +245,14 @@
 Rung 1 出力 transactional / AARA は別レーンの台帳へ。ADR-0002（実行順）の批准は
 ユーザー討議事項のため台帳化しない。
 
+- **develop 既存の build warnings 91 件**（T6-5 精査の副産物）: 全て branch 以前
+  から存在（blame 確認済み — TestWhere=780c8341 / gap_blanks=a1860635 /
+  NTy privacy=17e493ba 等、37 ファイルは branch 未接触）。本 branch で触ると
+  merge 面が汚れるため、develop 上の独立ハイジーンコミットとして別途実施が正。
+- **can-err lifted effect fn の native v1**（T6-6 検証の残）: variant match in
+  tail の trust-spine brick（project_v1_mir_trust_spine の既知残）。honest
+  fallback で動作は正しい。
+
 ## 完了の定義（全体）
 
 台帳の Tier 1–4 が全て `[x]`、REPORT.md の deviation 節が空（または「仕様に昇格」の
