@@ -44,8 +44,12 @@
 
 ## Tier 3 — 小物（半日圏）
 
-- [ ] **T3-1 飽和演算 + 負値 trap**（構築子の overflow 飽和、負引数の決定的 trap、
-  両ターゲット一致 fixture）
+- [x] **T3-1 飽和演算 + 負値 trap**（5d8619bf — 構築子の erasure に §13 abort
+  （負値）+ MAX 飽和（overflow）の guard を IR 合成、非負リテラルは畳み込み。
+  fixture `negative_trap`/`saturate` を両ターゲットゲート化。副産物: native v1 rung に
+  `eprintln` shim + `ProcExit` arm（assert desugar の native v1 wall も解消）、
+  **発見した既存穴** = budget prim を含む v0 fallback は rustc E0425 で死ぬ →
+  明示診断で拒否に変更（`almide_rt_prim_budget_` 検出）。differential corpus +2 行）
 - [ ] **T3-2 UFCS 曖昧診断**（`n.ms()` → compute/duration 両候補の名指しエラー）
 - [x] **T3-3 S6 matrix gate 群**（e9bf6eef — `almide_types::time_units` に単位表・
   時計表・S4 時計列を単一ソース化。checker/lowering/診断 hint 全て同表読み。
@@ -66,8 +70,9 @@
 
 ## Tier 4 — merge 準備（branch 上で先行、PR は GO 後）
 
-- [ ] **T4-1 CHEATSHEET 反映**（fan.bounded / fan.race / block any/settle /
-  compute.ms — LLM が読む文書。MSR 直結、最優先）
+- [x] **T4-1 CHEATSHEET 反映**（b3dd3e60 — 「Concurrency & deterministic time (fan)」
+  節 + 時間構築子の閉集合 + DO NOT 5 行（async/await・thunk-list・裸 Int・偽単位・
+  時間リテラル））
 - [ ] **T4-2 SPEC.md §13 の書き直し**（決定層の全意味論。§13.1/13.2 矛盾の後日談を
   正しい形で）
 - [ ] **T4-3 C-NNN 契約下書き + fixture 正式化**（fuel fixtures を spec/wasm_cross へ、
