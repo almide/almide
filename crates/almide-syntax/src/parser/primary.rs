@@ -213,6 +213,14 @@ impl Parser {
             self.advance(); // bounded
             self.expect(TokenType::LParen)?;
             let budget = self.parse_expr()?;
+            // The THUNK spelling from pre-Wave-1 training data:
+            // `fan.bounded(budget, () => work())`. A bare "Missing ')'" sent
+            // models in circles (dojo round 1) — teach the block form.
+            if self.check(TokenType::Comma) {
+                return Err(format!(
+                    "fan.bounded takes a BLOCK, not a thunk argument, at line {}:{}\n  Hint: fan.bounded(compute.ms(100)) {{ work(x) }} — drop the `() =>` wrapper; the braces are the region",
+                    self.current().line, self.current().col));
+            }
             self.expect(TokenType::RParen)?;
             self.skip_newlines();
             if !self.check(TokenType::LBrace) {
@@ -299,6 +307,11 @@ impl Parser {
             let budget = if self.check(TokenType::LParen) {
                 self.advance();
                 let b = self.parse_expr()?;
+                if self.check(TokenType::Comma) {
+                    return Err(format!(
+                        "fan.race takes a BLOCK of arms, not thunk arguments, at line {}:{}\n  Hint: fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }} — arms are expressions separated by `;`, no `() =>` wrappers",
+                        self.current().line, self.current().col));
+                }
                 self.expect(TokenType::RParen)?;
                 Some(b)
             } else {
