@@ -52,8 +52,8 @@
 - [ ] **T3-4 interp の budget prim 対応**（3-way oracle の復帰。最低限: 明示 abstain
   ではなく prim 実装 — thread-local カウンタで semantics 一致）
 - [ ] **T3-5 Dyn charge**（可変コスト op の従量課金 `1 + ⌈size/16⌉` 系。CM-1 v0.3）
-- [ ] **T3-6 CM-1 定数の単一ソース化**（charge_probe 定数 / wasm render / native shim の
-  3 箇所 → 1 定義。consistency unit test 付き）
+- [x] **T3-6 CM-1 定数の単一ソース化**（13135f61 — wasm render は補間、native shim は
+  template 注入で `CM1_NS_PER_CHARGE` の 1 定義に。統合ゲートに artifact 検査を追加）
 - [ ] **T3-7 D5 校正ゲートの常設**（決定的 ms vs 実測壁時計の比を測り宣言帯
   （5 倍）内を assert する cargo test。21 倍ずれの再発防止 — 検出実績あり）
 - [ ] **T3-8 fan{} 並列 native × budget の裁定**（最低限: 併用を checker で拒否 or

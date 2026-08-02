@@ -168,12 +168,16 @@ pub fn reset_budget_used() {
 /// The counters start at i64::MAX and count DOWN; consumed = MAX - remaining.
 pub const FUEL_START: i64 = i64::MAX;
 
-/// CM-1 v0.2: nanoseconds per charge unit. CALIBRATED 2026-08-02 against the
-/// reference measurement: heavy(1000) = 1002 units ran 47.0µs wall (release,
-/// Apple M-class) → 46.9ns/unit; pinned at 50 (band ratio 1.07, inside the
-/// ADR-0001 D5 declared 5x band — the v0 draft of 1000 was 21x out and would
-/// have tripped the ADR's own falsifier). RATIO-ONLY contract. This is the
-/// SINGLE definition: the wasm BudgetEnter render interpolates it and the
-/// native BUDGET_SHIM injects it via template substitution — the integration
-/// gate asserts both rendered artifacts divide by this exact value.
-pub const CM1_NS_PER_CHARGE: i64 = 50;
+/// CM-1 v0.3: nanoseconds per charge unit. RECALIBRATED 2026-08-02 by the
+/// standing D5 gate the moment it was installed: heavy(100M) = 100,000,003
+/// units ran 0.25s native release AND 0.28s wasmtime (Apple M-class, min of 3)
+/// → ~2.5ns/unit on BOTH targets. Pinned at 3 to center the ADR-0001 D5
+/// declared 5x band across faster and slower hosts (M-class ratio ≈ 0.85; a
+/// 3-5x slower CI host stays inside). The v0.2 value of 50 came from a
+/// 47µs/1002-unit reference measurement that a millisecond-scale process
+/// spawn cannot resolve — a confounded measurement the gate falsified at
+/// ratio 0.05. RATIO-ONLY contract. This is the SINGLE definition: the wasm
+/// BudgetEnter render interpolates it and the native BUDGET_SHIM injects it
+/// via template substitution — the integration gate asserts both rendered
+/// artifacts divide by this exact value.
+pub const CM1_NS_PER_CHARGE: i64 = 3;

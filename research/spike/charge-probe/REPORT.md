@@ -154,6 +154,14 @@ lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
    教訓: 「ms を名乗る」の誠実さは定数 1 つに懸かっており、D5 校正ゲートの CI 常設は
    merge 前必須。定数は 3 箇所（charge_probe 定数 / wasm BudgetEnter render / native
    BUDGET_SHIM）に現れる — 単一ソース化は本実装 PR で。
+   **後日談（v0.2 → v0.3）**: この 47µs という参照測定自体が混入だった — 1002 units
+   の実行は µs 級で、ms 級の process spawn を通しては解像できない。D5 ゲートを常設した
+   瞬間（T3-7）にゲートが ratio 0.05（≈18 倍過大）で落とし、heavy(100M) = 1e8 units の
+   min-of-3 実測（native 0.25s / wasmtime 0.28s — **両ターゲット ≈2.5ns/unit で一致**）で
+   **3ns/unit** に再 pin。境界 fixture は ns 構築子で 1 unit 精度に強化: bounded は
+   3006ns（=1002×3）、race は 1506ns（=502×3）ちょうどで両ターゲット同時に反転する。
+   宣言時計上の 1ns が判定を変える、が現在の決定性の主張形。二度の誤校正
+   （21 倍過大 → 18 倍過大）を人手レビューは素通りし、ゲートだけが両方を捕えた。
 
 ## Wave 1 — fan v2 表面統一（2026-08-02、同 branch）
 

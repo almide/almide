@@ -76,6 +76,7 @@ fn charge_probe_gate() {
     // reading the environment while it is written.
     unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
     cm1_divisor_single_sourced_in_both_artifacts();
+    cm1_calibration_within_declared_band();
     static_certificate_first_occurrence_equality();
     native_wall_fails_loudly_under_probe();
     dynamic_three_point_comparison();
@@ -107,10 +108,69 @@ fn cm1_divisor_single_sourced_in_both_artifacts() {
     );
 }
 
+/// D5 calibration gate (T3-7): declared deterministic time (consumed units ×
+/// CM1_NS_PER_CHARGE) must stay within the ADR-0001 D5 declared 5x band of the
+/// measured wall clock on the reference workload — the standing falsifier that
+/// caught the v0 draft constant (1000ns/unit, 21x out). Native release build
+/// with the probe baked in; min-of-3 wall time (noise only ADDS time), consumed
+/// units read from the binary's own probe line, so the unit count is the
+/// artifact's, never hand-derived.
+fn cm1_calibration_within_declared_band() {
+    let fixture = fixtures_dir().join("calibrate.almd");
+    let bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/tmp/calibrate_gate_bin");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    let out = Command::new(almide_bin())
+        .arg("build")
+        .arg(&fixture)
+        .arg("--release")
+        .arg("-o")
+        .arg(&bin)
+        .env("ALMIDE_FUEL_PROBE", "1")
+        .output()
+        .expect("spawn almide build");
+    assert!(
+        out.status.success(),
+        "calibrate: build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let run_once = || {
+        let t0 = std::time::Instant::now();
+        let out = Command::new(&bin).output().expect("spawn calibrate bin");
+        let wall_ns = t0.elapsed().as_nanos() as i64;
+        assert!(out.status.success(), "calibrate: run failed");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let consumed: i64 = stderr
+            .lines()
+            .rev()
+            .find(|l| l.starts_with("__ALMD_PROBE "))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|s| s.parse().ok())
+            .expect("calibrate: probe line missing from built binary");
+        (wall_ns, consumed)
+    };
+    run_once(); // warmup (page cache, first-touch)
+    let (mut wall_ns, mut consumed) = run_once();
+    for _ in 0..2 {
+        let (w, c) = run_once();
+        if w < wall_ns {
+            wall_ns = w;
+            consumed = c;
+        }
+    }
+    let declared_ns = consumed * almide_mir::charge_probe::CM1_NS_PER_CHARGE;
+    let ratio = wall_ns as f64 / declared_ns as f64;
+    assert!(
+        ratio < 5.0 && ratio > 0.2,
+        "D5 band violated: consumed={consumed} units, declared={declared_ns}ns, \
+         wall={wall_ns}ns, ratio={ratio:.2} — CM1_NS_PER_CHARGE needs recalibration"
+    );
+}
+
 /// Stage 3: `fan.race` — winner selection ((spend, index) lex-min), tie →
 /// source order, budget filtering, and the winner-appearance boundary:
-/// heavy(500) costs exactly 502 units = 25.1µs at CM-1 v0.2, so the sweep
-/// flips from all-exhausted to arm-1-wins at `compute.us(26)` on BOTH targets.
+/// heavy(500) costs exactly 502 units = 1506ns at CM-1 v0.3 (3ns/unit), so the
+/// sweep flips from all-exhausted to arm-1-wins at `compute.ns(1506)` — the
+/// exact same nanosecond on BOTH targets.
 fn race_deterministic_across_targets() {
     if !wasmtime_available() {
         eprintln!("skip: wasmtime not on PATH");
@@ -144,16 +204,17 @@ fn race_deterministic_across_targets() {
         cmd.env_remove("ALMIDE_FUEL_PROBE");
         String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
     };
-    assert!(out.contains("251"), "us=25 must have no winner (flag 1)");
-    assert!(out.contains("260"), "us=26 must produce the arm-1 winner (flag 0)");
+    assert!(out.contains("15051"), "ns=1505 must have no winner (flag 1)");
+    assert!(out.contains("15060"), "ns=1506 must produce the arm-1 winner (flag 0)");
+    assert!(!out.contains("15061"), "ns=1506 must not be winnerless");
 }
 
 /// Stage 2: `fan.bounded` — result equality WITHOUT the probe (the shipped
 /// semantics), probe-triple equality WITH it, and the deterministic budget
 /// boundary: heavy(1000) costs exactly 1002 charge units (entry + 1001 loop
-/// heads) = 50.1µs at CM-1 v0.2 (50ns/unit), so `compute.us(50)` exhausts and
-/// `compute.us(51)` succeeds —
-/// at the SAME point on both targets. That flip is the Stage 2 claim.
+/// heads) = 3006ns at CM-1 v0.3 (3ns/unit), so `compute.ns(3005)` exhausts and
+/// `compute.ns(3006)` succeeds — a 1ns budget difference flips the verdict at
+/// the SAME nanosecond on both targets. That flip is the Stage 2 claim.
 fn bounded_deterministic_across_targets() {
     if !wasmtime_available() {
         eprintln!("skip: wasmtime not on PATH");
@@ -183,16 +244,16 @@ fn bounded_deterministic_across_targets() {
         assert!(n_ok && w_ok, "{name}: probed run failed");
         assert_eq!(n_probe, w_probe, "{name}: probe triple diverged over bounded");
     }
-    // The flip point itself: EXHAUST through us=1001, OK from us=1002.
+    // The flip point itself: EXHAUST through ns=3005, OK from ns=3006.
     let out = {
         let mut cmd = Command::new(almide_bin());
         cmd.arg("run").arg(dir.join("boundary.almd"));
         cmd.env_remove("ALMIDE_FUEL_PROBE");
         String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
     };
-    assert!(out.contains("501"), "us=50 must exhaust (flag 1)");
-    assert!(out.contains("510"), "us=51 must succeed (flag 0)");
-    assert!(!out.contains("511"), "us=51 must not exhaust");
+    assert!(out.contains("30051"), "ns=3005 must exhaust (flag 1)");
+    assert!(out.contains("30060"), "ns=3006 must succeed (flag 0)");
+    assert!(!out.contains("30061"), "ns=3006 must not exhaust");
 }
 
 fn dynamic_three_point_comparison() {

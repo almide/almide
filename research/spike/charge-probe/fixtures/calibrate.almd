@@ -1,0 +1,14 @@
+// D5 calibration workload: ~10M charge units (entry + loop heads), large
+// enough that process spawn (~ms) is noise against the ~0.5s metered run.
+// The gate reads consumed units from the probe line and compares
+// consumed × CM1_NS_PER_CHARGE against the measured wall clock.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+fn main() -> Unit = {
+  println(int.to_string(heavy(10000000)))
+}
