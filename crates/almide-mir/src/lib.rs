@@ -531,6 +531,11 @@ pub enum Op {
     /// (consumed, trace) across targets. Every pass MUST preserve these ops — dropping,
     /// duplicating, or reordering one is exactly the bug the probe exists to catch.
     Charge { site: u32, cost: u32 },
+    /// T3-5 dynamic charge: a size-proportional cost `1 + (len(src) >> 4)`
+    /// read from the RESULT of a bulk op (`__str_concat`) — keying on the
+    /// result makes the cost identical on every leg by construction. Emitted
+    /// by `charge_probe` beside the static charges; same strict-cut rule.
+    ChargeDyn { site: u32, src: ValueId },
 }
 
 include!("lib_b.rs");

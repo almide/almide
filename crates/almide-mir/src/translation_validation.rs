@@ -51,7 +51,7 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
     Some(match op {
         // Probe charge: the SITE-SPECIFIC trace update is the presence claim — a
         // renderer that drops THIS charge (not just any charge) fails the gate.
-        Op::Charge { site, .. } => format!(
+        Op::ChargeDyn { site, .. } | Op::Charge { site, .. } => format!(
             "(global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))"
         ),
         Op::Alloc { init: Init::IntList(_), .. } => "call $list_new".into(),

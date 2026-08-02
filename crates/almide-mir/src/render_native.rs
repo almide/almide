@@ -427,6 +427,25 @@ fn render_fn(
                 // marker is emitted here and patched at the end of render_fn.
                 line!("if __almd_fuel_lt0() {{ {CUT_RET_MARKER} }}");
             }
+            // T3-5 dynamic charge — the native twin of the wasm arm above:
+            // 1 + byte_len/16 of the result string, same trace + cut rules.
+            Op::ChargeDyn { site, src } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(CHARGE_SHIM);
+                used_shims.push(CHARGE_DYN_SHIM);
+                used_shims.push(FUEL_LT0_SHIM);
+                let tr = crate::charge_probe::probe_enabled();
+                let sref = match tys.get(src) {
+                    Some(NTy::Str | NTy::StrRef) => format!("{}.len() as i64", var(*src)),
+                    other => {
+                        return Err(wall(format!(
+                            "native: ChargeDyn over a non-string value ({other:?})"
+                        )))
+                    }
+                };
+                line!("__almd_charge_dyn({site}, {sref}, {tr});");
+                line!("if __almd_fuel_lt0() {{ {CUT_RET_MARKER} }}");
+            }
             // The §13 termination convention's exit half (assert desugar tail,
             // time-ctor negative trap): a user exit code, no message of its own.
             Op::Prim { kind: crate::PrimKind::ProcExit, dst: None, args } => {
@@ -920,6 +939,15 @@ const CUT_RET_MARKER: &str = "/*__CUT_RET__*/";
 /// The exhaustion read the strict cut branches on.
 const FUEL_LT0_SHIM: &str =
     "fn __almd_fuel_lt0() -> bool { __ALMD_FUEL.with(|f| f.get()) < 0 }";
+
+/// T3-5: the dynamic (size-proportional) charge — 1 + len/16, same trace
+/// arithmetic as the static charge.
+const CHARGE_DYN_SHIM: &str = "fn __almd_charge_dyn(site: i64, len: i64, trace: bool) {
+    __ALMD_FUEL.with(|f| f.set(f.get().wrapping_sub(1 + (len >> 4))));
+    if trace {
+        __ALMD_TRACE.with(|t| t.set(t.get().wrapping_mul(1000003).wrapping_add(site)));
+    }
+}";
 
 /// Stage 1 probe shim: fuel/trace thread-locals + the charge fn + the guard
 /// that prints the triple's (consumed, trace) legs on main exit. Same hash

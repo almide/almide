@@ -320,5 +320,8 @@ fn collect_reads(op: &Op, used: &mut BTreeSet<ValueId>) {
         }
         Op::Else { val } | Op::EndIf { val } => used.extend(val.iter().copied()),
         Op::LoopStart | Op::LoopEnd | Op::Charge { .. } => {}
+        Op::ChargeDyn { src, .. } => {
+            used.insert(*src);
+        }
     }
 }

@@ -413,7 +413,18 @@ impl<'a> Interpreter<'a> {
 
             ConcatStr => match (l, r) {
                 (Value::Str(a), Value::Str(b)) => {
-                    Flow::val(Value::str(format!("{}{}", a, b)))
+                    let out = format!("{}{}", a, b);
+                    // T3-5 dynamic charge mirror: 1 + result_byte_len/16,
+                    // keyed on the same result both backends key on.
+                    if self.det_in_user.get() {
+                        self.det_fuel.set(
+                            self.det_fuel.get().wrapping_sub(1 + (out.len() as i64 >> 4)),
+                        );
+                        if self.det_cut() {
+                            return Some(Flow::Return(Value::Int(0)));
+                        }
+                    }
+                    Flow::val(Value::str(out))
                 }
                 (a, b) => Flow::Abort(format!(
                     "internal: string concat on {} and {}",

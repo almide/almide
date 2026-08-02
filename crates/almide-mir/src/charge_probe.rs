@@ -60,9 +60,19 @@ fn charge_fn(f: &mut MirFunction) {
     idx += 1;
     for op in f.ops.drain(..) {
         let is_loop_start = matches!(op, Op::LoopStart);
+        // T3-5: a bulk string concat charges 1 + result_len/16 (the dyn
+        // charge reads the result AFTER the op, so it sits right behind it).
+        let dyn_src = match &op {
+            Op::CallFn { name, dst: Some(d), .. } if name == "__str_concat" => Some(*d),
+            _ => None,
+        };
         out.push(op);
         if is_loop_start {
             out.push(Op::Charge { site: site_id(&f.name, idx), cost: 1 });
+            idx += 1;
+        }
+        if let Some(src) = dyn_src {
+            out.push(Op::ChargeDyn { site: site_id(&f.name, idx), src });
             idx += 1;
         }
     }

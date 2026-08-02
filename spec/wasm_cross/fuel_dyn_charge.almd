@@ -1,0 +1,22 @@
+// @contract: C-204
+// T3-5 dynamic charge: a bulk string concat costs 1 + result_len/16 charge
+// units (result-keyed — identical on every leg by construction). build(20)
+// spends exactly 252 units = entry(1) + 21 loop heads + concats costing
+// 2..21 as the string grows by 16 bytes per round; at CM-1 v0.3 the verdict
+// flips between 750ns (250 units) and 760ns (253 units) on both targets.
+fn build(n: Int) -> Int = {
+  var s = ""
+  var i = 0
+  while i < n { s = s + "0123456789abcdef"; i = i + 1 }
+  string.len(s)
+}
+
+effect fn main() -> Unit = {
+  var ns = 74
+  while ns < 78 {
+    let r = fan.bounded(compute.ns(ns * 10)) { build(20) } ?? -1
+    let flag = if r == -1 then 1 else 0
+    println(int.to_string(ns * 10 + flag))
+    ns = ns + 1
+  }
+}

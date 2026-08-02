@@ -388,6 +388,32 @@ fn render_op_range(
                     "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
                 ));
             }
+            // T3-5 dynamic charge: 1 + result_len/16 read from the block's
+            // len field (@4) — result-keyed, so both legs subtract the same
+            // number by construction. Same trace + strict-cut rules as the
+            // static charge above.
+            Op::ChargeDyn { site, src } => {
+                st.fuser.flush_all(body);
+                body.push_str(&format!(
+                    "    (global.set $__fuel (i64.sub (global.get $__fuel) (i64.add (i64.const 1) (i64.shr_u (i64.extend_i32_u (i32.load offset=4 (local.get {}))) (i64.const 4)))))\n",
+                    local(*src)
+                ));
+                if crate::charge_probe::probe_enabled() {
+                    body.push_str(&format!(
+                        "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
+                    ));
+                }
+                let dflt = match ctx.func.ret {
+                    None => String::new(),
+                    Some(r) => {
+                        let vt = wasm_ty(ctx.reprs.get(&r).copied().unwrap_or(SCALAR_REPR));
+                        format!(" ({vt}.const 0)")
+                    }
+                };
+                body.push_str(&format!(
+                    "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
+                ));
+            }
             _ => {
                 if render_fused_or_plain_op(ctx, st, op, op_idx, region, body) {
                     continue 'op_loop;
@@ -676,6 +702,7 @@ pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
     };
     match op {
         Op::Charge { .. } => {}
+        Op::ChargeDyn { src, .. } => out.push(*src),
         Op::Alloc { init, .. } => match init {
             Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
                 out.push(*len)
@@ -763,7 +790,7 @@ pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
         }
     };
     match op {
-        Op::Charge { .. } => {}
+        Op::Charge { .. } | Op::ChargeDyn { .. } => {}
         Op::Alloc { dst, init, .. } => {
             out.push(*dst);
             match init {

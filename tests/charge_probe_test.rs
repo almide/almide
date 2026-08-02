@@ -53,6 +53,7 @@ fn fixture_path(name: &str) -> PathBuf {
         "divergence_cut" => Some("fuel_divergence_cut"),
         "trap_cut" => Some("fuel_trap_cut"),
         "trap_window" => Some("fuel_trap_window"),
+        "dyn_charge" => Some("fuel_dyn_charge"),
         _ => None,
     };
     match relocated {
@@ -167,7 +168,7 @@ fn metered_clones_keep_nonregion_paths_charge_free() {
 /// dynamic layer already pins against wasm).
 fn interp_third_vote_on_metered_fixtures() {
     let dir = fixtures_dir();
-    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip", "divergence_cut", "trap_cut"] {
+    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip", "divergence_cut", "trap_cut", "dyn_charge"] {
         let source = std::fs::read_to_string(fixture_path(name)).unwrap();
         let ir = lower_for_interp(&source);
         let outcome = almide_interp::Interpreter::new(&ir).run_main();
@@ -324,6 +325,11 @@ fn time_ctor_guard_cross_target() {
             stderr.contains("Error: division by zero"),
             "trap_window {leg}: §13 trap message missing, got: {stderr}"
         );
+        // T3-5: the dynamic concat charge — exhaust through 750ns (250
+        // units), admitted from 760ns (253 >= the exact 252-unit spend).
+        let (code, stdout, _) = run("dyn_charge", wasm);
+        assert_eq!(code, Some(0), "dyn_charge {leg}: must succeed");
+        assert_eq!(stdout, "741\n751\n760\n770", "dyn_charge {leg}: dyn cost drifted");
         // T2-2: race arms may return Result — Err self-disqualifies.
         let (code, stdout, _) = run("race_err_skip", wasm);
         assert_eq!(code, Some(0), "race_err_skip {leg}: must succeed");

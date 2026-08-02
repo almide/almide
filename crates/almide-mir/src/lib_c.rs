@@ -145,7 +145,10 @@ impl OwnershipScan {
     fn step(&mut self, i: usize, op: &Op) {
         match op {
             // Probe charge: no ownership event (no alloc, no dup, no drop).
+            // The dyn charge READS its src (a borrow-class use, like a Prim
+            // handle arg) and changes no refcount.
             Op::Charge { .. } => {}
+            Op::ChargeDyn { src, .. } => self.check_borrowed_use(i, *src),
             Op::Alloc { dst, repr, .. } => {
                 debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
                 self.own_fresh_object(*dst);

@@ -166,7 +166,8 @@ pub(crate) fn defined_value(op: &Op) -> Option<ValueId> {
         Op::CallIndirect { dst, .. } => *dst,
         Op::Prim { dst, .. } => *dst,
         Op::IfThen { dst, .. } => *dst,
-        Op::Drop { .. }
+        Op::ChargeDyn { .. }
+        | Op::Drop { .. }
         | Op::DropListStr { .. }
         | Op::DropValue { .. }
         | Op::DropListValue { .. }
@@ -432,7 +433,7 @@ fn classify_f64_op(
 ) {
     match op {
         Op::Prim { kind, dst, args } => classify_f64_prim(kind, dst, args, hard, poison),
-        Op::ConstInt { .. } | Op::Const { .. } | Op::Charge { .. } => {}
+        Op::ConstInt { .. } | Op::Const { .. } | Op::Charge { .. } | Op::ChargeDyn { .. } => {}
         Op::SetLocal { local, src } => edges.push((*local, *src)),
         // A list ELEMENT slot is flexible either way (`f64.load`/`f64.store`);
         // it is the list HANDLE and the INDEX that can never be an f64.

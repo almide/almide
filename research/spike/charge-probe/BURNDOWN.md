@@ -4,9 +4,9 @@
 > 潰したら `[x]` + コミット SHA を記す。新しく見つけた残件はこの台帳に**追記してから**
 > 潰す（台帳外の作業を作らない）。develop への merge はユーザーの明示 GO まで行わない。
 >
-> 現在地（2026-08-02 深夜）: 23 項目中 20 完了。残り 3 = T1-1（strict cap +
-> unwind — 発散カットの本丸）、T1-2（metered-clone 特殊化）、T3-5（Dyn charge）。
-> 全 workspace テスト緑を維持したまま進行中。
+> **現在地（2026-08-03）: 23 項目、全て完了。** REPORT の deviation 節も全件解消。
+> 残る手続きは最終フルスイート緑の確認と、ユーザーの merge GO 待ちのみ
+> （merge はユーザーの明示 GO まで行わない）。
 
 ## Tier 1 — 意味論の大物
 
@@ -90,7 +90,10 @@
   （RuntimeCall arm 経由 — fan lowering は `almide_rt_prim_budget_*` を直接発行）。
   unit-exact 境界 sweep 含む全 metered fixture で第三票が backends に一致。
   CM-1 は almide-types/time_units へ移動し真の 1 定義に）
-- [ ] **T3-5 Dyn charge**（可変コスト op の従量課金 `1 + ⌈size/16⌉` 系。CM-1 v0.3）
+- [x] **T3-5 Dyn charge**（`Op::ChargeDyn` — `__str_concat` の結果長ベース従量課金
+  `1 + len/16`（result-keyed = 両レグ一致が構成的）。両 renderer + interp mirror +
+  strict cut/trace 同則。`fuel_dyn_charge` が 252 units の spend を計算値どおり
+  unit-exact で pin（750/760ns flip、3-way 一致））
 - [x] **T3-6 CM-1 定数の単一ソース化**（13135f61 — wasm render は補間、native shim は
   template 注入で `CM1_NS_PER_CHARGE` の 1 定義に。統合ゲートに artifact 検査を追加）
 - [x] **T3-7 D5 校正ゲートの常設**（9c3d78a7 — 常設した瞬間 v0.2 の混入測定を
