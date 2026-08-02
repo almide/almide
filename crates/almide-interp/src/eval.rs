@@ -395,7 +395,6 @@ impl<'a> Interpreter<'a> {
                 self.eval_optional_chain(expr, *field, scope)
             }
             // The interp is synchronous: await is identity over the value.
-            IrExprKind::Await { expr } => self.eval_expr(expr, scope),
 
             _ => return None,
         })

@@ -27,17 +27,17 @@ effect fn main() -> Unit = {
   let empty = fan.map([], (x: Int) => dbl(x))
   println("empty=" + int.to_string(list.len(empty)))
   // fan.any: FIRST Ok in list order wins (deterministic, NOT wall-clock).
-  let first = fan.any([
-    () => fail_n("skip"),
-    () => ok_n(7),
-    () => ok_n(99)
-  ])
+  let first = fan.any {
+    fail_n("skip")
+    ok_n(7)
+    ok_n(99)
+  }
   println("any=" + int.to_string(first))
   // fan.settle: List[Result] in list order; ok/err payloads preserved.
-  let settled = fan.settle([
-    () => ok_n(1),
-    () => fail_n("bad"),
-    () => ok_n(3)
-  ])
+  let settled = fan.settle {
+    ok_n(1)
+    fail_n("bad")
+    ok_n(3)
+  }
   println("settle=" + int.to_string(list.len(settled)))
 }

@@ -356,10 +356,6 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::Try { expr: Box::new(inner) }, ty, span)
         }
-        ast::ExprKind::Await { expr, .. } => {
-            let inner = lower_expr(ctx, expr);
-            ctx.mk(IrExprKind::Await { expr: Box::new(inner) }, ty, span)
-        }
 
         // expr! — keep as Unwrap (distinct from auto-? Try)
         ast::ExprKind::Unwrap { expr, .. } => {
@@ -826,7 +822,6 @@ fn outline_metered_arm(
         ret_ty: body_ty.clone(),
         body: fn_body,
         is_effect: false,
-        is_async: false,
         is_test: false,
         generics: None,
         extern_attrs: vec![],

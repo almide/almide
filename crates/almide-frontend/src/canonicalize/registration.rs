@@ -210,7 +210,7 @@ pub fn collect_protocol_bounds(generics: &Option<Vec<ast::GenericParam>>) -> Has
 }
 /// A borrowed view of the `fn` signature being registered.
 ///
-/// `effect` and `r#async` are both `&Option<bool>` and were adjacent
+/// `effect` is an `&Option<bool>` and was adjacent
 /// positional parameters, so transposing them type-checked. Named fields make
 /// that a compile error instead of a signature registered with the wrong
 /// effect-ness.
@@ -219,7 +219,6 @@ pub struct FnSigToRegister<'a> {
     pub params: &'a [ast::Param],
     pub return_type: &'a ast::TypeExpr,
     pub effect: &'a Option<bool>,
-    pub r#async: &'a Option<bool>,
     pub generics: &'a Option<Vec<ast::GenericParam>>,
     pub prefix: Option<&'a str>,
     pub span: Option<&'a ast::Span>,
@@ -228,7 +227,7 @@ pub struct FnSigToRegister<'a> {
 
 pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     let FnSigToRegister {
-        name, params, return_type, effect, r#async, generics, prefix, span, visibility,
+        name, params, return_type, effect, generics, prefix, span, visibility,
     } = *decl;
     let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
     let sb = collect_structural_bounds(env, generics);
@@ -259,7 +258,7 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
         .collect();
     let ret = resolve_in(env, return_type, prefix);
     for gn in &gnames { env.types.remove(gn); }
-    let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
+    let is_effect = effect.unwrap_or(false);
     let key = prefixed_key(prefix, name);
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
@@ -514,7 +513,7 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
 }
 /// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function diagnostic (skipped for `@extern` re-exports), signature registration, and DefTable registration. Verbatim text move; `continue` in the original loop becomes an early `return` here (both simply skip the rest of this decl's registration and move on to the next `decl`).
 fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_fn: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl, prefix: Option<&str>) {
-    let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, visibility, extern_attrs, .. } = decl else { unreachable!() };
+    let ast::Decl::Fn { name, params, return_type, effect, generics, span, visibility, extern_attrs, .. } = decl else { unreachable!() };
     // Skip duplicates that come from @extern re-export (name may appear twice by design).
     if extern_attrs.is_empty() {
         let key = prefixed_key(prefix, name);
@@ -541,7 +540,7 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
         seen_fn.insert(key, span.clone());
     }
     register_fn_sig(env, &FnSigToRegister {
-        name, params, return_type, effect, r#async, generics,
+        name, params, return_type, effect, generics,
         prefix, span: span.as_ref(), visibility: *visibility,
     });
     // Register in DefTable

@@ -107,7 +107,7 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
         | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
         | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-        | IrExprKind::Await { expr: e }
+
         | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
         | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
         | IrExprKind::RcWrap { expr: e, .. }

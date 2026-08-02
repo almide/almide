@@ -10,11 +10,11 @@ effect fn pick(s: String) -> Result[String, String] = ok(s)
 
 // ── fan.settle — every settled payload must survive (was zeroed/corrupt) ──
 test "fan.settle preserves ok and err payloads" {
-  let rs = fan.settle([
-    () => succeed(11),
-    () => fail_with("boom"),
-    () => succeed(33)
-  ])
+  let rs = fan.settle {
+    succeed(11)
+    fail_with("boom")
+    succeed(33)
+  }
   assert_eq(list.len(rs), 3)
   assert_eq(rs[0], ok(11))
   assert_eq(rs[1], err("boom"))
@@ -24,9 +24,9 @@ test "fan.settle preserves ok and err payloads" {
 // ── fan.any returning Int — must produce a valid module + correct value ──
 // fan.any is now Result[T, String]; the test-block binding is the full Result.
 test "fan.any returns the Int winner" {
-  let w = fan.any([
-    () => succeed(5)
-  ])
+  let w = fan.any {
+    succeed(5)
+  }
   assert_eq(w, ok(5))
 }
 
@@ -35,10 +35,10 @@ test "fan.any returns the Int winner" {
 // winner is always the first success ("alpha"). The original regression was that
 // a valid String result was dropped/garbage on wasm; this locks in the value.
 test "fan.any returns the String winner" {
-  let w = fan.any([
-    () => pick("alpha"),
-    () => pick("beta")
-  ])
+  let w = fan.any {
+    pick("alpha")
+    pick("beta")
+  }
   assert_eq(w, ok("alpha"))
 }
 
@@ -46,9 +46,9 @@ test "fan.any returns the String winner" {
 // (was written against fan.race, removed in 0.42.0; the regression is about the BINDING,
 // not about which combinator produced it, so fan.any over a succeeding thunk pins it.)
 test "fan combinator result supports ?? and ==" {
-  let r: Result[Int, String] = fan.any([
-    () => succeed(42)
-  ])
+  let r: Result[Int, String] = fan.any {
+    succeed(42)
+  }
   assert_eq(r ?? -1, 42)
   assert(r == ok(42))
 }
@@ -67,10 +67,10 @@ test "fan combinator result supports ?? and ==" {
 test "two capturing thunks share one fan thunk list (native E0308)" {
   let a = 4
   let b = 5
-  let rs = fan.settle([
-    () => succeed(a + 5),
-    () => succeed(b + 4)
-  ])
+  let rs = fan.settle {
+    succeed(a + 5)
+    succeed(b + 4)
+  }
   assert_eq(list.len(rs), 2)
 }
 
@@ -78,10 +78,10 @@ test "fan.any over capturing thunks picks the lone success" {
   let lo = 2
   let hi = 8
   let msg = "skip"
-  let w = fan.any([
-    () => fail_with(msg),
-    () => succeed(hi - lo)
-  ])
+  let w = fan.any {
+    fail_with(msg)
+    succeed(hi - lo)
+  }
   assert_eq(w, ok(6))
 }
 
@@ -89,11 +89,11 @@ test "fan.settle over capturing thunks preserves order and payloads" {
   let x = 1
   let oops = "boom"
   let z = 3
-  let rs = fan.settle([
-    () => succeed(x * 10),
-    () => fail_with(oops),
-    () => succeed(z * 10)
-  ])
+  let rs = fan.settle {
+    succeed(x * 10)
+    fail_with(oops)
+    succeed(z * 10)
+  }
   assert_eq(list.len(rs), 3)
   assert_eq(rs[0], ok(10))
   assert_eq(rs[1], err("boom"))

@@ -192,7 +192,6 @@ pub enum ExprKind {
     UnwrapOr { expr: Box<Expr>, fallback: Box<Expr> },
     ToOption { expr: Box<Expr> },
     OptionalChain { expr: Box<Expr>, field: Sym },
-    Await { expr: Box<Expr> },
     Binary { op: Sym, left: Box<Expr>, right: Box<Expr> },
     Unary { op: Sym, operand: Box<Expr> },
     Paren { expr: Box<Expr> },
@@ -357,7 +356,6 @@ pub enum Decl {
     Fn {
         name: Sym,
         #[serde(default)] effect: Option<bool>,
-        #[serde(default)] r#async: Option<bool>,
         #[serde(default)] visibility: Visibility,
         #[serde(default)] extern_attrs: Vec<ExternAttr>,
         #[serde(default)] export_attrs: Vec<ExportAttr>,
@@ -576,7 +574,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         }
         ExprKind::Lambda { body, .. } => visit_expr_mut(body, f),
         ExprKind::Try { expr } | ExprKind::Unwrap { expr } | ExprKind::ToOption { expr } |
-        ExprKind::Await { expr } | ExprKind::Paren { expr } |
+        ExprKind::Paren { expr } |
         ExprKind::Some { expr } | ExprKind::Ok { expr } | ExprKind::Err { expr } |
         ExprKind::OptionalChain { expr, .. } => visit_expr_mut(expr, f),
         ExprKind::Range { start, end, .. } => { visit_expr_mut(start, f); visit_expr_mut(end, f); }

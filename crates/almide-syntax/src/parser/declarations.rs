@@ -472,7 +472,6 @@ impl Parser {
         let span = self.current_span();
         if self.check(TokenType::Pub) { self.advance(); }
         let visibility = self.parse_visibility();
-        let async_ = false;
         let mut effect = false;
         if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;
@@ -524,7 +523,6 @@ impl Parser {
 
             Ok(Decl::Fn {
                 name: name.clone(),
-                r#async: if async_ { Some(true) } else { None },
                 effect: if effect { Some(true) } else { None },
                 visibility,
                 extern_attrs: Vec::new(),

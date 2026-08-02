@@ -139,8 +139,8 @@ fn build_module_sigs(module: &str) -> Option<HashMap<Sym, FnSig>> {
 
     let mut out = HashMap::new();
     for decl in &program.decls {
-        if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, .. } = decl {
-            let sig = build_fn_sig(params, return_type, effect, r#async, generics);
+        if let ast::Decl::Fn { name, params, return_type, effect, generics, .. } = decl {
+            let sig = build_fn_sig(params, return_type, effect, generics);
             out.insert(*name, sig);
         }
     }
@@ -151,7 +151,6 @@ fn build_fn_sig(
     params: &[ast::Param],
     return_type: &ast::TypeExpr,
     effect: &Option<bool>,
-    r#async: &Option<bool>,
     generics: &Option<Vec<ast::GenericParam>>,
 ) -> FnSig {
     // Build a `known_types` map that resolves each generic param name
@@ -176,7 +175,7 @@ fn build_fn_sig(
         .map(|p| (p.name, crate::canonicalize::resolve::resolve_type_expr(&p.ty, resolver_ctx)))
         .collect();
     let ret = crate::canonicalize::resolve::resolve_type_expr(return_type, resolver_ctx);
-    let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
+    let is_effect = effect.unwrap_or(false);
     let mut_params: Vec<usize> = params.iter().enumerate()
         .filter(|(_, p)| p.is_mut)
         .map(|(i, _)| i)

@@ -136,8 +136,6 @@ impl Checker {
     /// groups in that order, so the dispatch an expression sees is unchanged.
     pub(super) fn infer_expr_g3_postfix(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
         Some(match &mut expr.kind {
-            ExprKind::Await { expr, .. } => self.infer_expr(expr),
-
             ExprKind::Unwrap { .. } => self.infer_expr_g3_unwrap(expr),
             ExprKind::UnwrapOr { .. } => self.infer_expr_g3_unwrap_or(expr),
             ExprKind::ToOption { .. } => self.infer_expr_g3_to_option(expr),

@@ -201,7 +201,7 @@ fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where
     IrFunction {
         name: sym(&format!("{}{}", almide_ir::TEST_NAME_PREFIX, name)),
         params: vec![], ret_ty: Ty::Unit, body: final_body,
-        is_effect: true, is_async: false, is_test: true,
+        is_effect: true, is_test: true,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
         visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,

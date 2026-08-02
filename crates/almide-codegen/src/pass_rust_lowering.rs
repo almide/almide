@@ -459,7 +459,7 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<
         | IrExprKind::MapAccess { .. } | IrExprKind::StringInterp { .. } | IrExprKind::ResultOk { .. }
         | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
         | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
-        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
         | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }

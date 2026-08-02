@@ -305,7 +305,7 @@ fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
         }
         IrExprKind::OptionSome { expr: inner } | IrExprKind::ResultOk { expr: inner }
         | IrExprKind::ResultErr { expr: inner } | IrExprKind::Try { expr: inner }
-        | IrExprKind::Await { expr: inner } | IrExprKind::Clone { expr: inner }
+        | IrExprKind::Clone { expr: inner }
         | IrExprKind::Deref { expr: inner } => resolve_expr(inner, vt),
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
         | IrExprKind::IndexAccess { object, .. } => resolve_expr(object, vt),

@@ -39,6 +39,18 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
 
     ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
     let mut target = lower_call_target(ctx, callee);
+    // Wave 1 block forms: the parser synthesizes fan.__any_block/__settle_block
+    // (so the checker can tombstone the public thunk-list spelling); normalize
+    // back here so the MIR inliner sees the names it has always desugared.
+    if let CallTarget::Module { module, func, .. } = &mut target {
+        if module.as_str() == "fan" {
+            if func.as_str() == "__any_block" {
+                *func = sym("any");
+            } else if func.as_str() == "__settle_block" {
+                *func = sym("settle");
+            }
+        }
+    }
     rewrite_crossmodule_ufcs(ctx, &mut target, &mut ir_args);
     rewrite_local_ufcs(ctx, &mut target, &mut ir_args);
 

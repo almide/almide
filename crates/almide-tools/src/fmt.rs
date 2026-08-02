@@ -296,8 +296,7 @@ fn module_ref_children(expr: &Expr) -> Vec<&Expr> {
         ExprKind::Unary { operand, .. } => vec![operand],
         ExprKind::Unwrap { expr, .. }
         | ExprKind::Try { expr, .. }
-        | ExprKind::ToOption { expr, .. }
-        | ExprKind::Await { expr, .. } => vec![expr],
+        | ExprKind::ToOption { expr, .. } => vec![expr],
         ExprKind::UnwrapOr { expr, fallback, .. } => vec![expr, fallback],
         _ => Vec::new(),
     }
@@ -522,14 +521,13 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
 }
 
 fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
-    let Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, export_attrs, attrs, generics, .. } = decl else { unreachable!() };
+    let Decl::Fn { name, effect, visibility, params, return_type, body, extern_attrs, export_attrs, attrs, generics, .. } = decl else { unreachable!() };
     let i = ind(depth);
     for a in extern_attrs { wln!(out, "{i}@extern({}, \"{}\", \"{}\")", a.target, escape_dquoted(a.module.as_str()), escape_dquoted(a.function.as_str())); }
     for a in export_attrs { wln!(out, "{i}@export({}, \"{}\")", a.target, escape_dquoted(a.symbol.as_str())); }
     for a in attrs { wln!(out, "{i}{}", format_attribute(a)); }
     out.push_str(&i); fmt_vis(out, visibility);
     if matches!(effect, Some(true)) { out.push_str("effect "); }
-    if matches!(r#async, Some(true)) { out.push_str("async "); }
     w!(out, "fn {name}");
     maybe_generics(out, generics);
     out.push('(');

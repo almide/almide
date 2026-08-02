@@ -499,7 +499,7 @@ fn collect_anon_from_expr_data(expr: &IrExpr, named: &HashSet<Vec<String>>, seen
         // Codegen-specific nodes
         IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+        | IrExprKind::ToVec { expr } => {
             collect_anon_from_expr(expr, named, seen);
         }
         _ => {}

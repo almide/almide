@@ -31,7 +31,7 @@ pub(super) fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
         IrExprKind::IterChain { .. } => collect_varids_in_iter_chain(expr, out),
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
         | IrExprKind::OptionSome { .. } | IrExprKind::Try { .. }
-        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Clone { .. }
         | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
         | IrExprKind::ToVec { .. } | IrExprKind::Unwrap { .. }
@@ -155,7 +155,7 @@ fn collect_varids_in_wrap(expr: &IrExpr, out: &mut Vec<VarId>) {
     match &expr.kind {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
+        | IrExprKind::Clone { expr }
         | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
         | IrExprKind::BoxNew { expr } | IrExprKind::RcWrap { expr, .. }
         | IrExprKind::ToVec { expr } | IrExprKind::Unwrap { expr }
@@ -255,7 +255,7 @@ pub(super) fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>
         IrExprKind::IterChain { .. } => remap_iter_chain_varids(expr, remap),
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
         | IrExprKind::OptionSome { .. } | IrExprKind::Try { .. }
-        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Clone { .. }
         | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
         | IrExprKind::ToVec { .. } | IrExprKind::Unwrap { .. }
@@ -362,7 +362,7 @@ fn remap_wrap_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
     match &mut expr.kind {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
+        | IrExprKind::Clone { expr }
         | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
         | IrExprKind::BoxNew { expr } | IrExprKind::RcWrap { expr, .. }
         | IrExprKind::ToVec { expr } | IrExprKind::Unwrap { expr }

@@ -359,9 +359,9 @@ fn lower_decls(
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
 
         match decl {
-            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } => {
+            ast::Decl::Fn { name, params, body: Some(body), effect, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } => {
                 let mut f = lower_fn(ctx, &FnToLower {
-                    name, params, body: body, effect, r#async, span, generics,
+                    name, params, body: body, effect, span, generics,
                     extern_attrs, export_attrs, attrs, visibility, module_prefix,
                 });
                 f.doc = doc;
@@ -375,13 +375,13 @@ fn lower_decls(
             // codegen skips emission and substitutes a template at call
             // sites). Either case keeps the signature in IR so callers
             // type-check against a real IrFunction.
-            ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. }
+            ast::Decl::Fn { name, params, body: None, effect, span, generics, extern_attrs, export_attrs, attrs, visibility, .. }
                 if !extern_attrs.is_empty()
                     || attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic")) =>
             {
                 let hole_body = ast::Expr::new(ast::ExprId(0), span.clone(), ast::ExprKind::Hole);
                 let mut f = lower_fn(ctx, &FnToLower {
-                    name, params, body: &hole_body, effect, r#async, span, generics,
+                    name, params, body: &hole_body, effect, span, generics,
                     extern_attrs, export_attrs, attrs, visibility, module_prefix,
                 });
                 f.doc = doc;

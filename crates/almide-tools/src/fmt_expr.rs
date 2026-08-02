@@ -66,7 +66,6 @@ fn fmt_expr_wrapper(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Err { expr: e, .. } => around("err(", e, ")"),
         ExprKind::Paren { expr: e, .. } => around("(", e, ")"),
         ExprKind::Try { expr: e, .. } => around("try ", e, ""),
-        ExprKind::Await { expr: e, .. } => around("await ", e, ""),
         ExprKind::Unwrap { expr: e, .. } => around("", e, "!"),
         ExprKind::ToOption { expr: e, .. } => around("", e, "?"),
         ExprKind::Unary { op, operand, .. } => {
@@ -206,6 +205,35 @@ fn fmt_expr_spread_record(out: &mut String, expr: &Expr, depth: usize) {
 
 fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Call { callee, args, type_args, named_args, .. } = &expr.kind else { unreachable!() };
+    // Wave 1 block forms: the parser synthesizes `fan.__any_block([() => …])`
+    // internally — RE-SUGAR to the surface spelling, or fmt would rewrite the
+    // user's block into an internal name that does not parse.
+    if let ExprKind::Member { object, field } = &callee.kind {
+        if let ExprKind::Ident { name, .. } = &object.kind {
+            if name.as_str() == "fan"
+                && matches!(field.as_str(), "__any_block" | "__settle_block")
+            {
+                if let [arg] = &args[..] {
+                    if let ExprKind::List { elements } = &arg.kind {
+                        let head = if field.as_str() == "__any_block" { "any" } else { "settle" };
+                        w!(out, "fan.{head} {{\n");
+                        for el in elements {
+                            let body: &Expr = match &el.kind {
+                                ExprKind::Lambda { params, body } if params.is_empty() => body,
+                                _ => el,
+                            };
+                            out.push_str(&ind(depth + 1));
+                            fmt_expr(out, body, depth + 1);
+                            out.push('\n');
+                        }
+                        out.push_str(&ind(depth));
+                        out.push('}');
+                        return;
+                    }
+                }
+            }
+        }
+    }
     fmt_expr(out, callee, depth);
     if let Some(ta) = type_args { out.push('['); comma_sep(out, ta, |out, t| fmt_type(out, t, depth)); out.push(']'); }
     out.push('(');

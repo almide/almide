@@ -154,3 +154,27 @@ lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
    教訓: 「ms を名乗る」の誠実さは定数 1 つに懸かっており、D5 校正ゲートの CI 常設は
    merge 前必須。定数は 3 箇所（charge_probe 定数 / wasm BudgetEnter render / native
    BUDGET_SHIM）に現れる — 単一ソース化は本実装 PR で。
+
+## Wave 1 — fan v2 表面統一（2026-08-02、同 branch）
+
+race/bounded が block head になったことで残っていた表面の不整合（any/settle だけ
+thunk-list）を解消:
+
+- **block 形**: `fan.any { a(); b() }` / `fan.settle { a(); b() }` — parser が
+  literal thunk-list AST（内部名 `__any_block`/`__settle_block`）へ脱糖し、frontend
+  lowering が名前を正規化。**checker 以深は完全無変更**で両ターゲット即動作。
+  fmt は内部名を block 構文へ re-sugar（roundtrip + 冪等確認済み）。
+- **thunk-list 綴りの tombstone**（E027 署名移行ヒント）: `fan.any([...])` /
+  `fan.settle([...])` は removed。2 引数の mapper 形は「宣言済み・未実装（Wave 2）」
+  の専用診断。合成ノードだけが legacy 形の唯一の生産者。
+- **移行 10 ファイル**: spec 8（wasm_cross 5 + lang 3）+ diagnostics fixed 2。
+  各 pin を読んで移行 — fan_var_thunk_list（#599 の var-bound list pin）は綴りごと
+  対象が消えたため「混在 arm 種の list 順決定性」の pin に改記。fan_pure_thunks の
+  #514 pin（pure arm の Ok-adapter）は block 形で生存。新 tombstone fixture 2 件追加。
+- **async/await の死骸撤去**: `ExprKind::Await` / `IrExprKind::Await` /
+  `Decl::Fn.r#async` / `IrFunction.is_async` と全消費アーム（optimize/codegen/
+  interp/fmt/mir、約 40 ファイル）を削除。「文法から書けない」が「AST/IR で表現
+  できない」へ格上げ。
+
+settle block 形の戻り型は v1 では legacy どおり `List[Result]`（fan-v2.md の
+tuple 契約は本実装 PR での deviation 項目に追加）。

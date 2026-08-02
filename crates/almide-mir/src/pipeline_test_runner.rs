@@ -256,7 +256,6 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
         ret_ty: Ty::Unit,
         body,
         is_effect: true,
-        is_async: false,
         is_test: false,
         generics: None,
         extern_attrs: vec![],

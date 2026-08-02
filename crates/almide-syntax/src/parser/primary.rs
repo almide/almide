@@ -290,6 +290,64 @@ impl Parser {
                 arms,
             }));
         }
+        // fan.any { arms } / fan.settle { arms } — the Wave 1 block forms.
+        // DESUGARS AT PARSE TIME to the literal thunk-list call the checker and
+        // the MIR inliner already handle (`fan.any([() => a(), () => b()])`),
+        // so the entire downstream pipeline is unchanged on both targets. The
+        // user-facing thunk-list SPELLING is tombstoned in the checker; this
+        // synthesized form is the one internal producer of it.
+        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
+            && self.peek_at(2).map_or(false, |t| t.value == "any" || t.value == "settle")
+            && self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LBrace)
+        {
+            let span = Some(self.current_span());
+            self.advance(); // fan
+            self.advance(); // .
+            let head = self.current().value.clone();
+            self.advance(); // any | settle
+            let open = self.current().clone();
+            self.expect(TokenType::LBrace)?;
+            let mut thunks = Vec::new();
+            self.skip_newlines();
+            while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+                let tok = self.current().clone();
+                if matches!(tok.token_type, TokenType::Let | TokenType::Var | TokenType::For | TokenType::While) {
+                    return Err(format!("`{}` is not allowed inside fan.{} at line {}:{}\n  Hint: arms are expressions", tok.value, head, tok.line, tok.col));
+                }
+                let arm = self.parse_expr()?;
+                let arm_span = arm.span.clone();
+                thunks.push(Expr::new(self.next_id(), arm_span, ExprKind::Lambda {
+                    params: Vec::new(),
+                    body: Box::new(arm),
+                }));
+                self.skip_newlines();
+                if self.check(TokenType::Semicolon) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.expect_closing(TokenType::RBrace, open.line, open.col, &format!("fan.{head} block"))?;
+            if thunks.is_empty() {
+                return Err(format!("fan.{} must contain at least one arm at line {}:{}", head, open.line, open.col));
+            }
+            let list = Expr::new(self.next_id(), span, ExprKind::List { elements: thunks });
+            let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
+            let member = Expr::new(self.next_id(), span, ExprKind::Member {
+                object: Box::new(fan_ident),
+                // INTERNAL name: the checker types `__any_block`/`__settle_block`
+                // exactly like any/settle, while the PUBLIC 1-arg thunk-list
+                // spelling is tombstoned — this synthesized node is the only
+                // producer of the legacy shape. Frontend lowering normalizes the
+                // name back so the MIR inliner is untouched.
+                field: sym(&format!("__{head}_block")),
+            });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
+                callee: Box::new(member),
+                args: vec![list],
+                named_args: Vec::new(),
+                type_args: None,
+            }));
+        }
         // fan { ... } = fan block; fan.map/fan.race = module-like call
         if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
             // Treat `fan` as an identifier for member access

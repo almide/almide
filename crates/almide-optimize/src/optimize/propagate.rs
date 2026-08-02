@@ -85,7 +85,7 @@ fn propagate_expr(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
         | IrExprKind::MapAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
         | IrExprKind::MapLiteral { .. } | IrExprKind::StringInterp { .. } => propagate_expr_containers(expr, constants),
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. }
-        | IrExprKind::Try { .. } | IrExprKind::Await { .. } => propagate_expr_wrap(expr, constants),
+        | IrExprKind::Try { .. } => propagate_expr_wrap(expr, constants),
         // Do NOT propagate into lambda bodies — closures capture by value,
         // and replacing captured vars with literals breaks use-count tracking
         // (the captured var's use_count drops to 0, DCE removes the binding,
@@ -212,7 +212,7 @@ fn propagate_expr_containers_access(expr: &mut IrExpr, constants: &HashMap<VarId
 fn propagate_expr_wrap(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
     let (IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
         | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Await { expr: e }) = &mut expr.kind else { unreachable!() };
+) = &mut expr.kind else { unreachable!() };
     propagate_expr(e, constants);
 }
 

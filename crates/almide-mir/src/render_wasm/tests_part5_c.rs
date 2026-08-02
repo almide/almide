@@ -428,12 +428,14 @@ fn fan_any_inlines_a_literal_thunk_list() {
     // This test also covered `fan.race`, which was REMOVED in 0.42.0 (E027 tombstone): under
     // the deterministic model it was exactly `thunks[0]()`, so its name promised a race the
     // language does not have. `fan.any` exercises the same literal-thunk-list lowering path.
+    // Wave 1 respelling: the block form is the surface; it synthesizes the same
+    // literal thunk list, so the inline path this test pins is unchanged.
     let src = "effect fn okn(n: Int) -> Result[Int, String] = ok(n * 3)\n\
         effect fn failing() -> Result[Int, String] = err(\"boom\")\n\
         effect fn main() -> Unit = {\n\
-        match fan.any([() => okn(10), () => okn(20)]) { ok(v) => println(\"r=\" + int.to_string(v)), err(e) => println(e) }\n\
-        match fan.any([() => failing(), () => okn(7)]) { ok(v) => println(\"any=\" + int.to_string(v)), err(e) => println(e) }\n\
-        match fan.any([() => failing(), () => failing()]) { ok(v) => println(\"ok\"), err(e) => println(\"af=\" + e) } }\n";
+        match (fan.any { okn(10); okn(20) }) { ok(v) => println(\"r=\" + int.to_string(v)), err(e) => println(e) }\n\
+        match (fan.any { failing(); okn(7) }) { ok(v) => println(\"any=\" + int.to_string(v)), err(e) => println(e) }\n\
+        match (fan.any { failing(); failing() }) { ok(v) => println(\"ok\"), err(e) => println(\"af=\" + e) } }\n";
     let prog = lower_source(src);
     if let Some(out) = build_and_run("fan_any_literal", &render_wasm_program(&prog)) {
         assert_eq!(out, "r=30\nany=21\naf=fan.any: all candidates failed");

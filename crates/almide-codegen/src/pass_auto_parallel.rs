@@ -282,7 +282,7 @@ fn is_pure_expr(
         IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. } |
         IrExprKind::BoxNew { expr } | IrExprKind::RcWrap { expr, .. } |
         IrExprKind::ToVec { expr } |
-        IrExprKind::Try { expr } | IrExprKind::Await { expr } |
+        IrExprKind::Try { expr } |
         IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr } => {
             is_pure_expr(expr, local_vars, effect_fns, mutable_vars)
         }
@@ -559,7 +559,6 @@ fn rewrite_expr(
         IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), fallback: Box::new(rewrite_expr(*fallback, effect_fns, mutable_vars)) },
         IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), as_str, mutable },

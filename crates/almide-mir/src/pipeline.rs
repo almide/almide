@@ -539,7 +539,6 @@ fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
             def_id: None,
         },
         is_effect: false,
-        is_async: false,
         is_test: false,
         generics: None,
         extern_attrs: vec![],

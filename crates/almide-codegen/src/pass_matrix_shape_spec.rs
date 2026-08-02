@@ -299,7 +299,7 @@ fn rewrite_expr(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
         | IrExprKind::UnwrapOr { .. }
         | IrExprKind::ToOption { .. }
         | IrExprKind::OptionalChain { .. }
-        | IrExprKind::Await { .. }
+       
         | IrExprKind::Clone { .. }
         | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. }

@@ -262,7 +262,7 @@ fn propagate_ty_down(expr: &mut IrExpr, expected: &Ty) {
         | (IrExprKind::StringInterp { .. }, _) | (IrExprKind::OptionNone, _)
         | (IrExprKind::Try { .. }, _) | (IrExprKind::Unwrap { .. }, _)
         | (IrExprKind::UnwrapOr { .. }, _) | (IrExprKind::ToOption { .. }, _)
-        | (IrExprKind::OptionalChain { .. }, _) | (IrExprKind::Await { .. }, _)
+        | (IrExprKind::OptionalChain { .. }, _)
         | (IrExprKind::Clone { .. }, _) | (IrExprKind::Deref { .. }, _)
         | (IrExprKind::Borrow { .. }, _) | (IrExprKind::BoxNew { .. }, _)
         | (IrExprKind::RcWrap { .. }, _) | (IrExprKind::RustMacro { .. }, _)

@@ -179,7 +179,7 @@ impl Checker {
             // LIVE surfaces only. `fan.race` is tombstoned (E027) and naming it here sent a
             // user who merely mistyped toward a function that no longer exists — the same
             // defect class as a tombstone whose migration target is itself removed.
-            "Available: fan.map, fan.any, fan.settle, fan.race (block head), fan.bounded (block head)",
+            "Available: fan.map(xs, f), and the block heads fan.any / fan.settle / fan.race / fan.bounded",
             format!("call to fan.{}()", field)));
         Some(Ty::Unknown)
     }
@@ -289,34 +289,63 @@ impl Checker {
     /// order and only then reports the unknown-fan-fn diagnostic.
     fn resolve_fan_collecting(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         match field {
-            "any" => {
-                // fan.any(thunks) -> Result[T, String] — try thunks in LIST
-                // ORDER, return the FIRST Ok (deterministic); if ALL fail,
-                // return a defined Err ("fan.any: all candidates failed").
-                // EFFECTFUL: auto-unwrapped in effect-fn bindings and auto-`?`
-                // propagated, like a user effect fn call.
-                if arg_tys.len() != 1 {
-                    self.emit(super::err(
-                        format!("fan.any() expects 1 argument but got {}", arg_tys.len()),
-                        "Usage: fan.any([() => a, () => b])",
-                        "call to fan.any()".to_string()));
-                    return Some(Ty::Unknown);
-                }
+            // The Wave 1 BLOCK forms (parser-synthesized internal names): typed
+            // exactly like the legacy combinators they compile to.
+            "__any_block" => {
                 let list_ty = resolve_ty(&arg_tys[0], &self.uf);
                 Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String))
             }
-            "settle" => {
-                // fan.settle(thunks) -> List[Result[T, String]]
-                if arg_tys.len() != 1 {
+            "__settle_block" => {
+                let list_ty = resolve_ty(&arg_tys[0], &self.uf);
+                Some(Ty::list(unwrap_list_fn_result_ty(&list_ty)))
+            }
+            "any" => {
+                // Wave 1: the thunk-list SPELLING is removed; the block form is
+                // the surface. 2 args = the declared (not yet implemented)
+                // mapper form.
+                if arg_tys.len() == 1 {
                     self.emit(super::err(
-                        format!("fan.settle() expects 1 argument but got {}", arg_tys.len()),
-                        "Usage: fan.settle([() => a, () => b])",
+                        "fan.any changed signature: the thunk-list form was removed; any is now a block head",
+                        "New form: `fan.any { a(); b() }` — first Ok in source order. \
+                         The dynamic mapper form `fan.any(xs, f)` is declared for Wave 2.",
+                        "call to fan.any()".to_string()).with_code("E027"));
+                    return Some(Ty::Unknown);
+                }
+                if arg_tys.len() == 2 {
+                    self.emit(super::err(
+                        "fan.any(xs, f) — the mapper form is declared but not yet implemented",
+                        "Use the block form for a static candidate list: `fan.any { f(a); f(b) }`",
+                        "call to fan.any()".to_string()));
+                    return Some(Ty::Unknown);
+                }
+                self.emit(super::err(
+                    format!("fan.any() expects a block but got {} arguments", arg_tys.len()),
+                    "Usage: fan.any { a(); b() }",
+                    "call to fan.any()".to_string()));
+                Some(Ty::Unknown)
+            }
+            "settle" => {
+                if arg_tys.len() == 1 {
+                    self.emit(super::err(
+                        "fan.settle changed signature: the thunk-list form was removed; settle is now a block head",
+                        "New form: `fan.settle { a(); b() }` — collects every result in \
+                         source order. The dynamic mapper form `fan.settle(xs, f)` is \
+                         declared for Wave 2.",
+                        "call to fan.settle()".to_string()).with_code("E027"));
+                    return Some(Ty::Unknown);
+                }
+                if arg_tys.len() == 2 {
+                    self.emit(super::err(
+                        "fan.settle(xs, f) — the mapper form is declared but not yet implemented",
+                        "Use the block form for a static list: `fan.settle { f(a); f(b) }`",
                         "call to fan.settle()".to_string()));
                     return Some(Ty::Unknown);
                 }
-                let list_ty = resolve_ty(&arg_tys[0], &self.uf);
-                let inner_result = unwrap_list_fn_result_ty(&list_ty);
-                Some(Ty::list(inner_result))
+                self.emit(super::err(
+                    format!("fan.settle() expects a block but got {} arguments", arg_tys.len()),
+                    "Usage: fan.settle { a(); b() }",
+                    "call to fan.settle()".to_string()));
+                Some(Ty::Unknown)
             }
             "timeout" => {
                 // Tombstone (contract C-006): `fan.timeout` was REMOVED in 0.29.0.
