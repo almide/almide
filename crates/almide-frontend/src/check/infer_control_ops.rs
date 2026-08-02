@@ -334,6 +334,16 @@ impl Checker {
         let lt = self.infer_expr(left);
         let rt = self.infer_expr(right);
         self.pin_binop_literal_context(op, left, right, &lt, &rt);
+        // ADR-0001 S3: the time-type operator matrix intercepts BEFORE the
+        // generic paths — `Named` types pass the generic numeric check (the
+        // GPU-vector allowance), which would silently admit `T * T`.
+        {
+            let lc0 = resolve_ty(&lt, &self.uf);
+            let rc0 = resolve_ty(&rt, &self.uf);
+            if let Some(t) = self.infer_time_binop(op.as_str(), &lc0, &rc0, &lt, &rt) {
+                return t;
+            }
+        }
         match op.as_str() {
             "+" => {
                 let lc = resolve_ty(&lt, &self.uf);
@@ -350,6 +360,118 @@ impl Checker {
             "==" | "!=" | "<" | ">" | "<=" | ">=" => self.infer_binop_compare(op, left, right, &lt, &rt),
             "and" | "or" => self.infer_binop_logical(op, &lt, &rt),
             _ => lt,
+        }
+    }
+
+    /// ADR-0001 S3: the time-type operator matrix. `None` = no time operand
+    /// (or an op outside the matrix) — fall through to the generic paths.
+    /// Same-clock algebra: `T + T`, `T - T` (0-saturating), `T * Int` /
+    /// `Int * T`, and comparisons. Everything else on a time type is a NAMED
+    /// error: `T * T` (the Go #64420 silent-10⁹ class), clock mixing, bare
+    /// Int join, and the intentionally omitted `/` (S7).
+    fn infer_time_binop(&mut self, op: &str, lc: &Ty, rc: &Ty, lt: &Ty, rt: &Ty) -> Option<Ty> {
+        let clock = |t: &Ty| match t {
+            Ty::Named(n, args)
+                if args.is_empty()
+                    && almide_lang::time_units::TIME_MODULES
+                        .iter()
+                        .any(|(_, ty)| *ty == n.as_str()) =>
+            {
+                Some(n.as_str())
+            }
+            _ => None,
+        };
+        let module_of = |clock_name: &str| {
+            almide_lang::time_units::TIME_MODULES
+                .iter()
+                .find(|(_, ty)| *ty == clock_name)
+                .map(|(m, _)| *m)
+                .unwrap_or("compute")
+        };
+        let l = clock(lc);
+        let r = clock(rc);
+        if l.is_none() && r.is_none() {
+            return None;
+        }
+        let is_cmp = matches!(op, "==" | "!=" | "<" | ">" | "<=" | ">=");
+        if !is_cmp && !matches!(op, "+" | "-" | "*" | "/" | "%" | "^") {
+            return None;
+        }
+        let mix_err = |s: &mut Self, verb: &str| {
+            s.emit(super::err(
+                format!("cannot {verb} Compute and Duration"),
+                "The two clocks have no bridge (ADR-0001): a deterministic budget is \
+                 Compute, a wall-clock deadline is Duration — there is no conversion",
+                format!("operator {op}")));
+        };
+        match (op, l, r) {
+            ("/" | "%" | "^", _, _) => {
+                let hint = if op == "/" {
+                    "Division is intentionally omitted (ADR-0001 S7) — divide the Int \
+                     before constructing, or scale with `*`"
+                } else {
+                    "The time algebra is `T + T`, `T - T` (0-saturating), `T * Int`, \
+                     and comparisons — nothing else"
+                };
+                self.emit(super::err(
+                    format!("operator '{op}' is not defined on time types"),
+                    hint,
+                    format!("operator {op}")));
+                Some(if l.is_some() { lc.clone() } else { rc.clone() })
+            }
+            ("*", Some(_), Some(_)) => {
+                self.emit(super::err(
+                    "cannot multiply two time quantities".to_string(),
+                    "time × time has no meaning (the result would be time²) — scale \
+                     with an Int: `t * 3`",
+                    "operator *".to_string()));
+                Some(lc.clone())
+            }
+            ("*", Some(_), None) => {
+                self.constrain(rt.clone(), Ty::Int, "time scale factor");
+                Some(lc.clone())
+            }
+            ("*", None, Some(_)) => {
+                self.constrain(lt.clone(), Ty::Int, "time scale factor");
+                Some(rc.clone())
+            }
+            ("+" | "-", Some(a), Some(b)) => {
+                if a != b {
+                    mix_err(self, if op == "+" { "add" } else { "subtract" });
+                }
+                Some(lc.clone())
+            }
+            ("+" | "-", Some(a), None) | ("+" | "-", None, Some(a)) => {
+                let m = module_of(a);
+                self.emit(super::err(
+                    format!(
+                        "operator '{op}' needs two {a} values, found {} and {}",
+                        lc.display(),
+                        rc.display()
+                    ),
+                    format!("A bare number is never a time — wrap it: {m}.ms(n)"),
+                    format!("operator {op}")));
+                Some(if l.is_some() { lc.clone() } else { rc.clone() })
+            }
+            (_, Some(a), Some(b)) if is_cmp => {
+                if a != b {
+                    mix_err(self, "compare");
+                }
+                Some(Ty::Bool)
+            }
+            (_, Some(a), None) | (_, None, Some(a)) if is_cmp => {
+                let m = module_of(a);
+                self.emit(super::err(
+                    format!(
+                        "cannot compare {} with {} — both sides must be {a}",
+                        lc.display(),
+                        rc.display()
+                    ),
+                    format!("A bare number is never a time — wrap it: {m}.ms(n)"),
+                    format!("operator {op}")));
+                Some(Ty::Bool)
+            }
+            _ => None,
         }
     }
 

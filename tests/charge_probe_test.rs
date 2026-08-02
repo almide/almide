@@ -94,7 +94,7 @@ fn charge_probe_gate() {
 /// dynamic layer already pins against wasm).
 fn interp_third_vote_on_metered_fixtures() {
     let dir = fixtures_dir();
-    for name in ["bounded", "boundary", "race", "race_boundary", "saturate"] {
+    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops"] {
         let source = std::fs::read_to_string(dir.join(format!("{name}.almd"))).unwrap();
         let ir = lower_for_interp(&source);
         let outcome = almide_interp::Interpreter::new(&ir).run_main();
@@ -212,6 +212,21 @@ fn time_ctor_guard_cross_target() {
         let (code, stdout, _) = run("saturate", wasm);
         assert_eq!(code, Some(0), "saturate {leg}: must succeed");
         assert_eq!(stdout, "42\n42", "saturate {leg}: saturated budgets must admit the work");
+        // S3 (T2-5): the operator algebra at UNIT precision — every digit is
+        // an exact-boundary verdict (see the fixture header for the map).
+        let (code, stdout, _) = run("time_ops", wasm);
+        assert_eq!(code, Some(0), "time_ops {leg}: must succeed");
+        assert_eq!(
+            stdout, "901011\n900100",
+            "time_ops {leg}: S3 algebra verdicts drifted"
+        );
+        let (code, stdout, stderr) = run("negative_scale", wasm);
+        assert_eq!(code, Some(1), "negative_scale {leg}: must exit 1");
+        assert!(stdout.is_empty(), "negative_scale {leg}: must die before printing");
+        assert!(
+            stderr.contains("Error: negative time scale: -2"),
+            "negative_scale {leg}: §13 message missing, got: {stderr}"
+        );
     }
 }
 

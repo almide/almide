@@ -118,6 +118,50 @@ fn s6_3_ufcs_unit_is_ambiguous_naming_both_clocks() {
     }
 }
 
+/// S3 (T2-5): the operator matrix — accepted cells type-check clean, every
+/// rejected cell carries its NAMED error. Generated over both clocks where
+/// the rule is clock-symmetric.
+#[test]
+fn s3_operator_matrix() {
+    let wrap = |expr: &str| {
+        format!(
+            "fn work() -> Int = 1\n\
+             effect fn main() -> Unit = {{\n\
+               let c = compute.ms(2)\n\
+               let d = compute.ms(3)\n\
+               let w = duration.ms(2)\n\
+               let x = {expr}\n\
+               let r = fan.bounded(compute.ms(1)) {{ work() }} ?? -1\n\
+               println(int.to_string(r))\n\
+             }}\n"
+        )
+    };
+    // Accepted cells (the algebra): T+T, T-T, T*Int, Int*T, T<T, T==T.
+    for good in ["c + d", "c - d", "c * 4", "4 * c", "w + w", "if c < d then 1 else 0", "if c == d then 1 else 0"] {
+        let errs = errors(&wrap(good));
+        assert!(errs.is_empty(), "S3 accepted cell `{good}` must be clean, got {errs:?}");
+    }
+    // Rejected cells, each with its named diagnostic.
+    for (bad, msg) in [
+        ("c * d", "cannot multiply two time quantities"),
+        ("c * w", "cannot multiply two time quantities"),
+        ("c + w", "cannot add Compute and Duration"),
+        ("c - w", "cannot subtract Compute and Duration"),
+        ("c + 5", "operator '+' needs two Compute values"),
+        ("5 - c", "operator '-' needs two Compute values"),
+        ("c / 2", "operator '/' is not defined on time types"),
+        ("c % 2", "operator '%' is not defined on time types"),
+        ("if c < w then 1 else 0", "cannot compare Compute and Duration"),
+        ("if c < 5 then 1 else 0", "cannot compare Compute with Int"),
+    ] {
+        let errs = errors(&wrap(bad));
+        assert!(
+            errs.iter().any(|m| m.contains(msg)),
+            "S3 rejected cell `{bad}`: expected `{msg}`, got {errs:?}"
+        );
+    }
+}
+
 /// T3-8 adjudication pin: a `fan { }` PARALLEL block can never appear inside
 /// a metered region, because the region body is checked PURE and `fan {}`
 /// demands an effect context (E007). This is what makes the native

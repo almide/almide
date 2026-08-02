@@ -67,8 +67,10 @@
 - [x] **T3-7 D5 校正ゲートの常設**（9c3d78a7 — 常設した瞬間 v0.2 の混入測定を
   ratio 0.05 で検出。CM-1 v0.3 = 3ns/unit に再校正、境界 fixture は ns 精度の
   exact flip（bounded 3006ns / race 1506ns、両ターゲット同一）に強化）
-- [ ] **T3-8 fan{} 並列 native × budget の裁定**（最低限: 併用を checker で拒否 or
-  atomic 化 + 決定順序の設計判断を文書化。無定義状態の解消）
+- [x] **T3-8 fan{} 並列 native × budget の裁定**（3ecf61dd — 型システムが既に排除:
+  region=pure × fan{}=effect 必須（E007）で region がスレッドを跨げない。逆方向は
+  arm ごとに自己完結・決定的（wasm 実証、native は honest wall/拒否）。checker pin +
+  REPORT に裁定全文）
 - [x] **T3-9 レポート表示 `--time-report`**（90ca1acd — `almide run --time-report`
   が `time: 0.151ms deterministic (≈38.7ms wall here)` を stderr へ。probe 行は
   swallow、決定的時間は両ターゲット一致をゲートで pin）
