@@ -257,7 +257,8 @@
   空リスト込み）。matrix gate はセル遷移済み（implemented 11 + 設計上不在 2 +
   非 Result mapper 契約エラー）。C-205 statement に mapper 条項 + evidence 追加
   （347/347 双方向）。fan-v2 matrix / CHEATSHEET / SPEC §13.5 更新。
-  残: mapper 形の MSR タスクは次の dojo daily で計測（クレーム材料の追補））
+  MSR 実測済み: dojo `race-cheapest`（cdf8edc）が **pass（retry 1** — 唯一の
+  失敗は `import fan` で、T5-4b の新診断が即修正させた）。async バンク 7/7）
 
 ## Branch 外（残り — 参照のみ）
 
