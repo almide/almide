@@ -388,6 +388,35 @@ impl Checker {
         }
     }
 
+    /// Post-solve #1051: warn when an interpolation segment holds a Result the
+    /// lowering will not auto-? — it prints the debug form (`ok(…)`/`err(…)`),
+    /// which is legal for debug output but a silent surprise when the writer
+    /// meant the payload (the classic shape: a can-err call bound inside a
+    /// lambda, then `"${resp}"`). Warning, not error: interpolating the
+    /// Result itself is how you debug one.
+    fn validate_result_interpolations(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_result_interp_checks);
+        for (ty, span) in checks {
+            let resolved = resolve_ty(&ty, &self.uf);
+            if !resolved.is_result() {
+                continue;
+            }
+            let mut diag = Diagnostic::warning(
+                format!("interpolating a {} prints its debug form (ok(…)/err(…))", resolved.display()),
+                "If you meant the payload, unwrap first: `?? fallback` supplies a default, \
+                 `match` handles ok/err, `!` propagates in an effect fn body. Interpolate \
+                 the Result itself only for debug output",
+                "string interpolation",
+            );
+            if let Some(s) = span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
     fn validate_map_key_types(&mut self) {
         use std::collections::HashSet;
         let mut reported: HashSet<String> = HashSet::new();

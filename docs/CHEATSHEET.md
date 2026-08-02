@@ -178,6 +178,15 @@ let f = (x) => {
 }
 ```
 
+**Lambdas and effects**: a lambda inherits the enclosing fn's effect
+capability — one rule for every higher-order callee (`list.map`,
+`http.serve`'s handler, …). Inside an `effect fn`, a lambda may call effect
+fns, but their results stay **explicit `Result` values** (auto-`?` never
+crosses a closure boundary): unwrap with `?? fallback` or `match` — `!`
+cannot propagate out of a lambda. In a pure fn the same lambda is an error.
+Exception: metered regions (`fan.bounded` / `fan.race` bodies) are pure by
+design, so effect calls are rejected there even inside an effect fn.
+
 ### Block (last expression is the value)
 ```
 {

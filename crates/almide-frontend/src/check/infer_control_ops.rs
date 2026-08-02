@@ -25,7 +25,17 @@ impl Checker {
             ExprKind::InterpolatedString { parts, .. } => {
                 for part in parts.iter_mut() {
                     if let ast::StringPart::Expr { expr } = part {
-                        self.infer_expr(expr);
+                        let t = self.infer_expr(expr);
+                        // #1051: a segment the lowering will NOT auto-? (a
+                        // CALL in an effect-fn body takes the `?`; everything
+                        // else keeps its value) prints a Result as its debug
+                        // form. Queue it for the post-solve warning so
+                        // `"${resp}"` never surprises silently.
+                        let auto_unwraps =
+                            self.env.auto_unwrap && matches!(expr.kind, ExprKind::Call { .. });
+                        if !auto_unwraps {
+                            self.deferred_result_interp_checks.push((t.clone(), expr.span));
+                        }
                     }
                 }
                 Ty::String

@@ -106,6 +106,16 @@ impl Checker {
                  unwrapped; for a fallback, apply `?? <default>` to the producing call instead",
                 arg_ty.display());
         }
+        // The reverse of the unwrap-family case: a Result handed to a plain-T
+        // param means the caller meant the payload. "Fix the argument type"
+        // names no path; the unwrap operators are the path (#1050).
+        if arg_ty.is_result() && !expected.is_result() && !expected.is_unresolved() {
+            return format!(
+                "the argument is a {} — unwrap it first: `!` propagates the error \
+                 (effect fn body), `?? fallback` supplies a default, or `match` \
+                 handles ok/err",
+                arg_ty.display());
+        }
         Self::hint_with_conversion("Fix the argument type", expected, arg_ty)
     }
 

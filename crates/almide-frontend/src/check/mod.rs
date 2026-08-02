@@ -142,6 +142,12 @@ pub struct Checker {
     /// Map literal key types to validate after constraint solving.
     /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
     pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Interpolation segments whose value will NOT be auto-?'d, awaiting the
+    /// post-solve Result check (#1051): a `${resp}` holding a Result prints
+    /// its debug form (`ok(…)`/`err(…)`) — legal for debug output, but a
+    /// silent surprise when the writer meant the payload (the http.serve
+    /// handler trap). Each entry: (segment type, span).
+    pub(crate) deferred_result_interp_checks: Vec<(Ty, Option<crate::ast::Span>)>,
     /// Order-sensitive combinator subjects/keys (list.sort/min/max, sort_by's
     /// key) awaiting the post-solve ORDERABLE-element check (E030).
     pub(crate) deferred_ord_elem_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
@@ -476,6 +482,7 @@ impl Checker {
             deferred_tuple_indices: Vec::new(),
             deferred_field_accesses: Vec::new(),
             deferred_map_key_checks: Vec::new(),
+            deferred_result_interp_checks: Vec::new(),
             deferred_ord_elem_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
@@ -855,6 +862,7 @@ impl Checker {
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
+        self.validate_result_interpolations();
         self.validate_ord_elem_types();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();

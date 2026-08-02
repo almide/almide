@@ -357,6 +357,16 @@ impl Checker {
                          Run the effect before the region and pass the value in"
                     ),
                 ),
+                None if self.env.lambda_depth > 0 => (
+                    format!("cannot call effect function '{}' from a pure function", name),
+                    // The call sits in a LAMBDA: a lambda has no effect marker
+                    // of its own — it inherits the enclosing fn's capability
+                    // (one rule for every higher-order callee, list.map and
+                    // http.serve alike, #1051) — so the fix is one level up.
+                    "A lambda inherits its context's effect capability — mark the enclosing \
+                     function as `effect fn`"
+                        .to_string(),
+                ),
                 None => (
                     format!("cannot call effect function '{}' from a pure function", name),
                     "Mark the calling function as `effect fn`".to_string(),

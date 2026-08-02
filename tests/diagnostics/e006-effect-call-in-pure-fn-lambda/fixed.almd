@@ -1,0 +1,12 @@
+// The fix the hint teaches: mark the ENCLOSING function as effect fn.
+import random
+
+effect fn effect_map() -> Int = {
+  let xs = [1, 2] |> list.map((_) => random.int(0, 9))
+  list.len(xs)
+}
+
+effect fn main() -> Unit = {
+  let n = effect_map()
+  println(int.to_string(n))
+}
