@@ -233,6 +233,14 @@ thunk-list）を解消:
 settle block 形の戻り型は v1 では legacy どおり `List[Result]`（fan-v2.md の
 tuple 契約は本実装 PR での deviation 項目に追加）。
 
+> **後日談（2026-08-03）**: 上の 2 点は Wave 1 時点の記述で、その後どちらも解消
+> 済み。settle の tuple 契約は T2-4（FanSettle 実ノード）で実装され
+> `let (ra, rb) = fan.settle { a(); b() }` が動く。mapper 形は any/settle が
+> T2-3 で実装済み。**race の mapper セルだけが fan-v2 の規定どおり「宣言済み・
+> 実ユース待ち」**で、その状態自体を `tests/fan_surface_matrix_test.rs`（6 head ×
+> 2 form の全セル gate）が機械固定している — 誤爆していた thunk 移行ヒントは
+> セル状態を正しく答える専用診断に置換（T6-1）。
+
 ## Tier 5 — oracle 層の完遂（2026-08-02/03、同 branch）
 
 決定的 tier（bounded/race）で止めず、インセプションの oracle 層まで同 branch で

@@ -206,5 +206,8 @@ Wave 1 が独立に着手可能であることが v2 の要点の一つ — 表�
   pin を読む）を踏む。8 ファイルは半日仕事の規模。
 - mapper form の race に実ユースが出ない。→ セルは宣言のまま Wave 2 では
   block form だけ実装し、matrix gate に「宣言済み・未実装」を明示させる。
+  （2026-08-03 発効: `tests/fan_surface_matrix_test.rs` が 6 head × 2 form の
+  全セルを機械固定 — race mapper は専用診断つき宣言済み・未実装、bounded /
+  timeout の mapper は設計上不在。セルを変えるなら同 PR で gate を更新する）
 - 「block か mapper か」の 2 択が LLM に不利に働く証拠が dojo の計測で出る。→
   MSR タスクバンクに fan v2 セットを足して測る。設計の当否は計測が決める。

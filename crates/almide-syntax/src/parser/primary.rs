@@ -201,6 +201,25 @@ impl Parser {
         Ok(Expr::new(self.next_id(), span, ExprKind::Todo { message: msg }))
     }
 
+    /// At the COMMA of an over-arity fan head `fan.X(a, …)`: consume the rest
+    /// of the argument list and report whether it ENDS in a 1-param lambda —
+    /// the declared MAPPER spelling — vs the retired thunk spelling (0-param
+    /// lambdas). Only called on error paths (every caller returns Err either
+    /// way), so the token consumption never leaks into a successful parse.
+    fn extra_head_args_end_in_mapper(&mut self) -> Result<bool, String> {
+        let mut last_is_mapper = false;
+        while self.check(TokenType::Comma) {
+            self.advance();
+            if self.check(TokenType::RParen) {
+                break;
+            }
+            let arg = self.parse_expr()?;
+            last_is_mapper =
+                matches!(&arg.kind, ExprKind::Lambda { params, .. } if params.len() == 1);
+        }
+        Ok(last_is_mapper)
+    }
+
     fn parse_fan_primary(&mut self) -> Result<Expr, String> {
         // fan.bounded(budget) { body } — a HEAD with args + block, not a call
         // (a call followed by `{` does not parse), so it gets its own node here.
@@ -215,11 +234,17 @@ impl Parser {
             let budget = self.parse_expr()?;
             // The THUNK spelling from pre-Wave-1 training data:
             // `fan.bounded(budget, () => work())`. A bare "Missing ')'" sent
-            // models in circles (dojo round 1) — teach the block form.
+            // models in circles (dojo round 1) — teach the block form. A
+            // MAPPER-looking spelling (a 1-param lambda) gets the matrix
+            // answer instead: bounded has no mapper cell BY DESIGN.
             if self.check(TokenType::Comma) {
+                let (line, col) = (self.current().line, self.current().col);
+                if self.extra_head_args_end_in_mapper()? {
+                    return Err(format!(
+                        "fan.bounded has no mapper form — it meters a single BODY, at line {line}:{col}\n  Hint: meter per element by composing: xs |> fan.map((x) => fan.bounded(compute.ms(100)) {{ work(x) }} )"));
+                }
                 return Err(format!(
-                    "fan.bounded takes a BLOCK, not a thunk argument, at line {}:{}\n  Hint: fan.bounded(compute.ms(100)) {{ work(x) }} — drop the `() =>` wrapper; the braces are the region",
-                    self.current().line, self.current().col));
+                    "fan.bounded takes a BLOCK, not a thunk argument, at line {line}:{col}\n  Hint: fan.bounded(compute.ms(100)) {{ work(x) }} — drop the `() =>` wrapper; the braces are the region"));
             }
             self.expect(TokenType::RParen)?;
             self.skip_newlines();
@@ -250,13 +275,22 @@ impl Parser {
             let deadline = self.parse_expr()?;
             // Legacy `fan.timeout(ms, thunk)` (2+ args) — rebuild the member
             // CALL so the checker's E027 signature-migration hint fires,
-            // exactly like race's legacy rebuild.
+            // exactly like race's legacy rebuild. A MAPPER-looking spelling
+            // (1-param lambda tail) instead gets the matrix answer — timeout
+            // has no mapper cell BY DESIGN.
             if self.check(TokenType::Comma) {
+                let (line, col) = (self.current().line, self.current().col);
                 let mut args = vec![deadline];
                 while self.check(TokenType::Comma) {
                     self.advance();
                     self.skip_newlines();
                     args.push(self.parse_expr()?);
+                }
+                if matches!(&args.last().map(|a| &a.kind),
+                    Some(ExprKind::Lambda { params, .. }) if params.len() == 1)
+                {
+                    return Err(format!(
+                        "fan.timeout has no mapper form — it deadlines a single BODY, at line {line}:{col}\n  Hint: fan.timeout(duration.ms(5000)) {{ work(x) }}"));
                 }
                 self.expect(TokenType::RParen)?;
                 let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
@@ -308,9 +342,17 @@ impl Parser {
                 self.advance();
                 let b = self.parse_expr()?;
                 if self.check(TokenType::Comma) {
+                    let (line, col) = (self.current().line, self.current().col);
+                    // A 1-param lambda tail = the DECLARED mapper spelling
+                    // `fan.race(xs, f)` / `fan.race(budget, xs, f)` — answer
+                    // with the cell's real status (fan-v2: declared, awaiting
+                    // a real use), not the thunk-migration hint.
+                    if self.extra_head_args_end_in_mapper()? {
+                        return Err(format!(
+                            "the fan.race mapper form is declared but not implemented (fan-v2 Wave 2 keeps the cell open until a real use appears), at line {line}:{col}\n  Hint: static arms use the block form — fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }}; a dynamic list with first-success semantics is fan.any(xs, f)"));
+                    }
                     return Err(format!(
-                        "fan.race takes a BLOCK of arms, not thunk arguments, at line {}:{}\n  Hint: fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }} — arms are expressions separated by `;`, no `() =>` wrappers",
-                        self.current().line, self.current().col));
+                        "fan.race takes a BLOCK of arms, not thunk arguments, at line {line}:{col}\n  Hint: fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }} — arms are expressions separated by `;`, no `() =>` wrappers"));
                 }
                 self.expect(TokenType::RParen)?;
                 Some(b)

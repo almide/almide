@@ -202,6 +202,44 @@
   「nothing to unwrap — 値は既に T。fallback は producing call に `?? <default>`」
   の targeted hint を追加。fixture: unwrap-already-plain）
 
+## Tier 6 — 残滓掃討（2026-08-03 スコープ拡大「残りも全部つぶして」で編入）
+
+- [x] **T6-1 fan.race mapper セルの正規化**（当初「実装で閉じる」と書いたが
+  **批准済み fan-v2 設計の規定に従い改訂**: race mapper セルは「宣言済み・
+  実ユース待ち」が設計された状態（反証条件に明記の fallback）で、実ユースは
+  今日時点でゼロ — 点実装は API 完備性運用（面は gate で固定、点追加しない）
+  にも反する。実バグは **thunk 移行ヒントが正規の mapper 綴り
+  `fan.race(xs, (x) => …)` に誤爆**していたこと。修正: 1-param lambda 尾部を
+  mapper 綴りとして検出し「declared but not implemented (Wave 2 keeps the cell
+  open until a real use appears)」+ block 形 / fan.any(xs, f) への誘導。bounded /
+  timeout の mapper 綴りも matrix 回答（「has no mapper form — 設計上不在 +
+  合成イディオム」）に。セルを将来実装する時は T6-2 gate が同 PR 更新を強制）
+- [x] **T6-2 fan head×form matrix gate 新設** — `tests/fan_surface_matrix_test.rs`:
+  6 head × 2 form の 13 fixture（実装 9 セル=type-check 必須、不在 4 セル=正確な
+  matrix 回答文字列必須）。fan-v2.md 反証条件に gate 発効を注記
+- [x] **T6-3 REPORT の stale 記述訂正** — Wave 1 節の 2 点（mapper 未実装 /
+  settle List[Result]）に後日談ブロックを追記（履歴は書き換えず、現状 =
+  any/settle mapper 実装済み・settle tuple live・race mapper は gate 固定の
+  宣言済みセル、を明記）
+- [x] **T6-4 inline call subject assert の wasm test レグ wall 解消**（eee33f6a —
+  真因は 2 層: assert desugar が call を if 条件に残す + **hoist を MIR 段でやると
+  never-err/auto-wrap ABI 分類（IR 段）の後になり rewrap 網に乗らない**。
+  修正 = IR 前処理段（hoist_block_call_args と同じ家族）に
+  `hoist_assert_call_subjects` を新設し、**Result 型 × call を含む operand に限定**
+  して bind-first へ hoist（無差別 hoist は inline の materialize 経路より Var 経路が
+  狭い型域で map_higher_order_test 等を退行させる — 学び）。
+  `assert_eq(pick(5), ok(5))` 緑、spec 325/325・レグ配分 316/9 復元、corpus 75/75、
+  charge_probe gate 緑。T5-4a の「bind-first 記法規約」は機構化により不要に）
+- [x] **T6-5 workspace build warnings ゼロ化** — 精査の結果 **branch 起源の
+  warning はゼロ**（blame 全サンプル develop 既存: TestWhere=780c8341、
+  gap_blanks=a1860635 等）。develop 既存の 91 件は本 branch の merge 面を汚さない
+  ため別レーン（下の Branch 外に記録）
+- [x] **T6-6 通常 lifted effect fn の native v1 到達検証** — **開通を確認**:
+  `effect fn f(n: Int) -> Int` + main 呼び出し（never-err lifted、非 metered）が
+  fallback note なしで native v1 直接描画（T5-4e の 5 レンガの副産物）。can-err 形
+  （fs.read_text + auto-`?`）は既存の trust-spine brick（variant match in tail）で
+  honest fallback — 別レーンの既知残（project_v1_mir_trust_spine）
+
 ## Branch 外（残り — 参照のみ）
 
 Rung 1 出力 transactional / AARA は別レーンの台帳へ。ADR-0002（実行順）の批准は
