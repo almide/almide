@@ -172,7 +172,8 @@ pub const FUEL_START: i64 = i64::MAX;
 /// reference measurement: heavy(1000) = 1002 units ran 47.0µs wall (release,
 /// Apple M-class) → 46.9ns/unit; pinned at 50 (band ratio 1.07, inside the
 /// ADR-0001 D5 declared 5x band — the v0 draft of 1000 was 21x out and would
-/// have tripped the ADR's own falsifier). RATIO-ONLY contract; this constant
-/// appears verbatim in the wasm BudgetEnter render and the native BUDGET_SHIM
-/// — keep the three sites identical.
+/// have tripped the ADR's own falsifier). RATIO-ONLY contract. This is the
+/// SINGLE definition: the wasm BudgetEnter render interpolates it and the
+/// native BUDGET_SHIM injects it via template substitution — the integration
+/// gate asserts both rendered artifacts divide by this exact value.
 pub const CM1_NS_PER_CHARGE: i64 = 50;

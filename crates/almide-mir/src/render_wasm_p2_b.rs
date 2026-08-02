@@ -324,12 +324,14 @@ fn render_op_prim(
     }
     // Stage 2 budget prims: multi-statement global sequences, not a single
     // value expression — rendered whole here (the min-cap arithmetic of
-    // ADR-0001 / EIP-150; CM-1 v0: 1000ns per charge unit).
+    // ADR-0001 / EIP-150; the ns→unit divisor comes from the single CM-1
+    // definition, crate::charge_probe::CM1_NS_PER_CHARGE).
     if let PrimKind::BudgetEnter = kind {
         let d = local(dst.expect("BudgetEnter has a result"));
         let a = local(args[0]);
+        let cm1 = crate::charge_probe::CM1_NS_PER_CHARGE;
         return format!(
-            "    (global.set $__fuel_entry (i64.div_s (local.get {a}) (i64.const 50)))\n\
+            "    (global.set $__fuel_entry (i64.div_s (local.get {a}) (i64.const {cm1})))\n\
                  (local.set {d} (global.get $__fuel))\n\
                  (if (i64.lt_s (global.get $__fuel_entry) (global.get $__fuel))\n\
                    (then (global.set $__fuel (global.get $__fuel_entry))))\n"

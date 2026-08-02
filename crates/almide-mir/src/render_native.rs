@@ -406,25 +406,25 @@ fn render_fn(
             }
             Op::Prim { kind: crate::PrimKind::BudgetEnter, dst: Some(d), args } => {
                 used_shims.push(COUNTER_SHIM);
-                used_shims.push(BUDGET_SHIM);
+                used_shims.push(BUDGET_SHIM.as_str());
                 tys.insert(*d, NTy::I64);
                 line!("let {} = __almd_budget_enter({});", var(*d), var(args[0]));
             }
             Op::Prim { kind: crate::PrimKind::BudgetExhausted, dst: Some(d), .. } => {
                 used_shims.push(COUNTER_SHIM);
-                used_shims.push(BUDGET_SHIM);
+                used_shims.push(BUDGET_SHIM.as_str());
                 tys.insert(*d, NTy::I64);
                 line!("let {} = __almd_budget_exhausted();", var(*d));
             }
             Op::Prim { kind: crate::PrimKind::BudgetExit, dst: Some(d), args } => {
                 used_shims.push(COUNTER_SHIM);
-                used_shims.push(BUDGET_SHIM);
+                used_shims.push(BUDGET_SHIM.as_str());
                 tys.insert(*d, NTy::I64);
                 line!("let {} = __almd_budget_exit({});", var(*d), var(args[0]));
             }
             Op::Prim { kind: crate::PrimKind::BudgetSpend, dst: Some(d), .. } => {
                 used_shims.push(COUNTER_SHIM);
-                used_shims.push(BUDGET_SHIM);
+                used_shims.push(BUDGET_SHIM.as_str());
                 tys.insert(*d, NTy::I64);
                 line!("let {} = __almd_budget_spend();", var(*d));
             }
@@ -850,9 +850,16 @@ impl Drop for __AlmdProbeGuard {
 }";
 
 /// Stage 2 budget fns — the exact wasm-leg arithmetic (min-cap, lazy verdict,
-/// streaming exit).
-const BUDGET_SHIM: &str = "fn __almd_budget_enter(budget_ns: i64) -> i64 {
-    let units = budget_ns / 50;
+/// streaming exit). The ns→unit divisor is injected from the single CM-1
+/// definition ([`crate::charge_probe::CM1_NS_PER_CHARGE`]) so this shim cannot
+/// drift from the wasm BudgetEnter render.
+static BUDGET_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    BUDGET_SHIM_TEMPLATE
+        .replace("__ALMD_CM1_NS__", &crate::charge_probe::CM1_NS_PER_CHARGE.to_string())
+});
+
+const BUDGET_SHIM_TEMPLATE: &str = "fn __almd_budget_enter(budget_ns: i64) -> i64 {
+    let units = budget_ns / __ALMD_CM1_NS__;
     __ALMD_FUEL_ENTRY.with(|e| e.set(units));
     let saved = __ALMD_FUEL.with(|f| f.get());
     if units < saved {

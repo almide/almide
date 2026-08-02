@@ -75,11 +75,36 @@ fn charge_probe_gate() {
     // SAFETY: this is the only test in this binary, so no other thread is
     // reading the environment while it is written.
     unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
+    cm1_divisor_single_sourced_in_both_artifacts();
     static_certificate_first_occurrence_equality();
     native_wall_fails_loudly_under_probe();
     dynamic_three_point_comparison();
     bounded_deterministic_across_targets();
     race_deterministic_across_targets();
+}
+
+/// CM-1 consistency (T3-6): both rendered artifacts must divide the budget by
+/// the ONE exported constant. The renderers now interpolate
+/// `charge_probe::CM1_NS_PER_CHARGE` (wasm) / inject it into the shim template
+/// (native), so a drift can only mean someone reintroduced a literal — this
+/// asserts the artifacts, not the source.
+fn cm1_divisor_single_sourced_in_both_artifacts() {
+    let cm1 = almide_mir::charge_probe::CM1_NS_PER_CHARGE;
+    let source = std::fs::read_to_string(fixtures_dir().join("bounded.almd")).unwrap();
+    let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
+    let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
+        .expect("bounded: wasm render failed");
+    let rs = almide_mir::pipeline::try_render_rust_source(&source)
+        .expect("bounded: native render failed");
+    assert!(
+        wat.contains(&format!("(i64.div_s (local.get $l0) (i64.const {cm1}))"))
+            || wat.contains(&format!("(i64.const {cm1})")),
+        "wasm BudgetEnter does not divide by CM1_NS_PER_CHARGE={cm1}"
+    );
+    assert!(
+        rs.contains(&format!("budget_ns / {cm1}")),
+        "native BUDGET_SHIM does not divide by CM1_NS_PER_CHARGE={cm1}"
+    );
 }
 
 /// Stage 3: `fan.race` — winner selection ((spend, index) lex-min), tie →
