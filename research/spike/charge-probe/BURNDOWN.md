@@ -50,7 +50,8 @@
   `eprintln` shim + `ProcExit` arm（assert desugar の native v1 wall も解消）、
   **発見した既存穴** = budget prim を含む v0 fallback は rustc E0425 で死ぬ →
   明示診断で拒否に変更（`almide_rt_prim_budget_` 検出）。differential corpus +2 行）
-- [ ] **T3-2 UFCS 曖昧診断**（`n.ms()` → compute/duration 両候補の名指しエラー）
+- [x] **T3-2 UFCS 曖昧診断**（1a81dc1a — E002 経路で単位名を検出し両時計候補を
+  名指し（旧: `int.abs` を提案する迷子ヒント）。matrix gate に S6-3 ケース追加）
 - [x] **T3-3 S6 matrix gate 群**（e9bf6eef — `almide_types::time_units` に単位表・
   時計表・S4 時計列を単一ソース化。checker/lowering/診断 hint 全て同表読み。
   `tests/time_units_matrix_test.rs` に S6-1/4/6 + 裸 Int ゲート、ケースは表から生成。

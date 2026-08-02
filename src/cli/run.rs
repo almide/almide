@@ -301,13 +301,74 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
 }
 
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool, native_verified: bool) -> i32 {
+    cmd_run_inner_report(file, program_args, no_check, test_mode, release, native_verified, false)
+}
+
+/// [`cmd_run_inner`] + the D5 dual-time report leg (`--time-report`).
+fn cmd_run_inner_report(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool, native_verified: bool, time_report: bool) -> i32 {
     match compile_to_binary_with(file, no_check, test_mode, release, None, native_verified) {
-        Ok(bin) => run_binary(&bin, program_args),
+        Ok(bin) => {
+            if time_report {
+                let mut cmd = Command::new(&bin);
+                cmd.env("RUST_MIN_STACK", "8388608");
+                if let Some(cwd) = almide_cwd() {
+                    cmd.env("ALMIDE_CWD", cwd);
+                }
+                cmd.args(program_args);
+                run_with_time_report(cmd)
+            } else {
+                run_binary(&bin, program_args)
+            }
+        }
         Err(e) => {
             err(&format!("Compile error:\n{}", e));
             1
         }
     }
+}
+
+/// Run `cmd` with stderr captured (stdout stays inherited), swallow the raw
+/// `__ALMD_PROBE` line, and print the ADR-0001 D5 dual-time line: the
+/// deterministic time (consumed charge units × CM-1) next to the measured
+/// wall clock. The two never claim to be the same quantity — the declared
+/// band between them is D5's ratio-only contract.
+fn run_with_time_report(mut cmd: Command) -> i32 {
+    let t0 = std::time::Instant::now();
+    let child = match cmd.stderr(std::process::Stdio::piped()).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            err(&format!("Failed to execute: {}", e));
+            return 1;
+        }
+    };
+    let out = match child.wait_with_output() {
+        Ok(o) => o,
+        Err(e) => {
+            err(&format!("Failed to execute: {}", e));
+            return 1;
+        }
+    };
+    let wall_ns = t0.elapsed().as_nanos() as i64;
+    let mut consumed: Option<i64> = None;
+    for line in String::from_utf8_lossy(&out.stderr).lines() {
+        if let Some(rest) = line.strip_prefix("__ALMD_PROBE ") {
+            consumed = rest.split_whitespace().next().and_then(|s| s.parse().ok());
+        } else {
+            eprintln!("{line}");
+        }
+    }
+    match consumed {
+        Some(units) => {
+            let det_ms =
+                units as f64 * almide_mir::charge_probe::CM1_NS_PER_CHARGE as f64 / 1e6;
+            let wall_ms = wall_ns as f64 / 1e6;
+            eprintln!("time: {det_ms:.3}ms deterministic (≈{wall_ms:.3}ms wall here)");
+        }
+        None => {
+            eprintln!("time: no deterministic meter in this run (probe line missing)");
+        }
+    }
+    out.status.code().unwrap_or(1)
 }
 
 /// Flags for [`cmd_run`] — bundled into one struct (was 7 positional
@@ -321,17 +382,20 @@ pub struct RunArgs<'a> {
     pub target: Option<&'a str>,
     pub verified: bool,
     pub native_verified: bool,
+    /// ADR-0001 D5 dual-time report: compile with the deterministic meter and
+    /// print `time: <det>ms deterministic (≈<wall>ms wall here)` after the run.
+    pub time_report: bool,
 }
 
 pub fn cmd_run(args: RunArgs) {
-    let RunArgs { file, program_args, no_check, release, target, verified, native_verified } = args;
+    let RunArgs { file, program_args, no_check, release, target, verified, native_verified, time_report } = args;
     let code = match target {
         // Default and explicit native target: the cargo/rustc path.
-        None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release, native_verified),
+        None | Some("rust") | Some("native") => cmd_run_inner_report(file, program_args, no_check, false, release, native_verified, time_report),
         // WASM target: build the same module `almide build --target wasm`
         // emits, then execute it on the `wasmtime` CLI. Both targets must
         // produce byte-identical stdout/stderr/exit — the cross-target gate.
-        Some("wasm") | Some("wasm32") | Some("wasi") => cmd_run_wasm(file, program_args, verified),
+        Some("wasm") | Some("wasm32") | Some("wasi") => cmd_run_wasm(file, program_args, verified, time_report),
         Some(other) => {
             err(&format!(
                 "error: unknown run target '{}'\n  \
@@ -353,7 +417,7 @@ pub fn cmd_run(args: RunArgs) {
 /// `spec/wasm_cross` gate. Program args after `--` are forwarded to the guest.
 /// `wasmtime`'s own exit code is propagated unchanged, so a guest
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
-fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
+fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report: bool) -> i32 {
     // `run` does not expose the `--emit-unverified` waiver: running a module that
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
@@ -386,10 +450,16 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     if let Some(cwd) = almide_cwd() {
         cmd.arg(format!("--env=ALMIDE_CWD={}", cwd));
     }
-    let status = cmd
-        .arg(&wasm_path)
-        .args(program_args)
-        .status();
+    cmd.arg(&wasm_path).args(program_args);
+    if time_report {
+        // Wall time here includes wasmtime's own module compile (~ms scale) —
+        // honest for a "wall here" report, and the deterministic side is
+        // unaffected (it comes from the guest's own meter).
+        let code = run_with_time_report(cmd);
+        let _ = std::fs::remove_file(&wasm_path);
+        return code;
+    }
+    let status = cmd.status();
     let _ = std::fs::remove_file(&wasm_path);
     match status {
         Ok(s) => s.code().unwrap_or(1),

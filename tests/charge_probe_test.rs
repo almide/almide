@@ -83,6 +83,45 @@ fn charge_probe_gate() {
     bounded_deterministic_across_targets();
     race_deterministic_across_targets();
     time_ctor_guard_cross_target();
+    time_report_prints_dual_time();
+}
+
+/// T3-9: `--time-report` prints the ADR-0001 D5 dual-time line (deterministic
+/// + wall), swallows the raw probe line, and reports the SAME deterministic
+/// time on both targets.
+fn time_report_prints_dual_time() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let fixture = fixtures_dir().join("loop.almd");
+    let det_of = |wasm: bool| {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg("--time-report");
+        if wasm {
+            cmd.args(["--target", "wasm"]);
+        }
+        cmd.arg(&fixture);
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        let out = cmd.output().expect("spawn almide");
+        assert!(out.status.success(), "time-report run failed");
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(
+            !stderr.contains("__ALMD_PROBE"),
+            "raw probe line must be swallowed, got: {stderr}"
+        );
+        let line = stderr
+            .lines()
+            .find(|l| l.starts_with("time: "))
+            .unwrap_or_else(|| panic!("dual-time line missing, got: {stderr}"))
+            .to_string();
+        assert!(line.contains("deterministic (≈"), "malformed report: {line}");
+        assert!(line.contains("ms wall here)"), "malformed report: {line}");
+        line.split("deterministic").next().unwrap().to_string()
+    };
+    let n = det_of(false);
+    let w = det_of(true);
+    assert_eq!(n, w, "deterministic time diverged between targets");
 }
 
 /// ADR-0001 S3 (T3-1): the time-constructor guard — a negative argument is a

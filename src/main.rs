@@ -67,6 +67,11 @@ enum Commands {
         /// the sanctioned oracle harnesses may set ALMIDE_NO_VERIFIED_OK=1.
         #[arg(long)]
         no_verified: bool,
+        /// Print the ADR-0001 D5 dual-time line after the run: the program's
+        /// DETERMINISTIC time (charge units × CM-1, identical on every
+        /// machine) next to the measured wall clock on this host.
+        #[arg(long)]
+        time_report: bool,
         /// Arguments passed to the program. Almide's own flags (`--target`,
         /// `--no-check`, `--release`) are consumed before these; anything
         /// after a `--` separator is forwarded verbatim to the program.
@@ -493,8 +498,16 @@ fn run_main() {
 }
 
 /// `dispatch`'s `Commands::Run` arm. Extracted verbatim.
-fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Option<String>, no_verified: bool, program_args: Vec<String>) {
+fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Option<String>, no_verified: bool, time_report: bool, program_args: Vec<String>) {
     let file = resolve_file(file);
+    if time_report {
+        // The deterministic meter is the probe machinery: setting the env here
+        // (before any compile thread exists) makes the pipeline insert charge
+        // ops, and the run leg formats the probe line into the D5 dual-time
+        // report instead of printing it raw.
+        // SAFETY: single-threaded at this point (process entry, pre-dispatch).
+        unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
+    }
     // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out.
     // 0.30.0 (#764 rung-5 complete): the v1 NATIVE trust-spine renderer is
     // likewise the DEFAULT (byte-identical to v0 where it lowers — the
@@ -510,6 +523,7 @@ fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Opt
         target: target.as_deref(),
         verified: !no_verified,
         native_verified: !no_verified,
+        time_report,
     });
 }
 
@@ -723,8 +737,8 @@ fn dispatch(cli: Cli) {
     };
     match command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, release, target, verified: _, no_verified, program_args } =>
-            dispatch_run(file, no_check, release, target, no_verified, program_args),
+        Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
+            dispatch_run(file, no_check, release, target, no_verified, time_report, program_args),
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);

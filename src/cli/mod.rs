@@ -112,7 +112,7 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
             // Hard error instead of a quiet unmeasured run.
             if almide_mir::charge_probe::probe_enabled() {
                 err(&format!(
-                    "error: ALMIDE_FUEL_PROBE requires the v1 native render, but it walled\n  reason: {e}\n  hint: the probe cannot measure a v0-codegen binary; fix the wall or drop the probe"
+                    "error: ALMIDE_FUEL_PROBE / --time-report require the v1 native render, but it walled\n  reason: {e}\n  hint: the deterministic meter cannot measure a v0-codegen binary; fix the wall or drop the flag"
                 ));
                 std::process::exit(1);
             }
