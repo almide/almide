@@ -163,6 +163,26 @@ lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
    宣言時計上の 1ns が判定を変える、が現在の決定性の主張形。二度の誤校正
    （21 倍過大 → 18 倍過大）を人手レビューは素通りし、ゲートだけが両方を捕えた。
 
+## fan{} 並列 × budget の裁定（T3-8、2026-08-02）
+
+「native の fan{} は実スレッド、fuel カウンタは thread-local — 併用したら計数は
+どうなるのか」という無定義状態の解消。結論: **併用は型システムが既に排除している**。
+
+- **metered region 内の fan{}**: 不可能。region body は pure 文脈で検査され
+  （can_call_effect=false）、`fan {}` は effect 文脈必須（E007）。したがって
+  metered region がスレッドを跨ぐことは構文的に起こらず、thread-local カウンタは
+  常に安全。checker pin: `t3_8_fan_parallel_inside_metered_region_is_rejected`。
+- **fan{} arm 内の metered region**: 定義済みかつ決定的。region の enter/exit は
+  自分の実行コンテキスト（native なら自スレッドのカウンタ、wasm なら逐次の
+  グローバル）で自己完結し、arm ごとの verdict は跨ぎ観測を持たない。wasm で実証
+  （arm1=Ok / arm2=exhausted）。native は fan{}+effect-arm が v1 rung 外で wall し、
+  v0 fallback は budget prim 不在の honest 拒否（T3-1 で追加）に落ちる —
+  「誤答への経路なし」の状態。native v1 の fan{} rung 開通は branch 外の既存残件。
+- 注意書き: probe / --time-report の consumed は main スレッドのカウンタを読むため、
+  native 実スレッド fan{} の arm 消費は含まれない（wasm は含む）。semantics
+  （verdict）はこの差を観測できない — 観測するには enclosing region が必要で、
+  それは上記のとおり不可能。
+
 ## Wave 1 — fan v2 表面統一（2026-08-02、同 branch）
 
 race/bounded が block head になったことで残っていた表面の不整合（any/settle だけ

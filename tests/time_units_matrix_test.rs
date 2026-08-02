@@ -118,6 +118,31 @@ fn s6_3_ufcs_unit_is_ambiguous_naming_both_clocks() {
     }
 }
 
+/// T3-8 adjudication pin: a `fan { }` PARALLEL block can never appear inside
+/// a metered region, because the region body is checked PURE and `fan {}`
+/// demands an effect context (E007). This is what makes the native
+/// thread-local fuel counters safe: no metered region ever spans threads.
+/// (The other direction — a metered region INSIDE a fan arm — is defined and
+/// deterministic per arm: each region's enter/exit brackets its own
+/// execution context on every leg.)
+#[test]
+fn t3_8_fan_parallel_inside_metered_region_is_rejected() {
+    let src = "fn work(n: Int) -> Int = n * 10\n\
+         fn helper() -> Int = {\n\
+           let (a, b) = fan { work(1); work(2) }\n\
+           a + b\n\
+         }\n\
+         effect fn main() -> Unit = {\n\
+           let r = fan.bounded(compute.ms(1)) { helper() } ?? -1\n\
+           println(int.to_string(r))\n\
+         }\n";
+    let errs = errors(src);
+    assert!(
+        errs.iter().any(|m| m.contains("fan block can only be used inside an effect fn")),
+        "fan {{}} inside a metered region must be an E007-class error, got {errs:?}"
+    );
+}
+
 /// S6-6: the clock-declaration face — the declared surface set is exactly the
 /// S4 clock column. A new time-consuming surface must extend
 /// `TIME_CONSUMING_SURFACES` (the checker's budget typing reads it and panics

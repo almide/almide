@@ -56,8 +56,11 @@
   時計表・S4 時計列を単一ソース化。checker/lowering/診断 hint 全て同表読み。
   `tests/time_units_matrix_test.rs` に S6-1/4/6 + 裸 Int ゲート、ケースは表から生成。
   S6-2/3/5 は T3-1/T3-2/T4-6 側で land）
-- [ ] **T3-4 interp の budget prim 対応**（3-way oracle の復帰。最低限: 明示 abstain
-  ではなく prim 実装 — thread-local カウンタで semantics 一致）
+- [x] **T3-4 interp の budget prim 対応**（6102bdba — interp に決定的メーター実装:
+  user-fn entry / while n+1 / for-in n+1 / closure 呼び出しの W1 鏡 + budget 四重奏
+  （RuntimeCall arm 経由 — fan lowering は `almide_rt_prim_budget_*` を直接発行）。
+  unit-exact 境界 sweep 含む全 metered fixture で第三票が backends に一致。
+  CM-1 は almide-types/time_units へ移動し真の 1 定義に）
 - [ ] **T3-5 Dyn charge**（可変コスト op の従量課金 `1 + ⌈size/16⌉` 系。CM-1 v0.3）
 - [x] **T3-6 CM-1 定数の単一ソース化**（13135f61 — wasm render は補間、native shim は
   template 注入で `CM1_NS_PER_CHARGE` の 1 定義に。統合ゲートに artifact 検査を追加）
