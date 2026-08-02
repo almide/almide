@@ -1,0 +1,9 @@
+// `compute` is a checker built-in surface (ADR-0001), not a module on disk.
+// The old diagnostic told the user to CREATE compute.almd — a malicious hint
+// (dojo budget-units, MSR round 2): the fix is to delete the import line.
+import compute
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(compute.ms(50)) { 21 * 2 } ?? -1
+  println(int.to_string(r))
+}

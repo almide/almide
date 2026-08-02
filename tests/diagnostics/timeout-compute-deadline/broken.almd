@@ -1,0 +1,9 @@
+// fan.timeout takes a WALL-CLOCK deadline (Duration) — a deterministic
+// compute budget (Compute) is the other clock, and the two never mix
+// (ADR-0001 D2). The reverse mix-up of bounded-duration-budget.
+fn work() -> Int = 42
+
+effect fn main() -> Unit = {
+  let r = fan.timeout(compute.ms(100)) { work() } ?? -1
+  println(int.to_string(r))
+}

@@ -1,0 +1,2 @@
+expects_error = "expected Compute, found Duration"
+hint_substring = "fan.timeout (oracle tier)"

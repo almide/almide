@@ -1,0 +1,15 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+effect fn main() -> Unit = {
+  let a = fan.bounded(compute.ms(100)) { heavy(1000) } ?? -1
+  let b = fan.bounded(compute.us(3)) { heavy(500000) } ?? -1
+  let c = fan.bounded(compute.ms(50)) { heavy(2000) } ?? -1
+  println(int.to_string(a))
+  println(int.to_string(b))
+  println(int.to_string(c))
+}

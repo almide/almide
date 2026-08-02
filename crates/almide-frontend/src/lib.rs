@@ -4,7 +4,7 @@ pub mod lower;
 pub mod ir_link;
 pub mod import_table;
 pub mod stdlib;
-mod bundled_sigs;
+pub mod bundled_sigs;
 
 /// The one implementation of integer-literal decoding.
 mod literals;

@@ -386,7 +386,6 @@ pub enum IrExprKind {
     ToOption { expr: Box<IrExpr> },
     /// expr?.field — optional chaining
     OptionalChain { expr: Box<IrExpr>, field: Sym },
-    Await { expr: Box<IrExpr> },
 
     // ── Codegen-specific (inserted by Nanopass passes) ──
     /// Explicit clone: `expr.clone()` (Rust)
@@ -516,7 +515,6 @@ impl IrExpr {
             IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(f(*expr)) },
             IrExprKind::RcWrap { expr, cast_ty, wrap } => IrExprKind::RcWrap { expr: Box::new(f(*expr)), cast_ty, wrap },
             IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(f(*expr)) },
-            IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(f(*expr)) },
             IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(f(*expr)) },
             IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(f(*expr)) },
             IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(f(*expr)) },

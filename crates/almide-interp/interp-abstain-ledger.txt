@@ -40,6 +40,7 @@ fan_any_allfail  out-of-interp-scope capability: fan.any
 fan_any_early_winner  out-of-interp-scope capability: fan.any
 fan_deterministic  out-of-interp-scope capability: fan.any
 fan_pure_thunks  out-of-interp-scope capability: fan.any
+fan_settle_tuple  out-of-interp-scope capability: fs.read_text
 fan_var_thunk_list  out-of-interp-scope capability: fan.any
 float_sign_minmax_ieee  out-of-interp-scope capability: transcendental `math.log2` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 fs_preopen_resolve  out-of-interp-scope capability: prim.write_text_file

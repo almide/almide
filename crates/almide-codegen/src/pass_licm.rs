@@ -67,7 +67,7 @@ fn collect_pure_stdlib_module_fns(program: &IrProgram, pure_fns: &mut HashSet<Sy
             // that verdict too — otherwise a stateful cross-module call in a
             // loop gets hoisted and N calls collapse into one (ceangal's
             // scroll physics; almide#846).
-            if !func.is_effect && !func.is_async
+            if !func.is_effect
                 && func.mutated_params.is_empty()
                 && !has_mut_in_inline_rust(&func.attrs)
                 && pure_fns.contains(&func.name)
@@ -177,7 +177,7 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm
         | IrExprKind::OptionNone | IrExprKind::Try { .. }
         | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
         | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
-        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Clone { .. }
         | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
         | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
@@ -269,7 +269,7 @@ fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<
         | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
         | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
         | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::OptionalChain { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
@@ -505,7 +505,7 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &M
         | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
         | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
         | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::OptionalChain { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }

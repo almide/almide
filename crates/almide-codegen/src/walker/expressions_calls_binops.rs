@@ -111,6 +111,22 @@ fn int_wrapping_method(op: BinOp) -> Option<&'static str> {
 }
 
 fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _ty: &Ty) -> String {
+    // Concat first, and WITHOUT the generic l/r pre-render below: concat uses
+    // the OWNED render exclusively, so pre-rendering the plain forms too made
+    // every operand of a concat chain render twice — 2^depth work on a long
+    // `"a" + x + "b" + y + …` string build (the dojo harness spun for
+    // minutes at 100% CPU on exactly that shape; found 2026-08-03).
+    if matches!(op, BinOp::ConcatStr | BinOp::ConcatList) {
+        let ty_tag = if op == BinOp::ConcatStr { "String" } else { "List" };
+        // Unwrap RcCow operands to owned T for concat
+        let lo = render_expr_owned(ctx, left);
+        let ro = render_expr_owned(ctx, right);
+        return ctx
+            .templates
+            .render_with("concat_expr", Some(ty_tag), &[], &[("left", lo.as_str()), ("right", ro.as_str())])
+            .unwrap_or_else(|| format!("concat(_, _)"));
+    }
+
     let l = render_expr(ctx, left);
     let r = render_expr(ctx, right);
 
@@ -120,14 +136,6 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 
     // Type-dispatched operators
     match op {
-        BinOp::ConcatStr | BinOp::ConcatList => {
-            let ty_tag = if op == BinOp::ConcatStr { "String" } else { "List" };
-            // Unwrap RcCow operands to owned T for concat
-            let lo = render_expr_owned(ctx, left);
-            let ro = render_expr_owned(ctx, right);
-            ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", lo.as_str()), ("right", ro.as_str())])
-                .unwrap_or_else(|| format!("concat(_, _)"))
-        }
         BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix =>
             render_binop_matrix(ctx, op, left, l.as_str(), r.as_str()),
         BinOp::Eq => {

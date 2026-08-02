@@ -83,8 +83,8 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 
 | Version | 大機能 | Issue |
 |---|---|---|
-| 0.51 | QualifiedRef newtype — v1 MIR 上で bare type identity を表現不能にする（#433 クラスの型による根絶）。以後の optimizer 追加はこの型の上で行う | [#908](https://github.com/almide/almide/issues/908) |
-| 0.52 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存。optimizer 手術の前に検出器を立てる。実例棚: [#1018](https://github.com/almide/almide/issues/1018)（map.fold closure の under-check） | [#912](https://github.com/almide/almide/issues/912), [#1018](https://github.com/almide/almide/issues/1018) |
+| 0.51 | effect 表面規則の統一と診断修復（OTel dogfooding 発の #1049–#1054 一括）— `!` は effect call 上で常に可（never-err は無警告 no-op）、二項演算子オペランドの implicit unwrap（lowering の A-正規化込み）、unresolved import の wall taxonomy 修復、runtime-backed 型のユーザー注釈（HttpRequest/HttpResponse/JsonPath + 完備性 matrix gate）、E025 shape 導出。**出荷済 v0.51.0**。派生: [#1055](https://github.com/almide/almide/issues/1055)（effect-typed fn params）, [#1056](https://github.com/almide/almide/issues/1056) | [#1049](https://github.com/almide/almide/issues/1049)–[#1054](https://github.com/almide/almide/issues/1054) |
+| 0.52 | QualifiedRef newtype + hole-hunt レンズ — optimizer 手術の前の構造的安全化を 1 Unit に束ねる。QualifiedRef は v1 MIR 上で bare type identity を表現不能にし（#433 クラスの型による根絶）、以後の optimizer 追加はこの型の上で行う。hole-hunt は pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存の検出器。実例棚: [#1018](https://github.com/almide/almide/issues/1018)（map.fold closure の under-check）。どちらも 0.53 の optimizer 接続より前という順序制約は不変 | [#908](https://github.com/almide/almide/issues/908), [#912](https://github.com/almide/almide/issues/912), [#1018](https://github.com/almide/almide/issues/1018) |
 | 0.53 | wasm leg に nanopass optimizer 群を接続 | [#929](https://github.com/almide/almide/issues/929) |
 | 0.54 | wasm SIMD | [#929](https://github.com/almide/almide/issues/929) |
 | 0.55 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |
@@ -95,6 +95,12 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 | 0.60 | ゲートリリース — クロスターゲット対等性監査を固定 | — |
 
 **Gate 0.60**: 両ターゲットの最適化品質が同格 / hole-hunt findings 0 / 対 Rust perf ギャップが計測・ラチェット管理下。
+
+> **0.51 の差し替え（2026-08-03）**: 計画上の 0.51（QualifiedRef #908）は、OTel dogfooding が出した
+> #1049–#1054（effect 表面規則の統一）に席を譲った。表面規則の穴は書き手が今日踏むもので、
+> optimizer 前提の内部安全化より先に返すべき負債だからである。QualifiedRef は消えたのではなく
+> 0.52 に統合され、「0.53 の optimizer 接続より前」という順序制約ごと保存されている。
+> 静かな番号の付け替えではなく、この注記が記録である。
 
 ## 0.6x — rustc からの独立（debug ビルド）
 
@@ -228,3 +234,77 @@ its notes say so instead of pretending the ordering held.
 **The rule, sharpened for next time**: a Unit is not done when its `construction.md` is
 written. It is done when the tag exists. Starting the next Unit before that is what produced
 this, and the ladder is only auditable if the two stay coupled.
+
+## Merged past unverified CI, 2026-08-01 — the mechanism that should have stopped it
+
+**v0.47.0, v0.48.0 and v0.49.0 were tagged on commits whose CI never completed.** Not failed —
+**CANCELLED**, each superseded by the next merge while still in flight. Recorded here because
+the cause is a missing mechanism, not a missing intention.
+
+**What happened.** The first two release PRs were merged after explicitly polling their checks
+to green. Polling took ~50 minutes per release, so the remaining three switched to
+`gh pr merge --merge --auto`, expecting auto-merge to hold until checks passed. `main` requires
+a pull request but has **no required status checks**, so `--merge` executed immediately and
+`--auto` was a no-op. The command returned `MERGED` and the release proceeded.
+
+**A flag was substituted for a verification.** That is the whole failure. The intention was
+identical in all five releases; only the enforcement differed.
+
+**The damage, measured rather than assumed**: `git diff v0.49.0 v0.50.0` restricted to
+`crates/ src/ stdlib/ runtime/ spec/ tests/ tools/ .github/` is **empty** — every difference is
+documentation — and v0.50.0 (`c75f2ee8`) is green on `main`. So the three tags are verified
+transitively and nothing shipped is unverified in substance. Each release note now says so
+rather than leaving the gap to be discovered.
+
+**Not retracted, and the reason matters.** The release-deletion procedure in CLAUDE.md is for a
+BROKEN release. These are not broken; they lack a completed run on their own commit, which is a
+process defect. Deleting them would break anyone who pinned a tag, and removing 0.49 alone
+would restore the 0.48 → 0.50 gap that this ladder exists to prevent.
+
+### The fix is a mechanism, not a resolution
+
+**Required status checks on `main` are NOT configured and should be.** With them, `--merge`
+would have been refused by GitHub regardless of what the operator intended:
+
+```bash
+gh api -X PUT repos/almide/almide/branches/main/protection --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "Test Rust", "Test WASM", "Emit & Format",
+      "Cross-Target (Rust vs WASM)",
+      "Coq proofs + axiom audit + PCC gate",
+      "WASM host-arch determinism"
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+JSON
+```
+
+`"strict": true` also forces the branch to be up to date before merging, which would have
+caught the second half of this: `develop` moved under two of these PRs while they were open, so
+the checks that were cancelled were cancelled for a reason worth surfacing.
+
+This is the same discipline the repository already applies to everything else — the contract
+ledger, the ratchets, the down-only counts. **A rule that depends on the operator remembering
+is not a rule.** Until it is configured, the release procedure below is the fallback, and it is
+strictly weaker.
+
+### Until then: the release procedure has one added step
+
+Between "merge" and "tag": **confirm every check on the PR reached `SUCCESS`**, by reading the
+conclusions, not by trusting a merge flag.
+
+```bash
+gh pr view <N> --json statusCheckRollup \
+  --jq '[.statusCheckRollup[]|select(.conclusion!="SUCCESS" and .conclusion!="SKIPPED")|{name,conclusion,status}]'
+```
+
+Empty output, and only empty output, is permission to tag. `CANCELLED` counts as not-verified.

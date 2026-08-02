@@ -142,6 +142,7 @@ fn render_set_local(
         NTy::StrRef => format!("{}.to_string()", var(*src)),
         NTy::Vec => format!("{}.clone()", var(*src)),
         NTy::VecRef => format!("{}.to_vec()", var(*src)),
+        NTy::Res => format!("{}.clone()", var(*src)),
     };
     let store_t = match t {
         NTy::StrRef => NTy::Str,
@@ -247,6 +248,9 @@ fn declared_param_want(
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
         Some(NativeSigKind::F64) => NTy::F64,
+        Some(NativeSigKind::Res) => {
+            return Err(wall("native: Result-typed param — outside the rung subset"))
+        }
         None => repr_nty(&p.repr, true)?,
     })
 }
@@ -322,6 +326,7 @@ fn bind_user_fn_result(
                 Some(NativeSigKind::Str) => NTy::Str,
                 Some(NativeSigKind::I64) => NTy::I64,
                 Some(NativeSigKind::F64) => NTy::F64,
+                Some(NativeSigKind::Res) => NTy::Res,
                 None => repr_nty(r, false)?,
             };
             tys.insert(*d, t);
@@ -329,6 +334,7 @@ fn bind_user_fn_result(
                 NTy::Str => "String",
                 NTy::Vec => "Vec<i64>",
                 NTy::F64 => "f64",
+                NTy::Res => "Result<i64, String>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, call);
@@ -632,6 +638,11 @@ fn render_else(
                 NTy::F64,
                 var(v),
             ),
+            NTy::Res => (
+                format!("let mut {}: Result<i64, String> = Ok(0);", var(*d)),
+                NTy::Res,
+                format!("{}.clone()", var(v)),
+            ),
         };
         *out = out.replacen(marker, &decl, 1);
         tys.insert(*d, join_t);
@@ -668,6 +679,7 @@ fn render_end_if(
             NTy::StrRef => format!("{}.to_string()", var(v)),
             NTy::Vec => format!("{}.clone()", var(v)),
             NTy::VecRef => format!("{}.to_vec()", var(v)),
+            NTy::Res => format!("{}.clone()", var(v)),
         };
         let arm_t = match t {
             NTy::StrRef => NTy::Str,

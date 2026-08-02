@@ -116,6 +116,14 @@ impl Checker {
         if module == "fan" {
             return self.resolve_fan_call(field, arg_tys);
         }
+        // compute.ms / duration.ms — the ADR-0001 time constructors. Compiler-known
+        // NOMINAL types: the value erases to an Int of nanoseconds in lowering; the
+        // Compute/Duration distinction lives here, in the checker, as the clock
+        // firewall (bare Int and cross-clock arguments are type errors at the
+        // consuming heads).
+        if module == "compute" || module == "duration" {
+            return Some(self.resolve_time_ctor(module, field, arg_tys));
+        }
         // Codec convenience: `json.encode(t)` is String when `t` has `T.encode`.
         if field == "encode" && arg_tys.len() == 1 {
             let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
@@ -131,6 +139,30 @@ impl Checker {
     /// `timeout` tombstones, and the unknown-fan-fn diagnostic. Verbatim text
     /// move: every arm ends in `return Some(..)`, so this always resolves
     /// (never falls through to UFCS).
+    /// The closed unit set of ADR-0001 S2 — 2 clocks x 6 units, gate-checked.
+    /// Unknown units are a diagnostic naming the whole legal set (LLMs invent
+    /// `msec`/`5m`; the matrix answer beats a nearest-match guess).
+    fn resolve_time_ctor(&mut self, module: &str, field: &str, arg_tys: &[Ty]) -> Ty {
+        let ty_name = almide_lang::time_units::clock_type_of_module(module)
+            .expect("resolve_time_ctor called for a non-clock module");
+        if almide_lang::time_units::unit_factor(field).is_none() {
+            self.emit(super::err(
+                format!("unknown unit '{}.{}'", module, field),
+                almide_lang::time_units::unit_set_hint(module),
+                format!("call to {}.{}()", module, field)));
+            return Ty::Named(sym(ty_name), vec![]);
+        }
+        if arg_tys.len() != 1 {
+            self.emit(super::err(
+                format!("{}.{}() expects 1 argument but got {}", module, field, arg_tys.len()),
+                format!("Usage: {}.{}(100)", module, field),
+                format!("call to {}.{}()", module, field)));
+            return Ty::Named(sym(ty_name), vec![]);
+        }
+        self.constrain(arg_tys[0].clone(), Ty::Int, "time constructor argument");
+        Ty::Named(sym(ty_name), vec![])
+    }
+
     fn resolve_fan_call(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         if !self.env.can_call_effect {
             self.emit(super::err(
@@ -148,7 +180,7 @@ impl Checker {
             // LIVE surfaces only. `fan.race` is tombstoned (E027) and naming it here sent a
             // user who merely mistyped toward a function that no longer exists — the same
             // defect class as a tombstone whose migration target is itself removed.
-            "Available: fan.map, fan.any, fan.settle",
+            "Available: fan.map(xs, f), and the block heads fan.any / fan.settle / fan.race / fan.bounded",
             format!("call to fan.{}()", field)));
         Some(Ty::Unknown)
     }
@@ -238,10 +270,12 @@ impl Checker {
                 // Same treatment as fan.timeout (E027, 0.29.0): a check-time tombstone with
                 // an actionable migration, not an alias. No coexistence.
                 self.emit(super::err(
-                    "fan.race was removed: under Almide's deterministic model it returned thunk[0] in list order, so the name promised a race the language does not have",
-                    "Call the thunk directly if you meant thunk[0] (`thunks[0]()`), or use \
-                     `fan.any(thunks)` if you meant the first candidate that SUCCEEDS in list \
-                     order. `fan.map` / `fan.settle` are unchanged.",
+                    "fan.race changed signature: the thunk-list form was removed; race is now a deterministic block head",
+                    "New form: `fan.race { a(); b() }` — the winner is the branch that \
+                     completes with the LEAST deterministic computation ((spend, index) \
+                     minimum; ties go to source order). An optional per-branch budget is \
+                     `fan.race(compute.ms(5)) { … }`. If you meant the first candidate \
+                     that SUCCEEDS in list order, use `fan.any`.",
                     "call to fan.race()".to_string()).with_code("E027"));
                 Some(Ty::Unknown)
             }
@@ -256,48 +290,100 @@ impl Checker {
     /// order and only then reports the unknown-fan-fn diagnostic.
     fn resolve_fan_collecting(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         match field {
-            "any" => {
-                // fan.any(thunks) -> Result[T, String] — try thunks in LIST
-                // ORDER, return the FIRST Ok (deterministic); if ALL fail,
-                // return a defined Err ("fan.any: all candidates failed").
-                // EFFECTFUL: auto-unwrapped in effect-fn bindings and auto-`?`
-                // propagated, like a user effect fn call.
-                if arg_tys.len() != 1 {
-                    self.emit(super::err(
-                        format!("fan.any() expects 1 argument but got {}", arg_tys.len()),
-                        "Usage: fan.any([() => a, () => b])",
-                        "call to fan.any()".to_string()));
-                    return Some(Ty::Unknown);
-                }
+            // The Wave 1 BLOCK forms (parser-synthesized internal names): typed
+            // exactly like the legacy combinators they compile to.
+            "__any_block" => {
                 let list_ty = resolve_ty(&arg_tys[0], &self.uf);
                 Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String))
             }
-            "settle" => {
-                // fan.settle(thunks) -> List[Result[T, String]]
-                if arg_tys.len() != 1 {
+            "__settle_block" => {
+                let list_ty = resolve_ty(&arg_tys[0], &self.uf);
+                Some(Ty::list(unwrap_list_fn_result_ty(&list_ty)))
+            }
+            "any" => {
+                // Wave 1: the thunk-list SPELLING is removed; the block form is
+                // the surface. 2 args = the declared (not yet implemented)
+                // mapper form.
+                if arg_tys.len() == 1 {
                     self.emit(super::err(
-                        format!("fan.settle() expects 1 argument but got {}", arg_tys.len()),
-                        "Usage: fan.settle([() => a, () => b])",
-                        "call to fan.settle()".to_string()));
+                        "fan.any changed signature: the thunk-list form was removed; any is now a block head",
+                        "New form: `fan.any { a(); b() }` — first Ok in source order. \
+                         The dynamic mapper form `fan.any(xs, f)` is declared for Wave 2.",
+                        "call to fan.any()".to_string()).with_code("E027"));
                     return Some(Ty::Unknown);
                 }
-                let list_ty = resolve_ty(&arg_tys[0], &self.uf);
-                let inner_result = unwrap_list_fn_result_ty(&list_ty);
-                Some(Ty::list(inner_result))
+                if arg_tys.len() == 2 {
+                    // fan.any(xs, f) -> Result[B, String] (T2-3, the Wave 2
+                    // mapper form): apply f in LIST ORDER, first Ok wins, an
+                    // element's Err disqualifies that element only; all-fail
+                    // (and empty) is the ledger-constant Err. Same callback
+                    // contract as fan.map: f returns Result.
+                    let list_ty = resolve_ty(&arg_tys[0], &self.uf);
+                    let elem_ty = match &list_ty {
+                        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                        _ => Ty::Unknown,
+                    };
+                    let result_elem = self.fresh_var();
+                    let callback_ret = Ty::result(result_elem.clone(), Ty::String);
+                    self.constrain(arg_tys[1].clone(),
+                        Ty::Fn { params: vec![elem_ty], ret: Box::new(callback_ret) },
+                        "fan.any callback");
+                    return Some(Ty::result(resolve_ty(&result_elem, &self.uf), Ty::String));
+                }
+                self.emit(super::err(
+                    format!("fan.any() expects a block but got {} arguments", arg_tys.len()),
+                    "Usage: fan.any { a(); b() }",
+                    "call to fan.any()".to_string()));
+                Some(Ty::Unknown)
+            }
+            "settle" => {
+                if arg_tys.len() == 1 {
+                    self.emit(super::err(
+                        "fan.settle changed signature: the thunk-list form was removed; settle is now a block head",
+                        "New form: `fan.settle { a(); b() }` — collects every result in \
+                         source order. The dynamic mapper form `fan.settle(xs, f)` is \
+                         declared for Wave 2.",
+                        "call to fan.settle()".to_string()).with_code("E027"));
+                    return Some(Ty::Unknown);
+                }
+                if arg_tys.len() == 2 {
+                    // fan.settle(xs, f) -> List[Result[B, String]] (T2-3):
+                    // apply f in LIST ORDER, collecting EVERY element's Result
+                    // (Errs captured, never propagated). Lowering desugars it
+                    // to `list.map(xs, f)` — that IS the semantics.
+                    let list_ty = resolve_ty(&arg_tys[0], &self.uf);
+                    let elem_ty = match &list_ty {
+                        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                        _ => Ty::Unknown,
+                    };
+                    let result_elem = self.fresh_var();
+                    let callback_ret = Ty::result(result_elem.clone(), Ty::String);
+                    self.constrain(arg_tys[1].clone(),
+                        Ty::Fn { params: vec![elem_ty], ret: Box::new(callback_ret.clone()) },
+                        "fan.settle callback");
+                    return Some(Ty::list(Ty::result(
+                        resolve_ty(&result_elem, &self.uf),
+                        Ty::String,
+                    )));
+                }
+                self.emit(super::err(
+                    format!("fan.settle() expects a block but got {} arguments", arg_tys.len()),
+                    "Usage: fan.settle { a(); b() }",
+                    "call to fan.settle()".to_string()));
+                Some(Ty::Unknown)
             }
             "timeout" => {
-                // Tombstone (contract C-006): `fan.timeout` was REMOVED in 0.29.0.
-                // A wall-clock timeout has no portable cross-target meaning (wasm
-                // has no clock, scheduler, or threads), and it was the sole stdlib
-                // surface whose result was not a function of the program + its
-                // inputs. Deadlines belong at the host boundary that invokes the
-                // program. The dedicated arm (instead of the unknown-member arm
-                // below) keeps the migration actionable.
+                // fan.timeout RETURNED in T5-1 as the ORACLE-tier block head
+                // (`fan.timeout(duration.ms(n)) { body }` — a cooperative
+                // wall-clock deadline checked at charge sites, ω-relative per
+                // ADR-0001 S8; record/replay makes an observed ω
+                // reproducible). The legacy CALL spelling gets a
+                // signature-migration hint, mirroring race's E027 revision.
                 self.emit(super::err(
-                    "fan.timeout was removed: a wall-clock timeout has no portable cross-target meaning",
-                    "Enforce deadlines at the host boundary that invokes the program \
-                     (e.g. `timeout 5 ./app`). Inside Almide every fan combinator is \
-                     deterministic by list order: fan.map, fan.any, fan.settle.",
+                    "fan.timeout changed signature: it is now a block head with a Duration deadline",
+                    "New form: `fan.timeout(duration.ms(5000)) { work(x) }` — the deadline \
+                     is checked cooperatively at charge sites (never mid-operation), and \
+                     the verdict is host-relative (record/replay reproduces it)",
                     "call to fan.timeout()".to_string()).with_code("E027"));
                 Some(Ty::Unknown)
             }

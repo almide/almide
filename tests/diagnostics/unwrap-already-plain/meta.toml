@@ -1,0 +1,2 @@
+expects_error = "argument 'o' expects Option[A] but got Int"
+hint_substring = "nothing to unwrap"

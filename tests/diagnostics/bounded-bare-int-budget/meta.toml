@@ -1,0 +1,2 @@
+expects_error = "expected Compute, found Int"
+hint_substring = "Budgets carry a unit and a clock"

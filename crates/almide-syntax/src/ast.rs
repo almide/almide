@@ -175,6 +175,29 @@ pub enum ExprKind {
     Match { subject: Box<Expr>, arms: Vec<MatchArm> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>> },
     Fan { exprs: Vec<Expr> },
+    /// `fan.bounded(budget) { body }` — deterministic computation budget
+    /// (Stage 2 v1: body is a single call expression; budget is a `Compute`).
+    FanBounded { budget: Box<Expr>, body: Box<Expr> },
+    /// `fan.race(budget?) { arm; arm; … }` — deterministic race: the winner is
+    /// the (spend, index)-lexicographic minimum completion. The optional budget
+    /// is a per-branch divergence guard (Stage 3 v1: arms are single calls).
+    FanRace { budget: Option<Box<Expr>>, arms: Vec<Expr> },
+    /// `fan.race(xs, f)` / `fan.race(budget, xs, f)` — the MAPPER form: one
+    /// pure 1-param lambda raced over a dynamic list, winner = the
+    /// (spend, index) lexicographic minimum among successes (the mapper
+    /// returns Result — Err self-disqualifies, matching the block form's
+    /// Result-arm rule). The budget is per-element (per-branch semantics).
+    FanRaceMap { budget: Option<Box<Expr>>, list: Box<Expr>, mapper: Box<Expr> },
+    /// `fan.timeout(deadline) { body }` — the ORACLE-tier deadline (Stage 4):
+    /// the body runs under a WALL-CLOCK deadline checked cooperatively at
+    /// charge sites (the Go-context cancellation model). The verdict is
+    /// ω-relative (ADR-0001 S8): which site the deadline hits depends on the
+    /// host — record/replay (T5-2) makes an observed ω reproducible.
+    FanTimeout { deadline: Box<Expr>, body: Box<Expr> },
+    /// `fan.settle { arm; arm; … }` — collect EVERYTHING: each arm settles to
+    /// its own `Result` slot, heterogeneous arm types allowed. The value is a
+    /// TUPLE `(Result[A, String], Result[B, String], …)` in arm order (T2-4).
+    FanSettle { arms: Vec<Expr> },
     ForIn { var: Sym, var_tuple: Option<Vec<Sym>>, iterable: Box<Expr>, body: Vec<Stmt> },
     While { cond: Box<Expr>, body: Vec<Stmt> },
     Lambda { params: Vec<LambdaParam>, body: Box<Expr> },
@@ -185,7 +208,6 @@ pub enum ExprKind {
     UnwrapOr { expr: Box<Expr>, fallback: Box<Expr> },
     ToOption { expr: Box<Expr> },
     OptionalChain { expr: Box<Expr>, field: Sym },
-    Await { expr: Box<Expr> },
     Binary { op: Sym, left: Box<Expr>, right: Box<Expr> },
     Unary { op: Sym, operand: Box<Expr> },
     Paren { expr: Box<Expr> },
@@ -350,7 +372,6 @@ pub enum Decl {
     Fn {
         name: Sym,
         #[serde(default)] effect: Option<bool>,
-        #[serde(default)] r#async: Option<bool>,
         #[serde(default)] visibility: Visibility,
         #[serde(default)] extern_attrs: Vec<ExternAttr>,
         #[serde(default)] export_attrs: Vec<ExportAttr>,
@@ -517,6 +538,28 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
     match &mut expr.kind {
         ExprKind::List { elements } | ExprKind::Tuple { elements } => visit_exprs_slice_mut(elements, f),
         ExprKind::Fan { exprs } => visit_exprs_slice_mut(exprs, f),
+        ExprKind::FanBounded { budget, body } => {
+            f(budget);
+            f(body);
+        }
+        ExprKind::FanRace { budget, arms } => {
+            if let Some(b) = budget {
+                f(b);
+            }
+            visit_exprs_slice_mut(arms, f);
+        }
+        ExprKind::FanRaceMap { budget, list, mapper } => {
+            if let Some(b) = budget {
+                f(b);
+            }
+            f(list);
+            f(mapper);
+        }
+        ExprKind::FanSettle { arms } => visit_exprs_slice_mut(arms, f),
+        ExprKind::FanTimeout { deadline, body } => {
+            f(deadline);
+            f(body);
+        }
         ExprKind::MapLiteral { entries } => visit_map_entries_mut(entries, f),
         ExprKind::Record { fields, .. } => visit_field_inits_mut(fields, f),
         ExprKind::SpreadRecord { base, fields } => {
@@ -559,7 +602,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         }
         ExprKind::Lambda { body, .. } => visit_expr_mut(body, f),
         ExprKind::Try { expr } | ExprKind::Unwrap { expr } | ExprKind::ToOption { expr } |
-        ExprKind::Await { expr } | ExprKind::Paren { expr } |
+        ExprKind::Paren { expr } |
         ExprKind::Some { expr } | ExprKind::Ok { expr } | ExprKind::Err { expr } |
         ExprKind::OptionalChain { expr, .. } => visit_expr_mut(expr, f),
         ExprKind::Range { start, end, .. } => { visit_expr_mut(start, f); visit_expr_mut(end, f); }

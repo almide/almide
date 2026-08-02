@@ -1,0 +1,8 @@
+// time x time has no meaning (the result would be time^2) — the Go #64420
+// silent-10^9 accident class, killed by the type system (ADR-0001 S3).
+fn work() -> Int = 42
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(compute.ms(2) * compute.ms(3)) { work() } ?? -1
+  println(int.to_string(r))
+}

@@ -23,16 +23,16 @@ effect fn settle_static() -> (Result[A, String], Result[B, String]) = {
   fan.settle { risky_a(); risky_b() }
 }
 
-// ── race: 0.42.0 撤去済 → fuel 付きで新生（E027 は署名移行ヒントに改訂）──
+// ── race: 0.42.0 撤去済 → ticks 予算付きで新生（E027 は署名移行ヒントに改訂）──
 // v1:  fan.race(thunks)          — 実体は thunks[0]() と等価だった
 // v2:
 effect fn race_new(p: Problem) -> Answer = {
-  fan.race(fuel: 1_000_000) { exact(p); heuristic(p) } ?? fallback(p)
+  fan.race(compute.s(1)) { exact(p); heuristic(p) } ?? fallback(p)
 }
 
 // ── timeout: 0.29.0 撤去済 → Stage 4 の oracle 層で新生 ─────────────
 // v1:  fan.timeout(5000, () => http.get(url))
 // v2 (Stage 4):
 effect fn timeout_new(url: String) -> String = {
-  fan.timeout(ms: 5000) { http.get(url) } ?? cached_page(url)
+  fan.timeout(duration.s(5)) { http.get(url) } ?? cached_page(url)
 }

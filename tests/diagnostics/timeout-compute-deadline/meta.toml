@@ -1,0 +1,2 @@
+expects_error = "expected Duration, found Compute"
+hint_substring = "duration.ms"

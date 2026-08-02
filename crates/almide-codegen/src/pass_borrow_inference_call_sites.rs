@@ -238,7 +238,6 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
         IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
         IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
         IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect(),
         },
@@ -460,7 +459,7 @@ fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
             | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
             | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
             | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
-            | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+            | IrExprKind::Clone { .. }
             | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
             | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
             | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }

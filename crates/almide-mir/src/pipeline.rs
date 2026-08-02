@@ -226,6 +226,52 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     }
 }
 
+/// The #1052 pre-inference import audit: every non-stdlib import must have a
+/// resolved module in `modules` (matched on the full name or its first/last
+/// dot-segment — CLI resolvers register both bare and package-qualified
+/// spellings). `import self as pkg` aliases the file's own package and needs
+/// no module. Returns the one-line feature wall for the first unsatisfied
+/// import, `None` when every import is covered.
+fn unresolved_import_wall(
+    prog: &almide_lang::ast::Program,
+    modules: &[(String, almide_lang::ast::Program, bool)],
+) -> Option<LowerError> {
+    for imp in &prog.imports {
+        let almide_lang::ast::Decl::Import { path, span, .. } = imp else { continue };
+        let Some(root) = path.first() else { continue };
+        let wanted = if root.as_str() == "self" {
+            match path.get(1) {
+                Some(sibling) => sibling.as_str(),
+                None => continue,
+            }
+        } else {
+            // Hardcoded AND bundled stdlib both type from stdlib info /
+            // bundled sigs — `import prim` (bundled-only) must not wall.
+            if almide_lang::stdlib_info::is_any_stdlib(root.as_str()) {
+                continue;
+            }
+            root.as_str()
+        };
+        let satisfied = modules.iter().any(|(n, _, _)| {
+            n == wanted
+                || n.split('.').next() == Some(wanted)
+                || n.rsplit('.').next() == Some(wanted)
+        });
+        if !satisfied {
+            let spelled = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+            let kind = if root.as_str() == "self" { "package sibling" } else { "dependency module" };
+            return Some(LowerError::at(
+                *span,
+                format!(
+                    "import {spelled} — {kind} not resolved by this render's front-end \
+                     (feature wall, not a type error; cf. #943 for the linking-stage wall)"
+                ),
+            ));
+        }
+    }
+    None
+}
+
 /// Lower `.almd` source to a linked `IrProgram` (`parse → check → lower → optimize → mono →
 /// ir_link`) — the SAME frontend cut point emit_cert_from_source uses. `modules` are the resolved
 /// cross-module siblings (empty ⇒ the single-file path); each is inferred + `lower_module`d into
@@ -251,6 +297,17 @@ fn source_to_ir_with(
             "parse error: {}",
             messages.join("\n")
         )));
+    }
+    // #1052: an import this render was NOT handed a module for can never
+    // type-check — every reference through it would surface as "undefined
+    // function" and the wall would land in the "type errors" bucket, the one
+    // category the walled-real ledgers audit as empty-by-construction. A
+    // missing module is a FEATURE gap of the caller (the native rung passes no
+    // siblings), so classify it as one, before inference, without the cascade.
+    // Adjacent but distinct from #943: that wall HAS the module and fails to
+    // link it. Stdlib imports are typed from stdlib info and need no module.
+    if let Some(wall) = unresolved_import_wall(&prog, modules) {
+        return Err(wall);
     }
     let canon = canonicalize::canonicalize_program(
         &prog,
@@ -354,6 +411,10 @@ fn source_to_ir_with(
     crate::lower::normalize_tail_err_raise_ifs(&mut ir);
     // Block call-arguments absorb their call (shared with classify: desugar-before-both).
     crate::lower::hoist_block_call_args(&mut ir);
+    // Call-bearing assert subjects bind first (shared with classify: desugar-before-both;
+    // must precede the never-err/auto-wrap classification so the bind rewraps like a
+    // user-written `let`).
+    crate::lower::hoist_assert_call_subjects(&mut ir);
     crate::lower::desugar_loop_early_returns(&mut ir);
     crate::lower::hoist_spread_call_bases(&mut ir);
     crate::lower::hoist_record_literal_args(&mut ir);
@@ -490,6 +551,7 @@ fn try_render_wasm_source_impl(
     verbose: bool,
     mode: RenderMode,
 ) -> Result<String, LowerError> {
+    crate::charge_probe::reset_budget_used();
     // STRICT VALUE MODE spans the WHOLE render, not just the IR phase. `strict_values()`
     // is read by MIR *lowering*, which runs in `try_render_wasm_source_impl_rest` below —
     // so a guard scoped to `build_ir_with_drops` would be restored before the only code
@@ -538,7 +600,6 @@ fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
             def_id: None,
         },
         is_effect: false,
-        is_async: false,
         is_test: false,
         generics: None,
         extern_attrs: vec![],

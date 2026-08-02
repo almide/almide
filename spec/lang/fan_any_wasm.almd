@@ -13,24 +13,24 @@ effect fn failing() -> Result[Int, String] = err("boom")
 effect fn main() -> Unit = {
   // fan.any: the FIRST Ok in list order wins; if every candidate errs, v0's fixed
   // `fan.any: all candidates failed` message. Inlined into a per-thunk match chain.
-  match fan.any([
-    () => failing(),
-    () => okn(7),
-    () => okn(99)
-  ]) {
+  match fan.any {
+    failing()
+    okn(7)
+    okn(99)
+  } {
     ok(v) => println("any=" + int.to_string(v)),
     err(e) => println("any_err=" + e),
   }
-  match fan.any([
-    () => failing(),
-    () => failing()
-  ]) {
+  match fan.any {
+    failing()
+    failing()
+  } {
     ok(v) => println("any_ok"),
     err(e) => println("all_fail=" + e),
   }
-  let got = fan.any([
-    () => failing(),
-    () => okn(88)
-  ])
+  let got = fan.any {
+    failing()
+    okn(88)
+  }
   println("unwrap=" + int.to_string(got))
 }

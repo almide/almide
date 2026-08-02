@@ -1,12 +1,8 @@
-// Deadlines belong at the host boundary. Inside Almide the fan combinators are
-// deterministic by list order; `fan.any` returns the first candidate that succeeds.
-// (This file used to migrate to `fan.race`, which was itself removed in 0.42.0 —
-// a tombstone's migration target must stay a live surface.)
-effect fn slow() -> Result[Int, String] = ok(42)
+// fan.timeout returned (T5-1) as the oracle-tier block head: a WALL-CLOCK
+// deadline (Duration) checked cooperatively at charge sites.
+fn work() -> Int = 42
 
 effect fn main() -> Unit = {
-  let r: Result[Int, String] = fan.any([
-    () => slow()
-  ])
-  println(int.to_string(r ?? -1))
+  let r = fan.timeout(duration.ms(5000)) { work() } ?? -1
+  println(int.to_string(r))
 }

@@ -71,7 +71,7 @@ fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
         IrExprKind::Lambda { .. } => propagate_expr_lambda(expr, vt),
         IrExprKind::OptionSome { .. } | IrExprKind::ResultOk { .. }
         | IrExprKind::ResultErr { .. } | IrExprKind::Try { .. }
-        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Clone { .. }
         | IrExprKind::Deref { .. } => propagate_expr_wrap(expr, vt),
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
         | IrExprKind::IndexAccess { object, .. } => propagate_expr(object, vt),
@@ -159,7 +159,7 @@ fn propagate_expr_containers(expr: &mut IrExpr, vt: &mut VarTable) {
 fn propagate_expr_wrap(expr: &mut IrExpr, vt: &mut VarTable) {
     let (IrExprKind::OptionSome { expr: inner } | IrExprKind::ResultOk { expr: inner }
         | IrExprKind::ResultErr { expr: inner } | IrExprKind::Try { expr: inner }
-        | IrExprKind::Await { expr: inner } | IrExprKind::Clone { expr: inner }
+        | IrExprKind::Clone { expr: inner }
         | IrExprKind::Deref { expr: inner }) = &mut expr.kind else { unreachable!() };
     propagate_expr(inner, vt);
 }

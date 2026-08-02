@@ -1,0 +1,15 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = (acc + i * 7) % 999983; i = i + 1 }
+  acc
+}
+
+effect fn main() -> Unit = {
+  // A borderline deadline: ~2.5ms of work under a 1ms deadline — the verdict
+  // depends on where the wall check lands (omega).
+  let a = fan.timeout(duration.ms(1)) { heavy(1000000) } ?? -1
+  println(int.to_string(a))
+  let b = fan.timeout(duration.ms(1)) { heavy(400000) } ?? -1
+  println(int.to_string(b))
+}

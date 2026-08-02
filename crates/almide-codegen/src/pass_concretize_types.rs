@@ -390,7 +390,7 @@ fn erase_expr(expr: &mut IrExpr, aliases: &HashMap<String, Ty>) {
         | IrExprKind::TupleIndex { .. } | IrExprKind::MapAccess { .. }
         | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
         | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::OptionalChain { .. }
         | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
         | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }

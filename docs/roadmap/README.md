@@ -7,7 +7,7 @@
 
 ## Active
 
-77 items
+78 items
 
 | Item | Description |
 |------|-------------|
@@ -31,7 +31,7 @@
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) | Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause |
 | [Fan v2 — reference examples](active/fan-v2-examples.md) | Reference examples for the fan v2 surface: every head, edge semantics, diagnostics |
-| [Fan v2 — one execution-policy grammar](active/fan-v2.md) | Fan v2: the execution-policy grammar — heads x forms, thunk-free, labeled fuel |
+| [Fan v2 — one execution-policy grammar](active/fan-v2.md) | Fan v2: the execution-policy grammar — heads x forms, thunk-free, typed budgets |
 | [Flight Evidence Gaps — 実地監査所見台帳](active/flight-evidence-gaps.md) | Hands-on internal audit findings (2026-07-03) — the measured distance between DAL-A philosophy and DAL-A evidence, as 7 findings with corrective work items and acceptance criteria |
 | [Flight Profile — 航空品質への接地分析と2つのキーストーン](active/flight-profile.md) | DO-178C flight-grade gap analysis: 6 pillars status + 2 engineering keystones |
 | [Flight Qualification — DO-178C/DO-330/DO-333 マッピング + 資格化キット(G-F5 + G-F6)](active/flight-qualification.md) | Flight gates G-F5 + G-F6 — how the PCC certificate/receipt maps to DO-178C Table A objectives, the DO-330 "prove-the-checker" tool-qualification argument (compiler→TQL-5 output-verified, checker→qualified-by-proof), the DO-333 formal-methods credit per proven property, and the G-F6 qualification kit as a product (AbsInt/SCADE-KCG model): what's in the kit, the boundary (kit provides vs customer's domain process), and the customer integration story. |
@@ -56,6 +56,7 @@
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
 | [Receipt Logic — 受領書の論理](active/receipt-logic.md) | Formal foundation for the trust layer — receipt logic: claim types, threat model, trust bases, falsification procedures, completeness relative to use-case |
 | [reconciliation follow-up — v0.28.0 で見送った develop 側の残件](active/reconciliation-followup.md) | v0.28.0 reconciliation follow-up: deferred develop commits for 0.28.1 |
+| [Ticks interface audit — is the demanded API shape different?](active/ticks-interface-audit.md) | Audit of ticks against timeout-shaped APIs: the unwritable-number problem, three fixes |
 | [Trust Layer — 機械が書くソフトウェアの信頼層](active/trust-layer.md) | Category strategy — winning "the trust layer for machine-written software": MWS Trust Levels, receipts, critical path |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
 | [v0 wasm codegen: Try/Unwrap/Fan early-return heap leak](active/v0-unwrap-early-return-leak.md) | The retired v0 wasm emitter's Try/Unwrap/Fan early-return heap leak, kept as the historical record of the class |

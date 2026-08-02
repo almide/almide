@@ -166,7 +166,7 @@ fn try_hoist_expr(expr: &mut IrExpr, ctx: &mut HoistCtx) {
         | IrExprKind::TupleIndex { .. } | IrExprKind::Lambda { .. }
         | IrExprKind::OptionNone | IrExprKind::Try { .. }
         | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
-        | IrExprKind::ToOption { .. } | IrExprKind::Await { .. }
+        | IrExprKind::ToOption { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
@@ -292,7 +292,7 @@ fn has_assignment(expr: &IrExpr) -> bool {
         | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
         | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
         | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::OptionalChain { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
@@ -375,7 +375,7 @@ fn has_control_flow(expr: &IrExpr) -> bool {
         | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
         | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
         | IrExprKind::Lambda { .. } | IrExprKind::StringInterp { .. }
-        | IrExprKind::OptionNone | IrExprKind::Await { .. }
+        | IrExprKind::OptionNone
         | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
         | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }

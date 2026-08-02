@@ -232,7 +232,6 @@ pub struct IrFunction {
     pub ret_ty: Ty,
     pub body: IrExpr,
     pub is_effect: bool,
-    pub is_async: bool,
     pub is_test: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generics: Option<Vec<almide_lang::ast::GenericParam>>,

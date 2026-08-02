@@ -1,4 +1,35 @@
 
+/// Fill each undecidable slot (an unbound `?` inference var or `Unknown`) in
+/// `ty` with an example concrete type, so the E025 hint shows an annotation
+/// whose SHAPE matches the reported binding. Result's err slot fills as
+/// `String` (the stdlib's uniform error channel); every other hole fills as
+/// `Int`. Both are examples, marked `e.g.` at the emit site.
+fn fill_example_ty(ty: &Ty) -> Ty {
+    fn go(ty: &Ty, in_result_err: bool) -> Ty {
+        let hole = || if in_result_err { Ty::String } else { Ty::Int };
+        match ty {
+            Ty::Unknown => hole(),
+            Ty::TypeVar(n) if n.as_str().starts_with('?') => hole(),
+            Ty::Applied(ctor, args) => {
+                let is_result = *ctor == almide_lang::types::TypeConstructorId::Result;
+                Ty::Applied(ctor.clone(), args.iter().enumerate().map(|(i, a)|
+                    go(a, is_result && i == 1)).collect())
+            }
+            Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| go(t, false)).collect()),
+            Ty::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(|t| go(t, false)).collect(),
+                ret: Box::new(go(ret, false)),
+            },
+            Ty::Named(n, args) => Ty::Named(*n, args.iter().map(|t| go(t, false)).collect()),
+            Ty::Union(ts) => Ty::Union(ts.iter().map(|t| go(t, false)).collect()),
+            Ty::Record { fields } =>
+                Ty::Record { fields: fields.iter().map(|(n, t)| (*n, go(t, false))).collect() },
+            _ => ty.clone(),
+        }
+    }
+    go(ty, false)
+}
+
 /// Infer types for default value expressions in type declarations.
 /// Prevents ICE "missing type for expr" during lowering.
 fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
@@ -316,6 +347,33 @@ impl Checker {
                 if s.as_str() == "Value" || self.env.types.contains_key(&s) || !reported.insert(s) {
                     continue;
                 }
+                // A runtime-backed stdlib nominal (`HttpRequest`, bare or
+                // `http.`-qualified) is a valid annotation whenever its owner
+                // module is in scope — the stdlib's own signatures use it, so
+                // the writer must be able to spell it too (#1053). Without the
+                // import, the generic "declare it" hint would be a dead end
+                // (the type can neither be declared nor selectively imported);
+                // name the one action that works instead.
+                if let Some(owner) = almide_lang::stdlib_info::runtime_backed_type_owner(s.as_str()) {
+                    if self.env.import_table.is_module(owner) {
+                        continue;
+                    }
+                    let mut diag = err(
+                        format!("unknown type '{}'", s),
+                        format!(
+                            "'{}' is the `{owner}` stdlib module's runtime-backed type — \
+                             add `import {owner}` and it resolves in annotations",
+                            s,
+                        ),
+                        ctx.clone(),
+                    ).with_code("E029").with_try(format!("import {owner}"));
+                    if let Some(sp) = span {
+                        diag.line = Some(sp.line);
+                        diag.col = Some(sp.col);
+                    }
+                    self.diagnostics.push(diag);
+                    continue;
+                }
                 let mut diag = err(
                     format!("unknown type '{}'", s),
                     format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", s),
@@ -327,6 +385,35 @@ impl Checker {
                 }
                 self.diagnostics.push(diag);
             }
+        }
+    }
+
+    /// Post-solve #1051: warn when an interpolation segment holds a Result the
+    /// lowering will not auto-? — it prints the debug form (`ok(…)`/`err(…)`),
+    /// which is legal for debug output but a silent surprise when the writer
+    /// meant the payload (the classic shape: a can-err call bound inside a
+    /// lambda, then `"${resp}"`). Warning, not error: interpolating the
+    /// Result itself is how you debug one.
+    fn validate_result_interpolations(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_result_interp_checks);
+        for (ty, span) in checks {
+            let resolved = resolve_ty(&ty, &self.uf);
+            if !resolved.is_result() {
+                continue;
+            }
+            let mut diag = Diagnostic::warning(
+                format!("interpolating a {} prints its debug form (ok(…)/err(…))", resolved.display()),
+                "If you meant the payload, unwrap first: `?? fallback` supplies a default, \
+                 `match` handles ok/err, `!` propagates in an effect fn body. Interpolate \
+                 the Result itself only for debug output",
+                "string interpolation",
+            );
+            if let Some(s) = span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
         }
     }
 
@@ -602,24 +689,28 @@ impl Checker {
     /// The wording splits on whether the site has a NAME: a named binding can be
     /// annotated in place and gets a `try` line naming it, while a bare
     /// expression has to be bound first before there is anywhere to put the
-    /// annotation.
+    /// annotation. The example annotation is derived from the REPORTED shape
+    /// (`List[Unknown]` → `List[Int]`), never a fixed exemplar — a hint whose
+    /// example cannot be correct for the binding teaches a false move (#1054).
     fn emit_unresolved_binding_diagnostic(&mut self, site: &UnresolvedBindingSite, resolved: &Ty) {
         let what = match &site.name {
             Some(n) => format!("binding '{}'", n),
             None => "this expression".to_string(),
         };
+            let example = fill_example_ty(resolved).display();
             let fix = match &site.name {
                 Some(n) => format!(
-                    "Annotate the binding with the full type, e.g. `let {}: Result[Int, String] = ...`. \
+                    "Annotate the binding with the full type, e.g. `let {}: {} = ...`. \
                      An unconstrained slot (such as the error type of a value that is always `ok(...)`, \
                      reachable only through an un-exercised branch) cannot be inferred and is never \
                      silently defaulted (Almide follows Rust/Swift; cf. Rust E0282).",
-                    n,
+                    n, example,
                 ),
-                None => "Bind the expression to an explicitly-typed `let`, e.g. \
-                     `let r: Result[Int, String] = ...`, so the unconstrained slot is pinned. \
+                None => format!(
+                    "Bind the expression to an explicitly-typed `let`, e.g. \
+                     `let r: {} = ...`, so the unconstrained slot is pinned. \
                      An unconstrained type slot cannot be inferred and is never silently defaulted \
-                     (Almide follows Rust/Swift; cf. Rust E0282).".to_string(),
+                     (Almide follows Rust/Swift; cf. Rust E0282).", example),
             };
             let mut diag = err(
                 format!("cannot infer a concrete type for {} (type {})", what, resolved.display()),
@@ -627,7 +718,7 @@ impl Checker {
                 format!("{} with an unconstrained type", what),
             ).with_code("E025");
             if let Some(n) = &site.name {
-                diag = diag.with_try(format!("let {}: Result[Int, String] = ...", n));
+                diag = diag.with_try(format!("let {}: {} = ...", n, example));
             }
             if let Some(s) = site.span {
                 diag.file = self.source_file.clone();

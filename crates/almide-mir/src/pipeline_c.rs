@@ -83,8 +83,7 @@ fn synthesize_mutable_global_init(
             ret_ty: almide_lang::types::Ty::Unit,
             body,
             is_effect: false,
-            is_async: false,
-            is_test: false,
+                is_test: false,
             generics: None,
             extern_attrs: vec![],
             export_attrs: vec![],
@@ -310,6 +309,10 @@ fn try_render_wasm_source_impl_rest(
     );
     let main_wall = fn_walls.get("main").cloned();
 
+    // Stage 1 probe: charge insertion on the SHARED user-fn MIR, before any
+    // leg-specific pass. The native leg calls the same pass at the same point.
+    crate::charge_probe::insert_probe_charges(&mut functions);
+
     // Self-append windows (`x = x + [e]`, incl. the `list.push` desugar) →
     // the amortized-O(1) `__list_append1` (self-hosted in list_concat.almd —
     // §4.1: the hand-written WAT floor must not grow). MUST run BEFORE the
@@ -406,8 +409,7 @@ fn try_render_wasm_source_impl_rest(
                 ret_ty: almide_lang::types::Ty::Unit,
                 body,
                 is_effect: false,
-                is_async: false,
-                is_test: false,
+                        is_test: false,
                 generics: None,
                 extern_attrs: vec![],
                 export_attrs: vec![],
@@ -606,6 +608,14 @@ pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
 }
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
+    // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
+    // same view `debug_dump_mir` builds) before the native render runs.
+    if std::env::var("ALMIDE_DUMP_MIR").is_ok() {
+        if let Ok(dump) = debug_dump_mir(source) {
+            eprintln!("{dump}");
+        }
+    }
+    crate::charge_probe::reset_budget_used();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
@@ -667,6 +677,15 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
                     && matches!(**ret, Ty::Int | Ty::Bool))
         };
+        // T1-3: Result[scalar, String] returns ride a dedicated native
+        // carrier (NTy::Res — Rust Result<i64, String>). String-Ok payloads
+        // stay walled (their tag/payload windows are ambiguous with Err's).
+        let is_native_result = |t: &Ty| {
+            matches!(t, Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2
+                    && matches!(a[0], Ty::Int | Ty::Bool)
+                    && matches!(a[1], Ty::String))
+        };
         let sig_ok = |t: &Ty| {
             matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
                 || is_scalar_list(t)
@@ -674,6 +693,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 || is_flat_variant(t)
                 || is_scalar_fn(t)
         };
+        let sig_ok_ret = |t: &Ty| sig_ok(t) || is_native_result(t);
         for p in &func.params {
             if !sig_ok(&p.ty) {
                 return Err(LowerError::Unsupported(format!(
@@ -682,7 +702,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 )));
             }
         }
-        if !matches!(func.ret_ty, Ty::Unit) && !sig_ok(&func.ret_ty) {
+        if !matches!(func.ret_ty, Ty::Unit) && !sig_ok_ret(&func.ret_ty) {
             return Err(LowerError::Unsupported(format!(
                 "native: fn `{}` return type {:?} — outside the native rung subset",
                 func.name, func.ret_ty
@@ -702,6 +722,35 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         })?;
         functions.extend(all);
     }
+    // T1-3: rewrite the stereotyped Result block windows onto the native
+    // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
+    // sees these ops. Runs BEFORE verification/render (both are downstream).
+    {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use almide_lang::types::Ty;
+        let result_fns: std::collections::BTreeSet<String> = ir
+            .functions
+            .iter()
+            .filter(|f| {
+                matches!(&f.ret_ty, Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2
+                        && matches!(a[0], Ty::Int | Ty::Bool)
+                        && matches!(a[1], Ty::String))
+                    // A LIFTED effect fn (declared `-> Int|Bool`, `effect`) has
+                    // the same wrapped carrier ABI on this leg — the native
+                    // pipeline runs no never-err strip, so every lifted call
+                    // site reads the stereotyped consumer windows. Declared
+                    // ret_ty alone misses them (the lift lives in the ABI, not
+                    // the signature), which left the windows unrewritten and
+                    // the verifier flagging the raw LoadHandle as UseAfterFree.
+                    || (f.is_effect && matches!(f.ret_ty, Ty::Int | Ty::Bool))
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+        for f in functions.iter_mut() {
+            crate::native_result_rewrite::rewrite_result_ops(f, &result_fns);
+        }
+    }
     if !functions.iter().any(|f| f.name == "main") {
         return Err(LowerError::Unsupported(
             "native: main is outside the MIR-lowering subset".into(),
@@ -720,6 +769,15 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
                 Ty::Float => Some(NativeSigKind::F64),
                 Ty::String => Some(NativeSigKind::Str),
+                // T1-3: the native Result carrier (return position only — the
+                // param gate rejects Result params before this table is read).
+                Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2
+                        && matches!(a[0], Ty::Int | Ty::Bool)
+                        && matches!(a[1], Ty::String) =>
+                {
+                    Some(NativeSigKind::Res)
+                }
                 Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
                 {
@@ -760,6 +818,11 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             let params: Option<Vec<_>> = func.params.iter().map(|p| kind(&p.ty)).collect();
             let ret = if matches!(func.ret_ty, Ty::Unit) {
                 Some(None)
+            } else if func.is_effect && matches!(func.ret_ty, Ty::Int | Ty::Bool) {
+                // A LIFTED effect fn returns the wrapped carrier on this leg
+                // (the same widening `result_fns` applies above): its declared
+                // scalar would type the call dst I64 while the value is Res.
+                Some(Some(NativeSigKind::Res))
             } else {
                 kind(&func.ret_ty).map(Some)
             };
@@ -791,6 +854,23 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 }
             }
             sigs.insert(f.name.clone(), (ps, Some(crate::render_native::NativeSigKind::I64)));
+        }
+    }
+    // Stage 1 probe: same insertion point in pass order as the wasm leg.
+    crate::charge_probe::insert_probe_charges(&mut functions);
+    // T1-2 metered clones carry their base fn's declared signature — copy the
+    // sig entry so a call to `heavy__fuel` types exactly like `heavy` (without
+    // this the repr fallback typed a Result-returning clone as String).
+    {
+        let cloned: Vec<(String, _)> = functions
+            .iter()
+            .filter_map(|f| {
+                let base = f.name.strip_suffix("__fuel")?;
+                Some((f.name.as_str().to_string(), sigs.get(base)?.clone()))
+            })
+            .collect();
+        for (name, sig) in cloned {
+            sigs.insert(name, sig);
         }
     }
     // #824: see the wasm leg's call above — `Op::MakeUnique` already renders to

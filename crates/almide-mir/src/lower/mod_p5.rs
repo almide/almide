@@ -21,6 +21,10 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("value", "as_int")
             | ("value", "as_bool")
             | ("value", "as_float")
+            // fan.any_map (T2-3) builds its Result[scalar, String] through the
+            // ordinary ok()/err() ctor rails of the fan_any self-host — a
+            // `match`/`??`/auto-unwrap over the bound result EXECUTES.
+            | ("fan", "any_map")
     )
 }
 

@@ -1,0 +1,3 @@
+expects_code = "E027"
+expects_error = "fan.any changed signature"
+hint_substring = "fan.any { a(); b() }"

@@ -1,0 +1,8 @@
+// `fan` is a keyword head — `import fan` used to die with a raw parse error
+// ("Expected identifier (got Fan 'fan')") that hid the actual fix.
+import fan
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(compute.ms(50)) { 21 * 2 } ?? -1
+  println(int.to_string(r))
+}

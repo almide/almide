@@ -527,7 +527,7 @@ mod tests {
     fn module_fn(name: &str, module: &str, body: IrExpr) -> IrFunction {
         IrFunction {
             name: sym(name), params: vec![], ret_ty: Ty::String, body,
-            is_effect: false, is_async: false, is_test: false,
+            is_effect: false, is_test: false,
             generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
             visibility: IrVisibility::Public, doc: None, blank_lines_before: 0, def_id: None,
             mutated_params: vec![], module_origin: Some(module.to_string()),

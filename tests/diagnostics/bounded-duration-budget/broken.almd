@@ -1,0 +1,8 @@
+// fan.bounded budgets DETERMINISTIC compute time (Compute), not wall-clock
+// time (Duration). The two clocks never mix (ADR-0001 D2).
+fn work() -> Int = 42
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(duration.ms(100)) { work() } ?? -1
+  println(int.to_string(r))
+}

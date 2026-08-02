@@ -25,7 +25,17 @@ impl Checker {
             ExprKind::InterpolatedString { parts, .. } => {
                 for part in parts.iter_mut() {
                     if let ast::StringPart::Expr { expr } = part {
-                        self.infer_expr(expr);
+                        let t = self.infer_expr(expr);
+                        // #1051: a segment the lowering will NOT auto-? (a
+                        // CALL in an effect-fn body takes the `?`; everything
+                        // else keeps its value) prints a Result as its debug
+                        // form. Queue it for the post-solve warning so
+                        // `"${resp}"` never surprises silently.
+                        let auto_unwraps =
+                            self.env.auto_unwrap && matches!(expr.kind, ExprKind::Call { .. });
+                        if !auto_unwraps {
+                            self.deferred_result_interp_checks.push((t.clone(), expr.span));
+                        }
                     }
                 }
                 Ty::String
@@ -333,7 +343,30 @@ impl Checker {
         let ExprKind::Binary { op, left, right, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_binary called on the wrong ExprKind") };
         let lt = self.infer_expr(left);
         let rt = self.infer_expr(right);
+        // #1050: operand-position implicit unwrap. In an effect-fn body the
+        // checker strips Result from a CALL in binding position and the
+        // lowering auto-?'s it; `insert_auto_try` wraps every Result-typed
+        // call, operand position included — so the checker admitting
+        // `helper() + 1` is the same one rule as `let x = helper()`. VARs are
+        // untouched: a var's unwrap is decided at its binding, and a
+        // Result-typed var operand stays a type error (whose hint names the
+        // unwrap operators). This also closes an acceptance-parity hole:
+        // `helper() == ok(0)` used to pass check and explode in the generated
+        // Rust (auto-? unwrapped the left side under a Result comparand);
+        // it is now an honest check-time mismatch.
+        let lt = self.operand_effect_unwrap(left, lt);
+        let rt = self.operand_effect_unwrap(right, rt);
         self.pin_binop_literal_context(op, left, right, &lt, &rt);
+        // ADR-0001 S3: the time-type operator matrix intercepts BEFORE the
+        // generic paths — `Named` types pass the generic numeric check (the
+        // GPU-vector allowance), which would silently admit `T * T`.
+        {
+            let lc0 = resolve_ty(&lt, &self.uf);
+            let rc0 = resolve_ty(&rt, &self.uf);
+            if let Some(t) = self.infer_time_binop(op.as_str(), &lc0, &rc0, &lt, &rt) {
+                return t;
+            }
+        }
         match op.as_str() {
             "+" => {
                 let lc = resolve_ty(&lt, &self.uf);
@@ -350,6 +383,131 @@ impl Checker {
             "==" | "!=" | "<" | ">" | "<=" | ">=" => self.infer_binop_compare(op, left, right, &lt, &rt),
             "and" | "or" => self.infer_binop_logical(op, &lt, &rt),
             _ => lt,
+        }
+    }
+
+    /// The #1050 operand strip: `expr` is a binary operand; when it is a CALL
+    /// whose type resolved to `Result[T, E]` inside an auto-unwrap context
+    /// (an effect-fn body outside lambdas), give the operator `T` — the
+    /// lowering's `insert_auto_try` wraps exactly this shape in a `?`.
+    /// Anything else (vars, ctors, non-effect contexts) passes through.
+    fn operand_effect_unwrap(&mut self, operand: &ast::Expr, t: Ty) -> Ty {
+        if !self.env.auto_unwrap || !matches!(operand.kind, ExprKind::Call { .. }) {
+            return t;
+        }
+        let resolved = resolve_ty(&t, &self.uf);
+        resolved.result_ok_ty().unwrap_or(t)
+    }
+
+    /// ADR-0001 S3: the time-type operator matrix. `None` = no time operand
+    /// (or an op outside the matrix) — fall through to the generic paths.
+    /// Same-clock algebra: `T + T`, `T - T` (0-saturating), `T * Int` /
+    /// `Int * T`, and comparisons. Everything else on a time type is a NAMED
+    /// error: `T * T` (the Go #64420 silent-10⁹ class), clock mixing, bare
+    /// Int join, and the intentionally omitted `/` (S7).
+    fn infer_time_binop(&mut self, op: &str, lc: &Ty, rc: &Ty, lt: &Ty, rt: &Ty) -> Option<Ty> {
+        let clock = |t: &Ty| match t {
+            Ty::Named(n, args)
+                if args.is_empty()
+                    && almide_lang::time_units::TIME_MODULES
+                        .iter()
+                        .any(|(_, ty)| *ty == n.as_str()) =>
+            {
+                Some(n.as_str())
+            }
+            _ => None,
+        };
+        let module_of = |clock_name: &str| {
+            almide_lang::time_units::TIME_MODULES
+                .iter()
+                .find(|(_, ty)| *ty == clock_name)
+                .map(|(m, _)| *m)
+                .unwrap_or("compute")
+        };
+        let l = clock(lc);
+        let r = clock(rc);
+        if l.is_none() && r.is_none() {
+            return None;
+        }
+        let is_cmp = matches!(op, "==" | "!=" | "<" | ">" | "<=" | ">=");
+        if !is_cmp && !matches!(op, "+" | "-" | "*" | "/" | "%" | "^") {
+            return None;
+        }
+        let mix_err = |s: &mut Self, verb: &str| {
+            s.emit(super::err(
+                format!("cannot {verb} Compute and Duration"),
+                "The two clocks have no bridge (ADR-0001): a deterministic budget is \
+                 Compute, a wall-clock deadline is Duration — there is no conversion",
+                format!("operator {op}")));
+        };
+        match (op, l, r) {
+            ("/" | "%" | "^", _, _) => {
+                let hint = if op == "/" {
+                    "Division is intentionally omitted (ADR-0001 S7) — divide the Int \
+                     before constructing, or scale with `*`"
+                } else {
+                    "The time algebra is `T + T`, `T - T` (0-saturating), `T * Int`, \
+                     and comparisons — nothing else"
+                };
+                self.emit(super::err(
+                    format!("operator '{op}' is not defined on time types"),
+                    hint,
+                    format!("operator {op}")));
+                Some(if l.is_some() { lc.clone() } else { rc.clone() })
+            }
+            ("*", Some(_), Some(_)) => {
+                self.emit(super::err(
+                    "cannot multiply two time quantities".to_string(),
+                    "time × time has no meaning (the result would be time²) — scale \
+                     with an Int: `t * 3`",
+                    "operator *".to_string()));
+                Some(lc.clone())
+            }
+            ("*", Some(_), None) => {
+                self.constrain(rt.clone(), Ty::Int, "time scale factor");
+                Some(lc.clone())
+            }
+            ("*", None, Some(_)) => {
+                self.constrain(lt.clone(), Ty::Int, "time scale factor");
+                Some(rc.clone())
+            }
+            ("+" | "-", Some(a), Some(b)) => {
+                if a != b {
+                    mix_err(self, if op == "+" { "add" } else { "subtract" });
+                }
+                Some(lc.clone())
+            }
+            ("+" | "-", Some(a), None) | ("+" | "-", None, Some(a)) => {
+                let m = module_of(a);
+                self.emit(super::err(
+                    format!(
+                        "operator '{op}' needs two {a} values, found {} and {}",
+                        lc.display(),
+                        rc.display()
+                    ),
+                    format!("A bare number is never a time — wrap it: {m}.ms(n)"),
+                    format!("operator {op}")));
+                Some(if l.is_some() { lc.clone() } else { rc.clone() })
+            }
+            (_, Some(a), Some(b)) if is_cmp => {
+                if a != b {
+                    mix_err(self, "compare");
+                }
+                Some(Ty::Bool)
+            }
+            (_, Some(a), None) | (_, None, Some(a)) if is_cmp => {
+                let m = module_of(a);
+                self.emit(super::err(
+                    format!(
+                        "cannot compare {} with {} — both sides must be {a}",
+                        lc.display(),
+                        rc.display()
+                    ),
+                    format!("A bare number is never a time — wrap it: {m}.ms(n)"),
+                    format!("operator {op}")));
+                Some(Ty::Bool)
+            }
+            _ => None,
         }
     }
 
@@ -429,9 +587,17 @@ impl Checker {
                     | Ty::Float32 | Ty::Float64
             );
             if !is_numeric(&lc) || !is_numeric(&rc) {
+                // Same Result-specific hint as `+` (#1050): the generic text
+                // never named the unwrap operators.
+                let hint = if lc.is_result() || rc.is_result() {
+                    "Unwrap the Result operand first: `!` propagates the error (effect fn body), \
+                     `?? fallback` supplies a default, or `match` handles ok/err"
+                } else {
+                    "Use numeric types (Int or Float)"
+                };
                 self.emit(super::err(
                     format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
-                    "Use numeric types (Int or Float)", format!("operator {}", op)));
+                    hint, format!("operator {}", op)));
             }
             // A sized operand meeting a canonical `Int`/`Float` VALUE is the
             // same mistake with the wide side spelled differently (#902).
@@ -482,6 +648,24 @@ impl Checker {
         }
         // Unify left/right types so TypeVars in none/err/constructors get resolved
         self.unify_infer(lt, rt);
+        // #1050: a Result on exactly ONE side of ==/!= can never compare —
+        // `unify_infer` stays silent on a concrete mismatch, so this shape
+        // used to pass check and explode as an E0308 in the generated Rust
+        // (`helper() == ok(0)`: the operand strip / auto-? gives the call
+        // side `T` while the ctor side keeps `Result`). Report it here with
+        // the unwrap operators named.
+        if matches!(op.as_str(), "==" | "!=") {
+            let lc = resolve_ty(lt, &self.uf);
+            let rc = resolve_ty(rt, &self.uf);
+            let opaque = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+            if lc.is_result() != rc.is_result() && !opaque(&lc) && !opaque(&rc) {
+                self.emit(super::err(
+                    format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
+                    "Unwrap the Result operand first (`!` in an effect fn body, `?? fallback`, \
+                     or `match` on ok/err) — or compare two Results",
+                    format!("operator {}", op)));
+            }
+        }
         // Ordering (< <= > >=) is defined ONLY on scalar orderable
         // types. On a compound operand (Tuple/Option/Result/List/
         // Map/Set/Record/custom) the checker used to pass while

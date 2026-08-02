@@ -85,7 +85,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+        | IrExprKind::ToVec { expr } => {
             check_needs_ownership(expr, var, needs);
         }
         // Both the unwrapped value and the `??` fallback flow OUT as the result,
@@ -513,7 +513,7 @@ fn check_needs_refmut(expr: &IrExpr, var: VarId, needs: &mut bool) {
         IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+        | IrExprKind::ToVec { expr } => {
             check_needs_refmut(expr, var, needs);
         }
         IrExprKind::UnwrapOr { expr, fallback } => {
@@ -644,7 +644,7 @@ fn uses_var(expr: &IrExpr, var: VarId) -> bool {
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => uses_var(expr, var),
+        | IrExprKind::ToVec { expr } => uses_var(expr, var),
         IrExprKind::UnwrapOr { expr, fallback } => uses_var(expr, var) || uses_var(fallback, var),
         IrExprKind::List { elements } | IrExprKind::Tuple { elements }
         | IrExprKind::Fan { exprs: elements } => elements.iter().any(|e| uses_var(e, var)),

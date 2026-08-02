@@ -154,7 +154,7 @@ fn fold_expr(expr: &mut IrExpr) {
         | IrExprKind::MapAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
         | IrExprKind::MapLiteral { .. } | IrExprKind::StringInterp { .. } => fold_expr_containers(expr),
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. }
-        | IrExprKind::Try { .. } | IrExprKind::Await { .. } => fold_expr_wrap(expr),
+        | IrExprKind::Try { .. } => fold_expr_wrap(expr),
         IrExprKind::Lambda { body, .. } => fold_expr(body),
         _ => {}
     }
@@ -285,7 +285,7 @@ fn fold_expr_containers_access(expr: &mut IrExpr) {
 fn fold_expr_wrap(expr: &mut IrExpr) {
     let (IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
         | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Await { expr: e }) = &mut expr.kind else { unreachable!() };
+) = &mut expr.kind else { unreachable!() };
     fold_expr(e);
 }
 

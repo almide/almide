@@ -1,0 +1,651 @@
+//! Stage 1 charge-trace preservation gate (ALMIDE_FUEL_PROBE).
+//!
+//! Three layers, per research/spike/charge-probe/REPORT.md:
+//!   1. DYNAMIC: run each fixture on BOTH targets with the probe env and
+//!      compare the full triple (stdout, consumed, trace_hash). The trace is
+//!      order-sensitive, so a dropped, duplicated, or reordered charge on
+//!      either leg diverges here.
+//!   2. STATIC: render both legs in-process and compare the FIRST-OCCURRENCE
+//!      charge-site sequences extracted from the artifacts (the certificate
+//!      form — survives legitimate BCE body duplication, catches drops and
+//!      reorders at emit time, before anything runs).
+//!   3. WALL HONESTY: a fixture whose native leg walls must FAIL LOUDLY under
+//!      the probe (the silent v0-fallback miss the spike discovered), never
+//!      silently report nothing.
+//!
+//! The probe env is passed to SUBPROCESSES only (layer 1/3) or set in this
+//! test binary's own process (layer 2) — integration tests are separate
+//! processes, so no other test binary observes it.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn almide_bin() -> String {
+    if let Ok(bin) = std::env::var("ALMIDE_BIN") {
+        return bin;
+    }
+    let cargo_bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide");
+    if cargo_bin.exists() {
+        return cargo_bin.to_str().unwrap().to_string();
+    }
+    "almide".to_string()
+}
+
+fn fixtures_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("research/spike/charge-probe/fixtures")
+}
+
+/// Resolve a fixture by its gate-internal name. The contract-formalized
+/// fixtures (T4-3) moved to `spec/wasm_cross/` under their C-NNN names; the
+/// probe-only ones stay in the spike directory.
+fn fixture_path(name: &str) -> PathBuf {
+    let relocated = match name {
+        "boundary" => Some("fuel_bounded_boundary"),
+        "race_boundary" => Some("fuel_race_boundary"),
+        "time_ops" => Some("time_ops_algebra"),
+        "negative_trap" => Some("time_negative_trap"),
+        "negative_scale" => Some("time_negative_scale"),
+        "saturate" => Some("time_saturate"),
+        "block_body" => Some("fuel_block_body"),
+        "bare_result" => Some("fuel_bare_result"),
+        "race_err_skip" => Some("fuel_race_err_skip"),
+        "settle_tuple" => Some("fan_settle_tuple"),
+        "divergence_cut" => Some("fuel_divergence_cut"),
+        "trap_cut" => Some("fuel_trap_cut"),
+        "trap_window" => Some("fuel_trap_window"),
+        "dyn_charge" => Some("fuel_dyn_charge"),
+        "timeout_ends" => Some("fuel_timeout_ends"),
+        _ => None,
+    };
+    match relocated {
+        Some(n) => Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("spec/wasm_cross/{n}.almd")),
+        None => fixtures_dir().join(format!("{name}.almd")),
+    }
+}
+
+fn wasmtime_available() -> bool {
+    Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
+}
+
+/// (stdout, probe line) from one probed run; None probe if absent.
+fn probed_run(fixture: &Path, wasm: bool) -> (bool, String, Option<String>) {
+    let mut cmd = Command::new(almide_bin());
+    cmd.arg("run").arg(fixture);
+    if wasm {
+        cmd.args(["--target", "wasm"]);
+    }
+    cmd.env("ALMIDE_FUEL_PROBE", "1");
+    let out = cmd.output().expect("failed to spawn almide");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let probe = stderr
+        .lines()
+        .rev()
+        .find(|l| l.starts_with("__ALMD_PROBE "))
+        .map(|l| l.trim().to_string());
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        probe,
+    )
+}
+
+/// The fixtures whose native leg renders on the v1 trust spine (comparable),
+/// asserted MATCH in the spike. `list`/`bce` wall natively — layer 3 covers them.
+const COMPARABLE: &[&str] =
+    &["loop", "recursion", "branch", "strings", "mutual", "switch", "fusion", "nested"];
+const NATIVE_WALLED: &[&str] = &["list", "bce"];
+
+/// ONE combined test: the in-process renders need the probe env var, and
+/// `set_var` is unsafe under concurrent threads (edition 2024) — a single
+/// test fn keeps this binary effectively single-threaded while it is set.
+#[test]
+fn charge_probe_gate() {
+    // SAFETY: this is the only test in this binary, so no other thread is
+    // reading the environment while it is written.
+    unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
+    cm1_divisor_single_sourced_in_both_artifacts();
+    cm1_calibration_within_declared_band();
+    static_certificate_first_occurrence_equality();
+    native_wall_fails_loudly_under_probe();
+    dynamic_three_point_comparison();
+    bounded_deterministic_across_targets();
+    race_deterministic_across_targets();
+    time_ctor_guard_cross_target();
+    time_report_prints_dual_time();
+    interp_third_vote_on_metered_fixtures();
+    metered_clones_keep_nonregion_paths_charge_free();
+    timeout_deterministic_ends_and_replay();
+}
+
+/// T5-1/T5-2: the wall-deadline's two deterministic ends agree everywhere,
+/// and a RECORDED omega replays byte-identically — including RECORD ON
+/// NATIVE, REPLAY ON WASM (the ADR-0001 S8 / claim-4 shape). The borderline
+/// live verdict itself is omega-relative and deliberately NOT asserted.
+fn timeout_deterministic_ends_and_replay() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let run_env = |name: &str, wasm: bool, envs: &[(&str, &str)]| {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(fixture_path(name));
+        if wasm {
+            cmd.args(["--target", "wasm"]);
+        }
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        cmd.env_remove("ALMIDE_OMEGA");
+        cmd.env_remove("ALMIDE_OMEGA_RECORD");
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        let out = cmd.output().expect("spawn almide");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+    // Deterministic ends, both targets.
+    for wasm in [false, true] {
+        let leg = if wasm { "wasm" } else { "native" };
+        let (code, stdout, _) = run_env("timeout_ends", wasm, &[]);
+        assert_eq!(code, Some(0), "timeout_ends {leg}: must succeed");
+        assert_eq!(
+            stdout, "496551\n-1\n42",
+            "timeout_ends {leg}: deterministic ends drifted"
+        );
+    }
+    // Record on native: the borderline fixture prints its omega ordinals.
+    let (code, _, stderr) = run_env("omega_replay", false, &[("ALMIDE_OMEGA_RECORD", "1")]);
+    assert_eq!(code, Some(0), "omega record run failed");
+    let omega = stderr
+        .lines()
+        .find_map(|l| l.strip_prefix("__ALMD_OMEGA "))
+        .and_then(|n| n.trim().parse::<i64>().ok())
+        .expect("no __ALMD_OMEGA line recorded");
+    // Replay the recorded omega on BOTH targets + a repeat: byte-identical.
+    let omega_s = omega.to_string();
+    let envs: &[(&str, &str)] = &[("ALMIDE_OMEGA", omega_s.as_str())];
+    let (c1, n1, _) = run_env("omega_replay", false, envs);
+    let (c2, n2, _) = run_env("omega_replay", false, envs);
+    let (c3, w1, _) = run_env("omega_replay", true, envs);
+    assert_eq!(c1, Some(0));
+    assert_eq!((c1, &n1), (c2, &n2), "native replay is not stable");
+    assert_eq!((c1, &n1), (c3, &w1), "cross-target replay diverged (claim 4)");
+}
+
+/// T1-2: in BUDGET-ONLY mode (no probe), every charge in BOTH artifacts sits
+/// inside a region fn (`__almd_bounded_*`) or a `__fuel` clone — the
+/// non-region paths of a budget-using program pay ZERO metering.
+fn metered_clones_keep_nonregion_paths_charge_free() {
+    // Budget-only mode: the probe env must be OFF for these in-process
+    // renders (this test binary is single-threaded by design — see the
+    // combined-test SAFETY note).
+    unsafe { std::env::remove_var("ALMIDE_FUEL_PROBE") };
+    let source = std::fs::read_to_string(fixture_path("bounded")).unwrap();
+    let metered_fn = |name: &str| name.contains("__almd_bounded_") || name.contains("__fuel");
+
+    let rs = almide_mir::pipeline::try_render_rust_source(&source)
+        .expect("bounded: native render failed");
+    assert!(
+        rs.contains("__almd_charge("),
+        "native: budget-only mode emitted no charges at all (vacuous check)"
+    );
+    for block in rs.split("\nfn ").skip(1) {
+        let name = block.split(['(', '<']).next().unwrap_or("");
+        if block.contains("__almd_charge(") && name != "__almd_charge" {
+            assert!(
+                metered_fn(name),
+                "native: non-region fn `{name}` carries a charge in budget-only mode"
+            );
+        }
+    }
+
+    let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
+    let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
+        .expect("bounded: wasm render failed");
+    assert!(
+        wat.contains("global.set $__fuel (i64.sub (global.get $__fuel)"),
+        "wasm: budget-only mode emitted no charges at all (vacuous check)"
+    );
+    for block in wat.split("(func $").skip(1) {
+        let name = block.split([' ', '\n', '(']).next().unwrap_or("");
+        if block.contains("global.set $__fuel (i64.sub (global.get $__fuel)") {
+            assert!(
+                metered_fn(name),
+                "wasm: non-region fn `{name}` carries a charge in budget-only mode"
+            );
+        }
+    }
+    unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
+}
+
+/// T3-4: the interp's deterministic meter (budget prims + W1 charge mirror)
+/// gives a REAL third vote on the metered fixtures — including the
+/// unit-exact boundary sweeps, where any drift in the interp's charge
+/// placement flips a verdict. Compared against the native leg (which the
+/// dynamic layer already pins against wasm).
+fn interp_third_vote_on_metered_fixtures() {
+    let dir = fixtures_dir();
+    for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip", "divergence_cut", "trap_cut", "dyn_charge"] {
+        let source = std::fs::read_to_string(fixture_path(name)).unwrap();
+        let ir = lower_for_interp(&source);
+        let outcome = almide_interp::Interpreter::new(&ir).run_main();
+        let interp_out = match &outcome.status {
+            almide_interp::RunStatus::Ok => outcome.stdout.trim().to_string(),
+            other => panic!("{name}: interp did not complete cleanly: {other:?}"),
+        };
+        let native = {
+            let mut cmd = Command::new(almide_bin());
+            cmd.arg("run").arg(fixture_path(name));
+            cmd.env_remove("ALMIDE_FUEL_PROBE");
+            let out = cmd.output().expect("spawn almide");
+            assert!(out.status.success(), "{name}: native run failed");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        assert_eq!(
+            interp_out, native,
+            "{name}: the interp's third vote DISSENTS from the backends"
+        );
+    }
+}
+
+/// The 3-way harness's IR recipe (tests/wasm_runtime_test_parts/p4_corpus.rs):
+/// parse → check → lower → link, at the pre-codegen cut point.
+fn lower_for_interp(source: &str) -> almide_ir::IrProgram {
+    let tokens = almide::lexer::Lexer::tokenize(source);
+    let mut parser = almide::parser::Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    assert!(parser.errors.is_empty(), "parse errors: {:?}", parser.errors);
+    let canon = almide::canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = almide::check::Checker::from_env(canon.env);
+    let diags = checker.infer_program(&mut prog);
+    let errs: Vec<_> = diags
+        .iter()
+        .filter(|d| d.level == almide::diagnostic::Level::Error)
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(errs.is_empty(), "type errors at interp cut point: {errs:?}");
+    let mut ir = almide_frontend::lower::lower_program(&prog, &checker.env, &checker.type_map);
+    almide_driver::link_ir(&mut ir);
+    ir
+}
+
+/// T3-9: `--time-report` prints the ADR-0001 D5 dual-time line (deterministic
+/// + wall), swallows the raw probe line, and reports the SAME deterministic
+/// time on both targets.
+fn time_report_prints_dual_time() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let fixture = fixtures_dir().join("loop.almd");
+    let det_of = |wasm: bool| {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg("--time-report");
+        if wasm {
+            cmd.args(["--target", "wasm"]);
+        }
+        cmd.arg(&fixture);
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        let out = cmd.output().expect("spawn almide");
+        assert!(out.status.success(), "time-report run failed");
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(
+            !stderr.contains("__ALMD_PROBE"),
+            "raw probe line must be swallowed, got: {stderr}"
+        );
+        let line = stderr
+            .lines()
+            .find(|l| l.starts_with("time: "))
+            .unwrap_or_else(|| panic!("dual-time line missing, got: {stderr}"))
+            .to_string();
+        assert!(line.contains("deterministic (≈"), "malformed report: {line}");
+        assert!(line.contains("ms wall here)"), "malformed report: {line}");
+        line.split("deterministic").next().unwrap().to_string()
+    };
+    let n = det_of(false);
+    let w = det_of(true);
+    assert_eq!(n, w, "deterministic time diverged between targets");
+}
+
+/// ADR-0001 S3 (T3-1): the time-constructor guard — a negative argument is a
+/// deterministic §13 abort (stderr message + exit 1), an overflowing
+/// construction saturates to i64::MAX — with IDENTICAL observations on both
+/// targets (S6-2 / S6-5).
+fn time_ctor_guard_cross_target() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let dir = fixtures_dir();
+    let run = |name: &str, wasm: bool| {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(fixture_path(name));
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        if wasm {
+            cmd.args(["--target", "wasm"]);
+        }
+        let out = cmd.output().expect("spawn almide");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+    for wasm in [false, true] {
+        let leg = if wasm { "wasm" } else { "native" };
+        let (code, stdout, stderr) = run("negative_trap", wasm);
+        assert_eq!(code, Some(1), "negative_trap {leg}: must exit 1");
+        assert!(stdout.is_empty(), "negative_trap {leg}: must die before printing");
+        assert!(
+            stderr.contains("Error: negative time: compute.us(-5)"),
+            "negative_trap {leg}: §13 message missing, got: {stderr}"
+        );
+        let (code, stdout, _) = run("saturate", wasm);
+        assert_eq!(code, Some(0), "saturate {leg}: must succeed");
+        assert_eq!(stdout, "42\n42", "saturate {leg}: saturated budgets must admit the work");
+        // T2-1: full block bodies/arms — free-var outlining, bind statements
+        // are charge-free (exact boundary preserved), zero-budget constant.
+        let (code, stdout, _) = run("block_body", wasm);
+        assert_eq!(code, Some(0), "block_body {leg}: must succeed");
+        assert_eq!(
+            stdout, "11\n496551\n42\n873250",
+            "block_body {leg}: block-body semantics drifted"
+        );
+        // T1-3: the BARE forms produce a real Result on both targets; the
+        // exact boundary shows the wrap costs the region nothing.
+        let (code, stdout, _) = run("bare_result", wasm);
+        assert_eq!(code, Some(0), "bare_result {leg}: must succeed");
+        assert_eq!(
+            stdout, "496551\nfan.bounded: budget exhausted\n873250",
+            "bare_result {leg}: bare-form semantics drifted"
+        );
+        // T2-4: settle block → tuple of per-arm Results (heterogeneous arms,
+        // effect-arm Err captured, tuple-pattern match).
+        let (code, stdout, _) = run("settle_tuple", wasm);
+        assert_eq!(code, Some(0), "settle_tuple {leg}: must succeed");
+        assert_eq!(
+            stdout, "5\ndisk-7\ncfg failed\nnet degraded: net down",
+            "settle_tuple {leg}: tuple-settle semantics drifted"
+        );
+        // T1-1 strict cut: a diverging body is CUT (Err + the program lives).
+        let (code, stdout, _) = run("divergence_cut", wasm);
+        assert_eq!(code, Some(0), "divergence_cut {leg}: must terminate and succeed");
+        assert_eq!(stdout, "-1\n42", "divergence_cut {leg}: cut semantics drifted");
+        // T1-1 trap window, OUTSIDE: the loser's trap is cut before it fires.
+        let (code, stdout, _) = run("trap_cut", wasm);
+        assert_eq!(code, Some(0), "trap_cut {leg}: must succeed");
+        assert_eq!(stdout, "873250", "trap_cut {leg}: window semantics drifted");
+        // T1-1 trap window, INSIDE: the inlined trap fires identically.
+        let (code, _, stderr) = run("trap_window", wasm);
+        assert_eq!(code, Some(1), "trap_window {leg}: must abort");
+        assert!(
+            stderr.contains("Error: division by zero"),
+            "trap_window {leg}: §13 trap message missing, got: {stderr}"
+        );
+        // T3-5: the dynamic concat charge — exhaust through 750ns (250
+        // units), admitted from 760ns (253 >= the exact 252-unit spend).
+        let (code, stdout, _) = run("dyn_charge", wasm);
+        assert_eq!(code, Some(0), "dyn_charge {leg}: must succeed");
+        assert_eq!(stdout, "741\n751\n760\n770", "dyn_charge {leg}: dyn cost drifted");
+        // T2-2: race arms may return Result — Err self-disqualifies.
+        let (code, stdout, _) = run("race_err_skip", wasm);
+        assert_eq!(code, Some(0), "race_err_skip {leg}: must succeed");
+        assert_eq!(
+            stdout, "873250\n-1\n873250",
+            "race_err_skip {leg}: Err-skip semantics drifted"
+        );
+        // S3 (T2-5): the operator algebra at UNIT precision — every digit is
+        // an exact-boundary verdict (see the fixture header for the map).
+        let (code, stdout, _) = run("time_ops", wasm);
+        assert_eq!(code, Some(0), "time_ops {leg}: must succeed");
+        assert_eq!(
+            stdout, "901011\n900100",
+            "time_ops {leg}: S3 algebra verdicts drifted"
+        );
+        let (code, stdout, stderr) = run("negative_scale", wasm);
+        assert_eq!(code, Some(1), "negative_scale {leg}: must exit 1");
+        assert!(stdout.is_empty(), "negative_scale {leg}: must die before printing");
+        assert!(
+            stderr.contains("Error: negative time scale: -2"),
+            "negative_scale {leg}: §13 message missing, got: {stderr}"
+        );
+    }
+}
+
+/// CM-1 consistency (T3-6): both rendered artifacts must divide the budget by
+/// the ONE exported constant. The renderers now interpolate
+/// `charge_probe::CM1_NS_PER_CHARGE` (wasm) / inject it into the shim template
+/// (native), so a drift can only mean someone reintroduced a literal — this
+/// asserts the artifacts, not the source.
+fn cm1_divisor_single_sourced_in_both_artifacts() {
+    let cm1 = almide_mir::charge_probe::CM1_NS_PER_CHARGE;
+    let source = std::fs::read_to_string(fixtures_dir().join("bounded.almd")).unwrap();
+    let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
+    let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
+        .expect("bounded: wasm render failed");
+    let rs = almide_mir::pipeline::try_render_rust_source(&source)
+        .expect("bounded: native render failed");
+    assert!(
+        wat.contains(&format!("(i64.div_s (local.get $l0) (i64.const {cm1}))"))
+            || wat.contains(&format!("(i64.const {cm1})")),
+        "wasm BudgetEnter does not divide by CM1_NS_PER_CHARGE={cm1}"
+    );
+    assert!(
+        rs.contains(&format!("budget_ns / {cm1}")),
+        "native BUDGET_SHIM does not divide by CM1_NS_PER_CHARGE={cm1}"
+    );
+}
+
+/// D5 calibration gate (T3-7): declared deterministic time (consumed units ×
+/// CM1_NS_PER_CHARGE) must stay within the ADR-0001 D5 declared 5x band of the
+/// measured wall clock on the reference workload — the standing falsifier that
+/// caught the v0 draft constant (1000ns/unit, 21x out). Native release build
+/// with the probe baked in; min-of-3 wall time (noise only ADDS time), consumed
+/// units read from the binary's own probe line, so the unit count is the
+/// artifact's, never hand-derived.
+fn cm1_calibration_within_declared_band() {
+    let fixture = fixtures_dir().join("calibrate.almd");
+    let bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/tmp/calibrate_gate_bin");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    let out = Command::new(almide_bin())
+        .arg("build")
+        .arg(&fixture)
+        .arg("--release")
+        .arg("-o")
+        .arg(&bin)
+        .env("ALMIDE_FUEL_PROBE", "1")
+        .output()
+        .expect("spawn almide build");
+    assert!(
+        out.status.success(),
+        "calibrate: build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let run_once = || {
+        let t0 = std::time::Instant::now();
+        let out = Command::new(&bin).output().expect("spawn calibrate bin");
+        let wall_ns = t0.elapsed().as_nanos() as i64;
+        assert!(out.status.success(), "calibrate: run failed");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let consumed: i64 = stderr
+            .lines()
+            .rev()
+            .find(|l| l.starts_with("__ALMD_PROBE "))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|s| s.parse().ok())
+            .expect("calibrate: probe line missing from built binary");
+        (wall_ns, consumed)
+    };
+    run_once(); // warmup (page cache, first-touch)
+    let (mut wall_ns, mut consumed) = run_once();
+    for _ in 0..2 {
+        let (w, c) = run_once();
+        if w < wall_ns {
+            wall_ns = w;
+            consumed = c;
+        }
+    }
+    let declared_ns = consumed * almide_mir::charge_probe::CM1_NS_PER_CHARGE;
+    let ratio = wall_ns as f64 / declared_ns as f64;
+    assert!(
+        ratio < 5.0 && ratio > 0.2,
+        "D5 band violated: consumed={consumed} units, declared={declared_ns}ns, \
+         wall={wall_ns}ns, ratio={ratio:.2} — CM1_NS_PER_CHARGE needs recalibration"
+    );
+}
+
+/// Stage 3: `fan.race` — winner selection ((spend, index) lex-min), tie →
+/// source order, budget filtering, and the winner-appearance boundary:
+/// heavy(500) costs exactly 502 units = 1506ns at CM-1 v0.3 (3ns/unit), so the
+/// sweep flips from all-exhausted to arm-1-wins at `compute.ns(1506)` — the
+/// exact same nanosecond on BOTH targets.
+fn race_deterministic_across_targets() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let dir = fixtures_dir();
+    for name in ["race", "race_boundary"] {
+        let fixture = fixture_path(name);
+        let plain = |wasm: bool| {
+            let mut cmd = Command::new(almide_bin());
+            cmd.arg("run").arg(&fixture);
+            cmd.env_remove("ALMIDE_FUEL_PROBE");
+            if wasm {
+                cmd.args(["--target", "wasm"]);
+            }
+            let out = cmd.output().expect("spawn almide");
+            assert!(out.status.success(), "{name}: run failed ({})", if wasm { "wasm" } else { "native" });
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let n = plain(false);
+        let w = plain(true);
+        assert_eq!(n, w, "{name}: race outputs diverged across targets");
+        let (n_ok, _, n_probe) = probed_run(&fixture, false);
+        let (w_ok, _, w_probe) = probed_run(&fixture, true);
+        assert!(n_ok && w_ok, "{name}: probed run failed");
+        assert_eq!(n_probe, w_probe, "{name}: probe triple diverged over race");
+    }
+    let out = {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(fixture_path("race_boundary"));
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
+    };
+    assert!(out.contains("15051"), "ns=1505 must have no winner (flag 1)");
+    assert!(out.contains("15060"), "ns=1506 must produce the arm-1 winner (flag 0)");
+    assert!(!out.contains("15061"), "ns=1506 must not be winnerless");
+}
+
+/// Stage 2: `fan.bounded` — result equality WITHOUT the probe (the shipped
+/// semantics), probe-triple equality WITH it, and the deterministic budget
+/// boundary: heavy(1000) costs exactly 1002 charge units (entry + 1001 loop
+/// heads) = 3006ns at CM-1 v0.3 (3ns/unit), so `compute.ns(3005)` exhausts and
+/// `compute.ns(3006)` succeeds — a 1ns budget difference flips the verdict at
+/// the SAME nanosecond on both targets. That flip is the Stage 2 claim.
+fn bounded_deterministic_across_targets() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let dir = fixtures_dir();
+    for name in ["bounded", "boundary"] {
+        let fixture = fixture_path(name);
+        // Plain runs (no probe env): the user-facing semantics.
+        let plain = |wasm: bool| {
+            let mut cmd = Command::new(almide_bin());
+            cmd.arg("run").arg(&fixture);
+            cmd.env_remove("ALMIDE_FUEL_PROBE");
+            if wasm {
+                cmd.args(["--target", "wasm"]);
+            }
+            let out = cmd.output().expect("spawn almide");
+            assert!(out.status.success(), "{name}: run failed ({})", if wasm { "wasm" } else { "native" });
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let n = plain(false);
+        let w = plain(true);
+        assert_eq!(n, w, "{name}: bounded outputs diverged across targets");
+        // Probed runs: the (consumed, trace) pair must also agree.
+        let (n_ok, _, n_probe) = probed_run(&fixture, false);
+        let (w_ok, _, w_probe) = probed_run(&fixture, true);
+        assert!(n_ok && w_ok, "{name}: probed run failed");
+        assert_eq!(n_probe, w_probe, "{name}: probe triple diverged over bounded");
+    }
+    // The flip point itself: EXHAUST through ns=3005, OK from ns=3006.
+    let out = {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(fixture_path("boundary"));
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
+    };
+    assert!(out.contains("30051"), "ns=3005 must exhaust (flag 1)");
+    assert!(out.contains("30060"), "ns=3006 must succeed (flag 0)");
+    assert!(!out.contains("30061"), "ns=3006 must not exhaust");
+}
+
+fn dynamic_three_point_comparison() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let dir = fixtures_dir();
+    for name in COMPARABLE {
+        let fixture = fixture_path(name);
+        let (n_ok, n_out, n_probe) = probed_run(&fixture, false);
+        let (w_ok, w_out, w_probe) = probed_run(&fixture, true);
+        assert!(n_ok, "{name}: native run failed");
+        assert!(w_ok, "{name}: wasm run failed");
+        let n_probe = n_probe.unwrap_or_else(|| panic!("{name}: native probe line missing"));
+        let w_probe = w_probe.unwrap_or_else(|| panic!("{name}: wasm probe line missing"));
+        assert_eq!(n_out, w_out, "{name}: stdout diverged");
+        assert_eq!(
+            n_probe, w_probe,
+            "{name}: charge-trace preservation FALSIFIED — (consumed, trace) diverged"
+        );
+    }
+}
+
+fn native_wall_fails_loudly_under_probe() {
+    let dir = fixtures_dir();
+    for name in NATIVE_WALLED {
+        let fixture = fixture_path(name);
+        let (ok, _out, probe) = probed_run(&fixture, false);
+        assert!(
+            !ok,
+            "{name}: expected the probe to REFUSE the v0 fallback, but the run succeeded \
+             (a silent unmeasured run is the exact miss the probe exists to prevent)"
+        );
+        assert!(probe.is_none(), "{name}: a walled run must not emit a probe line");
+    }
+}
+
+fn static_certificate_first_occurrence_equality() {
+    let dir = fixtures_dir();
+    for name in COMPARABLE {
+        let source = std::fs::read_to_string(fixture_path(name)).unwrap();
+        let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
+        let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
+            .unwrap_or_else(|e| panic!("{name}: wasm render failed: {e:?}"));
+        let rs = almide_mir::pipeline::try_render_rust_source(&source)
+            .unwrap_or_else(|e| panic!("{name}: native render failed: {e:?}"));
+        let w_sites =
+            almide_mir::charge_probe::first_occurrences(&almide_mir::charge_probe::wasm_charge_sites(&wat));
+        let n_sites = almide_mir::charge_probe::first_occurrences(
+            &almide_mir::charge_probe::native_charge_sites(&rs),
+        );
+        assert!(!w_sites.is_empty(), "{name}: no charges reached the wasm artifact");
+        // The wasm leg links self-hosted runtime fns lowered THROUGH the same
+        // charge-bearing path only for user fns; native meters user fns only.
+        // The preserved claim is over the COMMON (user-fn) sites: every native
+        // site must appear in wasm in the same first-occurrence order.
+        let w_common: Vec<u32> =
+            w_sites.iter().copied().filter(|s| n_sites.contains(s)).collect();
+        assert_eq!(
+            n_sites, w_common,
+            "{name}: static charge certificate FALSIFIED — user-fn site order diverged"
+        );
+    }
+}

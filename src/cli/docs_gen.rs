@@ -249,6 +249,11 @@ fn check_stdlib_fn_count() -> Vec<String> {
         Err(e) => return vec![format!("cannot read docs/stdlib: {e}")],
     };
     modules.sort();
+    // The clock-constructor pages (compute / duration) document CHECKER
+    // surface, not stdlib module interfaces — recognized via the same table
+    // the checker resolves them from (ADR-0001), so this carve-out cannot
+    // drift into a hand list.
+    modules.retain(|m| almide_lang::time_units::clock_type_of_module(m).is_none());
     let mut total = 0usize;
     for m in &modules {
         let (file, lenient) = super::compile::resolve_module_to_file(m);

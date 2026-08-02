@@ -3,9 +3,19 @@
 
 > 非同期設計の憲章。この一枚で全体が読める。深掘りは末尾の文書地図から。
 
+> **実装状況（2026-08-03、branch `worktree-stage1-charge-probe` — 食い違いは
+> BURNDOWN/契約台帳が正。憲章本文は起草時のまま）**: §7 の計画は
+> **Lane 1（Wave 1 → Stage 1 → 2 → 3）・Lane 2 の B2（fan.timeout）・
+> Lane 3 の D（dojo async バンク、Almide 側 7/7）が完了**。§3 の matrix は
+> race の mapper 形（T7-1）まで含め全セル確定（`tests/fan_surface_matrix_test.rs`
+> が機械固定）。§6 の 5 文は: **1–3 = 解禁条件成立**（Lean 7 定理 + C-202..C-208 +
+> 3-way gates）、**4 = timeout-ω の record/replay に射程を限定すれば真**
+> （効果応答テープ = B1 の全域は未着手）、**5 = Almide 単独 MSR は取得済み、
+> 全文解禁には同一モデル比較 lang-bench(async) が残る**。C（KPN）は設計どおり地平。
+
 ## 0. 一文
 
-**壁時計は観測を決めない。言語の時間基底は論理時間（fuel）であり、環境の時間は宣言された入力としてのみ入る。**
+**壁時計は観測を決めない。言語の時間基底は論理時間であり、環境の時間は宣言された入力としてのみ入る。**
 
 ここへたどり着くまでに、Almide は非同期の構文を二度削除している。足し算ではなく引き算でできた歴史であり、三度目にあたる本設計は、二度の削除が何を診断していたのかという問いへの答えでもある。
 
@@ -76,19 +86,23 @@ quadrantChart
 fuel が手に入った今、設計の到達点は 1 行で示せる。
 
 ```almide
-let plan = fan.bounded(fuel: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
+let plan = fan.bounded(compute.ms(100)) { optimal_plan(g) } ?? greedy_plan(g)
 ```
 
-10 万 fuel 以内に厳密解が出ればそれを使い、出なければ貪欲解に落ちる。計算量の上限とフォールバックが、新しいキーワードなしに 1 行へ畳まれた。race も同じ調子で書ける。
+100 ミリ秒ぶんの計算で厳密解が出ればそれを使い、出なければ貪欲解に落ちる。計算量の上限とフォールバックが、新しいキーワードなしに 1 行へ畳まれた。race も同じ調子で書ける。
 
 ```almide
-let ans = fan.race(fuel: 1_000_000) {
+let ans = fan.race {
   exact_solve(input)
   heuristic_solve(input)
 } ?? default_answer
 ```
 
-2 本の枝を走らせ、より少ない fuel で成功した方を採る。await はどこにもない。Future も task handle もない。書くのは「何を並べるか」と「どう選ぶか」だけである。
+2 本の枝を走らせ、より少ない計算で成功した方を採る。予算は書いていない — race の
+選択は予算を要さず、予算は発散が心配な枝構成に付ける任意のガードである
+（数字の出どころ問題ごと精査した記録は [ticks-interface-audit.md](./ticks-interface-audit.md)）。
+await はどこにもない。Future も task handle もない。書くのは「何を並べるか」と
+「どう選ぶか」だけである。
 
 その「どう選ぶか」= head、「どう並べるか」= form の直積 1 枚が、fan v2 の表面のすべてになる。
 
@@ -97,9 +111,9 @@ let ans = fan.race(fuel: 1_000_000) {
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 |
 | settle | 全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 |
 | any | index 最小の成功（逐次フォールバック） | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 |
-| race | (spend, index) 最小の成功 | `fan.race(fuel: n) { a; b }` → `T` | `fan.race(fuel: n, xs, f)` → `T` | **pure**（Rung 0） |
-| bounded | 単一 body の計量 | `fan.bounded(fuel: n) { body }` → `T` | —（map と合成） | **pure** |
-| timeout | 環境が切る | `fan.timeout(ms: n) { body }` → `T` | — | oracle 可（Stage 4） |
+| race | (spend, index) 最小の成功 | `fan.race { a; b }` → `T`（予算は任意ガード） | `fan.race(xs, f)` → `T` | **pure**（Rung 0） |
+| bounded | 単一 body の計量 | `fan.bounded(compute.ms(100)) { body }` → `T` | —（map と合成） | **pure** |
+| timeout | 環境が切る | `fan.timeout(duration.s(5)) { body }` → `T` | — | oracle 可（Stage 4） |
 
 六つの head を並べると、軸は一本しかない。any は index を最小化し、race は fuel を最小化する。all と settle は選択しない。「何を最小化するか」だけが head の違いであり、head を足すときはこの表に行を足して全列を埋めることが受理条件になる（matrix gate）。
 
@@ -119,7 +133,9 @@ fan.any(mirrors, (m) => fetch(m))
 
 動的な場合も「thunk リストを組み立ててから渡す」2 段が「リスト + mapper」の 1 段になり、コードは厳密に短くなる。おまけも付く。動的 thunk リストは wasm 側で `List[funcref]` が表現できず wall に落ちていたが、mapper form は fan.map と同じ「データ + 閉包 1 個」の形なので、この wall クラスは構文の変更だけで消滅する。契約も form 単位に揃う — block の arm は `fan {}` と同じ auto-unwrap、mapper は `fan.map` と同じ Result 必須。head ごとの auto-wrap 例外はゼロになる。
 
-`fuel:` のラベルは飾りではない。`timeout(1000)` の 1000 をミリ秒と読まない人間はいない — それが 0.29.0 で fan.timeout を撤去した教訓の半分だった。ラベルを必須にすれば全呼び出しサイトに fuel の語が現れ、単位の誤読は構文レベルで死ぬ。ならば言語にラベル引数機構を足したのか、と思うだろう。足していない。fan の head は関数呼び出しではなく構文なので、`fuel:` と `ms:` は fan 文法自身の要素として供給される。汎用ラベル引数という言語全体の問いを、fan 経由で密輸しない。
+予算が `compute.ms(100)` と時間で書けるのは、妥協ではなく定義である。ここでの「時間」は壁時計ではない — `ulimit -t` の CPU 秒が待ち時間を数えないのと同じ意味で、決定的時計は計算した分だけを数える（CPU 時間との違いは、実測をやめて凍結したコスト表で計算するので**マシンの速さにも依存しない**こと。3 者の比較は [ADR-0001 の前提節](../../adr/0001-deterministic-time-units.md#前提--時間は-1-つではない) にある）。**論理時計の単位は時間そのもの** — CM-1 は各 op に「凍結された Almide 抽象機械での所要時間」を割り当て、消費の総和はひとつの持続時間になる。それは (プログラム, 入力) の関数で、どのホストでも同じ値を返す。数えるものは決定的、呼ぶ名前は時間。この 2 つが分離できることは機械検査で担保されている — Lean の 7 定理も 74,898 構成の合流ゲートも、単位に一切依存していない。
+
+裸の整数は書けない（`expected Compute, found Int`）。単位のない `1000` が「ミリ秒か秒か」で 1000 倍ずれる事故は Go の `time.Sleep(10)`（10 ナノ秒）から Jenkins の「300 秒が 3.5 日」まで実例に事欠かず、単位を型に載せると型検査で死ぬ。新しいリテラル構文は追加していない — `compute.ms(n)` は現行構文のモジュール関数呼び出しであり、lexer も parser も触らずに済む。壁時計の `fan.timeout(duration.s(5))` とは**型が違う** — 単位は共有し、どちらの時計を読むかは head が名乗り、変数を経由した混入は型が止める。決定の全体と、他言語 15 系の調査に基づく根拠は [ADR-0001](../../adr/0001-deterministic-time-units.md) にある。
 
 何を入れないかも、この文法の一部である。
 
@@ -139,17 +155,17 @@ flowchart TD
     Q1 -->|"全部"| ALL["fan { } / fan.map"]
     Q1 -->|"全部、失敗も含めて"| SETTLE["fan.settle"]
     Q1 -->|"最初の成功"| ANY["fan.any"]
-    Q1 -->|"最安の成功"| RACE["fan.race(fuel: n)"]
-    Q1 -->|"1 つに計算量の上限"| BOUNDED["fan.bounded(fuel: n)"]
+    Q1 -->|"最安の成功"| RACE["fan.race（予算は任意）"]
+    Q1 -->|"1 つに計算量の上限"| BOUNDED["fan.bounded(compute.ms(n))"]
 ```
 
 形はもう 1 問で決まる — 枝を静的に並べるなら block、データから量産するなら mapper。await の置き場所を誤るというクラスの間違いは、選択肢ごと存在しない。lexer に async / await のトークンはなく、AST に残った死んだ variant（`ExprKind::Await`、`r#async` フィールド）も Wave 1 で撤去される。「文法から書けない」は「表現できない」へ格上げされる。
 
-ただし、冒頭の 1 行にはまだ答えていない問いが埋まっている。`optimal_plan(g)` が途中でゼロ除算を踏んだら、どうなるのか。race の枝の途中で 10 万 fuel が尽きたら、「途中」とはどの時点のことなのか。表のどの列にもその答えはない。文法は時計を持たないからだ。答えるには、何 tick 目に何が起きたかを言い切れる装置 — 文法の一段下で回っている論理時計 — が要る。
+ただし、冒頭の 1 行にはまだ答えていない問いが埋まっている。`optimal_plan(g)` が途中でゼロ除算を踏んだら、どうなるのか。race の枝の途中で予算が尽きたら、「途中」とはどの時点のことなのか。表のどの列にもその答えはない。文法は時計を持たないからだ。答えるには、決定的時計の何時点で何が起きたかを言い切れる装置 — 文法の一段下で回っている論理時計 — が要る。
 
 ## 4. 意味論 — 五本の柱
 
-`fan.race(fuel: 1000) { exact(input); heuristic(input) }` と書いたとする。heuristic が途中でゼロ除算を踏んだら、プログラムは落ちるのか。exact の予算が尽きたら、それを誰がどう知るのか。文法の表はこの問いに答えない。答えは五本の柱でできた意味論の側にある。
+`fan.race(compute.s(1)) { exact(input); heuristic(input) }` と書いたとする。heuristic が途中でゼロ除算を踏んだら、プログラムは落ちるのか。exact の予算が尽きたら、それを誰がどう知るのか。文法の表はこの問いに答えない。答えは五本の柱でできた意味論の側にある。
 
 ### 柱 1 — 論理時計：fuel は機械のコストではなく、ソースのコストを数える
 
@@ -368,6 +384,7 @@ C（KPN チャネル）には着手しない。Stage 3 のあとに設計文書�
 | logical-time-proofs.md | 証明台帳（T1–T9・訂正記録） |
 | logical-time-implementation.md | 実装方式（Op::Charge・fuel ABI・metered 特殊化・ゲート配線） |
 | fan-v2-examples.md + fan-v2-examples/*.almd | リファレンス例（コード原本は .almd、挙動注記が fixture の種） |
+| ticks-interface-audit.md | ticks の対外監査（時間にしない理由、race の任意化、数字の供給者） |
 | async-world-claim.md | 主張の監査（競合表・五手・実行順の原本） |
 | `crates/almide-race-belt/` | Lean 機械証明（0 sorry、CI 常駐） |
 | `research/spike/logical-time-race/` | 全数合流ゲート（`run-gate.sh`） |

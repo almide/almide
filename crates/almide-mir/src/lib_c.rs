@@ -144,6 +144,11 @@ impl OwnershipScan {
     /// empty body, and each kept its own comment above its own pattern.
     fn step(&mut self, i: usize, op: &Op) {
         match op {
+            // Probe charge: no ownership event (no alloc, no dup, no drop).
+            // The dyn charge READS its src (a borrow-class use, like a Prim
+            // handle arg) and changes no refcount.
+            Op::Charge { .. } => {}
+            Op::ChargeDyn { src, .. } => self.check_borrowed_use(i, *src),
             Op::Alloc { dst, repr, .. } => {
                 debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
                 self.own_fresh_object(*dst);
@@ -429,6 +434,18 @@ impl OwnershipScan {
                     (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
                 {
                     self.object_of.insert(*d, o);
+                }
+            }
+            // T1-3 native Result carrier: the borrowed Err-String read ALIASES
+            // the Result's object (exactly the `Handle` rule) so a downstream
+            // borrowing use (a `CallArg::Handle` into println) live-checks
+            // against the Result value the caller still owns.
+            PrimKind::ResErrStr => {
+                if let (Some(d), Some(&o)) =
+                    (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
+                {
+                    self.object_of.insert(*d, o);
+                    self.dead.insert(*d, false);
                 }
             }
             PrimKind::RcInc => {

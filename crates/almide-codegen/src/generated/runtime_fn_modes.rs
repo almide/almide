@@ -195,6 +195,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_error_context" => &[false, false],
         "almide_rt_error_message" => &[false],
         "almide_rt_fan_any" => &[false],
+        "almide_rt_fan_any_map" => &[false, false],
         "almide_rt_fan_map" => &[false, false],
         "almide_rt_fan_race" => &[false],
         "almide_rt_fan_settle" => &[false],

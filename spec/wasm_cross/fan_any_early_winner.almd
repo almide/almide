@@ -33,54 +33,54 @@ effect fn boom() -> Result[Int, String] = err("boom")
 
 effect fn main() -> Result[Unit, String] = {
   // Winner FIRST — the case that returned 0.
-  let a = fan.any([
-    () => ok11(),
-    () => ok22()
-  ])
+  let a = fan.any {
+    ok11()
+    ok22()
+  }
   println("a=" + int.to_string(a))
   // Winner first, loser after.
-  let b = fan.any([
-    () => ok11(),
-    () => boom()
-  ])
+  let b = fan.any {
+    ok11()
+    boom()
+  }
   println("b=" + int.to_string(b))
   // Winner last: the arrangement that always worked.
-  let c = fan.any([
-    () => boom(),
-    () => ok22()
-  ])
+  let c = fan.any {
+    boom()
+    ok22()
+  }
   println("c=" + int.to_string(c))
   // Three levels, so the chain is deeper than the single nesting.
-  let d = fan.any([
-    () => ok11(),
-    () => ok22(),
-    () => ok33()
-  ])
+  let d = fan.any {
+    ok11()
+    ok22()
+    ok33()
+  }
   println("d=" + int.to_string(d))
-  let e = fan.any([
-    () => boom(),
-    () => ok22(),
-    () => ok33()
-  ])
+  let e = fan.any {
+    boom()
+    ok22()
+    ok33()
+  }
   println("e=" + int.to_string(e))
-  let f = fan.any([
-    () => boom(),
-    () => boom(),
-    () => ok33()
-  ])
+  let f = fan.any {
+    boom()
+    boom()
+    ok33()
+  }
   println("f=" + int.to_string(f))
   // The match-subject spelling of the same call, and the all-failed fallback.
-  match fan.any([
-    () => ok11(),
-    () => ok22()
-  ]) {
+  match fan.any {
+    ok11()
+    ok22()
+  } {
     ok(v) => println("m=" + int.to_string(v)),
     err(er) => println("m-err=" + er),
   }
-  match fan.any([
-    () => boom(),
-    () => boom()
-  ]) {
+  match fan.any {
+    boom()
+    boom()
+  } {
     ok(v) => println("g=" + int.to_string(v)),
     err(er) => println("g-err=" + er),
   }

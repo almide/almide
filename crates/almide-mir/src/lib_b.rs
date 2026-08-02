@@ -3,6 +3,22 @@
 /// surface the self-hosted runtime is written over).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrimKind {
+    /// Stage 2 budget region entry: arg = budget in ns; converts to charge
+    /// units (CM-1 v0: 1000ns per charge), saves the outer remaining fuel
+    /// (the result), sets fuel = min(budget_units, outer) — EIP-150 min-cap.
+    BudgetEnter,
+    /// 1 iff the current region overspent (fuel went negative) — the
+    /// exhaustion verdict read AFTER the body ran (lazy check; the model's
+    /// verified overrun form).
+    BudgetExhausted,
+    /// Restore the outer counter: arg = saved; fuel = saved - consumed.
+    /// Streaming semantics: the inner spend (even past the budget) drains
+    /// the outer region too.
+    BudgetExit,
+    /// Read the PERSISTED consumed amount of the most recently exited region
+    /// (set by BudgetExit) — the per-arm spend the race winner fold compares.
+    BudgetSpend,
+
     /// Reinterpret a heap handle (i32 pointer) as an i64 address value — the
     /// String/List→Int bridge so all address math is `Int` `IntBinOp`.
     Handle,
@@ -28,6 +44,37 @@ pub enum PrimKind {
     /// self-host arm of the §13 termination convention (math.pow negative
     /// exponent, int.rotate nonpositive width). Never returns.
     Die,
+    /// ── T5-1 wall-clock deadline prims (fan.timeout, oracle tier) ────────
+    /// `dst = saved deadline` — computes `min(now + args[0] ns, outer)` as the
+    /// new deadline (EIP-150-style min-cap nesting on the WALL clock) and
+    /// returns the outer deadline for restore. In replay mode the clock is
+    /// never read (the baked ω ordinal decides the cut instead).
+    TimeoutEnter,
+    /// Restore the outer deadline from args[0]; persist the region's
+    /// deadline-hit verdict and clear the hit flag.
+    TimeoutExit,
+    /// `dst = the persisted verdict` of the most recently exited region.
+    TimeoutHit,
+    /// ── NATIVE-ONLY Result carrier prims (T1-3) ──────────────────────────
+    /// Inserted exclusively by `native_result_rewrite` (never by the shared
+    /// lowering, never seen by the wasm renderer): the stereotyped
+    /// `materialize_result_*` block windows and their tag/payload read
+    /// windows are recognized post-verification-input and rewritten to these,
+    /// which the native renderer maps onto a real Rust `Result<i64, String>`
+    /// local (`NTy::Res`).
+    /// `Ok(args[0])` — args[0] is the scalar Ok payload; dst is the Result.
+    ResMakeOk,
+    /// `Err(args[0].clone())` — args[0] is an owned String local (its own
+    /// Alloc/Consume accounting is untouched); dst is the Result.
+    ResMakeErrStr,
+    /// `dst = src.is_err() as i64` — the tag read (0 = Ok, 1 = Err).
+    ResTag,
+    /// `dst = ok payload (scalar)`; 0 on the Err side (unreached: the tag
+    /// dispatch guards it).
+    ResOkScalar,
+    /// `dst = &err String` — a BORROW of the Result's Err payload (the
+    /// verifier aliases dst to the Result's object, like `Handle`).
+    ResErrStr,
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no

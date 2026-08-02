@@ -1,0 +1,6 @@
+fn is_even(n: Int) -> Bool = if n == 0 then true else is_odd(n - 1)
+fn is_odd(n: Int) -> Bool = if n == 0 then false else is_even(n - 1)
+
+fn main() -> Unit = {
+  if is_even(5000) then println("even") else println("odd")
+}

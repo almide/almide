@@ -96,6 +96,26 @@ struct FreeVarCollector {
     free: HashSet<VarId>,
 }
 
+impl FreeVarCollector {
+    /// Walk a statement-list body (While / ForIn), registering each `let`'s
+    /// binding for the statements that follow — the same discipline as the
+    /// `Block` arm.
+    fn visit_body_stmts(&mut self, body: &[IrStmt]) {
+        for stmt in body {
+            IrVisitor::visit_stmt(self, stmt);
+            match &stmt.kind {
+                IrStmtKind::Bind { var, .. } => {
+                    self.bound.insert(*var);
+                }
+                IrStmtKind::BindDestructure { pattern, .. } => {
+                    collect_pattern_bindings(pattern, &mut self.bound);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 impl IrVisitor for FreeVarCollector {
     fn visit_expr(&mut self, expr: &IrExpr) {
         match &expr.kind {
@@ -159,9 +179,18 @@ impl IrVisitor for FreeVarCollector {
                         self.bound.insert(*v);
                     }
                 }
-                for s in body {
-                    self.visit_stmt(s);
-                }
+                self.visit_body_stmts(body);
+                self.bound = saved;
+            }
+            // A While body is a statement scope like a Block's: its `let`s bind
+            // for the remainder of the body. Falling to the generic walk left
+            // those binds unregistered, so a loop-local was counted FREE and
+            // an outliner lifted it into a phantom param (the race-mapper
+            // `__rm_o` unbound-var wall, 2026-08-03).
+            IrExprKind::While { cond, body } => {
+                self.visit_expr(cond);
+                let saved = self.bound.clone();
+                self.visit_body_stmts(body);
                 self.bound = saved;
             }
             _ => walk_expr(self, expr),

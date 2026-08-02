@@ -119,6 +119,36 @@ pub struct Interpreter<'a> {
     /// exact and needs no per-frame bookkeeping. The in-place write-back tier
     /// reads it to refuse a receiver whose binding lives in the callee's frame.
     pub(crate) mut_param_vars: HashSet<VarId>,
+    /// ADR-0001 deterministic meter (fan.bounded / fan.race). Mirrors the MIR
+    /// W1 charge placement EXACTLY — user-fn entries, loop-head checks
+    /// (while: n+1 condition evaluations; for-in: n iterations + 1 exit
+    /// check), and closure invocations (a lifted lambda's entry charge on the
+    /// backends) — and the renderers' budget arithmetic (min-cap entry, lazy
+    /// verdict, streaming exit). Counts DOWN from i64::MAX like both legs.
+    pub(crate) det_fuel: Cell<i64>,
+    pub(crate) det_entry: Cell<i64>,
+    pub(crate) det_verdict: Cell<i64>,
+    pub(crate) det_spend: Cell<i64>,
+    /// True while evaluating a USER fn body. Charges apply only there: the
+    /// stdlib pool bodies are unmetered on every leg (both backends meter
+    /// user functions only), so a pool fn's internal loops must not charge.
+    pub(crate) det_in_user: Cell<bool>,
+    /// Open metered regions (budget_enter +1 / budget_exit -1): the strict
+    /// cut (T1-1) fires only inside a region — outside one, fuel below zero
+    /// is impossible in budget mode and irrelevant in probe mode.
+    pub(crate) det_region_depth: Cell<u32>,
+    /// The user program's own fn names — captured BEFORE the stdlib pool is
+    /// layered into `fns`, so the meter can tell the two apart at call time.
+    pub(crate) user_fn_names: HashSet<Sym>,
+    /// T5-1 wall-deadline mirror (fan.timeout): absolute deadline (ns since
+    /// interp start; i64::MAX = none), hit flag, persisted verdict, and the
+    /// wall-check ordinal (the ω of T5-2). Replay/record ride the same env
+    /// contract as the backends (`ALMIDE_OMEGA` / `ALMIDE_OMEGA_RECORD`).
+    pub(crate) t_deadline: Cell<i64>,
+    pub(crate) t_hit: Cell<bool>,
+    pub(crate) t_verdict: Cell<i64>,
+    pub(crate) t_ord: Cell<i64>,
+    pub(crate) t_start: std::time::Instant,
 }
 
 /// Default fuel budget — high enough for any real corpus program, low enough to
@@ -189,6 +219,14 @@ impl<'a> Interpreter<'a> {
         let mut fns = HashMap::new();
         for f in &program.functions {
             fns.insert(f.name, f);
+        }
+        // The deterministic meter's user-fn set: program fns + user-module fns,
+        // captured before the pool layers in (pool bodies are unmetered).
+        let mut user_fn_names: HashSet<Sym> = fns.keys().copied().collect();
+        for m in &program.modules {
+            for f in &m.functions {
+                user_fn_names.insert(f.name);
+            }
         }
         // Layer in the self-hosted stdlib bodies (lowered once, process-wide) so
         // a stdlib call the interp-native surfaces don't cover evaluates the SAME
@@ -263,7 +301,71 @@ impl<'a> Interpreter<'a> {
             fuel: Cell::new(DEFAULT_FUEL),
             depth: Cell::new(0),
             mut_param_vars,
+            det_fuel: Cell::new(i64::MAX),
+            det_entry: Cell::new(0),
+            det_verdict: Cell::new(0),
+            det_spend: Cell::new(0),
+            det_in_user: Cell::new(false),
+            det_region_depth: Cell::new(0),
+            user_fn_names,
+            t_deadline: Cell::new(i64::MAX),
+            t_hit: Cell::new(false),
+            t_verdict: Cell::new(0),
+            t_ord: Cell::new(0),
+            t_start: std::time::Instant::now(),
         }
+    }
+
+    /// T5-1: monotonic ns since interp start (0 in replay mode — the baked
+    /// ordinal decides instead, mirroring both backends).
+    pub(crate) fn wall_now_ns(&self) -> i64 {
+        self.t_start.elapsed().as_nanos() as i64
+    }
+
+    /// T5-2: the replay ordinal (env, same contract as the compile-time bake).
+    pub(crate) fn omega_replay() -> i64 {
+        std::env::var("ALMIDE_OMEGA").ok().and_then(|v| v.parse().ok()).unwrap_or(-1)
+    }
+
+    /// T5-1: the wall-deadline check at a charge site — ordinal + replay or
+    /// live clock, exactly the backends' `__wall_hit`.
+    pub(crate) fn wall_hit(&self) -> bool {
+        if self.t_deadline.get() == i64::MAX {
+            return false;
+        }
+        if self.t_hit.get() {
+            return true;
+        }
+        self.t_ord.set(self.t_ord.get() + 1);
+        let omega = Self::omega_replay();
+        if omega >= 0 {
+            if self.t_ord.get() >= omega {
+                self.t_hit.set(true);
+            }
+            return self.t_hit.get();
+        }
+        if self.wall_now_ns() >= self.t_deadline.get() {
+            self.t_hit.set(true);
+        }
+        self.t_hit.get()
+    }
+
+    /// One deterministic charge unit, if the meter applies here (inside a
+    /// user fn). Wrapping like both renderers.
+    #[inline]
+    pub(crate) fn det_charge(&self) {
+        if self.det_in_user.get() {
+            self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
+        }
+    }
+
+    /// T1-1 strict cut: inside an open metered region with the meter below
+    /// zero, execution returns from the current fn with a dummy value (never
+    /// observed — the region verdict is already Err). Mirrors the backends'
+    /// check-and-return at charge sites.
+    #[inline]
+    pub(crate) fn det_cut(&self) -> bool {
+        self.det_region_depth.get() > 0 && (self.det_fuel.get() < 0 || self.wall_hit())
     }
 
     /// Override the fuel budget (for tests / the fuzz oracle).
@@ -486,6 +588,21 @@ impl<'a> Interpreter<'a> {
         }
         self.depth.set(d + 1);
 
+        // Deterministic meter: a USER fn's entry charge (fires regardless of
+        // caller, like the charge op at the top of the rendered fn); the
+        // in-user flag scopes loop-head charges to user bodies only.
+        let det_was_user = self.det_in_user.get();
+        let det_is_user = self.user_fn_names.contains(&func.name);
+        self.det_in_user.set(det_is_user);
+        if det_is_user {
+            self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
+            if self.det_cut() {
+                self.det_in_user.set(det_was_user);
+                self.depth.set(d);
+                return Flow::Value(Value::Int(0));
+            }
+        }
+
         let frame = base.child();
         for (param, arg) in func.params.iter().zip(args.into_iter()) {
             frame.bind(param.var, arg);
@@ -495,6 +612,7 @@ impl<'a> Interpreter<'a> {
             Flow::Return(v) => Flow::Value(v),
             other => other,
         };
+        self.det_in_user.set(det_was_user);
         self.depth.set(d);
         result
     }
@@ -507,6 +625,13 @@ impl<'a> Interpreter<'a> {
             return Flow::Fuel;
         }
         self.depth.set(d + 1);
+        // Deterministic meter: a closure invocation is a lifted lambda's
+        // entry charge on the backends.
+        self.det_charge();
+        if self.det_cut() {
+            self.depth.set(d);
+            return Flow::Value(Value::Int(0));
+        }
 
         let frame = clo.captured.child();
         for (param, arg) in clo.params.iter().zip(args.into_iter()) {

@@ -66,7 +66,6 @@ fn fmt_expr_wrapper(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Err { expr: e, .. } => around("err(", e, ")"),
         ExprKind::Paren { expr: e, .. } => around("(", e, ")"),
         ExprKind::Try { expr: e, .. } => around("try ", e, ""),
-        ExprKind::Await { expr: e, .. } => around("await ", e, ""),
         ExprKind::Unwrap { expr: e, .. } => around("", e, "!"),
         ExprKind::ToOption { expr: e, .. } => around("", e, "?"),
         ExprKind::Unary { op, operand, .. } => {
@@ -142,6 +141,11 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Match { .. } => fmt_expr_match(out, expr, depth),
         ExprKind::Block { .. } => fmt_expr_block(out, expr, depth),
         ExprKind::Fan { .. } => fmt_expr_fan(out, expr, depth),
+        ExprKind::FanBounded { .. } => fmt_expr_fan_bounded(out, expr, depth),
+        ExprKind::FanRace { .. } => fmt_expr_fan_race(out, expr, depth),
+        ExprKind::FanRaceMap { .. } => fmt_expr_fan_race_map(out, expr, depth),
+        ExprKind::FanSettle { .. } => fmt_expr_fan_settle(out, expr, depth),
+        ExprKind::FanTimeout { .. } => fmt_expr_fan_timeout(out, expr, depth),
         ExprKind::ForIn { .. } => fmt_expr_forin(out, expr, depth),
         ExprKind::While { .. } => fmt_expr_while(out, expr, depth),
         ExprKind::Lambda { .. } => fmt_expr_lambda(out, expr, depth),
@@ -204,6 +208,35 @@ fn fmt_expr_spread_record(out: &mut String, expr: &Expr, depth: usize) {
 
 fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Call { callee, args, type_args, named_args, .. } = &expr.kind else { unreachable!() };
+    // Wave 1 block forms: the parser synthesizes `fan.__any_block([() => …])`
+    // internally — RE-SUGAR to the surface spelling, or fmt would rewrite the
+    // user's block into an internal name that does not parse.
+    if let ExprKind::Member { object, field } = &callee.kind {
+        if let ExprKind::Ident { name, .. } = &object.kind {
+            if name.as_str() == "fan"
+                && matches!(field.as_str(), "__any_block" | "__settle_block")
+            {
+                if let [arg] = &args[..] {
+                    if let ExprKind::List { elements } = &arg.kind {
+                        let head = if field.as_str() == "__any_block" { "any" } else { "settle" };
+                        w!(out, "fan.{head} {{\n");
+                        for el in elements {
+                            let body: &Expr = match &el.kind {
+                                ExprKind::Lambda { params, body } if params.is_empty() => body,
+                                _ => el,
+                            };
+                            out.push_str(&ind(depth + 1));
+                            fmt_expr(out, body, depth + 1);
+                            out.push('\n');
+                        }
+                        out.push_str(&ind(depth));
+                        out.push('}');
+                        return;
+                    }
+                }
+            }
+        }
+    }
     fmt_expr(out, callee, depth);
     if let Some(ta) = type_args { out.push('['); comma_sep(out, ta, |out, t| fmt_type(out, t, depth)); out.push(']'); }
     out.push('(');
@@ -260,6 +293,77 @@ fn fmt_expr_fan(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Fan { exprs, .. } = &expr.kind else { unreachable!() };
     out.push_str("fan {\n");
     for e in exprs {
+        out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
+    }
+    out.push_str(&ind(depth)); out.push('}');
+}
+
+fn fmt_expr_fan_bounded(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanBounded { budget, body } = &expr.kind else { unreachable!() };
+    out.push_str("fan.bounded(");
+    fmt_expr(out, budget, depth);
+    out.push_str(") ");
+    // The body parses as a Block (T2-1): a one-expr block prints inline
+    // (`{ work(x) }`), a statement block prints as itself — either way the
+    // Block arm supplies its own braces.
+    match &body.kind {
+        ExprKind::Block { .. } => fmt_expr(out, body, depth),
+        _ => {
+            out.push_str("{ ");
+            fmt_expr(out, body, depth);
+            out.push_str(" }");
+        }
+    }
+}
+
+fn fmt_expr_fan_race(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanRace { budget, arms } = &expr.kind else { unreachable!() };
+    out.push_str("fan.race");
+    if let Some(b) = budget {
+        out.push('(');
+        fmt_expr(out, b, depth);
+        out.push(')');
+    }
+    out.push_str(" {
+");
+    for e in arms {
+        out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
+    }
+    out.push_str(&ind(depth)); out.push('}');
+}
+
+fn fmt_expr_fan_race_map(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanRaceMap { budget, list, mapper } = &expr.kind else { unreachable!() };
+    out.push_str("fan.race(");
+    if let Some(b) = budget {
+        fmt_expr(out, b, depth);
+        out.push_str(", ");
+    }
+    fmt_expr(out, list, depth);
+    out.push_str(", ");
+    fmt_expr(out, mapper, depth);
+    out.push(')');
+}
+
+fn fmt_expr_fan_timeout(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanTimeout { deadline, body } = &expr.kind else { unreachable!() };
+    out.push_str("fan.timeout(");
+    fmt_expr(out, deadline, depth);
+    out.push_str(") ");
+    match &body.kind {
+        ExprKind::Block { .. } => fmt_expr(out, body, depth),
+        _ => {
+            out.push_str("{ ");
+            fmt_expr(out, body, depth);
+            out.push_str(" }");
+        }
+    }
+}
+
+fn fmt_expr_fan_settle(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanSettle { arms } = &expr.kind else { unreachable!() };
+    out.push_str("fan.settle {\n");
+    for e in arms {
         out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
     }
     out.push_str(&ind(depth)); out.push('}');

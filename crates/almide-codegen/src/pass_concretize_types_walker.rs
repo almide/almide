@@ -566,7 +566,7 @@ fn resolve_node_ty_container(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable
         | IrExprKind::BoxNew { expr }
         | IrExprKind::ToVec { expr }
         | IrExprKind::Borrow { expr, .. }
-        | IrExprKind::Await { expr } => if_concrete(&expr.ty),
+        => if_concrete(&expr.ty),
         // Range produces List[Int]
         IrExprKind::Range { .. } => Some(Ty::Applied(
             almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int],

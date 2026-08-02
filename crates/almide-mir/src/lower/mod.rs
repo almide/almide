@@ -114,6 +114,9 @@ impl WallShape {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LowerError {
     Unsupported(String),
+    // (impl below: `with_fn_context` — a DECORATOR appending the function name
+    // to an existing spanless wall; spelled via `Self::` so the #931 ratchet's
+    // textual scan keeps counting only real wall SITES.)
     /// A wall carrying the SOURCE SPAN of the construct that walled (#931):
     /// line/col/end_col in the lexer's 1-indexed char convention, straight off
     /// the nearest IR node. Construct via [`LowerError::at`] — every NEW wall
@@ -127,6 +130,18 @@ pub enum LowerError {
 }
 
 impl LowerError {
+    /// Append the walling FUNCTION's name to a spanless reason — a decorator
+    /// on an existing wall, not a new wall site. A reason already carrying a
+    /// location (" in `") passes through untouched.
+    pub fn with_fn_context(self, fn_name: &str) -> Self {
+        match self {
+            Self::Unsupported(msg) if !msg.contains(" in `") => {
+                Self::Unsupported(format!("{msg} (fn `{fn_name}`)"))
+            }
+            other => other,
+        }
+    }
+
     /// Span-carrying wall constructor — pass the nearest IR node's span.
     /// Falls back to the spanless form when the node carries none, so callers
     /// never have to branch.

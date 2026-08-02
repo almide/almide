@@ -1,6 +1,12 @@
 <!-- description: Implementation blueprint: Op::Charge, fuel ABI, metered clones, race lowering, gates -->
 # Logical-Time Async — the implementation blueprint
 
+> **実装状況（worktree-stage1-charge-probe、2026-08-02）**: Stage 1 probe /
+> Stage 2 bounded / Stage 3 race / Wave 1 表面統一 / T2 全部 / T1-3 native
+> Res carrier まで実装済み（CM-1 v0.3 = 3ns/unit、unit-exact 境界 fixture）。
+> 残 = strict cap + unwind、metered clone、Dyn charge。台帳:
+> research/spike/charge-probe/BURNDOWN.md（食い違いはこの台帳が正）。
+
 > 憲章: [async-inception.md](./async-inception.md)。意味論は
 > [logical-time-async.md](./logical-time-async.md)、証明は
 > [logical-time-proofs.md](./logical-time-proofs.md)。本文書は「コンパイラのどこに、
@@ -51,7 +57,7 @@ Charge { site: ChargeSiteId, cost: ChargeCost /* Const(u32) | Dyn { base, per_un
 
 ## 2. Fuel の実行機構 — 新しい ABI を作らない
 
-- **wasm**: モジュール global `$__fuel: i64`。Charge の描画は
+- **wasm**: モジュール global `$__ticks: i64`。Charge の描画は
   `global.get → i64.const cost → i64.sub → global.set` + 枯渇分岐。`Dyn` は len を
   読んで積和。
 - **native**: ランタイムの thread-local `FUEL: Cell<i64>`。描画は同型の減算 + 分岐。
@@ -90,7 +96,14 @@ bounded は metered のみ（trap は通常どおり即死 — 投機ではな�
 
 - fixture: `spec/wasm_cross/fuel_probe_*.almd` を両ターゲットで実行し、
   **result / consumed_fuel / trace_hash の三点**を比較する。1 単位・1 位置の乖離が
-  そのまま「charge-trace 保存が破れた」の反証になる。最有力容疑の
+  そのまま「charge-trace 保存が破れた」の反証になる。
+- この probe ビルドはそのままユーザー向け校正器 **`--ticks-report`** になる: region /
+  プログラムごとの消費 tick に**この機械での実測時間を併記**して印字する
+  （`52,000 ticks (≈0.4ms here)` — 数字の直感はツール側で接続する。EVM estimateGas と
+  同じ運用形）。さらに Stage 2 以降、**`almide run --ticks n` / `almide test --ticks n`**
+  — main を bounded で包むだけのホスト境界予算 — を同じ機構で提供する。数字の持ち主が
+  harness / CI になり、壁時計と違い flaky にならない決定的 hang killer になる
+  （[ticks-interface-audit.md](./ticks-interface-audit.md) 修正 2）。最有力容疑の
   `render_wasm_fuse.rs` 系 peephole には、Charge を跨ぐ融合を拒否するガードを同 PR で
   入れる。
 - **charge certificate**: `certificate.rs` 族に相似形を 1 本足す —
@@ -102,9 +115,10 @@ bounded は metered のみ（trap は通常どおり即死 — 投機ではな�
 
 ## 5. Stage 2 — `fan.bounded`: 表面と CM-1 定数の確定
 
-- parser: fan v2 の head 文法（`fan.bounded(fuel: expr) { body }`）。`fuel:` は
-  fan 構文の要素としてパース（汎用ラベル引数は作らない — `parse_fan_primary` の
-  member-access 分岐を head-args + block の分岐に拡張する）。
+- parser: fan v2 の head 文法（`fan.bounded(<expr>) { body }`）。`parse_fan_primary` の
+  member-access 分岐を head-args + block の分岐に拡張するだけでよい。**ラベルも
+  リテラル接尾辞も要らない** — 予算はただの式（`compute.ms(100)`）であり、
+  lexer は無変更（ADR-0001）。
 - checker: `static_dispatch.rs` の fan アーム表に `bounded` を追加。body は pure 制約
   （既存 purity 機構）。型は `Result[T, String]`、auto-unwrap は race/any/settle の
   既存契約に従う。

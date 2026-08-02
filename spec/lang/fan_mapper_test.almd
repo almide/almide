@@ -1,0 +1,26 @@
+// fan.any / fan.settle MAPPER forms (T2-3, the Wave 2 surface): a dynamic
+// list + one callback. fan.any applies f in LIST ORDER and returns the first
+// Ok (an element's Err disqualifies that element only; the early cut is
+// structural — later elements never run). fan.settle collects EVERY element's
+// Result (it IS list.map by desugar). Both deterministic on both targets.
+effect fn probe(n: Int) -> Result[Int, String] = if n > 2 then ok(n * 10) else err("too small")
+
+test "fan.any mapper returns the first Ok in list order" {
+  let w = fan.any([1, 3, 5], (n) => probe(n))
+  assert_eq(w, ok(30))
+}
+
+test "fan.any mapper all-fail is the ledger Err" {
+  let x = fan.any([1, 2], (n) => probe(n))
+  assert_eq(x, err("fan.any: all candidates failed"))
+}
+
+test "fan.any mapper empty list fails closed" {
+  let x = fan.any([], (n: Int) => probe(n))
+  assert_eq(x, err("fan.any: all candidates failed"))
+}
+
+test "fan.settle mapper collects every Result" {
+  let rs = fan.settle([1, 3, 5], (n) => probe(n))
+  assert_eq(list.len(rs), 3)
+}

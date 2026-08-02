@@ -375,6 +375,25 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                 if let IrExprKind::Var { id } = &r.kind { ctx.var_table.get(*id).ty.clone() } else { r.ty.clone() }
             } else { r.ty.clone() };
             let right_ty = &right_ty;
+            // ADR-0001 S3: time-type algebra erases to guarded/saturating Int
+            // forms (comparisons fall through — they erase to Int compares).
+            // Side detection reads the CHECKER's types of the operand ASTs: a
+            // time ctor's IR expr is already erased to Ty::Int, so the IR
+            // types cannot tell the time side from the scale side.
+            let is_time = |t: &Ty| matches!(
+                t,
+                Ty::Named(n, args) if args.is_empty()
+                    && matches!(n.as_str(), "Compute" | "Duration")
+            );
+            let l_time = is_time(&ctx.expr_ty(left));
+            let r_time = is_time(&ctx.expr_ty(right));
+            if l_time || r_time {
+                if let Some(out) = super::calls::lower_time_binop(
+                    ctx, op.as_str(), l.clone(), r.clone(), l_time, span,
+                ) {
+                    return out;
+                }
+            }
             let bin_op = binop_for(op.as_str(), left_ty, right_ty);
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
 }

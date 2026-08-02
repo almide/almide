@@ -1,0 +1,9 @@
+// #1054: the E025 example annotation is derived from the REPORTED shape.
+// The undecidable slot here sits inside a LIST (`List[Result[Int, ?]]`), so
+// the hint must show `List[Result[Int, String]]` — not a fixed exemplar
+// (`Result[Int, String]`) that cannot be a correct annotation for the binding.
+fn main() -> Unit = {
+  let r0: Result[Int, String] = ok(7)
+  let rs = [result.or_else(r0, (e) => ok(0))]
+  println("done")
+}

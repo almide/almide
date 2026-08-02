@@ -1,0 +1,16 @@
+fn classify(n: Int) -> String =
+  match n % 3 {
+    0 => "zero",
+    1 => "one",
+    _ => "two",
+  }
+
+fn main() -> Unit = {
+  var i = 0
+  var z = 0
+  while i < 300 {
+    if string.len(classify(i)) == 4 then { z = z + 1 } else { z = z }
+    i = i + 1
+  }
+  println(int.to_string(z))
+}

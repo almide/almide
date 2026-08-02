@@ -89,6 +89,33 @@ impl Checker {
                 return format!("'{}' is not a known type. To use it as a type parameter, declare it: fn {}[{}](...)", n, fn_name, n);
             }
         }
+        // A plain value handed to the unwrap family means the caller believes
+        // it is still wrapped — the classic effect-fn confusion: there,
+        // Result-returning calls are auto-propagated, so values arrive
+        // already unwrapped and the fallback belongs on the producing call.
+        let unwrap_family = matches!(fn_name,
+            "option.unwrap_or" | "option.unwrap_or_else" | "option.unwrap"
+            | "result.unwrap_or" | "result.unwrap_or_else" | "result.unwrap");
+        if unwrap_family
+            && (expected.is_option() || expected.is_result())
+            && !arg_ty.is_option() && !arg_ty.is_result() && !arg_ty.is_unresolved()
+        {
+            return format!(
+                "nothing to unwrap — the value is already {}. In an effect fn, a \
+                 Result-returning call is auto-propagated (`?`), so its value arrives \
+                 unwrapped; for a fallback, apply `?? <default>` to the producing call instead",
+                arg_ty.display());
+        }
+        // The reverse of the unwrap-family case: a Result handed to a plain-T
+        // param means the caller meant the payload. "Fix the argument type"
+        // names no path; the unwrap operators are the path (#1050).
+        if arg_ty.is_result() && !expected.is_result() && !expected.is_unresolved() {
+            return format!(
+                "the argument is a {} — unwrap it first: `!` propagates the error \
+                 (effect fn body), `?? fallback` supplies a default, or `match` \
+                 handles ok/err",
+                arg_ty.display());
+        }
         Self::hint_with_conversion("Fix the argument type", expected, arg_ty)
     }
 

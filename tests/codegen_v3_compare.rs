@@ -103,7 +103,6 @@ fn make_test_program() -> IrProgram {
         ret_ty: Ty::Int,
         body: match_expr,
         is_effect: false,
-        is_async: false,
         is_test: false,
         generics: None,
         extern_attrs: vec![],

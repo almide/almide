@@ -340,7 +340,9 @@ fn try_box_fan_thunks(expr: &mut IrExpr) -> Option<bool> {
         "race" | "any" | "settle" => args.first_mut()
             .map(|a| box_fan_thunk_list(a, FnBox::BoxSendSync))
             .unwrap_or(false),
-        "map" => args.get_mut(1)
+        // The T2-3 mapper forms ride the same sequential Rc<dyn Fn> mode as
+        // fan.map (arg 1 is the item mapper, arg 0 the plain item list).
+        "map" | "any_map" => args.get_mut(1)
             .map(|f| box_fan_thunk(f, FnBox::Rc))
             .unwrap_or(false),
         _ => false,
@@ -459,7 +461,7 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<
         | IrExprKind::MapAccess { .. } | IrExprKind::StringInterp { .. } | IrExprKind::ResultOk { .. }
         | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
         | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
-        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
         | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }

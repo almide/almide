@@ -315,7 +315,6 @@ fn ir_function_construction() {
         ret_ty: Ty::Int,
         body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None },
         is_effect: false,
-        is_async: false,
         is_test: false,
         generics: None,
         extern_attrs: vec![],
@@ -328,7 +327,6 @@ fn ir_function_construction() {
     assert_eq!(f.name, "add");
     assert_eq!(f.params.len(), 2);
     assert!(!f.is_effect);
-    assert!(!f.is_async);
     assert!(!f.is_test);
 }
 
@@ -340,7 +338,6 @@ fn ir_function_effect() {
         ret_ty: Ty::result(Ty::Unit, Ty::String),
         body: IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
         is_effect: true,
-        is_async: false,
         is_test: false,
         generics: None,
         extern_attrs: vec![],
@@ -530,8 +527,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
             ret_ty: Ty::Unit,
             body,
             is_effect: false,
-            is_async: false,
-            is_test: false,
+                is_test: false,
             generics: None,
             extern_attrs: vec![],
             export_attrs: vec![], attrs: vec![],
@@ -609,8 +605,7 @@ fn unused_var_warning_used_var_no_warning() {
             ret_ty: Ty::Int,
             body,
             is_effect: false,
-            is_async: false,
-            is_test: false,
+                is_test: false,
             generics: None,
             extern_attrs: vec![],
             export_attrs: vec![], attrs: vec![],

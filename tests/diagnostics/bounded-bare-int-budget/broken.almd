@@ -1,0 +1,8 @@
+// A bare Int is never a time (ADR-0001 S2): the budget must carry a unit and
+// a clock, so `5000` — 5000 of WHAT? — is a type error, not "5000ms".
+fn work() -> Int = 42
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(5000) { work() } ?? -1
+  println(int.to_string(r))
+}

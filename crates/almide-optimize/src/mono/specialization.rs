@@ -73,7 +73,6 @@ pub(super) fn specialize_function(
         body,
         generics: None, // specialized function is concrete
         is_effect: orig.is_effect,
-        is_async: orig.is_async,
         is_test: orig.is_test,
         extern_attrs: orig.extern_attrs.clone(),
         export_attrs: orig.export_attrs.clone(),
@@ -206,7 +205,7 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
         }
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
         | IrExprKind::OptionSome { .. } | IrExprKind::Try { .. }
-        | IrExprKind::Await { .. }
+       
         | IrExprKind::Unwrap { .. } | IrExprKind::ToOption { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
@@ -305,7 +304,7 @@ fn substitute_wrap_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
     match &mut expr.kind {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr }
+       
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }

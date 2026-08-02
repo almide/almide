@@ -1,0 +1,11 @@
+// #1051: a lambda inherits the enclosing fn's effect capability. In a PURE
+// fn the list.map lambda may not call an effect fn — and the hint must say
+// the fix is one level up (the lambda itself has no effect marker).
+import random
+
+fn pure_map() -> Int = {
+  let xs = [1, 2] |> list.map((_) => random.int(0, 9))
+  list.len(xs)
+}
+
+effect fn main() -> Unit = println(int.to_string(pure_map()))

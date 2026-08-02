@@ -658,6 +658,11 @@ pub fn merge_dst_i_credits(func: &MirFunction) -> usize {
             released.insert(r);
         }
     }
+    // HEAP merges only — the exact filter `ownership_certificate_released_merge_dsts`
+    // applies (a scalar merge carries no reference; crediting it would desync
+    // this count from the certificate's `i` events).
+    let heap_objs = loop_carried_slots_heap_objs(func);
+    released.retain(|d| heap_objs.contains(d));
     func.ops
         .iter()
         .filter(|op| match op {
@@ -710,6 +715,15 @@ fn ownership_certificate_released_merge_dsts(
             released_merge_dsts.insert(r);
         }
     }
+    // Ownership is a HEAP property: only a merge whose arm value is heap
+    // carries a reference into the dst. A SCALAR merge dst flowing out as an
+    // outer arm value (the lex-min fold's flag selects) must NOT become an
+    // object — its synthetic `i` + one-sided arm `m` certs as `i{m|}` /
+    // `i{|m}`, which the kernel-proven checker rejects while the executable
+    // verifier (scalar-blind by design) accepts — the PCC corpus-wall
+    // divergence, 2026-08-03. Same filter mirrored in `merge_dst_i_credits`.
+    let heap_objs = loop_carried_slots_heap_objs(func);
+    released_merge_dsts.retain(|d| heap_objs.contains(d));
     released_merge_dsts
 }
 

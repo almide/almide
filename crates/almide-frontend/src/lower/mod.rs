@@ -67,6 +67,10 @@ pub struct LowerCtx<'a> {
     /// them in the IR: an un-annotated `let v = boom()` where boom DECLARES
     /// `-> Result[..]` has the identical Bind.ty but must auto-unwrap (#485).
     pub annotated_result_vars: std::collections::HashSet<VarId>,
+    /// Functions synthesized during expression lowering (fan.bounded outlining).
+    pub synthesized_fns: Vec<almide_ir::IrFunction>,
+    /// Counter for synthesized fan.bounded function names.
+    pub bounded_counter: u32,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -87,6 +91,8 @@ impl<'a> LowerCtx<'a> {
             current_module: None,
             in_test: false,
             annotated_result_vars: std::collections::HashSet::new(),
+            synthesized_fns: Vec::new(),
+            bounded_counter: 0,
         }
     }
 
@@ -353,9 +359,9 @@ fn lower_decls(
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
 
         match decl {
-            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } => {
+            ast::Decl::Fn { name, params, body: Some(body), effect, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } => {
                 let mut f = lower_fn(ctx, &FnToLower {
-                    name, params, body: body, effect, r#async, span, generics,
+                    name, params, body: body, effect, span, generics,
                     extern_attrs, export_attrs, attrs, visibility, module_prefix,
                 });
                 f.doc = doc;
@@ -369,13 +375,13 @@ fn lower_decls(
             // codegen skips emission and substitutes a template at call
             // sites). Either case keeps the signature in IR so callers
             // type-check against a real IrFunction.
-            ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. }
+            ast::Decl::Fn { name, params, body: None, effect, span, generics, extern_attrs, export_attrs, attrs, visibility, .. }
                 if !extern_attrs.is_empty()
                     || attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic")) =>
             {
                 let hole_body = ast::Expr::new(ast::ExprId(0), span.clone(), ast::ExprKind::Hole);
                 let mut f = lower_fn(ctx, &FnToLower {
-                    name, params, body: &hole_body, effect, r#async, span, generics,
+                    name, params, body: &hole_body, effect, span, generics,
                     extern_attrs, export_attrs, attrs, visibility, module_prefix,
                 });
                 f.doc = doc;
@@ -444,13 +450,21 @@ fn append_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl], functions:
 // types in the type constructor registry (HKT foundation). Consumes `ctx` by
 // value — nothing after this point needs it, its var_table/def_table move
 // straight into the program.
-fn build_ir_program(ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec<IrTopLet>, type_decls: Vec<IrTypeDecl>, env: &TypeEnv) -> IrProgram {
+fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec<IrTopLet>, type_decls: Vec<IrTypeDecl>, env: &TypeEnv) -> IrProgram {
     // Collect effect fn names from TypeEnv (user-defined + stdlib)
     let effect_fn_names: std::collections::HashSet<almide_base::intern::Sym> = env.functions.iter()
         .filter(|(_, sig)| sig.is_effect)
         .map(|(name, _)| *name)
         .collect();
 
+    let mut functions = functions;
+    let mut effect_fn_names = effect_fn_names;
+    for f in &ctx.synthesized_fns {
+        if f.is_effect {
+            effect_fn_names.insert(f.name);
+        }
+    }
+    functions.append(&mut ctx.synthesized_fns);
     let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)

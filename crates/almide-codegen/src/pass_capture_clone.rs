@@ -403,7 +403,7 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         // the var failed to compile (E0382). `replace_vars` already descends these,
         // so the walk and the rename now agree.
         | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::ToVec { expr: e } | IrExprKind::Await { expr: e } => {
+        | IrExprKind::ToVec { expr: e } => {
             transform_expr(e, vt, scope_vars)
         }
         IrExprKind::RustMacro { args, .. } => transform_expr_list(args, vt, scope_vars),
@@ -758,7 +758,7 @@ fn replace_vars(expr: &mut IrExpr, renames: &Renames) {
         IrExprKind::Borrow { expr: e, .. }
         | IrExprKind::BoxNew { expr: e }
         | IrExprKind::ToVec { expr: e }
-        | IrExprKind::Await { expr: e } => {
+ => {
             replace_vars(e, renames);
         }
         IrExprKind::RustMacro { args, .. } => replace_vars_list(args, renames),

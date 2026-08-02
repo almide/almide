@@ -164,10 +164,6 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             kind: IrExprKind::ToOption { expr: Box::new(sub(inner)) },
             ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
         },
-        IrExprKind::Await { expr: inner } => IrExpr {
-            kind: IrExprKind::Await { expr: Box::new(sub(inner)) },
-            ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
-        },
         IrExprKind::Clone { expr: inner } => IrExpr {
             kind: IrExprKind::Clone { expr: Box::new(sub(inner)) },
             ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,

@@ -352,7 +352,7 @@ fn substitute_var(expr: &mut IrExpr, from: VarId, to: VarId) {
         | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
         | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
         | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::OptionalChain { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
@@ -536,7 +536,7 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str, is_effect: bool) -> 
         | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
         | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
         | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::OptionalChain { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
@@ -616,7 +616,7 @@ fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+        | IrExprKind::ToVec { expr } => {
             scan_non_tail(expr, fn_name)
         }
         IrExprKind::UnwrapOr { expr, fallback } => {

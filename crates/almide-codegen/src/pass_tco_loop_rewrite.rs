@@ -396,7 +396,7 @@ fn rewrite_tail_expr(
         | IrExprKind::OptionNone | IrExprKind::Try { .. }
         | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
         | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
-        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Clone { .. }
         | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
         | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }

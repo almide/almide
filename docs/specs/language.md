@@ -740,7 +740,21 @@ Fan blocks execute expressions concurrently. Each expression in the block runs i
 
 Fan blocks only allow expressions -- no `let`, `var`, `for`, or `while` statements.
 
-テスト: `spec/lang/fan_test.almd`, `spec/lang/fan_map_test.almd`, `spec/lang/fan_race_test.almd`, `spec/lang/fan_ext_test.almd`
+The `fan.*` block heads share the surface:
+
+```
+let first = fan.any { a(); b() }                       // first Ok in source order
+let all   = fan.settle { a(); b() }                    // List[Result[T, String]]
+let win   = fan.race { fast(); slow() } ?? d           // deterministic winner (least compute)
+let r     = fan.bounded(compute.ms(100)) { work(x) } ?? d  // deterministic budget
+```
+
+Budgets are built with the `compute.*` time constructors (closed unit set
+`ns / us / ms / s / min / h`); a bare `Int` or a wall-clock `duration.*` value
+is a type error. Full semantics: [docs/SPEC.md §13](../SPEC.md), normative
+time rules: [docs/adr/0001-deterministic-time-units.md](../adr/0001-deterministic-time-units.md).
+
+テスト: `spec/lang/fan_test.almd`, `spec/lang/fan_map_test.almd`, `spec/lang/fan_ext_test.almd`, `spec/wasm_cross/fan_*.almd`, `research/spike/charge-probe/fixtures/`
 
 ### 5.18 Option and Result Constructors
 

@@ -78,7 +78,7 @@ impl Checker {
         }
     }
     /// Resolve the callee of a call to its function signature, for the two shapes that can name a higher-order function with a `Fn`-typed parameter: a bare `Ident` (user fn / selectively-imported stdlib fn) or `module.field` (`list.map`, an aliased import, or a user `module.fn`). Returns the signature so the eager-arg pass can pin an inferred lambda param to the element type BEFORE the lambda body is checked. Returns `None` for anything else (the call then infers args bottom-up as before).
-    fn lookup_call_sig(&self, callee: &ast::Expr) -> Option<crate::types::FnSig> {
+    pub(crate) fn lookup_call_sig(&self, callee: &ast::Expr) -> Option<crate::types::FnSig> {
         match &callee.kind {
             ExprKind::Ident { name, .. } => {
                 self.env.functions.get(&sym(name)).cloned()
@@ -345,10 +345,34 @@ impl Checker {
     /// Effect isolation: pure fn cannot call effect fn. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
         if sig.is_effect && !self.env.can_call_effect {
-            let mut diag = super::err(
-                format!("cannot call effect function '{}' from a pure function", name),
-                "Mark the calling function as `effect fn`",
-                format!("call to {}()", name)).with_code("E006");
+            let (msg, hint) = match self.env.metered_region {
+                // Inside a metered region the caller usually IS an effect fn —
+                // "mark it effect" would send the user in a circle. The region
+                // is pure BY DESIGN (determinism), so the fix is to move the
+                // effect out.
+                Some(region) => (
+                    format!("cannot call effect function '{}' inside a {} region", name, region),
+                    format!(
+                        "{region} meters deterministic computation, so its body is PURE. \
+                         Run the effect before the region and pass the value in"
+                    ),
+                ),
+                None if self.env.lambda_depth > 0 => (
+                    format!("cannot call effect function '{}' from a pure function", name),
+                    // The call sits in a LAMBDA: a lambda has no effect marker
+                    // of its own — it inherits the enclosing fn's capability
+                    // (one rule for every higher-order callee, list.map and
+                    // http.serve alike, #1051) — so the fix is one level up.
+                    "A lambda inherits its context's effect capability — mark the enclosing \
+                     function as `effect fn`"
+                        .to_string(),
+                ),
+                None => (
+                    format!("cannot call effect function '{}' from a pure function", name),
+                    "Mark the calling function as `effect fn`".to_string(),
+                ),
+            };
+            let mut diag = super::err(msg, hint, format!("call to {}()", name)).with_code("E006");
             if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
                 diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
             }

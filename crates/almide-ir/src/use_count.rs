@@ -123,7 +123,7 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Await { expr }
+       
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
         | IrExprKind::RcWrap { expr, .. }
@@ -413,7 +413,7 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
         | IrExprKind::RcWrap { expr, .. }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+        | IrExprKind::ToVec { expr } => {
             bump_vars_in_expr(expr, locals, table);
         }
         IrExprKind::MapLiteral { entries } => {

@@ -193,6 +193,34 @@ fn fan_map_call_name(arg_tys: &[Ty], result_ty: &Ty) -> String {
     format!("fan.map{sfx}")
 }
 
+/// `fan.any_map` monomorphic-variant routing — the T2-3 mapper form. Same
+/// (input element A, output element B) keying as `fan_map_call_name`, but the
+/// output B comes from `result_ty = Result[B, String]` DIRECTLY (any returns
+/// one winner, not a list). An unsupported pairing routes to the UNLINKED
+/// `fan.any_map_x` → a clean render wall.
+fn fan_any_call_name(arg_tys: &[Ty], result_ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fn elem_of(t: Option<&Ty>) -> Option<&Ty> {
+        match t {
+            Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 => Some(&e[0]),
+            _ => None,
+        }
+    }
+    let a = elem_of(arg_tys.first());
+    let b = match result_ty {
+        Ty::Applied(TypeConstructorId::Result, r) if r.len() == 2 => Some(&r[0]),
+        _ => None,
+    };
+    let sfx = match (a, b) {
+        (Some(Ty::Int), Some(Ty::Int)) => "",
+        (Some(Ty::Int), Some(Ty::String)) => "_is",
+        (Some(Ty::String), Some(Ty::String)) => "_ss",
+        (Some(Ty::String), Some(Ty::Int)) => "_si",
+        _ => "_x",
+    };
+    format!("fan.any_map{sfx}")
+}
+
 /// HEAP-accumulator `fold` routing for list/map/set (see the block comment). `fold` threads an
 /// ACCUMULATOR (= the result type). A HEAP accumulator (e.g. a String built up across the
 /// fold) needs the closure-result + accumulator to be an i32 handle, not the i64 the

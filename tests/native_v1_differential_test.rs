@@ -101,6 +101,13 @@ const CORPUS: &[(&str, &str)] = &[
     ("list_set", "fn main() -> Unit = {\n  var b = [1, 2, 3]\n  b[1] = 99\n  println(int.to_string(b[0] + b[1] + b[2]))\n}\n"),
     ("str_transforms", "fn main() -> Unit = {\n  let s = \"héllo ßtraße \" + int.to_string(7)\n  println(string.to_upper(s))\n  println(string.to_lower(string.to_upper(s)))\n  println(string.trim(\"  padded  \" + int.to_string(1)))\n  println(string.repeat(\"ab\", 3))\n}\n"),
     ("str_ordering", "fn main() -> Unit = {\n  let a = int.to_string(41)\n  let b = int.to_string(42)\n  if a < b then println(\"lt\") else println(\"ge\")\n  if b < a then println(\"lt\") else println(\"ge\")\n  if a != b then println(\"ne\") else println(\"eq\")\n}\n"),
+    // ── T1-3 Res carrier: a Result[Int, String]-returning plain fn and its
+    //    match consumption ride NTy::Res (Rust Result<i64, String>) ──
+    ("result_fn_match", "fn safe_div(a: Int, b: Int) -> Result[Int, String] =\n  if b == 0 then err(\"div by zero\") else ok(a / b)\n\nfn main() -> Unit = {\n  let r = safe_div(10, 2)\n  match r {\n    ok(v) => println(int.to_string(v)),\n    err(e) => println(e),\n  }\n  let s = safe_div(1, 0)\n  match s {\n    ok(v) => println(int.to_string(v)),\n    err(e) => println(e),\n  }\n}\n"),
+    // ── §13 abort floor (T3-1): eprintln shim + ProcExit prim — the assert
+    //    desugar's abort tail now renders on the native v1 rung ──
+    ("eprintln_line", "fn main() -> Unit = {\n  eprintln(\"warn \" + int.to_string(7))\n  println(int.to_string(1))\n}\n"),
+    ("assert_abort_tail", "fn main() -> Unit = {\n  println(int.to_string(1))\n  assert(1 == 2)\n  println(int.to_string(2))\n}\n"),
 ];
 
 #[test]

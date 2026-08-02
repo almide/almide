@@ -1,0 +1,8 @@
+// #1053: `HttpRequest` is http's runtime-backed nominal. Without the import
+// the old hint suggested declaring or importing the type — two actions that
+// both cannot work. The hint must name the one that does: `import http`.
+fn method_of(req: HttpRequest) -> String = "x"
+
+effect fn main() -> Unit = println(method_of_placeholder())
+
+fn method_of_placeholder() -> String = "y"

@@ -413,12 +413,6 @@ fn render_expr_optional_chain(ctx: &RenderContext, inner: &IrExpr, field: &Sym) 
         .unwrap_or_else(|| format!("{}.as_ref().map(|__v| __v.{}.clone())", s, field))
 }
 
-/// `Await { expr: inner }` case of `render_expr`.
-fn render_expr_await(ctx: &RenderContext, inner: &IrExpr) -> String {
-    let s = render_expr(ctx, inner);
-    ctx.templates.render_with("await_expr", None, &[], &[("inner", s.as_str())])
-        .unwrap_or_else(|| "await(...)".into())
-}
 
 /// `Deref { expr: inner }` case of `render_expr`.
 fn render_expr_deref(ctx: &RenderContext, inner: &IrExpr) -> String {
@@ -600,8 +594,6 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::UnwrapOr { expr: inner, fallback } => render_expr_unwrap_or(ctx, inner, fallback),
         IrExprKind::ToOption { expr: inner } => render_expr_to_option(ctx, inner),
         IrExprKind::OptionalChain { expr: inner, field } => render_expr_optional_chain(ctx, inner, field),
-        IrExprKind::Await { expr: inner } => render_expr_await(ctx, inner),
-
         // ── Codegen nodes (inserted by passes — walker just renders) ──
         IrExprKind::Clone { .. } => render_expr_clone(ctx, expr),
         IrExprKind::Deref { expr: inner } => render_expr_deref(ctx, inner),

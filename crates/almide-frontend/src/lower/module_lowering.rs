@@ -384,7 +384,6 @@ pub(super) struct FnToLower<'a> {
     pub params: &'a [ast::Param],
     pub body: &'a ast::Expr,
     pub effect: &'a Option<bool>,
-    pub r#async: &'a Option<bool>,
     pub span: &'a Option<ast::Span>,
     pub generics: &'a Option<Vec<ast::GenericParam>>,
     pub extern_attrs: &'a [ast::ExternAttr],
@@ -396,7 +395,7 @@ pub(super) struct FnToLower<'a> {
 
 fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
     let FnToLower {
-        name, params, body, effect, r#async, span, generics,
+        name, params, body, effect, span, generics,
         extern_attrs, export_attrs, attrs, visibility, module_prefix,
     } = *decl;
     ctx.push_scope();
@@ -417,7 +416,6 @@ fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
     ctx.pop_scope();
 
     let is_effect = effect.unwrap_or(false);
-    let is_async = r#async.unwrap_or(false);
     let vis = match visibility {
         ast::Visibility::Public => IrVisibility::Public,
         ast::Visibility::Mod => IrVisibility::Mod,
@@ -429,7 +427,7 @@ fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
 
     IrFunction {
         name: sym(name), params: ir_params, ret_ty, body: ir_body,
-        is_effect, is_async, is_test: false,
+        is_effect, is_test: false,
         generics: stripped_generics, extern_attrs: extern_attrs.to_vec(),
         export_attrs: export_attrs.to_vec(),
         attrs: attrs.to_vec(),

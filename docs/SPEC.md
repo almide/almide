@@ -1011,21 +1011,119 @@ effect fn main() -> Result[Unit, String] = {
 Results are returned as a tuple. All siblings are joined — nothing is cancelled. If any
 expression returns `Err`, the block's value is the first `Err` in list order.
 
-### 13.2 fan.map / fan.any
+### 13.2 fan.map and the block heads fan.any / fan.settle
 
 ```
-let results = fan.map(urls, (url) => fetch(url))   // deterministic, list order
-let first_ok = fan.any([task_a, task_b])           // first Ok in list order
+let results = fan.map(urls, (url) => fetch(url))    // Result[List[B], String], list order
+let first   = fan.any { fetch_a(); fetch_b() }      // Result[T, String]: first Ok in SOURCE order
+let all     = fan.settle { job_a(); job_b() }       // List[Result[T, String]], list order
 ```
 
-### 13.3 Rules
+- `fan.map(xs, f)` maps in deterministic list order; the first `Err` (in list
+  order) propagates as the whole map's `Err`.
+- `fan.any { ... }` — arms are single calls. The value is the first `Ok` in
+  source order; `Err` arms are skipped; all-`Err` yields `Err`.
+- `fan.settle { ... }` — every arm runs to completion; the RESULT list is in
+  arm order (deterministic) even where the native leg uses real threads.
+- The thunk-list spellings `fan.any([...])` / `fan.settle([...])` were removed
+  (E027 names the block-form migration).
 
-- `fan { }` only inside `effect fn` — pure functions cannot fork
+### 13.3 Deterministic time: `Compute` and `Duration`
+
+Time quantities are built with module-qualified constructors over a CLOSED
+unit set (`ns / us / ms / s / min / h`) and carry a nominal clock type:
+
+```
+compute.ms(100)     // Compute  — deterministic compute time (budgets)
+duration.ms(5000)   // Duration — wall-clock time (oracle-tier surfaces)
+```
+
+- A bare `Int` where a time is expected is a type error; the two clocks never
+  mix (the firewall exists in the checker only — both erase to an `Int` of
+  nanoseconds in lowering).
+- A NEGATIVE constructor argument aborts deterministically at runtime
+  (`Error: negative time: compute.us(-5)` on stderr, exit 1 — identical on
+  both targets); an overflowing construction saturates to the maximum instead
+  of wrapping.
+- Deterministic time is metered in charge units on a frozen abstract machine
+  (function entries and loop heads) and converted from declared nanoseconds by
+  a versioned calibration constant (CM-1). The contract is RATIO-ONLY: the
+  declared time approximates the wall clock within a declared band (a standing
+  CI gate measures it), but the METERING itself is exact and
+  machine-independent. Full normative rules: `docs/adr/0001-deterministic-time-units.md`.
+
+### 13.4 fan.bounded — deterministic compute budget
+
+```
+let r = fan.bounded(compute.ms(100)) { work(input) } ?? fallback
+```
+
+- Runs the body under a deterministic compute budget. If the metered spend
+  exceeds the budget, the value is `Err`; otherwise `Ok(body value)`. Type:
+  `Result[T, String]`.
+- The verdict is a function of the program and its inputs ONLY: the same
+  program flips from `Ok` to `Err` at the same declared nanosecond on every
+  target and every machine.
+- Nested budgets min-cap: an inner region can never spend more than the
+  enclosing region's remainder.
+- The body is checked in a PURE context; in v1 it must be a single function
+  call returning a plain (non-`Result`) value.
+
+### 13.5 fan.race — deterministic winner
+
+```
+let w = fan.race { solve_fast(); solve_slow() } ?? fallback
+let b = fan.race(compute.us(50)) { a(); b() } ?? fallback   // per-arm budget
+let m = fan.race(xs, (x) => ok(solve(x))) ?? fallback       // mapper form
+let n = fan.race(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback
+```
+
+- Every arm is metered on the deterministic clock; the winner is the arm with
+  the LEXICOGRAPHICALLY least `(spend, index)` — the cheapest arm, ties
+  resolved by source order. With a budget, arms whose spend exceeds it are
+  excluded; no admitted arm yields `Err`. Type: `Result[T, String]`.
+- The MAPPER form races one PURE 1-param lambda over a dynamic list: arm `i`
+  is `f(xs[i])`, index order is list order, and the budget (when given) is
+  per-element — the same law as the block form. The mapper must return a
+  `Result` (the mapper-form contract): `ok(v)` competes, `err(_)`
+  self-disqualifies the element. An empty list is the no-admitted-arm `Err`.
+- History: an earlier spec revision promised both "results are identical on
+  every target" (§13.1) and "the first arm to COMPLETE wins" (then-§13.2) —
+  incompatible, since the second makes wall-clock scheduling observable. The
+  wall-clock race was removed in 0.42.0. `fan.race` returns with the winner
+  measured on the DECLARED deterministic clock, which makes both promises
+  true at once: the fast arm wins, and every target agrees on which arm that
+  is. Selecting a winner by wall clock is impossible in the deterministic
+  tier by theorem (T9), not by preference.
+
+### 13.6 fan.timeout — the oracle-tier wall-clock deadline
+
+```
+let t = fan.timeout(duration.ms(5000)) { work(input) } ?? fallback
+```
+
+- The deadline is a `Duration` (wall clock); it is checked COOPERATIVELY at
+  charge sites — never mid-operation (the Go-context cancellation model) —
+  and nested deadlines min-cap on the absolute deadline.
+- The verdict is ω-RELATIVE: which check the deadline fires at is a host
+  input (ADR-0001 S8). A recorded ω replays byte-identically on every target
+  (`ALMIDE_OMEGA_RECORD=1` to record on native, `ALMIDE_OMEGA=<n>` to
+  replay anywhere — the replay never reads the clock). Two ends are
+  absolute: a deadline larger than the work always completes, and a
+  diverging body under any finite deadline is always cut.
+
+### 13.7 Rules
+
+- All `fan` forms only inside `effect fn` — pure functions cannot fork
+  (`fan.bounded` / `fan.race` bodies and arms are themselves checked PURE)
 - No `var` capture — only `let` bindings from outer scope (prevents data races)
 - No unstructured `spawn` — all concurrency is scoped
 - No cancellation, by design — a cancelled sibling's side effects would depend on when the
   cancellation landed, which is exactly the scheduling dependence the model excludes. The
   block joins every sibling and reports the first `Err` in list order
+- Budgets are `Compute`, never `Duration` and never a bare `Int` — wall-clock
+  limits belong to the oracle tier (`fan.timeout`, future), not the
+  deterministic tier
 
 ---
 

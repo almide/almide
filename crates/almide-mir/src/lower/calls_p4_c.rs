@@ -431,6 +431,23 @@ impl LowerCtx {
     /// Extracted from `Self::lower_prim_call_generic` (thirteenth-round split, cog
     /// reduction): the structural-vs-float name-group dispatch, verbatim.
     fn prim_kind_for_name(&self, func: &str) -> Result<crate::PrimKind, LowerError> {
+        if matches!(func, "budget_enter" | "budget_exhausted" | "budget_exit" | "budget_spend") {
+            crate::charge_probe::note_budget_used();
+            return Ok(match func {
+                "budget_enter" => crate::PrimKind::BudgetEnter,
+                "budget_exhausted" => crate::PrimKind::BudgetExhausted,
+                "budget_spend" => crate::PrimKind::BudgetSpend,
+                _ => crate::PrimKind::BudgetExit,
+            });
+        }
+        if matches!(func, "timeout_enter" | "timeout_exit" | "timeout_hit") {
+            crate::charge_probe::note_timeout_used();
+            return Ok(match func {
+                "timeout_enter" => crate::PrimKind::TimeoutEnter,
+                "timeout_hit" => crate::PrimKind::TimeoutHit,
+                _ => crate::PrimKind::TimeoutExit,
+            });
+        }
         if matches!(
             func,
             "handle" | "die" | "load8" | "load32" | "load64" | "load_str" | "load_handle"

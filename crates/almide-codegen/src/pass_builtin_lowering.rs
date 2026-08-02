@@ -495,7 +495,6 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             expr: Box::new(rewrite_expr(*expr)),
             fallback: Box::new(rewrite_expr(*fallback)),
         },
-        IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(rewrite_expr(*expr)) },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             exprs: exprs.into_iter().map(rewrite_expr).collect(),
         },

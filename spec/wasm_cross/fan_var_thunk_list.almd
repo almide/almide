@@ -1,11 +1,10 @@
 // @contract: C-004
-// #599: a race/any/settle thunk list bound to a `let` VARIABLE before the fan
-// call (not an inline `[...]` literal) is adapted/boxed identically to the
-// inline form. Before the fix, the #514 inline-list adapter's `_ => arg`
-// passthrough left a var-bound list unadapted: native emitted invalid Rust
-// (Rc<dyn Fn> is not Fn), wasm ran for Result-lambdas but RUNTIME-TRAPPED
-// (indirect call type mismatch) for pure named-fn-ref thunks. Both the
-// frontend Ok-adapter and the Rust Send+Sync boxing now follow the var.
+// Wave 1 respelling of the #599 fixture: the var-bound thunk-LIST spelling was
+// retired with the thunk-list surface (E027 — the block form is the only
+// spelling, and it synthesizes a literal list the inliner always handled).
+// What this fixture still pins from #599's fallout: MIXED arm kinds — an
+// effect call and pure named-fn calls — through any AND settle, list-order
+// deterministic on both targets, with the Ok-adapter applied once per arm.
 effect fn one() -> Result[Int, String] = ok(1)
 
 fn ra() -> Int = 1
@@ -13,12 +12,13 @@ fn ra() -> Int = 1
 fn rb() -> Int = 2
 
 effect fn main() -> Unit = {
-  let lam: List[fn() -> Result[Int, String]] = [
-    () => one()
-  ]
-  let r = fan.any(lam)
+  let r = fan.any {
+    one()
+  }
   println("any_var=${r}")
-  let refs: List[fn() -> Int] = [ra, rb]
-  let s = fan.settle(refs)
-  println("settle=${list.len(s)}")
+  let (sa, sb) = fan.settle {
+    ra()
+    rb()
+  }
+  println("settle=${sa} ${sb}")
 }

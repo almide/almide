@@ -9,6 +9,7 @@ pub mod embedded {
 pub mod types;
 pub mod stdlib_info;
 pub mod self_host_registry;
+pub mod time_units;
 
 // Re-export almide-base for convenience
 pub use almide_base;

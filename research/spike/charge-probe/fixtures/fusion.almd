@@ -1,0 +1,16 @@
+fn hot(a: Int, b: Int) -> Int = {
+  let c = a * 3 + b * 5
+  let d = c * c - a * b
+  let e = d % 1000
+  ((e * 7 + c % 13) * 2 - b) % 100000
+}
+
+fn main() -> Unit = {
+  var i = 0
+  var acc = 0
+  while i < 2000 {
+    acc = (acc + hot(i, acc)) % 999983
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}

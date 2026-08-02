@@ -178,6 +178,15 @@ let f = (x) => {
 }
 ```
 
+**Lambdas and effects**: a lambda inherits the enclosing fn's effect
+capability — one rule for every higher-order callee (`list.map`,
+`http.serve`'s handler, …). Inside an `effect fn`, a lambda may call effect
+fns, but their results stay **explicit `Result` values** (auto-`?` never
+crosses a closure boundary): unwrap with `?? fallback` or `match` — `!`
+cannot propagate out of a lambda. In a pure fn the same lambda is an error.
+Exception: metered regions (`fan.bounded` / `fan.race` bodies) are pure by
+design, so effect calls are rejected there even inside an effect fn.
+
 ### Block (last expression is the value)
 ```
 {
@@ -311,6 +320,10 @@ expr?              // Result → Option (err → none)
 expr?.field        // optional chaining (Option[Record] → Option[FieldType])
 ```
 
+`!` on an effect CALL always compiles: if the fn never fails (`random.int`,
+`fs.exists`, …) the `!` is a silent no-op. You never need to know whether a
+stdlib effect fn can fail to append it.
+
 ### Guard (early return / loop break)
 ```
 guard x > 0 else err("must be positive")
@@ -322,6 +335,46 @@ guard not fs.exists(path) else {
   ok(())
 }
 ```
+
+## Concurrency & deterministic time (fan)
+
+All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in Almide.
+
+```
+// Parallel map: first Err (in list order) propagates
+let results = fan.map(urls, (u) => http.get(u))!         // Result[List[B], String]
+
+// Block heads — arms are single function calls separated by `;` or newline
+let first = fan.any { fetch_a(); fetch_b() } ?? fallback  // first Ok in SOURCE order
+let all   = fan.settle { job_a(); job_b() }               // List[Result[T, String]]
+let win   = fan.race { solve_fast(); solve_slow() } ?? d  // deterministic winner (least compute spent; tie → source order)
+
+// Budgets: deterministic compute-time limits, built with compute.* constructors
+let r = fan.bounded(compute.ms(100)) { work(input) } ?? -1   // Err if work exceeds 100ms of deterministic compute
+let w = fan.race(compute.us(50)) { a(); b() } ?? -1          // arms over budget are excluded
+
+// Mapper form: race ONE pure lambda over a dynamic list (winner = cheapest, tie → list order)
+let m = fan.race(xs, (x) => ok(solve(x))) ?? fallback        // mapper returns Result: err(...) disqualifies
+let n = fan.race(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback  // per-element budget
+
+// Wall-clock deadline (oracle tier): checked cooperatively at charge sites
+let t = fan.timeout(duration.ms(5000)) { work(input) } ?? -1 // Err if the wall deadline fires first
+```
+
+### Time constructors (closed set)
+
+Two clock types, six units each — `ns / us / ms / s / min / h`:
+
+```
+compute.ms(100)     // Compute — deterministic compute-time (fan.bounded / fan.race budgets)
+duration.ms(5000)   // Duration — wall-clock time (fan.timeout deadlines)
+```
+
+- A bare `Int` is NEVER a time: `fan.bounded(5000) {...}` is a type error — write `compute.ms(5000)`
+- `Compute` and `Duration` do not mix: `fan.bounded(duration.ms(5)) {...}` is a type error
+- There is no literal suffix: `100ms` does not parse — write `compute.ms(100)`
+- A negative argument aborts at runtime (`Error: negative time: ...`); an overflowing construction saturates to the maximum
+- `fan.race` / `fan.bounded` results are deterministic: same program + same inputs = same winner/verdict on every target and every machine
 ## Test
 ```
 test "description" {
@@ -411,6 +464,8 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [math](stdlib/math.md) | Mathematical functions | auto-imported | 21 |
 | [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
 | [datetime](stdlib/datetime.md) | Date and time | auto-imported | 21 |
+| [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) | 6 |
+| [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) | 6 |
 | [bytes](stdlib/bytes.md) | Binary data | auto-imported | 67 |
 | [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported | 39 |
 | [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
@@ -462,6 +517,11 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - `let mut x = 1` → **WRONG**. Write `var x = 1`. `mut` is only a parameter modifier (`fn f(mut x: Int)`), not a binding modifier
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
+- `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan.any` / `fan.settle` / `fan.race` / `fan.bounded` block forms
+- `fan.any([a, b])` / `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.any { a(); b() }`
+- `fan.bounded(100) {...}` / `fan.race(5000) {...}` → **WRONG**. A bare Int is not a time. Write `compute.ms(100)`
+- `compute.msec(5)` / `compute.sec(5)` / `compute.m(5)` → **WRONG**. The unit set is closed: `ns / us / ms / s / min / h`
+- `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`
 
 ## Complete example
 ```

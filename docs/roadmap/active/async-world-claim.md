@@ -8,6 +8,28 @@
 > 証明は [logical-time-proofs.md](./logical-time-proofs.md)。本文書は主張の側を扱う —
 > どの一文なら審査に耐え、どの一文はまだ嘘になるか。
 
+> **実装状況（2026-08-03、branch `worktree-stage1-charge-probe` — 食い違いは
+> BURNDOWN/契約台帳が正）**: 下の実行順節は起草時の「これから」の体のまま残す。
+> 現在地は以下のとおり。
+>
+> - **Lane 1 完了**: Wave 1（b817e3dc）→ Stage 1（8ece4153 + 4db109aa）→
+>   Stage 2（4152da7b）→ Stage 3（113feee2）。CM-1 v0.3 = 3ns/unit、境界は
+>   ns 精度 exact flip、契約 C-202..C-207 + 3-way corpus 常設 —
+>   **claim 1–3 の解禁条件は成立**。
+> - **Lane 2 B2 完了**: `fan.timeout(duration.ms(n)) { body }`（f8d760ba、
+>   C-208 + ALS-D5）。
+> - **Lane 2 B1 は timeout-ω スライスのみ**: ω = 期限が切れた wall check の序数。
+>   `ALMIDE_OMEGA_RECORD=1` 採録 → `ALMIDE_OMEGA=<n>` コンパイル時 bake 再生、
+>   record(native) → replay(native + wasm) byte 一致を常設 gate で検査。
+>   **効果応答テープ（fs/http/random/process/env の ω スキーマ + `--record` /
+>   `--replay` + redaction）は未着手** — claim 4 は「timeout 事象の決定的再現」に
+>   射程を限定すれば今日言える。全文の解禁は B1 完了後（下のスケッチが仕様）。
+> - **Lane 3 D は Almide 側完了**: dojo async バンク 7 タスク **7/7 pass**
+>   （cli:claude、retry 込み — dojo runs/2026-08-02/summary.md）。
+>   **claim 5 の全文解禁には同一モデル比較 lang-bench(async) が残る**。
+> - **追補**: race の mapper 形も実装済み（T7-1）— fan v2 matrix は全セル確定。
+> - **C（KPN）**: 設計どおり未着手（地平のまま）。
+
 ## 判定（先に結論）
 
 **今日、無条件の「世界最高の async」は言えない。今日でも言い切れる唯一性の軸は 4 本ある。

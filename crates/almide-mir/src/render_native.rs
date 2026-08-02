@@ -43,6 +43,9 @@ enum NTy {
     /// carries Float as i64 BITS; the boundary into a float op converts via
     /// `f64::from_bits` (bit-exact), and every float-op result stays `f64`.
     F64,
+    /// An OWNED `Result<i64, String>` local — the T1-3 native Result carrier
+    /// (produced by the `native_result_rewrite` prims / a Res-returning call).
+    Res,
 }
 
 impl NTy {
@@ -63,6 +66,8 @@ pub enum NativeSigKind {
     Str,
     ListI64,
     F64,
+    /// `Result<i64, String>` — the T1-3 native Result carrier (returns only).
+    Res,
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -90,6 +95,7 @@ fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::StrRef => code.to_string(),
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
         NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
+        NTy::Res => unreachable!("as_str_arg on a Result carrier"),
     }
 }
 
@@ -120,6 +126,13 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
             &[NTy::Str],
             None,
             "fn rt_print_str(s: &str) { println!(\"{}\", s); }",
+        )),
+        // The §13 abort convention's message channel (assert desugar, time-ctor
+        // negative trap): stderr line, exact v0 oracle behavior.
+        "eprintln" => Some((
+            &[NTy::Str],
+            None,
+            "fn rt_eprintln(s: &str) { eprintln!(\"{}\", s); }",
         )),
         "__str_concat" => Some((
             &[NTy::Str, NTy::Str],
@@ -249,7 +262,8 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
                 func.name
             )));
         }
-        let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)?;
+        let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
+            .map_err(|e| e.with_fn_context(&func.name))?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
@@ -336,6 +350,11 @@ fn seed_param_ntys(
             Some(NativeSigKind::Str) => NTy::StrRef,
             Some(NativeSigKind::I64) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
+            // Result params are rejected by the sig gate; a Res kind can
+            // only name a RETURN.
+            Some(NativeSigKind::Res) => {
+                return Err(wall("native: Result-typed param — outside the rung subset"))
+            }
             None => repr_nty(&p.repr, true)?,
         };
         tys.insert(p.value, nty);
@@ -370,6 +389,12 @@ fn render_fn(
     // side effect), so skipping an unused one is sound — and it keeps the
     // subset honest: a USED Handle still walls below.
     let used = native_used_values(func);
+    if is_main && crate::charge_probe::probe_enabled() {
+        used_shims.push(COUNTER_SHIM);
+        used_shims.push(CHARGE_SHIM);
+        line!("let __almd_probe_guard = __AlmdProbeGuard;");
+        line!("let _ = &__almd_probe_guard;");
+    }
     for op in &func.ops {
         match op {
             Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), .. } if !used.contains(d) => {
@@ -392,6 +417,151 @@ fn render_fn(
                     },
                 )?
             }
+            Op::Charge { site, cost } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(CHARGE_SHIM);
+                let tr = crate::charge_probe::probe_enabled();
+                used_shims.push(FUEL_LT0_SHIM);
+                line!("__almd_charge({site}, {cost}, {tr});");
+                // T1-1 strict cut (see the wasm arm): the dummy return value's
+                // type is known only after the body typed `func.ret`, so a
+                // marker is emitted here and patched at the end of render_fn.
+                line!("if __almd_fuel_lt0() {{ {CUT_RET_MARKER} }}");
+                // T5-1: the wall-deadline check rides the same cut mechanism.
+                if crate::charge_probe::timeout_used() {
+                    used_shims.push(TIMEOUT_SHIM.as_str());
+                    line!("if __almd_wall_hit() {{ {CUT_RET_MARKER} }}");
+                }
+            }
+            // T3-5 dynamic charge — the native twin of the wasm arm above:
+            // 1 + byte_len/16 of the result string, same trace + cut rules.
+            Op::ChargeDyn { site, src } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(CHARGE_SHIM);
+                used_shims.push(CHARGE_DYN_SHIM);
+                used_shims.push(FUEL_LT0_SHIM);
+                let tr = crate::charge_probe::probe_enabled();
+                let sref = match tys.get(src) {
+                    Some(NTy::Str | NTy::StrRef) => format!("{}.len() as i64", var(*src)),
+                    other => {
+                        return Err(wall(format!(
+                            "native: ChargeDyn over a non-string value ({other:?})"
+                        )))
+                    }
+                };
+                line!("__almd_charge_dyn({site}, {sref}, {tr});");
+                line!("if __almd_fuel_lt0() {{ {CUT_RET_MARKER} }}");
+                if crate::charge_probe::timeout_used() {
+                    used_shims.push(TIMEOUT_SHIM.as_str());
+                    line!("if __almd_wall_hit() {{ {CUT_RET_MARKER} }}");
+                }
+            }
+            // The §13 termination convention's exit half (assert desugar tail,
+            // time-ctor negative trap): a user exit code, no message of its own.
+            Op::Prim { kind: crate::PrimKind::ProcExit, dst: None, args } => {
+                line!("std::process::exit({} as i32);", var(args[0]));
+            }
+            // The §13 termination convention's MESSAGE half — the err-abort
+            // window of a `?`-propagation in main (`Handle(msg)` + `Die`).
+            // The native render has no address model: a handle over a STRING
+            // local is an alias (the value IS the string), and `Die` is the
+            // wasm `$__die` twin — the string to stderr verbatim, exit 1.
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args }
+                if matches!(tys.get(&args[0]), Some(NTy::Str | NTy::StrRef)) =>
+            {
+                let src = match tys.get(&args[0]) {
+                    Some(NTy::Str) => format!("{}.as_str()", var(args[0])),
+                    _ => var(args[0]).to_string(),
+                };
+                tys.insert(*d, NTy::StrRef);
+                line!("let {}: &str = {};", var(*d), src);
+            }
+            Op::Prim { kind: crate::PrimKind::Die, dst: None, args }
+                if matches!(tys.get(&args[0]), Some(NTy::Str | NTy::StrRef)) =>
+            {
+                line!("eprint!(\"{{}}\", {});", var(args[0]));
+                line!("std::process::exit(1);");
+            }
+            // ── T1-3 native Result carrier (native_result_rewrite) ──
+            Op::Prim { kind: crate::PrimKind::ResMakeOk, dst: Some(d), args } => {
+                tys.insert(*d, NTy::Res);
+                line!("let {}: Result<i64, String> = Ok({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::ResMakeErrStr, dst: Some(d), args } => {
+                let src = match tys.get(&args[0]) {
+                    Some(NTy::Str) => format!("{}.clone()", var(args[0])),
+                    Some(NTy::StrRef) => format!("{}.to_string()", var(args[0])),
+                    other => {
+                        return Err(wall(format!(
+                            "native: ResMakeErrStr over a non-string payload ({other:?})"
+                        )))
+                    }
+                };
+                tys.insert(*d, NTy::Res);
+                line!("let {}: Result<i64, String> = Err({});", var(*d), src);
+            }
+            Op::Prim { kind: crate::PrimKind::ResTag, dst: Some(d), args } => {
+                tys.insert(*d, NTy::I64);
+                line!("let {}: i64 = {}.is_err() as i64;", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::ResOkScalar, dst: Some(d), args } => {
+                tys.insert(*d, NTy::I64);
+                line!(
+                    "let {}: i64 = match &{} {{ Ok(x) => *x, Err(_) => 0 }};",
+                    var(*d),
+                    var(args[0])
+                );
+            }
+            Op::Prim { kind: crate::PrimKind::ResErrStr, dst: Some(d), args } => {
+                // A BORROW of the Err payload (the verifier aliases it to the
+                // Result's object); "" on the Ok side (unreached — the tag
+                // dispatch guards it).
+                tys.insert(*d, NTy::StrRef);
+                line!(
+                    "let {}: &str = match &{} {{ Err(e) => e.as_str(), Ok(_) => \"\" }};",
+                    var(*d),
+                    var(args[0])
+                );
+            }
+            Op::Prim { kind: crate::PrimKind::TimeoutEnter, dst: Some(d), args } => {
+                used_shims.push(TIMEOUT_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_timeout_enter({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::TimeoutExit, dst: Some(d), args } => {
+                used_shims.push(TIMEOUT_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_timeout_exit({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::TimeoutHit, dst: Some(d), .. } => {
+                used_shims.push(TIMEOUT_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_timeout_hit();", var(*d));
+            }
+            Op::Prim { kind: crate::PrimKind::BudgetEnter, dst: Some(d), args } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(BUDGET_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_budget_enter({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::BudgetExhausted, dst: Some(d), .. } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(BUDGET_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_budget_exhausted();", var(*d));
+            }
+            Op::Prim { kind: crate::PrimKind::BudgetExit, dst: Some(d), args } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(BUDGET_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_budget_exit({});", var(*d), var(args[0]));
+            }
+            Op::Prim { kind: crate::PrimKind::BudgetSpend, dst: Some(d), .. } => {
+                used_shims.push(COUNTER_SHIM);
+                used_shims.push(BUDGET_SHIM.as_str());
+                tys.insert(*d, NTy::I64);
+                line!("let {} = __almd_budget_spend();", var(*d));
+            }
             other => {
                 let handled = render_native_call_op(
                     other,
@@ -401,9 +571,14 @@ fn render_fn(
                     crate::render_native::OpSink { tys: &mut tys, out: &mut out, indent, used_shims },
                 )? || render_native_flow_op(other, &mut tys, &mut out, &mut indent, &mut if_stack)?;
                 if !handled {
+                    let detail = if let Op::Prim { kind, .. } = other {
+                        format!("Prim {kind:?}")
+                    } else {
+                        op_name(other).to_string()
+                    };
                     return Err(wall(format!(
-                        "native: op {:?} — outside the rung subset",
-                        op_name(other)
+                        "native: op {detail:?} in `{}` — outside the rung subset",
+                        func.name
                     )));
                 }
             }
@@ -414,6 +589,19 @@ fn render_fn(
         return Err(wall("native: unbalanced IfThen/EndIf markers"));
     }
 
+    // A LIFTED effect fn (declared scalar ret, wrapped carrier ABI — the sigs
+    // table widening in the pipeline): the body computes the raw scalar and
+    // the `Ok(..)` wrap happens HERE, at the single return seam. The body was
+    // already rendered with the scalar typing, so retyping the ret value now
+    // affects only the signature and the cut-marker patch below.
+    let lifted_wrap = !is_main
+        && matches!(sigs.get(func.name.as_str()), Some((_, Some(NativeSigKind::Res))))
+        && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
+    if lifted_wrap {
+        if let Some(v) = func.ret {
+            tys.insert(v, NTy::Res);
+        }
+    }
     // Signature: the return type is known only after the body typed `func.ret`.
     let mut sig = render_native_fn_sig(func, &tys, is_main)?;
     sig.push_str(" {\n");
@@ -421,11 +609,28 @@ fn render_fn(
     // The trailing return expression (moved out — fresh owned for heap).
     if let Some(v) = func.ret {
         out.push_str("    ");
-        out.push_str(&native_ret_expr(v, tys[&v]));
+        if lifted_wrap {
+            out.push_str(&format!("Ok({})", var(v)));
+        } else {
+            out.push_str(&native_ret_expr(v, tys[&v]));
+        }
         out.push('\n');
     }
     out.push_str("}\n");
     let ret_nty = func.ret.map(|v| tys[&v]);
+    // T1-1: patch every strict-cut marker with the now-known typed default
+    // (never observed — the region verdict is Err by the time a cut fires).
+    if out.contains(CUT_RET_MARKER) {
+        let cut_ret = match ret_nty {
+            None => "return;",
+            Some(NTy::I64) => "return 0;",
+            Some(NTy::F64) => "return 0.0;",
+            Some(NTy::Str | NTy::StrRef) => "return String::new();",
+            Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
+            Some(NTy::Res) => "return Ok(0);",
+        };
+        out = out.replace(CUT_RET_MARKER, cut_ret);
+    }
     Ok((format!("{sig}{out}"), ret_nty))
 }
 
@@ -433,7 +638,7 @@ fn render_fn(
 /// owned value; everything else returns the local directly.
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
-        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec => var(v),
+        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res => var(v),
         NTy::StrRef => format!("{}.to_string()", var(v)),
         NTy::VecRef => format!("{}.to_vec()", var(v)),
     }
@@ -464,6 +669,7 @@ fn render_native_fn_sig(
                 NTy::VecRef | NTy::Vec => "&[i64]",
                 NTy::I64 => "i64",
                 NTy::F64 => "f64",
+                NTy::Res => "Result<i64, String>",
             };
             format!("{}: {}", var(p.value), spelled)
         })
@@ -477,6 +683,7 @@ fn render_native_fn_sig(
             Some(NTy::Vec) => " -> Vec<i64>".to_string(),
             Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
             Some(NTy::F64) => " -> f64".to_string(),
+            Some(NTy::Res) => " -> Result<i64, String>".to_string(),
             None => return Err(wall("native: return value untyped")),
         },
     };
@@ -715,6 +922,8 @@ fn render_native_drop_op(
         Op::DropListStr { v } => {
             match tys.get(v) {
                 Some(NTy::Vec) => line!("// drop(record/list block): scope-end"),
+                // The T1-3 Result carrier frees like any owned Rust value.
+                Some(NTy::Res) => line!("// drop(result carrier): scope-end"),
                 Some(NTy::VecRef) => {
                     return Err(wall("native: DropListStr of a borrowed param — MIR call-mode violation"))
                 }
@@ -751,6 +960,10 @@ fn render_dup(
             tys.insert(*dst, NTy::I64);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
+        NTy::Res => {
+            tys.insert(*dst, NTy::Res);
+            line!("let mut {} = {}.clone();", var(*dst), var(*src));
+        }
         NTy::Str => {
             tys.insert(*dst, NTy::Str);
             line!("let mut {} = {}.clone();", var(*dst), var(*src));
@@ -778,3 +991,148 @@ fn render_dup(
 }
 
 include!("render_native_b.rs");
+
+
+/// T1-1: the strict-cut return marker — every Charge site emits
+/// `if __almd_fuel_lt0() { <marker> }` and `render_fn` patches the marker
+/// with a `return <default of the fn's ret type>;` once the ret NTy is known
+/// (the same late-patch technique as the if-value JOIN markers).
+const CUT_RET_MARKER: &str = "/*__CUT_RET__*/";
+
+/// The exhaustion read the strict cut branches on.
+const FUEL_LT0_SHIM: &str =
+    "fn __almd_fuel_lt0() -> bool { __ALMD_FUEL.with(|f| f.get()) < 0 }";
+
+/// T3-5: the dynamic (size-proportional) charge — 1 + len/16, same trace
+/// arithmetic as the static charge.
+const CHARGE_DYN_SHIM: &str = "fn __almd_charge_dyn(site: i64, len: i64, trace: bool) {
+    __ALMD_FUEL.with(|f| f.set(f.get().wrapping_sub(1 + (len >> 4))));
+    if trace {
+        __ALMD_TRACE.with(|t| t.set(t.get().wrapping_mul(1000003).wrapping_add(site)));
+    }
+}";
+
+/// T5-1: the wall-deadline shims (fan.timeout). The clock is monotonic
+/// (`Instant` since first use); in REPLAY mode (`ALMIDE_OMEGA` baked at
+/// compile time) the clock is never read — the baked ordinal decides the
+/// cut. RECORD mode (`ALMIDE_OMEGA_RECORD=1` baked) prints
+/// `__ALMD_OMEGA <ord>` on stderr at each fired region exit.
+static TIMEOUT_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    TIMEOUT_SHIM_TEMPLATE
+        .replace("__ALMD_OMEGA_V__", &crate::charge_probe::omega_replay().to_string())
+        .replace("__ALMD_OMEGA_REC__", if crate::charge_probe::omega_record() { "true" } else { "false" })
+});
+
+const TIMEOUT_SHIM_TEMPLATE: &str = "const __ALMD_OMEGA: i64 = __ALMD_OMEGA_V__;
+const __ALMD_OMEGA_RECORD: bool = __ALMD_OMEGA_REC__;
+static __ALMD_T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new(); // wasm-safe: GENERATED native-only shim (fan.timeout reads the wall clock at program runtime — oracle-tier semantics, never the compile path)
+fn __almd_now_ns() -> i64 {
+    __ALMD_T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i64 // wasm-safe: generated shim (see above)
+}
+thread_local! {
+    static __ALMD_T_DEADLINE: std::cell::Cell<i64> = const { std::cell::Cell::new(i64::MAX) };
+    static __ALMD_T_HIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static __ALMD_T_VERDICT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_T_ORD: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+fn __almd_timeout_enter(d_ns: i64) -> i64 {
+    let saved = __ALMD_T_DEADLINE.with(|d| d.get());
+    let now = if __ALMD_OMEGA >= 0 { 0 } else { __almd_now_ns() };
+    let dl = now.saturating_add(d_ns);
+    if dl < saved {
+        __ALMD_T_DEADLINE.with(|d| d.set(dl));
+    }
+    saved
+}
+fn __almd_timeout_exit(saved: i64) -> i64 {
+    let hit = __ALMD_T_HIT.with(|h| h.get());
+    __ALMD_T_VERDICT.with(|v| v.set(hit as i64));
+    if __ALMD_OMEGA_RECORD && hit {
+        eprintln!(\"__ALMD_OMEGA {}\", __ALMD_T_ORD.with(|o| o.get()));
+    }
+    __ALMD_T_HIT.with(|h| h.set(false));
+    __ALMD_T_DEADLINE.with(|d| d.set(saved));
+    0
+}
+fn __almd_timeout_hit() -> i64 {
+    __ALMD_T_VERDICT.with(|v| v.get())
+}
+fn __almd_wall_hit() -> bool {
+    if __ALMD_T_DEADLINE.with(|d| d.get()) == i64::MAX {
+        return false;
+    }
+    if __ALMD_T_HIT.with(|h| h.get()) {
+        return true;
+    }
+    let ord = __ALMD_T_ORD.with(|o| { o.set(o.get() + 1); o.get() });
+    if __ALMD_OMEGA >= 0 {
+        if ord >= __ALMD_OMEGA {
+            __ALMD_T_HIT.with(|h| h.set(true));
+        }
+        return __ALMD_T_HIT.with(|h| h.get());
+    }
+    if __almd_now_ns() >= __ALMD_T_DEADLINE.with(|d| d.get()) {
+        __ALMD_T_HIT.with(|h| h.set(true));
+    }
+    __ALMD_T_HIT.with(|h| h.get())
+}";
+
+/// Stage 1 probe shim: fuel/trace thread-locals + the charge fn + the guard
+/// that prints the triple's (consumed, trace) legs on main exit. Same hash
+/// arithmetic as the wasm leg (wrapping i64, trace*1000003+site).
+const COUNTER_SHIM: &str = "thread_local! {
+    static __ALMD_FUEL: std::cell::Cell<i64> = const { std::cell::Cell::new(i64::MAX) };
+    static __ALMD_FUEL_ENTRY: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_B_VERDICT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_B_SPEND: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_TRACE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}";
+
+/// The probe charge fn: fuel counts DOWN (consumed = MAX - fuel); the trace is
+/// the order-sensitive hash. Only probe builds call it with tracing on.
+const CHARGE_SHIM: &str = "fn __almd_charge(site: i64, cost: i64, trace: bool) {
+    __ALMD_FUEL.with(|f| f.set(f.get().wrapping_sub(cost)));
+    if trace {
+        __ALMD_TRACE.with(|t| t.set(t.get().wrapping_mul(1000003).wrapping_add(site)));
+    }
+}
+struct __AlmdProbeGuard;
+impl Drop for __AlmdProbeGuard {
+    fn drop(&mut self) {
+        eprintln!(\"__ALMD_PROBE {} {}\",
+            (i64::MAX.wrapping_sub(__ALMD_FUEL.with(|f| f.get()))) as u64,
+            __ALMD_TRACE.with(|t| t.get()) as u64);
+    }
+}";
+
+/// Stage 2 budget fns — the exact wasm-leg arithmetic (min-cap, lazy verdict,
+/// streaming exit). The ns→unit divisor is injected from the single CM-1
+/// definition ([`crate::charge_probe::CM1_NS_PER_CHARGE`]) so this shim cannot
+/// drift from the wasm BudgetEnter render.
+static BUDGET_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    BUDGET_SHIM_TEMPLATE
+        .replace("__ALMD_CM1_NS__", &crate::charge_probe::CM1_NS_PER_CHARGE.to_string())
+});
+
+const BUDGET_SHIM_TEMPLATE: &str = "fn __almd_budget_enter(budget_ns: i64) -> i64 {
+    let units = budget_ns / __ALMD_CM1_NS__;
+    __ALMD_FUEL_ENTRY.with(|e| e.set(units));
+    let saved = __ALMD_FUEL.with(|f| f.get());
+    if units < saved {
+        __ALMD_FUEL.with(|f| f.set(units));
+    }
+    saved
+}
+fn __almd_budget_exhausted() -> i64 {
+    __ALMD_B_VERDICT.with(|v| v.get())
+}
+fn __almd_budget_exit(saved: i64) -> i64 {
+    __ALMD_B_VERDICT.with(|v| v.set(i64::from(__ALMD_FUEL.with(|f| f.get()) < 0)));
+    let consumed = __ALMD_FUEL_ENTRY.with(|e| e.get()) - __ALMD_FUEL.with(|f| f.get());
+    __ALMD_B_SPEND.with(|s| s.set(consumed));
+    __ALMD_FUEL.with(|f| f.set(saved - consumed));
+    0
+}
+fn __almd_budget_spend() -> i64 {
+    __ALMD_B_SPEND.with(|s| s.get())
+}";

@@ -1,0 +1,10 @@
+// #1050 err-propagation twin: a can-err CALL as a binary operand takes the
+// auto-? — the failure propagates out of the operand exactly as it would out
+// of a `let`. The lowering A-normalizes a Try operand into the proven
+// heap-result-bind brick (auto_try), so this renders on the trust spine.
+effect fn parse_sum(s: String) -> Int = int.parse(s) + 1
+
+test "a can-err call operand propagates its err" {
+  assert_eq(parse_sum("5")!, 6)
+  assert(result.is_err(parse_sum("x")), "parse failure propagates out of the operand")
+}

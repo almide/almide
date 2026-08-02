@@ -357,6 +357,75 @@ fn render_op_range(
                 let close = if dst.is_some() { "))\n" } else { ")\n" };
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
+            Op::Charge { site, cost } => {
+                // Flush pending fused exprs so the charge cannot migrate across
+                // buffered computation, then emit the counter + trace update at
+                // this exact position. Same arithmetic as the native shim.
+                st.fuser.flush_all(body);
+                body.push_str(&format!(
+                    "    (global.set $__fuel (i64.sub (global.get $__fuel) (i64.const {cost})))\n"
+                ));
+                if crate::charge_probe::probe_enabled() {
+                    body.push_str(&format!(
+                        "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
+                    ));
+                }
+                // T1-1 strict cut: an exhausted meter RETURNS from this fn with
+                // a dummy value (never observed — the region's verdict is
+                // already Err, and every charge-bearing fn in budget-only mode
+                // is a metered clone). W1 bounds the post-exhaustion work: the
+                // chain of cuts reaches the outlined fn, whose exit persists
+                // verdict + spend on the normal path. In probe mode the fuel
+                // counts down from i64::MAX and never goes negative.
+                let dflt = match ctx.func.ret {
+                    None => String::new(),
+                    Some(r) => {
+                        let vt = wasm_ty(ctx.reprs.get(&r).copied().unwrap_or(SCALAR_REPR));
+                        format!(" ({vt}.const 0)")
+                    }
+                };
+                body.push_str(&format!(
+                    "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
+                ));
+                // T5-1: the wall-deadline check rides the SAME cut mechanism.
+                if crate::charge_probe::timeout_used() {
+                    body.push_str(&format!(
+                        "    (if (i32.ne (call $__wall_hit) (i32.const 0)) (then (return{dflt})))\n"
+                    ));
+                }
+            }
+            // T3-5 dynamic charge: 1 + result_len/16 read from the block's
+            // len field (@4) — result-keyed, so both legs subtract the same
+            // number by construction. Same trace + strict-cut rules as the
+            // static charge above.
+            Op::ChargeDyn { site, src } => {
+                st.fuser.flush_all(body);
+                body.push_str(&format!(
+                    "    (global.set $__fuel (i64.sub (global.get $__fuel) (i64.add (i64.const 1) (i64.shr_u (i64.extend_i32_u (i32.load offset=4 (local.get {}))) (i64.const 4)))))\n",
+                    local(*src)
+                ));
+                if crate::charge_probe::probe_enabled() {
+                    body.push_str(&format!(
+                        "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
+                    ));
+                }
+                let dflt = match ctx.func.ret {
+                    None => String::new(),
+                    Some(r) => {
+                        let vt = wasm_ty(ctx.reprs.get(&r).copied().unwrap_or(SCALAR_REPR));
+                        format!(" ({vt}.const 0)")
+                    }
+                };
+                body.push_str(&format!(
+                    "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
+                ));
+                // T5-1: the wall-deadline check rides the SAME cut mechanism.
+                if crate::charge_probe::timeout_used() {
+                    body.push_str(&format!(
+                        "    (if (i32.ne (call $__wall_hit) (i32.const 0)) (then (return{dflt})))\n"
+                    ));
+                }
+            }
             _ => {
                 if render_fused_or_plain_op(ctx, st, op, op_idx, region, body) {
                     continue 'op_loop;
@@ -644,6 +713,8 @@ pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
         }
     };
     match op {
+        Op::Charge { .. } => {}
+        Op::ChargeDyn { src, .. } => out.push(*src),
         Op::Alloc { init, .. } => match init {
             Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
                 out.push(*len)
@@ -731,6 +802,7 @@ pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
         }
     };
     match op {
+        Op::Charge { .. } | Op::ChargeDyn { .. } => {}
         Op::Alloc { dst, init, .. } => {
             out.push(*dst);
             match init {

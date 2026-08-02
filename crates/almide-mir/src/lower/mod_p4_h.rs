@@ -213,6 +213,9 @@ fn list_heap_call_name_special_cases(
     if module == "fan" && func == "map" {
         return Some(fan_map_call_name(arg_tys, result_ty));
     }
+    if module == "fan" && func == "any_map" {
+        return Some(fan_any_call_name(arg_tys, result_ty));
+    }
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
         return Some(heap_fold_call_name(module, arg_tys, result_ty));
     }

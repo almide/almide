@@ -68,6 +68,9 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
     };
     for op in &func.ops {
         match op {
+            // Probe charge: no defined value ids (the dyn charge reads
+            // src but defines nothing).
+            Op::Charge { .. } | Op::ChargeDyn { .. } => {}
             Op::Alloc { dst, .. } | Op::Const { dst } | Op::ConstInt { dst, .. } => {
                 defined.push(*dst)
             }

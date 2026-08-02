@@ -1,0 +1,16 @@
+fn name(n: Int) -> String =
+  match n {
+    0 => "zero", 1 => "one", 2 => "two", 3 => "three", 4 => "four",
+    5 => "five", 6 => "six", 7 => "seven", 8 => "eight", 9 => "nine",
+    _ => "many",
+  }
+
+fn main() -> Unit = {
+  var i = 0
+  var total = 0
+  while i < 500 {
+    total = total + string.len(name(i % 12))
+    i = i + 1
+  }
+  println(int.to_string(total))
+}

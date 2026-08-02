@@ -23,6 +23,11 @@ impl Checker {
         Some(match &mut expr.kind {
             ExprKind::Block { .. } => self.infer_expr_g3_block(expr),
             ExprKind::Fan { .. } => self.infer_expr_g3_fan(expr),
+            ExprKind::FanBounded { .. } => self.infer_expr_g3_fan_bounded(expr),
+            ExprKind::FanRace { .. } => self.infer_expr_g3_fan_race(expr),
+            ExprKind::FanRaceMap { .. } => self.infer_expr_g3_fan_race_map(expr),
+            ExprKind::FanSettle { .. } => self.infer_expr_g3_fan_settle(expr),
+            ExprKind::FanTimeout { .. } => self.infer_expr_g3_fan_timeout(expr),
             ExprKind::Call { .. } => self.infer_expr_g3_call(expr),
 
             ExprKind::Pipe { left, right, .. } => {
@@ -134,8 +139,6 @@ impl Checker {
     /// groups in that order, so the dispatch an expression sees is unchanged.
     pub(super) fn infer_expr_g3_postfix(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
         Some(match &mut expr.kind {
-            ExprKind::Await { expr, .. } => self.infer_expr(expr),
-
             ExprKind::Unwrap { .. } => self.infer_expr_g3_unwrap(expr),
             ExprKind::UnwrapOr { .. } => self.infer_expr_g3_unwrap_or(expr),
             ExprKind::ToOption { .. } => self.infer_expr_g3_to_option(expr),
@@ -227,6 +230,251 @@ impl Checker {
         }
     }
 
+    /// Budget clock firewall (ADR-0001 S4 / S6-6): the EXPECTED clock comes
+    /// from the declared `TIME_CONSUMING_SURFACES` table, never from the call
+    /// site — this lookup is the S6-6 face check's reading side, so a new
+    /// time-consuming surface that skipped the declaration fails loudly on its
+    /// first type-check anywhere in the test suite.
+    fn check_budget_clock(&mut self, surface: &'static str, budget_concrete: &Ty) {
+        let clock = almide_lang::time_units::surface_clock(surface).unwrap_or_else(|| {
+            panic!(
+                "{surface} consumes a time quantity but is not declared in \
+                 TIME_CONSUMING_SURFACES (ADR-0001 S6-6)"
+            )
+        });
+        match budget_concrete {
+            Ty::Named(n, _) if n.as_str() == clock => {}
+            Ty::Named(n, _) if n.as_str() == "Duration" && clock == "Compute" => {
+                self.emit(super::err(
+                    format!("expected {clock}, found Duration"),
+                    format!(
+                        "{surface} budgets deterministic computation, not wall-clock time. \
+                         Build the budget with compute.ms(...); for a wall-clock limit use \
+                         fan.timeout (oracle tier)"
+                    ),
+                    format!("{surface} budget")));
+            }
+            Ty::Named(n, _) if n.as_str() == "Compute" && clock == "Duration" => {
+                self.emit(super::err(
+                    format!("expected {clock}, found Compute"),
+                    format!(
+                        "{surface} takes a WALL-CLOCK deadline. Build it with \
+                         duration.ms(...); for a deterministic compute budget use \
+                         fan.bounded"
+                    ),
+                    format!("{surface} budget")));
+            }
+            other => {
+                self.emit(super::err(
+                    format!("expected {clock}, found {}", other.display()),
+                    format!(
+                        "Budgets carry a unit and a clock: {surface}(compute.ms(100)) {{ ... }}"
+                    ),
+                    format!("{surface} budget")));
+            }
+        }
+    }
+
+    /// `ExprKind::FanBounded` arm: `fan.bounded(budget) { body }` (Stage 2 v1).
+    /// Effect-fn gate; budget must be a `Compute` (the ADR-0001 clock firewall
+    /// — bare Int and wall-clock `Duration` are named type errors); the body is
+    /// checked in a PURE context (Rung 0) and, in v1, must be a single call
+    /// returning a plain (non-Result) value. Result[T, String] like fan.map.
+    fn infer_expr_g3_fan_bounded(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanBounded { budget, body } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.bounded can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.bounded".to_string()).with_code("E007"));
+        }
+        let budget_ty = self.infer_expr(budget);
+        let budget_concrete = resolve_ty(&budget_ty, &self.uf);
+        self.check_budget_clock("fan.bounded", &budget_concrete);
+        let saved_effect = self.env.can_call_effect;
+        let saved_region = self.env.metered_region;
+        self.env.can_call_effect = false;
+        self.env.metered_region = Some("fan.bounded");
+        let body_ty = self.infer_expr(body);
+        self.env.can_call_effect = saved_effect;
+        self.env.metered_region = saved_region;
+        let body_concrete = resolve_ty(&body_ty, &self.uf);
+        if body_concrete.is_result() {
+            self.emit(super::err(
+                "fan.bounded body must return a plain value in v1".to_string(),
+                "Return the value directly; the budget adds its own Err channel".to_string(),
+                "fan.bounded body".to_string()));
+        }
+        Ty::result(body_concrete, Ty::String)
+    }
+
+    /// `ExprKind::FanRace` arm: `fan.race(budget?) { arms }` (Stage 3 v1).
+    /// Effect-fn gate; the optional budget is a `Compute` (same firewall as
+    /// bounded); every arm is a single pure call and all arms unify to one T.
+    /// Result[T, String] — Err is the ledger-constant no-winner verdict.
+    fn infer_expr_g3_fan_race(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanRace { budget, arms } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.race can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.race".to_string()).with_code("E007"));
+        }
+        if let Some(b) = budget {
+            let budget_ty = self.infer_expr(b);
+            let budget_concrete = resolve_ty(&budget_ty, &self.uf);
+            self.check_budget_clock("fan.race", &budget_concrete);
+        }
+        let saved_effect = self.env.can_call_effect;
+        let saved_region = self.env.metered_region;
+        self.env.can_call_effect = false;
+        self.env.metered_region = Some("fan.race");
+        let mut arm_ty: Option<Ty> = None;
+        for arm in arms.iter_mut() {
+            let t = self.infer_expr(arm);
+            let concrete = resolve_ty(&t, &self.uf);
+            // T2-2: an arm may return Result[T, E] — its Err SELF-DISQUALIFIES
+            // the arm (symmetric with fan.any), and its Ok type joins the
+            // unification. Plain arms are always candidates.
+            let candidate = match &concrete {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[0].clone(),
+                _ => t,
+            };
+            match &arm_ty {
+                None => arm_ty = Some(candidate),
+                Some(t0) => self.constrain(candidate, t0.clone(), "fan.race arm type"),
+            }
+        }
+        self.env.can_call_effect = saved_effect;
+        self.env.metered_region = saved_region;
+        let t = arm_ty.map(|t| resolve_ty(&t, &self.uf)).unwrap_or(Ty::Unknown);
+        Ty::result(t, Ty::String)
+    }
+
+    /// `ExprKind::FanRaceMap` arm: `fan.race(xs, f)` / `fan.race(budget, xs, f)`
+    /// (T7-1 — the mapper cell). Effect-fn gate + budget clock like the block
+    /// form; `xs` unifies to `List[X]`; the mapper is a PURE 1-param lambda
+    /// `(X) -> Result[T, E]` (mapper form contract: Result REQUIRED — ok
+    /// competes, err self-disqualifies). Result[T, String] like the block form.
+    fn infer_expr_g3_fan_race_map(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanRaceMap { budget, list, mapper } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.race can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.race".to_string()).with_code("E007"));
+        }
+        if let Some(b) = budget {
+            let budget_ty = self.infer_expr(b);
+            let budget_concrete = resolve_ty(&budget_ty, &self.uf);
+            self.check_budget_clock("fan.race", &budget_concrete);
+        }
+        let list_ty = self.infer_expr(list);
+        let elem = self.fresh_var();
+        self.constrain(
+            list_ty,
+            Ty::Applied(TypeConstructorId::List, vec![elem.clone()]),
+            "fan.race mapper list",
+        );
+        // The mapper body is a metered PURE region, exactly like a block arm.
+        let saved_effect = self.env.can_call_effect;
+        let saved_region = self.env.metered_region;
+        self.env.can_call_effect = false;
+        self.env.metered_region = Some("fan.race");
+        let mapper_ty = self.infer_expr(mapper);
+        self.env.can_call_effect = saved_effect;
+        self.env.metered_region = saved_region;
+        // The mapper's return is pinned to `Result[T, String]` OUTRIGHT (not a
+        // free Err var): the Err payload only self-disqualifies — it is never
+        // read — and an unconstrained E left `Result[T, Unknown]` in the
+        // lowered fold (a ConcretizeTypes refusal). String is the fan world's
+        // uniform error channel. A concretely non-Result mapper gets the
+        // contract named before the unification error would garble it.
+        let mapper_concrete = resolve_ty(&mapper_ty, &self.uf);
+        if let Ty::Fn { ret, .. } = &mapper_concrete {
+            let r = resolve_ty(ret, &self.uf);
+            if !matches!(r, Ty::Applied(TypeConstructorId::Result, _) | Ty::TypeVar(_) | Ty::Unknown) {
+                self.emit(super::err(
+                    format!("fan.race mapper must return a Result, got {}", r.display()),
+                    "Return ok(value) to compete and err(reason) to disqualify the element — the mapper-form contract (like fan.map)",
+                    "fan.race mapper".to_string()));
+            }
+        }
+        let winner = self.fresh_var();
+        self.constrain(
+            mapper_ty,
+            Ty::Fn {
+                params: vec![elem],
+                ret: Box::new(Ty::result(winner.clone(), Ty::String)),
+            },
+            "fan.race mapper",
+        );
+        Ty::result(resolve_ty(&winner, &self.uf), Ty::String)
+    }
+
+    /// `ExprKind::FanTimeout` arm: `fan.timeout(deadline) { body }` (T5-1,
+    /// the ORACLE tier). The deadline is a `Duration` (the S4 matrix's first
+    /// wall-clock row — Compute and bare Int are named errors via the same
+    /// S6-6 table lookup); the body is PURE like bounded's (v1) and the
+    /// verdict is ω-relative: Err iff the wall deadline fires at a charge
+    /// site before the body completes. Result[T, String].
+    fn infer_expr_g3_fan_timeout(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanTimeout { deadline, body } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.timeout can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.timeout".to_string()).with_code("E007"));
+        }
+        let deadline_ty = self.infer_expr(deadline);
+        let deadline_concrete = resolve_ty(&deadline_ty, &self.uf);
+        self.check_budget_clock("fan.timeout", &deadline_concrete);
+        let saved_effect = self.env.can_call_effect;
+        let saved_region = self.env.metered_region;
+        self.env.can_call_effect = false;
+        self.env.metered_region = Some("fan.timeout");
+        let body_ty = self.infer_expr(body);
+        self.env.can_call_effect = saved_effect;
+        self.env.metered_region = saved_region;
+        let body_concrete = resolve_ty(&body_ty, &self.uf);
+        if body_concrete.is_result() {
+            self.emit(super::err(
+                "fan.timeout body must return a plain value in v1".to_string(),
+                "Return the value directly; the deadline adds its own Err channel".to_string(),
+                "fan.timeout body".to_string()));
+        }
+        Ty::result(body_concrete, Ty::String)
+    }
+
+    /// `ExprKind::FanSettle` arm: `fan.settle { arms }` (T2-4). Every arm
+    /// settles into its OWN `Result` slot — heterogeneous arm types are
+    /// allowed and the value is the TUPLE `(Result[A, String], …)` in arm
+    /// order. Arms may be effectful (unlike the metered regions): an arm's
+    /// Err is CAPTURED into its slot, never propagated, so arm inference
+    /// runs with auto-unwrap OFF.
+    fn infer_expr_g3_fan_settle(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanSettle { arms } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.settle can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.settle".to_string()).with_code("E007"));
+        }
+        let saved_unwrap = self.env.auto_unwrap;
+        self.env.auto_unwrap = false;
+        let mut elems = Vec::with_capacity(arms.len());
+        for arm in arms.iter_mut() {
+            let t = self.infer_expr(arm);
+            let c = resolve_ty(&t, &self.uf);
+            elems.push(match &c {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => c.clone(),
+                _ => Ty::result(c, Ty::String),
+            });
+        }
+        self.env.auto_unwrap = saved_unwrap;
+        Ty::Tuple(elems)
+    }
+
     /// `ExprKind::Call` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
     fn infer_expr_g3_call(&mut self, expr: &mut ast::Expr) -> Ty {
         let span = expr.span;
@@ -314,6 +562,17 @@ impl Checker {
             inner_ty
         } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
             self.fresh_var()
+        } else if self.is_effect_call_expr(inner) {
+            // #1049: `!` on a NEVER-ERR effect call is a silent no-op. The
+            // never-err/can-err split is the lifted ABI's business (#840/#841);
+            // the surface rule stays position-independent — "an effect call
+            // takes `!`" must compile for every effect fn, or the writer needs
+            // each stdlib fn's internal classification to predict the checker.
+            // Silent on purpose: a warning would teach removing the `!`, which
+            // breaks the caller the day the fn's classification changes. The
+            // pipe spelling (`xs |> f!`, infer_pipe) already unwraps by
+            // identity here, so this also closes a direct-vs-pipe asymmetry.
+            t
         } else {
             self.emit(super::err(
                 format!("operator '!' requires Option or Result type but got {}", resolved.display()),
@@ -322,6 +581,15 @@ impl Checker {
             ));
             Ty::Unknown
         }
+    }
+
+    /// True when `expr` is a CALL whose callee resolves to an `effect fn` —
+    /// the `!`-is-a-no-op carve-out above. Covers the two shapes
+    /// [`Self::lookup_call_sig`] resolves (bare `Ident` and `module.fn`);
+    /// anything else keeps the strict rule.
+    fn is_effect_call_expr(&self, expr: &ast::Expr) -> bool {
+        let ExprKind::Call { callee, .. } = &expr.kind else { return false };
+        self.lookup_call_sig(callee).is_some_and(|sig| sig.is_effect)
     }
 
     /// `expr ?? fallback` — unwrap with default (Option[T] → T, Result[T,E]

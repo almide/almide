@@ -4,9 +4,9 @@ effect fn a() -> Result[String, String] = ok("a")
 effect fn b() -> Result[String, String] = ok("b")
 
 effect fn main() -> Unit = {
-  let w = fan.any([
-    () => a(),
-    () => b()
-  ])
+  let w = fan.any {
+    a()
+    b()
+  }
   println(w)
 }

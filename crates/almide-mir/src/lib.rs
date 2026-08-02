@@ -30,6 +30,7 @@ pub(crate) mod trace;
 
 pub mod alias_safety;
 pub mod certificate;
+pub mod charge_probe;
 pub mod concat_to_append;
 pub mod coown_names;
 pub mod region_alloc;
@@ -39,6 +40,7 @@ pub mod lower;
 pub mod pipeline;
 pub mod purity;
 pub(crate) mod mir_wellformed;
+pub mod native_result_rewrite;
 pub mod render_native;
 pub mod render_wasm;
 pub mod translation_validation;
@@ -522,6 +524,18 @@ pub enum Op {
     /// — the loop-carried state). No ownership (scalar copy); `local` was already defined
     /// by its `var` bind, `src` is the freshly computed value.
     SetLocal { local: ValueId, src: ValueId },
+    /// A logical-clock charge event (Stage 1 probe, ALMIDE_FUEL_PROBE builds only).
+    /// `site` is a program-wide deterministic id; `cost` a constant weight. No dst, no
+    /// operands, no ownership. Renders to fuel-counter arithmetic + an order-sensitive
+    /// trace-hash update in BOTH renderers; the falsifier compares the resulting
+    /// (consumed, trace) across targets. Every pass MUST preserve these ops — dropping,
+    /// duplicating, or reordering one is exactly the bug the probe exists to catch.
+    Charge { site: u32, cost: u32 },
+    /// T3-5 dynamic charge: a size-proportional cost `1 + (len(src) >> 4)`
+    /// read from the RESULT of a bulk op (`__str_concat`) — keying on the
+    /// result makes the cost identical on every leg by construction. Emitted
+    /// by `charge_probe` beside the static charges; same strict-cut rule.
+    ChargeDyn { site: u32, src: ValueId },
 }
 
 include!("lib_b.rs");

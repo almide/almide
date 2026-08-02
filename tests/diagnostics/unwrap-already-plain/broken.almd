@@ -1,0 +1,15 @@
+// In an effect fn, a Result-returning call is auto-propagated (`?`), so the
+// bound value is already the plain payload. Wrapping it in the unwrap family
+// is the classic confusion (dojo budget-units, MSR round 2) — the fallback
+// belongs on the producing call as `?? default`.
+fn count_to(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n { acc = acc + i; i = i + 1 }
+  acc
+}
+
+effect fn run_with_budget(ms: Int, n: Int) -> Int = {
+  let result = fan.bounded(compute.ms(ms)) { count_to(n) }
+  result |> option.unwrap_or(-1)
+}

@@ -64,7 +64,7 @@ fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
         | IrExprKind::TailCall { .. } | IrExprKind::RuntimeCall { .. }
         | IrExprKind::Lambda { .. } | IrExprKind::Try { .. }
         | IrExprKind::Unwrap { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::OptionalChain { .. }
         | IrExprKind::RcWrap { .. } | IrExprKind::InlineRust { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::IterChain { .. } | IrExprKind::Todo { .. } => false,
@@ -168,7 +168,7 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
         | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
         | IrExprKind::Break | IrExprKind::Continue | IrExprKind::TailCall { .. }
         | IrExprKind::RuntimeCall { .. } | IrExprKind::EmptyMap
-        | IrExprKind::OptionNone | IrExprKind::Await { .. }
+        | IrExprKind::OptionNone
         | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
         | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
@@ -324,7 +324,7 @@ fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
         | IrExprKind::SpreadRecord { .. } | IrExprKind::MapAccess { .. }
         | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
         | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
-        | IrExprKind::Await { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::RcWrap { .. }
         | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
         | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
         | IrExprKind::Todo { .. } => false,

@@ -1,5 +1,15 @@
-<!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, labeled fuel -->
+<!-- description: Fan v2: the execution-policy grammar — heads x forms, thunk-free, typed budgets -->
 # Fan v2 — one execution-policy grammar
+
+> **実装状況（worktree-stage1-charge-probe、2026-08-02）**: 表面は実装済み —
+> block heads 全部（fan{} / any / settle / race / bounded、settle は tuple 契約）、
+> mapper 形 any/settle、budgets（compute.* 構築子 + S3 代数 + min-cap）、
+> Result arm の Err スキップ、裸形 Result（native Res carrier 含む）、full block
+> body/arm。fixtures = spec/wasm_cross/fuel_* / time_* / fan_settle_tuple、契約 =
+> C-202..C-207。未了: strict cap + unwind（T1-1）と metered-clone（T1-2）—
+> research/spike/charge-probe/BURNDOWN.md が正。本文の表と食い違う場合は
+> BURNDOWN/契約台帳が勝つ。
+
 
 > 憲章: [async-inception.md](./async-inception.md)。本文書はその表面詳細である。
 >
@@ -27,9 +37,9 @@ v2 はこれを **head × form の直積 1 枚**に置き換える。
 | （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 | 可（観測はリスト順） |
 | settle | 選択しない。全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 | 可 |
 | any | **index 最小**の成功 | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 | 逐次（意味論ごと逐次） |
-| race | **(spend, index) 最小**の成功 | `fan.race(fuel: n) { a; b }` → `T` | `fan.race(fuel: n, xs, f)` → `T` | **pure**（Rung 0） | 可（枝刈り付き） |
-| bounded | 単一 body の計量 | `fan.bounded(fuel: n) { body }` → `T` | —（map と合成） | **pure** | — |
-| timeout | 環境が切る（oracle 層） | `fan.timeout(ms: n) { body }` → `T` | — | oracle 可 | ホスト相対 |
+| race | **(spend, index) 最小**の成功 | `fan.race { a; b }` → `T`（`fan.race(compute.ms(500)) { … }` は任意の発散ガード） | `fan.race(xs, f)` / `fan.race(compute.ms(500), xs, f)` → `T`（**実装済み 2026-08-03、T7-1** — f は pure な 1 引数 lambda で `Result` 必須、budget は per-element、同着はリスト順） | **pure**（Rung 0） | 可（枝刈り付き） |
+| bounded | 単一 body の計量 | `fan.bounded(compute.ms(100)) { body }` → `T` | —（map と合成） | **pure** | — |
+| timeout | 環境が切る（壁時計 — oracle 層、[ADR-0001 S8](../../adr/0001-deterministic-time-units.md)） | `fan.timeout(duration.s(5)) { body }` → `T` | — | oracle 可 | ホスト相対 |
 
 - block form の arm は **式**（`fan {}` と同じ arm 契約: Result auto-unwrap、外側 `var`
   キャプチャ禁止）。any/race の arm は同一の `T` に unify する。all/settle は tuple なので
@@ -70,13 +80,26 @@ fan-concurrency.md §3.4「Why Thunks Are Needed」は、fan.* が**関数だか
 purity wall に落としている。mapper form は「データのリスト + 閉包 1 個」— `fan.map` と
 同じ形 — なので、**この wall クラスは構文の変更だけで消滅する**。意味論の犠牲はゼロ。
 
-### 3. `fuel:` ラベルの供給源になる
+### 3. 予算引数がラベルを必要としなくなる
 
 言語にラベル引数構文は**存在しない**（logical-time-async.md 初稿はここを `limit:` の
-前例ありと誤認していた — 訂正済み）。v2 では fan head が関数呼び出しではなく構文なので、
-`fan.race(fuel: n)` の `fuel:` は **fan 文法自身の要素**として実装できる。汎用ラベル引数
-機構は導入しない。単位を持つ head 引数は必ずラベルを持つ（`fuel:` / `ms:`）— 単位の
-誤読クラスを構文で殺す原則はここで統一的に効く。
+前例ありと誤認していた — 訂正済み）。当初は fan head が構文であることを利用して
+`ticks:` / `ms:` を fan 文法自身の要素として供給する設計だったが、**[ADR-0001](../../adr/0001-deterministic-time-units.md)
+でラベルごと不要になった** — 予算は単位付きの構築関数（`compute.ms(100)` / `duration.s(5)`）で
+書き、区別は型が持つ。パーサに head-args のラベル解析を入れる必要が消え、v2 の表面は
+一段縮む。
+
+```almide
+fan.bounded(compute.ms(100)) { body }   // 決定的時計（Compute 型）
+fan.timeout(duration.s(5))   { body }   // 壁時計（Duration 型）
+fan.bounded(compute.ms(n))   { body }   // 変数もそのまま
+fan.bounded(100)                        // 型エラー: expected Compute, found Int
+```
+
+単位名の集合は `ns`/`us`/`ms`/`s`/`min`/`h` で、完備性 matrix としてゲートに載せる。
+**新しいリテラル構文は追加しない** — `100ms` のような数値接尾辞は lexer の拡張が要り、
+fan の表面のためだけに字句規則を広げる取引は割に合わない（将来足す場合の脱糖先が
+この関数形になる）。
 
 ## 各 head の意味論（確定事項の整理）
 
@@ -93,16 +116,16 @@ purity wall に落としている。mapper form は「データのリスト + �
   確定させる。**bounded + `??` が主要イディオムになる**:
 
   ```almide
-  let plan = fan.bounded(fuel: 100_000) { optimal_plan(g) } ?? greedy_plan(g)
+  let plan = fan.bounded(compute.ms(100)) { optimal_plan(g) } ?? greedy_plan(g)
 
-  let ans = fan.race(fuel: 1_000_000) {
+  let ans = fan.race(compute.s(1)) {
     exact_solve(input)
     heuristic_solve(input)
   } ?? default_answer
   ```
 
 - **timeout**: Stage 4（Path C / R_Ω）まで tombstone 維持。再導入時の形だけここで
-  確定する — `fan.timeout(ms: n) { body }`、中断点は charge site（logical-time-async の
+  確定する — `fan.timeout(duration.s(5)) { body }`、中断点は charge site（logical-time-async の
   中断点統一原理）、契約クラスは oracle-relative。
 
 ## 完備性規則（matrix gate に載せる文）
@@ -111,10 +134,11 @@ purity wall に落としている。mapper form は「データのリスト + �
 2. mapper form を持つのは「同型の動的データに対して arm を量産できる head」
    （all / settle / any / race）に限る。bounded / timeout は単一 body head なので持たない
    — これは意図的省略である。
-3. `fuel:` はメトリクスを消費する head（race）と定義する head（bounded）に、`ms:` は
-   oracle head（timeout）に、**ちょうど**現れる。無印 fan / map / any / settle に予算
-   引数はない — fuel 次元は `fan.bounded` の合成で届くため（logical-time-async の
-   完備性規則そのまま）。
+3. 予算引数は bounded で**必須**（bound することが存在理由）、race で**任意**
+   （選択は予算を要さない — 予算の役割は発散ガードだけ。
+   [ticks-interface-audit.md](./ticks-interface-audit.md)）。timeout は壁時計の
+   duration を取る。無印 fan / map / any / settle に予算引数はない — 予算の
+   次元は `fan.bounded` の合成で届くため（logical-time-async の完備性規則そのまま）。
 4. 新しい head を足すときは、この表に行を足し、全列（選択規則・両 form の型・効果上限・
    並列化可能性）を埋めることが PR の受理条件（API 族の matrix 原則）。
 
@@ -139,7 +163,7 @@ tombstone（check 時、書き換え例つき）にする。共存させない �
 |---|---|---|
 | `fan.rush`（最速を返し敗者は走り続ける） | **恒久却下** | 敗者の効果が採用後も漏れ続ける構文は、決定的モデルで意味を与えられない。「リスト順の意味を与えられないものは言語に入れない」の適用例 |
 | `fan.spawn` / `fan.link` | 地平送り | 非構造化・チャネルは logical-time-async の「将来の地平」（決定的並行性）が土台になってから。v2 には入れない |
-| 汎用ラベル引数 | 導入しない | 言語全体の呼び出し規約の問いであり、fan 経由で密輸しない。`fuel:`/`ms:` は fan 構文の要素 |
+| 汎用ラベル引数 | 導入しない | 言語全体の呼び出し規約の問いであり、fan 経由で密輸しない。ADR-0001 で予算がラベルごと不要になり、この問い自体が消えた |
 | trailing lambda（`fan.map(xs) { x => … }`） | 導入しない | 綴りが 2 通りになるだけで意味が増えない |
 | `fan.map(xs, limit: n, f)` | 入れない | 実装されていなかった（fan-concurrency-next の ✅ は stale、checker は 2 引数固定）。観測を変えないスケジューリングヒントは必要が実証されてから、別の機構（pragma 類）で |
 | `fan.all { }`（無印の別名） | 導入しない | 最頻の形が最短であるべき。別名は共存負債 |
@@ -168,7 +192,7 @@ tombstone（check 時、書き換え例つき）にする。共存させない �
    「表現できない」に格上げする。
 2. **Wave 2 — 決定層の完成**: `fan.bounded`（logical-time Stage 2）→ `fan.race`
    （Stage 3）を v2 の形で。E027 改訂もここ。
-3. **Wave 3 — oracle 層**: `fan.timeout(ms: n) { }`（Stage 4）。
+3. **Wave 3 — oracle 層**: `fan.timeout(duration.s(5)) { }`（Stage 4）。
 
 Wave 1 が独立に着手可能であることが v2 の要点の一つ — 表面の統一は fuel 意味論の
 実装を待たない。
@@ -182,5 +206,9 @@ Wave 1 が独立に着手可能であることが v2 の要点の一つ — 表�
   pin を読む）を踏む。8 ファイルは半日仕事の規模。
 - mapper form の race に実ユースが出ない。→ セルは宣言のまま Wave 2 では
   block form だけ実装し、matrix gate に「宣言済み・未実装」を明示させる。
+  （2026-08-03 発効: `tests/fan_surface_matrix_test.rs` が 6 head × 2 form の
+  全セルを機械固定。**同日、ユーザー指示でセルを実装で閉じた（T7-1）** — gate は
+  race mapper を implemented 側へ遷移済み。bounded / timeout の mapper は
+  設計上不在のまま。セルを変えるなら同 PR で gate を更新する）
 - 「block か mapper か」の 2 択が LLM に不利に働く証拠が dojo の計測で出る。→
   MSR タスクバンクに fan v2 セットを足して測る。設計の当否は計測が決める。

@@ -570,9 +570,6 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
         IrExprKind::ToVec { expr } => IrExprKind::ToVec {
             expr: Box::new(insert_clones_live(*expr, ctx)),
         },
-        IrExprKind::Await { expr } => IrExprKind::Await {
-            expr: Box::new(insert_clones_live(*expr, ctx)),
-        },
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(|a| insert_clones_live(a, ctx)).collect(),
         },

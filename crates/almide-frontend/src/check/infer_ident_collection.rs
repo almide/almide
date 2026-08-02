@@ -110,7 +110,7 @@ fn collect_in_expr_operators(expr: &ast::Expr, out: &mut std::collections::HashS
         ExprKind::Paren { expr: inner, .. } | ExprKind::Some { expr: inner, .. }
         | ExprKind::Ok { expr: inner, .. } | ExprKind::Err { expr: inner, .. }
         | ExprKind::Try { expr: inner, .. } | ExprKind::Unwrap { expr: inner, .. }
-        | ExprKind::ToOption { expr: inner, .. } | ExprKind::Await { expr: inner, .. }
+        | ExprKind::ToOption { expr: inner, .. }
         | ExprKind::TypeAscription { expr: inner, .. }
         | ExprKind::OptionalChain { expr: inner, .. } => { collect_in_expr(inner, out); true }
         ExprKind::UnwrapOr { expr: inner, fallback, .. } => {

@@ -272,7 +272,8 @@ impl LowerCtx {
         // (2-arg form); the per-(input, output)-element self-host is selected in `list_heap_call_name`,
         // where an UNSUPPORTED element pairing routes to the UNLINKED `fan.map_x` and walls cleanly at
         // render — never linked to a wrong-typed self-host (no invalid wasm).
-        let is_admitted_fan_map = module == "fan" && func == "map" && args.len() == 2;
+        let is_admitted_fan_map =
+            module == "fan" && matches!(func, "map" | "any_map") && args.len() == 2;
         if !purity::is_pure(module, func) && !is_admitted_effectful && !is_admitted_fan_map {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"

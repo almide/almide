@@ -485,6 +485,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (crate::embedded::SRC_FAN_MAP, &[("fan_map", "fan.map"), ("fan_map_is", "fan.map_is"), ("fan_map_ss", "fan.map_ss"), ("fan_map_si", "fan.map_si")]),
+        (crate::embedded::SRC_FAN_ANY, &[("fan_any", "fan.any_map"), ("fan_any_is", "fan.any_map_is"), ("fan_any_ss", "fan.any_map_ss"), ("fan_any_si", "fan.any_map_si")]),
         // The self-hosted regex ENGINE (Stage 1: is_match/full_match — v0's
         // runtime regex ported quirk-for-quirk; see stdlib/regex_engine.almd).
         (crate::embedded::SRC_REGEX_ENGINE, &[("regex_is_match", "regex.is_match"), ("regex_full_match", "regex.full_match"), ("regex_find", "regex.find"), ("regex_find_all", "regex.find_all"), ("regex_replace", "regex.replace"), ("regex_replace_first", "regex.replace_first"), ("regex_split", "regex.split"), ("regex_captures", "regex.captures")]),

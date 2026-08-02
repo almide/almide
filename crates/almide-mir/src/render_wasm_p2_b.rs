@@ -322,6 +322,74 @@ fn render_op_prim(
         );
         return format!("    (local.set {} {body})\n", local(dst.unwrap()));
     }
+    // Stage 2 budget prims: multi-statement global sequences, not a single
+    // value expression — rendered whole here (the min-cap arithmetic of
+    // ADR-0001 / EIP-150; the ns→unit divisor comes from the single CM-1
+    // definition, crate::charge_probe::CM1_NS_PER_CHARGE).
+    if let PrimKind::BudgetEnter = kind {
+        let d = local(dst.expect("BudgetEnter has a result"));
+        let a = local(args[0]);
+        let cm1 = crate::charge_probe::CM1_NS_PER_CHARGE;
+        return format!(
+            "    (global.set $__fuel_entry (i64.div_s (local.get {a}) (i64.const {cm1})))\n\
+                 (local.set {d} (global.get $__fuel))\n\
+                 (if (i64.lt_s (global.get $__fuel_entry) (global.get $__fuel))\n\
+                   (then (global.set $__fuel (global.get $__fuel_entry))))\n"
+        );
+    }
+    // T5-1 wall-deadline prims: enter min-caps the ABSOLUTE deadline
+    // (now + ns vs the outer), exit restores + persists the hit verdict.
+    // In replay mode "now" is a constant 0 — the ordinal decides instead,
+    // and the min-cap arithmetic still nests correctly (0 + ns vs outer).
+    if let PrimKind::TimeoutEnter = kind {
+        let d = local(dst.expect("TimeoutEnter has a result"));
+        let a = local(args[0]);
+        let now = if crate::charge_probe::omega_replay() >= 0 {
+            "(i64.const 0)".to_string()
+        } else {
+            "(call $__wall_now)".to_string()
+        };
+        return format!(
+            "    (local.set {d} (global.get $__t_deadline))\n\
+                 (if (i64.lt_s (i64.add {now} (local.get {a})) (global.get $__t_deadline))\n\
+                   (then (global.set $__t_deadline (i64.add {now} (local.get {a})))))\n"
+        );
+    }
+    if let PrimKind::TimeoutExit = kind {
+        let d = local(dst.expect("TimeoutExit has a result"));
+        let a = local(args[0]);
+        return format!(
+            "    (global.set $__t_verdict (i64.extend_i32_u (global.get $__t_hit)))\n\
+                 (global.set $__t_hit (i32.const 0))\n\
+                 (global.set $__t_deadline (local.get {a}))\n\
+                 (local.set {d} (i64.const 0))\n"
+        );
+    }
+    if let PrimKind::TimeoutHit = kind {
+        let d = local(dst.expect("TimeoutHit has a result"));
+        return format!("    (local.set {d} (global.get $__t_verdict))\n");
+    }
+    if let PrimKind::BudgetExhausted = kind {
+        // Reads the PERSISTED verdict of the most recently exited region (set
+        // by BudgetExit), so the caller can consult it after the counter was
+        // restored — the scalar path that keeps Result off the native rung.
+        let d = local(dst.expect("BudgetExhausted has a result"));
+        return format!("    (local.set {d} (global.get $__b_verdict))\n");
+    }
+    if let PrimKind::BudgetExit = kind {
+        let d = local(dst.expect("BudgetExit has a result"));
+        let a = local(args[0]);
+        return format!(
+            "    (global.set $__b_verdict (i64.extend_i32_u (i64.lt_s (global.get $__fuel) (i64.const 0))))\n\
+                 (global.set $__b_spend (i64.sub (global.get $__fuel_entry) (global.get $__fuel)))\n\
+                 (global.set $__fuel (i64.sub (local.get {a}) (global.get $__b_spend)))\n\
+                 (local.set {d} (i64.const 0))\n"
+        );
+    }
+    if let PrimKind::BudgetSpend = kind {
+        let d = local(dst.expect("BudgetSpend has a result"));
+        return format!("    (local.set {d} (global.get $__b_spend))\n");
+    }
     let body = render_op_prim_mem_io(kind, args)
         .unwrap_or_else(|| render_op_prim_float(kind, dst, args, floats, fuser));
     match dst {
