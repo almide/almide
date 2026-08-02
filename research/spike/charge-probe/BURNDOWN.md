@@ -132,24 +132,22 @@
 
 ## Tier 5 — oracle 層（インセプション完遂。2026-08-03 にスコープ拡大で編入）
 
-- [ ] **T5-1 fan.timeout（Stage 4）** — `fan.timeout(duration.ms(n)) { body }`。
-  壁時計期限を **charge site で協調チェック**（中断点統一原理 — Go の context と
-  同じ協調キャンセルの型）。v1: pure body（bounded と同形、時計だけ Duration）。
-  実装は T1-1/T1-2 の機構を流用: `__wall` クローン族の charge site が
-  「時計読み → 期限超過 → check-and-return カット」。verdict は ω 依存
-  （R_Ω 契約 — 決定的 fixture は「巨大期限=必ず Ok」「発散 body + 微小期限=必ず
-  Err」の両端のみ pin）。TIME_CONSUMING_SURFACES に ("fan.timeout","Duration")
-  追加（S6-6 の初の Duration 行）。完了条件: 両ターゲットで動作 + ω 両端 fixture +
-  E007/純度/時計混合の診断。
-- [ ] **T5-2 B1 record/replay（claim 4）** — ω = 「何回目の壁時計チェックで期限が
-  切れたか」の序数列。record モードが ω を採録し、replay モードは時計を読まずに
-  その序数でカット → **採録した ω での観測は byte 一致**（native で record →
-  wasm で replay も定義から成立）。チャネルは env 変数（wasmtime -S inherit-env
-  経由で両レグ共通）。完了条件: record→replay の三つ組一致 + クロスターゲット
-  replay の gate、C-NNN（R_Ω クラス）起草。
-- [ ] **T5-3 効果表面期限の型 pin** — S4 行どおり「形は将来、型だけ pin」:
-  Duration を取る効果表面の予約を ADR/S4/契約側の注記として固定（実装なし、
-  ドキュメント + 台帳整合のみ）。
+- [x] **T5-1 fan.timeout（Stage 4）**（f8d760ba — FanTimeout ノード + T1-1/T1-2
+  機構流用（charge site の wall check が同じ check-and-return カットに乗る）。
+  min-cap 入れ子・E027 署名移行（legacy 2-arg/ブロック無しは AST 再構築で発火）・
+  「expected Duration, found Compute」専用文言・S6-6 に初の Duration 行。
+  `fuel_timeout_ends`（決定的両端: 完走 Ok / 発散+微小期限 Err）が両ターゲット一致、
+  契約 C-208（R_Ω クラス）+ ALS-D5。CHEATSHEET/SPEC §13.6/duration.md 反映）
+- [x] **T5-2 B1 record/replay（claim 4）**（f8d760ba — ω は**コンパイル時定数
+  bake**（env 配管不要）: `ALMIDE_OMEGA_RECORD=1` で native が `__ALMD_OMEGA <ord>`
+  を採録、`ALMIDE_OMEGA=<n>` で全レグが時計を読まずに序数カット。gate
+  `timeout_deterministic_ends_and_replay` が record(native)→replay(native×2 +
+  **wasm**) の byte 一致を常設検査 — claim 4 の実行可能な証拠。v1 ω 符号化 =
+  最初の hit の単一序数（多 region の一般化は契約に明記））
+- [x] **T5-3 効果表面期限の型 pin**（f8d760ba — ADR S4 行は既存、ALS-D5 +
+  docs/stdlib/duration.md に「effect-surface deadlines reserve the same type,
+  future」を明記。S6-6 テーブルが将来行の追加を機械強制（宣言なき Duration 消費
+  表面は panic））
 - [ ] **T5-4 dojo async タスクバンク + 初回実測（claim 5）** — almide-dojo repo に
   fan v2 / 決定的時間のタスク群を追加し、branch ビルドの almide で MSR 初回
   ラウンドを実測・記録。完了条件: タスクが dojo ハーネスで green + 実測結果の
