@@ -48,6 +48,18 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
                 *func = sym("any");
             } else if func.as_str() == "__settle_block" {
                 *func = sym("settle");
+            } else if func.as_str() == "any" && ir_args.len() == 2 {
+                // T2-3: the MAPPER form gets its own runtime name so it can
+                // never collide with the thunk-list ABI the block form uses
+                // (v0: almide_rt_fan_any_map; wasm: the fan_any self-host
+                // routed by type in fan_any_call_name).
+                *func = sym("any_map");
+            } else if func.as_str() == "settle" && ir_args.len() == 2 {
+                // T2-3: settle's mapper IS list.map (apply in order, collect
+                // every Result — Errs captured) — desugar to it outright, so
+                // both legs ride list.map's proven paths and limits.
+                *module = sym("list");
+                *func = sym("map");
             }
         }
     }

@@ -313,11 +313,22 @@ impl Checker {
                     return Some(Ty::Unknown);
                 }
                 if arg_tys.len() == 2 {
-                    self.emit(super::err(
-                        "fan.any(xs, f) — the mapper form is declared but not yet implemented",
-                        "Use the block form for a static candidate list: `fan.any { f(a); f(b) }`",
-                        "call to fan.any()".to_string()));
-                    return Some(Ty::Unknown);
+                    // fan.any(xs, f) -> Result[B, String] (T2-3, the Wave 2
+                    // mapper form): apply f in LIST ORDER, first Ok wins, an
+                    // element's Err disqualifies that element only; all-fail
+                    // (and empty) is the ledger-constant Err. Same callback
+                    // contract as fan.map: f returns Result.
+                    let list_ty = resolve_ty(&arg_tys[0], &self.uf);
+                    let elem_ty = match &list_ty {
+                        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                        _ => Ty::Unknown,
+                    };
+                    let result_elem = self.fresh_var();
+                    let callback_ret = Ty::result(result_elem.clone(), Ty::String);
+                    self.constrain(arg_tys[1].clone(),
+                        Ty::Fn { params: vec![elem_ty], ret: Box::new(callback_ret) },
+                        "fan.any callback");
+                    return Some(Ty::result(resolve_ty(&result_elem, &self.uf), Ty::String));
                 }
                 self.emit(super::err(
                     format!("fan.any() expects a block but got {} arguments", arg_tys.len()),
@@ -336,11 +347,24 @@ impl Checker {
                     return Some(Ty::Unknown);
                 }
                 if arg_tys.len() == 2 {
-                    self.emit(super::err(
-                        "fan.settle(xs, f) — the mapper form is declared but not yet implemented",
-                        "Use the block form for a static list: `fan.settle { f(a); f(b) }`",
-                        "call to fan.settle()".to_string()));
-                    return Some(Ty::Unknown);
+                    // fan.settle(xs, f) -> List[Result[B, String]] (T2-3):
+                    // apply f in LIST ORDER, collecting EVERY element's Result
+                    // (Errs captured, never propagated). Lowering desugars it
+                    // to `list.map(xs, f)` — that IS the semantics.
+                    let list_ty = resolve_ty(&arg_tys[0], &self.uf);
+                    let elem_ty = match &list_ty {
+                        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                        _ => Ty::Unknown,
+                    };
+                    let result_elem = self.fresh_var();
+                    let callback_ret = Ty::result(result_elem.clone(), Ty::String);
+                    self.constrain(arg_tys[1].clone(),
+                        Ty::Fn { params: vec![elem_ty], ret: Box::new(callback_ret.clone()) },
+                        "fan.settle callback");
+                    return Some(Ty::list(Ty::result(
+                        resolve_ty(&result_elem, &self.uf),
+                        Ty::String,
+                    )));
                 }
                 self.emit(super::err(
                     format!("fan.settle() expects a block but got {} arguments", arg_tys.len()),

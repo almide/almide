@@ -89,8 +89,11 @@
 - [x] **T4-2 SPEC.md §13 の書き直し**（63159a24 — §13.2 block heads / §13.3 決定的
   時間 / §13.4 bounded / §13.5 race + 13.1/13.2 矛盾の後日談（T9 定理として） /
   §13.6 rules。language.md §5.17 も同期）
-- [ ] **T4-3 C-NNN 契約下書き + fixture 正式化**（fuel fixtures を spec/wasm_cross へ、
-  @contract 双方向。CM-1 を versioned オブジェクトとして台帳へ。番号は merge 時確定）
+- [x] **T4-3 C-NNN 契約正式化**（d81cc2d8 — C-202..C-207 の 6 契約 + 新 ALS 章
+  `deterministic-time.md`（ALS-D1..D4）。10 fixture を spec/wasm_cross へ移設し
+  @contract 双方向、check-contracts.sh 緑（207 契約/340 fixtures）。CM-1 は C-207 で
+  versioned オブジェクト化（D5 ゲートが by-construction evidence）。番号は merge 時に
+  衝突があれば再採番）
 - [x] **T4-4 docs/stdlib の compute / duration ページ**（6471c8ef — 2 ページ +
   CHEATSHEET 表 2 行。docs-gen counter / signature-index 生成器の両方に
   「時計ページ＝checker 表面」の carve-out（Rust 側は TIME_MODULES 直読み））
