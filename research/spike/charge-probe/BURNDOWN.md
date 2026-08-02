@@ -157,6 +157,37 @@
   fan v2 / 決定的時間のタスク群を追加し、branch ビルドの almide で MSR 初回
   ラウンドを実測・記録。完了条件: タスクが dojo ハーネスで green + 実測結果の
   記録（数値は claim 5 の解禁判定材料）。
+- [x] **T5-4b auto-available import の誤誘導ヒント**（3078f557 — 実測 round 2 の
+  発見。`import compute` → 「Create compute.almd」と教えていた（auto-available な
+  checker surface なのに）。resolve.rs の TIME_MODULES 分岐 + parser の Fan token
+  分岐で 3 経路とも「'X' is auto-available — Remove the `import X` line」に。
+  diagnostics fixture: import-auto-available / import-fan-auto-available）
+- [x] **T5-4d let 束縛した budget の wasm validate 破壊**（3078f557 — 同 round の
+  発見を掘って露出した実バグ。`let budget = compute.ms(ms)` → 変数の型が
+  `Ty::Named("Compute")` のまま MIR に届き、layout が heap Ptr（i32 slot）と誤解。
+  値は lowering で i64 に erase 済みなので validate「expected i64, found i32」。
+  修正 = **MIR の newtype eraser に Compute/Duration → Int を種として追加**
+  （frontend expr_ty での erase は saturating 代数の dispatch を壊すため NG と
+  判明 — 検討済みの袋小路として記録）。インライン head は const-fold されていた
+  ため今まで隠れていた。fixture: spec/wasm_cross/fuel_var_budget.almd（C-204 の
+  evidence に追加、statement に変数経由条項を追記））
+- [x] **T5-4e metered effect fn 呼び出しの native レグ開通**（3078f557 — T5-4d の
+  fixture 化で露出した既存ギャップの連鎖を 5 レンガで開通: (1) result_fns が
+  lifted effect fn（宣言 ret Int|Bool + is_effect）を取りこぼし consumer window が
+  未 rewrite → verifier が生 LoadHandle を UseAfterFree 誤検出、(2) NativeSigs も
+  同じ lift 盲目で CallFn dst を I64 誤型付け、(3) err-abort window（Handle(msg)+
+  Die）が rung subset 外 → native render に Str-alias Handle + Die（stderr+exit 1、
+  wasm $__die の双子）を実装、(4) lifted fn の def 側は raw scalar のまま → render_fn
+  の return seam で `Ok(..)` wrap（signature も Result 化）、(5) interp の
+  RuntimeCall ガードが budget_ のみで timeout_ を通さず fuel_timeout_ends が interp
+  panic → ガード拡張。結果: nat probes / fuel_var_budget が native==wasm byte 一致、
+  wasm_runtime_test 75/75（3-way corpus 緑）。render wall に fn 名も付与）
+- [x] **T5-4c unwrap 済み値への unwrap_or の hint 欠落**（3078f557 — 同 round の
+  発見。effect fn 内の `fan.bounded(){...}` は auto-`?` 済みで値は素の T なのに、
+  model は `option.unwrap_or`/`result.unwrap_or` を重ねて E005「Fix the argument
+  type」で迷子。unwrap 族 × Option/Result 期待 × 非コンテナ実引数のとき
+  「nothing to unwrap — 値は既に T。fallback は producing call に `?? <default>`」
+  の targeted hint を追加。fixture: unwrap-already-plain）
 
 ## Branch 外（残り — 参照のみ）
 
