@@ -226,6 +226,50 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     }
 }
 
+/// The #1052 pre-inference import audit: every non-stdlib import must have a
+/// resolved module in `modules` (matched on the full name or its first/last
+/// dot-segment — CLI resolvers register both bare and package-qualified
+/// spellings). `import self as pkg` aliases the file's own package and needs
+/// no module. Returns the one-line feature wall for the first unsatisfied
+/// import, `None` when every import is covered.
+fn unresolved_import_wall(
+    prog: &almide_lang::ast::Program,
+    modules: &[(String, almide_lang::ast::Program, bool)],
+) -> Option<LowerError> {
+    for imp in &prog.imports {
+        let almide_lang::ast::Decl::Import { path, span, .. } = imp else { continue };
+        let Some(root) = path.first() else { continue };
+        let wanted = if root.as_str() == "self" {
+            match path.get(1) {
+                Some(sibling) => sibling.as_str(),
+                None => continue,
+            }
+        } else {
+            if almide_lang::stdlib_info::is_stdlib_module(root.as_str()) {
+                continue;
+            }
+            root.as_str()
+        };
+        let satisfied = modules.iter().any(|(n, _, _)| {
+            n == wanted
+                || n.split('.').next() == Some(wanted)
+                || n.rsplit('.').next() == Some(wanted)
+        });
+        if !satisfied {
+            let spelled = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+            let kind = if root.as_str() == "self" { "package sibling" } else { "dependency module" };
+            return Some(LowerError::at(
+                *span,
+                format!(
+                    "import {spelled} — {kind} not resolved by this render's front-end \
+                     (feature wall, not a type error; cf. #943 for the linking-stage wall)"
+                ),
+            ));
+        }
+    }
+    None
+}
+
 /// Lower `.almd` source to a linked `IrProgram` (`parse → check → lower → optimize → mono →
 /// ir_link`) — the SAME frontend cut point emit_cert_from_source uses. `modules` are the resolved
 /// cross-module siblings (empty ⇒ the single-file path); each is inferred + `lower_module`d into
@@ -251,6 +295,17 @@ fn source_to_ir_with(
             "parse error: {}",
             messages.join("\n")
         )));
+    }
+    // #1052: an import this render was NOT handed a module for can never
+    // type-check — every reference through it would surface as "undefined
+    // function" and the wall would land in the "type errors" bucket, the one
+    // category the walled-real ledgers audit as empty-by-construction. A
+    // missing module is a FEATURE gap of the caller (the native rung passes no
+    // siblings), so classify it as one, before inference, without the cascade.
+    // Adjacent but distinct from #943: that wall HAS the module and fails to
+    // link it. Stdlib imports are typed from stdlib info and need no module.
+    if let Some(wall) = unresolved_import_wall(&prog, modules) {
+        return Err(wall);
     }
     let canon = canonicalize::canonicalize_program(
         &prog,
