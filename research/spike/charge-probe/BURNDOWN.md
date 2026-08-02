@@ -73,8 +73,9 @@
 - [x] **T4-1 CHEATSHEET 反映**（b3dd3e60 — 「Concurrency & deterministic time (fan)」
   節 + 時間構築子の閉集合 + DO NOT 5 行（async/await・thunk-list・裸 Int・偽単位・
   時間リテラル））
-- [ ] **T4-2 SPEC.md §13 の書き直し**（決定層の全意味論。§13.1/13.2 矛盾の後日談を
-  正しい形で）
+- [x] **T4-2 SPEC.md §13 の書き直し**（63159a24 — §13.2 block heads / §13.3 決定的
+  時間 / §13.4 bounded / §13.5 race + 13.1/13.2 矛盾の後日談（T9 定理として） /
+  §13.6 rules。language.md §5.17 も同期）
 - [ ] **T4-3 C-NNN 契約下書き + fixture 正式化**（fuel fixtures を spec/wasm_cross へ、
   @contract 双方向。CM-1 を versioned オブジェクトとして台帳へ。番号は merge 時確定）
 - [ ] **T4-4 docs/stdlib の compute / duration ページ**

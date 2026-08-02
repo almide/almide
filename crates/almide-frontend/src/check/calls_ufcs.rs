@@ -179,6 +179,22 @@ impl Checker {
     /// Almide-specific hint: method-call syntax isn't supported. If `obj_ty` maps to a stdlib module, suggest the module-call form (plus the closest existing name if there's a typo). Verbatim text move out of [`Self::check_call_target_member`].
     fn check_call_target_e002_hint(&mut self, builtin_module: Option<&str>, field: &Sym, object: &ast::Expr) -> Option<Ty> {
         let module = builtin_module?;
+        // ADR-0001 S6-3: `n.ms()` — the name is a TIME UNIT, and a unit alone
+        // cannot pick a clock. Name BOTH candidates instead of the generic
+        // nearest-match guess (which suggested `int.abs`).
+        if module == "int" && almide_lang::time_units::unit_factor(field.as_str()).is_some() {
+            self.emit(super::err(
+                format!("ambiguous time unit '.{}()': the unit does not name a clock", field),
+                format!(
+                    "Write the clock module explicitly: compute.{f}(n) for a deterministic \
+                     compute budget (fan.bounded / fan.race), or duration.{f}(n) for \
+                     wall-clock time",
+                    f = field
+                ),
+                format!("method call .{}()", field),
+            ).with_code("E002"));
+            return Some(Ty::Unknown);
+        }
         // Use the *full* surface (TOML + bundled `.almd`) so fns migrated through the Stdlib Unification arc still power the E002 suggestion. `module_functions` only sees TOML, so after `stdlib/string.almd` replaced the TOML the method-call try-snippet silently disappeared.
         let module_funcs = crate::stdlib::module_functions_all(module);
         let suggestion = almide_base::diagnostic::suggest(field, module_funcs.iter().copied());

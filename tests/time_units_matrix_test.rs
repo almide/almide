@@ -93,6 +93,31 @@ fn s6_bare_int_budget_is_a_type_error() {
     assert_eq!(errs, vec!["expected Compute, found Int".to_string()]);
 }
 
+/// S6-3 (UFCS half): `n.ms()` — a unit name alone cannot pick a clock, so the
+/// diagnostic must name BOTH constructor candidates instead of a nearest-match
+/// guess.
+#[test]
+fn s6_3_ufcs_unit_is_ambiguous_naming_both_clocks() {
+    for unit in ["ms", "us"] {
+        let src = format!(
+            "fn work() -> Int = 1\n\
+             effect fn main() -> Unit = {{\n\
+               let n = 100\n\
+               let r = fan.bounded(n.{unit}()) {{ work() }} ?? -1\n\
+               println(int.to_string(r))\n\
+             }}\n"
+        );
+        let diags = check(&src);
+        let hit = diags.iter().any(|(l, m, h)| {
+            *l == Level::Error
+                && m == &format!("ambiguous time unit '.{unit}()': the unit does not name a clock")
+                && h.contains(&format!("compute.{unit}(n)"))
+                && h.contains(&format!("duration.{unit}(n)"))
+        });
+        assert!(hit, ".{unit}(): expected the both-candidates diagnostic, got {diags:?}");
+    }
+}
+
 /// S6-6: the clock-declaration face — the declared surface set is exactly the
 /// S4 clock column. A new time-consuming surface must extend
 /// `TIME_CONSUMING_SURFACES` (the checker's budget typing reads it and panics
