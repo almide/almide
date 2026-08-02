@@ -562,6 +562,17 @@ impl Checker {
             inner_ty
         } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
             self.fresh_var()
+        } else if self.is_effect_call_expr(inner) {
+            // #1049: `!` on a NEVER-ERR effect call is a silent no-op. The
+            // never-err/can-err split is the lifted ABI's business (#840/#841);
+            // the surface rule stays position-independent — "an effect call
+            // takes `!`" must compile for every effect fn, or the writer needs
+            // each stdlib fn's internal classification to predict the checker.
+            // Silent on purpose: a warning would teach removing the `!`, which
+            // breaks the caller the day the fn's classification changes. The
+            // pipe spelling (`xs |> f!`, infer_pipe) already unwraps by
+            // identity here, so this also closes a direct-vs-pipe asymmetry.
+            t
         } else {
             self.emit(super::err(
                 format!("operator '!' requires Option or Result type but got {}", resolved.display()),
@@ -570,6 +581,15 @@ impl Checker {
             ));
             Ty::Unknown
         }
+    }
+
+    /// True when `expr` is a CALL whose callee resolves to an `effect fn` —
+    /// the `!`-is-a-no-op carve-out above. Covers the two shapes
+    /// [`Self::lookup_call_sig`] resolves (bare `Ident` and `module.fn`);
+    /// anything else keeps the strict rule.
+    fn is_effect_call_expr(&self, expr: &ast::Expr) -> bool {
+        let ExprKind::Call { callee, .. } = &expr.kind else { return false };
+        self.lookup_call_sig(callee).is_some_and(|sig| sig.is_effect)
     }
 
     /// `expr ?? fallback` — unwrap with default (Option[T] → T, Result[T,E]

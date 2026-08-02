@@ -78,7 +78,7 @@ impl Checker {
         }
     }
     /// Resolve the callee of a call to its function signature, for the two shapes that can name a higher-order function with a `Fn`-typed parameter: a bare `Ident` (user fn / selectively-imported stdlib fn) or `module.field` (`list.map`, an aliased import, or a user `module.fn`). Returns the signature so the eager-arg pass can pin an inferred lambda param to the element type BEFORE the lambda body is checked. Returns `None` for anything else (the call then infers args bottom-up as before).
-    fn lookup_call_sig(&self, callee: &ast::Expr) -> Option<crate::types::FnSig> {
+    pub(crate) fn lookup_call_sig(&self, callee: &ast::Expr) -> Option<crate::types::FnSig> {
         match &callee.kind {
             ExprKind::Ident { name, .. } => {
                 self.env.functions.get(&sym(name)).cloned()

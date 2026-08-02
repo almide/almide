@@ -311,6 +311,10 @@ expr?              // Result → Option (err → none)
 expr?.field        // optional chaining (Option[Record] → Option[FieldType])
 ```
 
+`!` on an effect CALL always compiles: if the fn never fails (`random.int`,
+`fs.exists`, …) the `!` is a silent no-op. You never need to know whether a
+stdlib effect fn can fail to append it.
+
 ### Guard (early return / loop break)
 ```
 guard x > 0 else err("must be positive")

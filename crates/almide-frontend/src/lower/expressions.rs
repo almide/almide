@@ -456,6 +456,17 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         // expr! — keep as Unwrap (distinct from auto-? Try)
         ast::ExprKind::Unwrap { expr, .. } => {
             let inner = lower_expr(ctx, expr);
+            // #1049: the checker admits `!` on a never-err effect call as a
+            // no-op — the value is already the raw T. Erase the node here so
+            // no downstream pass ever sees an Unwrap over a non-container
+            // type. Unknown/TypeVar keep the node (error recovery / generic
+            // slots resolve later).
+            let is_container = inner.ty.result_ok_ty().is_some()
+                || inner.ty.option_inner().is_some()
+                || matches!(inner.ty, Ty::Unknown | Ty::TypeVar(_));
+            if !is_container {
+                return Some(inner);
+            }
             ctx.mk(IrExprKind::Unwrap { expr: Box::new(inner) }, ty, span)
         }
         // expr ?? fallback — lower to match: ok(v)/some(v) → v, else → fallback
