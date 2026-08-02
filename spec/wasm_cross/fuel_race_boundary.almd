@@ -1,3 +1,4 @@
+// @contract: C-205
 // Exact winner-appearance boundary at CM-1 v0.3 (3ns/unit): the eventual
 // winner heavy(500) spends 502 units = 1506ns, so the race has no admitted
 // arm through ns=1505 and produces the arm-1 winner from ns=1506 — the same

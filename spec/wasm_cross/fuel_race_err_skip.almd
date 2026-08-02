@@ -1,3 +1,4 @@
+// @contract: C-205
 // T2-2: a Result arm SELF-DISQUALIFIES on Err (symmetric with fan.any):
 // the cheapest arm loses by returning Err, an Ok Result arm beats a plain
 // arm on spend, all-Err falls back, and the bare form carries the mix.

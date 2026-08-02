@@ -1,3 +1,4 @@
+// @contract: C-202
 // ADR-0001 S3 / S6-5: an overflowing time construction SATURATES to i64::MAX
 // instead of wrapping — on the dynamic path (first let: 9e12 hours through a
 // call) and the literal fold (second let). A wrapped-negative budget would

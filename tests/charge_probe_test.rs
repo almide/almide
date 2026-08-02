@@ -35,6 +35,29 @@ fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("research/spike/charge-probe/fixtures")
 }
 
+/// Resolve a fixture by its gate-internal name. The contract-formalized
+/// fixtures (T4-3) moved to `spec/wasm_cross/` under their C-NNN names; the
+/// probe-only ones stay in the spike directory.
+fn fixture_path(name: &str) -> PathBuf {
+    let relocated = match name {
+        "boundary" => Some("fuel_bounded_boundary"),
+        "race_boundary" => Some("fuel_race_boundary"),
+        "time_ops" => Some("time_ops_algebra"),
+        "negative_trap" => Some("time_negative_trap"),
+        "negative_scale" => Some("time_negative_scale"),
+        "saturate" => Some("time_saturate"),
+        "block_body" => Some("fuel_block_body"),
+        "bare_result" => Some("fuel_bare_result"),
+        "race_err_skip" => Some("fuel_race_err_skip"),
+        "settle_tuple" => Some("fan_settle_tuple"),
+        _ => None,
+    };
+    match relocated {
+        Some(n) => Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("spec/wasm_cross/{n}.almd")),
+        None => fixtures_dir().join(format!("{name}.almd")),
+    }
+}
+
 fn wasmtime_available() -> bool {
     Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
 }
@@ -95,7 +118,7 @@ fn charge_probe_gate() {
 fn interp_third_vote_on_metered_fixtures() {
     let dir = fixtures_dir();
     for name in ["bounded", "boundary", "race", "race_boundary", "saturate", "time_ops", "block_body", "bare_result", "race_err_skip"] {
-        let source = std::fs::read_to_string(dir.join(format!("{name}.almd"))).unwrap();
+        let source = std::fs::read_to_string(fixture_path(name)).unwrap();
         let ir = lower_for_interp(&source);
         let outcome = almide_interp::Interpreter::new(&ir).run_main();
         let interp_out = match &outcome.status {
@@ -104,7 +127,7 @@ fn interp_third_vote_on_metered_fixtures() {
         };
         let native = {
             let mut cmd = Command::new(almide_bin());
-            cmd.arg("run").arg(dir.join(format!("{name}.almd")));
+            cmd.arg("run").arg(fixture_path(name));
             cmd.env_remove("ALMIDE_FUEL_PROBE");
             let out = cmd.output().expect("spawn almide");
             assert!(out.status.success(), "{name}: native run failed");
@@ -188,7 +211,7 @@ fn time_ctor_guard_cross_target() {
     let dir = fixtures_dir();
     let run = |name: &str, wasm: bool| {
         let mut cmd = Command::new(almide_bin());
-        cmd.arg("run").arg(dir.join(format!("{name}.almd")));
+        cmd.arg("run").arg(fixture_path(name));
         cmd.env_remove("ALMIDE_FUEL_PROBE");
         if wasm {
             cmd.args(["--target", "wasm"]);
@@ -355,7 +378,7 @@ fn race_deterministic_across_targets() {
     }
     let dir = fixtures_dir();
     for name in ["race", "race_boundary"] {
-        let fixture = dir.join(format!("{name}.almd"));
+        let fixture = fixture_path(name);
         let plain = |wasm: bool| {
             let mut cmd = Command::new(almide_bin());
             cmd.arg("run").arg(&fixture);
@@ -377,7 +400,7 @@ fn race_deterministic_across_targets() {
     }
     let out = {
         let mut cmd = Command::new(almide_bin());
-        cmd.arg("run").arg(dir.join("race_boundary.almd"));
+        cmd.arg("run").arg(fixture_path("race_boundary"));
         cmd.env_remove("ALMIDE_FUEL_PROBE");
         String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
     };
@@ -399,7 +422,7 @@ fn bounded_deterministic_across_targets() {
     }
     let dir = fixtures_dir();
     for name in ["bounded", "boundary"] {
-        let fixture = dir.join(format!("{name}.almd"));
+        let fixture = fixture_path(name);
         // Plain runs (no probe env): the user-facing semantics.
         let plain = |wasm: bool| {
             let mut cmd = Command::new(almide_bin());
@@ -424,7 +447,7 @@ fn bounded_deterministic_across_targets() {
     // The flip point itself: EXHAUST through ns=3005, OK from ns=3006.
     let out = {
         let mut cmd = Command::new(almide_bin());
-        cmd.arg("run").arg(dir.join("boundary.almd"));
+        cmd.arg("run").arg(fixture_path("boundary"));
         cmd.env_remove("ALMIDE_FUEL_PROBE");
         String::from_utf8_lossy(&cmd.output().unwrap().stdout).to_string()
     };
@@ -440,7 +463,7 @@ fn dynamic_three_point_comparison() {
     }
     let dir = fixtures_dir();
     for name in COMPARABLE {
-        let fixture = dir.join(format!("{name}.almd"));
+        let fixture = fixture_path(name);
         let (n_ok, n_out, n_probe) = probed_run(&fixture, false);
         let (w_ok, w_out, w_probe) = probed_run(&fixture, true);
         assert!(n_ok, "{name}: native run failed");
@@ -458,7 +481,7 @@ fn dynamic_three_point_comparison() {
 fn native_wall_fails_loudly_under_probe() {
     let dir = fixtures_dir();
     for name in NATIVE_WALLED {
-        let fixture = dir.join(format!("{name}.almd"));
+        let fixture = fixture_path(name);
         let (ok, _out, probe) = probed_run(&fixture, false);
         assert!(
             !ok,
@@ -472,7 +495,7 @@ fn native_wall_fails_loudly_under_probe() {
 fn static_certificate_first_occurrence_equality() {
     let dir = fixtures_dir();
     for name in COMPARABLE {
-        let source = std::fs::read_to_string(dir.join(format!("{name}.almd"))).unwrap();
+        let source = std::fs::read_to_string(fixture_path(name)).unwrap();
         let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
         let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
             .unwrap_or_else(|e| panic!("{name}: wasm render failed: {e:?}"));

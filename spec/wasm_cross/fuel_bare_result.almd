@@ -1,3 +1,4 @@
+// @contract: C-204, C-205
 // T1-3: the BARE forms — `let r = fan.bounded(...)` / `fan.race { ... }`
 // without `??` — produce a real Result[T, String] on BOTH targets (native
 // rides the Res carrier + the outlined region wrap). The exact 3006/3005ns

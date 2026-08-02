@@ -1,3 +1,4 @@
+// @contract: C-204, C-207
 // Exact deterministic boundary at CM-1 v0.3 (3ns/unit): heavy(1000) costs
 // 1002 charge units (fn entry + 1001 loop-head checks) = 3006ns on the
 // declared clock. The sweep must exhaust through ns=3005 and succeed from

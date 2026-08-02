@@ -38,9 +38,11 @@
 - [ ] **T2-3 mapper 形 any/settle（Wave 2 宣言分）**
   `fan.any(xs, f)` / `fan.settle(xs, f)` — 動的リスト + 1 閉包。早期打ち切り
   （any）を含む。完了条件: 「宣言済み・未実装」診断の撤去 + fixture 両ターゲット。
-- [ ] **T2-4 settle block の tuple 戻り**
-  v1 の List[Result] → fan-v2.md の `(Result[A], Result[B])` 契約へ。異型 arm 対応。
-  完了条件: fan-v2-examples/settle.almd の health_report 例が動く。
+- [x] **T2-4 settle block の tuple 戻り**（f0c3b900 — FanSettle 実ノード化（parser/
+  checker/lowering/fmt）、値は arm 順 tuple リテラル（要素順評価が逐次確定契約を実現、
+  v0 native の実スレッド interleave flake も消滅）。異型 arm + effect arm の Err 捕捉
+  （auto-unwrap OFF）+ tuple-pattern match（health_report 形）が両ターゲット一致。
+  既存 5 fixture を tuple 契約へ移行）
 - [x] **T2-5 S3 演算 matrix**（24236472 — checker interceptor（Named の generic
   numeric 素通りで T*T が無警告だった穴を塞ぐ）+ 飽和 erasure（+ MAX 飽和 / −
   0 飽和 / ×Int 負 trap+MAX 飽和）。`time_ops` fixture が全セルを unit 精度で

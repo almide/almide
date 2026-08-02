@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-64 normative sections; 339 distinct executable fixtures.
+64 normative sections; 349 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -25,10 +25,10 @@
 | ALS-C8 | C-038 | `spec/wasm_cross/sized_int_record_fields.almd` (byte-compare)<br>`spec/wasm_cross/sized_numeric_literals.almd` (byte-compare) |
 | ALS-C9 | C-053, C-055 | `spec/wasm_cross/list_total_order.almd` (byte-compare)<br>`spec/wasm_cross/list_float_total_order.almd` (byte-compare)<br>`spec/wasm_cross/sort_by_call_count.almd` (byte-compare) |
 | ALS-C10 | C-052, C-058 | `spec/wasm_cross/empty_collection_fold.almd` (byte-compare)<br>`spec/wasm_cross/empty_collection_annotated.almd` (byte-compare)<br>`tests/diagnostics/e018-empty-collection-element/broken.almd` (checker) |
-| ALS-D1 | C-031 | `spec/wasm_cross/json_path_edges.almd` (byte-compare)<br>`spec/wasm_cross/json_value.almd` (byte-compare) |
-| ALS-D2 | C-060 | `spec/wasm_cross/value_repr.almd` (byte-compare) |
-| ALS-D3 | C-063 | `spec/wasm_cross/json_gltf_walk.almd` (byte-compare) |
-| ALS-D4 | C-032, C-160 | `spec/wasm_cross/regex_engine.almd` (byte-compare)<br>`spec/wasm_cross/regex_fuzz_batch.almd` (byte-compare)<br>`spec/wasm_cross/bundled_pure_modules.almd` (byte-compare) |
+| ALS-D1 | C-031, C-202, C-203 | `spec/wasm_cross/json_path_edges.almd` (byte-compare)<br>`spec/wasm_cross/json_value.almd` (byte-compare)<br>`spec/wasm_cross/time_negative_trap.almd` (byte-compare)<br>`spec/wasm_cross/time_negative_scale.almd` (byte-compare)<br>`spec/wasm_cross/time_saturate.almd` (byte-compare)<br>`spec/wasm_cross/time_ops_algebra.almd` (byte-compare) |
+| ALS-D2 | C-060, C-204, C-207 | `spec/wasm_cross/value_repr.almd` (byte-compare)<br>`spec/wasm_cross/fuel_bounded_boundary.almd` (byte-compare)<br>`spec/wasm_cross/fuel_block_body.almd` (byte-compare)<br>`spec/wasm_cross/fuel_bare_result.almd` (byte-compare) |
+| ALS-D3 | C-063, C-205 | `spec/wasm_cross/json_gltf_walk.almd` (byte-compare)<br>`spec/wasm_cross/fuel_race_boundary.almd` (byte-compare)<br>`spec/wasm_cross/fuel_race_err_skip.almd` (byte-compare)<br>`spec/wasm_cross/fuel_bare_result.almd` (byte-compare) |
+| ALS-D4 | C-032, C-160, C-206 | `spec/wasm_cross/regex_engine.almd` (byte-compare)<br>`spec/wasm_cross/regex_fuzz_batch.almd` (byte-compare)<br>`spec/wasm_cross/bundled_pure_modules.almd` (byte-compare)<br>`spec/wasm_cross/fan_settle_tuple.almd` (byte-compare) |
 | ALS-D5 | C-037 | `spec/wasm_cross/bytes_f16.almd` (byte-compare) |
 | ALS-D6 | C-084, C-085, C-095, C-098, C-103 | `spec/wasm_cross/codec_decode_errors.almd` (byte-compare)<br>`spec/wasm_cross/codec_float_int.almd` (byte-compare)<br>`spec/wasm_cross/json_stringify_pretty.almd` (byte-compare)<br>`tests/crossmod_matrix_test.rs` (cargo gate)<br>`spec/wasm_cross/value_merge.almd` (byte-compare)<br>`spec/wasm_cross/value_array_leak_loop.almd` (byte-compare)<br>`spec/wasm_cross/value_as_array_leak_loop.almd` (byte-compare)<br>`spec/wasm_cross/value_as_array_roundtrip.almd` (byte-compare)<br>`spec/wasm_cross/value_array_tuple_tco.almd` (byte-compare) |
 | ALS-D7 | C-062, C-090 | `spec/wasm_cross/bytes_rawptr.almd` (byte-compare)<br>`spec/wasm_cross/bytes_from_list_param.almd` (byte-compare) |

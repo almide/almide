@@ -2515,3 +2515,82 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/option_tuple_payload_matrix.almd", class = "fixture" },
 ]
+
+# ── DETERMINISTIC TIME: CONSTRUCTOR GUARDS ─
+[[contract]]
+id        = "C-202"
+spec      = "ALS-D1"
+title     = "Time constructors guard their domain: negative aborts, overflow saturates"
+statement = "A NEGATIVE argument to any `compute.*` / `duration.*` constructor, and a negative scale factor in `T * Int`, terminate through the §13 convention (`Error: negative time: compute.us(-5)` / `Error: negative time scale: -2` on stderr + exit 1) identically on both targets; an overflowing construction or `T + T` sum SATURATES to the maximum representable time instead of wrapping (a wrapped-negative budget would exhaust instantly — saturation admits the work). Non-negative literal arguments fold at compile time to the same erased value the runtime guard produces."
+since     = "0.47.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/time_negative_trap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/time_negative_scale.almd", class = "fixture" },
+  { path = "spec/wasm_cross/time_saturate.almd", class = "fixture" },
+]
+
+# ── DETERMINISTIC TIME: OPERATOR ALGEBRA ─
+[[contract]]
+id        = "C-203"
+spec      = "ALS-D1"
+title     = "The time-type operator algebra is unit-exact and saturating on both targets"
+statement = "`T + T` (saturating), `T - T` (0-saturating), `T * Int` in either operand order (saturating), and same-clock comparisons agree native == wasm at CHARGE-UNIT precision: the fixture pins every cell by driving a `fan.bounded` verdict across an exact unit boundary, so a one-unit drift in any operator's erasure flips an observable verdict. `T * T`, any Compute⊕Duration mix, bare-Int joins, and `/` are compile-time type errors (checker matrix, not runtime behaviour)."
+since     = "0.47.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/time_ops_algebra.almd", class = "fixture" },
+]
+
+# ── DETERMINISTIC BUDGET VERDICT (fan.bounded) ─
+[[contract]]
+id        = "C-204"
+spec      = "ALS-D2"
+title     = "A fan.bounded verdict is a function of the program and its inputs alone"
+statement = "`fan.bounded(c) { body }` yields Err (the ledger-constant message) exactly when the region's metered spend in charge units exceeds `floor(ns / CM-1)`, and the Ok ⇄ Err flip happens at the SAME declared nanosecond on both targets — the boundary fixtures pin the flip at unit exactness (heavy(1000) = 1002 units flips at 3006ns under CM-1 v0.3). Bind statements inside a block body add zero charge; the bare (no-`??`) form produces the same verdict as a real `Result[T, String]` value; the region body is pure by typing, so no wall-clock input can reach the verdict."
+since     = "0.47.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fuel_bounded_boundary.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_block_body.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_bare_result.almd", class = "fixture" },
+]
+
+# ── DETERMINISTIC RACE WINNER (fan.race) ─
+[[contract]]
+id        = "C-205"
+spec      = "ALS-D3"
+title     = "The fan.race winner is the (spend, index) lexicographic minimum among admitted arms"
+statement = "Every arm is metered on the deterministic clock; an arm is ADMITTED iff it completes within the (optional) budget AND — when it returns a `Result` — it returned Ok (an arm's Err self-disqualifies it, never propagates). The winner is the admitted arm with the least `(spend, index)`: the cheapest arm, ties to source order; no admitted arm yields the ledger-constant Err. The winner-appearance boundary is unit-exact and identical on both targets (heavy(500) = 502 units appears at 1506ns under CM-1 v0.3)."
+since     = "0.47.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fuel_race_boundary.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_race_err_skip.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_bare_result.almd", class = "fixture" },
+]
+
+# ── SETTLE TUPLE ─
+[[contract]]
+id        = "C-206"
+spec      = "ALS-D4"
+title     = "A settle block settles every arm into its own tuple slot, in arm order"
+statement = "`fan.settle { a; b; … }` evaluates its arms in arm order and yields the TUPLE `(Result[A, String], Result[B, String], …)`: heterogeneous arm types are allowed, a plain arm's value wraps in Ok, and an EFFECTFUL arm's Err is CAPTURED into its slot — never propagated out of the block. Both targets agree byte-for-byte, including the captured-Err case and a tuple-pattern match over the settled slots."
+since     = "0.47.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_settle_tuple.almd", class = "fixture" },
+]
+
+# ── CM-1: THE VERSIONED COST MODEL ─
+[[contract]]
+id        = "C-207"
+spec      = "ALS-D2"
+title     = "CM-1 is a versioned constant with a ratio-only wall-clock claim"
+statement = "Deterministic time is `charge units × CM-1` where CM-1 v0.3 = 3ns/unit, defined ONCE (`almide_types::time_units::CM1_NS_PER_CHARGE`) and consumed by both renderers, the interpreter, and `--time-report` from that single definition. The wall-clock claim is RATIO-ONLY: a standing calibration gate measures the declared/measured ratio on a 100M-unit reference workload and asserts it inside the declared 5x band (ADR-0001 D5) — the gate falsified both prior draft constants (21x and 18x out). Changing CM-1 is a versioned cost-model revision (CM-2, …), never a silent retune: every unit-exact fixture in ALS-D2/D3 pins the current value."
+since     = "0.47.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fuel_bounded_boundary.almd", class = "fixture" },
+  { path = "tests/charge_probe_test.rs", class = "by-construction", name = "cm1_calibration_within_declared_band" },
+]

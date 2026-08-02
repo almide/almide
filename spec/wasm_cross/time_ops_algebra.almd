@@ -1,3 +1,4 @@
+// @contract: C-203
 // ADR-0001 S3 operator algebra, pinned at UNIT precision via the budget
 // boundary (heavy(1000) = 1002 units = 3006ns at CM-1 v0.3):
 //   +  : 3000+6 = 3006 ok / 3000+5 = 3005 exhaust

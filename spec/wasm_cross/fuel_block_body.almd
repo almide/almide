@@ -1,3 +1,4 @@
+// @contract: C-204
 // T2-1: full BLOCK bodies/arms — the outliner parameterizes free variables.
 //   line 1: parse -> filter -> render over a free String var (11)
 //   line 2: exact boundary UNCHANGED by block wrapping: a bind statement adds
