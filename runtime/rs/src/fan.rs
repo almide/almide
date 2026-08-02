@@ -53,6 +53,22 @@ pub fn almide_rt_fan_any<T>(
     Err("fan.any: all candidates failed".to_string())
 }
 
+// `fan.any_map` -- the T2-3 MAPPER form: apply `f` to the items IN LIST ORDER
+// and return the FIRST `Ok`; an element's Err disqualifies that element only.
+// All-fail (and the empty list) is the ledger-constant Err. Deterministic --
+// the early cut is structural (later elements are never evaluated).
+pub fn almide_rt_fan_any_map<A, B>(
+    items: Vec<A>,
+    f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
+) -> Result<B, String> {
+    for item in items {
+        if let Ok(v) = f(item) {
+            return Ok(v);
+        }
+    }
+    Err("fan.any: all candidates failed".to_string())
+}
+
 pub fn almide_rt_fan_settle<T: Send + 'static>(
     thunks: Vec<impl Fn() -> Result<T, String> + Send + Sync>,
 ) -> Vec<Result<T, String>> {
