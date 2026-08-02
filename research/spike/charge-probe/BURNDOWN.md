@@ -15,30 +15,28 @@
   完了条件: race の敗者 trap が可視窓の外で「起こらなかったことになる」fixture
   （spec の挙動表の trap 行 2 種）が両ターゲット一致。発散 callee が budget で
   切れる fixture。deviation 4/7 の閉鎖。
-  **設計ノート（2026-08-02）**: T1-2 のクローンが前提（strict チェックは metered
-  クローンの charge site のみに入れる — 非 region 経路のコスト 0 を維持）。
-  native: charge shim が枯渇で `panic_any(BudgetExhausted)` → BUDGET_SHIM の
-  enter/exit を `catch_unwind` 境界に（exit は catch 側で verdict=1 を persist）。
-  wasm: unwind がないので check付き charge が枯渇時に `$__b_cut=1` を立てて
-  早期 return 連鎖（metered クローンの各 call 直後に `br_if` チェック、fn は
-  ダミー値 return）— これが metered-ABI。interp: det_charge で fuel<0 になったら
-  Flow 伝播（新 Flow::BudgetCut）を budget_exit で吸収。trap 可視窓: strict cut は
-  「枯渇後は何も起こらない」を与える — 敗者 arm の trap（div0 等）は spend が
-  勝者確定前に尽きれば不可視、の 2 fixture。両レグの cut 点一致は charge 配置の
-  同一性（既存の保存性）から従う。
-- [ ] **T1-2 metered-clone 特殊化**
-  bounded/race から到達可能な関数だけを `__fuel$` 変種に複製（mono の追加次元）。
-  完了条件: bounded を含むプログラムの非 region 経路が計量ゼロ（生成物 diff で
-  確認）+ 既存 fixture 全緑。deviation 1 の閉鎖。
-  **設計ノート（2026-08-02）**: charge_probe.rs に `specialize_metered_clones`:
-  roots = `__almd_bounded_*`; reachable = roots からの CallFn 推移閉包（user fn 内）;
-  reachable を `<name>__fuel` に複製し roots/クローン内の CallFn を retarget;
-  charge 挿入は roots+クローンのみ（probe mode は従来どおり全 fn — probe 意味論
-  不変）。region spend は不変（region 内 callee は全て metered clone）→ 境界
-  fixture の 3006/1506ns は変わらない。interp は全 user fn 課金のままで安全
-  （verdict は enter/exit の差分のみ観測 — region 外課金は不可視）。lifted lambda
-  は table dispatch のため clone 不可 → FuncRef 到達可能な lambda は全域 charged の
-  まま（軽微な region 外課金として deviation に明記）。
+  **確定設計（unwind 不要・両レグ同型の check-and-return）**: metered fn の
+  charge site を「subtract → if fuel<0 → その fn からダミー値 return」に。
+  W1（全サイクルは charge site を通る）により枯渇後の残実行は有限、region の
+  呼び出し連鎖は各 fn の次 charge site で連鎖 return し outlined fn 本体へ戻り、
+  exit が verdict=1（fuel<0）と spend を通常経路で persist する — unwind も
+  フラグも不要。カット点 = 枯渇後最初の charge site で、charge 配置保存性から
+  両レグ同一。ダミー値は観測不能（verdict=Err が値を捨てる）。T1-2 により
+  budget-only モードの charge 保有 fn は全て metered なので、チェックは charge
+  render に無条件で置ける（probe モードは fuel=MAX から減るだけで <0 に達しない）。
+  native: `//__CUT_RET__` マーカー + 末尾 ret-NTy 確定後に
+  `if __almd_fuel_lt0() { return <default>; }` へ replacen（JOIN marker の前例）。
+  wasm: `(if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return <typed default>)))`。
+  interp: `det_region_depth`（enter+1/exit-1）>0 かつ fuel<0 で eval_while break +
+  call_function 早期 return（ダミー Value::Int(0)）。fixture: 発散カット
+  （loop_forever が budget で切れる）+ race 敗者 trap 不可視 2 種。
+- [x] **T1-2 metered-clone 特殊化**（de7c2d20 — `specialize_metered_clones`:
+  roots=`__almd_bounded_*` からの CallFn 推移閉包を `__fuel` 複製 + retarget、
+  charge は roots+クローンのみ（probe mode は全 fn のまま = probe 意味論不変）。
+  native sig 表へクローンを base からコピー（Result 返し region の String 誤型を
+  修正）。ゲートに「非 region 経路の charge ゼロ」を両 artifact で機械検査
+  （vacuity pin 付き）。境界 3006/1506ns 不変・全 metered fixture 緑。
+  既知の残: FuncRef 到達時は `__lambda_*` が全域 charged（table 複製不可のため））
 - [x] **T1-3 native heap-Result ABI（裸形の開通）**（1a63629e — native-only 認識パス
   `native_result_rewrite.rs` + NTy::Res carrier。裸形 bounded/race が native v1 緑
   （`bare_result` fixture、exact boundary 同値）、**一般 Result[Int,String] plain fn
