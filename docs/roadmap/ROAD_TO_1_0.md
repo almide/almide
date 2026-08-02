@@ -83,8 +83,8 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 
 | Version | 大機能 | Issue |
 |---|---|---|
-| 0.51 | QualifiedRef newtype — v1 MIR 上で bare type identity を表現不能にする（#433 クラスの型による根絶）。以後の optimizer 追加はこの型の上で行う | [#908](https://github.com/almide/almide/issues/908) |
-| 0.52 | hole-hunt レンズ — pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存。optimizer 手術の前に検出器を立てる。実例棚: [#1018](https://github.com/almide/almide/issues/1018)（map.fold closure の under-check） | [#912](https://github.com/almide/almide/issues/912), [#1018](https://github.com/almide/almide/issues/1018) |
+| 0.51 | effect 表面規則の統一と診断修復（OTel dogfooding 発の #1049–#1054 一括）— `!` は effect call 上で常に可（never-err は無警告 no-op）、二項演算子オペランドの implicit unwrap（lowering の A-正規化込み）、unresolved import の wall taxonomy 修復、runtime-backed 型のユーザー注釈（HttpRequest/HttpResponse/JsonPath + 完備性 matrix gate）、E025 shape 導出。**出荷済 v0.51.0**。派生: [#1055](https://github.com/almide/almide/issues/1055)（effect-typed fn params）, [#1056](https://github.com/almide/almide/issues/1056) | [#1049](https://github.com/almide/almide/issues/1049)–[#1054](https://github.com/almide/almide/issues/1054) |
+| 0.52 | QualifiedRef newtype + hole-hunt レンズ — optimizer 手術の前の構造的安全化を 1 Unit に束ねる。QualifiedRef は v1 MIR 上で bare type identity を表現不能にし（#433 クラスの型による根絶）、以後の optimizer 追加はこの型の上で行う。hole-hunt は pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存の検出器。実例棚: [#1018](https://github.com/almide/almide/issues/1018)（map.fold closure の under-check）。どちらも 0.53 の optimizer 接続より前という順序制約は不変 | [#908](https://github.com/almide/almide/issues/908), [#912](https://github.com/almide/almide/issues/912), [#1018](https://github.com/almide/almide/issues/1018) |
 | 0.53 | wasm leg に nanopass optimizer 群を接続 | [#929](https://github.com/almide/almide/issues/929) |
 | 0.54 | wasm SIMD | [#929](https://github.com/almide/almide/issues/929) |
 | 0.55 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |
@@ -95,6 +95,12 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 | 0.60 | ゲートリリース — クロスターゲット対等性監査を固定 | — |
 
 **Gate 0.60**: 両ターゲットの最適化品質が同格 / hole-hunt findings 0 / 対 Rust perf ギャップが計測・ラチェット管理下。
+
+> **0.51 の差し替え（2026-08-03）**: 計画上の 0.51（QualifiedRef #908）は、OTel dogfooding が出した
+> #1049–#1054（effect 表面規則の統一）に席を譲った。表面規則の穴は書き手が今日踏むもので、
+> optimizer 前提の内部安全化より先に返すべき負債だからである。QualifiedRef は消えたのではなく
+> 0.52 に統合され、「0.53 の optimizer 接続より前」という順序制約ごと保存されている。
+> 静かな番号の付け替えではなく、この注記が記録である。
 
 ## 0.6x — rustc からの独立（debug ビルド）
 
