@@ -245,7 +245,9 @@ fn unresolved_import_wall(
                 None => continue,
             }
         } else {
-            if almide_lang::stdlib_info::is_stdlib_module(root.as_str()) {
+            // Hardcoded AND bundled stdlib both type from stdlib info /
+            // bundled sigs — `import prim` (bundled-only) must not wall.
+            if almide_lang::stdlib_info::is_any_stdlib(root.as_str()) {
                 continue;
             }
             root.as_str()
