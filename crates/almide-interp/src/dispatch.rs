@@ -297,6 +297,39 @@ impl<'a> Interpreter<'a> {
     }
 
     /// Dispatch a `(module, func)` whose args are already evaluated. Tiers:
+    /// The budget prim quartet over the interpreter's deterministic meter —
+    /// byte-for-byte the arithmetic of the wasm BudgetEnter/Exit renders and
+    /// the native BUDGET_SHIM (see `render_wasm_p2_b.rs` / `render_native.rs`).
+    /// Reached from the eval's `RuntimeCall` arm: the fan.bounded/race
+    /// frontend lowering emits these symbols directly, pre-codegen.
+    pub(crate) fn budget_prim_rt(&self, symbol: &str, args: &[Value]) -> Flow {
+        let int0 = || match args.first() {
+            Some(Value::Int(n)) => *n,
+            _ => 0,
+        };
+        match symbol {
+            "almide_rt_prim_budget_enter" => {
+                let units = int0() / almide_lang::time_units::CM1_NS_PER_CHARGE;
+                self.det_entry.set(units);
+                let saved = self.det_fuel.get();
+                if units < saved {
+                    self.det_fuel.set(units);
+                }
+                Flow::val(Value::Int(saved))
+            }
+            "almide_rt_prim_budget_exhausted" => Flow::val(Value::Int(self.det_verdict.get())),
+            "almide_rt_prim_budget_exit" => {
+                self.det_verdict.set(i64::from(self.det_fuel.get() < 0));
+                let consumed = self.det_entry.get() - self.det_fuel.get();
+                self.det_spend.set(consumed);
+                self.det_fuel.set(int0() - consumed);
+                Flow::val(Value::Int(0))
+            }
+            "almide_rt_prim_budget_spend" => Flow::val(Value::Int(self.det_spend.get())),
+            other => Flow::Unsupported(format!("budget prim `{other}`")),
+        }
+    }
+
     /// interp-native container ops → scalar/string bridge → almide-bodied
     /// stdlib fn → unsupported.
     pub(crate) fn dispatch_module_resolved(

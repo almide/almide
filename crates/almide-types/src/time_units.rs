@@ -6,6 +6,17 @@
 //! consumer and every gate at once; adding it anywhere else is a bug the
 //! matrix gate (`tests/time_units_matrix_test.rs`) exists to catch.
 
+/// CM-1 v0.3: nanoseconds per charge unit — the calibration constant between
+/// the declared clock and the abstract machine's charge units. RECALIBRATED
+/// 2026-08-02 by the standing D5 gate: heavy(100M) = 100,000,003 units ran
+/// 0.25s native release AND 0.28s wasmtime (Apple M-class, min of 3) →
+/// ~2.5ns/unit on BOTH targets; pinned at 3 to center the ADR-0001 D5
+/// declared 5x band. RATIO-ONLY contract. Consumed by the wasm BudgetEnter
+/// render, the native BUDGET_SHIM template, the interp's budget prims, and
+/// `--time-report` — via this ONE definition (re-exported as
+/// `almide_mir::charge_probe::CM1_NS_PER_CHARGE`).
+pub const CM1_NS_PER_CHARGE: i64 = 3;
+
 /// The closed unit set (S2): unit name → nanoseconds per unit. Order is the
 /// canonical display order used in diagnostics.
 pub const TIME_UNITS: &[(&str, i64)] = &[

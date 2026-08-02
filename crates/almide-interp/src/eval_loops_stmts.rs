@@ -106,6 +106,9 @@ impl<'a> Interpreter<'a> {
             if let Err(f) = self.step() {
                 return f;
             }
+            // Deterministic meter: one loop-head charge per iteration entry,
+            // plus the final exit check below (n iterations = n+1 checks).
+            self.det_charge();
             let frame = scope.child();
             if let Some(abort) = Self::bind_for_in_item(&frame, var, var_tuple, item) {
                 return abort;
@@ -116,6 +119,7 @@ impl<'a> Interpreter<'a> {
                 LoopStep::Signal(f) => return f,
             }
         }
+        self.det_charge();
         Flow::val(Value::Unit)
     }
 
@@ -139,6 +143,9 @@ impl<'a> Interpreter<'a> {
             if let Err(f) = self.step() {
                 return f;
             }
+            // Deterministic meter: per-iteration loop-head charge (the +1 exit
+            // check is charged after the loop).
+            self.det_charge();
             let frame = scope.child();
             if var_tuple.is_some() {
                 return Flow::Abort(
@@ -153,6 +160,7 @@ impl<'a> Interpreter<'a> {
             }
             i += 1;
         }
+        self.det_charge();
         Flow::val(Value::Unit)
     }
 
@@ -161,6 +169,9 @@ impl<'a> Interpreter<'a> {
             if let Err(f) = self.step() {
                 return f;
             }
+            // Deterministic meter: one loop-head charge per condition CHECK
+            // (n iterations = n+1 checks), mirroring the MIR LoopStart charge.
+            self.det_charge();
             let c = val!(self.eval_expr(cond, scope));
             match c {
                 Value::Bool(true) => {}

@@ -84,6 +84,58 @@ fn charge_probe_gate() {
     race_deterministic_across_targets();
     time_ctor_guard_cross_target();
     time_report_prints_dual_time();
+    interp_third_vote_on_metered_fixtures();
+}
+
+/// T3-4: the interp's deterministic meter (budget prims + W1 charge mirror)
+/// gives a REAL third vote on the metered fixtures — including the
+/// unit-exact boundary sweeps, where any drift in the interp's charge
+/// placement flips a verdict. Compared against the native leg (which the
+/// dynamic layer already pins against wasm).
+fn interp_third_vote_on_metered_fixtures() {
+    let dir = fixtures_dir();
+    for name in ["bounded", "boundary", "race", "race_boundary", "saturate"] {
+        let source = std::fs::read_to_string(dir.join(format!("{name}.almd"))).unwrap();
+        let ir = lower_for_interp(&source);
+        let outcome = almide_interp::Interpreter::new(&ir).run_main();
+        let interp_out = match &outcome.status {
+            almide_interp::RunStatus::Ok => outcome.stdout.trim().to_string(),
+            other => panic!("{name}: interp did not complete cleanly: {other:?}"),
+        };
+        let native = {
+            let mut cmd = Command::new(almide_bin());
+            cmd.arg("run").arg(dir.join(format!("{name}.almd")));
+            cmd.env_remove("ALMIDE_FUEL_PROBE");
+            let out = cmd.output().expect("spawn almide");
+            assert!(out.status.success(), "{name}: native run failed");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        assert_eq!(
+            interp_out, native,
+            "{name}: the interp's third vote DISSENTS from the backends"
+        );
+    }
+}
+
+/// The 3-way harness's IR recipe (tests/wasm_runtime_test_parts/p4_corpus.rs):
+/// parse → check → lower → link, at the pre-codegen cut point.
+fn lower_for_interp(source: &str) -> almide_ir::IrProgram {
+    let tokens = almide::lexer::Lexer::tokenize(source);
+    let mut parser = almide::parser::Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    assert!(parser.errors.is_empty(), "parse errors: {:?}", parser.errors);
+    let canon = almide::canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = almide::check::Checker::from_env(canon.env);
+    let diags = checker.infer_program(&mut prog);
+    let errs: Vec<_> = diags
+        .iter()
+        .filter(|d| d.level == almide::diagnostic::Level::Error)
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(errs.is_empty(), "type errors at interp cut point: {errs:?}");
+    let mut ir = almide_frontend::lower::lower_program(&prog, &checker.env, &checker.type_map);
+    almide_driver::link_ir(&mut ir);
+    ir
 }
 
 /// T3-9: `--time-report` prints the ADR-0001 D5 dual-time line (deterministic

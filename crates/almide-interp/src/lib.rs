@@ -119,6 +119,23 @@ pub struct Interpreter<'a> {
     /// exact and needs no per-frame bookkeeping. The in-place write-back tier
     /// reads it to refuse a receiver whose binding lives in the callee's frame.
     pub(crate) mut_param_vars: HashSet<VarId>,
+    /// ADR-0001 deterministic meter (fan.bounded / fan.race). Mirrors the MIR
+    /// W1 charge placement EXACTLY — user-fn entries, loop-head checks
+    /// (while: n+1 condition evaluations; for-in: n iterations + 1 exit
+    /// check), and closure invocations (a lifted lambda's entry charge on the
+    /// backends) — and the renderers' budget arithmetic (min-cap entry, lazy
+    /// verdict, streaming exit). Counts DOWN from i64::MAX like both legs.
+    pub(crate) det_fuel: Cell<i64>,
+    pub(crate) det_entry: Cell<i64>,
+    pub(crate) det_verdict: Cell<i64>,
+    pub(crate) det_spend: Cell<i64>,
+    /// True while evaluating a USER fn body. Charges apply only there: the
+    /// stdlib pool bodies are unmetered on every leg (both backends meter
+    /// user functions only), so a pool fn's internal loops must not charge.
+    pub(crate) det_in_user: Cell<bool>,
+    /// The user program's own fn names — captured BEFORE the stdlib pool is
+    /// layered into `fns`, so the meter can tell the two apart at call time.
+    pub(crate) user_fn_names: HashSet<Sym>,
 }
 
 /// Default fuel budget — high enough for any real corpus program, low enough to
@@ -189,6 +206,14 @@ impl<'a> Interpreter<'a> {
         let mut fns = HashMap::new();
         for f in &program.functions {
             fns.insert(f.name, f);
+        }
+        // The deterministic meter's user-fn set: program fns + user-module fns,
+        // captured before the pool layers in (pool bodies are unmetered).
+        let mut user_fn_names: HashSet<Sym> = fns.keys().copied().collect();
+        for m in &program.modules {
+            for f in &m.functions {
+                user_fn_names.insert(f.name);
+            }
         }
         // Layer in the self-hosted stdlib bodies (lowered once, process-wide) so
         // a stdlib call the interp-native surfaces don't cover evaluates the SAME
@@ -263,6 +288,21 @@ impl<'a> Interpreter<'a> {
             fuel: Cell::new(DEFAULT_FUEL),
             depth: Cell::new(0),
             mut_param_vars,
+            det_fuel: Cell::new(i64::MAX),
+            det_entry: Cell::new(0),
+            det_verdict: Cell::new(0),
+            det_spend: Cell::new(0),
+            det_in_user: Cell::new(false),
+            user_fn_names,
+        }
+    }
+
+    /// One deterministic charge unit, if the meter applies here (inside a
+    /// user fn). Wrapping like both renderers.
+    #[inline]
+    pub(crate) fn det_charge(&self) {
+        if self.det_in_user.get() {
+            self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
         }
     }
 
@@ -486,6 +526,16 @@ impl<'a> Interpreter<'a> {
         }
         self.depth.set(d + 1);
 
+        // Deterministic meter: a USER fn's entry charge (fires regardless of
+        // caller, like the charge op at the top of the rendered fn); the
+        // in-user flag scopes loop-head charges to user bodies only.
+        let det_was_user = self.det_in_user.get();
+        let det_is_user = self.user_fn_names.contains(&func.name);
+        self.det_in_user.set(det_is_user);
+        if det_is_user {
+            self.det_fuel.set(self.det_fuel.get().wrapping_sub(1));
+        }
+
         let frame = base.child();
         for (param, arg) in func.params.iter().zip(args.into_iter()) {
             frame.bind(param.var, arg);
@@ -495,6 +545,7 @@ impl<'a> Interpreter<'a> {
             Flow::Return(v) => Flow::Value(v),
             other => other,
         };
+        self.det_in_user.set(det_was_user);
         self.depth.set(d);
         result
     }
@@ -507,6 +558,9 @@ impl<'a> Interpreter<'a> {
             return Flow::Fuel;
         }
         self.depth.set(d + 1);
+        // Deterministic meter: a closure invocation is a lifted lambda's
+        // entry charge on the backends.
+        self.det_charge();
 
         let frame = clo.captured.child();
         for (param, arg) in clo.params.iter().zip(args.into_iter()) {

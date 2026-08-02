@@ -66,8 +66,9 @@
   exact flip（bounded 3006ns / race 1506ns、両ターゲット同一）に強化）
 - [ ] **T3-8 fan{} 並列 native × budget の裁定**（最低限: 併用を checker で拒否 or
   atomic 化 + 決定順序の設計判断を文書化。無定義状態の解消）
-- [ ] **T3-9 レポート表示 `--time-report`**（決定的 ms + 実測壁時計の併記出力 —
-  ADR D5 の tooling 面。`--fuel-probe` の出力を人間可読の ms 表示に格上げ）
+- [x] **T3-9 レポート表示 `--time-report`**（90ca1acd — `almide run --time-report`
+  が `time: 0.151ms deterministic (≈38.7ms wall here)` を stderr へ。probe 行は
+  swallow、決定的時間は両ターゲット一致をゲートで pin）
 
 ## Tier 4 — merge 準備（branch 上で先行、PR は GO 後）
 

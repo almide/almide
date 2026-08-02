@@ -446,6 +446,20 @@ impl<'a> Interpreter<'a> {
                 "internal: evaluated a Hole (intrinsic-stub body reached as an expr)".into(),
             ),
             IrExprKind::Todo { message } => Flow::Abort(message.clone()),
+            // ── The ONE pre-codegen RuntimeCall family: the budget prims.
+            // The fan.bounded/race frontend lowering emits these symbols
+            // directly (they are the deterministic tier's floor on every
+            // leg), so they are legitimately reachable at the cut point.
+            // Everything else stays unreachable below.
+            IrExprKind::RuntimeCall { symbol, args }
+                if symbol.as_str().starts_with("almide_rt_prim_budget_") =>
+            {
+                let mut vals = Vec::with_capacity(args.len());
+                for a in args {
+                    vals.push(val!(self.eval_expr(a, scope)));
+                }
+                self.budget_prim_rt(symbol.as_str(), &vals)
+            }
             // ── Codegen-inserted: UNREACHABLE at the pre-codegen cut point ──
             IrExprKind::RuntimeCall { .. } => unreachable!(
                 "RuntimeCall is codegen-inserted (IntrinsicLowering); interp runs pre-codegen"
