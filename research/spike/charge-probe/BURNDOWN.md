@@ -47,8 +47,10 @@
 - [ ] **T3-1 飽和演算 + 負値 trap**（構築子の overflow 飽和、負引数の決定的 trap、
   両ターゲット一致 fixture）
 - [ ] **T3-2 UFCS 曖昧診断**（`n.ms()` → compute/duration 両候補の名指しエラー）
-- [ ] **T3-3 S6 matrix gate 群**（構築子 12 セル / 単位集合の CLI 共有 / 時計宣言列。
-  実行可能テストとして常設）
+- [x] **T3-3 S6 matrix gate 群**（e9bf6eef — `almide_types::time_units` に単位表・
+  時計表・S4 時計列を単一ソース化。checker/lowering/診断 hint 全て同表読み。
+  `tests/time_units_matrix_test.rs` に S6-1/4/6 + 裸 Int ゲート、ケースは表から生成。
+  S6-2/3/5 は T3-1/T3-2/T4-6 側で land）
 - [ ] **T3-4 interp の budget prim 対応**（3-way oracle の復帰。最低限: 明示 abstain
   ではなく prim 実装 — thread-local カウンタで semantics 一致）
 - [ ] **T3-5 Dyn charge**（可変コスト op の従量課金 `1 + ⌈size/16⌉` 系。CM-1 v0.3）

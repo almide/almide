@@ -121,6 +121,13 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
             None,
             "fn rt_print_str(s: &str) { println!(\"{}\", s); }",
         )),
+        // The §13 abort convention's message channel (assert desugar, time-ctor
+        // negative trap): stderr line, exact v0 oracle behavior.
+        "eprintln" => Some((
+            &[NTy::Str],
+            None,
+            "fn rt_eprintln(s: &str) { eprintln!(\"{}\", s); }",
+        )),
         "__str_concat" => Some((
             &[NTy::Str, NTy::Str],
             Some(NTy::Str),
@@ -403,6 +410,11 @@ fn render_fn(
                 used_shims.push(CHARGE_SHIM);
                 let tr = crate::charge_probe::probe_enabled();
                 line!("__almd_charge({site}, {cost}, {tr});");
+            }
+            // The §13 termination convention's exit half (assert desugar tail,
+            // time-ctor negative trap): a user exit code, no message of its own.
+            Op::Prim { kind: crate::PrimKind::ProcExit, dst: None, args } => {
+                line!("std::process::exit({} as i32);", var(args[0]));
             }
             Op::Prim { kind: crate::PrimKind::BudgetEnter, dst: Some(d), args } => {
                 used_shims.push(COUNTER_SHIM);

@@ -82,6 +82,46 @@ fn charge_probe_gate() {
     dynamic_three_point_comparison();
     bounded_deterministic_across_targets();
     race_deterministic_across_targets();
+    time_ctor_guard_cross_target();
+}
+
+/// ADR-0001 S3 (T3-1): the time-constructor guard — a negative argument is a
+/// deterministic §13 abort (stderr message + exit 1), an overflowing
+/// construction saturates to i64::MAX — with IDENTICAL observations on both
+/// targets (S6-2 / S6-5).
+fn time_ctor_guard_cross_target() {
+    if !wasmtime_available() {
+        eprintln!("skip: wasmtime not on PATH");
+        return;
+    }
+    let dir = fixtures_dir();
+    let run = |name: &str, wasm: bool| {
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(dir.join(format!("{name}.almd")));
+        cmd.env_remove("ALMIDE_FUEL_PROBE");
+        if wasm {
+            cmd.args(["--target", "wasm"]);
+        }
+        let out = cmd.output().expect("spawn almide");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+    for wasm in [false, true] {
+        let leg = if wasm { "wasm" } else { "native" };
+        let (code, stdout, stderr) = run("negative_trap", wasm);
+        assert_eq!(code, Some(1), "negative_trap {leg}: must exit 1");
+        assert!(stdout.is_empty(), "negative_trap {leg}: must die before printing");
+        assert!(
+            stderr.contains("Error: negative time: compute.us(-5)"),
+            "negative_trap {leg}: §13 message missing, got: {stderr}"
+        );
+        let (code, stdout, _) = run("saturate", wasm);
+        assert_eq!(code, Some(0), "saturate {leg}: must succeed");
+        assert_eq!(stdout, "42\n42", "saturate {leg}: saturated budgets must admit the work");
+    }
 }
 
 /// CM-1 consistency (T3-6): both rendered artifacts must divide the budget by

@@ -116,6 +116,17 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
                 ));
                 std::process::exit(1);
             }
+            // Budget semantics (fan.bounded / fan.race) exist only on the v1
+            // trust spine — the v0 pipeline emits calls to budget runtime fns
+            // that do not exist, so the fallback would die later as an opaque
+            // rustc E0425 in generated code. Refuse with the wall reason
+            // instead (same honesty rule as the probe above).
+            if rs_code.contains("almide_rt_prim_budget_") {
+                err(&format!(
+                    "error: fan.bounded / fan.race require the v1 native render, but it walled\n  reason: {e}\n  hint: budgets are metered on the trust spine only; simplify the program to the v1 subset or build for --target wasm"
+                ));
+                std::process::exit(1);
+            }
             // The fallback is SILENT no more (#931): the user asked for the
             // verified render, so tell them in one line that they did not get
             // it and why — the full reason, not a Debug dump. The env var now

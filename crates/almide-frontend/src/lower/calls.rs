@@ -566,11 +566,113 @@ fn lower_time_ctor(
     let factor: i64 = almide_lang::time_units::unit_factor(field.as_str())?;
     let [arg] = args else { return None };
     let n = lower_expr(ctx, arg);
+    // ADR-0001 S3: the erased value is ALWAYS in [0, i64::MAX] — a negative
+    // argument is a deterministic abort (§13 convention: stderr + exit 1,
+    // identical on both targets), an overflowing construction saturates to
+    // i64::MAX (never wraps). `sat_limit` is the largest argument that scales
+    // without overflow.
+    let sat_limit = i64::MAX / factor;
+    // Non-negative literal: fold the whole guard at compile time.
+    if let IrExprKind::LitInt { value } = n.kind {
+        if value >= 0 {
+            let scaled = if value > sat_limit { i64::MAX } else { value * factor };
+            return Some(ctx.mk(IrExprKind::LitInt { value: scaled }, Ty::Int, span));
+        }
+    }
+    let t = ctx.define_var("__time_arg", Ty::Int, Mutability::Let, None);
+    let bind = IrStmt {
+        kind: IrStmtKind::Bind { var: t, mutability: Mutability::Let, ty: Ty::Int, value: n },
+        span: None,
+    };
+    let tv = |ctx: &mut LowerCtx| ctx.mk(IrExprKind::Var { id: t }, Ty::Int, span);
+    let lit = |ctx: &mut LowerCtx, v: i64| ctx.mk(IrExprKind::LitInt { value: v }, Ty::Int, span);
+    // if t < 0 then { eprintln("Error: negative time: module.unit(t)"); process.exit(1) }
+    let zero = lit(ctx, 0);
+    let t0 = tv(ctx);
+    let neg = ctx.mk(
+        IrExprKind::BinOp { op: BinOp::Lt, left: Box::new(t0), right: Box::new(zero) },
+        Ty::Bool,
+        span,
+    );
+    let t1 = tv(ctx);
+    let msg = ctx.mk(
+        IrExprKind::StringInterp {
+            parts: vec![
+                IrStringPart::Lit {
+                    value: format!("Error: negative time: {}.{}(", module.as_str(), field.as_str()),
+                },
+                IrStringPart::Expr { expr: t1 },
+                IrStringPart::Lit { value: ")".into() },
+            ],
+        },
+        Ty::String,
+        span,
+    );
+    let eprint = ctx.mk(
+        IrExprKind::Call {
+            target: CallTarget::Named { name: sym("eprintln") },
+            args: vec![msg],
+            type_args: vec![],
+        },
+        Ty::Unit,
+        span,
+    );
+    let one = lit(ctx, 1);
+    let exit = ctx.mk(
+        IrExprKind::Call {
+            target: CallTarget::Module {
+                module: sym("process"),
+                func: sym("exit"),
+                def_id: ctx.def_map.get(&sym("process.exit")).copied(),
+            },
+            args: vec![one],
+            type_args: vec![],
+        },
+        Ty::Unit,
+        span,
+    );
+    let abort = ctx.mk(
+        IrExprKind::Block {
+            stmts: vec![
+                IrStmt { kind: IrStmtKind::Expr { expr: eprint }, span: None },
+                IrStmt { kind: IrStmtKind::Expr { expr: exit }, span: None },
+            ],
+            expr: None,
+        },
+        Ty::Unit,
+        span,
+    );
+    let ok = ctx.mk(IrExprKind::Block { stmts: vec![], expr: None }, Ty::Unit, span);
+    let trap_guard = ctx.mk(
+        IrExprKind::If { cond: Box::new(neg), then: Box::new(abort), else_: Box::new(ok) },
+        Ty::Unit,
+        span,
+    );
+    // if t > sat_limit then i64::MAX else t * factor
+    let t2 = tv(ctx);
+    let limit = lit(ctx, sat_limit);
+    let over = ctx.mk(
+        IrExprKind::BinOp { op: BinOp::Gt, left: Box::new(t2), right: Box::new(limit) },
+        Ty::Bool,
+        span,
+    );
+    let max = lit(ctx, i64::MAX);
+    let t3 = tv(ctx);
+    let f = lit(ctx, factor);
+    let scaled = ctx.mk(
+        IrExprKind::BinOp { op: BinOp::MulInt, left: Box::new(t3), right: Box::new(f) },
+        Ty::Int,
+        span,
+    );
+    let value = ctx.mk(
+        IrExprKind::If { cond: Box::new(over), then: Box::new(max), else_: Box::new(scaled) },
+        Ty::Int,
+        span,
+    );
     Some(ctx.mk(
-        IrExprKind::BinOp {
-            op: almide_ir::BinOp::MulInt,
-            left: Box::new(n),
-            right: Box::new(ctx.mk(IrExprKind::LitInt { value: factor }, Ty::Int, span)),
+        IrExprKind::Block {
+            stmts: vec![bind, IrStmt { kind: IrStmtKind::Expr { expr: trap_guard }, span: None }],
+            expr: Some(Box::new(value)),
         },
         Ty::Int,
         span,

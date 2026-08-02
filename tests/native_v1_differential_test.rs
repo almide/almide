@@ -101,6 +101,10 @@ const CORPUS: &[(&str, &str)] = &[
     ("list_set", "fn main() -> Unit = {\n  var b = [1, 2, 3]\n  b[1] = 99\n  println(int.to_string(b[0] + b[1] + b[2]))\n}\n"),
     ("str_transforms", "fn main() -> Unit = {\n  let s = \"héllo ßtraße \" + int.to_string(7)\n  println(string.to_upper(s))\n  println(string.to_lower(string.to_upper(s)))\n  println(string.trim(\"  padded  \" + int.to_string(1)))\n  println(string.repeat(\"ab\", 3))\n}\n"),
     ("str_ordering", "fn main() -> Unit = {\n  let a = int.to_string(41)\n  let b = int.to_string(42)\n  if a < b then println(\"lt\") else println(\"ge\")\n  if b < a then println(\"lt\") else println(\"ge\")\n  if a != b then println(\"ne\") else println(\"eq\")\n}\n"),
+    // ── §13 abort floor (T3-1): eprintln shim + ProcExit prim — the assert
+    //    desugar's abort tail now renders on the native v1 rung ──
+    ("eprintln_line", "fn main() -> Unit = {\n  eprintln(\"warn \" + int.to_string(7))\n  println(int.to_string(1))\n}\n"),
+    ("assert_abort_tail", "fn main() -> Unit = {\n  println(int.to_string(1))\n  assert(1 == 2)\n  println(int.to_string(2))\n}\n"),
 ];
 
 #[test]
