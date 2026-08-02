@@ -322,6 +322,39 @@ guard not fs.exists(path) else {
   ok(())
 }
 ```
+
+## Concurrency & deterministic time (fan)
+
+All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in Almide.
+
+```
+// Parallel map: first Err (in list order) propagates
+let results = fan.map(urls, (u) => http.get(u))!         // Result[List[B], String]
+
+// Block heads — arms are single function calls separated by `;` or newline
+let first = fan.any { fetch_a(); fetch_b() } ?? fallback  // first Ok in SOURCE order
+let all   = fan.settle { job_a(); job_b() }               // List[Result[T, String]]
+let win   = fan.race { solve_fast(); solve_slow() } ?? d  // deterministic winner (least compute spent; tie → source order)
+
+// Budgets: deterministic compute-time limits, built with compute.* constructors
+let r = fan.bounded(compute.ms(100)) { work(input) } ?? -1   // Err if work exceeds 100ms of deterministic compute
+let w = fan.race(compute.us(50)) { a(); b() } ?? -1          // arms over budget are excluded
+```
+
+### Time constructors (closed set)
+
+Two clock types, six units each — `ns / us / ms / s / min / h`:
+
+```
+compute.ms(100)     // Compute — deterministic compute-time (fan.bounded / fan.race budgets)
+duration.ms(5000)   // Duration — wall-clock time (future oracle-tier surfaces)
+```
+
+- A bare `Int` is NEVER a time: `fan.bounded(5000) {...}` is a type error — write `compute.ms(5000)`
+- `Compute` and `Duration` do not mix: `fan.bounded(duration.ms(5)) {...}` is a type error
+- There is no literal suffix: `100ms` does not parse — write `compute.ms(100)`
+- A negative argument aborts at runtime (`Error: negative time: ...`); an overflowing construction saturates to the maximum
+- `fan.race` / `fan.bounded` results are deterministic: same program + same inputs = same winner/verdict on every target and every machine
 ## Test
 ```
 test "description" {
@@ -462,6 +495,11 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - `let mut x = 1` → **WRONG**. Write `var x = 1`. `mut` is only a parameter modifier (`fn f(mut x: Int)`), not a binding modifier
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
+- `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan.any` / `fan.settle` / `fan.race` / `fan.bounded` block forms
+- `fan.any([a, b])` / `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.any { a(); b() }`
+- `fan.bounded(100) {...}` / `fan.race(5000) {...}` → **WRONG**. A bare Int is not a time. Write `compute.ms(100)`
+- `compute.msec(5)` / `compute.sec(5)` / `compute.m(5)` → **WRONG**. The unit set is closed: `ns / us / ms / s / min / h`
+- `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`
 
 ## Complete example
 ```
