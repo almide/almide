@@ -33,11 +33,12 @@ effect fn main() -> Unit = {
     ok_n(99)
   }
   println("any=" + int.to_string(first))
-  // fan.settle: List[Result] in list order; ok/err payloads preserved.
-  let settled = fan.settle {
+  // fan.settle: a TUPLE of per-arm Results in arm order (T2-4);
+  // ok/err payloads preserved.
+  let (s1, s2, s3) = fan.settle {
     ok_n(1)
     fail_n("bad")
     ok_n(3)
   }
-  println("settle=" + int.to_string(list.len(settled)))
+  println("settle=${s1} ${s2} ${s3}")
 }

@@ -143,6 +143,7 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Fan { .. } => fmt_expr_fan(out, expr, depth),
         ExprKind::FanBounded { .. } => fmt_expr_fan_bounded(out, expr, depth),
         ExprKind::FanRace { .. } => fmt_expr_fan_race(out, expr, depth),
+        ExprKind::FanSettle { .. } => fmt_expr_fan_settle(out, expr, depth),
         ExprKind::ForIn { .. } => fmt_expr_forin(out, expr, depth),
         ExprKind::While { .. } => fmt_expr_while(out, expr, depth),
         ExprKind::Lambda { .. } => fmt_expr_lambda(out, expr, depth),
@@ -323,6 +324,15 @@ fn fmt_expr_fan_race(out: &mut String, expr: &Expr, depth: usize) {
     }
     out.push_str(" {
 ");
+    for e in arms {
+        out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
+    }
+    out.push_str(&ind(depth)); out.push('}');
+}
+
+fn fmt_expr_fan_settle(out: &mut String, expr: &Expr, depth: usize) {
+    let ExprKind::FanSettle { arms } = &expr.kind else { unreachable!() };
+    out.push_str("fan.settle {\n");
     for e in arms {
         out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
     }

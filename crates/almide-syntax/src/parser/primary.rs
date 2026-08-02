@@ -292,14 +292,47 @@ impl Parser {
                 arms,
             }));
         }
-        // fan.any { arms } / fan.settle { arms } — the Wave 1 block forms.
+        // fan.settle { arms } — a REAL node (T2-4): the value is a TUPLE of
+        // per-arm Results (heterogeneous arms allowed), so the thunk-list
+        // desugar (which forces one list element type) cannot carry it.
+        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
+            && self.peek_at(2).map_or(false, |t| t.value == "settle")
+            && self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LBrace)
+        {
+            let span = Some(self.current_span());
+            self.advance(); // fan
+            self.advance(); // .
+            self.advance(); // settle
+            let open = self.current().clone();
+            self.expect(TokenType::LBrace)?;
+            let mut arms = Vec::new();
+            self.skip_newlines();
+            while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+                let tok = self.current().clone();
+                if matches!(tok.token_type, TokenType::Let | TokenType::Var | TokenType::For | TokenType::While) {
+                    return Err(format!("`{}` is not allowed inside fan.settle at line {}:{}\n  Hint: arms are expressions — wrap statements in a block arm: {{ let x = f(); g(x) }}", tok.value, tok.line, tok.col));
+                }
+                arms.push(self.parse_expr()?);
+                self.skip_newlines();
+                if self.check(TokenType::Semicolon) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.expect_closing(TokenType::RBrace, open.line, open.col, "fan.settle block")?;
+            if arms.is_empty() {
+                return Err(format!("fan.settle must contain at least one arm at line {}:{}", open.line, open.col));
+            }
+            return Ok(Expr::new(self.next_id(), span, ExprKind::FanSettle { arms }));
+        }
+        // fan.any { arms } — the Wave 1 block form.
         // DESUGARS AT PARSE TIME to the literal thunk-list call the checker and
         // the MIR inliner already handle (`fan.any([() => a(), () => b()])`),
         // so the entire downstream pipeline is unchanged on both targets. The
         // user-facing thunk-list SPELLING is tombstoned in the checker; this
         // synthesized form is the one internal producer of it.
         if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
-            && self.peek_at(2).map_or(false, |t| t.value == "any" || t.value == "settle")
+            && self.peek_at(2).map_or(false, |t| t.value == "any")
             && self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LBrace)
         {
             let span = Some(self.current_span());

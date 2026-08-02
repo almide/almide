@@ -18,7 +18,7 @@
   bounded/race から到達可能な関数だけを `__fuel$` 変種に複製（mono の追加次元）。
   完了条件: bounded を含むプログラムの非 region 経路が計量ゼロ（生成物 diff で
   確認）+ 既存 fixture 全緑。deviation 1 の閉鎖。
-- [x] **T1-3 native heap-Result ABI（裸形の開通）**（native-only 認識パス
+- [x] **T1-3 native heap-Result ABI（裸形の開通）**（1a63629e — native-only 認識パス
   `native_result_rewrite.rs` + NTy::Res carrier。裸形 bounded/race が native v1 緑
   （`bare_result` fixture、exact boundary 同値）、**一般 Result[Int,String] plain fn
   + match も開通**（differential 行 `result_fn_match`）。wasm レグ完全不変。
@@ -31,9 +31,10 @@
   fmt の Block body 対応。ADR の parse→filter→render 例が両ターゲット+interp 一致、
   bind 文は charge 0 で exact boundary 不変（3006ns の pin が block 形でも同値）。
   race の block arm も動作。旧 single-call 診断 fixture は撤去）
-- [ ] **T2-2 Result arm の Err スキップ（race）**
-  arm が Result を返せて、Err arm は候補から外れる（any と対称の仕様）。
-  完了条件: Err/Ok 混在 arm の fixture が仕様表どおり、両ターゲット一致。
+- [x] **T2-2 Result arm の Err スキップ（race）**（1a63629e — checker が Result arm の
+  Ok 型で unify、fold に per-arm の is-ok match + candidate 合成。`race_err_skip`
+  fixture: 最安 Err arm の除外 / Ok Result arm が plain arm に spend 勝ち / 全 Err
+  fallback / 裸形混在 — 全て両ターゲット+interp 一致。native も Res carrier 経由で緑）
 - [ ] **T2-3 mapper 形 any/settle（Wave 2 宣言分）**
   `fan.any(xs, f)` / `fan.settle(xs, f)` — 動的リスト + 1 閉包。早期打ち切り
   （any）を含む。完了条件: 「宣言済み・未実装」診断の撤去 + fixture 両ターゲット。

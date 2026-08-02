@@ -25,6 +25,7 @@ impl Checker {
             ExprKind::Fan { .. } => self.infer_expr_g3_fan(expr),
             ExprKind::FanBounded { .. } => self.infer_expr_g3_fan_bounded(expr),
             ExprKind::FanRace { .. } => self.infer_expr_g3_fan_race(expr),
+            ExprKind::FanSettle { .. } => self.infer_expr_g3_fan_settle(expr),
             ExprKind::Call { .. } => self.infer_expr_g3_call(expr),
 
             ExprKind::Pipe { left, right, .. } => {
@@ -336,6 +337,35 @@ impl Checker {
         self.env.metered_region = saved_region;
         let t = arm_ty.map(|t| resolve_ty(&t, &self.uf)).unwrap_or(Ty::Unknown);
         Ty::result(t, Ty::String)
+    }
+
+    /// `ExprKind::FanSettle` arm: `fan.settle { arms }` (T2-4). Every arm
+    /// settles into its OWN `Result` slot — heterogeneous arm types are
+    /// allowed and the value is the TUPLE `(Result[A, String], …)` in arm
+    /// order. Arms may be effectful (unlike the metered regions): an arm's
+    /// Err is CAPTURED into its slot, never propagated, so arm inference
+    /// runs with auto-unwrap OFF.
+    fn infer_expr_g3_fan_settle(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::FanSettle { arms } = &mut expr.kind else { unreachable!() };
+        if !self.env.can_call_effect {
+            self.emit(super::err(
+                "fan.settle can only be used inside an effect fn".to_string(),
+                "Mark the enclosing function as `effect fn`",
+                "fan.settle".to_string()).with_code("E007"));
+        }
+        let saved_unwrap = self.env.auto_unwrap;
+        self.env.auto_unwrap = false;
+        let mut elems = Vec::with_capacity(arms.len());
+        for arm in arms.iter_mut() {
+            let t = self.infer_expr(arm);
+            let c = resolve_ty(&t, &self.uf);
+            elems.push(match &c {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => c.clone(),
+                _ => Ty::result(c, Ty::String),
+            });
+        }
+        self.env.auto_unwrap = saved_unwrap;
+        Ty::Tuple(elems)
     }
 
     /// `ExprKind::Call` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.

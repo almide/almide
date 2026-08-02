@@ -182,6 +182,10 @@ pub enum ExprKind {
     /// the (spend, index)-lexicographic minimum completion. The optional budget
     /// is a per-branch divergence guard (Stage 3 v1: arms are single calls).
     FanRace { budget: Option<Box<Expr>>, arms: Vec<Expr> },
+    /// `fan.settle { arm; arm; … }` — collect EVERYTHING: each arm settles to
+    /// its own `Result` slot, heterogeneous arm types allowed. The value is a
+    /// TUPLE `(Result[A, String], Result[B, String], …)` in arm order (T2-4).
+    FanSettle { arms: Vec<Expr> },
     ForIn { var: Sym, var_tuple: Option<Vec<Sym>>, iterable: Box<Expr>, body: Vec<Stmt> },
     While { cond: Box<Expr>, body: Vec<Stmt> },
     Lambda { params: Vec<LambdaParam>, body: Box<Expr> },
@@ -532,6 +536,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
             }
             visit_exprs_slice_mut(arms, f);
         }
+        ExprKind::FanSettle { arms } => visit_exprs_slice_mut(arms, f),
         ExprKind::MapLiteral { entries } => visit_map_entries_mut(entries, f),
         ExprKind::Record { fields, .. } => visit_field_inits_mut(fields, f),
         ExprKind::SpreadRecord { base, fields } => {

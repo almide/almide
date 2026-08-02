@@ -228,6 +228,14 @@ fn time_ctor_guard_cross_target() {
             stdout, "496551\nfan.bounded: budget exhausted\n873250",
             "bare_result {leg}: bare-form semantics drifted"
         );
+        // T2-4: settle block → tuple of per-arm Results (heterogeneous arms,
+        // effect-arm Err captured, tuple-pattern match).
+        let (code, stdout, _) = run("settle_tuple", wasm);
+        assert_eq!(code, Some(0), "settle_tuple {leg}: must succeed");
+        assert_eq!(
+            stdout, "5\ndisk-7\ncfg failed\nnet degraded: net down",
+            "settle_tuple {leg}: tuple-settle semantics drifted"
+        );
         // T2-2: race arms may return Result — Err self-disqualifies.
         let (code, stdout, _) = run("race_err_skip", wasm);
         assert_eq!(code, Some(0), "race_err_skip {leg}: must succeed");

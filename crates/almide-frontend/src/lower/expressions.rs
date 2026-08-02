@@ -211,6 +211,33 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         // over the lex-min fold (wasm renders it; the native rung's heap-Result
         // wall applies as with bare bounded — the fused `?? fb` form below is
         // the fully scalar path).
+        // fan.settle { arms } — SEQUENTIAL settle (T2-4): each arm evaluates
+        // in arm order into its own Result slot (a plain arm wraps in Ok, a
+        // Result arm passes through — its Err is CAPTURED, never propagated),
+        // and the value is the tuple of the slots. The pinned contract is the
+        // RESULT order; sequential evaluation realizes it deterministically
+        // on every leg.
+        ast::ExprKind::FanSettle { arms } => {
+            use almide_lang::types::constructor::TypeConstructorId;
+            // A tuple literal evaluates its elements in exactly arm order
+            // (the same guarantee the fan{} desugar rides), so the settle IS
+            // the literal — and a destructuring bind then splits it into
+            // DIRECT per-arm binds the downstream match tracking understands.
+            let elems: Vec<IrExpr> = arms
+                .iter()
+                .map(|arm| {
+                    let a = lower_expr(ctx, arm);
+                    match &a.ty {
+                        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => a,
+                        _ => {
+                            let rt = Ty::result(a.ty.clone(), Ty::String);
+                            ctx.mk(IrExprKind::ResultOk { expr: Box::new(a) }, rt, span)
+                        }
+                    }
+                })
+                .collect();
+            ctx.mk(IrExprKind::Tuple { elements: elems }, ty, span)
+        }
         ast::ExprKind::FanRace { .. } => {
             let result_ty = ty.clone();
             let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_fold(ctx, expr, span);

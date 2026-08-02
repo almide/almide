@@ -31,12 +31,14 @@ test "fan.any all fail returns a defined error" {
   assert_eq(result, err("fan.any: all candidates failed"))
 }
 
-// ── fan.settle — collect all results ──
+// ── fan.settle — collect all results (a TUPLE of per-arm Results, T2-4) ──
 test "fan.settle collects all" {
-  let results = fan.settle {
+  let (r1, r2, r3) = fan.settle {
     succeed(1)
     fail("bad")
     succeed(3)
   }
-  assert_eq(list.len(results), 3)
+  assert_eq(r1, ok(1))
+  assert_eq(r2, err("bad"))
+  assert_eq(r3, ok(3))
 }
