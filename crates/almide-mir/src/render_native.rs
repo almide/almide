@@ -1025,9 +1025,9 @@ static TIMEOUT_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
 
 const TIMEOUT_SHIM_TEMPLATE: &str = "const __ALMD_OMEGA: i64 = __ALMD_OMEGA_V__;
 const __ALMD_OMEGA_RECORD: bool = __ALMD_OMEGA_REC__;
-static __ALMD_T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+static __ALMD_T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new(); // wasm-safe: GENERATED native-only shim (fan.timeout reads the wall clock at program runtime — oracle-tier semantics, never the compile path)
 fn __almd_now_ns() -> i64 {
-    __ALMD_T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i64
+    __ALMD_T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i64 // wasm-safe: generated shim (see above)
 }
 thread_local! {
     static __ALMD_T_DEADLINE: std::cell::Cell<i64> = const { std::cell::Cell::new(i64::MAX) };
