@@ -1,0 +1,9 @@
+// All fan forms fork the world and need an effect context — a pure fn
+// cannot contain a metered region.
+fn work() -> Int = 42
+
+fn run() -> Int = fan.bounded(compute.ms(1)) { work() } ?? -1
+
+effect fn main() -> Unit = {
+  println(int.to_string(run()))
+}

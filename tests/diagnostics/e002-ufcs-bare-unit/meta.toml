@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "ambiguous time unit '.ms()'"
+hint_substring = "compute.ms(n)"

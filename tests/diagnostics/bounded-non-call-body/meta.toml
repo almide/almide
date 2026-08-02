@@ -1,0 +1,2 @@
+expects_error = "fan.bounded body must be a single function call"
+hint_substring = "Wrap the work in a function"

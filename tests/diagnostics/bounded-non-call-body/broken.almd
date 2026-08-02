@@ -1,0 +1,6 @@
+// v1: the metered region is ONE outlined function call — an inline
+// expression body is not yet supported.
+effect fn main() -> Unit = {
+  let r = fan.bounded(compute.ms(1)) { 1 + 2 } ?? -1
+  println(int.to_string(r))
+}

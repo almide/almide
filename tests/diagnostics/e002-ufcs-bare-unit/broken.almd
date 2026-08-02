@@ -1,0 +1,10 @@
+// `n.ms()` cannot pick a clock — a unit alone is ambiguous between the
+// deterministic Compute and the wall-clock Duration. The diagnostic names
+// BOTH candidates (ADR-0001 S6-3).
+fn work() -> Int = 42
+
+effect fn main() -> Unit = {
+  let n = 100
+  let r = fan.bounded(n.ms()) { work() } ?? -1
+  println(int.to_string(r))
+}

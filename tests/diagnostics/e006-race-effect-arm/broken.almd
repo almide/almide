@@ -1,0 +1,16 @@
+// Metered regions are PURE by design: determinism forbids I/O inside a
+// race arm (an arm's spend must be a function of the program alone). The
+// hint must NOT say "mark the caller as effect fn" — it already is.
+import fs
+
+effect fn slow() -> Int = {
+  let t = fs.read_text("x.txt") ?? ""
+  1
+}
+
+fn quick(n: Int) -> Int = n
+
+effect fn main() -> Unit = {
+  let r = fan.race { slow(); quick(2) } ?? -1
+  println(int.to_string(r))
+}

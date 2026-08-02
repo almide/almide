@@ -38,9 +38,10 @@
 - [ ] **T2-4 settle block の tuple 戻り**
   v1 の List[Result] → fan-v2.md の `(Result[A], Result[B])` 契約へ。異型 arm 対応。
   完了条件: fan-v2-examples/settle.almd の health_report 例が動く。
-- [ ] **T2-5 S3 演算 matrix**
-  `T + T` / `T - T`（0 飽和）/ `T × Int`、`T × T` と時計混合の型エラー。
-  完了条件: ADR-0001 S3 表の全セルが checker テストで pin。
+- [x] **T2-5 S3 演算 matrix**（24236472 — checker interceptor（Named の generic
+  numeric 素通りで T*T が無警告だった穴を塞ぐ）+ 飽和 erasure（+ MAX 飽和 / −
+  0 飽和 / ×Int 負 trap+MAX 飽和）。`time_ops` fixture が全セルを unit 精度で
+  両ターゲット+interp pin、`negative_scale` trap fixture、checker matrix 17 セル）
 
 ## Tier 3 — 小物（半日圏）
 

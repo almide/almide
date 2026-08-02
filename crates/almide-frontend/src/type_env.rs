@@ -29,6 +29,11 @@ pub struct TypeEnv {
     pub auto_unwrap: bool,
     /// Whether effect functions may be called from this context
     pub can_call_effect: bool,
+    /// Set while checking a METERED pure region (`fan.bounded` body /
+    /// `fan.race` arms) — names the surface so the effect-isolation
+    /// diagnostic can say "move the effect out of the region" instead of
+    /// the misleading "mark the caller as effect fn" (the caller already is).
+    pub metered_region: Option<&'static str>,
     /// Set of effect function names
     pub effect_fns: std::collections::HashSet<Sym>,
     /// Variant constructor name -> candidate (variant type name, case info) list.
@@ -154,6 +159,7 @@ impl TypeEnv {
             current_ret: None,
             auto_unwrap: false,
             can_call_effect: false,
+            metered_region: None,
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),

@@ -1,0 +1,8 @@
+fn work() -> Int = 42
+
+effect fn run() -> Int = fan.bounded(compute.ms(1)) { work() } ?? -1
+
+effect fn main() -> Unit = {
+  let v = run()
+  println(int.to_string(v))
+}

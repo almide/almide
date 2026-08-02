@@ -1,0 +1,2 @@
+expects_error = "unknown unit 'compute.msec'"
+hint_substring = "The unit set is closed"

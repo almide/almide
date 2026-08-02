@@ -1,0 +1,9 @@
+// The unit set is CLOSED (ADR-0001 S2): ns / us / ms / s / min / h.
+// LLMs invent `msec` / `sec` / `m` — the diagnostic answers with the
+// whole legal set instead of a nearest-match guess.
+fn work() -> Int = 42
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(compute.msec(5)) { work() } ?? -1
+  println(int.to_string(r))
+}

@@ -1,0 +1,3 @@
+expects_code = "E007"
+expects_error = "fan.bounded can only be used inside an effect fn"
+hint_substring = "effect fn"

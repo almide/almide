@@ -285,9 +285,12 @@ impl Checker {
                 "fan.bounded body".to_string()));
         }
         let saved_effect = self.env.can_call_effect;
+        let saved_region = self.env.metered_region;
         self.env.can_call_effect = false;
+        self.env.metered_region = Some("fan.bounded");
         let body_ty = self.infer_expr(body);
         self.env.can_call_effect = saved_effect;
+        self.env.metered_region = saved_region;
         let body_concrete = resolve_ty(&body_ty, &self.uf);
         if body_concrete.is_result() {
             self.emit(super::err(
@@ -316,7 +319,9 @@ impl Checker {
             self.check_budget_clock("fan.race", &budget_concrete);
         }
         let saved_effect = self.env.can_call_effect;
+        let saved_region = self.env.metered_region;
         self.env.can_call_effect = false;
+        self.env.metered_region = Some("fan.race");
         let mut arm_ty: Option<Ty> = None;
         for arm in arms.iter_mut() {
             if !matches!(arm.kind, ExprKind::Call { .. }) {
@@ -340,6 +345,7 @@ impl Checker {
             }
         }
         self.env.can_call_effect = saved_effect;
+        self.env.metered_region = saved_region;
         let t = arm_ty.map(|t| resolve_ty(&t, &self.uf)).unwrap_or(Ty::Unknown);
         Ty::result(t, Ty::String)
     }

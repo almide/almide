@@ -1,0 +1,2 @@
+expects_error = "cannot multiply two time quantities"
+hint_substring = "scale with an Int"
