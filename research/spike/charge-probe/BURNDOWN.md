@@ -182,6 +182,14 @@
   RuntimeCall ガードが budget_ のみで timeout_ を通さず fuel_timeout_ends が interp
   panic → ガード拡張。結果: nat probes / fuel_var_budget が native==wasm byte 一致、
   wasm_runtime_test 75/75（3-way corpus 緑）。render wall に fn 名も付与）
+- [x] **T5-4f scalar subject への variant パターンが checker を素通り**（fb095282 —
+  実測 round 3 の発見。`let r = fan.bounded(b){...}`（auto-`?` 済みで r: Int）に
+  `match r { some(v) => v, _ => -1 }` — `some(v)` が Int subject でも型エラーに
+  ならず（`_ => Ty::Unknown` の黙認）、`_` を足すと checker 素通り → wasm レグの
+  wall まで落ちて診断が最下流に退化していた。some/ok/err/none × scalar 具象
+  subject を「pattern `some(..)` cannot match Int」+ auto-`?` 説明 + `?? <default>`
+  誘導で拒否。Named/TypeVar/Unknown subject は従来どおり（alias・cascade 安全）。
+  fixture: variant-pattern-on-scalar。spec 325/325 緑）
 - [x] **T5-4c unwrap 済み値への unwrap_or の hint 欠落**（3078f557 — 同 round の
   発見。effect fn 内の `fan.bounded(){...}` は auto-`?` 済みで値は素の T なのに、
   model は `option.unwrap_or`/`result.unwrap_or` を重ねて E005「Fix the argument
