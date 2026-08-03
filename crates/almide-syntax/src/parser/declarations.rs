@@ -497,6 +497,25 @@ impl Parser {
             self.expect(TokenType::LParen)?;
             let params = self.parse_param_list()?;
             self.expect_closing(TokenType::RParen, open_fn.line, open_fn.col, "function parameters")?;
+            // #1072: `fn main() {` is the first-contact spelling of every
+            // writer coming from Rust/Go/TS, and `fn f() = ...` of one who
+            // already learned the '=' rule. The parser knows the decl, the
+            // name, and the full distance to legal — teach the complete form
+            // in one hint instead of a bare "Expected Arrow" that costs two
+            // failures to climb.
+            if self.check(TokenType::LBrace) || self.check(TokenType::Eq) {
+                let tok = self.current();
+                let kw = if effect { "effect fn " } else { "fn " };
+                let (parens, ret) = if name == "main" { ("()", "Unit") } else { ("(...)", "Type") };
+                let mut msg = format!(
+                    "Missing return type at line {}:{}\n  Hint: every fn declares its return type and takes '=' before its body:\n        {kw}{name}{parens} -> {ret} = {{ ... }}",
+                    tok.line, tok.col
+                );
+                if name == "main" && !effect {
+                    msg.push_str("\n        a main that performs IO (fs, http, ...) should be:  effect fn main() -> Unit = { ... }");
+                }
+                return Err(msg);
+            }
             self.expect(TokenType::Arrow)?;
             let return_type = self.parse_type_expr()?;
 
