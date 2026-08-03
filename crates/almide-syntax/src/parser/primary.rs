@@ -751,7 +751,15 @@ impl Parser {
         let mut col_offset = 0usize;
 
         while i < chars.len() {
-            if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+            // #1076: `\\` and `\$` reach this splitter as undecoded pairs
+            // (the lexer keeps them so an escaped `\${` — or a literal
+            // backslash before a real hole — stays distinguishable from a
+            // live hole). Decode them here, before the hole check.
+            if chars[i] == '\\' && i + 1 < chars.len() && (chars[i + 1] == '\\' || chars[i + 1] == '$') {
+                lit.push(chars[i + 1]);
+                i += 2;
+                col_offset += 2;
+            } else if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
                 if !lit.is_empty() {
                     parts.push(StringPart::Lit { value: std::mem::take(&mut lit) });
                 }

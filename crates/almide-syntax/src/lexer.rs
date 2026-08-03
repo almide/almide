@@ -260,12 +260,14 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
     let mut pos = start + 1; // skip opening "
     let mut value = String::new();
     let mut has_interpolation = false;
+    let mut pair_starts: Vec<usize> = Vec::new();
 
     while pos < chars.len() && chars[pos] != '"' {
-        pos = lex_string_char(chars, pos, &mut value, &mut has_interpolation);
+        pos = lex_string_char(chars, pos, &mut value, &mut has_interpolation, &mut pair_starts);
     }
     if pos < chars.len() { pos += 1; } // skip closing "
 
+    let value = if has_interpolation { value } else { strip_escape_pairs(value, &pair_starts) };
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
     let len = pos - start;
     let end_col = col + len;
@@ -310,6 +312,7 @@ fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token,
     let mut pos = start + 3; // skip opening """
     let mut raw = String::new();
     let mut has_interpolation = false;
+    let mut pair_starts: Vec<usize> = Vec::new();
     let mut cur_line = line;
     let mut cur_col = col + 3;
 
@@ -321,13 +324,14 @@ fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token,
         } else {
             cur_col += 1;
         }
-        pos = lex_string_char(chars, pos, &mut raw, &mut has_interpolation);
+        pos = lex_string_char(chars, pos, &mut raw, &mut has_interpolation, &mut pair_starts);
     }
     if pos + 2 < chars.len() {
         cur_col += 3; // closing """
         pos += 3;
     }
 
+    let raw = if has_interpolation { raw } else { strip_escape_pairs(raw, &pair_starts) };
     let value = strip_heredoc_indent(&raw);
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
     (Token { token_type: tt, value, line, col, end_col: cur_col }, pos, cur_line, cur_col)
@@ -335,9 +339,9 @@ fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token,
 
 /// Process one character (or escape / interpolation) inside a string body.
 /// Returns the new position after consuming the character(s).
-fn lex_string_char(chars: &[char], pos: usize, buf: &mut String, has_interpolation: &mut bool) -> usize {
+fn lex_string_char(chars: &[char], pos: usize, buf: &mut String, has_interpolation: &mut bool, pair_starts: &mut Vec<usize>) -> usize {
     if chars[pos] == '\\' && pos + 1 < chars.len() {
-        lex_escape(chars, pos, buf)
+        lex_escape(chars, pos, buf, pair_starts)
     } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
         *has_interpolation = true;
         lex_interpolation(chars, pos, buf)
@@ -348,7 +352,16 @@ fn lex_string_char(chars: &[char], pos: usize, buf: &mut String, has_interpolati
 }
 
 /// Process a backslash escape sequence. Returns the new position.
-fn lex_escape(chars: &[char], pos: usize, buf: &mut String) -> usize {
+///
+/// `\\` and `\$` are NOT decoded here (#1076): an interpolated string's
+/// value is re-scanned by the parser's `${...}` splitter, and a decoded
+/// `\$` (or a decoded `\\` before a real `$`) becomes indistinguishable
+/// from a live hole. The pair is kept verbatim, its buffer offset recorded
+/// in `pair_starts`; a string that turns out NOT to be interpolated strips
+/// the backslashes at the end (`strip_escape_pairs`), and an interpolated
+/// one hands the pairs to the splitter, which decodes them in literal
+/// segments.
+fn lex_escape(chars: &[char], pos: usize, buf: &mut String, pair_starts: &mut Vec<usize>) -> usize {
     if let Some((c, new_pos)) = lex_numeric_escape(chars, pos) {
         buf.push(c);
         return new_pos;
@@ -357,11 +370,28 @@ fn lex_escape(chars: &[char], pos: usize, buf: &mut String) -> usize {
         'n' => { buf.push('\n'); pos + 2 }
         't' => { buf.push('\t'); pos + 2 }
         'r' => { buf.push('\r'); pos + 2 }
-        '\\' => { buf.push('\\'); pos + 2 }
+        '\\' => { pair_starts.push(buf.len()); buf.push('\\'); buf.push('\\'); pos + 2 }
         '"' => { buf.push('"'); pos + 2 }
-        '$' => { buf.push('$'); pos + 2 }
+        '$' => { pair_starts.push(buf.len()); buf.push('\\'); buf.push('$'); pos + 2 }
         other => { buf.push('\\'); buf.push(other); pos + 2 }
     }
+}
+
+/// Remove the recorded escape-pair backslashes from a non-interpolated
+/// string value (`\\` → `\`, `\$` → `$`). `pair_starts` holds the byte
+/// offset of each pair's backslash, in ascending order.
+fn strip_escape_pairs(value: String, pair_starts: &[usize]) -> String {
+    if pair_starts.is_empty() { return value; }
+    let mut out = String::with_capacity(value.len());
+    let mut next = 0;
+    for (i, ch) in value.char_indices() {
+        if next < pair_starts.len() && pair_starts[next] == i {
+            next += 1;
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// Decode a numeric / Unicode escape starting at `pos` (which points at the `\`):

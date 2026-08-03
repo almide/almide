@@ -386,3 +386,23 @@ fn interpolation_nested_string_keeps_inner_escapes() {
         r#"n=${f("a\"b")}"#.into()
     )]);
 }
+
+// ---- #1076: \\ and \$ survive to the splitter in interpolated values ----
+
+#[test]
+fn interpolated_value_keeps_escaped_dollar_pair() {
+    let toks = tokens(r#""${a} \${b}""#);
+    assert_eq!(toks, vec![(TokenType::InterpolatedString, r#"${a} \${b}"#.into())]);
+}
+
+#[test]
+fn plain_string_still_decodes_escaped_dollar() {
+    let toks = tokens(r#""\${b}""#);
+    assert_eq!(toks, vec![(TokenType::String, "${b}".into())]);
+}
+
+#[test]
+fn plain_string_still_decodes_escaped_backslash() {
+    let toks = tokens(r#""a\\b""#);
+    assert_eq!(toks, vec![(TokenType::String, r"a\b".into())]);
+}

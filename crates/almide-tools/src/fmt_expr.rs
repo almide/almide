@@ -449,11 +449,17 @@ fn fmt_map(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
 /// already a real interpolation boundary the parser consumed, so `$` stays literal
 /// here. Extracted to flatten the for-inside-match-inside-for nesting.
 fn push_escaped_lit(out: &mut String, value: &str, quote: char) {
-    for ch in value.chars() {
+    let mut it = value.chars().peekable();
+    while let Some(ch) = it.next() {
         match ch {
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
             '\\' => out.push_str("\\\\"),
+            // A literal `${` in a double-quoted string must not round-trip
+            // into a live interpolation hole (#1076). Single quotes never
+            // interpolate, and their lexer keeps `\$` as two characters, so
+            // the escape is double-quote-only.
+            '$' if quote == '"' && it.peek() == Some(&'{') => out.push_str("\\$"),
             c if c == quote => { out.push('\\'); out.push(c); }
             c => out.push(c),
         }

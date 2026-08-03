@@ -76,3 +76,14 @@ test "two habit-escaped holes in one string" {
   let b: Option[String] = none
   assert_eq("${a ?? "?"}/${b ?? "?"}", "A/?")
 }
+
+// ── #1076: escaped \${ coexisting with real holes ──
+test "escaped dollar-brace next to a real hole stays literal" {
+  let a = "A"
+  assert_eq("${a} \${b}", "A \${b}")
+}
+
+test "escaped backslash before a real hole keeps the hole" {
+  let x = "X"
+  assert_eq("\\${x}", "\\X")
+}
