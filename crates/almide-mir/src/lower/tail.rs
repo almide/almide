@@ -7,6 +7,32 @@ use almide_ir::{
 };
 use almide_lang::types::Ty;
 
+/// C-127: a `match` tail whose RESULT spelling is an UNRESOLVED generic
+/// (`Unknown` / a bare type param left by an under-constrained chain link) is
+/// judged HEAP and routed down the heap-match leg — but when EVERY arm body's
+/// own type is a resolved SCALAR, the arms are the ground truth (native sizes
+/// the value the same way): retype the tail from the arms so it takes the
+/// scalar leg.
+fn scalar_retyped_match_tail(tail: &IrExpr) -> Option<IrExpr> {
+    if !is_heap_ty(&tail.ty) {
+        return None;
+    }
+    let IrExprKind::Match { subject, arms } = &tail.kind else {
+        return None;
+    };
+    let arm_tys_scalar = !arms.is_empty()
+        && arms.iter().all(|a| !is_heap_ty(&a.body.ty) && !matches!(a.body.ty, Ty::Unknown));
+    if !arm_tys_scalar {
+        return None;
+    }
+    Some(IrExpr {
+        kind: IrExprKind::Match { subject: subject.clone(), arms: arms.clone() },
+        ty: arms[0].body.ty.clone(),
+        span: tail.span.clone(),
+        def_id: tail.def_id,
+    })
+}
+
 impl LowerCtx {
     /// True when a tail `e!` pass-through would return a Result whose ERR component
     /// differs from this fn's own err type ([`decl_fn_err`]) — a coercion v0 renders
@@ -133,18 +159,20 @@ impl LowerCtx {
     /// payload) and is NOT added to the scope-end drop set. Returns `None` (the caller then
     /// uses the container-grain fallback) unless the container is a tracked heap VAR whose
     /// block this brick materialized AND the field type is heap.
-    pub(crate) fn try_lower_heap_field_borrow(&mut self, expr: &IrExpr) -> Option<ValueId> {
+    /// A HEAP-element list index `xs[i]` (`xs: List[String]`) — LoadHandle the
+    /// element's OWNED handle at the bounds-checked `$elem_addr(list, i)` as a
+    /// BORROW (the list still owns it, freed by its DropListStr; the read is
+    /// not a second owner → `param_values`). Without this a heap `xs[i]` fell
+    /// through to the container-grain `Dup` (the WHOLE list), which a String
+    /// consumer then read as a String = the list HEADER bytes (the `$ `
+    /// garbage). Gated to a tracked/materialized list var so `$elem_addr`
+    /// reads a real populated block (else defer).
+    fn try_lower_heap_list_elem_borrow(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use crate::PrimKind;
-        if !is_heap_ty(&expr.ty) {
-            return None;
-        }
-        // A HEAP-element list index `xs[i]` (`xs: List[String]`) — LoadHandle the element's OWNED
-        // handle at the bounds-checked `$elem_addr(list, i)` as a BORROW (the list still owns it,
-        // freed by its DropListStr; the read is not a second owner → `param_values`). Without this
-        // a heap `xs[i]` fell through to the container-grain `Dup` (the WHOLE list), which a String
-        // consumer then read as a String = the list HEADER bytes (the `$ ` garbage). Gated to a
-        // tracked/materialized list var so `$elem_addr` reads a real populated block (else defer).
-        if let IrExprKind::IndexAccess { object, index } = &expr.kind {
+        let IrExprKind::IndexAccess { object, index } = &expr.kind else {
+            unreachable!("caller matched an index access")
+        };
+        {
             // GATE: the container must be a `List[heap]` (a nested-ownership list whose slots hold
             // owned element HANDLES). A scalar `List[Int]` slot holds an i64 VALUE, not a handle —
             // LoadHandle'ing it would borrow a non-handle (a use-after-free in the cert), so defer.
@@ -179,6 +207,22 @@ impl LowerCtx {
             self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(dst), args: vec![addr] });
             self.param_values.insert(dst);
             return Some(dst);
+        }
+    }
+
+    pub(crate) fn try_lower_heap_field_borrow(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        use crate::PrimKind;
+        if !is_heap_ty(&expr.ty) {
+            return None;
+        }
+        // A HEAP-element list index `xs[i]` (`xs: List[String]`) — LoadHandle the element's OWNED
+        // handle at the bounds-checked `$elem_addr(list, i)` as a BORROW (the list still owns it,
+        // freed by its DropListStr; the read is not a second owner → `param_values`). Without this
+        // a heap `xs[i]` fell through to the container-grain `Dup` (the WHOLE list), which a String
+        // consumer then read as a String = the list HEADER bytes (the `$ ` garbage). Gated to a
+        // tracked/materialized list var so `$elem_addr` reads a real populated block (else defer).
+        if let IrExprKind::IndexAccess { .. } = &expr.kind {
+            return self.try_lower_heap_list_elem_borrow(expr);
         }
         let (container, offset) = match &expr.kind {
             IrExprKind::Member { object, field } => {
@@ -351,25 +395,8 @@ impl LowerCtx {
         // body's own type is a resolved SCALAR, the arms are the ground truth
         // (native sizes the value the same way): retype the tail from the arms
         // and take the scalar leg.
-        if is_heap_ty(&tail.ty) {
-            if let IrExprKind::Match { subject, arms } = &tail.kind {
-                let arm_tys_scalar = !arms.is_empty()
-                    && arms.iter().all(|a| {
-                        !is_heap_ty(&a.body.ty) && !matches!(a.body.ty, Ty::Unknown)
-                    });
-                if arm_tys_scalar {
-                    let retyped = IrExpr {
-                        kind: IrExprKind::Match {
-                            subject: subject.clone(),
-                            arms: arms.clone(),
-                        },
-                        ty: arms[0].body.ty.clone(),
-                        span: tail.span.clone(),
-                        def_id: tail.def_id,
-                    };
-                    return self.lower_tail_scalar(&retyped);
-                }
-            }
+        if let Some(retyped) = scalar_retyped_match_tail(tail) {
+            return self.lower_tail_scalar(&retyped);
         }
         // Decomposed (#781, cog 232): the UNIT / HEAP / SCALAR tails are verbatim
         // text moves into lower_tail_unit / lower_tail_heap / lower_tail_scalar —
@@ -393,21 +420,35 @@ impl LowerCtx {
         // `(local.set $r (call $fs.write …))`, a type mismatch (invalid wasm). The voiding stays in
         // force for the SYNTHETIC `Result[Unit, _]` of a declared-`Unit` effect fn (flag false).
         if is_unit_result_ty(&tail.ty) && !self.decl_ret_is_result {
-            match &tail.kind {
-                IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
-                    return self.lower_tail(Some(expr));
-                }
-                IrExprKind::Call { .. } => {
-                    self.lower_effect_call(tail)?;
-                    return Ok(None);
-                }
-                _ => {}
+            if let Some(r) = self.lower_voided_effect_tail(tail) {
+                return r;
             }
         }
         if is_heap_ty(&tail.ty) {
             return self.lower_tail_heap(tail);
         }
         self.lower_tail_scalar(tail)
+    }
+
+    /// The VOID `Result[Unit, _]` effect tail of [`Self::lower_tail`]: an
+    /// effect call (or a `Try`/`Unwrap` over one) in the tail of a
+    /// declared-`Unit` effect fn produces NO return value — the v1 pipeline
+    /// lowers such a fn to a VOID wasm function. `None` = not that shape
+    /// (the caller falls to the heap/scalar legs). Verbatim.
+    fn lower_voided_effect_tail(
+        &mut self,
+        tail: &IrExpr,
+    ) -> Option<Result<Option<ValueId>, LowerError>> {
+        match &tail.kind {
+            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
+                Some(self.lower_tail(Some(expr)))
+            }
+            IrExprKind::Call { .. } => Some(match self.lower_effect_call(tail) {
+                Ok(_) => Ok(None),
+                Err(e) => Err(e),
+            }),
+            _ => None,
+        }
     }
 
     /// The UNIT-typed tail of [`Self::lower_tail`] (effects run, no value).
