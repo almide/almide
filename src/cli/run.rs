@@ -426,6 +426,24 @@ pub fn cmd_run(args: RunArgs) {
     std::process::exit(code);
 }
 
+/// The preopen strategy per host OS (#1066). Unix mirrors native absolute
+/// paths by preopening the host root (`--dir=/`). Windows has no "/" to
+/// preopen: the guest gets the CWD (relative fs paths keep working) plus the
+/// host's real temp dir mapped at the WASI `/tmp` convention, with `TMPDIR`
+/// steering `fs.temp_dir`/`env.temp_dir` there (the guest-side rule is
+/// `$TMPDIR ?? "/tmp"`, C-189 — the explicit `--env` wins over inherit-env,
+/// which on Windows would carry no TMPDIR at all). Shared by `cmd_run_wasm`
+/// and the wasm test harness so both legs see one filesystem contract.
+pub(crate) fn wasmtime_fs_args(cmd: &mut Command) {
+    if cfg!(windows) {
+        cmd.arg("--dir=.");
+        cmd.arg(format!("--dir={}::/tmp", std::env::temp_dir().display()));
+        cmd.arg("--env=TMPDIR=/tmp");
+    } else {
+        cmd.arg("--dir=/");
+    }
+}
+
 /// Build `file` to a wasm32-wasi module and execute it on the `wasmtime` CLI.
 ///
 /// Mirrors the test runner's wasm invocation (`wasmtime --dir=/ <module>`) so
@@ -452,14 +470,14 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
         return 1;
     }
 
-    // `--dir=/` preopens the host root so WASI fs ops resolve the same absolute
-    // paths native sees — matches `compile_and_run_wasm_test`. `-S inherit-env=y`
-    // passes the host environment through WASI so `env.get` observes the SAME
-    // variables native `std::env::var` does (without it every guest lookup is
-    // none — a silent cross-target divergence). Program args go after the module
-    // path; wasmtime forwards them to the guest as argv.
+    // Preopens per host (#1066) + `-S inherit-env=y`, which passes the host
+    // environment through WASI so `env.get` observes the SAME variables native
+    // `std::env::var` does (without it every guest lookup is none — a silent
+    // cross-target divergence). Program args go after the module path;
+    // wasmtime forwards them to the guest as argv.
     let mut cmd = Command::new("wasmtime");
-    cmd.arg("--dir=/").arg("-S").arg("inherit-env=y");
+    wasmtime_fs_args(&mut cmd);
+    cmd.arg("-S").arg("inherit-env=y");
     // The guest resolves relative fs paths against ALMIDE_CWD (in preference
     // to a possibly-stale inherited PWD — #874); `--env` overrides win over
     // `inherit-env`, so this pins the real launcher cwd either way.
