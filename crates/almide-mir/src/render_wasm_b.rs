@@ -34,110 +34,19 @@ fn render_extern_imports(prog: &MirProgram) -> String {
 }
 
 /// Render one MIR function with its signature (params, locals, result).
-pub fn render_wasm_fn(
+/// #806 step 3b planning: a loop condition computed by the IMMEDIATELY
+/// preceding compare whose Bool is used ONLY by the break renders as one
+/// direct `br_if` on the (negated) compare — dropping the extend/local.set/
+/// local.get/eqz churn in EVERY hot loop's header. Int compares negate
+/// exactly (total order); float compares wrap in `i32.eqz` instead
+/// (¬(a<b) ≠ (a≥b) under NaN). Render-level only: the MIR and its
+/// certificate are untouched. Also returns the total value-occurrence map
+/// shared with the 3c tree fuser.
+#[allow(clippy::type_complexity)]
+fn plan_break_fusion(
     func: &MirFunction,
-    label_off: &BTreeMap<String, (u32, u32)>,
-    func_slots: &BTreeMap<String, u32>,
-    param_counts: &BTreeMap<String, usize>,
-) -> String {
-    let reprs = value_reprs_wasm(func);
-    let floats = classify_f64_locals(func);
-    // A LIFTED LAMBDA (`__lambda_*`) is dispatched through the function table against the uniform
-    // i64 closure signature (`$closure_fnN`), so its params MUST all be i64. A HEAP param (a Ptr)
-    // is received as an i64 raw param and NARROWED to its Ptr value local at entry (the dual of the
-    // CallIndirect's `i64.extend_i32_u` widen); a scalar param is already i64. Regular functions
-    // keep their natural per-repr signature.
-    let is_lambda = func.name.starts_with("__lambda_");
-    let mut lambda_narrow = String::new();
-    let mut lambda_heap_locals: Vec<String> = Vec::new();
-    let params = func
-        .params
-        .iter()
-        .map(|p| {
-            if is_lambda && p.repr.is_heap() {
-                lambda_heap_locals.push(format!("(local {} i32)", local(p.value)));
-                lambda_narrow.push_str(&format!(
-                    "    (local.set {v} (i32.wrap_i64 (local.get {v}_raw)))\n",
-                    v = local(p.value)
-                ));
-                format!("(param {}_raw i64)", local(p.value))
-            } else if is_lambda {
-                format!("(param {} i64)", local(p.value))
-            } else {
-                format!("(param {} {})", local(p.value), wasm_ty(p.repr))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    let result = func
-        .ret
-        .map(|r| format!(" (result {})", wasm_ty(reprs.get(&r).copied().unwrap_or(SCALAR_REPR))))
-        .unwrap_or_default();
-    // locals = values defined in the body that are not params (first-def order).
-    let mut seen: BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
-    let mut locals = Vec::new();
-    for op in &func.ops {
-        if let Some(d) = defined_value(op) {
-            if seen.insert(d) {
-                let ty = if floats.contains(&d) {
-                    "f64"
-                } else {
-                    wasm_ty(reprs.get(&d).copied().unwrap_or(SCALAR_REPR))
-                };
-                locals.push(format!("(local {} {ty})", local(d)));
-            }
-        }
-    }
-    // A recursive List[String] drop needs two i32 scratch locals (loop index + length); they
-    // are function-wide (DropListStr ops never nest) and only declared when one is present.
-    // `DropResultListStr` (Result[List[String], String]) also loops the Ok payload list with
-    // $dlsi/$dlsn, so it joins this gate.
-    if func.ops.iter().any(|op| matches!(op,
-        Op::DropListStr { .. } | Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. })) {
-        locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
-    }
-    // DropResultListStrInt reuses the List[List[String]] scratch ($dlli = tuple handle, $dllinner =
-    // the inner List handle) for its nested Ok-tuple List free; `DropResultListStr` reuses just $dlli
-    // (the Ok payload List handle — no inner $dllinner, its payload is the direct list). Declare them
-    // when no DropListListStr did.
-    // `DropListIntStr` (List[(Int,String)]) loops with $dlli/$dlln/$dllinner too (no $dlsi/$dlsn —
-    // its per-element free is a single rc_dec of the tuple's String slot, not a nested loop).
-    if func.ops.iter().any(|op| matches!(op,
-        Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. } | Op::DropListIntStr { .. }
-        | Op::DropListStrInt { .. }))
-        && !func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. }))
-    {
-        locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());
-    }
-    // A recursive `List[List[String]]` drop is a NESTED loop: the OUTER loop over the rows needs its
-    // own index/length/inner-handle scratch (`$dlsi`/`$dlsn` serve the INNER cell loop). It also uses
-    // the inner-loop locals, so declare those too when no plain DropListStr already did.
-    if func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. })) {
-        locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());
-        if !func.ops.iter().any(|op| matches!(op,
-            Op::DropListStr { .. } | Op::DropResultListStr { .. })) {
-            locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
-        }
-    }
-    // #806 step 4: bounds-check elision plans (render_wasm_bce.rs) — versioned
-    // loops re-render their region twice, so the op walk is a RANGE renderer.
-    let bce = analyze_bce(func);
-    // A lifted lambda's heap params become i32 value locals (narrowed from their i64 raw params).
-    locals.extend(lambda_heap_locals);
-    let locals_decl = locals.join(" ");
-    // The heap-param narrowing runs first, before any body op reads the Ptr value local.
-    let mut body = lambda_narrow;
-    // The loop-markers (LoopStart/LoopBreakUnless/LoopEnd) reconstruct the standard
-    // wasm while shape `(block $brk (loop $cont … (br_if $brk (eqz cond)) … (br $cont)))`.
-    // A unique id per loop keeps nested loops' labels distinct; the stack tracks which
-    // open loop a break/back-edge closes.
-    //
-    // #806 step 3b: a loop condition computed by the IMMEDIATELY preceding compare
-    // whose Bool is used ONLY by the break renders as one direct `br_if` on the
-    // (negated) compare — dropping the extend/local.set/local.get/eqz churn that
-    // sat in EVERY hot loop's header. Int compares negate exactly (total order);
-    // float compares wrap in `i32.eqz` instead (¬(a<b) ≠ (a≥b) under NaN).
-    // Render-level only: the MIR and its certificate are untouched.
+    floats: &BTreeSet<ValueId>,
+) -> (BTreeMap<ValueId, usize>, BTreeMap<usize, String>, BTreeSet<usize>) {
     let mut fused_break: BTreeMap<usize, String> = BTreeMap::new();
     let mut fused_skip: BTreeSet<usize> = BTreeSet::new();
     // Total occurrences (def + uses) per value — shared by the 3b br_if
@@ -200,6 +109,135 @@ pub fn render_wasm_fn(
             }
         }
     }
+    (occ, fused_break, fused_skip)
+}
+
+/// The local declarations of [`render_wasm_fn`]: every body-defined value
+/// (first-def order, typed by repr/float class), plus the per-family
+/// recursive-drop scratch locals. Section comments verbatim.
+fn declare_fn_locals(
+    func: &MirFunction,
+    reprs: &BTreeMap<ValueId, Repr>,
+    floats: &BTreeSet<ValueId>,
+) -> Vec<String> {
+    // locals = values defined in the body that are not params (first-def order).
+    let mut seen: BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
+    let mut locals = Vec::new();
+    for op in &func.ops {
+        if let Some(d) = defined_value(op) {
+            if seen.insert(d) {
+                let ty = if floats.contains(&d) {
+                    "f64"
+                } else {
+                    wasm_ty(reprs.get(&d).copied().unwrap_or(SCALAR_REPR))
+                };
+                locals.push(format!("(local {} {ty})", local(d)));
+            }
+        }
+    }
+    locals.extend(drop_scratch_locals(func));
+    locals
+}
+
+/// The recursive-drop scratch locals of [`declare_fn_locals`]: each drop
+/// family loops with fixed scratch registers, function-wide (drops never
+/// nest) and declared only when the family is present. Gates verbatim.
+fn drop_scratch_locals(func: &MirFunction) -> Vec<String> {
+    let mut locals = Vec::new();
+    // A recursive List[String] drop needs two i32 scratch locals (loop index + length); they
+    // are function-wide (DropListStr ops never nest) and only declared when one is present.
+    // `DropResultListStr` (Result[List[String], String]) also loops the Ok payload list with
+    // $dlsi/$dlsn, so it joins this gate.
+    if func.ops.iter().any(|op| matches!(op,
+        Op::DropListStr { .. } | Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. })) {
+        locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
+    }
+    // DropResultListStrInt reuses the List[List[String]] scratch ($dlli = tuple handle, $dllinner =
+    // the inner List handle) for its nested Ok-tuple List free; `DropResultListStr` reuses just $dlli
+    // (the Ok payload List handle — no inner $dllinner, its payload is the direct list). Declare them
+    // when no DropListListStr did.
+    // `DropListIntStr` (List[(Int,String)]) loops with $dlli/$dlln/$dllinner too (no $dlsi/$dlsn —
+    // its per-element free is a single rc_dec of the tuple's String slot, not a nested loop).
+    if func.ops.iter().any(|op| matches!(op,
+        Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. } | Op::DropListIntStr { .. }
+        | Op::DropListStrInt { .. }))
+        && !func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. }))
+    {
+        locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());
+    }
+    // A recursive `List[List[String]]` drop is a NESTED loop: the OUTER loop over the rows needs its
+    // own index/length/inner-handle scratch (`$dlsi`/`$dlsn` serve the INNER cell loop). It also uses
+    // the inner-loop locals, so declare those too when no plain DropListStr already did.
+    if func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. })) {
+        locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());
+        if !func.ops.iter().any(|op| matches!(op,
+            Op::DropListStr { .. } | Op::DropResultListStr { .. })) {
+            locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
+        }
+    }
+    locals
+}
+
+pub fn render_wasm_fn(
+    func: &MirFunction,
+    label_off: &BTreeMap<String, (u32, u32)>,
+    func_slots: &BTreeMap<String, u32>,
+    param_counts: &BTreeMap<String, usize>,
+) -> String {
+    let reprs = value_reprs_wasm(func);
+    let floats = classify_f64_locals(func);
+    // A LIFTED LAMBDA (`__lambda_*`) is dispatched through the function table against the uniform
+    // i64 closure signature (`$closure_fnN`), so its params MUST all be i64. A HEAP param (a Ptr)
+    // is received as an i64 raw param and NARROWED to its Ptr value local at entry (the dual of the
+    // CallIndirect's `i64.extend_i32_u` widen); a scalar param is already i64. Regular functions
+    // keep their natural per-repr signature.
+    let is_lambda = func.name.starts_with("__lambda_");
+    let mut lambda_narrow = String::new();
+    let mut lambda_heap_locals: Vec<String> = Vec::new();
+    let params = func
+        .params
+        .iter()
+        .map(|p| {
+            if is_lambda && p.repr.is_heap() {
+                lambda_heap_locals.push(format!("(local {} i32)", local(p.value)));
+                lambda_narrow.push_str(&format!(
+                    "    (local.set {v} (i32.wrap_i64 (local.get {v}_raw)))\n",
+                    v = local(p.value)
+                ));
+                format!("(param {}_raw i64)", local(p.value))
+            } else if is_lambda {
+                format!("(param {} i64)", local(p.value))
+            } else {
+                format!("(param {} {})", local(p.value), wasm_ty(p.repr))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let result = func
+        .ret
+        .map(|r| format!(" (result {})", wasm_ty(reprs.get(&r).copied().unwrap_or(SCALAR_REPR))))
+        .unwrap_or_default();
+    let mut locals = declare_fn_locals(func, &reprs, &floats);
+    // #806 step 4: bounds-check elision plans (render_wasm_bce.rs) — versioned
+    // loops re-render their region twice, so the op walk is a RANGE renderer.
+    let bce = analyze_bce(func);
+    // A lifted lambda's heap params become i32 value locals (narrowed from their i64 raw params).
+    locals.extend(lambda_heap_locals);
+    let locals_decl = locals.join(" ");
+    // The heap-param narrowing runs first, before any body op reads the Ptr value local.
+    let mut body = lambda_narrow;
+    // The loop-markers (LoopStart/LoopBreakUnless/LoopEnd) reconstruct the standard
+    // wasm while shape `(block $brk (loop $cont … (br_if $brk (eqz cond)) … (br $cont)))`.
+    // A unique id per loop keeps nested loops' labels distinct; the stack tracks which
+    // open loop a break/back-edge closes.
+    //
+    // #806 step 3b: a loop condition computed by the IMMEDIATELY preceding compare
+    // whose Bool is used ONLY by the break renders as one direct `br_if` on the
+    // (negated) compare — dropping the extend/local.set/local.get/eqz churn that
+    // sat in EVERY hot loop's header. Int compares negate exactly (total order);
+    // float compares wrap in `i32.eqz` instead (¬(a<b) ≠ (a≥b) under NaN).
+    // Render-level only: the MIR and its certificate are untouched.
+    let (occ, fused_break, fused_skip) = plan_break_fusion(func, &floats);
     let tail_calls = tail_call_indexes(func);
     let ctx = RenderFnCtx {
         func,
@@ -328,103 +366,11 @@ fn render_op_range(
                 // unconditional back-edge to the loop top, then close `loop` and `block`.
                 body.push_str(&format!("    (br $cont{id})\n    ))\n"));
             }
-            Op::IfThen { cond, dst } => {
-                st.fuser.flush_all(body);
-                st.if_stack.push(*dst);
-                // The result type follows the dst repr: a heap-result `if` yields an i32
-                // handle, a scalar one an i64 (value_reprs_wasm fixed dst from the arm val).
-                let res = match dst {
-                    Some(d) => format!(
-                        " (result {})",
-                        wasm_ty(ctx.reprs.get(d).copied().unwrap_or(SCALAR_REPR))
-                    ),
-                    None => String::new(),
-                };
-                let set = dst.map(|d| format!("(local.set {} ", local(d))).unwrap_or_default();
-                body.push_str(&format!(
-                    "    {set}(if{res} (i64.ne (local.get {c}) (i64.const 0))\n      (then\n",
-                    c = local(*cond),
-                ));
+            Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {
+                render_if_marker_op(ctx, st, op, body);
             }
-            Op::Else { val } => {
-                st.fuser.flush_all(body);
-                body.push_str(&format!("{}      )\n      (else\n", arm_val(val)));
-            }
-            Op::EndIf { val } => {
-                st.fuser.flush_all(body);
-                let dst = st.if_stack.pop().expect("EndIf without IfThen");
-                // close: else-arm value, `)` else, `)` if, and `)` local.set if scalar.
-                let close = if dst.is_some() { "))\n" } else { ")\n" };
-                body.push_str(&format!("{}      ){close}", arm_val(val)));
-            }
-            Op::Charge { site, cost } => {
-                // Flush pending fused exprs so the charge cannot migrate across
-                // buffered computation, then emit the counter + trace update at
-                // this exact position. Same arithmetic as the native shim.
-                st.fuser.flush_all(body);
-                body.push_str(&format!(
-                    "    (global.set $__fuel (i64.sub (global.get $__fuel) (i64.const {cost})))\n"
-                ));
-                if crate::charge_probe::probe_enabled() {
-                    body.push_str(&format!(
-                        "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
-                    ));
-                }
-                // T1-1 strict cut: an exhausted meter RETURNS from this fn with
-                // a dummy value (never observed — the region's verdict is
-                // already Err, and every charge-bearing fn in budget-only mode
-                // is a metered clone). W1 bounds the post-exhaustion work: the
-                // chain of cuts reaches the outlined fn, whose exit persists
-                // verdict + spend on the normal path. In probe mode the fuel
-                // counts down from i64::MAX and never goes negative.
-                let dflt = match ctx.func.ret {
-                    None => String::new(),
-                    Some(r) => {
-                        let vt = wasm_ty(ctx.reprs.get(&r).copied().unwrap_or(SCALAR_REPR));
-                        format!(" ({vt}.const 0)")
-                    }
-                };
-                body.push_str(&format!(
-                    "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
-                ));
-                // T5-1: the wall-deadline check rides the SAME cut mechanism.
-                if crate::charge_probe::timeout_used() {
-                    body.push_str(&format!(
-                        "    (if (i32.ne (call $__wall_hit) (i32.const 0)) (then (return{dflt})))\n"
-                    ));
-                }
-            }
-            // T3-5 dynamic charge: 1 + result_len/16 read from the block's
-            // len field (@4) — result-keyed, so both legs subtract the same
-            // number by construction. Same trace + strict-cut rules as the
-            // static charge above.
-            Op::ChargeDyn { site, src } => {
-                st.fuser.flush_all(body);
-                body.push_str(&format!(
-                    "    (global.set $__fuel (i64.sub (global.get $__fuel) (i64.add (i64.const 1) (i64.shr_u (i64.extend_i32_u (i32.load offset=4 (local.get {}))) (i64.const 4)))))\n",
-                    local(*src)
-                ));
-                if crate::charge_probe::probe_enabled() {
-                    body.push_str(&format!(
-                        "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
-                    ));
-                }
-                let dflt = match ctx.func.ret {
-                    None => String::new(),
-                    Some(r) => {
-                        let vt = wasm_ty(ctx.reprs.get(&r).copied().unwrap_or(SCALAR_REPR));
-                        format!(" ({vt}.const 0)")
-                    }
-                };
-                body.push_str(&format!(
-                    "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
-                ));
-                // T5-1: the wall-deadline check rides the SAME cut mechanism.
-                if crate::charge_probe::timeout_used() {
-                    body.push_str(&format!(
-                        "    (if (i32.ne (call $__wall_hit) (i32.const 0)) (then (return{dflt})))\n"
-                    ));
-                }
+            Op::Charge { .. } | Op::ChargeDyn { .. } => {
+                render_charge_marker_op(ctx, st, op, body);
             }
             _ => {
                 if render_fused_or_plain_op(ctx, st, op, op_idx, region, body) {
@@ -432,6 +378,125 @@ fn render_op_range(
                 }
             }
         }
+    }
+}
+
+/// The IfThen/Else/EndIf arms of [`render_op_range`]: the flat marker
+/// stream reconstructs a nested wasm `if`/`else`; a scalar `if` is an
+/// expression whose arms leave their value on the stack. Bodies verbatim.
+fn render_if_marker_op(ctx: &RenderFnCtx, st: &mut RenderFnState, op: &Op, body: &mut String) {
+    let arm_val = |v: &Option<ValueId>| {
+        v.map(|v| format!("      (local.get {})\n", local(v))).unwrap_or_default()
+    };
+    match op {
+    Op::IfThen { cond, dst } => {
+        st.fuser.flush_all(body);
+        st.if_stack.push(*dst);
+        // The result type follows the dst repr: a heap-result `if` yields an i32
+        // handle, a scalar one an i64 (value_reprs_wasm fixed dst from the arm val).
+        let res = match dst {
+            Some(d) => format!(
+                " (result {})",
+                wasm_ty(ctx.reprs.get(d).copied().unwrap_or(SCALAR_REPR))
+            ),
+            None => String::new(),
+        };
+        let set = dst.map(|d| format!("(local.set {} ", local(d))).unwrap_or_default();
+        body.push_str(&format!(
+            "    {set}(if{res} (i64.ne (local.get {c}) (i64.const 0))\n      (then\n",
+            c = local(*cond),
+        ));
+    }
+    Op::Else { val } => {
+        st.fuser.flush_all(body);
+        body.push_str(&format!("{}      )\n      (else\n", arm_val(val)));
+    }
+    Op::EndIf { val } => {
+        st.fuser.flush_all(body);
+        let dst = st.if_stack.pop().expect("EndIf without IfThen");
+        // close: else-arm value, `)` else, `)` if, and `)` local.set if scalar.
+        let close = if dst.is_some() { "))\n" } else { ")\n" };
+        body.push_str(&format!("{}      ){close}", arm_val(val)));
+    }
+        _ => unreachable!("caller matched the if markers"),
+    }
+}
+
+/// The Charge/ChargeDyn arms of [`render_op_range`]: the fuel meter update,
+/// the probe trace, and the T1-1 strict cut (+ T5-1 wall deadline) — flushed
+/// so the charge cannot migrate across buffered computation. Bodies verbatim.
+fn render_charge_marker_op(ctx: &RenderFnCtx, st: &mut RenderFnState, op: &Op, body: &mut String) {
+    match op {
+    Op::Charge { site, cost } => {
+        // Flush pending fused exprs so the charge cannot migrate across
+        // buffered computation, then emit the counter + trace update at
+        // this exact position. Same arithmetic as the native shim.
+        st.fuser.flush_all(body);
+        body.push_str(&format!(
+            "    (global.set $__fuel (i64.sub (global.get $__fuel) (i64.const {cost})))\n"
+        ));
+        if crate::charge_probe::probe_enabled() {
+            body.push_str(&format!(
+                "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
+            ));
+        }
+        // T1-1 strict cut: an exhausted meter RETURNS from this fn with
+        // a dummy value (never observed — the region's verdict is
+        // already Err, and every charge-bearing fn in budget-only mode
+        // is a metered clone). W1 bounds the post-exhaustion work: the
+        // chain of cuts reaches the outlined fn, whose exit persists
+        // verdict + spend on the normal path. In probe mode the fuel
+        // counts down from i64::MAX and never goes negative.
+        let dflt = match ctx.func.ret {
+            None => String::new(),
+            Some(r) => {
+                let vt = wasm_ty(ctx.reprs.get(&r).copied().unwrap_or(SCALAR_REPR));
+                format!(" ({vt}.const 0)")
+            }
+        };
+        body.push_str(&format!(
+            "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
+        ));
+        // T5-1: the wall-deadline check rides the SAME cut mechanism.
+        if crate::charge_probe::timeout_used() {
+            body.push_str(&format!(
+                "    (if (i32.ne (call $__wall_hit) (i32.const 0)) (then (return{dflt})))\n"
+            ));
+        }
+    }
+    // T3-5 dynamic charge: 1 + result_len/16 read from the block's
+    // len field (@4) — result-keyed, so both legs subtract the same
+    // number by construction. Same trace + strict-cut rules as the
+    // static charge above.
+    Op::ChargeDyn { site, src } => {
+        st.fuser.flush_all(body);
+        body.push_str(&format!(
+            "    (global.set $__fuel (i64.sub (global.get $__fuel) (i64.add (i64.const 1) (i64.shr_u (i64.extend_i32_u (i32.load offset=4 (local.get {}))) (i64.const 4)))))\n",
+            local(*src)
+        ));
+        if crate::charge_probe::probe_enabled() {
+            body.push_str(&format!(
+                "    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const {site})))\n"
+            ));
+        }
+        let dflt = match ctx.func.ret {
+            None => String::new(),
+            Some(r) => {
+                let vt = wasm_ty(ctx.reprs.get(&r).copied().unwrap_or(SCALAR_REPR));
+                format!(" ({vt}.const 0)")
+            }
+        };
+        body.push_str(&format!(
+            "    (if (i64.lt_s (global.get $__fuel) (i64.const 0)) (then (return{dflt})))\n"
+        ));
+        // T5-1: the wall-deadline check rides the SAME cut mechanism.
+        if crate::charge_probe::timeout_used() {
+            body.push_str(&format!(
+                "    (if (i32.ne (call $__wall_hit) (i32.const 0)) (then (return{dflt})))\n"
+            ));
+        }
+    }
+        _ => unreachable!("caller matched Charge/ChargeDyn"),
     }
 }
 
@@ -709,209 +774,7 @@ fn wasm_ty(repr: Repr) -> &'static str {
 ///
 /// A `SetLocal`'s `local` is counted as a READ here: the op stores INTO an
 /// existing slot, and def-before-use demands the slot already exist. Its `src`
-/// is an ordinary read. An `IfThen`'s `dst` is the definition, not a read; the
-/// `Else`/`EndIf` `val`s are reads (they feed the enclosing if-result).
-pub(crate) fn op_reads(op: &Op, out: &mut Vec<ValueId>) {
-    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
-        for a in args {
-            match a {
-                CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
-                CallArg::Imm(_) | CallArg::Label(_) => {}
-            }
-        }
-    };
-    match op {
-        Op::Charge { .. } => {}
-        Op::ChargeDyn { src, .. } => out.push(*src),
-        Op::Alloc { init, .. } => match init {
-            Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
-                out.push(*len)
-            }
-            Init::OptSome { payload } => out.push(*payload),
-            Init::Opaque
-            | Init::Empty
-            | Init::OptNone
-            | Init::IntList(_)
-            | Init::Bytes(_)
-            | Init::Str(_) => {}
-        },
-        Op::Const { .. } | Op::ConstInt { .. } | Op::FuncRef { .. } => {}
-        Op::Dup { src, .. } => out.push(*src),
-        Op::Drop { v }
-        | Op::DropListStr { v }
-        | Op::DropValue { v }
-        | Op::DropListValue { v }
-        | Op::DropListStrValue { v }
-        | Op::DropListStrStr { v }
-        | Op::DropListIntStr { v }
-        | Op::DropListStrInt { v }
-        | Op::DropResultListValue { v }
-        | Op::DropResultValue { v }
-        | Op::DropResultStrInt { v }
-        | Op::DropResultValueInt { v }
-        | Op::DropResultListValueInt { v }
-        | Op::DropResultListStrInt { v }
-        | Op::DropResultListStr { v }
-        | Op::DropListListStr { v }
-        | Op::DropVariant { v, .. }
-        | Op::DropWrapperRec { v, .. }
-        | Op::Consume { v }
-        | Op::Borrow { v }
-        | Op::MakeUnique { v } => out.push(*v),
-        Op::Pure { uses, .. } => out.extend(uses.iter().copied()),
-        Op::Call { args, .. } | Op::CallFn { args, .. } | Op::CallImport { args, .. } => {
-            args_vals(args, out);
-        }
-        Op::CallIndirect { table_idx, args, .. } => {
-            out.push(*table_idx);
-            args_vals(args, out);
-        }
-        Op::ListLit { elems, .. } => out.extend(elems.iter().copied()),
-        Op::ListGetScalar { list, idx, .. } => {
-            out.push(*list);
-            out.push(*idx);
-        }
-        Op::ListSetScalar { list, idx, val } => {
-            out.push(*list);
-            out.push(*idx);
-            out.push(*val);
-        }
-        Op::IntBinOp { a, b, .. } => {
-            out.push(*a);
-            out.push(*b);
-        }
-        Op::Prim { args, .. } => out.extend(args.iter().copied()),
-        Op::IfThen { cond, .. } => out.push(*cond),
-        Op::Else { val } | Op::EndIf { val } => {
-            if let Some(v) = val {
-                out.push(*v);
-            }
-        }
-        Op::LoopBreakUnless { cond } => out.push(*cond),
-        Op::LoopStart | Op::LoopEnd => {}
-        Op::SetLocal { local, src } => {
-            out.push(*local);
-            out.push(*src);
-        }
-    }
-}
-
-/// The value an op defines (binds), if any.
-/// Every [`ValueId`] an op touches (dst + all operands), exhaustively — the
-/// generic occurrence walk the render-level peepholes (#806 step 3b) use to
-/// prove a value is single-use before fusing its def into its use site.
-pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
-    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
-        for a in args {
-            match a {
-                CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
-                CallArg::Imm(_) | CallArg::Label(_) => {}
-            }
-        }
-    };
-    match op {
-        Op::Charge { .. } | Op::ChargeDyn { .. } => {}
-        Op::Alloc { dst, init, .. } => {
-            out.push(*dst);
-            match init {
-                Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
-                    out.push(*len)
-                }
-                Init::OptSome { payload } => out.push(*payload),
-                Init::Opaque
-                | Init::Empty
-                | Init::OptNone
-                | Init::IntList(_)
-                | Init::Bytes(_)
-                | Init::Str(_) => {}
-            }
-        }
-        Op::Const { dst } | Op::ConstInt { dst, .. } | Op::FuncRef { dst, .. } => out.push(*dst),
-        Op::Dup { dst, src } => {
-            out.push(*dst);
-            out.push(*src);
-        }
-        Op::Drop { v }
-        | Op::DropListStr { v }
-        | Op::DropValue { v }
-        | Op::DropListValue { v }
-        | Op::DropListStrValue { v }
-        | Op::DropListStrStr { v }
-        | Op::DropListIntStr { v }
-        | Op::DropListStrInt { v }
-        | Op::DropResultListValue { v }
-        | Op::DropResultValue { v }
-        | Op::DropResultStrInt { v }
-        | Op::DropResultValueInt { v }
-        | Op::DropResultListValueInt { v }
-        | Op::DropResultListStrInt { v }
-        | Op::DropResultListStr { v }
-        | Op::DropListListStr { v }
-        | Op::DropVariant { v, .. }
-        | Op::DropWrapperRec { v, .. }
-        | Op::Consume { v }
-        | Op::Borrow { v }
-        | Op::MakeUnique { v } => out.push(*v),
-        Op::Pure { dst, uses } => {
-            out.push(*dst);
-            out.extend(uses.iter().copied());
-        }
-        Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
-            if let Some(d) = dst {
-                out.push(*d);
-            }
-            args_vals(args, out);
-        }
-        Op::CallIndirect { dst, table_idx, args, .. } => {
-            if let Some(d) = dst {
-                out.push(*d);
-            }
-            out.push(*table_idx);
-            args_vals(args, out);
-        }
-        Op::ListLit { dst, elems } => {
-            out.push(*dst);
-            out.extend(elems.iter().copied());
-        }
-        Op::ListGetScalar { dst, list, idx } => {
-            out.push(*dst);
-            out.push(*list);
-            out.push(*idx);
-        }
-        Op::ListSetScalar { list, idx, val } => {
-            out.push(*list);
-            out.push(*idx);
-            out.push(*val);
-        }
-        Op::IntBinOp { dst, a, b, .. } => {
-            out.push(*dst);
-            out.push(*a);
-            out.push(*b);
-        }
-        Op::Prim { dst, args, .. } => {
-            if let Some(d) = dst {
-                out.push(*d);
-            }
-            out.extend(args.iter().copied());
-        }
-        Op::IfThen { cond, dst } => {
-            out.push(*cond);
-            if let Some(d) = dst {
-                out.push(*d);
-            }
-        }
-        Op::Else { val } | Op::EndIf { val } => {
-            if let Some(v) = val {
-                out.push(*v);
-            }
-        }
-        Op::LoopBreakUnless { cond } => out.push(*cond),
-        Op::LoopStart | Op::LoopEnd => {}
-        Op::SetLocal { local, src } => {
-            out.push(*local);
-            out.push(*src);
-        }
-    }
-}
 
 include!("render_wasm_fuse.rs");
+
+include!("wasm_op_tables.rs");
