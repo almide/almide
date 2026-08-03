@@ -317,15 +317,29 @@ jobs:
 
   test-wasm-windows:
     name: Test WASM (Windows host)
-    needs: build
+    # Self-sufficient build: the `almide-windows` artifact exists only on
+    # release PRs (build-cross is PR-to-main-gated), and this gate must run on
+    # every develop push — a Windows-host regression found at release time is
+    # found weeks late. The cargo cache below keeps the rebuild incremental.
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v8
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          name: almide-windows
-          path: almide-bin
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
+
+      - run: cargo build --release
 
       - name: Cache wasmtime zip
         uses: actions/cache@v6
@@ -351,7 +365,7 @@ jobs:
         run: |
           set -euo pipefail
           wasmtime --version
-          ALMIDE="$PWD/almide-bin/almide.exe"
+          ALMIDE="$PWD/target/release/almide.exe"
           for f in fs_relative_path env_platform_reporting nan_canonical_observation \
                    nan_canonical_bytes_write closure_tail_recursion mutual_tail_recursion; do
             n=$("$ALMIDE" run "spec/wasm_cross/$f.almd" 2>/dev/null) || { echo "native run failed: $f"; exit 1; }
