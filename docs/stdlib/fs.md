@@ -217,7 +217,7 @@ effect fs.rename(src: String, dst: String) -> Unit
 effect fs.walk(dir: String) -> List[String]
 effect fs.remove_all(path: String) -> Unit
 effect fs.file_size(path: String) -> Int
-fs.temp_dir() -> String
+effect fs.temp_dir() -> String
 effect fs.stat(path: String) -> FileStat
 effect fs.glob(pattern: String) -> List[String]
 effect fs.create_temp_file(prefix: String) -> String
