@@ -215,12 +215,33 @@ pub fn desugar_to_option_calls(body: &IrExpr) -> Option<IrExpr> {
                 self.changed = true;
                 return;
             }
-            let admits = matches!(&expr.ty,
-                Ty::Applied(TypeConstructorId::Result, a)
-                    if a.len() == 2 && matches!(a[0], Ty::Int) && matches!(a[1], Ty::String))
-                && matches!(&e.ty,
-                    Ty::Applied(TypeConstructorId::Option, oa)
-                        if oa.len() == 1 && matches!(oa[0], Ty::Int));
+            // Admitted payloads (#1075 widening — the `value.as_*(v)?` /
+            // `value.field(v, k)?` survivors of the json.as_*/json.get
+            // aliases produce `Result[T, String]?` for every T below): the
+            // i64-slot scalars ride the len-tag base impl bit-preservingly,
+            // and ANY heap-Ok instantiation routes to the payload-type-
+            // INDEPENDENT `_h` twin at the call-name layer
+            // (`result_call_name`, C-149 — Ok shares the handle into
+            // some(), Err is never read). E stays pinned to String, the
+            // error type of every stdlib Result surface. The emitted name
+            // is always `result.to_option` — the tracked seed
+            // (`is_self_host_option_module_fn`) and the twin routing key on
+            // it, so a later `match`/`??` over the bound result reads a
+            // real materialized Option.
+            let admits = match (&expr.ty, &e.ty) {
+                (
+                    Ty::Applied(TypeConstructorId::Result, a),
+                    Ty::Applied(TypeConstructorId::Option, oa),
+                ) if a.len() == 2
+                    && matches!(a[1], Ty::String)
+                    && oa.len() == 1
+                    && a[0] == oa[0] =>
+                {
+                    matches!(a[0], Ty::Int | Ty::Bool | Ty::Float)
+                        || crate::lower::is_heap_ty(&a[0])
+                }
+                _ => false,
+            };
             if !admits {
                 return;
             }
