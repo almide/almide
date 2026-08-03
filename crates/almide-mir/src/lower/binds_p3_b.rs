@@ -114,6 +114,12 @@ impl LowerCtx {
             // `Op::DropListIntStr` (rc_dec slot1 @20 only — likewise type-agnostic).
             return Some(ListElemDrop::IntStr);
         }
+        self.classify_elem_drop_str_keyed_pairs(elem_ty)
+    }
+
+    /// Rung 2b: the `(String, <container/closure/variant>)` pair shapes —
+    /// the ordered continuation of rung 2 (same ladder, same order).
+    fn classify_elem_drop_str_keyed_pairs(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
             && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
                 if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
@@ -262,6 +268,12 @@ impl LowerCtx {
             // (B24) double-frees this shape.
             return Some(ListElemDrop::ScalarAggregate);
         }
+        self.classify_elem_drop_map_options(elem_ty)
+    }
+
+    /// Rung 3b: the Option/Map element families and the flat-aggregate tail
+    /// — the ordered continuation of rung 3 (same ladder, same order).
+    fn classify_elem_drop_map_options(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         // An `Option[Map[String, <scalar>]]` element (`[some(["k0": true]), some(n1),
         // none]` — Wave 4 L6): the payload map breaks the lenlist "one-level-exact"
         // rule (its interior owns key Strings), so it takes its OWN class with the
@@ -345,76 +357,18 @@ impl LowerCtx {
     /// dispatches on at scope end. Arms verbatim.
     fn register_list_drop_kind(&mut self, dst: ValueId, kind: ListElemDrop) {
         match kind {
-            ListElemDrop::Record(rname) => {
-                self.variant_drop_handles.insert(dst, format!("list_{rname}"));
-            }
             ListElemDrop::StrStr => {
                 self.str_str_elem_lists.insert(dst);
             }
-            ListElemDrop::StrInt => {
-                self.variant_drop_handles.insert(dst, "list_str_int".to_string());
-            }
-            ListElemDrop::IntStr => {
-                self.variant_drop_handles.insert(dst, "list_int_str".to_string());
-            }
-            ListElemDrop::RecordInt(rname) => {
-                // → the GENERATED `$__drop_list_<R>_int` (drop_sources.rs — the same
-                // unconditional per-recursive-record / per-anon-record loops that already emit
-                // `$__drop_list_<R>`): per element, recurse into slot0 via `$__drop_<R>`, then
-                // free the tuple block; slot1 is scalar (nothing to free).
-                let rname_fn = drop_fn_ident(&rname);
-                self.variant_drop_handles.insert(dst, format!("list_{rname_fn}_int"));
-            }
-            ListElemDrop::StrVariant(vname) => {
-                // Routes through `Op::DropVariant`'s generic `variant_drop_handles` fallback
-                // (drop_op_for, mod_p3.rs) to `$__drop_<ty>` — `ty` = `list_str_<vname>` names
-                // the GENERATED `$__drop_list_str_<vname>` (drop_sources.rs, mirroring the
-                // `$__drop_list_<V>`/`$__drop_res_<V>` generation this session's B117 extended).
-                let vname_fn = drop_fn_ident(&vname);
-                self.variant_drop_handles.insert(dst, format!("list_str_{vname_fn}"));
-            }
-            ListElemDrop::StrMapStr => {
-                self.variant_drop_handles.insert(dst, "list_str_mss".to_string());
-            }
-            ListElemDrop::StrMapSkv => {
-                self.variant_drop_handles.insert(dst, "list_str_msb".to_string());
-            }
-            ListElemDrop::OptMapSkv => {
-                self.variant_drop_handles.insert(dst, "list_omb".to_string());
-            }
-            ListElemDrop::MapSkv => {
-                self.variant_drop_handles.insert(dst, "list_mb".to_string());
-            }
-            ListElemDrop::StrListOpt => {
-                self.variant_drop_handles.insert(dst, "list_str_mlo".to_string());
-            }
-            ListElemDrop::MapMlo => {
-                self.variant_drop_handles.insert(dst, "list_map_mlo".to_string());
-            }
-            ListElemDrop::MapHval => {
-                self.variant_drop_handles.insert(dst, "list_map_hval".to_string());
-            }
-            ListElemDrop::ScalarAggregate => {
+            ListElemDrop::ScalarAggregate | ListElemDrop::CtorFlat => {
                 self.heap_elem_lists.insert(dst);
             }
             ListElemDrop::ListStr => {
                 self.list_list_str_lists.insert(dst);
             }
-            // Flat ctor elements (Option[scalar]) free exactly under the per-element `rc_dec`
-            // of the masked `DropListStr`; LenLoop elements route to the generated
-            // `$__drop_list_lenlist` (injected iff the pre-scan saw this literal — the shared
-            // `lenlist_elem_class` keeps the two decisions identical by construction).
-            ListElemDrop::CtorFlat => {
-                self.heap_elem_lists.insert(dst);
-            }
-            ListElemDrop::CtorLenLoop => {
-                self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
-            }
-            ListElemDrop::Closure => {
-                self.variant_drop_handles.insert(dst, "list_closure".to_string());
-            }
-            ListElemDrop::StrClosure => {
-                self.variant_drop_handles.insert(dst, "list_str_clo".to_string());
+            other => {
+                let name = drop_route_name(other);
+                self.variant_drop_handles.insert(dst, name);
             }
         }
     }
@@ -715,3 +669,33 @@ impl LowerCtx {
         Some(dst)
     }
 }
+
+/// The `variant_drop_handles` route name for each name-routed element-drop
+/// kind (the set-routed kinds — StrStr / ScalarAggregate / ListStr — are
+/// registered directly in `register_list_drop_kind`). Names verbatim.
+fn drop_route_name(kind: ListElemDrop) -> String {
+    match kind {
+        ListElemDrop::Record(rname) => format!("list_{rname}"),
+        ListElemDrop::StrInt => "list_str_int".to_string(),
+        ListElemDrop::IntStr => "list_int_str".to_string(),
+        ListElemDrop::StrMapStr => "list_str_mss".to_string(),
+        ListElemDrop::StrMapSkv => "list_str_msb".to_string(),
+        ListElemDrop::OptMapSkv => "list_omb".to_string(),
+        ListElemDrop::MapSkv => "list_mb".to_string(),
+        ListElemDrop::StrListOpt => "list_str_mlo".to_string(),
+        ListElemDrop::MapMlo => "list_map_mlo".to_string(),
+        ListElemDrop::MapHval => "list_map_hval".to_string(),
+        ListElemDrop::CtorLenLoop => "list_lenlist".to_string(),
+        ListElemDrop::Closure => "list_closure".to_string(),
+        ListElemDrop::StrClosure => "list_str_clo".to_string(),
+        ListElemDrop::RecordInt(rname) => format!("list_{}_int", drop_fn_ident(&rname)),
+        ListElemDrop::StrVariant(vname) => format!("list_str_{}", drop_fn_ident(&vname)),
+        ListElemDrop::StrStr
+        | ListElemDrop::ScalarAggregate
+        | ListElemDrop::CtorFlat
+        | ListElemDrop::ListStr => {
+            unreachable!("set-routed kinds are registered directly")
+        }
+    }
+}
+
