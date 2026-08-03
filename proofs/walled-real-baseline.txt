@@ -36,3 +36,24 @@ spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_string_go
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested Codec: direct field, list elements, Option none omission
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[Option], List[List], deep Option[List[Option]]
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_variant record case: Option field omits none, folds missing/null to none
+#
+# (2026-08-03, #1075 migration fallout) The E040 sweep rewrote json.as_* to the
+# canonical `value.as_*(...)?` spelling; a ToOption (`?`) over a module call
+# inside a TEST fn is outside the v1 test-runner's lowering subset, so five
+# json_extra_test fns moved from lowered to walled. They pass on the native
+# fallback leg. Frontier: teach the test-fn leg the ToOption-over-call shape,
+# then prune these.
+spec/stdlib/json_extra_test.almd :: __test_almd_value.as_array on non-array
+spec/stdlib/json_extra_test.almd :: __test_almd_value.as_bool on bool value
+spec/stdlib/json_extra_test.almd :: __test_almd_value.as_bool on non-bool
+spec/stdlib/json_extra_test.almd :: __test_almd_value.as_float on non-float
+spec/stdlib/json_extra_test.almd :: __test_almd_value.as_string on non-string
+# (same class, full enumeration of the E040-migration test-fn fallout:)
+spec/stdlib/json_extra_test.almd :: __test_almd_value.as_string on string value
+spec/stdlib/json_path_test.almd :: __test_almd_json.field creates field path
+spec/stdlib/json_path_test.almd :: __test_almd_json.index on array
+spec/stdlib/json_path_test.almd :: __test_almd_json.remove_path array element
+spec/stdlib/json_path_test.almd :: __test_almd_json.remove_path nested field
+spec/stdlib/json_path_test.almd :: __test_almd_json.set_path nested field
+spec/stdlib/json_path_test.almd :: __test_almd_json.set_path simple field
+spec/stdlib/json_stringify_roundtrip_test.almd :: __test_almd_stringify round-trips through parse

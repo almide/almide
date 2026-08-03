@@ -2640,3 +2640,16 @@ evidence  = [
   { path = "spec/wasm_cross/nan_canonical_observation.almd", class = "fixture" },
   { path = "spec/wasm_cross/nan_canonical_bytes_write.almd", class = "fixture" },
 ]
+
+# ── PURE-FN ! PROPAGATION — the #1067 E022 lift ─
+[[contract]]
+id        = "C-211"
+spec      = "ALS-D6"
+title     = "! propagates in pure Result/Option-returning fns, byte-identical across targets"
+statement = "`!` (unwrap-with-propagation) is legal in a PURE fn whose declared return type is Result[_, E] or Option[_] — not only in effect fn bodies and test blocks (the pre-0.54 E022 rule). Semantics match the effect-fn body exactly: a Result operand unwraps ok and early-returns its err (the operand's error type must unify with the fn's E — a mismatch is a check-time error, never generated-Rust E0308); an Option operand in a Result fn turns none into err(\"none\") (the established unwrap-of-none message); an Option operand in an OPTION fn propagates the none ITSELF — the cell a Result-assuming lowering gets wrong (native E0277 via ok_or in an Option fn; the wasm leg read the mistyped block back as some(\"none\"), a silent wrong value caught while landing this). The closure boundary is unchanged: `!` never propagates out of a lambda (#489), and a fn returning any other type keeps E022. Verified byte-identical native == wasm across all three operand/return cells."
+since     = "0.54.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/pure_bang_propagation.almd", class = "fixture" },
+  { path = "spec/lang/pure_result_bang_test.almd", class = "fixture" },
+]

@@ -369,6 +369,18 @@ fn build_unwrap_match(
                 },
                 body,
             )
+        } else if matches!(&body.ty, Ty::Applied(TypeConstructorId::Option, _)) {
+            // #1067: in an OPTION-returning pure fn, `!` on a none propagates
+            // the none ITSELF. Manufacturing err("none") here typed the fail
+            // arm as a Result inside an Option-returning fn — native rustc
+            // E0277, and the wasm leg read the mistyped block back as
+            // some("none"), a silent wrong value the lift's probe caught.
+            IrExpr {
+                kind: IrExprKind::OptionNone,
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            }
         } else {
             IrExpr {
                 kind: IrExprKind::ResultErr {
