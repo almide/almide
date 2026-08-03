@@ -1,14 +1,15 @@
-// The executable Codec field-type matrix (#1062). Every ACCEPTED cell of the
-// field grammar is pinned here — wire bytes on encode, state on decode:
+// The executable Codec field-type matrix (#1062, containers widened by #1065).
+// Every ACCEPTED cell of the field grammar is pinned here — wire bytes on
+// encode, state on decode:
 //
-//   field  := scalar | Value | named | Option[inner] | List[elem]
-//   inner  := scalar | Value | named | List[elem]
-//   elem   := scalar | Value | named
+//   field  := scalar | Value | named | Option[field'] | List[field']
 //   scalar := String | Int | Float | Bool
 //
-// Cells OUTSIDE the grammar (Map/Set, Option[Option], sized numerics, Bytes,
-// tuples, fn types, Result, List[List], List[Option]) are rejected at
-// declaration with E023 — pinned in tests/diagnostics/e023-codec-*. Passing
+// Containers nest arbitrarily; the rejections are SEMANTIC, not depth-based:
+// Option[Option[..]] (void on the wire once none omits/folds), Option[Value]
+// anywhere but field root (elements have no "absent"), and non-wire leaves
+// (Map/Set, sized numerics, Bytes, tuples, fn types, Result) — all rejected at
+// declaration with E023, pinned in tests/diagnostics/e023-codec-*. Passing
 // `check` and dying in codegen is the one forbidden outcome (#1061).
 //
 // The none/null law (C-209): encode omits a none field; decode folds
@@ -33,6 +34,8 @@ type Defaults: Codec = { host: String = "localhost", port: Int = 8080, name: Str
 type Aliased: Codec = { trace_id as "traceId": String, count: Int }
 
 type Shape: Codec = | Circle(Float) | Point | Label { text: String, hint: Option[String] }
+
+type Deep: Codec = { lo: List[Option[Int]], ll: List[List[Int]], dp: Option[List[Option[String]]], lc: List[Option[Inner]] }
 
 fn enc_scalars(x: Scalars) -> String = json.stringify(Scalars.encode(x))
 
@@ -150,6 +153,26 @@ test "variant wire shapes: externally tagged; unit → null; tuple → array" {
   match Shape.decode(parse('{"Nope":null}')) {
     ok(_) => assert(false),
     err(e) => assert_eq(e, "unknown variant for Shape"),
+  }
+}
+
+test "nested containers: List[Option], List[List], deep Option[List[Option]]" {
+  let x = Deep { lo: [some(1), none, some(3)], ll: [
+    [1],
+    [2, 3]
+  ], dp: some([some("a"), none]), lc: [
+    some(Inner { n: 9 }),
+    none
+  ] }
+  assert_eq(json.stringify(Deep.encode(x)), '{"lo":[1,null,3],"ll":[[1],[2,3]],"dp":["a",null],"lc":[{"n":9},null]}')
+  assert_eq(Deep.decode(Deep.encode(x)), ok(x))
+  // dp omitted when none; element null decodes to none; element type errors propagate
+  let y = Deep { lo: [], ll: [], dp: none, lc: [] }
+  assert_eq(json.stringify(Deep.encode(y)), '{"lo":[],"ll":[],"lc":[]}')
+  assert_eq(Deep.decode(Deep.encode(y)), ok(y))
+  match Deep.decode(parse('{"lo":["bad"],"ll":[],"lc":[]}')) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "expected Int"),
   }
 }
 

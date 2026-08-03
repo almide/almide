@@ -1,0 +1,5 @@
+// #1065: Option[Value]'s absent-vs-null contract needs an omittable KEY;
+// an element position has none — List[Value] already carries nulls verbatim.
+type L: Codec = { xs: List[Option[Value]] }
+
+fn main() -> Unit = println("unreachable")

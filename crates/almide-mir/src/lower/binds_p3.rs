@@ -254,6 +254,19 @@ impl LowerCtx {
     /// [`crate::lower::generate_variant_drop_sources`] — a shape outside this set
     /// (`List[<flat variant>]`, `Map`) gets NO free statement there, so admitting it here
     /// would build a value whose drop leaks.
+    /// Is an `Option[payload]` ctor/record field freed EXACTLY by the generated
+    /// drops? Mirrors the drop generators' Option→List normalization (#1064):
+    /// scalar, String, flat variant, or rich (recursive-drop) variant.
+    pub(crate) fn option_payload_drop_exact(&self, payload: &Ty) -> bool {
+        !is_heap_ty(payload)
+            || matches!(payload, Ty::String)
+            || self.variant_layouts.is_flat_variant_ty(payload)
+            || self
+                .variant_layouts
+                .field_variant_name(payload)
+                .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n, &|_| false))
+    }
+
     fn ctor_list_field_drop_freeable(&self, ty: &Ty) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         let Ty::Applied(TypeConstructorId::List, a) = ty else { return false };
@@ -449,21 +462,25 @@ impl LowerCtx {
             };
             return Some((obj, true));
         }
-        if matches!(&arg.ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
-                if a.len() == 1 && !is_heap_ty(&a[0]))
-        {
-            // An Option[scalar] ctor field (`Box(Some(8))`, `Box(None)`): the 0-or-1-element
-            // len-tag block owns NO children, so its free is one flat rc_dec — emitted by the
-            // generated `$__drop_<T>` (the Option arm in the drop generator's field loop; the
-            // widened `needs_recursive_drop` makes this type recursive-drop) or the masked
-            // DropListStr. A ctor expr builds the fresh block (`try_lower_option_ctor`); a
-            // Var is Dup'd/moved via `lower_owned_heap_field`. Option[heap] / Result payloads
-            // own children a flat free would leak — they stay walled (a later brick).
-            let obj = self
-                .try_lower_option_ctor(arg, &arg.ty)
-                .or_else(|| self.lower_owned_heap_field(arg))?;
-            return Some((obj, true));
+        if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &arg.ty {
+            if a.len() == 1 && self.option_payload_drop_exact(&a[0]) {
+                // An Option ctor field whose payload the generated `$__drop_<T>` frees
+                // EXACTLY — scalar (flat rc_dec of the 0-or-1-element block), String /
+                // flat variant (`__drop_list_str` per-element sweep of the 0/1 block),
+                // or a rich variant (`__drop_list_<V>`): the Option block IS a
+                // 0-or-1-element list block, so the drop generator routes it via its
+                // List[T] twin (#1064: `Note{tag: Option[String]}`). A ctor expr
+                // builds the fresh block (`try_lower_option_ctor`); a Var is Dup'd via
+                // `lower_owned_heap_field`. Other payloads (Option[List], Option[record])
+                // stay walled — a later brick, never a leak.
+                let obj = self
+                    .try_lower_option_ctor(arg, &arg.ty)
+                    .or_else(|| self.lower_owned_heap_field(arg))?;
+                return Some((obj, true));
+            }
+            if a.len() == 1 && is_heap_ty(&a[0]) {
+                return None; // un-routable Option payload — decline (wall upstream)
+            }
         }
         if matches!(&arg.ty, Ty::Fn { .. }) {
             // A CLOSURE ctor field (`Run(() => …)` / `Thunk((x) => x * x)` — the

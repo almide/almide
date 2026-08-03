@@ -1,3 +1,0 @@
-expects_code = "E023"
-expects_error = "List[Option[Int]]"
-hint_substring = "one level"

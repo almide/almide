@@ -27,6 +27,23 @@ fn variant_ctor_field_frees(kind: &almide_ir::IrVariantKind, sets: &VariantDropN
     let mut idx = 0usize;
     for (i, ty) in tys.iter().enumerate() {
         let off = layout::slot_offset(1 + i);
+        // An Option block IS a 0-or-1-element len-tag list block, so an
+        // `Option[<heap>]` ctor field frees EXACTLY like the `List[<heap>]`
+        // twin — normalize before the cascade (#1064). `Option[scalar]` keeps
+        // its dedicated flat-rc_dec arm in the builtin group.
+        let normalized;
+        let ty = match ty {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+                if a.len() == 1 && is_heap_ty(&a[0]) =>
+            {
+                normalized = Ty::Applied(
+                    almide_lang::types::constructor::TypeConstructorId::List,
+                    a.clone(),
+                );
+                &normalized
+            }
+            other => other,
+        };
         if let Some(s) = variant_field_free_nested_variant(ty, off, &mut idx, sets) {
             frees.push_str(&s);
             continue;

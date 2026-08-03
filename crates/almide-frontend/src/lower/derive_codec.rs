@@ -6,8 +6,9 @@ use almide_base::intern::sym;
 
 /// Auto-derive Codec encode: `fn T.encode(t: T) -> Value`
 /// Generates: `value.object([("field1", value.str(t.field1)), ...] + <conditional Option chunks>)`
-pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
-    let var = vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
+pub(super) fn auto_derive_encode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
+    let type_name = wk.type_name.to_string();
+    let var = wk.vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
     let value_ty = Ty::Named(sym("Value"), vec![]);
 
     let entries: Vec<(String, Ty, IrExpr)> = fields.iter().map(|f| {
@@ -20,7 +21,7 @@ pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &T
         };
         (f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()), f.ty.clone(), field_access)
     }).collect();
-    let pairs_list = build_object_arg(vt, &entries, &value_ty);
+    let pairs_list = build_object_arg(wk, &entries, &value_ty);
 
     let body = IrExpr {
         kind: IrExprKind::Call {
@@ -50,7 +51,7 @@ pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &T
 /// so a `none` field OMITS its key from the emitted object (proto3-style unset)
 /// instead of emitting an explicit null. Chunks are joined with list concat —
 /// a shape both render legs lower (verified native == wasm byte output).
-pub(super) fn build_object_arg(vt: &mut VarTable, entries: &[(String, Ty, IrExpr)], value_ty: &Ty) -> IrExpr {
+pub(super) fn build_object_arg(wk: &mut CodecWk, entries: &[(String, Ty, IrExpr)], value_ty: &Ty) -> IrExpr {
     let pair_ty = Ty::Tuple(vec![Ty::String, value_ty.clone()]);
     let chunk_ty = Ty::list(pair_ty.clone());
     let mk_pair = |key: &str, val: IrExpr| IrExpr {
@@ -69,13 +70,14 @@ pub(super) fn build_object_arg(vt: &mut VarTable, entries: &[(String, Ty, IrExpr
                 chunks.push(IrExpr { kind: IrExprKind::List { elements: std::mem::take(&mut static_pairs) }, ty: chunk_ty.clone(), span: None, def_id: None });
             }
             let inner_ty = field_ty.inner().cloned().unwrap_or_else(|| field_ty.clone());
-            let x = vt.alloc(sym("_x"), inner_ty.clone(), Mutability::Let, None);
+            let x = wk.vt.alloc(sym("_x"), inner_ty.clone(), Mutability::Let, None);
             let x_expr = IrExpr { kind: IrExprKind::Var { id: x }, ty: inner_ty.clone(), span: None, def_id: None };
+            let enc_inner = enc_value_expr(wk, x_expr, &inner_ty, value_ty);
             let some_arm = IrMatchArm {
                 pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: x, ty: inner_ty.clone() }) },
                 guard: None,
                 body: IrExpr {
-                    kind: IrExprKind::List { elements: vec![mk_pair(key, encode_field_value(&x_expr, &inner_ty, value_ty))] },
+                    kind: IrExprKind::List { elements: vec![mk_pair(key, enc_inner)] },
                     ty: chunk_ty.clone(), span: None, def_id: None,
                 },
             };
@@ -89,7 +91,8 @@ pub(super) fn build_object_arg(vt: &mut VarTable, entries: &[(String, Ty, IrExpr
                 ty: chunk_ty.clone(), span: None, def_id: None,
             });
         } else {
-            static_pairs.push(mk_pair(key, encode_field_value(access, field_ty, value_ty)));
+            let enc = enc_value_expr(wk, access.clone(), field_ty, value_ty);
+            static_pairs.push(mk_pair(key, enc));
         }
     }
     if !static_pairs.is_empty() || chunks.is_empty() {
@@ -201,30 +204,414 @@ fn list_elem_suffix(elem: &Ty) -> String {
     if let Ty::Named(name, _) = elem { name.to_string() } else { decode_func_suffix(elem).to_string() }
 }
 
-/// The Result-typed list-decode CALL for a `List[elem]` type — no Try wrapper.
-fn decode_list_call(get_expr: IrExpr, list_ty: &Ty, elem: &Ty) -> IrExpr {
-    if is_value_ty(elem) {
-        return IrExpr {
-            kind: IrExprKind::Call {
-                target: CallTarget::Module { module: sym("value"), func: sym("as_array"), def_id: None },
-                args: vec![get_expr],
-                type_args: vec![],
-            },
-            ty: Ty::result(list_ty.clone(), Ty::String), span: None, def_id: None,
-        };
-    }
-    IrExpr {
-        kind: IrExprKind::Call {
-            target: CallTarget::Named { name: sym(&format!("__decode_list_{}", list_elem_suffix(elem))) },
-            args: vec![get_expr],
-            type_args: vec![],
-        },
-        ty: Ty::result(list_ty.clone(), Ty::String), span: None, def_id: None,
+fn is_container_ty(ty: &Ty) -> bool {
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::Option, a) | Ty::Applied(TypeConstructorId::List, a)
+        if a.len() == 1)
+}
+
+/// Mangled component naming a type inside a generated worker name:
+/// `List[Option[Int]]` → `list_opt_int`. Workers are dotted per declaring
+/// type, so a user type sharing a mangle is not reachable.
+fn ty_mangle(ty: &Ty) -> String {
+    match ty {
+        Ty::Int => "int".into(),
+        Ty::Float => "float".into(),
+        Ty::Bool => "bool".into(),
+        Ty::String => "string".into(),
+        Ty::Named(n, _) => n.to_string(),
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => format!("opt_{}", ty_mangle(&a[0])),
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => format!("list_{}", ty_mangle(&a[0])),
+        _ => "value".into(),
     }
 }
 
-fn option_list_worker_name(type_name: &str, elem: &Ty) -> String {
-    format!("{}.__opt_list_dec_{}", type_name, list_elem_suffix(elem))
+/// Worker-generation context for the RECURSIVE codec builders (#1065).
+/// Nested container shapes (`List[Option[T]]`, `List[List[T]]`, …) have no
+/// static helper family; each container node gets a dotted per-type worker
+/// (`T.__enc_list_opt_int`, `T.__dec_opt_elem_int`, …) generated on demand and
+/// memoized by name. Leaf and single-level shapes keep their existing
+/// static/dotted helper routes untouched.
+pub(super) struct CodecWk<'a> {
+    pub vt: &'a mut VarTable,
+    pub type_name: &'a str,
+    pub out: &'a mut Vec<IrFunction>,
+    pub seen: &'a mut std::collections::HashSet<String>,
+}
+
+fn e_(kind: IrExprKind, ty: Ty) -> IrExpr {
+    IrExpr { kind, ty, span: None, def_id: None }
+}
+fn call_named_(name: &str, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
+    e_(IrExprKind::Call { target: CallTarget::Named { name: sym(name) }, args, type_args: vec![] }, ty)
+}
+fn call_mod_(m: &str, f: &str, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
+    e_(IrExprKind::Call { target: CallTarget::Module { module: sym(m), func: sym(f), def_id: None }, args, type_args: vec![] }, ty)
+}
+fn mk_worker_fn(name: &str, params: Vec<(VarId, &str, Ty)>, ret_ty: Ty, body: IrExpr) -> IrFunction {
+    IrFunction {
+        name: sym(name),
+        params: params.into_iter().map(|(var, n, ty)| IrParam {
+            var, ty, name: sym(n), borrow: ParamBorrow::Own, is_mut: false,
+            open_record: None, default: None, attrs: vec![],
+        }).collect(),
+        ret_ty, body,
+        is_effect: false, is_test: false,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
+        doc: None, blank_lines_before: 0, def_id: None,
+        mutated_params: vec![], module_origin: None,
+    }
+}
+
+/// Encode `expr : ty` to a Value expression, any accepted shape. Existing
+/// shapes delegate to [`encode_field_value`] (their helper routes are
+/// byte-pinned); container-of-container shapes route through generated
+/// workers, and element-position Option encodes inline (no Try on encode).
+fn enc_value_expr(wk: &mut CodecWk, expr: IrExpr, ty: &Ty, value_ty: &Ty) -> IrExpr {
+    match ty {
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+            let inner = a[0].clone();
+            if is_container_ty(&inner) || is_value_ty(&inner) {
+                let x = wk.vt.alloc(sym("_x"), inner.clone(), Mutability::Let, None);
+                let x_expr = e_(IrExprKind::Var { id: x }, inner.clone());
+                let enc_inner = enc_value_expr(wk, x_expr, &inner, value_ty);
+                e_(IrExprKind::Match {
+                    subject: Box::new(expr),
+                    arms: vec![
+                        IrMatchArm {
+                            pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: x, ty: inner }) },
+                            guard: None, body: enc_inner,
+                        },
+                        IrMatchArm {
+                            pattern: IrPattern::None, guard: None,
+                            body: call_mod_("value", "null", vec![], value_ty.clone()),
+                        },
+                    ],
+                }, value_ty.clone())
+            } else {
+                encode_field_value(&expr, ty, value_ty)
+            }
+        }
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_container_ty(&a[0]) => {
+            let name = enc_list_worker(wk, ty, &a[0], value_ty);
+            call_named_(&name, vec![expr], value_ty.clone())
+        }
+        _ => encode_field_value(&expr, ty, value_ty),
+    }
+}
+
+/// `T.__enc_<mangle>(xs) -> Value` + index-recursive `_go` worker for a list
+/// whose ELEMENT is itself a container. Mirrors `T.__list_enc_go` exactly.
+fn enc_list_worker(wk: &mut CodecWk, list_ty: &Ty, elem: &Ty, value_ty: &Ty) -> String {
+    let name = format!("{}.__enc_{}", wk.type_name, ty_mangle(list_ty));
+    if !wk.seen.insert(name.clone()) {
+        return name;
+    }
+    let go_name = format!("{}_go", name);
+    let list_v = Ty::list(value_ty.clone());
+
+    let xs_a = wk.vt.alloc(sym("_xs"), list_ty.clone(), Mutability::Let, None);
+    let entry = mk_worker_fn(&name, vec![(xs_a, "_xs", list_ty.clone())], value_ty.clone(),
+        call_named_(&go_name, vec![
+            e_(IrExprKind::Var { id: xs_a }, list_ty.clone()),
+            e_(IrExprKind::LitInt { value: 0 }, Ty::Int),
+            e_(IrExprKind::List { elements: vec![] }, list_v.clone()),
+        ], value_ty.clone()));
+
+    let xs = wk.vt.alloc(sym("_xs"), list_ty.clone(), Mutability::Let, None);
+    let i = wk.vt.alloc(sym("_i"), Ty::Int, Mutability::Let, None);
+    let acc = wk.vt.alloc(sym("_acc"), list_v.clone(), Mutability::Let, None);
+    let elem_expr = e_(IrExprKind::IndexAccess {
+        object: Box::new(e_(IrExprKind::Var { id: xs }, list_ty.clone())),
+        index: Box::new(e_(IrExprKind::Var { id: i }, Ty::Int)),
+    }, elem.clone());
+    let enc_elem = enc_value_expr(wk, elem_expr, elem, value_ty);
+    let appended = e_(IrExprKind::BinOp {
+        op: BinOp::ConcatList,
+        left: Box::new(e_(IrExprKind::Var { id: acc }, list_v.clone())),
+        right: Box::new(e_(IrExprKind::List { elements: vec![enc_elem] }, list_v.clone())),
+    }, list_v.clone());
+    let cond = e_(IrExprKind::BinOp {
+        op: BinOp::Lt,
+        left: Box::new(e_(IrExprKind::Var { id: i }, Ty::Int)),
+        right: Box::new(call_mod_("list", "len", vec![e_(IrExprKind::Var { id: xs }, list_ty.clone())], Ty::Int)),
+    }, Ty::Bool);
+    let next_i = e_(IrExprKind::BinOp {
+        op: BinOp::AddInt,
+        left: Box::new(e_(IrExprKind::Var { id: i }, Ty::Int)),
+        right: Box::new(e_(IrExprKind::LitInt { value: 1 }, Ty::Int)),
+    }, Ty::Int);
+    let go = mk_worker_fn(&go_name,
+        vec![(xs, "_xs", list_ty.clone()), (i, "_i", Ty::Int), (acc, "_acc", list_v.clone())],
+        value_ty.clone(),
+        e_(IrExprKind::If {
+            cond: Box::new(cond),
+            then: Box::new(call_named_(&go_name, vec![
+                e_(IrExprKind::Var { id: xs }, list_ty.clone()), next_i, appended,
+            ], value_ty.clone())),
+            else_: Box::new(call_mod_("value", "array", vec![e_(IrExprKind::Var { id: acc }, list_v)], value_ty.clone())),
+        }, value_ty.clone()));
+
+    wk.out.push(entry);
+    wk.out.push(go);
+    name
+}
+
+/// A Result-typed decode expression for `expr : Value` into `ty` — the
+/// recursive counterpart of the static `__decode_list_*` family. No Try
+/// anywhere inside (callers Try the whole thing in bind position, or match it
+/// inside a worker — a Try nested in liftable branches breaks under
+/// branch-lift synthesis).
+fn dec_result_expr(wk: &mut CodecWk, expr: IrExpr, ty: &Ty, value_ty: &Ty) -> IrExpr {
+    let res_ty = Ty::result(ty.clone(), Ty::String);
+    match ty {
+        Ty::String => call_mod_("value", "as_string", vec![expr], res_ty),
+        Ty::Int => call_mod_("value", "as_int", vec![expr], res_ty),
+        Ty::Float => call_mod_("value", "as_float", vec![expr], res_ty),
+        Ty::Bool => call_mod_("value", "as_bool", vec![expr], res_ty),
+        _ if is_value_ty(ty) => e_(IrExprKind::ResultOk { expr: Box::new(expr) }, res_ty),
+        Ty::Named(name, _) => call_named_(&format!("{}.decode", name), vec![expr], res_ty),
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+            let elem = &a[0];
+            if is_value_ty(elem) {
+                call_mod_("value", "as_array", vec![expr], res_ty)
+            } else if is_container_ty(elem) {
+                let name = dec_list_worker(wk, ty, elem, value_ty);
+                call_named_(&name, vec![expr], res_ty)
+            } else {
+                call_named_(&format!("__decode_list_{}", list_elem_suffix(elem)), vec![expr], res_ty)
+            }
+        }
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+            let name = dec_opt_elem_worker(wk, &a[0], value_ty);
+            call_named_(&name, vec![expr], res_ty)
+        }
+        _ => call_mod_("value", "as_string", vec![expr], res_ty),
+    }
+}
+
+/// Decode a REQUIRED field from its fetched Value: existing shapes delegate
+/// to [`decode_field_value`] (byte-pinned helper routes); a list with a
+/// container element Try's the generated worker in bind position.
+fn dec_field_expr(wk: &mut CodecWk, get_expr: IrExpr, ty: &Ty, value_ty: &Ty) -> IrExpr {
+    if let Ty::Applied(TypeConstructorId::List, a) = ty {
+        if a.len() == 1 && is_container_ty(&a[0]) {
+            let call = dec_result_expr(wk, get_expr, ty, value_ty);
+            return e_(IrExprKind::Try { expr: Box::new(call) }, ty.clone());
+        }
+    }
+    decode_field_value(get_expr, ty, value_ty)
+}
+
+/// `T.__dec_<mangle>(v) -> Result[List[elem], String]` + `_go` worker for a
+/// list whose element is a container. Try only in bind position (the shape
+/// `T.__list_dec_go` already lowers on both legs).
+fn dec_list_worker(wk: &mut CodecWk, list_ty: &Ty, elem: &Ty, value_ty: &Ty) -> String {
+    let name = format!("{}.__dec_{}", wk.type_name, ty_mangle(list_ty));
+    if !wk.seen.insert(name.clone()) {
+        return name;
+    }
+    let go_name = format!("{}_go", name);
+    let list_v = Ty::list(value_ty.clone());
+    let res_ty = Ty::result(list_ty.clone(), Ty::String);
+
+    let v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
+    let items_e = wk.vt.alloc(sym("_items"), list_v.clone(), Mutability::Let, None);
+    let err_e = wk.vt.alloc(sym("_e"), Ty::String, Mutability::Let, None);
+    let entry = mk_worker_fn(&name, vec![(v, "_v", value_ty.clone())], res_ty.clone(),
+        e_(IrExprKind::Match {
+            subject: Box::new(call_mod_("value", "as_array",
+                vec![e_(IrExprKind::Var { id: v }, value_ty.clone())],
+                Ty::result(list_v.clone(), Ty::String))),
+            arms: vec![
+                IrMatchArm {
+                    pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: items_e, ty: list_v.clone() }) },
+                    guard: None,
+                    body: call_named_(&go_name, vec![
+                        e_(IrExprKind::Var { id: items_e }, list_v.clone()),
+                        e_(IrExprKind::LitInt { value: 0 }, Ty::Int),
+                        e_(IrExprKind::List { elements: vec![] }, list_ty.clone()),
+                    ], res_ty.clone()),
+                },
+                IrMatchArm {
+                    pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: err_e, ty: Ty::String }) },
+                    guard: None,
+                    body: e_(IrExprKind::ResultErr { expr: Box::new(e_(IrExprKind::Var { id: err_e }, Ty::String)) }, res_ty.clone()),
+                },
+            ],
+        }, res_ty.clone()));
+
+    let items = wk.vt.alloc(sym("_items"), list_v.clone(), Mutability::Let, None);
+    let i = wk.vt.alloc(sym("_i"), Ty::Int, Mutability::Let, None);
+    let acc = wk.vt.alloc(sym("_acc"), list_ty.clone(), Mutability::Let, None);
+    let x = wk.vt.alloc(sym("_x"), elem.clone(), Mutability::Let, None);
+    let elem_expr = e_(IrExprKind::IndexAccess {
+        object: Box::new(e_(IrExprKind::Var { id: items }, list_v.clone())),
+        index: Box::new(e_(IrExprKind::Var { id: i }, Ty::Int)),
+    }, value_ty.clone());
+    let dec_elem = dec_result_expr(wk, elem_expr, elem, value_ty);
+    let bind_x = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: x, mutability: Mutability::Let, ty: elem.clone(),
+            value: e_(IrExprKind::Try { expr: Box::new(dec_elem) }, elem.clone()),
+        },
+        span: None,
+    };
+    let appended = e_(IrExprKind::BinOp {
+        op: BinOp::ConcatList,
+        left: Box::new(e_(IrExprKind::Var { id: acc }, list_ty.clone())),
+        right: Box::new(e_(IrExprKind::List { elements: vec![e_(IrExprKind::Var { id: x }, elem.clone())] }, list_ty.clone())),
+    }, list_ty.clone());
+    let cond = e_(IrExprKind::BinOp {
+        op: BinOp::Lt,
+        left: Box::new(e_(IrExprKind::Var { id: i }, Ty::Int)),
+        right: Box::new(call_mod_("list", "len", vec![e_(IrExprKind::Var { id: items }, list_v.clone())], Ty::Int)),
+    }, Ty::Bool);
+    let next_i = e_(IrExprKind::BinOp {
+        op: BinOp::AddInt,
+        left: Box::new(e_(IrExprKind::Var { id: i }, Ty::Int)),
+        right: Box::new(e_(IrExprKind::LitInt { value: 1 }, Ty::Int)),
+    }, Ty::Int);
+    let go = mk_worker_fn(&go_name,
+        vec![(items, "_items", list_v), (i, "_i", Ty::Int), (acc, "_acc", list_ty.clone())],
+        res_ty.clone(),
+        e_(IrExprKind::If {
+            cond: Box::new(cond),
+            then: Box::new(e_(IrExprKind::Block {
+                stmts: vec![bind_x],
+                expr: Some(Box::new(call_named_(&go_name, vec![
+                    e_(IrExprKind::Var { id: items }, Ty::list(value_ty.clone())), next_i, appended,
+                ], res_ty.clone()))),
+            }, res_ty.clone())),
+            else_: Box::new(e_(IrExprKind::ResultOk {
+                expr: Box::new(e_(IrExprKind::Var { id: acc }, list_ty.clone())),
+            }, res_ty.clone())),
+        }, res_ty.clone()));
+
+    wk.out.push(entry);
+    wk.out.push(go);
+    name
+}
+
+/// `T.__dec_opt_elem_<mangle>(e) -> Result[Option[inner], String]` — decode
+/// for an ELEMENT-position Option: null → none, else inner decode → some.
+/// (Element positions have no "absent"; the grammar rejects Option[Option] and
+/// non-root Option[Value], so `inner` here is never Option or Value.)
+fn dec_opt_elem_worker(wk: &mut CodecWk, inner: &Ty, value_ty: &Ty) -> String {
+    let name = format!("{}.__dec_opt_elem_{}", wk.type_name, ty_mangle(inner));
+    if !wk.seen.insert(name.clone()) {
+        return name;
+    }
+    let opt_ty = Ty::option(inner.clone());
+    let res_ty = Ty::result(opt_ty.clone(), Ty::String);
+    let ev = wk.vt.alloc(sym("_e"), value_ty.clone(), Mutability::Let, None);
+    let x = wk.vt.alloc(sym("_x"), inner.clone(), Mutability::Let, None);
+    let er = wk.vt.alloc(sym("_er"), Ty::String, Mutability::Let, None);
+    let is_null = e_(IrExprKind::BinOp {
+        op: BinOp::Eq,
+        left: Box::new(e_(IrExprKind::Var { id: ev }, value_ty.clone())),
+        right: Box::new(call_mod_("value", "null", vec![], value_ty.clone())),
+    }, Ty::Bool);
+    let dec_inner = dec_result_expr(wk, e_(IrExprKind::Var { id: ev }, value_ty.clone()), inner, value_ty);
+    let body = e_(IrExprKind::If {
+        cond: Box::new(is_null),
+        then: Box::new(e_(IrExprKind::ResultOk {
+            expr: Box::new(e_(IrExprKind::OptionNone, opt_ty.clone())),
+        }, res_ty.clone())),
+        else_: Box::new(e_(IrExprKind::Match {
+            subject: Box::new(dec_inner),
+            arms: vec![
+                IrMatchArm {
+                    pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: x, ty: inner.clone() }) },
+                    guard: None,
+                    body: e_(IrExprKind::ResultOk {
+                        expr: Box::new(e_(IrExprKind::OptionSome {
+                            expr: Box::new(e_(IrExprKind::Var { id: x }, inner.clone())),
+                        }, opt_ty.clone())),
+                    }, res_ty.clone()),
+                },
+                IrMatchArm {
+                    pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: er, ty: Ty::String }) },
+                    guard: None,
+                    body: e_(IrExprKind::ResultErr {
+                        expr: Box::new(e_(IrExprKind::Var { id: er }, Ty::String)),
+                    }, res_ty.clone()),
+                },
+            ],
+        }, res_ty.clone())),
+    }, res_ty.clone());
+    wk.out.push(mk_worker_fn(&name, vec![(ev, "_e", value_ty.clone())], res_ty, body));
+    name
+}
+
+/// `T.__opt_dec_<mangle>(v, key) -> Result[Option[inner], String]` — decode
+/// for a FIELD-position Option whose inner is a container: missing/null →
+/// none, present → inner decode → some. Result-typed match chain, no Try.
+fn opt_field_dec_worker(wk: &mut CodecWk, inner: &Ty, value_ty: &Ty) -> String {
+    let name = format!("{}.__opt_dec_{}", wk.type_name, ty_mangle(inner));
+    if !wk.seen.insert(name.clone()) {
+        return name;
+    }
+    let opt_ty = Ty::option(inner.clone());
+    let res_ty = Ty::result(opt_ty.clone(), Ty::String);
+    let v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
+    let key = wk.vt.alloc(sym("_key"), Ty::String, Mutability::Let, None);
+    let fv = wk.vt.alloc(sym("_fv"), value_ty.clone(), Mutability::Let, None);
+    let x = wk.vt.alloc(sym("_x"), inner.clone(), Mutability::Let, None);
+    let er = wk.vt.alloc(sym("_er"), Ty::String, Mutability::Let, None);
+    let ok_none = || e_(IrExprKind::ResultOk {
+        expr: Box::new(e_(IrExprKind::OptionNone, opt_ty.clone())),
+    }, res_ty.clone());
+    let is_null = e_(IrExprKind::BinOp {
+        op: BinOp::Eq,
+        left: Box::new(e_(IrExprKind::Var { id: fv }, value_ty.clone())),
+        right: Box::new(call_mod_("value", "null", vec![], value_ty.clone())),
+    }, Ty::Bool);
+    let dec_inner = dec_result_expr(wk, e_(IrExprKind::Var { id: fv }, value_ty.clone()), inner, value_ty);
+    let present = e_(IrExprKind::If {
+        cond: Box::new(is_null),
+        then: Box::new(ok_none()),
+        else_: Box::new(e_(IrExprKind::Match {
+            subject: Box::new(dec_inner),
+            arms: vec![
+                IrMatchArm {
+                    pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: x, ty: inner.clone() }) },
+                    guard: None,
+                    body: e_(IrExprKind::ResultOk {
+                        expr: Box::new(e_(IrExprKind::OptionSome {
+                            expr: Box::new(e_(IrExprKind::Var { id: x }, inner.clone())),
+                        }, opt_ty.clone())),
+                    }, res_ty.clone()),
+                },
+                IrMatchArm {
+                    pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: er, ty: Ty::String }) },
+                    guard: None,
+                    body: e_(IrExprKind::ResultErr {
+                        expr: Box::new(e_(IrExprKind::Var { id: er }, Ty::String)),
+                    }, res_ty.clone()),
+                },
+            ],
+        }, res_ty.clone())),
+    }, res_ty.clone());
+    let body = e_(IrExprKind::Match {
+        subject: Box::new(call_mod_("value", "field", vec![
+            e_(IrExprKind::Var { id: v }, value_ty.clone()),
+            e_(IrExprKind::Var { id: key }, Ty::String),
+        ], Ty::result(value_ty.clone(), Ty::String))),
+        arms: vec![
+            IrMatchArm {
+                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: fv, ty: value_ty.clone() }) },
+                guard: None, body: present,
+            },
+            IrMatchArm {
+                pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                guard: None, body: ok_none(),
+            },
+        ],
+    }, res_ty.clone());
+    wk.out.push(mk_worker_fn(&name,
+        vec![(v, "_v", value_ty.clone()), (key, "_key", Ty::String)], res_ty, body));
+    name
 }
 
 /// Decode for an `Option[inner]` FIELD whose inner has no static
@@ -232,32 +619,23 @@ fn option_list_worker_name(type_name: &str, elem: &Ty) -> String {
 /// already covers. `Value` inner is the 3-state escape hatch: missing → none,
 /// present INCLUDING explicit null → some(v) — Value never interprets the
 /// wire, so `Option[Value]` distinguishes absent from null (unlike every other
-/// Option field, where the two collapse to none). `List[elem]` inner routes to
-/// the per-type worker `T.__opt_list_dec_<elem>` (see
-/// [`derive_option_list_workers`]) through the same `Try(Call)` bind shape as
-/// the static helpers.
-pub(super) fn decode_option_field_inline(vt: &mut VarTable, type_name: &str, payload: IrExpr, key: &str, inner_ty: &Ty, value_ty: &Ty) -> Option<IrExpr> {
-    if let Ty::Applied(TypeConstructorId::List, args) = inner_ty {
-        if args.len() == 1 {
-            let opt_ty = Ty::option(inner_ty.clone());
-            return Some(IrExpr {
-                kind: IrExprKind::Try { expr: Box::new(IrExpr {
-                    kind: IrExprKind::Call {
-                        target: CallTarget::Named { name: sym(&option_list_worker_name(type_name, &args[0])) },
-                        args: vec![payload, IrExpr { kind: IrExprKind::LitStr { value: key.to_string() }, ty: Ty::String, span: None, def_id: None }],
-                        type_args: vec![],
-                    },
-                    ty: Ty::result(opt_ty.clone(), Ty::String), span: None, def_id: None,
-                })},
-                ty: opt_ty, span: None, def_id: None,
-            });
-        }
+/// Option field, where the two collapse to none). A container inner routes to
+/// the per-type worker `T.__opt_dec_<mangle>` (see [`opt_field_dec_worker`])
+/// through the same `Try(Call)` bind shape as the static helpers.
+pub(super) fn decode_option_field_inline(wk: &mut CodecWk, payload: IrExpr, key: &str, inner_ty: &Ty, value_ty: &Ty) -> Option<IrExpr> {
+    if is_container_ty(inner_ty) {
+        let opt_ty = Ty::option(inner_ty.clone());
+        let name = opt_field_dec_worker(wk, inner_ty, value_ty);
+        return Some(e_(IrExprKind::Try { expr: Box::new(call_named_(&name, vec![
+            payload,
+            e_(IrExprKind::LitStr { value: key.to_string() }, Ty::String),
+        ], Ty::result(opt_ty.clone(), Ty::String))) }, opt_ty));
     }
     if !is_value_ty(inner_ty) {
         return None;
     }
     let opt_ty = Ty::option(inner_ty.clone());
-    let fv = vt.alloc(sym("_fv"), value_ty.clone(), Mutability::Let, None);
+    let fv = wk.vt.alloc(sym("_fv"), value_ty.clone(), Mutability::Let, None);
     let fv_expr = IrExpr { kind: IrExprKind::Var { id: fv }, ty: value_ty.clone(), span: None, def_id: None };
     let field_call = IrExpr {
         kind: IrExprKind::Call {
@@ -287,103 +665,12 @@ pub(super) fn decode_option_field_inline(vt: &mut VarTable, type_name: &str, pay
     })
 }
 
-/// Per-type decode workers for `Option[List[elem]]` fields:
-/// `T.__opt_list_dec_<elem>(v, key) -> Result[Option[List[elem]], String]`
-/// (dotted, so it rides the module-method rails like `T.__list_dec_go`).
-/// The body is a Result-typed match chain with NO Try inside: a Try nested in
-/// liftable branches breaks under branch-lift synthesis (it hoists into an
-/// Option-typed synthetic fn where `?` has no Result to propagate to), so the
-/// worker propagates by matching, stdlib-style, and the field site Try's the
-/// call like every other option helper.
-pub(super) fn derive_option_list_workers(vt: &mut VarTable, type_name: &str, field_tys: &[Ty]) -> Vec<IrFunction> {
-    let value_ty = Ty::Named(sym("Value"), vec![]);
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for fty in field_tys {
-        if !fty.is_option() { continue; }
-        let Some(inner) = fty.inner() else { continue };
-        let Ty::Applied(TypeConstructorId::List, args) = inner else { continue };
-        if args.len() != 1 { continue; }
-        let elem = args[0].clone();
-        if !seen.insert(list_elem_suffix(&elem)) { continue; }
-
-        let list_ty = inner.clone();
-        let opt_ty = Ty::option(list_ty.clone());
-        let res_ty = Ty::result(opt_ty.clone(), Ty::String);
-        let v = vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
-        let key = vt.alloc(sym("_key"), Ty::String, Mutability::Let, None);
-        let fv = vt.alloc(sym("_fv"), value_ty.clone(), Mutability::Let, None);
-        let xs = vt.alloc(sym("_xs"), list_ty.clone(), Mutability::Let, None);
-        let e = vt.alloc(sym("_e"), Ty::String, Mutability::Let, None);
-        let expr = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span: None, def_id: None };
-        let evar = |id, ty: &Ty| expr(IrExprKind::Var { id }, ty.clone());
-        let ok_of = |e: IrExpr| expr(IrExprKind::ResultOk { expr: Box::new(e) }, res_ty.clone());
-        let ok_none = || expr(IrExprKind::ResultOk { expr: Box::new(expr(IrExprKind::OptionNone, opt_ty.clone())) }, res_ty.clone());
-
-        let field_call = expr(IrExprKind::Call {
-            target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
-            args: vec![evar(v, &value_ty), evar(key, &Ty::String)],
-            type_args: vec![],
-        }, Ty::result(value_ty.clone(), Ty::String));
-        let is_null = expr(IrExprKind::BinOp {
-            op: BinOp::Eq,
-            left: Box::new(evar(fv, &value_ty)),
-            right: Box::new(expr(IrExprKind::Call {
-                target: CallTarget::Module { module: sym("value"), func: sym("null"), def_id: None },
-                args: vec![], type_args: vec![],
-            }, value_ty.clone())),
-        }, Ty::Bool);
-        let decode_match = expr(IrExprKind::Match {
-            subject: Box::new(decode_list_call(evar(fv, &value_ty), &list_ty, &elem)),
-            arms: vec![
-                IrMatchArm {
-                    pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: xs, ty: list_ty.clone() }) },
-                    guard: None,
-                    body: ok_of(expr(IrExprKind::OptionSome { expr: Box::new(evar(xs, &list_ty)) }, opt_ty.clone())),
-                },
-                IrMatchArm {
-                    pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: e, ty: Ty::String }) },
-                    guard: None,
-                    body: expr(IrExprKind::ResultErr { expr: Box::new(evar(e, &Ty::String)) }, res_ty.clone()),
-                },
-            ],
-        }, res_ty.clone());
-        let present = expr(IrExprKind::If {
-            cond: Box::new(is_null),
-            then: Box::new(ok_none()),
-            else_: Box::new(decode_match),
-        }, res_ty.clone());
-        let body = expr(IrExprKind::Match {
-            subject: Box::new(field_call),
-            arms: vec![
-                IrMatchArm { pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: fv, ty: value_ty.clone() }) }, guard: None, body: present },
-                IrMatchArm { pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) }, guard: None, body: ok_none() },
-            ],
-        }, res_ty.clone());
-
-        out.push(IrFunction {
-            name: sym(&option_list_worker_name(type_name, &elem)),
-            params: vec![
-                IrParam { var: v, ty: value_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] },
-                IrParam { var: key, ty: Ty::String, name: sym("_key"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] },
-            ],
-            ret_ty: res_ty,
-            body,
-            is_effect: false, is_test: false,
-            generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
-            doc: None, blank_lines_before: 0,
-            def_id: None,
-            mutated_params: vec![], module_origin: None,
-        });
-    }
-    out
-}
-
 /// Auto-derive Codec decode: `fn T.decode(v: Value) -> Result[T, String]`
-pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
+pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
+    let type_name = wk.type_name.to_string();
     let value_ty = Ty::Named(sym("Value"), vec![]);
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
-    let var_v = vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
+    let var_v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
 
     let mut stmts = Vec::new();
     let mut field_vars = Vec::new();
@@ -397,7 +684,7 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
         // field literally named `v` would shadow the document in the emitted
         // Rust and every later field would read the decoded value instead of
         // the doc ("expected Object" at runtime).
-        let field_var = vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
+        let field_var = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
 
         // value.field(_v, "key") — returns Result[Value, String]
         let get_field_call = IrExpr {
@@ -414,7 +701,7 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
 
         let decode_expr = if is_option {
             let payload = IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None };
-            if let Some(inline) = decode_option_field_inline(vt, type_name, payload.clone(), &key_name(f), &inner_ty, &value_ty) {
+            if let Some(inline) = decode_option_field_inline(wk, payload.clone(), &key_name(f), &inner_ty, &value_ty) {
                 inline
             } else {
             // Option[T]: use runtime helper value_decode_option(_v, "key", as_T)
@@ -458,7 +745,7 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
                 kind: IrExprKind::Try { expr: Box::new(get_field_call) },
                 ty: value_ty.clone(), span: None, def_id: None,
             };
-            decode_field_value(get_and_try, &f.ty, &value_ty)
+            dec_field_expr(wk, get_and_try, &f.ty, &value_ty)
         };
 
         stmts.push(IrStmt {
@@ -471,7 +758,7 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
     // ok(TypeName { field1: _field1, field2: _field2, ... })
     let record = IrExpr {
         kind: IrExprKind::Record {
-            name: Some(sym(type_name)),
+            name: Some(sym(&type_name)),
             // Each field value carries its DECLARED type — NOT Ty::Unknown. The v1 record
             // builder decides a field's heap-ness from `expr.ty` (binds_p3), so an Unknown
             // scalar field (`id: Int`) was mis-classified as heap → an rc_inc + i64.extend_i32_u

@@ -1,0 +1,3 @@
+expects_code = "E023"
+expects_error = "Result[Int"
+hint_substring = "named Codec type"

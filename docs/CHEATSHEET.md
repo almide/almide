@@ -568,9 +568,11 @@ Always pair a hand-written codec with a roundtrip test:
 `test "Event roundtrips" { assert_eq(Event.decode(Event.encode(C(Click{x:1,y:2}))), ok(C(Click{x:1,y:2}))) }`
 
 Codec field types are `String`/`Int`/`Float`/`Bool`/`Value`, other Codec
-types, and one level of `Option`/`List` of those. Anything else (Map, Bytes,
-tuples, sized ints, `Option[Option[T]]`, nested containers) is rejected at
-declaration — wrap it in a named Codec type or convert at the boundary.
+types, and any nesting of `Option`/`List` over those (`List[Option[Int]]`
+keeps element nulls; `Option[List[T]]` omits when none). Rejected at
+declaration: `Option[Option[T]]` (indistinguishable on the wire), `Option[Value]`
+outside field position, and non-wire leaves (Map, Bytes, tuples, sized ints,
+fn types, Result) — wrap those in a named Codec type or convert at the boundary.
 
 ## Key rules
 - Newline = statement separator (no semicolons needed)

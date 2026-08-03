@@ -6,9 +6,10 @@
 
 /// Auto-derive Variant Codec encode: Tagged format
 /// Circle(3.0) → Object([("Circle", Object([("radius", Float(3.0))]))])
-pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
+pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
+    let type_name = wk.type_name.to_string();
     let value_ty = Ty::Named(sym("Value"), vec![]);
-    let var = vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
+    let var = wk.vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
 
     // Build match arms for each variant case
     let arms: Vec<IrMatchArm> = cases.iter().map(|case| {
@@ -21,10 +22,10 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
                 let mut pat_vars = vec![];
                 let mut encode_elems = vec![];
                 for (i, field_ty) in fields.iter().enumerate() {
-                    let pv = vt.alloc(sym(&format!("_f{}", i)), field_ty.clone(), Mutability::Let, None);
+                    let pv = wk.vt.alloc(sym(&format!("_f{}", i)), field_ty.clone(), Mutability::Let, None);
                     pat_vars.push(IrPattern::Bind { var: pv, ty: field_ty.clone() });
                     let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: field_ty.clone(), span: None, def_id: None };
-                    encode_elems.push(encode_field_value(&field_expr, field_ty, &value_ty));
+                    encode_elems.push(enc_value_expr(wk, field_expr, field_ty, &value_ty));
                 }
                 (IrPattern::Constructor { name: case.name.to_string(), args: pat_vars },
                  IrExpr { kind: IrExprKind::Call { target: CallTarget::Module { module: sym("value"), func: sym("array"), def_id: None }, args: vec![IrExpr { kind: IrExprKind::List { elements: encode_elems }, ty: Ty::list(value_ty.clone()), span: None, def_id: None }], type_args: vec![] }, ty: value_ty.clone(), span: None, def_id: None })
@@ -35,12 +36,12 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
                 for f in fields {
                     // `_f_` prefix: see auto_derive_decode — a payload field named
                     // `v`/`tag`/`payload` must not shadow the fn's own locals.
-                    let pv = vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
+                    let pv = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
                     pat_fields.push(IrFieldPattern { name: f.name.to_string(), pattern: Some(IrPattern::Bind { var: pv, ty: f.ty.clone() }) });
                     let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: f.ty.clone(), span: None, def_id: None };
                     entries.push((f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()), f.ty.clone(), field_expr));
                 }
-                let pairs_arg = build_object_arg(vt, &entries, &value_ty);
+                let pairs_arg = build_object_arg(wk, &entries, &value_ty);
                 (IrPattern::RecordPattern { name: case.name.to_string(), fields: pat_fields, rest: false },
                  IrExpr { kind: IrExprKind::Call { target: CallTarget::Module { module: sym("value"), func: sym("object"), def_id: None }, args: vec![pairs_arg], type_args: vec![] }, ty: value_ty.clone(), span: None, def_id: None })
             }
@@ -80,19 +81,20 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
 
 /// Auto-derive Variant Codec decode: Tagged format
 /// {"Circle": {"radius": 3.0}} → Circle(3.0)
-pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
+pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
+    let type_name = wk.type_name.to_string();
     let value_ty = Ty::Named(sym("Value"), vec![]);
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
-    let var_v = vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
+    let var_v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
 
     // TUPLE-FREE tag/payload split (so neither side materializes a `(String, Value)` tuple the
     // trust-spine cannot lower): read the tag via `value.variant_tag(_v)` (Result[String, String])
     // and the payload via `value.field(_v, _tag)` (Result[Value, String]) — both simple Results the
     // trust-spine already lowers, wrapped as `match tag { ok(_tag) => match field { ok(_payload) =>
     // <if-chain>, err(e) => err(e) }, err(e) => err(e) }`.
-    let var_tag = vt.alloc(sym("_tag"), Ty::String, Mutability::Let, None);
-    let var_payload = vt.alloc(sym("_payload"), value_ty.clone(), Mutability::Let, None);
-    let var_e2 = vt.alloc(sym("_e2"), Ty::String, Mutability::Let, None);
+    let var_tag = wk.vt.alloc(sym("_tag"), Ty::String, Mutability::Let, None);
+    let var_payload = wk.vt.alloc(sym("_payload"), value_ty.clone(), Mutability::Let, None);
+    let var_e2 = wk.vt.alloc(sym("_e2"), Ty::String, Mutability::Let, None);
 
     // Build if-else chain: if tag == "Circle" then ... else if tag == "Rect" then ... else err
     let mut else_expr = IrExpr {
@@ -128,7 +130,7 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                 // Bind `_arr = value.as_array(payload)?`, decode each element by its
                 // field type, then `Ok(Ctor(e0, e1, …))`.
                 let arr_ty = Ty::list(value_ty.clone());
-                let arr_var = vt.alloc(sym("_arr"), arr_ty.clone(), Mutability::Let, None);
+                let arr_var = wk.vt.alloc(sym("_arr"), arr_ty.clone(), Mutability::Let, None);
                 let as_array = IrExpr {
                     kind: IrExprKind::Try { expr: Box::new(IrExpr {
                         kind: IrExprKind::Call {
@@ -153,8 +155,8 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                         },
                         ty: value_ty.clone(), span: None, def_id: None,
                     };
-                    let decoded = decode_field_value(elem, field_ty, &value_ty);
-                    let ev = vt.alloc(sym(&format!("_e{}", i)), field_ty.clone(), Mutability::Let, None);
+                    let decoded = dec_field_expr(wk, elem, field_ty, &value_ty);
+                    let ev = wk.vt.alloc(sym(&format!("_e{}", i)), field_ty.clone(), Mutability::Let, None);
                     stmts.push(IrStmt {
                         kind: IrStmtKind::Bind { var: ev, mutability: Mutability::Let, ty: field_ty.clone(), value: decoded },
                         span: None,
@@ -191,7 +193,7 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                     let decoded = if f.ty.is_option() {
                         let inner_ty = f.ty.inner().cloned().unwrap_or_else(|| f.ty.clone());
                         let payload = IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None };
-                        if let Some(inline) = decode_option_field_inline(vt, type_name, payload.clone(), &key, &inner_ty, &value_ty) {
+                        if let Some(inline) = decode_option_field_inline(wk, payload.clone(), &key, &inner_ty, &value_ty) {
                             inline
                         } else {
                         IrExpr {
@@ -224,9 +226,9 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                             })},
                             ty: value_ty.clone(), span: None, def_id: None,
                         };
-                        decode_field_value(get_field, &f.ty, &value_ty)
+                        dec_field_expr(wk, get_field, &f.ty, &value_ty)
                     };
-                    let fv = vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
+                    let fv = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
                     stmts.push(IrStmt {
                         kind: IrStmtKind::Bind { var: fv, mutability: Mutability::Let, ty: f.ty.clone(), value: decoded },
                         span: None,

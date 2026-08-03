@@ -84,6 +84,18 @@ fn record_drop_field_frees(
     let mut frees = String::new();
     for (i, ty) in field_tys.iter().enumerate() {
         let off = layout::slot_offset(i);
+        // An Option block IS a 0-or-1-element len-tag list block, so an
+        // `Option[T]` field frees EXACTLY like a `List[T]` field — normalize
+        // before classification so the two can never drift (#1064; the old
+        // catch-all flat rc_dec LEAKED a some(<heap>) payload).
+        let normalized;
+        let ty = match ty {
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+                normalized = Ty::Applied(TypeConstructorId::List, a.clone());
+                &normalized
+            }
+            other => other,
+        };
         match ty {
             Ty::String => {
                 frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
@@ -427,7 +439,9 @@ fn __drop_list_str_loop(h: Int, n: Int, i: Int) -> Unit =
 /// which never appear in `type_decls`).
 fn is_list_str_field(t: &Ty, flat_names: &std::collections::HashSet<String>) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
-    matches!(t, Ty::Applied(TypeConstructorId::List, a)
+    // `Option[String]` / `Option[<flat variant>]` fields free through the SAME
+    // `__drop_list_str` sweep (the Option→List drop normalization, #1064).
+    matches!(t, Ty::Applied(TypeConstructorId::List, a) | Ty::Applied(TypeConstructorId::Option, a)
         if a.len() == 1
             && (matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_names)))
 }

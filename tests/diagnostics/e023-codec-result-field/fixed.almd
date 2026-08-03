@@ -1,0 +1,4 @@
+// The fix: an Option carries presence; a Codec variant carries alternatives.
+type R: Codec = { r: Option[Int] }
+
+fn main() -> Unit = println("ok")

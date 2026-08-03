@@ -1,0 +1,4 @@
+// The fix: Value elements carry explicit nulls without a wrapper.
+type L: Codec = { xs: List[Value] }
+
+fn main() -> Unit = println("ok")
