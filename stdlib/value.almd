@@ -22,6 +22,8 @@ fn bool(b: Bool) -> Value = _
 @intrinsic("almide_rt_value_float")
 fn float(f: Float) -> Value = _
 
+// #1075: retired alias of `field` (E040, one release) — `get` means Option
+// everywhere else (map.get / list.get). Drops with the table + gate.
 @intrinsic("almide_rt_value_field")
 fn get(v: Value, key: String) -> Result[Value, String] = _
 

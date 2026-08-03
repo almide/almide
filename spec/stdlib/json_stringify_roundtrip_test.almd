@@ -6,16 +6,16 @@ let NL = string.from_codepoint(10)
 
 test "stringify round-trips through parse" {
   let original = "hello" + NL + "world"
-  let stringified = json.stringify(json.from_string(original))
+  let stringified = json.stringify(value.str(original))
   match json.parse(stringified) {
-    ok(parsed) => assert_eq(json.as_string(parsed) |> option.unwrap_or(""), original),
+    ok(parsed) => assert_eq(value.as_string(parsed)? |> option.unwrap_or(""), original),
     err(e) => assert(false),
   }
 }
 
 test "stringify object with newline value" {
   let msg = "hello" + NL + "world"
-  let obj = json.object([("msg", json.from_string(msg))])
+  let obj = value.object([("msg", value.str(msg))])
   let s = json.stringify(obj)
   match json.parse(s) {
     ok(parsed) => assert_eq(json.get_string(parsed, "msg") |> option.unwrap_or(""), msg),

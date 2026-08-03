@@ -299,3 +299,75 @@ effect fn main() -> Unit = {
     let after = std::fs::read_to_string(&path).unwrap();
     assert!(after.contains("translate_into"), "`into` was clipped:\n{}", after);
 }
+
+// ---- #1075: retired json.*/value.* alias migration ----
+
+#[test]
+fn fix_migrates_retired_dynamic_aliases() {
+    let path = write_tmp("fix_retired_aliases.almd", r#"import json
+
+fn main() -> Unit = {
+  let v = json.object([("a", json.from_int(1))])
+  let n = json.as_int(json.get(v, "a") ?? json.null())
+  let ks = value.get(v, "a")
+  println("${list.len(json.keys(v))} ${n ?? 0}")
+}
+"#);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    // ctors: plain renames
+    assert!(after.contains("value.object("), "object not migrated:\n{}", after);
+    assert!(after.contains("value.int(1)"), "from_int not migrated:\n{}", after);
+    assert!(after.contains("value.keys(v)"), "keys not migrated:\n{}", after);
+    // narrow: `?` appended — except directly under `??`, where the Result
+    // unwraps natively (`json.get(v,"a") ?? d` → `value.field(v,"a") ?? d`)
+    assert!(after.contains(r#"value.as_int(value.field(v, "a") ?? value.null())?"#),
+        "narrow chain wrong:\n{}", after);
+    // intra-module: value.get → value.field, no `?`
+    assert!(after.contains(r#"let ks = value.field(v, "a")"#), "value.get not migrated:\n{}", after);
+    // no deprecated spelling survives
+    for old in ["json.object(", "json.from_int(", "json.as_int(", "json.get(", "json.null(", "json.keys(", "value.get("] {
+        assert!(!after.contains(old), "{} survived:\n{}", old, after);
+    }
+}
+
+#[test]
+fn e040_warns_with_survivor_fixit() {
+    let path = write_tmp("e040_warn.almd", r#"import json
+
+fn main() -> Unit = {
+  let v = json.null()
+  println(json.stringify(v))
+}
+"#);
+    let out = Command::new(almide()).args(["check", &path]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("warning[E040]"), "no E040:\n{}", stderr);
+    assert!(stderr.contains("value.null"), "hint misses survivor:\n{}", stderr);
+    // the survivor spelling itself must NOT warn
+    assert!(!stderr.contains("json.stringify is retired"), "format fn wrongly retired:\n{}", stderr);
+    assert!(out.status.success(), "warnings must not fail the check: {}", stderr);
+}
+
+#[test]
+fn fix_never_formats_a_parse_error_file_from_the_recovered_ast() {
+    // #1077: parser recovery DROPS broken regions; formatting that AST and
+    // writing it back deletes the user's code. AST-level fixes must wait
+    // for a clean parse — the broken decl survives verbatim.
+    let src = r#"import json
+
+fn helper(x: Int) -> Int = x + )broken(
+
+fn main() -> Unit = {
+  println(json.stringify(json.null()))
+}
+"#;
+    let path = write_tmp("fix_parse_error_no_loss.almd", src);
+    let _ = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains(")broken("), "broken region deleted:\n{}", after);
+    assert!(after.contains("fn helper"), "helper decl deleted:\n{}", after);
+    // the deprecated call is intentionally NOT migrated while the parse is broken
+    assert!(after.contains("json.null()"), "AST rewrite ran on a broken parse:\n{}", after);
+}

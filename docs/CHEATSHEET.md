@@ -508,7 +508,7 @@ type OtlpSpan: Codec = {
   startTimeUnixNano: String,
 }
 // send:    http.request("POST", url, json.stringify(OtlpSpan.encode(s)), headers)
-// receive: OtlpSpan.decode(json.parse(body) ?? json.null())
+// receive: OtlpSpan.decode(json.parse(body) ?? value.null())
 ```
 Domain logic that wants Almide-shaped names defines its own type and maps in
 plain code (a constructor call — the checker verifies every field). Use the
@@ -533,7 +533,7 @@ AnyValue { stringValue: some("hi") }  // → {"stringValue":"hi"} — exactly on
 **Rule 3 — `Value` is the escape hatch.** A `Value` field passes through
 verbatim in both directions (nested docs, explicit nulls). `Option[Value]` is
 the ONE place absent and null differ: missing → `none`, explicit `null` →
-`some(json.null())` — use it for RFC-7386-style patch semantics.
+`some(value.null())` — use it for RFC-7386-style patch semantics.
 
 **Rule 4 — foreign variant shapes are hand-written codecs.** The derived
 variant form is externally tagged (`{"Click": {...}}`). For an API that tags

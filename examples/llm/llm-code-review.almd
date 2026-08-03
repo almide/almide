@@ -10,12 +10,12 @@ import fs
 import json
 
 effect fn main() -> Unit = {
-  let read_file_tool = almai.Tool { name: "read_file", description: "Read the contents of a source file", parameters: json.object([
-    ("type", json.from_string("object")),
-    ("properties", json.object([
-      ("path", json.object([("type", json.from_string("string")), ("description", json.from_string("File path to read"))]))
+  let read_file_tool = almai.Tool { name: "read_file", description: "Read the contents of a source file", parameters: value.object([
+    ("type", value.str("object")),
+    ("properties", value.object([
+      ("path", value.object([("type", value.str("string")), ("description", value.str("File path to read"))]))
     ])),
-    ("required", json.array([json.from_string("path")]))
+    ("required", value.array([value.str("path")]))
   ]) }
   let opts = almai.defaults() |> almai.with_system("You are a code reviewer. Review Almide source files for quality, correctness, and style.") |> almai.with_tools([read_file_tool])
   let model = "anthropic/claude-sonnet-4-6"

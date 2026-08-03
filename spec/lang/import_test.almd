@@ -44,7 +44,7 @@ test "math via UFCS" {
 
 // ── json module (requires import) ──
 test "json stringify" {
-  let v = json.object([("name", json.from_string("Alice"))])
+  let v = value.object([("name", value.str("Alice"))])
   let s = json.stringify(v)
   assert_eq(s.contains("Alice"), true)
 }

@@ -13,7 +13,7 @@ fn unwrap_or_null(r: Result[Value, String]) -> Value = match r {
   err(_) => value.null(),
 }
 
-fn gs(v: Value, key: String) -> String = value.as_string(value.get(v, key) ?? value.null()) ?? ""
+fn gs(v: Value, key: String) -> String = value.as_string(value.field(v, key) ?? value.null()) ?? ""
 
 test "never-err effect call as a first-class Result argument" {
   let v = unwrap_or_null(mk())
@@ -43,7 +43,7 @@ else {
 }
 
 test "can-err effect call as a first-class Result argument" {
-  let got = value.as_string(value.get(unwrap_or_null(mk_v(true)), "name") ?? value.null()) ?? ""
+  let got = value.as_string(value.field(unwrap_or_null(mk_v(true)), "name") ?? value.null()) ?? ""
   assert_eq(got, "Alice")
   let fell_back = match mk_v(false) {
     ok(_) => "ok",

@@ -7,22 +7,22 @@
 import json
 
 fn main() -> Unit = {
-  let v = json.object([
-    ("name", json.from_string("almide")),
-    ("nums", json.array([json.from_int(1), json.from_int(2), json.from_int(3)])),
-    ("nested", json.object([("x", json.from_int(10)), ("y", json.from_bool(true))])),
-    ("empty_arr", json.array([])),
-    ("empty_obj", json.object([])),
-    ("flag", json.from_bool(false)),
-    ("ratio", json.from_float(2.5))
+  let v = value.object([
+    ("name", value.str("almide")),
+    ("nums", value.array([value.int(1), value.int(2), value.int(3)])),
+    ("nested", value.object([("x", value.int(10)), ("y", value.bool(true))])),
+    ("empty_arr", value.array([])),
+    ("empty_obj", value.object([])),
+    ("flag", value.bool(false)),
+    ("ratio", value.float(2.5))
   ])
   println(json.stringify_pretty(v))
   // top-level array + scalar
-  println(json.stringify_pretty(json.array([json.from_string("a"), json.from_string("b")])))
-  println(json.stringify_pretty(json.from_int(42)))
+  println(json.stringify_pretty(value.array([value.str("a"), value.str("b")])))
+  println(json.stringify_pretty(value.int(42)))
   // Combining-mark strings/keys stay RAW UTF-8 under the canonical 5-escape
   // rule (the {:?} escape_debug path emitted `\u{301}` — invalid JSON and a
   // byte divergence vs the wasm leg; differential-fuzz).
-  let accents = json.object([("café", json.from_string("éclair")), ('quoted"key', json.from_string("tab\there"))])
+  let accents = value.object([("café", value.str("éclair")), ('quoted"key', value.str("tab\there"))])
   println(json.stringify_pretty(accents))
 }

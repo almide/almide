@@ -10,7 +10,7 @@
 import json
 
 fn push_obj(root: Value, key: String) -> Value = {
-  let arr = value.as_array(value.get(root, key) ?? value.object([])) ?? []
+  let arr = value.as_array(value.field(root, key) ?? value.object([])) ?? []
   value.merge(root, value.object([
     (key, value.array(arr + [
       value.object([])
@@ -19,7 +19,7 @@ fn push_obj(root: Value, key: String) -> Value = {
 }
 
 fn set_last(root: Value, key: String, item_key: String, v: Value) -> Value = {
-  let items = value.as_array(value.get(root, key) ?? value.object([])) ?? []
+  let items = value.as_array(value.field(root, key) ?? value.object([])) ?? []
   let idx = list.len(items) - 1
   if idx >= 0 then {
     let updated = list.set(items, idx, value.merge(list.get(items, idx) ?? value.object([]), value.object([(item_key, v)])))
@@ -39,12 +39,12 @@ fn main() -> Unit = {
   println(json.stringify(src))
   // json.keys elements alias the object's key strings — binding one must not
   // free the object's live key.
-  let keys = json.keys(src)
+  let keys = value.keys(src)
   println(list.get(keys, 0) ?? "?")
   println(keys |> list.join(","))
   println(json.stringify(src))
   // value.get ok payload is shared with the object.
-  let inner = value.get(src, "q") ?? value.null()
+  let inner = value.field(src, "q") ?? value.null()
   println(value.stringify(inner))
   println(json.stringify(src))
   // The toml array-of-tables build shape: incremental merge into nested arrays.

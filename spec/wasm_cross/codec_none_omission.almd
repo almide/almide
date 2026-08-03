@@ -18,7 +18,7 @@ fn main() -> Unit = {
   println(json.stringify(Attr.encode(Attr { intValue: some("42") })))
   // none omits (parent/extra/tags), Value verbatim (nested null preserved),
   // list elements keep null.
-  let sub = json.parse('{"a":[1,2],"b":null}') ?? json.null()
+  let sub = json.parse('{"a":[1,2],"b":null}') ?? value.null()
   let d = Doc { id: "d1", parent: none, meta: sub, extra: none, items: [value.int(1), value.null()], tags: none }
   println(json.stringify(Doc.encode(d)))
   // some(...) emits in declaration position; some(null) emits an explicit null.
@@ -26,7 +26,7 @@ fn main() -> Unit = {
   println(json.stringify(Doc.encode(d2)))
   // decode: missing → none for Option fields, EXCEPT Option[Value], which
   // distinguishes absent (none) from explicit null (some(null)).
-  match Doc.decode(json.parse('{"id":"x","meta":5,"items":[]}') ?? json.null()) {
+  match Doc.decode(json.parse('{"id":"x","meta":5,"items":[]}') ?? value.null()) {
     ok(v) => {
       let p = match v.parent {
         some(_) => "some",
@@ -44,7 +44,7 @@ fn main() -> Unit = {
     },
     err(e) => println("err ${e}"),
   }
-  match Doc.decode(json.parse('{"id":"x","meta":5,"items":[],"parent":null,"extra":null,"tags":null}') ?? json.null()) {
+  match Doc.decode(json.parse('{"id":"x","meta":5,"items":[],"parent":null,"extra":null,"tags":null}') ?? value.null()) {
     ok(v) => {
       let p = match v.parent {
         some(_) => "some",

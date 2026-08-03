@@ -77,9 +77,9 @@ fn scope_bind(env2: Value, pairs: List[(Value, Value)]) -> Value = match list.fi
 
 fn scope_child(parent: Value, names: List[Value], vals: List[Value]) -> Value = scope_bind(value.object([("#parent", parent)]), list.zip(names, vals))
 
-fn scope_chain_get(env: Value, name: String) -> Result[Value, String] = match value.get(env, name) {
+fn scope_chain_get(env: Value, name: String) -> Result[Value, String] = match value.field(env, name) {
   ok(v) => ok(v),
-  err(e) => match value.get(env, "#parent") {
+  err(e) => match value.field(env, "#parent") {
     ok(p) => scope_chain_get(p, name),
     err(_) => err(e),
   },
@@ -92,7 +92,7 @@ fn scope_chain_get(env: Value, name: String) -> Result[Value, String] = match va
 // operator names (+, car, …) reach `apply` as plain symbols.
 fn scope_get(env: Value, name: String, genv: Value) -> Value = match scope_chain_get(env, name) {
   ok(v) => v,
-  err(_) => match value.get(genv, name) {
+  err(_) => match value.field(genv, name) {
     ok(v) => v,
     err(_) => value.str(name),
   },

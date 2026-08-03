@@ -336,7 +336,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
     let keys_ty = Ty::list(Ty::String);
     let keys_call = IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("json"), func: sym("keys"), def_id: None },
+            target: CallTarget::Module { module: sym("value"), func: sym("keys"), def_id: None },
             args: vec![IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None }],
             type_args: vec![],
         },

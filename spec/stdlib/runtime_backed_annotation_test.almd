@@ -16,12 +16,12 @@ test "HttpResponse is annotatable in a typed helper" {
 }
 
 test "JsonPath is annotatable in a typed helper" {
-  let obj = json.object([
-    ("a", json.object([("b", json.from_int(3))]))
+  let obj = value.object([
+    ("a", value.object([("b", value.int(3))]))
   ])
   let p = extend(extend(json.root(), "a"), "b")
   match json.get_path(obj, p) {
-    some(v) => assert_eq(json.as_int(v), some(3)),
+    some(v) => assert_eq(value.as_int(v)?, some(3)),
     none => assert(false, "path should hit"),
   }
 }

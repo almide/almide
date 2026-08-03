@@ -23,6 +23,15 @@ fn parse(text: String) -> Result[Value, String] = _
 @intrinsic("almide_rt_json_stringify")
 fn stringify(v: Value) -> String = _
 
+
+// ── #1075: retired aliases (E040 deprecation window, one release) ──
+// Everything below this point up to the path API is a second name for a
+// `value.*` operation and drops next release together with the
+// RETIRED_DYNAMIC_ALIASES table (almide-types/stdlib_info.rs) and the
+// namespace gate (tests/stdlib_namespace_gate_test.rs). json keeps the
+// FORMAT (parse / stringify / stringify_pretty), the path API and the
+// typed-key conveniences; the data model lives on value.*.
+
 @intrinsic("almide_json_get")
 fn get(j: Value, key: String) -> Option[Value] = _
 

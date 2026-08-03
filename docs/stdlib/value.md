@@ -1,10 +1,21 @@
 # value
 
-Dynamic value manipulation. auto-imported.
+The dynamic `Value` **data model**: constructors and accessors.
+auto-imported. The `json` module is the format over it
+(`json.parse` / `json.stringify`) — see [json.md](./json.md).
 
-### `value.get(v: Value, key: String) -> Result[Value, String]`
+### `value.field(v: Value, key: String) -> Result[Value, String]`
 
-Get a field from a Value object by key. Returns err if missing.
+Get a field from a Value object by key. `err("expected Object")` on a
+non-Object subject, `err("missing field '<k>'")` when absent. For an
+Option instead, apply `?`: `value.field(v, k)?`.
+
+(`value.get` is a retired alias of this fn — E040, one release. `get` means
+Option everywhere else: `map.get` / `list.get`.)
+
+### `value.keys(v: Value) -> List[String]`
+
+All keys of a Value object, `[]` for non-Objects.
 
 ### `value.as_string(v: Value) -> Result[String, String]`
 

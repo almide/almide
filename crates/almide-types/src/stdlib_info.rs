@@ -84,6 +84,59 @@ pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
     })
 }
 
+/// How a retired dynamic-surface alias maps onto its survivor.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RetiredAliasKind {
+    /// Same signature, same behavior — a plain name swap.
+    Rename,
+    /// The survivor returns `Result` where the alias returned `Option`:
+    /// swap the name AND append `?` (the Result→Option conversion) to the
+    /// call, which preserves the expression's type exactly.
+    RenameAndNarrow,
+}
+
+/// #1075: the dynamic surface had two module names for one concept. The
+/// survivor split — `value.*` is the DATA MODEL (constructors/accessors),
+/// `json.*` is the FORMAT over it (parse / stringify / pretty, plus the
+/// json-branded path and typed-key conveniences) — retires every fn that
+/// was reachable under two names. `value.get` is retired inside its own
+/// module too: `value.field` is the same native intrinsic with the safer
+/// wasm lowering (Object-tag guard), and `get → Option` is the convention
+/// everywhere else (`map.get` / `list.get`), which made a Result-returning
+/// `value.get` a false friend.
+///
+/// One release of E040 warnings with a mechanical `almide fix` rewrite,
+/// then the aliases drop. This table is the single source of truth: the
+/// checker's warning, `almide fix`'s rewrite, and the namespace gate
+/// (`tests/stdlib_namespace_gate_test.rs`) all read it, so the drop
+/// release deletes the aliases and this table together and the gate then
+/// enforces the end state (no fn reachable under two module names).
+pub const RETIRED_DYNAMIC_ALIASES: &[(&str, &str, RetiredAliasKind)] = &[
+    ("json.null", "value.null", RetiredAliasKind::Rename),
+    ("json.object", "value.object", RetiredAliasKind::Rename),
+    ("json.array", "value.array", RetiredAliasKind::Rename),
+    ("json.keys", "value.keys", RetiredAliasKind::Rename),
+    ("json.from_string", "value.str", RetiredAliasKind::Rename),
+    ("json.from_int", "value.int", RetiredAliasKind::Rename),
+    ("json.from_bool", "value.bool", RetiredAliasKind::Rename),
+    ("json.from_float", "value.float", RetiredAliasKind::Rename),
+    ("json.as_string", "value.as_string", RetiredAliasKind::RenameAndNarrow),
+    ("json.as_int", "value.as_int", RetiredAliasKind::RenameAndNarrow),
+    ("json.as_float", "value.as_float", RetiredAliasKind::RenameAndNarrow),
+    ("json.as_bool", "value.as_bool", RetiredAliasKind::RenameAndNarrow),
+    ("json.as_array", "value.as_array", RetiredAliasKind::RenameAndNarrow),
+    ("json.get", "value.field", RetiredAliasKind::RenameAndNarrow),
+    ("value.get", "value.field", RetiredAliasKind::Rename),
+];
+
+/// Look up a retired dynamic-surface alias by its qualified name.
+pub fn retired_dynamic_alias(name: &str) -> Option<(&'static str, RetiredAliasKind)> {
+    RETIRED_DYNAMIC_ALIASES
+        .iter()
+        .find(|(old, _, _)| *old == name)
+        .map(|(_, new, kind)| (*new, *kind))
+}
+
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
     STDLIB_MODULES.contains(&name)
