@@ -12,6 +12,53 @@ impl LowerCtx {
     /// source order. `Ok(None)` means "not my group" — the router tries the groups
     /// in that order, so which rule an argument takes is unchanged, and an `Err`
     /// still aborts the whole call as before.
+    /// A lambda ARGUMENT (`list.map(xs, (x) => x + n)`): LIFT it to a fresh
+    /// `__lambda_*` function and pass its CLOSURE BLOCK (a borrowed heap
+    /// handle — fnidx in slot 0, captures in slots 1…); the callee invokes it
+    /// via `Op::CallIndirect`. A lambda outside the liftable subset is
+    /// rejected (an empty deferred closure env would be a silent miscompile).
+    fn lambda_call_arg(&mut self, params: &[(VarId, Ty)], body: &IrExpr) -> Result<CallArg, LowerError> {
+        Ok(
+    match self.lift_lambda(params, body) {
+        Some(blk) => CallArg::Handle(blk),
+        // A lambda OUTSIDE the liftable subset would materialize a
+        // deferred `Init::Opaque` (an EMPTY closure env) and pass it to
+        // the callee, which would invoke garbage = a SILENT MISCOMPILE.
+        // Reject.
+        None => {
+            return Err(LowerError::Unsupported(
+                "lambda outside the liftable subset in a call-argument \
+                 position (would pass an empty deferred closure env)"
+                    .into(),
+            ))
+        }
+    })
+    }
+
+    /// A STRING INTERPOLATION argument over the executable subset — a fresh
+    /// owned String via the __str_concat chain, borrowed into the call and
+    /// dropped at scope end; a non-lowerable interp is rejected (the callee
+    /// would read an empty deferred String). Comments verbatim.
+    fn string_interp_call_arg(&mut self, parts: &[almide_ir::IrStringPart], ty: &Ty) -> Result<CallArg, LowerError> {
+        let repr = repr_of(ty)?;
+        Ok(
+    match self.try_lower_string_interp(parts) {
+        Some(dst) => self.materialized_call_arg(dst, repr, ty),
+        // A non-lowerable interp as a call ARGUMENT would materialize a
+        // deferred `Init::Opaque` (an EMPTY String) and BORROW it into the
+        // call — the callee reads zero bytes = a SILENT MISCOMPILE. Reject
+        // explicitly so the enclosing function walls cleanly instead of
+        // emitting wrong output.
+        None => {
+            return Err(LowerError::Unsupported(
+                "non-lowerable string interpolation in a call-argument position \
+                 (would borrow an empty deferred String)"
+                    .into(),
+            ))
+        }
+    })
+    }
+
     fn lower_call_arg_leaf(
         &mut self,
         a: &IrExpr,
@@ -45,22 +92,7 @@ impl LowerCtx {
             // it via `Op::CallIndirect` through its function-typed param. This is
             // the call-site half of higher-order self-host (`list.map`/`filter`/
             // `fold`), capturing lambdas included (scalar captures).
-            IrExprKind::Lambda { params, body, .. } => {
-                match self.lift_lambda(params, body) {
-                    Some(blk) => CallArg::Handle(blk),
-                    // A lambda OUTSIDE the liftable subset would materialize a
-                    // deferred `Init::Opaque` (an EMPTY closure env) and pass it to
-                    // the callee, which would invoke garbage = a SILENT MISCOMPILE.
-                    // Reject.
-                    None => {
-                        return Err(LowerError::Unsupported(
-                            "lambda outside the liftable subset in a call-argument \
-                             position (would pass an empty deferred closure env)"
-                                .into(),
-                        ))
-                    }
-                }
-            }
+            IrExprKind::Lambda { params, body, .. } => self.lambda_call_arg(params, body)?,
             // A STRING INTERPOLATION argument (`println("x=${n}")`, `f("hi ${s}")`)
             // over the executable subset — lowered to a fresh owned String via the
             // __str_concat chain, borrowed into the call and dropped at scope end
@@ -69,24 +101,7 @@ impl LowerCtx {
             // deferred `Alloc{Opaque}` below (its inner calls recorded as elided),
             // unchanged. (This is the highest-traffic interp position — every
             // `println("…${x}…")` real program uses it.)
-            IrExprKind::StringInterp { parts } => {
-                let repr = repr_of(&a.ty)?;
-                match self.try_lower_string_interp(parts) {
-                    Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
-                    // A non-lowerable interp as a call ARGUMENT would materialize a
-                    // deferred `Init::Opaque` (an EMPTY String) and BORROW it into the
-                    // call — the callee reads zero bytes = a SILENT MISCOMPILE. Reject
-                    // explicitly so the enclosing function walls cleanly instead of
-                    // emitting wrong output.
-                    None => {
-                        return Err(LowerError::Unsupported(
-                            "non-lowerable string interpolation in a call-argument position \
-                             (would borrow an empty deferred String)"
-                                .into(),
-                        ))
-                    }
-                }
-            }
+            IrExprKind::StringInterp { parts } => self.string_interp_call_arg(parts, &a.ty)?,
             // An Option/Result CONSTRUCTOR argument (`f(Some(8))`, `g(Ok(y))`,
             // `h(Err("e"))`, `k(None)`) materializes a REAL tagged block via
             // `try_lower_option_ctor` — the SAME `OptSome`/`OptNone`/DynListStr-Result
