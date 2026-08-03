@@ -5,6 +5,103 @@ impl LowerCtx {
     /// member, tracked var …) and classify its Option/Result repr. Returns `None`
     /// AFTER rolling back to the given marks (the caller's rollback discipline).
     /// Verbatim text move (#781).
+    /// Option-subject tracking of [`Self::variant_match_subject`] — the
+    /// self-host / user-fn Option call cases. Bodies + comments verbatim.
+    fn track_option_subject(&mut self, subj: ValueId, subject: &IrExpr, is_named_call: bool) {
+    if is_self_host_option_call(subject)
+        || (is_named_call
+            && crate::lower::is_variant_ty(&subject.ty)
+            && !crate::lower::is_result_ty(&subject.ty))
+    {
+        self.materialized_options.insert(subj);
+        // An `Option[heap]` (`list.first(path): Option[String]` — toml set_nested's
+        // `match list.first(path)`) OWNS its payload: track it as a nested-ownership list so the
+        // Some-payload bind reads the borrowed element handle AND the scope-end drop is the
+        // recursive DropListStr (mirrors control.rs:100 for the statement-match path).
+        if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+            self.heap_elem_lists.insert(subj);
+        }
+    }
+    }
+
+    /// Scalar-Result-subject tracking (len-as-tag @4) — self-host / Named /
+    /// effect-result cases, with the Camp-4 sub-case-1 heap-Err routing.
+    fn track_scalar_result_subject(&mut self, subj: ValueId, subject: &IrExpr, is_named_call: bool, used_effect_subj: bool) {
+    if (is_self_host_result_call(subject) && !Self::is_heap_ok_result(&subject.ty))
+        || (is_named_call
+            && crate::lower::is_result_ty(&subject.ty)
+            && !Self::is_heap_ok_result(&subject.ty))
+        // An EFFECT-result subject (process.kill / RuntimeCall) with a SCALAR-Ok / heap-Err
+        // Result is tracked the SAME as a scalar self-host/Named result: len-as-tag @4, Err arm
+        // binds slot-0 String, subject drops via DropListStr (the case-A heap_elem_lists below).
+        // The self-host list is guarded by TYPE too: `result.collect`/`result.map` are listed
+        // there but return a HEAP-Ok Result for heap payloads — cap-as-tag, NOT len-as-tag —
+        // which the str-result branch below now tracks (reading @4 misdispatched EVERY heap-Ok
+        // collect to the Err arm — the parse_all List[Int]-as-List[String] garbage join).
+        || (used_effect_subj && !Self::is_heap_ok_result(&subject.ty))
+    {
+        self.materialized_results.insert(subj);
+        // Camp-4 sub-case 1 — a SCALAR-Ok / HEAP-Err `Result[Int, String]` (char_to_val; the
+        // unwrap-`!`-desugar's `err($x) => err($x)` re-wrap). The len-as-tag read stays @4
+        // (materialized_results, NOT _str), but ALSO track heap_elem_lists so (a) the Err arm's
+        // String payload bind is ADMITTED (heap_or_scalar_bind) and (b) the subject drops via
+        // `DropListStr` — EXACTLY right for this layout: Ok=len0 frees nothing (the int is scalar),
+        // Err=len1 frees slot-0's String. Gated to scalar-Ok + heap-Err so a heap-Ok Result (a
+        // different layout) is untouched. The Err arm move-out auto-`Dup`s in lower_heap_result_arm,
+        // so drop-subject-after frees slot-0 once (no double-free — gate-checked).
+        if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = &subject.ty {
+            if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
+                self.heap_elem_lists.insert(subj);
+            }
+        }
+    }
+    }
+
+    /// Heap-Ok (str-result, cap-as-tag @16) subject tracking, incl. the
+    /// HOLE-1 record-Ok recursive-drop routing. Bodies + comments verbatim.
+    fn track_str_result_subject(&mut self, subj: ValueId, subject: &IrExpr, is_named_call: bool, used_effect_subj: bool) {
+    if is_self_host_result_str_call(subject)
+        || (is_named_call && Self::is_heap_ok_result(&subject.ty))
+        // An EFFECT-result subject with a HEAP-Ok Result (String/Value/List[Value]/tuple-Ok —
+        // `effect_unwrap_admitted` already excluded RECORD-Ok; the by-type dispatch below is exact).
+        || (used_effect_subj && Self::is_heap_ok_result(&subject.ty))
+        // Any OTHER self-host Module call with a HEAP-Ok Result (`result.collect` /
+        // `result.map` over a heap payload — listed len-as-tag but cap-as-tag for these
+        // instantiations): TYPE decides the repr, not the list. Every heap-Ok Result is
+        // BUILT cap-as-tag (the ok()/err() ctors' materialize_result_str layout), so the
+        // read side must agree universally.
+        || (is_self_host_result_call(subject) && Self::is_heap_ok_result(&subject.ty))
+    {
+        self.materialized_results_str.insert(subj);
+        self.track_heap_ok_result_subject_drop(subj, &subject.ty);
+    }
+    }
+
+    /// A BORROWED Option/Result FIELD subject (`match u.email { … }`) —
+    /// track so the tag-read + heap-payload borrow bind execute. Verbatim.
+    fn track_borrowed_field_subject(&mut self, subj: ValueId, subject: &IrExpr) {
+    if matches!(&subject.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
+        use almide_lang::types::constructor::TypeConstructorId;
+        match &subject.ty {
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+                self.materialized_options.insert(subj);
+                if is_heap_ty(&a[0]) {
+                    self.heap_elem_lists.insert(subj);
+                }
+            }
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && !Self::is_heap_ok_result(&subject.ty) =>
+            {
+                self.materialized_results.insert(subj);
+                if is_heap_ty(&a[1]) {
+                    self.heap_elem_lists.insert(subj);
+                }
+            }
+            _ => {}
+        }
+    }
+    }
+
     fn variant_match_subject(
         &mut self,
         subject: &IrExpr,
@@ -56,48 +153,12 @@ impl LowerCtx {
         // bind requires a str-result), so only scalar payloads lower — never a silently-wrong heap move-out.
         let is_named_call =
             matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. });
-        if is_self_host_option_call(subject)
-            || (is_named_call
-                && crate::lower::is_variant_ty(&subject.ty)
-                && !crate::lower::is_result_ty(&subject.ty))
-        {
-            self.materialized_options.insert(subj);
-            // An `Option[heap]` (`list.first(path): Option[String]` — toml set_nested's
-            // `match list.first(path)`) OWNS its payload: track it as a nested-ownership list so the
-            // Some-payload bind reads the borrowed element handle AND the scope-end drop is the
-            // recursive DropListStr (mirrors control.rs:100 for the statement-match path).
-            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                self.heap_elem_lists.insert(subj);
-            }
-        }
-        if (is_self_host_result_call(subject) && !Self::is_heap_ok_result(&subject.ty))
-            || (is_named_call
-                && crate::lower::is_result_ty(&subject.ty)
-                && !Self::is_heap_ok_result(&subject.ty))
-            // An EFFECT-result subject (process.kill / RuntimeCall) with a SCALAR-Ok / heap-Err
-            // Result is tracked the SAME as a scalar self-host/Named result: len-as-tag @4, Err arm
-            // binds slot-0 String, subject drops via DropListStr (the case-A heap_elem_lists below).
-            // The self-host list is guarded by TYPE too: `result.collect`/`result.map` are listed
-            // there but return a HEAP-Ok Result for heap payloads — cap-as-tag, NOT len-as-tag —
-            // which the str-result branch below now tracks (reading @4 misdispatched EVERY heap-Ok
-            // collect to the Err arm — the parse_all List[Int]-as-List[String] garbage join).
-            || (used_effect_subj && !Self::is_heap_ok_result(&subject.ty))
-        {
-            self.materialized_results.insert(subj);
-            // Camp-4 sub-case 1 — a SCALAR-Ok / HEAP-Err `Result[Int, String]` (char_to_val; the
-            // unwrap-`!`-desugar's `err($x) => err($x)` re-wrap). The len-as-tag read stays @4
-            // (materialized_results, NOT _str), but ALSO track heap_elem_lists so (a) the Err arm's
-            // String payload bind is ADMITTED (heap_or_scalar_bind) and (b) the subject drops via
-            // `DropListStr` — EXACTLY right for this layout: Ok=len0 frees nothing (the int is scalar),
-            // Err=len1 frees slot-0's String. Gated to scalar-Ok + heap-Err so a heap-Ok Result (a
-            // different layout) is untouched. The Err arm move-out auto-`Dup`s in lower_heap_result_arm,
-            // so drop-subject-after frees slot-0 once (no double-free — gate-checked).
-            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = &subject.ty {
-                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                    self.heap_elem_lists.insert(subj);
-                }
-            }
-        }
+        self.track_option_subject(subj, subject, is_named_call);
+        self.track_scalar_result_subject(subj, subject, is_named_call, used_effect_subj);
+        self.track_str_result_subject(subj, subject, is_named_call, used_effect_subj);
+        self.track_borrowed_field_subject(subj, subject);
+
+
         // A self-host HEAP-Ok Result (`value.as_string`/`value.as_array`/`result.zip` — cap-as-tag
         // DynListStr) is tracked as a str-result (the match reads tag @16 + binds the @12 payload
         // handle). The DROP differs by Ok-arm type: a `List[Value]` Ok (`value.as_array`) frees
@@ -123,21 +184,7 @@ impl LowerCtx {
         // exactly once (the 6625a5d3 / f75eecae machinery, the SAME `resrec:` the record-Ok CONSTRUCTION
         // side already uses via `try_lower_result_record_ctor`). Gated on `result_ok_record_drop_fn`
         // (the record HAS a generated `$__drop_<R>`); a record without one keeps the sound flat path.
-        if is_self_host_result_str_call(subject)
-            || (is_named_call && Self::is_heap_ok_result(&subject.ty))
-            // An EFFECT-result subject with a HEAP-Ok Result (String/Value/List[Value]/tuple-Ok —
-            // `effect_unwrap_admitted` already excluded RECORD-Ok; the by-type dispatch below is exact).
-            || (used_effect_subj && Self::is_heap_ok_result(&subject.ty))
-            // Any OTHER self-host Module call with a HEAP-Ok Result (`result.collect` /
-            // `result.map` over a heap payload — listed len-as-tag but cap-as-tag for these
-            // instantiations): TYPE decides the repr, not the list. Every heap-Ok Result is
-            // BUILT cap-as-tag (the ok()/err() ctors' materialize_result_str layout), so the
-            // read side must agree universally.
-            || (is_self_host_result_call(subject) && Self::is_heap_ok_result(&subject.ty))
-        {
-            self.materialized_results_str.insert(subj);
-            self.track_heap_ok_result_subject_drop(subj, &subject.ty);
-        }
+
         // Dispatch on the tracking set. An Option reads len-as-tag (Some=len≠0); a scalar
         // Result reads len-as-tag INVERSE (Err=len≠0, Ok=len0). The if-skeleton is uniform
         // (then = tag≠0, else = tag==0): Option → then=Some/else=None; Result → then=Err/else=Ok.
@@ -148,26 +195,7 @@ impl LowerCtx {
         // tag-read + heap-payload BORROW bind below execute (the some-arm `e` is a second borrow of
         // the Option's @12 slot; the result String is moved out fresh). Same len-as-tag layout as a
         // self-host Option/Result value — only the SOURCE (a field borrow, not a call) differs.
-        if matches!(&subject.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
-            use almide_lang::types::constructor::TypeConstructorId;
-            match &subject.ty {
-                Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                    self.materialized_options.insert(subj);
-                    if is_heap_ty(&a[0]) {
-                        self.heap_elem_lists.insert(subj);
-                    }
-                }
-                Ty::Applied(TypeConstructorId::Result, a)
-                    if a.len() == 2 && !Self::is_heap_ok_result(&subject.ty) =>
-                {
-                    self.materialized_results.insert(subj);
-                    if is_heap_ty(&a[1]) {
-                        self.heap_elem_lists.insert(subj);
-                    }
-                }
-                _ => {}
-            }
-        }
+
         let is_option = self.materialized_options.contains(&subj);
         // A scalar Result reads len-as-tag (@4); a HEAP-Ok `Result[String,String]` (value.as_string,
         // the cap-as-tag DynListStr) reads the tag at the slot-0 HIGH 32 bits (@16). Both arrange
