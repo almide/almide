@@ -19,7 +19,7 @@ fn __hex_char(nib: Int) -> Int =
   if nib < 10 then 48 + nib
   else 87 + nib
 
-fn __hex_fill(n: Int, dst: Int, count: Int, i: Int) -> Int =
+fn __int_hex_fill(n: Int, dst: Int, count: Int, i: Int) -> Int =
   if i >= count then 0
   else {
     let pos = count - 1 - i
@@ -27,12 +27,12 @@ fn __hex_fill(n: Int, dst: Int, count: Int, i: Int) -> Int =
     let nib = prim.band(sh, 15)
     let ch = __hex_char(nib)
     prim.store8(dst + i, ch)
-    __hex_fill(n, dst, count, i + 1)
+    __int_hex_fill(n, dst, count, i + 1)
   }
 
 fn int_to_hex(n: Int) -> String = {
   let count = __hex_count(n)
   let buf = prim.alloc_str(count)
-  let _f = __hex_fill(n, prim.handle(buf) + 12, count, 0)
+  let _f = __int_hex_fill(n, prim.handle(buf) + 12, count, 0)
   buf
 }

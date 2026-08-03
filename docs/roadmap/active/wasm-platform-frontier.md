@@ -22,11 +22,16 @@
 
 ### 取る (小さくてミッション直結)
 
-- **Deterministic profile 準拠の明文化** — Wasm 3.0 が決定的実行プロファイル
-  (NaN 正規化、非決定機能の排除) を正式定義した。byte-identical cross-target
-  保証の仕様語彙そのもの。TODO: NaN ビットパターンが観測可能な経路
-  (float ビット再解釈系) の監査 + 「relaxed SIMD 不使用」宣言 + xtarget gate への一文。
-  現状 emit_wasm に NaN 正規化は無い。
+- **Deterministic profile 準拠の明文化** — **済 (2026-08-03, C-210)**。監査の結論:
+  NaN の生ビットが観測面に届く経路は `float.to_bits` と bytes float write 族の
+  2 面だけ (Float は hash 不可、to_string は "NaN" 固定)。両面とも観測境界で
+  canonical NaN (f64 0x7FF8000000000000 / f32 0x7FC00000) に正規化 —
+  x86 の sign-set NaN、エンジンの payload propagation 差、from_bits 経由の
+  payload 密輸をまとめて遮断し、プロファイルより強く**両ターゲット + 全ホスト
+  アーキで同一**。fixture 2 本 (nan_canonical_*) + 命令サブセット gate
+  (deterministic_profile_test.rs — relaxed SIMD / atomics / shared 不使用の
+  機械検査)。副産物: 監査が self-host リンクの同名異署名衝突 =
+  invalid-wasm-as-Ok 脱出 (#1068) を発見し、リンカを完全一致 merge + 衝突 wall 化。
   ※対象は **emit されたプログラムの実行決定性**。コンパイラ自身の出力決定性
   (emitter = pure fn of (IR, target)) は [determinism-belt](determinism-belt.md) が担当。
 - extended const expressions — global 初期化の柔軟化。微小。

@@ -2626,3 +2626,16 @@ evidence  = [
   { path = "spec/wasm_cross/codec_none_omission.almd", class = "fixture" },
   { path = "spec/stdlib/codec_field_matrix_test.almd", class = "fixture" },
 ]
+
+# ── NaN OBSERVATION IS CANONICAL — Wasm 3.0 deterministic-profile conformance ─
+[[contract]]
+id        = "C-210"
+spec      = "ALS-T2"
+title     = "NaN observation is canonical — the deterministic-profile conformance law"
+statement = "A NaN's raw sign/payload bits are the one place the byte-identical law would leak host state: x86 arithmetic produces sign-set NaNs where aarch64 does not, engines may or may not propagate payloads, and `int.bits_to_float` can smuggle arbitrary payloads in. Every OBSERVATION boundary therefore collapses NaN to a single canonical pattern — `float.to_bits` answers 0x7FF8000000000000 for every NaN however produced (arithmetic, negation, from_bits round-trip), and the bytes float writes (`bytes.append_f64_le/be`, `append_f32_le/be`) write the same canonical f64 pattern / the canonical f32 pattern 0x7FC00000. Non-NaN bits stay raw (to_bits(1.5) == 0x3FF8000000000000 — normalization never over-reaches), and a non-canonical NaN still EXISTS as a value (from_bits -> arithmetic keeps IEEE semantics); only observers are blind to its representation. This is the Wasm 3.0 deterministic-profile stance applied at the language layer, so it holds on BOTH targets and on every host architecture — stronger than the profile itself, which constrains only the wasm leg. The emitted module also stays inside the profile's instruction subset: no relaxed SIMD, no threads/atomics/shared memory (machine-checked by crates/almide-mir/tests/deterministic_profile_test.rs)."
+since     = "0.52.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nan_canonical_observation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nan_canonical_bytes_write.almd", class = "fixture" },
+]

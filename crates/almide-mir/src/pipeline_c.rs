@@ -211,9 +211,39 @@ fn link_self_host_runtime_to_fixpoint(
                 crate::concat_to_append::rewrite_self_append(&mut functions[linked_from..]);
             }
         }
-        // Dedup by name (identical source ⇒ no-op merge).
-        let mut seen = std::collections::HashSet::new();
-        functions.retain(|f| seen.insert(f.name.clone()));
+        // Dedup by name — a no-op merge ONLY when the two bodies are the same
+        // function (one source linked via two registry paths). Two DIFFERENT
+        // functions sharing a name (e.g. two modules' `__`-private helpers
+        // with different arities — the `__hex_fill` 4-vs-5-arg collision,
+        // #1068) must NOT merge: keeping either rebinds the other module's
+        // call sites to a wrong signature and the module fails validation
+        // AFTER the render wall — the invalid-wasm-as-Ok class the ledger
+        // audits as zero. Wall it instead.
+        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut kept: Vec<crate::MirFunction> = Vec::with_capacity(functions.len());
+        for f in functions.drain(..) {
+            match seen.get(f.name.as_str()) {
+                None => {
+                    seen.insert(f.name.clone(), kept.len());
+                    kept.push(f);
+                }
+                Some(&i) if kept[i] == f => {}
+                Some(&i) => {
+                    return Err(LowerError::at(
+                        None,
+                        format!(
+                            "self-host link collision: two different functions are both named `{}` \
+                             ({} vs {} param(s)) — module-local helpers must have distinct names; \
+                             merging them would emit an invalid module",
+                            f.name,
+                            kept[i].params.len(),
+                            f.params.len(),
+                        ),
+                    ));
+                }
+            }
+        }
+        *functions = kept;
         if functions.len() == before {
             break;
         }
