@@ -526,40 +526,7 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && is_heap_ty(&a[0]) => {}
             _ => return None,
         }
-        let mut some_arm: Option<(&IrExpr, Option<VarId>)> = None;
-        let mut none_arm: Option<&IrExpr> = None;
-        for arm in arms {
-            match &arm.pattern {
-                IrPattern::Some { inner } => {
-                    let bind = match inner.as_ref() {
-                        IrPattern::Bind { var, .. } => Some(*var),
-                        IrPattern::Wildcard => None,
-                        _ => return None,
-                    };
-                    if some_arm.is_some() {
-                        return None;
-                    }
-                    some_arm = Some((&arm.body, bind));
-                }
-                IrPattern::None => {
-                    if none_arm.is_some() {
-                        return None;
-                    }
-                    none_arm = Some(&arm.body);
-                }
-                IrPattern::Wildcard => {
-                    if none_arm.is_some() {
-                        return None;
-                    }
-                    none_arm = Some(&arm.body);
-                }
-                _ => return None,
-            }
-        }
-        let ((some_body, some_bind), none_body) = match (some_arm, none_arm) {
-            (Some(s), Some(n)) => (s, n),
-            _ => return None,
-        };
+        let ((some_body, some_bind), none_body) = classify_heap_option_arms(arms)?;
         let ops_mark = self.ops.len();
         let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
@@ -640,3 +607,46 @@ impl LowerCtx {
         Some(dst)
     }
 }
+
+/// The `[Some(bind?), None|_]` arm classification of
+/// [`LowerCtx::try_lower_option_match_value`] — heap-payload edition (the
+/// bind is by var only; the payload borrow types itself at the read).
+fn classify_heap_option_arms(
+    arms: &[IrMatchArm],
+) -> Option<((&IrExpr, Option<VarId>), &IrExpr)> {
+    let mut some_arm: Option<(&IrExpr, Option<VarId>)> = None;
+    let mut none_arm: Option<&IrExpr> = None;
+    for arm in arms {
+        match &arm.pattern {
+            IrPattern::Some { inner } => {
+                let bind = match inner.as_ref() {
+                    IrPattern::Bind { var, .. } => Some(*var),
+                    IrPattern::Wildcard => None,
+                    _ => return None,
+                };
+                if some_arm.is_some() {
+                    return None;
+                }
+                some_arm = Some((&arm.body, bind));
+            }
+            IrPattern::None => {
+                if none_arm.is_some() {
+                    return None;
+                }
+                none_arm = Some(&arm.body);
+            }
+            IrPattern::Wildcard => {
+                if none_arm.is_some() {
+                    return None;
+                }
+                none_arm = Some(&arm.body);
+            }
+            _ => return None,
+        }
+    }
+    match (some_arm, none_arm) {
+        (Some(s), Some(n)) => Some((s, n)),
+        _ => None,
+    }
+}
+
