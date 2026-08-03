@@ -17,7 +17,6 @@ fn plan_scalar_tuple_fold<'a>(
     init: &'a IrExpr,
     result_ty: &Ty,
 ) -> Option<ScalarTupleFoldPlan<'a>> {
-    use almide_ir::{IrPattern, IrStmtKind};
 
         // Accumulator type: a 2-tuple of scalars; the result is the same tuple.
         let (t1, t2) = match result_ty {
@@ -84,7 +83,6 @@ fn plan_scalar_tuple_option_match<'a>(
     arms: &'a [almide_ir::IrMatchArm],
 ) -> Option<&'a [IrExpr]> {
     use almide_ir::{IrMatchArm, IrPattern};
-    use almide_lang::types::constructor::TypeConstructorId;
     if !is_option_scalar_pair_ty(&subject.ty) {
         return None;
     }
@@ -349,8 +347,6 @@ impl LowerCtx {
         arms: &[almide_ir::IrMatchArm],
     ) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
-        use almide_lang::types::constructor::TypeConstructorId;
-        use almide_ir::{IrMatchArm, IrPattern};
         let fb = plan_scalar_tuple_option_match(subject, arms)?;
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
