@@ -41,9 +41,55 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                     let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: f.ty.clone(), span: None, def_id: None };
                     entries.push((f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()), f.ty.clone(), field_expr));
                 }
-                let pairs_arg = build_object_arg(wk, &entries, &value_ty);
-                (IrPattern::RecordPattern { name: case.name.to_string(), fields: pat_fields, rest: false },
-                 IrExpr { kind: IrExprKind::Call { target: CallTarget::Module { module: sym("value"), func: sym("object"), def_id: None }, args: vec![pairs_arg], type_args: vec![] }, ty: value_ty.clone(), span: None, def_id: None })
+                // An Option field makes the pairs expression a concat-with-match
+                // chunk chain; INSIDE a heap-result match arm that shape walls the
+                // whole derived encode on the trust spine ("cannot be faithfully
+                // returned"), and a bind defers it. The ONE position the chain is
+                // verified to lower is a fn body's direct call argument — so such a
+                // case gets a per-case PAYLOAD worker (`T.__enc_case_<Case>`) whose
+                // body is exactly `value.object(<chunks>)`, and the arm becomes a
+                // plain call over the pattern binds (the pre-omission arm shape).
+                // Option-free cases keep the original inline literal untouched.
+                let payload = if entries.iter().any(|(_, ty, _)| ty.is_option()) {
+                    let worker_name = format!("{}.__enc_case_{}", type_name, case.name);
+                    let mut wparams: Vec<(VarId, String, Ty)> = vec![];
+                    let mut wentries: Vec<(String, Ty, IrExpr)> = vec![];
+                    for f in fields {
+                        let pv2 = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
+                        wparams.push((pv2, format!("_f_{}", f.name), f.ty.clone()));
+                        wentries.push((
+                            f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()),
+                            f.ty.clone(),
+                            IrExpr { kind: IrExprKind::Var { id: pv2 }, ty: f.ty.clone(), span: None, def_id: None },
+                        ));
+                    }
+                    let wbody = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module { module: sym("value"), func: sym("object"), def_id: None },
+                            args: vec![build_object_arg(wk, &wentries, &value_ty)],
+                            type_args: vec![],
+                        },
+                        ty: value_ty.clone(), span: None, def_id: None,
+                    };
+                    wk.out.push(mk_worker_fn(
+                        &worker_name,
+                        wparams.iter().map(|(v, n, t)| (*v, n.as_str(), t.clone())).collect(),
+                        value_ty.clone(),
+                        wbody,
+                    ));
+                    IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Named { name: sym(&worker_name) },
+                            args: entries.iter().map(|(_, _, access)| access.clone()).collect(),
+                            type_args: vec![],
+                        },
+                        ty: value_ty.clone(), span: None, def_id: None,
+                    }
+                } else {
+                    let pairs_arg = build_object_arg(wk, &entries, &value_ty);
+                    IrExpr { kind: IrExprKind::Call { target: CallTarget::Module { module: sym("value"), func: sym("object"), def_id: None }, args: vec![pairs_arg], type_args: vec![] }, ty: value_ty.clone(), span: None, def_id: None }
+                };
+                (IrPattern::RecordPattern { name: case.name.to_string(), fields: pat_fields, rest: false }, payload)
             }
         };
         // Wrap payload in {"CaseName": payload}
