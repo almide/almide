@@ -75,55 +75,14 @@ fn desugar_effect_unwrap_inner(
         // spelled-out `!`, so both desugar identically. (A Try left unhandled emitted a
         // bare dst-less `(call $f)` whose Result handle stayed on the wasm stack —
         // effect_assign_unwrap's `unannotated=` leg, 2026-07-03.)
-        let (inner, ok_pat) = match &s.kind {
-            IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
-                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => (
-                    (**expr).clone(),
-                    IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: *var, ty: ty.clone() }) },
-                ),
-                _ => continue,
-            },
-            IrStmtKind::Expr { expr } => match &expr.kind {
-                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
-                    ((**expr).clone(), IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) })
-                }
-                _ => continue,
-            },
-            _ => continue,
-        };
+        let Some((inner, ok_pat)) = stmt_effect_unwrap_target(s) else { continue };
         // A UNIT Ok payload bound to a NEVER-READ var (`let _ = fs.write(p, s)!` — the
         // frontend gives `_` a real VarId) is semantically a discard: normalize it to the
         // Wildcard arm (exactly the statement-`!` shape above), so the statement
         // result-match parser dispatches it instead of declining on a Unit-typed bind.
         // Gated on ty == Unit AND the continuation (rest stmts + tail) never referencing
         // the var — a genuinely-read unit var keeps its bind.
-        let ok_pat = match ok_pat {
-            IrPattern::Ok { inner: b } => match *b {
-                IrPattern::Bind { var, ty: bty }
-                    if matches!(bty, Ty::Unit)
-                        && !stmts[i + 1..].iter().any(|s| {
-                            let mut f = false;
-                            almide_ir::visit::walk_stmt(
-                                &mut VarUse { var, found: &mut f },
-                                s,
-                            );
-                            f
-                        })
-                        && !tail.as_deref().is_some_and(|t| {
-                            let mut f = false;
-                            almide_ir::visit::IrVisitor::visit_expr(
-                                &mut VarUse { var, found: &mut f },
-                                t,
-                            );
-                            f
-                        }) =>
-                {
-                    IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) }
-                }
-                other => IrPattern::Ok { inner: Box::new(other) },
-            },
-            p => p,
-        };
+        let ok_pat = normalize_unit_discard(ok_pat, &stmts[i + 1..], tail.as_deref());
         // An Option-`!` admits BOTH scalar and heap Some payloads: a heap payload binds
         // as a @12 BORROW over the tracked subject (the heap_elem_lists discipline the
         // Option match machinery already proves — matrix_misc's `list.get(chunks, 0)!`
@@ -172,6 +131,70 @@ fn desugar_effect_unwrap_inner(
         }
     }
     None
+}
+
+/// The stmt shapes the effect-`!` desugar fires on: a let-bind `let x = f()!`
+/// (the Ok-arm binds `x` to the payload) or a bare stmt `f()!` (the Ok-arm
+/// discards the payload). `Try` is the frontend's auto-`?` on an un-annotated
+/// bind of a declared-Result effect call — the same monadic coercion as a
+/// spelled-out `!`, so both desugar identically.
+fn stmt_effect_unwrap_target(s: &IrStmt) -> Option<(IrExpr, almide_ir::IrPattern)> {
+    use almide_ir::IrPattern;
+    match &s.kind {
+        IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => Some((
+                (**expr).clone(),
+                IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: *var, ty: ty.clone() }) },
+            )),
+            _ => None,
+        },
+        IrStmtKind::Expr { expr } => match &expr.kind {
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
+                Some(((**expr).clone(), IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) }))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A UNIT Ok payload bound to a NEVER-READ var (`let _ = fs.write(p, s)!` —
+/// the frontend gives `_` a real VarId) is semantically a discard: normalize
+/// it to the Wildcard arm (exactly the statement-`!` shape), so the statement
+/// result-match parser dispatches it instead of declining on a Unit-typed
+/// bind. Gated on ty == Unit AND the continuation (rest stmts + tail) never
+/// referencing the var — a genuinely-read unit var keeps its bind.
+fn normalize_unit_discard(
+    ok_pat: almide_ir::IrPattern,
+    rest: &[IrStmt],
+    tail: Option<&IrExpr>,
+) -> almide_ir::IrPattern {
+    use almide_ir::IrPattern;
+    use almide_lang::types::Ty;
+    match ok_pat {
+        IrPattern::Ok { inner: b } => match *b {
+            IrPattern::Bind { var, ty: bty }
+                if matches!(bty, Ty::Unit)
+                    && !rest.iter().any(|s| {
+                        let mut f = false;
+                        almide_ir::visit::walk_stmt(&mut VarUse { var, found: &mut f }, s);
+                        f
+                    })
+                    && !tail.is_some_and(|t| {
+                        let mut f = false;
+                        almide_ir::visit::IrVisitor::visit_expr(
+                            &mut VarUse { var, found: &mut f },
+                            t,
+                        );
+                        f
+                    }) =>
+            {
+                IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) }
+            }
+            other => IrPattern::Ok { inner: Box::new(other) },
+        },
+        p => p,
+    }
 }
 
 /// Build the nested-match `match inner { err(e) => err(e), ok(<ok_pat>) => <cont> }` at the enclosing
@@ -341,23 +364,24 @@ fn build_main_die(msg: IrExpr, body: &IrExpr) -> IrExpr {
     }
 }
 
-fn build_unwrap_match(
+/// The OPTION-subject fail/continue match of [`build_unwrap_match`]
+/// (`int.to_int8_checked(v)!` — the sized_conversion family): the fail arm is
+/// `none => err("none")` (v0's unwrap-of-none message, oracle: `Error: none`,
+/// exit 1) — or the propagated `none` itself in an Option-returning pure fn
+/// (#1067), or main's die line — and the continuation binds under the SOME
+/// pattern. Option's len-as-tag polarity is OPPOSITE Result's (Some = len 1,
+/// Err = len 1), so reusing the Ok/Err skeleton would fire the fail arm on the
+/// SUCCESS value. Verbatim.
+fn build_option_unwrap_match(
     inner: IrExpr,
     ok_pat: almide_ir::IrPattern,
     cont: IrExpr,
     body: &IrExpr,
-    next_var: &mut u32,
     unit_main: bool,
-) -> Option<IrExpr> {
+) -> IrExpr {
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
-    // An OPTION subject (`int.to_int8_checked(v)!` — the sized_conversion family): the fail
-    // arm is `none => err("none")` (v0's unwrap-of-none message, oracle: `Error: none`,
-    // exit 1), and the continuation binds under the SOME pattern — Option's len-as-tag
-    // polarity is OPPOSITE Result's (Some = len 1, Err = len 1), so reusing the Ok/Err
-    // skeleton would fire the fail arm on the SUCCESS value.
-    if matches!(&inner.ty, Ty::Applied(TypeConstructorId::Option, _)) {
         let none_body = if unit_main {
             // main is void — abort with v0's whole line instead of a discarded err().
             build_main_die(
@@ -402,12 +426,27 @@ fn build_unwrap_match(
             other => other,
         };
         let some_arm = IrMatchArm { pattern: some_pat, guard: None, body: cont };
-        return Some(IrExpr {
-            kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![none_arm, some_arm] },
-            ty: body.ty.clone(),
-            span: body.span.clone(),
-            def_id: body.def_id,
-        });
+    IrExpr {
+        kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![none_arm, some_arm] },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    }
+}
+
+fn build_unwrap_match(
+    inner: IrExpr,
+    ok_pat: almide_ir::IrPattern,
+    cont: IrExpr,
+    body: &IrExpr,
+    next_var: &mut u32,
+    unit_main: bool,
+) -> Option<IrExpr> {
+    use almide_ir::{IrMatchArm, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    if matches!(&inner.ty, Ty::Applied(TypeConstructorId::Option, _)) {
+        return Some(build_option_unwrap_match(inner, ok_pat, cont, body, unit_main));
     }
     let e_var = VarId(*next_var);
     *next_var += 1;
