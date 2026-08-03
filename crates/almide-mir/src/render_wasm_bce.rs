@@ -87,7 +87,9 @@ impl ListReq {
 /// Scan `func` for innermost loops that can be versioned; returns the plans
 /// keyed by their `LoopStart` op index. Pure analysis — the caller
 /// (`render_op_range`) does the two-copy emission.
-pub(crate) fn analyze_bce(func: &MirFunction) -> BTreeMap<usize, BcePlan> {
+/// The value tables of [`analyze_bce`]: SSA consts (ConstInt dsts never
+/// reassigned, SetLocal targets evicted), plus per-value def counts/sites.
+fn build_bce_tables(func: &MirFunction) -> BceTables {
     // SSA-consts: `ConstInt` dsts never reassigned (same rule as Fuser::scan_consts).
     let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
     for op in &func.ops {
@@ -110,7 +112,12 @@ pub(crate) fn analyze_bce(func: &MirFunction) -> BTreeMap<usize, BcePlan> {
             def_site.insert(d, i);
         }
     }
-    let tables = BceTables { consts, setlocal_targets, def_count, def_site };
+    BceTables { consts, setlocal_targets, def_count, def_site }
+}
+
+pub(crate) fn analyze_bce(func: &MirFunction) -> BTreeMap<usize, BcePlan> {
+    let tables = build_bce_tables(func);
+
 
     // EVERY loop level may get a plan — a nested planned loop re-applies its
     // own guard inside the enclosing copy (render_op_range composes the elide
@@ -165,41 +172,21 @@ impl BceRegion {
 /// (the whitelist applies to their bodies too, flat, so length invariance
 /// still holds region-wide); the depth map lets the induction analysis
 /// restrict itself to root-depth positions.
-fn scan_bce_region(func: &MirFunction, s: usize, e: usize) -> Option<BceRegion> {
-    let mut r = BceRegion {
-        set: BTreeMap::new(),
-        def: BTreeMap::new(),
-        first_break: None,
-        loop_depth: BTreeMap::new(),
-    };
-    let mut ldepth: u32 = 0;
-    let mut idepth: u32 = 0;
-    for i in s + 1..e {
-        let op = &func.ops[i];
-        match op {
-            Op::ConstInt { .. }
-            | Op::Const { .. }
-            | Op::IntBinOp { .. }
-            | Op::ListGetScalar { .. }
-            | Op::ListSetScalar { .. }
-            | Op::SetLocal { .. } => {}
-            Op::IfThen { .. } => idepth += 1,
-            Op::EndIf { .. } => idepth = idepth.saturating_sub(1),
-            Op::Else { .. } => {}
-            Op::LoopStart => ldepth += 1,
-            Op::LoopEnd => ldepth = ldepth.saturating_sub(1),
-            Op::LoopBreakUnless { .. } => {
-                // The bound the induction argument leans on must be checked on
-                // EVERY iteration of the ROOT loop: only a break at loop depth
-                // 0 outside any `if` arm qualifies. Extra/nested/conditional
-                // breaks only SHRINK the iteration space — always safe to keep.
-                if r.first_break.is_none() && ldepth == 0 && idepth == 0 {
-                    r.first_break = Some(i);
-                }
-            }
-            // Scalar float prims: pure register arithmetic, no memory, no trap.
-            Op::Prim { kind, .. } => match kind {
-                PrimKind::FloatUn(_)
+/// The straight-line ops a BCE region admits besides the loop/if markers:
+/// scalar consts/arithmetic, the list accesses under analysis, rebinds, and
+/// the scalar float prims (pure register arithmetic, no memory, no trap).
+fn bce_region_safe_op(op: &Op) -> bool {
+    match op {
+        Op::ConstInt { .. }
+        | Op::Const { .. }
+        | Op::IntBinOp { .. }
+        | Op::ListGetScalar { .. }
+        | Op::ListSetScalar { .. }
+        | Op::SetLocal { .. }
+        | Op::Else { .. } => true,
+        Op::Prim { kind, .. } => matches!(
+            kind,
+            PrimKind::FloatUn(_)
                 | PrimKind::FloatBin(_)
                 | PrimKind::FloatCmp(_)
                 | PrimKind::F64FromInt
@@ -212,9 +199,38 @@ fn scan_bce_region(func: &MirFunction, s: usize, e: usize) -> Option<BceRegion> 
                 | PrimKind::F32Bits
                 | PrimKind::F32Bin(_)
                 | PrimKind::F32Cmp(_)
-                | PrimKind::F32Un(_) => {}
-                _ => return None,
-            },
+                | PrimKind::F32Un(_)
+        ),
+        _ => false,
+    }
+}
+
+fn scan_bce_region(func: &MirFunction, s: usize, e: usize) -> Option<BceRegion> {
+    let mut r = BceRegion {
+        set: BTreeMap::new(),
+        def: BTreeMap::new(),
+        first_break: None,
+        loop_depth: BTreeMap::new(),
+    };
+    let mut ldepth: u32 = 0;
+    let mut idepth: u32 = 0;
+    for i in s + 1..e {
+        let op = &func.ops[i];
+        match op {
+            Op::IfThen { .. } => idepth += 1,
+            Op::EndIf { .. } => idepth = idepth.saturating_sub(1),
+            Op::LoopStart => ldepth += 1,
+            Op::LoopEnd => ldepth = ldepth.saturating_sub(1),
+            Op::LoopBreakUnless { .. } => {
+                // The bound the induction argument leans on must be checked on
+                // EVERY iteration of the ROOT loop: only a break at loop depth
+                // 0 outside any `if` arm qualifies. Extra/nested/conditional
+                // breaks only SHRINK the iteration space — always safe to keep.
+                if r.first_break.is_none() && ldepth == 0 && idepth == 0 {
+                    r.first_break = Some(i);
+                }
+            }
+            other if bce_region_safe_op(other) => {}
             _ => return None,
         }
         if let Some(d) = defined_value(op) {
@@ -257,7 +273,14 @@ fn bce_step_of(
     if d <= s || d >= e || d >= sl_idx {
         return None;
     }
-    match &func.ops[d] {
+    let is_up = positive_step_direction(&func.ops[d], t, v)?;
+    Some((is_up, sl_idx))
+}
+
+/// Is `op` a `v ± <positive const>` step? `Some(true)` = up, `Some(false)`
+/// = down, `None` = not a clean step.
+fn positive_step_direction(op: &Op, t: &BceTables, v: ValueId) -> Option<bool> {
+    match op {
         Op::IntBinOp { op: IntOp::Add, a, b, .. } => {
             let c = if *a == v {
                 t.consts.get(b)
@@ -266,10 +289,10 @@ fn bce_step_of(
             } else {
                 None
             };
-            (c.copied().unwrap_or(0) > 0).then_some((true, sl_idx))
+            (c.copied().unwrap_or(0) > 0).then_some(true)
         }
         Op::IntBinOp { op: IntOp::Sub, a, b, .. } if *a == v => {
-            (t.consts.get(b).copied().unwrap_or(0) > 0).then_some((false, sl_idx))
+            (t.consts.get(b).copied().unwrap_or(0) > 0).then_some(false)
         }
         _ => None,
     }
@@ -371,18 +394,18 @@ fn bce_offset_of(
 }
 
 /// Analyze one innermost loop region `[s..e]`; `Some` = a versionable plan.
-fn analyze_bce_region(
+/// Phase 1 of [`analyze_bce_region`]: walk the region's scalar list
+/// accesses and collect, per invariant list, the bound requirements each
+/// elidable access adds (constant index, or induction offset within the
+/// break-to-increment window at root depth). Bodies verbatim.
+fn collect_bce_requirements(
     func: &MirFunction,
+    region: &BceRegion,
+    ind: &Option<Ind>,
+    t: &BceTables,
     s: usize,
     e: usize,
-    t: &BceTables,
-) -> Option<BcePlan> {
-    if e - s > MAX_BCE_REGION_OPS {
-        return None;
-    }
-    let region = scan_bce_region(func, s, e)?;
-    let ind = bce_induction(func, &region, t, s, e);
-
+) -> (BTreeMap<ValueId, ListReq>, BTreeSet<usize>) {
     let mut reqs: BTreeMap<ValueId, ListReq> = BTreeMap::new();
     let mut elide: BTreeSet<usize> = BTreeSet::new();
     for p in s + 1..e {
@@ -419,12 +442,15 @@ fn analyze_bce_region(
             elide.insert(p);
         }
     }
-    if elide.is_empty() {
-        return None;
-    }
+    (reqs, elide)
+}
 
+/// Phase 2 of [`analyze_bce_region`]: the per-list guard conditions — the
+/// `len > c` constant bound and the induction-shape window bounds. Bodies
+/// verbatim.
+fn build_bce_guard_conds(reqs: &BTreeMap<ValueId, ListReq>, ind: &Option<Ind>) -> Vec<String> {
     let mut conds: Vec<String> = Vec::new();
-    for (l, rq) in &reqs {
+    for (l, rq) in reqs {
         let len64 = format!(
             "(i64.extend_i32_u (i32.load (i32.add (local.get {}) (i32.const {LIST_LEN_OFFSET}))))",
             local(*l)
@@ -473,6 +499,27 @@ fn analyze_bce_region(
             }
         }
     }
+    conds
+}
+
+fn analyze_bce_region(
+    func: &MirFunction,
+    s: usize,
+    e: usize,
+    t: &BceTables,
+) -> Option<BcePlan> {
+    if e - s > MAX_BCE_REGION_OPS {
+        return None;
+    }
+    let region = scan_bce_region(func, s, e)?;
+    let ind = bce_induction(func, &region, t, s, e);
+
+    let (reqs, elide) = collect_bce_requirements(func, &region, &ind, t, s, e);
+    if elide.is_empty() {
+        return None;
+    }
+
+    let conds = build_bce_guard_conds(&reqs, &ind);
     let guard = conds
         .into_iter()
         .reduce(|a, b| format!("(i32.and {a} {b})"))
