@@ -44,6 +44,14 @@ pub fn desugar_guard(body: &IrExpr) -> Option<IrExpr> {
 /// runtime; a pure diagnostic reachable through `dump_desugared_ir`.
 pub fn dump_ir(e: &IrExpr) -> String {
     fn go(e: &IrExpr, ind: usize, out: &mut String) {
+        use almide_ir::IrExprKind as K;
+        match &e.kind {
+            K::Block { .. } | K::Match { .. } | K::If { .. } => go_control(e, ind, out),
+            _ => go_value(e, ind, out),
+        }
+    }
+    /// The control forms (Block / Match / If) of the dump.
+    fn go_control(e: &IrExpr, ind: usize, out: &mut String) {
         use almide_ir::{IrExprKind as K, IrStmtKind as S};
         let pad = "  ".repeat(ind);
         match &e.kind {
@@ -83,6 +91,14 @@ pub fn dump_ir(e: &IrExpr) -> String {
                 out.push_str(&format!("{pad}  else\n"));
                 go(else_, ind + 2, out);
             }
+            _ => unreachable!("caller matched the control forms"),
+        }
+    }
+    /// The value forms of the dump.
+    fn go_value(e: &IrExpr, ind: usize, out: &mut String) {
+        use almide_ir::IrExprKind as K;
+        let pad = "  ".repeat(ind);
+        match &e.kind {
             K::Call { target, args, .. } => {
                 out.push_str(&format!("{pad}Call({})\n", crate::lower::call_target_kind(target)));
                 for a in args {
@@ -190,121 +206,117 @@ pub fn desugar_method_calls(
                 IrExprKind::TailCall { target, args } => (target, args),
                 _ => return,
             };
-            // A NAMED-record receiver whose "method" is a declared FN FIELD
-            // (`h.run("hello")` over `type Handler = { run: (String) -> String, … }`):
-            // the Type.method Named resolution below would fabricate an UNDEFINED
-            // `Handler.run` fn — resolve the FIELD ty from the record registry and take
-            // the field-call rewrite instead (the same Computed(Member) the structural
-            // receiver gets).
-            let named_fn_field: Option<Ty> = match &*target {
-                CallTarget::Method { object, method } if !method.as_str().contains('.') => {
-                    match &object.ty {
-                        Ty::Named(n, _) => crate::lower::canonical_record_key(
-                            self.record_layouts,
-                            n.as_str(),
-                        )
-                        .and_then(|k| self.record_layouts.get(k))
-                        .and_then(|(names, fields)| {
-                            let _ = names;
-                            fields
-                                .iter()
-                                .find(|(fname, _)| fname == method)
-                                .map(|(_, t)| t.clone())
-                        })
-                        .filter(|t| matches!(t, Ty::Fn { .. })),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
-            if let Some(field_ty) = named_fn_field {
-                if let CallTarget::Method { object, method } = &*target {
-                    let callee = IrExpr {
-                        kind: IrExprKind::Member { object: object.clone(), field: *method },
-                        ty: field_ty,
-                        span: None,
-                        def_id: None,
-                    };
-                    *target = CallTarget::Computed { callee: Box::new(callee) };
-                    self.changed = true;
-                    return;
-                }
+            // A NAMED-record receiver whose "method" is a declared FN FIELD — the
+            // field-call rewrite (the same Computed(Member) the structural receiver
+            // gets), never a fabricated `Handler.run` free fn.
+            if let Some(field_ty) = self.named_fn_field_ty(target) {
+                rewrite_to_field_call(target, field_ty);
+                self.changed = true;
+                return;
             }
-            let name = match &*target {
-                CallTarget::Method { object, method } => {
-                    if method.as_str().contains('.') {
-                        // A pre-dotted method (`Pigment.decode` via `varlib.Pigment.decode`)
-                        // resolves through the derived-method owner map too (#790 codec
-                        // bridge) — a uniquely-owned module type's codec method links the
-                        // module-mangled derived fn instead of an unlinked bare name.
-                        Some(crate::lower::resolve_derived_method_owner(
-                            method.as_str().to_string(),
-                        ))
-                    } else if let Ty::Named(n, _) = &object.ty {
-                        Some(crate::lower::resolve_derived_method_owner(format!(
-                            "{}.{}",
-                            n.as_str(),
-                            method.as_str()
-                        )))
-                    } else if !matches!(&object.ty, Ty::Record { .. } | Ty::OpenRecord { .. }) {
-                        // A non-Named, non-record receiver (`3.double()`,
-                        // `"hello".exclaim()`): the checker already resolved stdlib
-                        // UFCS to Module calls, so a SURVIVING Method here is plain
-                        // free-fn UFCS — `x.f(a)` = `f(x, a)`. (A record receiver may
-                        // be a FN-FIELD call — left for the Computed-callee brick.)
-                        Some(method.as_str().to_string())
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
             // A STRUCTURAL-record receiver (`h.run("hello")` where `run: (String) ->
             // String` is a FN FIELD): the "method" is the field's closure — rewrite to
             // a Computed call through the Member read (`(h.run)("hello")`), which the
             // funcref/closure-call machinery executes. (A Named receiver keeps the
             // Type.method resolution above; count-invariant either way — one call.)
-            let field_call = matches!(&*target,
-                CallTarget::Method { object, .. }
-                    if matches!(&object.ty, Ty::Record { .. } | Ty::OpenRecord { .. }));
-            if field_call {
-                if let CallTarget::Method { object, method } = &*target {
-                    let field_ty = match &object.ty {
-                        Ty::Record { fields } | Ty::OpenRecord { fields } => fields
-                            .iter()
-                            .find(|(n, _)| *n == *method)
-                            .map(|(_, t)| t.clone()),
-                        _ => None,
-                    };
-                    let Some(field_ty) = field_ty else { return };
-                    let callee = IrExpr {
-                        kind: IrExprKind::Member {
-                            object: object.clone(),
-                            field: *method,
-                        },
-                        ty: field_ty,
-                        span: None,
-                        def_id: None,
-                    };
-                    *target = CallTarget::Computed { callee: Box::new(callee) };
-                    self.changed = true;
-                    return;
-                }
-            }
-            if let Some(name) = name {
-                if let CallTarget::Method { object, .. } = target {
-                    let obj = (**object).clone();
-                    let mut new_args = Vec::with_capacity(args.len() + 1);
-                    new_args.push(obj);
-                    new_args.append(args);
-                    *args = new_args;
-                }
-                *target = CallTarget::Named {
-                    name: almide_lang::intern::sym(&name),
-                };
+            if structural_record_receiver(target) {
+                let Some(field_ty) = structural_fn_field_ty(target) else { return };
+                rewrite_to_field_call(target, field_ty);
                 self.changed = true;
+                return;
             }
+            let Some(name) = resolved_free_fn_name(target) else { return };
+            if let CallTarget::Method { object, .. } = target {
+                let obj = (**object).clone();
+                let mut new_args = Vec::with_capacity(args.len() + 1);
+                new_args.push(obj);
+                new_args.append(args);
+                *args = new_args;
+            }
+            *target = CallTarget::Named {
+                name: almide_lang::intern::sym(&name),
+            };
+            self.changed = true;
         }
+    }
+
+    impl V<'_> {
+        /// A NAMED-record receiver whose bare "method" names a declared FN
+        /// FIELD (`h.run("hello")` over `type Handler = { run: (String) ->
+        /// String, … }`): the Type.method Named resolution would fabricate an
+        /// UNDEFINED `Handler.run` fn — resolve the FIELD ty from the record
+        /// registry instead.
+        fn named_fn_field_ty(&self, target: &CallTarget) -> Option<Ty> {
+            let CallTarget::Method { object, method } = target else { return None };
+            if method.as_str().contains('.') {
+                return None;
+            }
+            let Ty::Named(n, _) = &object.ty else { return None };
+            crate::lower::canonical_record_key(self.record_layouts, n.as_str())
+                .and_then(|k| self.record_layouts.get(k))
+                .and_then(|(_names, fields)| {
+                    fields
+                        .iter()
+                        .find(|(fname, _)| fname == method)
+                        .map(|(_, t)| t.clone())
+                })
+                .filter(|t| matches!(t, Ty::Fn { .. }))
+        }
+    }
+
+    /// Rewrite a Method target to the field-call form: a Computed call through
+    /// the `Member` read (`(h.run)("hello")`).
+    fn rewrite_to_field_call(target: &mut CallTarget, field_ty: Ty) {
+        if let CallTarget::Method { object, method } = &*target {
+            let callee = IrExpr {
+                kind: IrExprKind::Member { object: object.clone(), field: *method },
+                ty: field_ty,
+                span: None,
+                def_id: None,
+            };
+            *target = CallTarget::Computed { callee: Box::new(callee) };
+        }
+    }
+
+    fn structural_record_receiver(target: &CallTarget) -> bool {
+        matches!(target,
+            CallTarget::Method { object, .. }
+                if matches!(&object.ty, Ty::Record { .. } | Ty::OpenRecord { .. }))
+    }
+
+    /// The structural receiver's FN-FIELD type, if the method names one.
+    fn structural_fn_field_ty(target: &CallTarget) -> Option<Ty> {
+        let CallTarget::Method { object, method } = target else { return None };
+        match &object.ty {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields
+                .iter()
+                .find(|(n, _)| *n == *method)
+                .map(|(_, t)| t.clone()),
+            _ => None,
+        }
+    }
+
+    /// The free-fn name a surviving Method resolves to: a pre-dotted method
+    /// (`Pigment.decode` via `varlib.Pigment.decode`) through the
+    /// derived-method owner map (#790 codec bridge); a `Ty::Named(T)` receiver
+    /// → the derived/user fn `T.method`; a non-Named, non-record receiver
+    /// (`3.double()`, `"hello".exclaim()`) is plain free-fn UFCS — `x.f(a)` =
+    /// `f(x, a)` (the checker already resolved stdlib UFCS to Module calls).
+    fn resolved_free_fn_name(target: &CallTarget) -> Option<String> {
+        let CallTarget::Method { object, method } = target else { return None };
+        if method.as_str().contains('.') {
+            return Some(crate::lower::resolve_derived_method_owner(
+                method.as_str().to_string(),
+            ));
+        }
+        if let Ty::Named(n, _) = &object.ty {
+            return Some(crate::lower::resolve_derived_method_owner(format!(
+                "{}.{}",
+                n.as_str(),
+                method.as_str()
+            )));
+        }
+        Some(method.as_str().to_string())
     }
 
     let mut v = V { changed: false, record_layouts };
