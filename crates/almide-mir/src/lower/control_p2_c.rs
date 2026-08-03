@@ -417,6 +417,44 @@ impl LowerCtx {
     /// (only the taken arm executes — `unit_arm_depth` raised per arm, exactly the
     /// `lower_variant_unit_arm` discipline). Returns `true` iff fully lowered;
     /// rolls back and returns `false` on any decline.
+    /// Are every non-default arm's rows within the unit-refinement subset —
+    /// a width-matched tuple pattern whose components are wildcards, scalar
+    /// literals, or valid nested variant refinements? Verbatim.
+    fn tuple_refinement_rows_valid(&self, elems: &[(ValueId, Ty)], arms: &[IrMatchArm]) -> bool {
+    let mut valid = true;
+    'outer: for a in &arms[..arms.len() - 1] {
+        let IrPattern::Tuple { elements: pats } = &a.pattern else {
+            valid = false;
+            break;
+        };
+        if pats.len() != elems.len() {
+            valid = false;
+            break;
+        }
+        for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
+            let ok = match p {
+                IrPattern::Wildcard => true,
+                IrPattern::Literal { expr } => {
+                    !is_heap_ty(ty)
+                        && matches!(
+                            expr.kind,
+                            IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. }
+                        )
+                }
+                IrPattern::Constructor { .. } => self
+                    .custom_variant_type_name(ty)
+                    .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
+                _ => false,
+            };
+            if !ok {
+                valid = false;
+                break 'outer;
+            }
+        }
+    }
+        valid
+    }
+
     pub(crate) fn try_lower_tuple_refinement_unit_match(
         &mut self,
         subject: &IrExpr,
@@ -447,37 +485,7 @@ impl LowerCtx {
                 }
             }
         }
-        let mut valid = true;
-        'outer: for a in &arms[..arms.len() - 1] {
-            let IrPattern::Tuple { elements: pats } = &a.pattern else {
-                valid = false;
-                break;
-            };
-            if pats.len() != elems.len() {
-                valid = false;
-                break;
-            }
-            for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
-                let ok = match p {
-                    IrPattern::Wildcard => true,
-                    IrPattern::Literal { expr } => {
-                        !is_heap_ty(ty)
-                            && matches!(
-                                expr.kind,
-                                IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. }
-                            )
-                    }
-                    IrPattern::Constructor { .. } => self
-                        .custom_variant_type_name(ty)
-                        .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
-                    _ => false,
-                };
-                if !ok {
-                    valid = false;
-                    break 'outer;
-                }
-            }
-        }
+        let valid = self.tuple_refinement_rows_valid(&elems, arms);
         if !valid || !self.tuple_refinement_unit_chain(&elems, arms) {
             self.ops.truncate(ops_mark);
             self.live_heap_handles.truncate(lhh_mark);
