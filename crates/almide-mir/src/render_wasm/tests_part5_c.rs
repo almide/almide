@@ -607,7 +607,8 @@ fn derived_codec_option_fields_decode() {
     // B-2 completion: Codec `Option[T]` fields. The self-hosted `__decode_option_T` builds a
     // `Result[Option[T], String]` (ok(some(x)) / ok(none) / err(e)) — a STRING leaf freed by the
     // recursive `$__drop_opt_str` (`resrec:opt_str`), a SCALAR leaf flat — byte-identical to v0.
-    // Encode → decode → re-encode roundtrip: present (Some) survives, absent + explicit-null → None.
+    // Encode → decode → re-encode roundtrip: present (Some) survives, absent + explicit-null →
+    // None, and a None field OMITS its key on re-encode (C-209: the encode-omission law).
     let src = "type Rec: Codec = { name: String, nick: Option[String], age: Option[Int] }\n\
         effect fn main() -> Unit = {\n\
         let r1 = Rec { name: \"A\", nick: some(\"nn\"), age: some(30) }\n\
@@ -624,7 +625,7 @@ fn derived_codec_option_fields_decode() {
             out,
             "{\"name\":\"A\",\"nick\":\"nn\",\"age\":30}\n\
              {\"name\":\"A\",\"nick\":\"nn\",\"age\":30}\n\
-             {\"name\":\"B\",\"nick\":null,\"age\":null}"
+             {\"name\":\"B\"}"
         );
     }
 
