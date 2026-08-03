@@ -40,183 +40,229 @@ use std::collections::{BTreeMap, BTreeSet};
 pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
     let ops = std::mem::take(&mut f.ops);
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
-
-    // Running knowledge, all keyed by ValueId.
-    let mut const_vals: BTreeMap<ValueId, i64> = BTreeMap::new();
-    let mut str_allocs: BTreeSet<ValueId> = BTreeSet::new();
-    let mut res_vals: BTreeSet<ValueId> = BTreeSet::new();
-    // Handle over a res value → the res value.
-    let mut res_handles: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    // Handle over an owned Str alloc → the Str value.
-    let mut str_handles: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    // Address value → (res value, byte offset).
-    let mut res_addrs: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
-    // In-flight producers: R → (its Handle, stored payload, payload-was-str-handle).
-    struct Pending {
-        handle: Option<ValueId>,
-        payload: Option<(ValueId, bool)>,
-    }
-    let mut pending: BTreeMap<ValueId, Pending> = BTreeMap::new();
-    // Producer-window handles → their R.
-    let mut pending_handles: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    // Addresses inside producer windows → (R, offset).
-    let mut pending_addrs: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
-    // if-value stack: dst of each open IfThen (for res propagation to joins).
-    let mut if_dsts: Vec<Option<ValueId>> = Vec::new();
+    let mut t = ResultWindowTracker::default();
 
     for op in ops {
         match &op {
             Op::ConstInt { dst, value } => {
-                const_vals.insert(*dst, *value);
+                t.const_vals.insert(*dst, *value);
                 out.push(op);
             }
             Op::Alloc { dst, init: Init::Str(_), .. } => {
-                str_allocs.insert(*dst);
+                t.str_allocs.insert(*dst);
                 out.push(op);
             }
             // Producer window opens: a len-1 DynListStr alloc.
             Op::Alloc { dst, init: Init::DynListStr { len }, .. }
-                if const_vals.get(len) == Some(&1) =>
+                if t.const_vals.get(len) == Some(&1) =>
             {
-                pending.insert(*dst, Pending { handle: None, payload: None });
+                t.pending.insert(*dst, Pending { handle: None, payload: None });
                 // NOT emitted — replaced by the ResMake* at window completion.
             }
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
-                let a = args[0];
-                if let Some(p) = pending.get_mut(&a) {
-                    p.handle = Some(*d);
-                    pending_handles.insert(*d, a);
-                } else if res_vals.contains(&a) {
-                    res_handles.insert(*d, a);
-                } else if str_allocs.contains(&a) {
-                    str_handles.insert(*d, a);
-                    // Emitted nothing yet — if this handle feeds a recognized
-                    // store it dies with the window; otherwise the sweep keeps
-                    // it and the render walls honestly as before.
-                    out.push(op);
-                    continue;
-                } else {
-                    out.push(op);
-                }
-                // pending/res handles are NOT emitted (pure address material).
+            Op::Prim { kind: PrimKind::Handle, dst: Some(_), args } if args.len() == 1 => {
+                t.track_handle(op, &mut out);
             }
-            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
-                let off = const_vals.get(b).copied();
-                if let (Some(r), Some(o)) = (pending_handles.get(a).copied(), off) {
-                    pending_addrs.insert(*dst, (r, o));
-                    // not emitted
-                } else if let (Some(r), Some(o)) = (res_handles.get(a).copied(), off) {
-                    res_addrs.insert(*dst, (r, o));
-                    // not emitted
-                } else {
-                    out.push(op);
-                }
+            Op::IntBinOp { op: crate::IntOp::Add, .. } => t.track_addr_add(op, &mut out),
+            Op::Prim { kind: PrimKind::Store { .. }, dst: None, args } if args.len() == 2 => {
+                t.track_store(op, &mut out);
             }
-            Op::Prim { kind: PrimKind::Store { width }, dst: None, args } if args.len() == 2 => {
-                match pending_addrs.get(&args[0]).copied() {
-                    Some((r, 12)) if *width == 8 => {
-                        let (payload, is_str) = match str_handles.get(&args[1]) {
-                            Some(s) => (*s, true),
-                            None => (args[1], false),
-                        };
-                        if let Some(p) = pending.get_mut(&r) {
-                            p.payload = Some((payload, is_str));
-                        }
-                        // Err(str) completes HERE (len stays 1 = Err tag).
-                        if is_str {
-                            if let Some(p) = pending.remove(&r) {
-                                if let Some(h) = p.handle {
-                                    pending_handles.remove(&h);
-                                }
-                                out.push(Op::Prim {
-                                    kind: PrimKind::ResMakeErrStr,
-                                    dst: Some(r),
-                                    args: vec![payload],
-                                });
-                                res_vals.insert(r);
-                            }
-                        }
-                        // Ok(scalar) completes at the len:=0 store below.
-                    }
-                    Some((r, 4)) if *width == 4 && const_vals.get(&args[1]) == Some(&0) => {
-                        // Ok tag store: complete the Ok(scalar) producer.
-                        if let Some(p) = pending.remove(&r) {
-                            if let Some(h) = p.handle {
-                                pending_handles.remove(&h);
-                            }
-                            if let Some((payload, false)) = p.payload {
-                                out.push(Op::Prim {
-                                    kind: PrimKind::ResMakeOk,
-                                    dst: Some(r),
-                                    args: vec![payload],
-                                });
-                                res_vals.insert(r);
-                            }
-                            // A str payload with an Ok tag is outside the
-                            // recognized set — the window ops were already
-                            // dropped, so re-emitting is impossible; leave R
-                            // undefined and let the render wall on its use.
-                        }
-                    }
-                    _ => out.push(op),
-                }
-            }
-            Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args }
-                if args.len() == 1 && matches!(res_addrs.get(&args[0]), Some((_, 4))) =>
+            Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, dst: Some(_), args }
+                if args.len() == 1 && t.res_addrs.contains_key(&args[0]) =>
             {
-                let (r, _) = res_addrs[&args[0]];
-                out.push(Op::Prim { kind: PrimKind::ResTag, dst: Some(*d), args: vec![r] });
-            }
-            Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(d), args }
-                if args.len() == 1 && matches!(res_addrs.get(&args[0]), Some((_, 12))) =>
-            {
-                let (r, _) = res_addrs[&args[0]];
-                out.push(Op::Prim { kind: PrimKind::ResOkScalar, dst: Some(*d), args: vec![r] });
-            }
-            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args }
-                if args.len() == 1 && matches!(res_addrs.get(&args[0]), Some((_, 12))) =>
-            {
-                let (r, _) = res_addrs[&args[0]];
-                out.push(Op::Prim { kind: PrimKind::ResErrStr, dst: Some(*d), args: vec![r] });
+                t.track_res_load(op, &mut out);
             }
             // A Consume of a rewritten result value: the carrier is
             // scalar-like to the verifier (no object) — drop the op.
-            Op::Consume { v } if res_vals.contains(v) => {}
+            Op::Consume { v } if t.res_vals.contains(v) => {}
             Op::CallFn { dst: Some(d), name, .. } if result_fns.contains(name) => {
-                res_vals.insert(*d);
+                t.res_vals.insert(*d);
                 out.push(op);
             }
             // Res-ness propagates through if-value joins.
             Op::IfThen { dst, .. } => {
-                if_dsts.push(*dst);
+                t.if_dsts.push(*dst);
                 out.push(op);
             }
-            Op::Else { val } | Op::EndIf { val } => {
-                if let (Some(v), Some(Some(d))) = (val, if_dsts.last()) {
-                    if res_vals.contains(v) {
-                        res_vals.insert(*d);
-                    }
-                }
-                if matches!(op, Op::EndIf { .. }) {
-                    if_dsts.pop();
-                }
-                out.push(op);
+            Op::Else { .. } | Op::EndIf { .. } => t.track_if_join(op, &mut out),
+            _ => out.push(op),
+        }
+    }
+
+    sweep_dead_window_material(&mut out, f.ret);
+    f.ops = out;
+}
+
+/// In-flight producers: R → (its Handle, stored payload, payload-was-str-handle).
+struct Pending {
+    handle: Option<ValueId>,
+    payload: Option<(ValueId, bool)>,
+}
+
+/// Running knowledge of the window recognizer, all keyed by ValueId.
+#[derive(Default)]
+struct ResultWindowTracker {
+    const_vals: BTreeMap<ValueId, i64>,
+    str_allocs: BTreeSet<ValueId>,
+    res_vals: BTreeSet<ValueId>,
+    /// Handle over a res value → the res value.
+    res_handles: BTreeMap<ValueId, ValueId>,
+    /// Handle over an owned Str alloc → the Str value.
+    str_handles: BTreeMap<ValueId, ValueId>,
+    /// Address value → (res value, byte offset).
+    res_addrs: BTreeMap<ValueId, (ValueId, i64)>,
+    pending: BTreeMap<ValueId, Pending>,
+    /// Producer-window handles → their R.
+    pending_handles: BTreeMap<ValueId, ValueId>,
+    /// Addresses inside producer windows → (R, offset).
+    pending_addrs: BTreeMap<ValueId, (ValueId, i64)>,
+    /// if-value stack: dst of each open IfThen (for res propagation to joins).
+    if_dsts: Vec<Option<ValueId>>,
+}
+
+impl ResultWindowTracker {
+    /// The `Handle` arm: classify what the handle points at. Pending/res
+    /// handles are NOT emitted (pure address material). A str handle IS
+    /// emitted — if it feeds a recognized store it dies with the window;
+    /// otherwise the sweep keeps it and the render walls honestly as before.
+    fn track_handle(&mut self, op: Op, out: &mut Vec<Op>) {
+        let Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } = &op else {
+            unreachable!("caller matched the handle prim")
+        };
+        let (d, a) = (*d, args[0]);
+        if let Some(p) = self.pending.get_mut(&a) {
+            p.handle = Some(d);
+            self.pending_handles.insert(d, a);
+        } else if self.res_vals.contains(&a) {
+            self.res_handles.insert(d, a);
+        } else if self.str_allocs.contains(&a) {
+            self.str_handles.insert(d, a);
+            out.push(op);
+        } else {
+            out.push(op);
+        }
+    }
+
+    /// The `Add` arm: an offset add over a window/res handle becomes address
+    /// knowledge (not emitted); anything else passes through.
+    fn track_addr_add(&mut self, op: Op, out: &mut Vec<Op>) {
+        let Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } = &op else {
+            unreachable!("caller matched the add")
+        };
+        let (dst, a) = (*dst, *a);
+        let off = self.const_vals.get(b).copied();
+        if let (Some(r), Some(o)) = (self.pending_handles.get(&a).copied(), off) {
+            self.pending_addrs.insert(dst, (r, o));
+        } else if let (Some(r), Some(o)) = (self.res_handles.get(&a).copied(), off) {
+            self.res_addrs.insert(dst, (r, o));
+        } else {
+            out.push(op);
+        }
+    }
+
+    /// The `Store` arm: a store through a producer-window address records the
+    /// payload (offset 12, width 8) or completes the Ok producer (the len:=0
+    /// tag store at offset 4). Any other store passes through.
+    fn track_store(&mut self, op: Op, out: &mut Vec<Op>) {
+        let Op::Prim { kind: PrimKind::Store { width }, dst: None, args } = &op else {
+            unreachable!("caller matched the store prim")
+        };
+        let (width, addr, stored) = (*width, args[0], args[1]);
+        match self.pending_addrs.get(&addr).copied() {
+            Some((r, 12)) if width == 8 => self.store_producer_payload(r, stored, out),
+            Some((r, 4)) if width == 4 && self.const_vals.get(&stored) == Some(&0) => {
+                self.complete_ok_producer(r, out);
             }
             _ => out.push(op),
         }
     }
 
-    // Dead-op sweep: the recognized windows orphaned their ConstInt feeders
-    // (and any Handle whose only use was a rewritten window). Iterate to a
-    // fixpoint so chains (ConstInt → Add → Handle) fully disappear — a live
-    // program value is never touched (only PURE ops are candidates, and the
-    // read set below is COMPLETE over the Op grammar).
+    /// The offset-12 payload store. An Err(str) completes HERE (len stays 1 =
+    /// Err tag); Ok(scalar) completes at the len:=0 store.
+    fn store_producer_payload(&mut self, r: ValueId, stored: ValueId, out: &mut Vec<Op>) {
+        let (payload, is_str) = match self.str_handles.get(&stored) {
+            Some(s) => (*s, true),
+            None => (stored, false),
+        };
+        if let Some(p) = self.pending.get_mut(&r) {
+            p.payload = Some((payload, is_str));
+        }
+        if !is_str {
+            return;
+        }
+        let Some(p) = self.pending.remove(&r) else { return };
+        if let Some(h) = p.handle {
+            self.pending_handles.remove(&h);
+        }
+        out.push(Op::Prim { kind: PrimKind::ResMakeErrStr, dst: Some(r), args: vec![payload] });
+        self.res_vals.insert(r);
+    }
+
+    /// The Ok tag store (len := 0): complete the Ok(scalar) producer. A str
+    /// payload with an Ok tag is outside the recognized set — the window ops
+    /// were already dropped, so re-emitting is impossible; leave R undefined
+    /// and let the render wall on its use.
+    fn complete_ok_producer(&mut self, r: ValueId, out: &mut Vec<Op>) {
+        let Some(p) = self.pending.remove(&r) else { return };
+        if let Some(h) = p.handle {
+            self.pending_handles.remove(&h);
+        }
+        if let Some((payload, false)) = p.payload {
+            out.push(Op::Prim { kind: PrimKind::ResMakeOk, dst: Some(r), args: vec![payload] });
+            self.res_vals.insert(r);
+        }
+    }
+
+    /// A load through a rewritten-result address: the tag (Load4 @+4), the ok
+    /// payload (Load8 @+12), or the err payload (LoadHandle @+12). Any other
+    /// width/offset combination passes through untouched.
+    fn track_res_load(&mut self, op: Op, out: &mut Vec<Op>) {
+        let Op::Prim { kind, dst: Some(d), args } = &op else {
+            unreachable!("caller matched the load prims")
+        };
+        let (r, off) = self.res_addrs[&args[0]];
+        let res_kind = match (kind, off) {
+            (PrimKind::Load { width: 4 }, 4) => Some(PrimKind::ResTag),
+            (PrimKind::Load { width: 8 }, 12) => Some(PrimKind::ResOkScalar),
+            (PrimKind::LoadHandle, 12) => Some(PrimKind::ResErrStr),
+            _ => None,
+        };
+        let d = *d;
+        match res_kind {
+            Some(kind) => out.push(Op::Prim { kind, dst: Some(d), args: vec![r] }),
+            None => out.push(op),
+        }
+    }
+
+    /// The `Else`/`EndIf` arm: propagate res-ness from an arm value to the
+    /// join dst, and close the if-value scope on `EndIf`.
+    fn track_if_join(&mut self, op: Op, out: &mut Vec<Op>) {
+        let (Op::Else { val } | Op::EndIf { val }) = &op else {
+            unreachable!("caller matched the join ops")
+        };
+        if let (Some(v), Some(Some(d))) = (val, self.if_dsts.last()) {
+            if self.res_vals.contains(v) {
+                self.res_vals.insert(*d);
+            }
+        }
+        if matches!(op, Op::EndIf { .. }) {
+            self.if_dsts.pop();
+        }
+        out.push(op);
+    }
+}
+
+/// Dead-op sweep: the recognized windows orphaned their ConstInt feeders
+/// (and any Handle whose only use was a rewritten window). Iterate to a
+/// fixpoint so chains (ConstInt → Add → Handle) fully disappear — a live
+/// program value is never touched (only PURE ops are candidates, and the
+/// read set of [`collect_reads`] is COMPLETE over the Op grammar).
+fn sweep_dead_window_material(out: &mut Vec<Op>, ret: Option<ValueId>) {
     loop {
         let mut used: BTreeSet<ValueId> = BTreeSet::new();
-        for op in &out {
+        for op in out.iter() {
             collect_reads(op, &mut used);
         }
-        if let Some(r) = f.ret {
+        if let Some(r) = ret {
             used.insert(r);
         }
         let before = out.len();
@@ -230,8 +276,6 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
             break;
         }
     }
-
-    f.ops = out;
 }
 
 /// EVERY ValueId an op reads — exhaustive over the Op grammar (a miss here
