@@ -16,7 +16,7 @@
 
 | 機能 | 実装 |
 |------|------|
-| tail calls | almide-mir の `tail_call_indexes`（render_wasm_b.rs）が関数末尾 CallFn を分類し `return_call` を出力（#864 で再移植、C-178）。self 再帰は上流 TCO ループ。`return_call_indirect`（クロージャ末尾）は未移植 |
+| tail calls | almide-mir の `tail_call_indexes`（render_wasm_b.rs）が関数末尾 CallFn を分類し `return_call` を出力（#864 で再移植、C-178）。self 再帰は上流 TCO ループ。`return_call_indirect`（クロージャ末尾）も**移植済 (2026-08-03)** — 同じ分類が CallIndirect を admit（fixture: closure_tail_recursion + 命令 gate: tail_call_indirect_test.rs）。純 indirect 無限サイクルは creator 側 drop が正当に decline するため深度主張は fixture ヘッダの通り正直化 |
 | SIMD (v128) | 旧 almide-codegen 時代の 4× v128 アンロールは almide-mir 未移植（デフォルト出力に v128 なし、#864 調査で確認）。適用拡大は [wasm-optimization-roadmap](../done/wasm-optimization-roadmap.md) |
 | 厳格検証 | wasmtime 45+ / V8 strict validator 前提 (StackBalancePass) |
 
