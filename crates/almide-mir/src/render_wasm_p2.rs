@@ -39,7 +39,7 @@ fn render_op(op: &Op, t: OpTables<'_>, fuser: &mut Fuser) -> String {
         | Op::CallIndirect { .. }
         | Op::CallFn { .. }
         | Op::CallImport { .. } => {
-            render_op_call(op, label_off, param_counts, reprs, floats, tail_call, fuser)
+            render_op_call(op, &WasmEnv { label_off, param_counts, reprs, floats }, tail_call, fuser)
         }
         Op::Drop { .. }
         | Op::DropListStr { .. }

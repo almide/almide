@@ -1,3 +1,13 @@
+/// The per-function naming environment the call renderers read — the label
+/// offsets, callee param counts and value repr/float classes travel as one
+/// value (a caller could otherwise pair maps from different functions).
+pub(crate) struct WasmEnv<'a> {
+    pub label_off: &'a BTreeMap<String, (u32, u32)>,
+    pub param_counts: &'a BTreeMap<String, usize>,
+    pub reprs: &'a BTreeMap<ValueId, Repr>,
+    pub floats: &'a BTreeSet<ValueId>,
+}
+
 // The CALL-family wasm op renderers — Dup/Call/CallIndirect/CallFn/
 // CallImport and the checked IntBinOp expansion with its strength
 // reductions. include!-spliced from render_wasm_p2.rs.
@@ -7,22 +17,14 @@
 /// and `_intbinop` (`IntBinOp` alone — it was the dominant share of this group's
 /// complexity) — `Op` has no repeated variant across the two, so the split
 /// carries none of the guard-order risk a duplicated-discriminant match would.
-fn render_op_call(
-    op: &Op,
-    label_off: &BTreeMap<String, (u32, u32)>,
-    param_counts: &BTreeMap<String, usize>,
-    reprs: &BTreeMap<ValueId, Repr>,
-    floats: &BTreeSet<ValueId>,
-    tail_call: bool,
-    fuser: &mut Fuser,
-) -> String {
+fn render_op_call(op: &Op, env: &WasmEnv<'_>, tail_call: bool, fuser: &mut Fuser) -> String {
     match op {
         Op::Dup { .. }
         | Op::Call { .. }
         | Op::CallIndirect { .. }
         | Op::CallFn { .. }
         | Op::CallImport { .. } => {
-            render_op_call_light(op, label_off, param_counts, reprs, floats, tail_call)
+            render_op_call_light(op, env, tail_call)
         }
         Op::IntBinOp { .. } => render_op_call_intbinop(op, fuser),
         _ => unreachable!("render_op_call: {op:?} is not in this group"),
@@ -100,14 +102,61 @@ match (dst, result) {
 
 }
 
-fn render_op_call_light(
-    op: &Op,
-    label_off: &BTreeMap<String, (u32, u32)>,
-    param_counts: &BTreeMap<String, usize>,
-    reprs: &BTreeMap<ValueId, Repr>,
-    floats: &BTreeSet<ValueId>,
+/// The `CallFn` arm of [`render_op_call_light`]: the elided-marker no-op,
+/// the function-tail `return_call` transfer (#864, C-178), and the plain
+/// direct call. Bodies verbatim.
+fn render_call_fn_wasm(
+    dst: &Option<ValueId>,
+    name: &str,
+    args: &[CallArg],
+    result: &Option<Repr>,
+    env: &WasmEnv<'_>,
     tail_call: bool,
 ) -> String {
+    let WasmEnv { param_counts, reprs, floats, .. } = *env;
+// A caps-accounting ELIDED-CALL MARKER (`record_elided_calls`) is an
+// `Op::CallFn { dst: None, args: [], result: None }` whose NAME carries
+// the elided callee's caps identity — it must keep that name for the
+// caps gate, but it must NOT render as a real `(call $name)`: when
+// `$name` declares parameters, a 0-arg call underflows the wasm stack
+// and wasmtime rejects the module. Render NOTHING for such a marker.
+//
+// A GENUINE 0-arg void call to a 0-PARAMETER function has the IDENTICAL
+// shape (`dst:None, args:[], result:None`) and IS valid wasm — it must
+// still render. The discriminator: a real call always supplies its
+// callee's params, so only a marker calls a param-taking function with
+// zero args.
+let is_elided_marker = dst.is_none()
+    && args.is_empty()
+    && result.is_none()
+    && param_counts.get(name).copied().unwrap_or(0) > 0;
+if is_elided_marker {
+    return String::new();
+}
+let argstr = args
+    .iter()
+    .map(|a| render_arg_wasm(a, reprs, floats))
+    .collect::<Vec<_>>()
+    .join(" ");
+// A FUNCTION-TAIL call (`tail_call_indexes`): `return_call`
+// transfers the frame — the merges after it are unreachable on
+// this path (their `local.get` of the never-set dst is dead but
+// valid wasm), so a mutual-tail-recursion chain runs in constant
+// stack (#864). Self tail-recursion still takes the TCO loop
+// rewrite upstream and never reaches here.
+if tail_call && dst.is_some() {
+    return format!("    (return_call ${name} {argstr})\n");
+}
+match dst {
+    Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
+    None => format!("    (call ${name} {argstr})\n"),
+}
+        
+
+}
+
+fn render_op_call_light(op: &Op, env: &WasmEnv<'_>, tail_call: bool) -> String {
+    let WasmEnv { label_off, param_counts, reprs, floats } = *env;
     match op {
         // An alias SHARES the object and bumps its refcount (A1.3-render): dst and
         // src become two handles to the SAME block, rc += 1 — matching the cert's
@@ -129,43 +178,7 @@ fn render_op_call_light(
             render_call_indirect_wasm(CallIndirectParts { dst, table_idx, args, result }, reprs, floats, tail_call)
         }
         Op::CallFn { dst, name, args, result } => {
-            // A caps-accounting ELIDED-CALL MARKER (`record_elided_calls`) is an
-            // `Op::CallFn { dst: None, args: [], result: None }` whose NAME carries
-            // the elided callee's caps identity — it must keep that name for the
-            // caps gate, but it must NOT render as a real `(call $name)`: when
-            // `$name` declares parameters, a 0-arg call underflows the wasm stack
-            // and wasmtime rejects the module. Render NOTHING for such a marker.
-            //
-            // A GENUINE 0-arg void call to a 0-PARAMETER function has the IDENTICAL
-            // shape (`dst:None, args:[], result:None`) and IS valid wasm — it must
-            // still render. The discriminator: a real call always supplies its
-            // callee's params, so only a marker calls a param-taking function with
-            // zero args.
-            let is_elided_marker = dst.is_none()
-                && args.is_empty()
-                && result.is_none()
-                && param_counts.get(name).copied().unwrap_or(0) > 0;
-            if is_elided_marker {
-                return String::new();
-            }
-            let argstr = args
-                .iter()
-                .map(|a| render_arg_wasm(a, reprs, floats))
-                .collect::<Vec<_>>()
-                .join(" ");
-            // A FUNCTION-TAIL call (`tail_call_indexes`): `return_call`
-            // transfers the frame — the merges after it are unreachable on
-            // this path (their `local.get` of the never-set dst is dead but
-            // valid wasm), so a mutual-tail-recursion chain runs in constant
-            // stack (#864). Self tail-recursion still takes the TCO loop
-            // rewrite upstream and never reaches here.
-            if tail_call && dst.is_some() {
-                return format!("    (return_call ${name} {argstr})\n");
-            }
-            match dst {
-                Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
-                None => format!("    (call ${name} {argstr})\n"),
-            }
+            render_call_fn_wasm(dst, name, args, result, env, tail_call)
         }
         // A host wasm IMPORT call (`@extern(wasm, module, name)`). Emit a `(call
         // $__import_module_name …)`; the matching `(import …)` is declared at module
