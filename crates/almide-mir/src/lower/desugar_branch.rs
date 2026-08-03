@@ -213,6 +213,52 @@ pub fn desugar_callarg_heap_if(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
 /// return (the `e!` to hoist, the container with that child replaced by `Var(tmp)`). NOT `e` itself
 /// (a top-level `e!` is [`desugar_let_unwrap`]'s job). The hoist + that pass turn `f(.., g(x)!, ..)`
 /// / `ok(int.parse(s)!)` into the proven match-based early-return.
+/// The single-child wrapper arms of [`extract_first_callarg_unwrap`] —
+/// ctor wrappers, unwrap/try, `if` COND / `match` SUBJECT (unconditionally
+/// evaluated FIRST; arms never descended), and access objects. Verbatim.
+fn extract_unwrap_from_wrapper(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+    fn take_or_recurse(child: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+        if matches!(&child.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
+            let var = IrExpr {
+                kind: IrExprKind::Var { id: tmp },
+                ty: child.ty.clone(),
+                span: child.span.clone(),
+                def_id: None,
+            };
+            return Some((child.clone(), var));
+        }
+        extract_first_callarg_unwrap(child, tmp)
+    }
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: e.ty.clone(), span: e.span.clone(), def_id: e.def_id };
+    match &e.kind {
+        IrExprKind::ResultOk { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultOk { expr: Box::new(ne) }))),
+        IrExprKind::ResultErr { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultErr { expr: Box::new(ne) }))),
+        IrExprKind::OptionSome { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::OptionSome { expr: Box::new(ne) }))),
+        IrExprKind::Unwrap { expr } => extract_first_callarg_unwrap(expr, tmp)
+            .map(|(u, ne)| (u, mk(IrExprKind::Unwrap { expr: Box::new(ne) }))),
+        IrExprKind::Try { expr } => extract_first_callarg_unwrap(expr, tmp)
+            .map(|(u, ne)| (u, mk(IrExprKind::Try { expr: Box::new(ne) }))),
+        // An `if` COND / `match` SUBJECT is evaluated unconditionally FIRST, so an unwrap
+        // there lifts soundly (the desugared assert shape `if f(x)! == 42 then () else die`
+        // reaches its unwrap through the cond). ARMS are conditional — never descended.
+        IrExprKind::If { cond, then, else_ } => take_or_recurse(cond, tmp).map(|(u, nc)| {
+            (u, mk(IrExprKind::If { cond: Box::new(nc), then: then.clone(), else_: else_.clone() }))
+        }),
+        IrExprKind::Match { subject, arms } => take_or_recurse(subject, tmp).map(|(u, ns)| {
+            (u, mk(IrExprKind::Match { subject: Box::new(ns), arms: arms.clone() }))
+        }),
+        // Field/element access objects (`f(x)!.field`, `xs[g()!]`) and the `??` operand —
+        // all unconditionally evaluated subpositions (the `??` FALLBACK is conditional).
+        IrExprKind::Member { object, field } => take_or_recurse(object, tmp).map(|(u, no)| {
+            (u, mk(IrExprKind::Member { object: Box::new(no), field: *field }))
+        }),
+        IrExprKind::TupleIndex { object, index } => take_or_recurse(object, tmp).map(|(u, no)| {
+            (u, mk(IrExprKind::TupleIndex { object: Box::new(no), index: *index }))
+        }),
+        _ => unreachable!("caller matched the wrapper kinds"),
+    }
+}
+
 fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
     fn take_or_recurse(child: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
         if matches!(&child.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
@@ -276,30 +322,15 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
             }
             None
         }
-        IrExprKind::ResultOk { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultOk { expr: Box::new(ne) }))),
-        IrExprKind::ResultErr { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultErr { expr: Box::new(ne) }))),
-        IrExprKind::OptionSome { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::OptionSome { expr: Box::new(ne) }))),
-        IrExprKind::Unwrap { expr } => extract_first_callarg_unwrap(expr, tmp)
-            .map(|(u, ne)| (u, mk(IrExprKind::Unwrap { expr: Box::new(ne) }))),
-        IrExprKind::Try { expr } => extract_first_callarg_unwrap(expr, tmp)
-            .map(|(u, ne)| (u, mk(IrExprKind::Try { expr: Box::new(ne) }))),
-        // An `if` COND / `match` SUBJECT is evaluated unconditionally FIRST, so an unwrap
-        // there lifts soundly (the desugared assert shape `if f(x)! == 42 then () else die`
-        // reaches its unwrap through the cond). ARMS are conditional — never descended.
-        IrExprKind::If { cond, then, else_ } => take_or_recurse(cond, tmp).map(|(u, nc)| {
-            (u, mk(IrExprKind::If { cond: Box::new(nc), then: then.clone(), else_: else_.clone() }))
-        }),
-        IrExprKind::Match { subject, arms } => take_or_recurse(subject, tmp).map(|(u, ns)| {
-            (u, mk(IrExprKind::Match { subject: Box::new(ns), arms: arms.clone() }))
-        }),
-        // Field/element access objects (`f(x)!.field`, `xs[g()!]`) and the `??` operand —
-        // all unconditionally evaluated subpositions (the `??` FALLBACK is conditional).
-        IrExprKind::Member { object, field } => take_or_recurse(object, tmp).map(|(u, no)| {
-            (u, mk(IrExprKind::Member { object: Box::new(no), field: *field }))
-        }),
-        IrExprKind::TupleIndex { object, index } => take_or_recurse(object, tmp).map(|(u, no)| {
-            (u, mk(IrExprKind::TupleIndex { object: Box::new(no), index: *index }))
-        }),
+        IrExprKind::ResultOk { .. }
+        | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. }
+        | IrExprKind::Unwrap { .. }
+        | IrExprKind::Try { .. }
+        | IrExprKind::If { .. }
+        | IrExprKind::Match { .. }
+        | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. } => extract_unwrap_from_wrapper(e, tmp),
         IrExprKind::IndexAccess { object, index } => {
             if let Some((u, no)) = take_or_recurse(object, tmp) {
                 return Some((u, mk(IrExprKind::IndexAccess { object: Box::new(no), index: index.clone() })));
