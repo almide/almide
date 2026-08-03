@@ -368,8 +368,8 @@ jobs:
           ALMIDE="$PWD/target/release/almide.exe"
           for f in fs_relative_path env_platform_reporting nan_canonical_observation \
                    nan_canonical_bytes_write closure_tail_recursion mutual_tail_recursion; do
-            n=$("$ALMIDE" run "spec/wasm_cross/$f.almd" 2>/dev/null) || { echo "native run failed: $f"; exit 1; }
-            w=$("$ALMIDE" run "spec/wasm_cross/$f.almd" --target wasm 2>/dev/null) || { echo "wasm run failed: $f"; exit 1; }
+            n=$("$ALMIDE" run "spec/wasm_cross/$f.almd" 2>native_err.txt) || { echo "native run failed: $f"; cat native_err.txt; exit 1; }
+            w=$("$ALMIDE" run "spec/wasm_cross/$f.almd" --target wasm 2>wasm_err.txt) || { echo "wasm run failed: $f"; cat wasm_err.txt; exit 1; }
             if [ -z "$w" ] || [ "$n" != "$w" ]; then
               echo "PARITY FAIL: $f"
               echo "--- native ---"; echo "$n"

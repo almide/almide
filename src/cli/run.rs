@@ -437,8 +437,18 @@ pub fn cmd_run(args: RunArgs) {
 pub(crate) fn wasmtime_fs_args(cmd: &mut Command) {
     if cfg!(windows) {
         cmd.arg("--dir=.");
-        cmd.arg(format!("--dir={}::/tmp", std::env::temp_dir().display()));
+        // GetTempPath answers with a trailing separator; wasmtime's
+        // `HOST::GUEST` mapping wants the bare directory.
+        let tmp = std::env::temp_dir();
+        let tmp = tmp.to_string_lossy();
+        cmd.arg(format!("--dir={}::/tmp", tmp.trim_end_matches(['\\', '/'])));
         cmd.arg("--env=TMPDIR=/tmp");
+        // The #874 cwd pin, Windows spelling: a host-absolute ALMIDE_CWD
+        // (`D:\a\…`) can never match a guest preopen, and the inherited PWD
+        // is a git-bash unix-style host path — equally unmatchable. "." IS
+        // the launcher cwd here (the `--dir=.` preopen), so the guest's
+        // relative-path prefix becomes `./…` and resolves inside it.
+        cmd.arg("--env=ALMIDE_CWD=.");
     } else {
         cmd.arg("--dir=/");
     }
@@ -480,9 +490,13 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     cmd.arg("-S").arg("inherit-env=y");
     // The guest resolves relative fs paths against ALMIDE_CWD (in preference
     // to a possibly-stale inherited PWD — #874); `--env` overrides win over
-    // `inherit-env`, so this pins the real launcher cwd either way.
-    if let Some(cwd) = almide_cwd() {
-        cmd.arg(format!("--env=ALMIDE_CWD={}", cwd));
+    // `inherit-env`, so this pins the real launcher cwd either way. On
+    // Windows `wasmtime_fs_args` already pinned the guest spelling (`.`);
+    // a host-absolute path here would shadow it with an unmatchable one.
+    if !cfg!(windows) {
+        if let Some(cwd) = almide_cwd() {
+            cmd.arg(format!("--env=ALMIDE_CWD={}", cwd));
+        }
     }
     cmd.arg(&wasm_path).args(program_args);
     if time_report {
