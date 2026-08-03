@@ -10,10 +10,10 @@ import json
 
 fn main() -> Unit = {
   // Separately-allocated nulls are equal (the wasm-bindgen is_import shape).
-  println(if json.null() == json.null() then "null-eq" else "null-ne")
-  let obj = json.parse('{"name":"g"}') ?? json.null()
-  let missing = json.get(obj, "import") ?? json.null()
-  println(if missing != json.null() then "import" else "plain")
+  println(if value.null() == value.null() then "null-eq" else "null-ne")
+  let obj = json.parse('{"name":"g"}') ?? value.null()
+  let missing = value.field(obj, "import") ?? value.null()
+  println(if missing != value.null() then "import" else "plain")
   // Scalars: strict tags, payload equality.
   println(if value.int(3) == value.int(3) then "int-eq" else "int-ne")
   println(if value.int(3) == value.int(4) then "int-eq2" else "int-ne2")
@@ -41,6 +41,6 @@ fn main() -> Unit = {
   println(if o1 == o2 then "obj-eq" else "obj-ne")
   println(if o1 == o3 then "obj-eq2" else "obj-ne2")
   // Parsed vs built.
-  let p = json.parse('{"k":1,"m":[false]}') ?? json.null()
+  let p = json.parse('{"k":1,"m":[false]}') ?? value.null()
   println(if p == o1 then "parse-eq" else "parse-ne")
 }

@@ -43,3 +43,47 @@ test "interpolation with nested braces" {
   let s = "len=${int.to_string(list.len(xs.filter((x) => { x > 1 })))}"
   assert_eq(s, "len=2")
 }
+
+// ── #1073: string literals inside ${...} ──
+// (the habit spelling \"..\" is pinned at the lexer level — `almide fmt`
+// canonicalizes it to bare quotes, so it cannot survive in a spec file)
+test "bare quotes inside interpolation" {
+  let parent: Option[String] = none
+  assert_eq("parent=${parent ?? "<none>"}", "parent=<none>")
+}
+
+test "closing brace inside nested string literal" {
+  let x: Option[String] = none
+  assert_eq("v=${x ?? "}"} end", "v=} end")
+}
+
+test "opening brace inside nested string literal" {
+  let x: Option[String] = none
+  assert_eq("v=${x ?? "{"} end", "v={ end")
+}
+
+test "escaped quote inside a bare nested string" {
+  assert_eq("n=${int.to_string(string.len('a"b'))}", "n=3")
+}
+
+test "single-quote literal inside interpolation" {
+  let x: Option[String] = none
+  assert_eq("v=${x ?? "<sq>"}", "v=<sq>")
+}
+
+test "two habit-escaped holes in one string" {
+  let a: Option[String] = some("A")
+  let b: Option[String] = none
+  assert_eq("${a ?? "?"}/${b ?? "?"}", "A/?")
+}
+
+// ── #1076: escaped \${ coexisting with real holes ──
+test "escaped dollar-brace next to a real hole stays literal" {
+  let a = "A"
+  assert_eq("${a} \${b}", "A \${b}")
+}
+
+test "escaped backslash before a real hole keeps the hole" {
+  let x = "X"
+  assert_eq("\\${x}", "\\X")
+}

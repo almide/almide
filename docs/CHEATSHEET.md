@@ -316,7 +316,7 @@ let { name, age } = user    // record destructure (1 level only)
 
 ### Unwrap operators
 ```
-expr!              // unwrap Result/Option, propagate err (effect fn only)
+expr!              // unwrap Result/Option, propagate the failure (effect fn, or a pure fn returning Result/Option)
 expr ?? fallback   // unwrap or use fallback value
 expr?              // Result → Option (err → none)
 expr?.field        // optional chaining (Option[Record] → Option[FieldType])
@@ -508,7 +508,7 @@ type OtlpSpan: Codec = {
   startTimeUnixNano: String,
 }
 // send:    http.request("POST", url, json.stringify(OtlpSpan.encode(s)), headers)
-// receive: OtlpSpan.decode(json.parse(body) ?? json.null())
+// receive: OtlpSpan.decode(json.parse(body) ?? value.null())
 ```
 Domain logic that wants Almide-shaped names defines its own type and maps in
 plain code (a constructor call — the checker verifies every field). Use the
@@ -533,7 +533,7 @@ AnyValue { stringValue: some("hi") }  // → {"stringValue":"hi"} — exactly on
 **Rule 3 — `Value` is the escape hatch.** A `Value` field passes through
 verbatim in both directions (nested docs, explicit nulls). `Option[Value]` is
 the ONE place absent and null differ: missing → `none`, explicit `null` →
-`some(json.null())` — use it for RFC-7386-style patch semantics.
+`some(value.null())` — use it for RFC-7386-style patch semantics.
 
 **Rule 4 — foreign variant shapes are hand-written codecs.** The derived
 variant form is externally tagged (`{"Click": {...}}`). For an API that tags
@@ -550,18 +550,14 @@ fn Event.encode(e: Event) -> Value = match e {
   C(c) => value.merge(Click.encode(c), value.object([("type", value.str("click"))])),
   S(s) => value.merge(Scroll.encode(s), value.object([("type", value.str("scroll"))])),
 }
-fn Event.decode(v: Value) -> Result[Event, String] =
-  match value.field(v, "type") {
-    ok(tv) => match value.as_string(tv) {
-      ok(tag) => match tag {
-        "click"  => result.map(Click.decode(v), (c) => C(c))
-        "scroll" => result.map(Scroll.decode(v), (s) => S(s))
-        _ => err("unknown Event tag: ${tag}")
-      }
-      err(e) => err(e)
-    }
-    err(e) => err(e)
+fn Event.decode(v: Value) -> Result[Event, String] = {
+  let tag = value.as_string(value.field(v, "type")!)!
+  match tag {
+    "click"  => result.map(Click.decode(v), (c) => C(c)),
+    "scroll" => result.map(Scroll.decode(v), (s) => S(s)),
+    _ => err("unknown Event tag: ${tag}"),
   }
+}
 // Event now nests in derived Codec types like any other: { evt: Event, at: Int }
 ```
 Always pair a hand-written codec with a roundtrip test:

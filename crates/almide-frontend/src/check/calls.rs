@@ -102,104 +102,7 @@ impl Checker {
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
         // Expected-type-directed argument inference (#653). The default is strictly-left-to-right bottom-up inference of every argument. The one place that breaks down is an INFERRED lambda param passed to a higher-order function inside a generic body: `list.map(xs, (e) => e.name())` where `xs: List[T]`, `T: Labelled`. Inferred bottom-up, `e` is a fresh var, so `e.name()` cannot see the protocol bound and collapses `e` into a closure type (`Fn() -> String`) -- the later `(T)->U` constraint can no longer undo that, yielding a spurious native E0308. Fix: resolve the callee's signature up front; as we infer args left-to-right we unify each non-lambda arg against its declared param to learn the generic bindings (`A := T`), then, just before inferring a lambda arg whose param slot is a `Fn`, pin the lambda's (unannotated) params to the substituted expected element type (`T`, carrying the bound). The lambda body then resolves `e.name()` via the protocol path. Calls without a `Fn`-param sig are unaffected -- they take the plain bottom-up path below.
         let call_sig = self.lookup_call_sig(callee);
-        let arg_tys: Vec<Ty> = {
-            let mut bindings: HashMap<Sym, Ty> = HashMap::new();
-            let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
-            for (i, a) in args.iter_mut().enumerate() {
-                // Pin an unannotated lambda's params to the expected element types substituted with bindings learned from earlier args. A slot whose substituted type still mentions one of the CALLEE's OWN unbound generics (`A` when arg0 was itself an unresolved inference var) gets NO pin: writing the literal sig generic into the lambda param disconnects it from the union-find, so it never picks up the element type that flows in later and silently defaults to Int (nn variance_rows: `let sq = list.map(row, (x) => …)` inside a map lambda).
-                let pinned = if matches!(&a.kind, ExprKind::Lambda { .. }) {
-                    call_sig.as_ref()
-                        .and_then(|sig| {
-                            let (_, pty) = sig.params.get(i)?;
-                            let pty = crate::types::substitute(pty, &bindings);
-                            let Ty::Fn { params, .. } = pty else { return None };
-                            // A callee generic that no earlier arg pinned is MEANINGLESS in the caller's scope — unless its name happens to denote an IN-SCOPE rigid generic (the enclosing fn's own `T`, registered in env.types as a TypeVar), in which case the pin is exactly the #653 protocol-bound case and must survive.
-                            let unbound: std::collections::HashSet<Sym> = sig.generics.iter().copied()
-                                .filter(|g| !bindings.contains_key(g))
-                                .filter(|g| !matches!(self.env.types.get(g), Some(Ty::TypeVar(n)) if n == g))
-                                .collect();
-                            let mentions_unbound = |t: &Ty| -> bool {
-                                let hit = |t: &Ty| matches!(t, Ty::TypeVar(n) if unbound.contains(n));
-                                hit(t) || t.any_child_recursive(&hit)
-                            };
-                            Some(params.into_iter()
-                                .map(|t| if mentions_unbound(&t) { None } else { Some(t) })
-                                .collect::<Vec<Option<Ty>>>())
-                        })
-                } else { None };
-                let prev_hint = self.lambda_arg_hint.take();
-                self.lambda_arg_hint = pinned;
-                let aty = self.infer_expr(a);
-                self.lambda_arg_hint = prev_hint;
-                // E025, call-arg edition: an Option/Result CONSTRUCTOR opens a
-                // fresh slot the surrounding context is supposed to pin, and in
-                // ARGUMENT position nothing does. `option.is_none(none)` and
-                // `result.is_err(err("fail"))` both passed `check` and then
-                // failed the build — the first as a rustc `E0282: type
-                // annotations needed` on the generated generic call, the second
-                // as the ConcretizeTypes COMPILER-BUG gate (#899). The
-                // call-RESULT enqueue in `infer_expr` cannot catch them: the
-                // call's own result is a concrete `Bool` and the undecidable
-                // slot lives in the argument.
-                //
-                // Scoped to argument position on purpose. The same constructor
-                // as a MATCH ARM body (`err(e) => err(e)` under an annotated
-                // binding) also keeps a loose slot the checker never pins and
-                // codegen resolves from the sibling arm — the "leave it alone"
-                // case the binding check already carves out.
-                if matches!(
-                    a.kind,
-                    ExprKind::None | ExprKind::Some { .. } | ExprKind::Ok { .. } | ExprKind::Err { .. }
-                ) {
-                    self.deferred_unresolved_binding_checks.push(crate::check::UnresolvedBindingSite {
-                        ty: aty.clone(),
-                        name: None,
-                        span: a.span,
-                    });
-                }
-                // E024, call-arg edition: a bare int literal flowing into a SIZED param must fit the declared width — `neg_one_i8(128)` passed check while native rustc rejected `128i8` (the check-vs-build gap, fuzz seed-20260718 index 92). Recording the param as the literal's context routes it through the post-solve E024 range check (non-integer/generic contexts fall back harmlessly).
-                if let Some(sig) = &call_sig {
-                    if let Some((_, pty)) = sig.params.get(i) {
-                        self.record_int_literal_context(a, pty);
-                    }
-                }
-                // E024, ctor-payload edition (Wave 4 N1): a literal flowing into a
-                // TUPLE-VARIANT constructor payload must fit the DECLARED payload
-                // type — `Click(<out-of-i32>, …)` with `Click(Int32, Int)` passed
-                // check while native rustc rejected the emitted literal. Ctor calls
-                // carry no `call_sig`, so none of the binding / record-field /
-                // call-arg hooks ever saw these positions; pin the declared payload
-                // type the same way (the float twin rides the same hook).
-                if call_sig.is_none() {
-                    // A capitalized ctor callee parses as TypeName, not Ident —
-                    // match both (the N1 first attempt matched Ident only and
-                    // silently never fired).
-                    let ctor_name: Option<String> = match &callee.kind {
-                        ExprKind::Ident { name, .. } => Some(name.as_str().to_string()),
-                        ExprKind::TypeName { name, .. } => Some(name.as_str().to_string()),
-                        _ => None,
-                    };
-                    if let Some(n) = ctor_name {
-                        if let Some((_, case)) = self.env.lookup_ctor(&sym(&n)) {
-                            if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
-                                if let Some(ety) = expected.get(i) {
-                                    let ety = ety.clone();
-                                    self.record_int_literal_context(a, &ety);
-                                }
-                            }
-                        }
-                    }
-                }
-                // Accumulate generic bindings from this arg so later lambda params can be pinned. Lambdas contribute nothing new here.
-                if let Some(sig) = &call_sig {
-                    if let Some((_, pty)) = sig.params.get(i) {
-                        crate::types::unify(pty, &resolve_ty(&aty, &self.uf), &mut bindings);
-                    }
-                }
-                tys.push(aty);
-            }
-            tys
-        };
+        let arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {
@@ -231,6 +134,119 @@ impl Checker {
             }
         }
     }
+    /// The argument-inference loop of [`Self::check_call_with_type_args`]:
+    /// infer each arg left-to-right, pinning unannotated lambda params from
+    /// the callee signature (#653), enqueueing the E025 ctor-in-arg and E024
+    /// sized-literal checks, and accumulating generic bindings so later
+    /// lambda slots see them.
+    fn infer_call_arg_tys(&mut self, callee: &ast::Expr, args: &mut [ast::Expr], call_sig: &Option<crate::types::FnSig>) -> Vec<Ty> {
+        let mut bindings: HashMap<Sym, Ty> = HashMap::new();
+        let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
+        for (i, a) in args.iter_mut().enumerate() {
+            let pinned = if matches!(&a.kind, ExprKind::Lambda { .. }) {
+                call_sig.as_ref().and_then(|sig| self.lambda_pin_for_arg(sig, i, &bindings))
+            } else { None };
+            let prev_hint = self.lambda_arg_hint.take();
+            self.lambda_arg_hint = pinned;
+            let aty = self.infer_expr(a);
+            self.lambda_arg_hint = prev_hint;
+            self.enqueue_ctor_arg_unresolved(a, &aty);
+            self.pin_arg_literal_context(callee, call_sig, i, a);
+            // Accumulate generic bindings from this arg so later lambda params can be pinned. Lambdas contribute nothing new here.
+            if let Some(sig) = call_sig {
+                if let Some((_, pty)) = sig.params.get(i) {
+                    crate::types::unify(pty, &resolve_ty(&aty, &self.uf), &mut bindings);
+                }
+            }
+            tys.push(aty);
+        }
+        tys
+    }
+
+    /// Pin an unannotated lambda's params to the expected element types substituted with bindings learned from earlier args. A slot whose substituted type still mentions one of the CALLEE's OWN unbound generics (`A` when arg0 was itself an unresolved inference var) gets NO pin: writing the literal sig generic into the lambda param disconnects it from the union-find, so it never picks up the element type that flows in later and silently defaults to Int (nn variance_rows: `let sq = list.map(row, (x) => …)` inside a map lambda).
+    fn lambda_pin_for_arg(&self, sig: &crate::types::FnSig, i: usize, bindings: &HashMap<Sym, Ty>) -> Option<Vec<Option<Ty>>> {
+        let (_, pty) = sig.params.get(i)?;
+        let pty = crate::types::substitute(pty, bindings);
+        let Ty::Fn { params, .. } = pty else { return None };
+        // A callee generic that no earlier arg pinned is MEANINGLESS in the caller's scope — unless its name happens to denote an IN-SCOPE rigid generic (the enclosing fn's own `T`, registered in env.types as a TypeVar), in which case the pin is exactly the #653 protocol-bound case and must survive.
+        let unbound: std::collections::HashSet<Sym> = sig.generics.iter().copied()
+            .filter(|g| !bindings.contains_key(g))
+            .filter(|g| !matches!(self.env.types.get(g), Some(Ty::TypeVar(n)) if n == g))
+            .collect();
+        let mentions_unbound = |t: &Ty| -> bool {
+            let hit = |t: &Ty| matches!(t, Ty::TypeVar(n) if unbound.contains(n));
+            hit(t) || t.any_child_recursive(&hit)
+        };
+        Some(params.into_iter()
+            .map(|t| if mentions_unbound(&t) { None } else { Some(t) })
+            .collect::<Vec<Option<Ty>>>())
+    }
+
+    /// E025, call-arg edition: an Option/Result CONSTRUCTOR opens a
+    /// fresh slot the surrounding context is supposed to pin, and in
+    /// ARGUMENT position nothing does. `option.is_none(none)` and
+    /// `result.is_err(err("fail"))` both passed `check` and then
+    /// failed the build — the first as a rustc `E0282: type
+    /// annotations needed` on the generated generic call, the second
+    /// as the ConcretizeTypes COMPILER-BUG gate (#899). The
+    /// call-RESULT enqueue in `infer_expr` cannot catch them: the
+    /// call's own result is a concrete `Bool` and the undecidable
+    /// slot lives in the argument.
+    ///
+    /// Scoped to argument position on purpose. The same constructor
+    /// as a MATCH ARM body (`err(e) => err(e)` under an annotated
+    /// binding) also keeps a loose slot the checker never pins and
+    /// codegen resolves from the sibling arm — the "leave it alone"
+    /// case the binding check already carves out.
+    fn enqueue_ctor_arg_unresolved(&mut self, a: &ast::Expr, aty: &Ty) {
+        if matches!(
+            a.kind,
+            ExprKind::None | ExprKind::Some { .. } | ExprKind::Ok { .. } | ExprKind::Err { .. }
+        ) {
+            self.deferred_unresolved_binding_checks.push(crate::check::UnresolvedBindingSite {
+                ty: aty.clone(),
+                name: None,
+                span: a.span,
+            });
+        }
+    }
+
+    /// E024, call-arg + ctor-payload editions: a bare int literal flowing
+    /// into a SIZED param (or a tuple-variant constructor payload) must fit
+    /// the declared width — `neg_one_i8(128)` and `Click(<out-of-i32>, …)`
+    /// both passed check while native rustc rejected the emitted literal
+    /// (fuzz seed-20260718 index 92 / Wave 4 N1). Recording the declared
+    /// type as the literal's context routes it through the post-solve E024
+    /// range check; non-integer/generic contexts fall back harmlessly.
+    fn pin_arg_literal_context(&mut self, callee: &ast::Expr, call_sig: &Option<crate::types::FnSig>, i: usize, a: &ast::Expr) {
+        if let Some(sig) = call_sig {
+            if let Some((_, pty)) = sig.params.get(i) {
+                self.record_int_literal_context(a, pty);
+            }
+            return;
+        }
+        // Ctor calls carry no `call_sig`, so none of the binding /
+        // record-field / call-arg hooks ever saw these positions; pin the
+        // declared payload type the same way. A capitalized ctor callee
+        // parses as TypeName, not Ident — match both (the N1 first attempt
+        // matched Ident only and silently never fired).
+        let ctor_name: Option<String> = match &callee.kind {
+            ExprKind::Ident { name, .. } => Some(name.as_str().to_string()),
+            ExprKind::TypeName { name, .. } => Some(name.as_str().to_string()),
+            _ => None,
+        };
+        if let Some(n) = ctor_name {
+            if let Some((_, case)) = self.env.lookup_ctor(&sym(&n)) {
+                if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
+                    if let Some(ety) = expected.get(i) {
+                        let ety = ety.clone();
+                        self.record_int_literal_context(a, &ety);
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn check_named_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
         self.check_named_call_with_type_args(name, arg_tys, None)
     }
@@ -300,6 +316,12 @@ impl Checker {
                 self.env.import_table.used.insert(module);
             }
         }
+
+        // #1075: retired dynamic-surface alias → E040 deprecation warning
+        // with a mechanical rewrite. Checked on the resolved qualified name
+        // so selective-import bare spellings warn too.
+        let resolved_for_alias = qualified_via_direct.as_deref().unwrap_or(name);
+        self.warn_retired_dynamic_alias(resolved_for_alias);
 
         // Decomposed (#781, cog 137): the unresolved-name fallback (~110 lines of ctor / diagnostics handling) is a verbatim text move.
         let Some(sig) = sig else {

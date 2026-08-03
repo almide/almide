@@ -122,7 +122,7 @@ fn render_list_set_scalar(
 }
 
 /// `Op::SetLocal` — assign (or first-declare) a loop-carried local.
-fn render_set_local(
+pub(crate) fn render_set_local(
     local: &ValueId,
     src: &ValueId,
     tys: &mut BTreeMap<ValueId, NTy>,
@@ -188,14 +188,12 @@ pub(crate) struct NativeSink<'a, 'f> {
 }
 
 fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), LowerError> {
-    let NativeCall { dst, name, args, result } = call;
     let NativeSink { user_fns, sigs, tys, out, indent, used_shims } = sink;
+    let name = call.name;
     if let Some(callee) = user_fns.get(name.as_str()) {
-        render_user_fn_call(dst, name, args, result, callee, sigs, tys, out, indent)
-    } else if let Some((param_tys, ret_ty, shim_src)) = shim(name) {
-        render_closed_shim_call(
-            dst, name, args, param_tys, ret_ty, shim_src, tys, out, indent, used_shims,
-        )
+        render_user_fn_call(call, callee, sigs, OpSink { tys, out, indent, used_shims })
+    } else if let Some(shim_entry) = shim(name) {
+        render_closed_shim_call(call, shim_entry, OpSink { tys, out, indent, used_shims })
     } else {
         Err(wall(format!(
             "native: call to `{name}` — not a lowered user fn and not in the \
@@ -207,30 +205,25 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
 /// A user fn call (by declared sig table): each arg rendered in the callee's
 /// declared param mode, then the result bound from the declared return.
 /// Extracted verbatim from `render_call_fn` (codopsy r2, #852).
-#[allow(clippy::too_many_arguments)]
 fn render_user_fn_call(
-    dst: &Option<ValueId>,
-    name: &String,
-    args: &Vec<CallArg>,
-    result: &Option<Repr>,
+    call: NativeCall<'_>,
     callee: &MirFunction,
     sigs: &NativeSigs,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
+    s: OpSink<'_>,
 ) -> Result<(), LowerError> {
-    if args.len() != callee.params.len() {
+    let name = call.name;
+    if call.args.len() != callee.params.len() {
         return Err(wall(format!("native: call to `{name}` arity mismatch")));
     }
     let callee_sig = sigs.get(name.as_str());
     let mut rendered_args = Vec::new();
-    for (i, (a, p)) in args.iter().zip(&callee.params).enumerate() {
+    for (i, (a, p)) in call.args.iter().zip(&callee.params).enumerate() {
         let want = declared_param_want(callee_sig, i, p)?;
-        let (code, got) = call_arg(a, tys)?;
+        let (code, got) = call_arg(a, s.tys)?;
         rendered_args.push(user_arg_in_declared_mode(name, want, code, got)?);
     }
-    let call = format!("{}({})", mangle(name), rendered_args.join(", "));
-    bind_user_fn_result(dst, result, callee_sig, &call, tys, out, indent)
+    let rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    bind_user_fn_result(call, callee_sig, &rendered, s)
 }
 
 /// Decides the NTy a user-fn param WANTS its arg rendered as.
@@ -303,14 +296,13 @@ fn user_arg_in_declared_mode(
 /// statement, and an absent result repr defaults to scalar. Extracted verbatim
 /// from `render_call_fn` (codopsy r2, #852).
 fn bind_user_fn_result(
-    dst: &Option<ValueId>,
-    result: &Option<Repr>,
+    call: NativeCall<'_>,
     callee_sig: Option<&(Vec<NativeSigKind>, Option<NativeSigKind>)>,
-    call: &str,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
+    rendered: &str,
+    s: OpSink<'_>,
 ) -> Result<(), LowerError> {
+    let NativeCall { dst, result, .. } = call;
+    let OpSink { tys, out, indent, used_shims: _ } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }
@@ -337,13 +329,13 @@ fn bind_user_fn_result(
                 NTy::Res => "Result<i64, String>",
                 _ => "i64",
             };
-            line!("let mut {}: {} = {};", var(*d), ty_name, call);
+            line!("let mut {}: {} = {};", var(*d), ty_name, rendered);
         }
-        (None, _) => line!("{call};"),
+        (None, _) => line!("{rendered};"),
         (Some(d), None) => {
             // Result repr unknown: scalar by convention.
             tys.insert(*d, NTy::I64);
-            line!("let mut {}: i64 = {};", var(*d), call);
+            line!("let mut {}: i64 = {};", var(*d), rendered);
         }
     }
     Ok(())
@@ -353,19 +345,14 @@ fn bind_user_fn_result(
 /// param list gates each arg, its source is pulled into `used_shims`, and the
 /// result binds by the shim's declared return. Extracted verbatim from
 /// `render_call_fn` (codopsy r2, #852).
-#[allow(clippy::too_many_arguments)]
 fn render_closed_shim_call(
-    dst: &Option<ValueId>,
-    name: &String,
-    args: &Vec<CallArg>,
-    param_tys: &'static [NTy],
-    ret_ty: Option<NTy>,
-    shim_src: &'static str,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-    used_shims: &mut Vec<&'static str>,
+    call: NativeCall<'_>,
+    shim_entry: (&'static [NTy], Option<NTy>, &'static str),
+    s: OpSink<'_>,
 ) -> Result<(), LowerError> {
+    let NativeCall { dst, name, args, .. } = call;
+    let (param_tys, ret_ty, shim_src) = shim_entry;
+    let OpSink { tys, out, indent, used_shims } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }
@@ -425,7 +412,7 @@ fn shim_arg_in_declared_mode(
 }
 
 /// `Op::Prim { kind: FloatBin(op), .. }` — a binary float op.
-fn render_float_bin(
+pub(crate) fn render_float_bin(
     op: &crate::FBinOp,
     d: &ValueId,
     args: &Vec<ValueId>,
@@ -459,7 +446,7 @@ fn render_float_bin(
 }
 
 /// `Op::Prim { kind: FloatUn(op), .. }` — a unary float op.
-fn render_float_un(
+pub(crate) fn render_float_un(
     op: &crate::FUnOp,
     d: &ValueId,
     args: &Vec<ValueId>,
@@ -488,7 +475,7 @@ fn render_float_un(
 }
 
 /// `Op::Prim { kind: FloatCmp(op), .. }` — a float comparison (result is i64 0/1).
-fn render_float_cmp(
+pub(crate) fn render_float_cmp(
     op: &crate::FCmpOp,
     d: &ValueId,
     args: &Vec<ValueId>,
@@ -708,7 +695,7 @@ fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(String, NTy), 
     }
 }
 
-fn render_int_binop(
+pub(crate) fn render_int_binop(
     op: &IntOp,
     a: ValueId,
     b: ValueId,
@@ -760,32 +747,10 @@ fn mangle(name: &str) -> String {
     format!("almd_{}", name.replace(['.', '$'], "_"))
 }
 
-fn op_name(op: &Op) -> &'static str {
-    match op {
-        Op::Alloc { .. } => "Alloc",
-        Op::Const { .. } => "Const",
-        Op::ConstInt { .. } => "ConstInt",
-        Op::Dup { .. } => "Dup",
-        Op::Drop { .. } => "Drop",
-        Op::DropListStr { .. } => "DropListStr",
-        Op::Consume { .. } => "Consume",
-        Op::Borrow { .. } => "Borrow",
-        Op::MakeUnique { .. } => "MakeUnique",
-        Op::Pure { .. } => "Pure",
-        Op::Call { .. } => "Call",
-        Op::CallFn { .. } => "CallFn",
-        Op::CallImport { .. } => "CallImport",
-        Op::CallIndirect { .. } => "CallIndirect",
-        Op::FuncRef { .. } => "FuncRef",
-        Op::IntBinOp { .. } => "IntBinOp",
-        Op::Prim { .. } => "Prim",
-        Op::IfThen { .. } => "IfThen",
-        Op::Else { .. } => "Else",
-        Op::EndIf { .. } => "EndIf",
-        Op::LoopStart => "LoopStart",
-        Op::LoopBreakUnless { .. } => "LoopBreakUnless",
-        Op::LoopEnd => "LoopEnd",
-        Op::SetLocal { .. } => "SetLocal",
-        _ => "unknown",
-    }
+fn op_name(op: &Op) -> String {
+    // The variant name is the first token of the Debug form (`Alloc { dst:
+    // … }` → "Alloc") — total over every Op, present and future, where the
+    // old hand table answered "unknown" for anything it lagged behind.
+    let d = format!("{op:?}");
+    d.split([' ', '{', '(']).next().unwrap_or("Op").to_string()
 }

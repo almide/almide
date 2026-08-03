@@ -353,3 +353,56 @@ fn lex_strips_carriage_returns() {
     assert_eq!(toks[0].0, TokenType::Fn);
     assert_eq!(toks[1].0, TokenType::Ident);
 }
+
+// ---- #1073: string literals inside ${...} ----
+
+#[test]
+fn interpolation_habit_escaped_quotes_normalize_to_bare() {
+    // The outer-string escape habit: \"...\" inside ${...} is captured as a
+    // plain nested literal — the sub-parser sees well-formed quotes.
+    let toks = tokens(r#""parent=${parent ?? \"<none>\"}""#);
+    assert_eq!(toks, vec![(
+        TokenType::InterpolatedString,
+        r#"parent=${parent ?? "<none>"}"#.into()
+    )]);
+}
+
+#[test]
+fn interpolation_nested_string_brace_is_literal_text() {
+    // A closing brace inside a nested string must not end the hole.
+    let toks = tokens(r#""v=${x ?? "}"} end""#);
+    assert_eq!(toks, vec![(
+        TokenType::InterpolatedString,
+        r#"v=${x ?? "}"} end"#.into()
+    )]);
+}
+
+#[test]
+fn interpolation_nested_string_keeps_inner_escapes() {
+    // Inside a bare nested string, \" stays an escape pair for the sub-lexer.
+    let toks = tokens(r#""n=${f("a\"b")}""#);
+    assert_eq!(toks, vec![(
+        TokenType::InterpolatedString,
+        r#"n=${f("a\"b")}"#.into()
+    )]);
+}
+
+// ---- #1076: \\ and \$ survive to the splitter in interpolated values ----
+
+#[test]
+fn interpolated_value_keeps_escaped_dollar_pair() {
+    let toks = tokens(r#""${a} \${b}""#);
+    assert_eq!(toks, vec![(TokenType::InterpolatedString, r#"${a} \${b}"#.into())]);
+}
+
+#[test]
+fn plain_string_still_decodes_escaped_dollar() {
+    let toks = tokens(r#""\${b}""#);
+    assert_eq!(toks, vec![(TokenType::String, "${b}".into())]);
+}
+
+#[test]
+fn plain_string_still_decodes_escaped_backslash() {
+    let toks = tokens(r#""a\\b""#);
+    assert_eq!(toks, vec![(TokenType::String, r"a\b".into())]);
+}

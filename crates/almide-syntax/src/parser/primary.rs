@@ -5,112 +5,126 @@ use crate::intern::sym;
 use super::Parser;
 
 impl Parser {
+    /// The primary dispatcher — four token families in order (literal,
+    /// constructor, control head, grouping), then the hint system, plain
+    /// identifiers, and the error tail. Each family returns `None` for
+    /// "not mine" so the chain reads like the token classes it covers.
     pub(crate) fn parse_primary(&mut self) -> Result<Expr, String> {
         let tok = self.current().clone();
         let span = Some(Span { line: tok.line, col: tok.col, end_col: tok.end_col });
 
-        if self.check(TokenType::Int) {
-            self.advance();
-            return Ok(self.parse_int_literal(&tok, span));
+        if let Some(r) = self.parse_primary_literal(&tok, span) {
+            return r;
         }
-        if self.check(TokenType::Float) {
-            self.advance();
-            let v: f64 = tok.value.replace('_', "").parse().unwrap_or(0.0);
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Float { value: v }));
+        if let Some(r) = self.parse_primary_ctor(&tok, span) {
+            return r;
         }
-        if self.check(TokenType::String) {
-            self.advance();
-            return Ok(Expr::new(self.next_id(), span, ExprKind::String { value: tok.value.clone() }));
+        if let Some(r) = self.parse_primary_control() {
+            return r;
         }
-        if self.check(TokenType::InterpolatedString) {
-            self.advance();
-            let parts = self.parse_interpolation_parts(&tok.value, tok.line, tok.col)?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::InterpolatedString { parts }));
-        }
-        if self.check(TokenType::True) {
-            self.advance();
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Bool { value: true }));
-        }
-        if self.check(TokenType::False) {
-            self.advance();
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Bool { value: false }));
-        }
-        if self.check(TokenType::Underscore) {
-            self.advance();
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Hole));
-        }
-        if self.check(TokenType::Break) {
-            self.advance();
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Break));
-        }
-        if self.check(TokenType::Continue) {
-            self.advance();
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Continue));
-        }
-        if self.check(TokenType::None) {
-            self.advance();
-            return Ok(Expr::new(self.next_id(), span, ExprKind::None));
-        }
-        if self.check(TokenType::Some) {
-            return self.parse_some_expr(span);
-        }
-        if self.check(TokenType::Ok) {
-            return self.parse_ok_expr(span);
-        }
-        if self.check(TokenType::Err) {
-            return self.parse_err_expr(span);
-        }
-        if self.check(TokenType::Todo) {
-            return self.parse_todo_expr(span);
-        }
-        // try and await keywords removed (no implementation)
-        if self.check(TokenType::If) {
-            return self.parse_if_expr();
-        }
-        if self.check(TokenType::Match) {
-            return self.parse_match_expr();
-        }
-
-        if self.check(TokenType::While) {
-            return self.parse_while_expr();
-        }
-        if self.check(TokenType::For) {
-            return self.parse_for_expr();
-        }
-        if self.check_ident("do") {
-            let span = self.current_span();
-            self.advance();
-            return Err(format!("`do` blocks have been removed — use `while` for loops or remove `do` from effect fn bodies (line {})", span.line));
-        }
-        if self.check(TokenType::Fan) {
-            return self.parse_fan_primary();
-        }
-        // Backtick-escaped keywords are lexed as Ident, so they reach
-        // the normal Ident path below. No special handling needed here.
-        if self.check(TokenType::LBrace) {
-            return self.parse_brace_expr();
-        }
-        if self.check(TokenType::LBracket) {
-            return self.parse_list_expr();
-        }
-        if self.check(TokenType::LParen) {
-            return self.parse_paren_expr();
-        }
-        if self.check(TokenType::TypeName) {
-            return self.parse_type_name_expr();
+        if let Some(r) = self.parse_primary_grouping() {
+            return r;
         }
         // Check hint system for rejected operators/keywords
         if let Some(result) = self.check_hint(None, super::hints::HintScope::Expression) {
             let msg = result.message.unwrap_or_else(|| format!("'{}' is not valid here", tok.value));
             return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
         }
-        if self.check(TokenType::Ident) || self.check(TokenType::Ident) {
+        if self.check(TokenType::Ident) {
             let name = sym(&tok.value);
             self.advance();
             return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name }));
         }
 
         self.parse_primary_error(&tok)
+    }
+
+    /// Literal tokens: one token in, one leaf node out.
+    fn parse_primary_literal(&mut self, tok: &crate::lexer::Token, span: Option<Span>) -> Option<Result<Expr, String>> {
+        let kind = match tok.token_type {
+            TokenType::Int => {
+                self.advance();
+                return Some(Ok(self.parse_int_literal(tok, span)));
+            }
+            TokenType::Float => {
+                let v: f64 = tok.value.replace('_', "").parse().unwrap_or(0.0);
+                ExprKind::Float { value: v }
+            }
+            TokenType::String => ExprKind::String { value: tok.value.clone() },
+            TokenType::InterpolatedString => {
+                self.advance();
+                let parts = match self.parse_interpolation_parts(&tok.value, tok.line, tok.col) {
+                    Ok(p) => p,
+                    Err(e) => return Some(Err(e)),
+                };
+                return Some(Ok(Expr::new(self.next_id(), span, ExprKind::InterpolatedString { parts })));
+            }
+            TokenType::True => ExprKind::Bool { value: true },
+            TokenType::False => ExprKind::Bool { value: false },
+            TokenType::Underscore => ExprKind::Hole,
+            TokenType::Break => ExprKind::Break,
+            TokenType::Continue => ExprKind::Continue,
+            TokenType::None => ExprKind::None,
+            _ => return Option::None,
+        };
+        self.advance();
+        Some(Ok(Expr::new(self.next_id(), span, kind)))
+    }
+
+    /// Constructor keywords: `some(..)` / `ok(..)` / `err(..)` / `todo(..)`.
+    fn parse_primary_ctor(&mut self, tok: &crate::lexer::Token, span: Option<Span>) -> Option<Result<Expr, String>> {
+        match tok.token_type {
+            TokenType::Some => Some(self.parse_some_expr(span)),
+            TokenType::Ok => Some(self.parse_ok_expr(span)),
+            TokenType::Err => Some(self.parse_err_expr(span)),
+            TokenType::Todo => Some(self.parse_todo_expr(span)),
+            _ => Option::None,
+        }
+    }
+
+    /// Control-flow heads: if / match / while / for / fan (and the removed
+    /// `do` blocks, which get a targeted error).
+    fn parse_primary_control(&mut self) -> Option<Result<Expr, String>> {
+        if self.check(TokenType::If) {
+            return Some(self.parse_if_expr());
+        }
+        if self.check(TokenType::Match) {
+            return Some(self.parse_match_expr());
+        }
+        if self.check(TokenType::While) {
+            return Some(self.parse_while_expr());
+        }
+        if self.check(TokenType::For) {
+            return Some(self.parse_for_expr());
+        }
+        if self.check_ident("do") {
+            let span = self.current_span();
+            self.advance();
+            return Some(Err(format!("`do` blocks have been removed — use `while` for loops or remove `do` from effect fn bodies (line {})", span.line)));
+        }
+        if self.check(TokenType::Fan) {
+            return Some(self.parse_fan_primary());
+        }
+        Option::None
+    }
+
+    /// Grouping openers: block / list / paren / type-name expression.
+    /// (Backtick-escaped keywords are lexed as Ident, so they reach the
+    /// normal Ident path in the dispatcher — no special handling here.)
+    fn parse_primary_grouping(&mut self) -> Option<Result<Expr, String>> {
+        if self.check(TokenType::LBrace) {
+            return Some(self.parse_brace_expr());
+        }
+        if self.check(TokenType::LBracket) {
+            return Some(self.parse_list_expr());
+        }
+        if self.check(TokenType::LParen) {
+            return Some(self.parse_paren_expr());
+        }
+        if self.check(TokenType::TypeName) {
+            return Some(self.parse_type_name_expr());
+        }
+        Option::None
     }
 
     /// Builds the "no primary matched" error, including targeted diagnostics
@@ -206,329 +220,6 @@ impl Parser {
     /// the declared MAPPER spelling — vs the retired thunk spelling (0-param
     /// lambdas). Only called on error paths (every caller returns Err either
     /// way), so the token consumption never leaks into a successful parse.
-    fn extra_head_args_end_in_mapper(&mut self) -> Result<bool, String> {
-        let mut last_is_mapper = false;
-        while self.check(TokenType::Comma) {
-            self.advance();
-            if self.check(TokenType::RParen) {
-                break;
-            }
-            let arg = self.parse_expr()?;
-            last_is_mapper =
-                matches!(&arg.kind, ExprKind::Lambda { params, .. } if params.len() == 1);
-        }
-        Ok(last_is_mapper)
-    }
-
-    fn parse_fan_primary(&mut self) -> Result<Expr, String> {
-        // fan.bounded(budget) { body } — a HEAD with args + block, not a call
-        // (a call followed by `{` does not parse), so it gets its own node here.
-        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
-            && self.peek_at(2).map_or(false, |t| t.value == "bounded")
-        {
-            let span = Some(self.current_span());
-            self.advance(); // fan
-            self.advance(); // .
-            self.advance(); // bounded
-            self.expect(TokenType::LParen)?;
-            let budget = self.parse_expr()?;
-            // The THUNK spelling from pre-Wave-1 training data:
-            // `fan.bounded(budget, () => work())`. A bare "Missing ')'" sent
-            // models in circles (dojo round 1) — teach the block form. A
-            // MAPPER-looking spelling (a 1-param lambda) gets the matrix
-            // answer instead: bounded has no mapper cell BY DESIGN.
-            if self.check(TokenType::Comma) {
-                let (line, col) = (self.current().line, self.current().col);
-                if self.extra_head_args_end_in_mapper()? {
-                    return Err(format!(
-                        "fan.bounded has no mapper form — it meters a single BODY, at line {line}:{col}\n  Hint: meter per element by composing: xs |> fan.map((x) => fan.bounded(compute.ms(100)) {{ work(x) }} )"));
-                }
-                return Err(format!(
-                    "fan.bounded takes a BLOCK, not a thunk argument, at line {line}:{col}\n  Hint: fan.bounded(compute.ms(100)) {{ work(x) }} — drop the `() =>` wrapper; the braces are the region"));
-            }
-            self.expect(TokenType::RParen)?;
-            self.skip_newlines();
-            if !self.check(TokenType::LBrace) {
-                return Err(format!(
-                    "fan.bounded requires a body block at line {}:{}\n  Hint: fan.bounded(compute.ms(100)) {{ work(x) }}",
-                    self.current().line, self.current().col));
-            }
-            // The body is a full BLOCK (T2-1): statements + trailing value,
-            // parsed by the same brace parser as any block expression.
-            let body = self.parse_brace_expr()?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::FanBounded {
-                budget: Box::new(budget),
-                body: Box::new(body),
-            }));
-        }
-        // fan.timeout(deadline) { body } — the oracle-tier head (T5-1),
-        // parsed exactly like bounded (deadline in parens, block body).
-        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
-            && self.peek_at(2).map_or(false, |t| t.value == "timeout")
-            && self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LParen)
-        {
-            let span = Some(self.current_span());
-            self.advance(); // fan
-            self.advance(); // .
-            self.advance(); // timeout
-            self.expect(TokenType::LParen)?;
-            let deadline = self.parse_expr()?;
-            // Legacy `fan.timeout(ms, thunk)` (2+ args) — rebuild the member
-            // CALL so the checker's E027 signature-migration hint fires,
-            // exactly like race's legacy rebuild. A MAPPER-looking spelling
-            // (1-param lambda tail) instead gets the matrix answer — timeout
-            // has no mapper cell BY DESIGN.
-            if self.check(TokenType::Comma) {
-                let (line, col) = (self.current().line, self.current().col);
-                let mut args = vec![deadline];
-                while self.check(TokenType::Comma) {
-                    self.advance();
-                    self.skip_newlines();
-                    args.push(self.parse_expr()?);
-                }
-                if matches!(&args.last().map(|a| &a.kind),
-                    Some(ExprKind::Lambda { params, .. }) if params.len() == 1)
-                {
-                    return Err(format!(
-                        "fan.timeout has no mapper form — it deadlines a single BODY, at line {line}:{col}\n  Hint: fan.timeout(duration.ms(5000)) {{ work(x) }}"));
-                }
-                self.expect(TokenType::RParen)?;
-                let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
-                let member = Expr::new(self.next_id(), span, ExprKind::Member {
-                    object: Box::new(fan_ident),
-                    field: sym("timeout"),
-                });
-                return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
-                    callee: Box::new(member),
-                    args,
-                    named_args: Vec::new(),
-                    type_args: None,
-                }));
-            }
-            self.expect(TokenType::RParen)?;
-            self.skip_newlines();
-            if !self.check(TokenType::LBrace) {
-                // `fan.timeout(e)` with no block: same legacy rebuild -> E027.
-                let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
-                let member = Expr::new(self.next_id(), span, ExprKind::Member {
-                    object: Box::new(fan_ident),
-                    field: sym("timeout"),
-                });
-                return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
-                    callee: Box::new(member),
-                    args: vec![deadline],
-                    named_args: Vec::new(),
-                    type_args: None,
-                }));
-            }
-            let body = self.parse_brace_expr()?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::FanTimeout {
-                deadline: Box::new(deadline),
-                body: Box::new(body),
-            }));
-        }
-        // fan.race(budget?) { arm; … } — like bounded, a head with an optional
-        // budget and an arm block. `fan.race(e)` NOT followed by `{` is the
-        // REMOVED 0.42.0 thunk-list form: reconstruct the legacy member call so
-        // the checker's E027 tombstone (now a signature-migration hint) fires.
-        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
-            && self.peek_at(2).map_or(false, |t| t.value == "race")
-        {
-            let span = Some(self.current_span());
-            self.advance(); // fan
-            self.advance(); // .
-            self.advance(); // race
-            let budget = if self.check(TokenType::LParen) {
-                self.advance();
-                let b = self.parse_expr()?;
-                if self.check(TokenType::Comma) {
-                    let (line, col) = (self.current().line, self.current().col);
-                    // A 1-param lambda tail = the MAPPER form `fan.race(xs, f)`
-                    // / `fan.race(budget, xs, f)`; anything else with a comma
-                    // is the retired thunk spelling — the migration hint.
-                    let mut rest = Vec::new();
-                    while self.check(TokenType::Comma) {
-                        self.advance();
-                        self.skip_newlines();
-                        if self.check(TokenType::RParen) {
-                            break;
-                        }
-                        rest.push(self.parse_expr()?);
-                    }
-                    let mapper_tail = matches!(
-                        rest.last().map(|a| &a.kind),
-                        Some(ExprKind::Lambda { params, .. }) if params.len() == 1
-                    );
-                    if mapper_tail && rest.len() <= 2 {
-                        self.expect(TokenType::RParen)?;
-                        let mapper = rest.pop().unwrap();
-                        let (budget, list) = match rest.pop() {
-                            // fan.race(budget, xs, f)
-                            Some(xs) => (Some(Box::new(b)), Box::new(xs)),
-                            // fan.race(xs, f)
-                            None => (None, Box::new(b)),
-                        };
-                        return Ok(Expr::new(self.next_id(), span, ExprKind::FanRaceMap {
-                            budget,
-                            list,
-                            mapper: Box::new(mapper),
-                        }));
-                    }
-                    return Err(format!(
-                        "fan.race takes a BLOCK of arms, not thunk arguments, at line {line}:{col}\n  Hint: fan.race(compute.ms(5)) {{ exact(p); heuristic(p) }} — arms are expressions separated by `;`, no `() =>` wrappers; a dynamic list races via the mapper form fan.race(xs, (x) => ok(work(x)))"));
-                }
-                self.expect(TokenType::RParen)?;
-                Some(b)
-            } else {
-                None
-            };
-            self.skip_newlines();
-            if !self.check(TokenType::LBrace) {
-                if let Some(b) = budget {
-                    // Legacy `fan.race(thunks)` call — rebuild it verbatim.
-                    let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
-                    let member = Expr::new(self.next_id(), span, ExprKind::Member {
-                        object: Box::new(fan_ident),
-                        field: sym("race"),
-                    });
-                    return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
-                        callee: Box::new(member),
-                        args: vec![b],
-                        named_args: Vec::new(),
-                        type_args: None,
-                    }));
-                }
-                return Err(format!(
-                    "fan.race requires an arm block at line {}:{}\n  Hint: fan.race {{ a(); b() }} or fan.race(compute.ms(5)) {{ a(); b() }}",
-                    self.current().line, self.current().col));
-            }
-            let open = self.current().clone();
-            self.expect(TokenType::LBrace)?;
-            let mut arms = Vec::new();
-            self.skip_newlines();
-            while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
-                let tok = self.current().clone();
-                if matches!(tok.token_type, TokenType::Let | TokenType::Var | TokenType::For | TokenType::While) {
-                    return Err(format!("`{}` is not allowed inside fan.race at line {}:{}\n  Hint: race arms are expressions — wrap statements in a block arm: {{ let x = f(); g(x) }}", tok.value, tok.line, tok.col));
-                }
-                arms.push(self.parse_expr()?);
-                self.skip_newlines();
-                if self.check(TokenType::Semicolon) {
-                    self.advance();
-                    self.skip_newlines();
-                }
-            }
-            self.expect_closing(TokenType::RBrace, open.line, open.col, "fan.race block")?;
-            if arms.is_empty() {
-                return Err(format!("fan.race must contain at least one arm at line {}:{}", open.line, open.col));
-            }
-            return Ok(Expr::new(self.next_id(), span, ExprKind::FanRace {
-                budget: budget.map(Box::new),
-                arms,
-            }));
-        }
-        // fan.settle { arms } — a REAL node (T2-4): the value is a TUPLE of
-        // per-arm Results (heterogeneous arms allowed), so the thunk-list
-        // desugar (which forces one list element type) cannot carry it.
-        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
-            && self.peek_at(2).map_or(false, |t| t.value == "settle")
-            && self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LBrace)
-        {
-            let span = Some(self.current_span());
-            self.advance(); // fan
-            self.advance(); // .
-            self.advance(); // settle
-            let open = self.current().clone();
-            self.expect(TokenType::LBrace)?;
-            let mut arms = Vec::new();
-            self.skip_newlines();
-            while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
-                let tok = self.current().clone();
-                if matches!(tok.token_type, TokenType::Let | TokenType::Var | TokenType::For | TokenType::While) {
-                    return Err(format!("`{}` is not allowed inside fan.settle at line {}:{}\n  Hint: arms are expressions — wrap statements in a block arm: {{ let x = f(); g(x) }}", tok.value, tok.line, tok.col));
-                }
-                arms.push(self.parse_expr()?);
-                self.skip_newlines();
-                if self.check(TokenType::Semicolon) {
-                    self.advance();
-                    self.skip_newlines();
-                }
-            }
-            self.expect_closing(TokenType::RBrace, open.line, open.col, "fan.settle block")?;
-            if arms.is_empty() {
-                return Err(format!("fan.settle must contain at least one arm at line {}:{}", open.line, open.col));
-            }
-            return Ok(Expr::new(self.next_id(), span, ExprKind::FanSettle { arms }));
-        }
-        // fan.any { arms } — the Wave 1 block form.
-        // DESUGARS AT PARSE TIME to the literal thunk-list call the checker and
-        // the MIR inliner already handle (`fan.any([() => a(), () => b()])`),
-        // so the entire downstream pipeline is unchanged on both targets. The
-        // user-facing thunk-list SPELLING is tombstoned in the checker; this
-        // synthesized form is the one internal producer of it.
-        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
-            && self.peek_at(2).map_or(false, |t| t.value == "any")
-            && self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LBrace)
-        {
-            let span = Some(self.current_span());
-            self.advance(); // fan
-            self.advance(); // .
-            let head = self.current().value.clone();
-            self.advance(); // any | settle
-            let open = self.current().clone();
-            self.expect(TokenType::LBrace)?;
-            let mut thunks = Vec::new();
-            self.skip_newlines();
-            while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
-                let tok = self.current().clone();
-                if matches!(tok.token_type, TokenType::Let | TokenType::Var | TokenType::For | TokenType::While) {
-                    return Err(format!("`{}` is not allowed inside fan.{} at line {}:{}\n  Hint: arms are expressions", tok.value, head, tok.line, tok.col));
-                }
-                let arm = self.parse_expr()?;
-                let arm_span = arm.span.clone();
-                thunks.push(Expr::new(self.next_id(), arm_span, ExprKind::Lambda {
-                    params: Vec::new(),
-                    body: Box::new(arm),
-                }));
-                self.skip_newlines();
-                if self.check(TokenType::Semicolon) {
-                    self.advance();
-                    self.skip_newlines();
-                }
-            }
-            self.expect_closing(TokenType::RBrace, open.line, open.col, &format!("fan.{head} block"))?;
-            if thunks.is_empty() {
-                return Err(format!("fan.{} must contain at least one arm at line {}:{}", head, open.line, open.col));
-            }
-            let list = Expr::new(self.next_id(), span, ExprKind::List { elements: thunks });
-            let fan_ident = Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") });
-            let member = Expr::new(self.next_id(), span, ExprKind::Member {
-                object: Box::new(fan_ident),
-                // INTERNAL name: the checker types `__any_block`/`__settle_block`
-                // exactly like any/settle, while the PUBLIC 1-arg thunk-list
-                // spelling is tombstoned — this synthesized node is the only
-                // producer of the legacy shape. Frontend lowering normalizes the
-                // name back so the MIR inliner is untouched.
-                field: sym(&format!("__{head}_block")),
-            });
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
-                callee: Box::new(member),
-                args: vec![list],
-                named_args: Vec::new(),
-                type_args: None,
-            }));
-        }
-        // fan { ... } = fan block; fan.map/fan.race = module-like call
-        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
-            // Treat `fan` as an identifier for member access
-            let span = Some(self.current_span());
-            self.advance();
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") }));
-        }
-        self.advance();
-        self.parse_fan_block()
-    }
-
     fn parse_paren_expr(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
         if self.peek_paren_lambda() {
@@ -751,7 +442,15 @@ impl Parser {
         let mut col_offset = 0usize;
 
         while i < chars.len() {
-            if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+            // #1076: `\\` and `\$` reach this splitter as undecoded pairs
+            // (the lexer keeps them so an escaped `\${` — or a literal
+            // backslash before a real hole — stays distinguishable from a
+            // live hole). Decode them here, before the hole check.
+            if chars[i] == '\\' && i + 1 < chars.len() && (chars[i + 1] == '\\' || chars[i + 1] == '$') {
+                lit.push(chars[i + 1]);
+                i += 2;
+                col_offset += 2;
+            } else if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
                 if !lit.is_empty() {
                     parts.push(StringPart::Lit { value: std::mem::take(&mut lit) });
                 }
@@ -788,6 +487,16 @@ impl Parser {
         let mut depth = 1;
         let mut expr_str = String::new();
         while *i < chars.len() && depth > 0 {
+            // #1073: a nested string literal is captured atomically — its
+            // quotes and braces are literal text, not structure. Delegates
+            // to the same scanner the lexer's interpolation scan uses, so
+            // the two passes agree on where the literal ends.
+            if chars[*i] == '"' || chars[*i] == '\'' {
+                let start = *i;
+                *i = crate::lexer::scan_nested_string_literal(chars, *i, &mut expr_str);
+                *col_offset += *i - start;
+                continue;
+            }
             if chars[*i] == '{' { depth += 1; }
             if chars[*i] == '}' { depth -= 1; if depth == 0 { break; } }
             expr_str.push(chars[*i]);

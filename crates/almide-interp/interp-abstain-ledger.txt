@@ -110,6 +110,7 @@ nested_hof_lambda_inference  out-of-interp-scope capability: prim.handle
 nested_match_heap_arm  out-of-interp-scope capability: prim.handle
 place_mutation  out-of-interp-scope capability: prim.alloc_map
 process_args  out-of-interp-scope capability: prim.args_get_list_full
+pure_bang_propagation  out-of-interp-scope capability: prim.handle
 r5_lowmisc_param_try_err  out-of-interp-scope capability: prim.alloc_map
 random_int_entropy  out-of-interp-scope capability: prim.alloc_bytes
 rc_alloc_stress  out-of-interp-scope capability: prim.alloc_map

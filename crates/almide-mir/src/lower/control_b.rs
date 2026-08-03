@@ -173,49 +173,59 @@ impl LowerCtx {
     /// v0). Each arm goes through `lower_branch_arm` (its Unit-call tail is an effect,
     /// its heap temps dropped per-arm), wrapped in `IfThen`/`Else`/`EndIf` with no
     /// result. Returns `false` (rolled back) if the cond is not a lowerable scalar.
+    /// The condition half of [`Self::try_lower_unit_if`]: a scalar cond, or
+    /// the typed materialized heap `==`/`!=` (the rc4 shape). `None` = the
+    /// cond declines (ops rolled back) and the whole unit-if falls through.
+    fn lower_unit_if_cond(&mut self, cond: &IrExpr, ops_mark: usize, lhh_mark: usize) -> Option<ValueId> {
+    let cond_v = match self.lower_scalar_value(cond) {
+        Some(v) => v,
+        None => {
+            // A HEAP `==`/`!=` condition (`if e == err("a") then println(…) …` —
+            // the rc4 shape, previously the call-bearing linearization wall): the
+            // typed materialized eq yields a REAL scalar Bool (rollback-safe on
+            // decline), so the if executes ONE arm like any scalar cond.
+            let heap_eq = if let IrExprKind::BinOp { op, left, right } = &cond.kind {
+                match op {
+                    almide_ir::BinOp::Eq if is_heap_ty(&left.ty) => {
+                        self.lower_heap_eq_cond(left, right, false)
+                    }
+                    almide_ir::BinOp::Neq if is_heap_ty(&left.ty) => {
+                        self.lower_heap_eq_cond(left, right, true)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            match heap_eq {
+                Some(v) => v,
+                None => {
+                    // The COND-side decline had no trace while the arm side did
+                    // (#904's report-the-right-side lesson): a threshold-class
+                    // decline here surfaces downstream as lower_branch's
+                    // "unresolvable condition" wall with no way to tell which
+                    // side actually refused (Wave 4 L2's diagnosis cost).
+                    crate::trace::trace("ALMIDE_DBG_ANF", || {
+                        format!(
+                            "[unit-if] cond declined scalar lowering: {}",
+                            kind_name(&cond.kind)
+                        )
+                    });
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            }
+        }
+    };
+        Some(cond_v)
+    }
+
     pub(crate) fn try_lower_unit_if(&mut self, cond: &IrExpr, then: &IrExpr, else_: &IrExpr) -> bool {
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
-        let cond_v = match self.lower_scalar_value(cond) {
-            Some(v) => v,
-            None => {
-                // A HEAP `==`/`!=` condition (`if e == err("a") then println(…) …` —
-                // the rc4 shape, previously the call-bearing linearization wall): the
-                // typed materialized eq yields a REAL scalar Bool (rollback-safe on
-                // decline), so the if executes ONE arm like any scalar cond.
-                let heap_eq = if let IrExprKind::BinOp { op, left, right } = &cond.kind {
-                    match op {
-                        almide_ir::BinOp::Eq if is_heap_ty(&left.ty) => {
-                            self.lower_heap_eq_cond(left, right, false)
-                        }
-                        almide_ir::BinOp::Neq if is_heap_ty(&left.ty) => {
-                            self.lower_heap_eq_cond(left, right, true)
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-                match heap_eq {
-                    Some(v) => v,
-                    None => {
-                        // The COND-side decline had no trace while the arm side did
-                        // (#904's report-the-right-side lesson): a threshold-class
-                        // decline here surfaces downstream as lower_branch's
-                        // "unresolvable condition" wall with no way to tell which
-                        // side actually refused (Wave 4 L2's diagnosis cost).
-                        crate::trace::trace("ALMIDE_DBG_ANF", || {
-                            format!(
-                                "[unit-if] cond declined scalar lowering: {}",
-                                kind_name(&cond.kind)
-                            )
-                        });
-                        self.ops.truncate(ops_mark);
-                        self.live_heap_handles.truncate(lhh_mark);
-                        return false;
-                    }
-                }
-            }
+        let Some(cond_v) = self.lower_unit_if_cond(cond, ops_mark, lhh_mark) else {
+            return false;
         };
         self.ops.push(Op::IfThen { cond: cond_v, dst: None });
         // Exactly ONE arm runs at runtime, so a scalar reassignment of an outer mutable
@@ -405,121 +415,9 @@ impl LowerCtx {
         }
     }
 
-    pub(crate) fn try_lower_variant_match(
-        &mut self,
-        subject_value: Option<ValueId>,
-        arms: &[IrMatchArm],
-    ) -> bool {
-        use crate::PrimKind;
-        // Gate 1: the subject is a TRACKED materialized Option.
-        let subj = match subject_value {
-            Some(v) if self.materialized_options.contains(&v) => v,
-            _ => return false,
-        };
-        // Gate 2: exactly a `[Some(scalar-bind?), None]` shape, no guards, Unit bodies.
-        if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
-            return false;
-        }
-        // The Some-bind carries an is_heap flag. A SCALAR payload is a value COPY (load64). A HEAP
-        // payload (Option[String]) is bound as a BORROW of the Option's element (LoadHandle =
-        // i32, recorded in param_values), gated to a subject that is a nested-ownership list (so
-        // the Option keeps ownership through its scope-end DropListStr; a consuming arm auto-Dups).
-        let mut some: Option<(&IrExpr, Option<(VarId, bool, Ty)>)> = None;
-        let mut none: Option<&IrExpr> = None;
-        for arm in arms {
-            match &arm.pattern {
-                IrPattern::Some { inner } => {
-                    let bind = match inner.as_ref() {
-                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false, ty.clone())),
-                        IrPattern::Bind { var, ty }
-                            if is_heap_ty(ty)
-                                && (self.heap_elem_lists.contains(&subj)
-                                    // `Option[List[String]]` (the heap-acc fold value) — routed
-                                    // to the nested DropListListStr set; the payload-borrow
-                                    // discipline is identical.
-                                    || self.list_list_str_lists.contains(&subj)
-                                    // An `Option[record]` subject (the materialized option
-                                    // toplet — its drop routes "optrec:<R>" via
-                                    // DropWrapperRec): the record payload binds as the SAME
-                                    // borrow; the option's recursive drop keeps ownership.
-                                    || self
-                                        .variant_drop_handles
-                                        .get(&subj)
-                                        .is_some_and(|d| d.starts_with("optrec:"))) =>
-                        {
-                            Some((*var, true, ty.clone()))
-                        }
-                        IrPattern::Wildcard => None,
-                        _ => return false, // heap bind w/o nested-ownership subject / nested ctor
-                    };
-                    if some.is_some() {
-                        return false;
-                    }
-                    some = Some((&arm.body, bind));
-                }
-                IrPattern::None | IrPattern::Wildcard => {
-                    if none.is_some() {
-                        return false;
-                    }
-                    none = Some(&arm.body);
-                }
-                _ => return false,
-            }
-        }
-        let ((some_body, some_bind), none_body) = match (some, none) {
-            (Some(s), Some(n)) => (s, n),
-            _ => return false,
-        };
-        if !matches!(some_body.ty, Ty::Unit) || !matches!(none_body.ty, Ty::Unit) {
-            return false;
-        }
-        // Emit: tag = load32(handle(subj) + 4); if tag != 0 then Some-arm else None-arm.
-        let ops_mark = self.ops.len();
-        let lhh_mark = self.live_heap_handles.len();
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
-        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
-        self.ops.push(Op::IfThen { cond: tag, dst: None });
-        // Some-arm (then): extract the payload `data[0]`, bind it, lower the arm in a per-arm
-        // frame. A SCALAR is a value COPY (load64); a HEAP element is `LoadHandle` (an i32 Ptr)
-        // recorded in `param_values` (BORROWED) — the Option owns it (DropListStr frees it at
-        // scope end), so the bound var is not a second owner; a consuming use auto-Dups.
-        if let Some((bind_var, is_heap, bind_ty)) = some_bind {
-            let payload = if is_heap {
-                self.load_at_offset(h, 12, PrimKind::LoadHandle)
-            } else {
-                self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
-            };
-            self.value_of.insert(bind_var, payload);
-            if is_heap {
-                self.param_values.insert(payload);
-                self.seed_option_some_payload_read_shape(payload, &bind_ty);
-            }
-        }
-        // Exactly ONE arm runs at runtime (the unit-if discipline): an outer var's
-        // reassignment inside an arm mutates the stable local IN PLACE — scalar via
-        // SetLocal, heap via the drop-old + SetLocal rebind — see `unit_arm_depth`.
-        self.unit_arm_depth += 1;
-        let some_ok = self.lower_branch_arm(None, some_body).is_ok();
-        if !some_ok {
-            self.unit_arm_depth -= 1;
-            self.ops.truncate(ops_mark);
-            self.live_heap_handles.truncate(lhh_mark);
-            return false;
-        }
-        self.ops.push(Op::Else { val: None });
-        let none_ok = self.lower_branch_arm(None, none_body).is_ok();
-        self.unit_arm_depth -= 1;
-        if !none_ok {
-            self.ops.truncate(ops_mark);
-            self.live_heap_handles.truncate(lhh_mark);
-            return false;
-        }
-        self.ops.push(Op::EndIf { val: None });
-        true
-    }
 }
 
+include!("option_match.rs");
 include!("control_p2.rs");
 include!("control_p2_b.rs");
 include!("control_p2_c.rs");
@@ -544,13 +442,6 @@ include!("defunc_tuple_fold.rs");
 include!("defunc_tuple_fold_b.rs");
 include!("control_while.rs");
 
-/// Is `subject` a call to a SELF-HOST Option-returning stdlib fn? Such a call returns a
-/// real MATERIALIZED 0-or-1-element-list Option (its impl returns through `Some(scalar)`/
-/// `None` helpers, tail-materialized), so a `match` over its result may EXECUTE — the call
-/// dst is tracked in `materialized_options`. NARROW to the fns ACTUALLY self-hosted today
-/// (`list.get`): a fn merely declared Option-returning but NOT self-hosted would return a
-/// deferred `Opaque` (len0) that must NOT be tracked, else the match would misread it as
-/// `None`. Add a name here only when its self-host impl + registry entry land together.
 fn is_self_host_option_call(subject: &IrExpr) -> bool {
     match &subject.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
@@ -668,6 +559,36 @@ fn detect_zip_map_fusion<'a>(
     Some((a, b, p0, t0, p1, t1, new_body))
 }
 
+/// The leading `let (i, key) = entry` destructure of an enumerate-map body:
+/// returns the two bound vars and the key's type, or `None` when the first
+/// statement is any other shape.
+fn destructured_entry_binds(
+    first: &almide_ir::IrStmt,
+    entry_var: VarId,
+) -> Option<(VarId, VarId, Ty)> {
+    use almide_ir::{IrPattern, IrStmtKind};
+    let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value } = &first.kind
+    else {
+        return None;
+    };
+    if elements.len() != 2 {
+        return None;
+    }
+    match &value.kind {
+        IrExprKind::Var { id } if *id == entry_var => {}
+        _ => return None,
+    }
+    let i_var = match &elements[0] {
+        IrPattern::Bind { var, .. } => *var,
+        _ => return None,
+    };
+    let (key_var, key_ty) = match &elements[1] {
+        IrPattern::Bind { var, ty } => (*var, ty.clone()),
+        _ => return None,
+    };
+    Some((i_var, key_var, key_ty))
+}
+
 fn detect_enum_map_fusion<'a>(
     xs: &'a IrExpr,
     params: &[(VarId, Ty)],
@@ -692,25 +613,7 @@ fn detect_enum_map_fusion<'a>(
         return None;
     };
     let first = stmts.first()?;
-    let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value } = &first.kind
-    else {
-        return None;
-    };
-    if elements.len() != 2 {
-        return None;
-    }
-    match &value.kind {
-        IrExprKind::Var { id } if *id == entry_var => {}
-        _ => return None,
-    }
-    let i_var = match &elements[0] {
-        IrPattern::Bind { var, .. } => *var,
-        _ => return None,
-    };
-    let (key_var, key_ty) = match &elements[1] {
-        IrPattern::Bind { var, ty } => (*var, ty.clone()),
-        _ => return None,
-    };
+    let (i_var, key_var, key_ty) = destructured_entry_binds(first, entry_var)?;
     // tail = the block with the leading destructure removed (the remaining stmts + the block tail).
     let tail = IrExpr {
         kind: IrExprKind::Block { stmts: stmts[1..].to_vec(), expr: expr.clone() },
@@ -782,23 +685,4 @@ fn detect_enum_fold_fusion<'a>(
     Some((real, i_var, acc_param, key_var, key_ty, tail))
 }
 
-fn is_self_host_result_call(subject: &IrExpr) -> bool {
-    match &subject.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
-            is_self_host_result_module_fn(module.as_str(), func.as_str())
-        }
-        _ => false,
-    }
-}
-
-/// Is the match subject a self-host call returning a HEAP-Ok Result (`result.zip` /
-/// `value.as_string` — the cap-as-tag 1-slot DynListStr)? Drives the `materialized_results_str` +
-/// `heap_elem_lists` tracking so a direct `match` over it executes (binds the @12 payload handle).
-fn is_self_host_result_str_call(subject: &IrExpr) -> bool {
-    match &subject.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
-            crate::lower::is_self_host_result_str_module_fn(module.as_str(), func.as_str())
-        }
-        _ => false,
-    }
-}
+include!("tracked_calls.rs");

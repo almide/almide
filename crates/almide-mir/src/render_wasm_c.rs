@@ -1,4 +1,39 @@
 
+/// Wasm mnemonic SUFFIXES for the float op families — shared by the fuser
+/// (f64) and the f64/f32 prim renderers (`(f64.{name} …)` / `(f32.{name} …)`).
+fn float_un_name(op: FUnOp) -> &'static str {
+    match op {
+        FUnOp::Abs => "abs",
+        FUnOp::Sqrt => "sqrt",
+        FUnOp::Floor => "floor",
+        FUnOp::Ceil => "ceil",
+        FUnOp::Neg => "neg",
+    }
+}
+
+fn float_bin_name(op: FBinOp) -> &'static str {
+    match op {
+        FBinOp::Add => "add",
+        FBinOp::Sub => "sub",
+        FBinOp::Mul => "mul",
+        FBinOp::Div => "div",
+        FBinOp::Min => "min",
+        FBinOp::Max => "max",
+        FBinOp::CopySign => "copysign",
+    }
+}
+
+fn float_cmp_name(op: FCmpOp) -> &'static str {
+    match op {
+        FCmpOp::Lt => "lt",
+        FCmpOp::Le => "le",
+        FCmpOp::Gt => "gt",
+        FCmpOp::Ge => "ge",
+        FCmpOp::Eq => "eq",
+        FCmpOp::Ne => "ne",
+    }
+}
+
 /// Build the deferred expression for a fusable single-use def, splicing
 /// already-pending operands. Returns `None` when the op is not a fusable
 /// pure-scalar def (the caller renders it normally).
@@ -18,126 +53,80 @@ fn fusable_expr(
             Some((*dst, e, reads))
         }
         Op::IntBinOp { dst, op: iop, a, b } => {
-            let instr = match iop {
-                IntOp::Add => "i64.add",
-                IntOp::Sub => "i64.sub",
-                IntOp::Mul => "i64.mul",
-                IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU => return None,
-                IntOp::Lt => "i64.lt_s",
-                IntOp::LtU => "i64.lt_u",
-                IntOp::LeU => "i64.le_u",
-                IntOp::GtU => "i64.gt_u",
-                IntOp::GeU => "i64.ge_u",
-                IntOp::Le => "i64.le_s",
-                IntOp::Gt => "i64.gt_s",
-                IntOp::Ge => "i64.ge_s",
-                IntOp::Eq => "i64.eq",
-                IntOp::Ne => "i64.ne",
-                IntOp::And => "i64.and",
-                IntOp::Or => "i64.or",
-                IntOp::Xor => "i64.xor",
-                IntOp::Shl => "i64.shl",
-                IntOp::Shr => "i64.shr_s",
-                IntOp::ShrU => "i64.shr_u",
-            };
+            // Div/Mod read their operands several times (trap checks) — never fusable.
+            if matches!(iop, IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU) {
+                return None;
+            }
+            // The shared table's extend flag covers the signed AND unsigned
+            // comparisons (#872) — omitting the unsigned lane here spliced a raw
+            // i32 where the i64 scalar model was expected (an INVALID module,
+            // not a wrong value).
+            let (instr, is_cmp) = int_binop_instr(*iop);
             let ea = fuser.take(*a, &mut reads);
             let eb = fuser.take(*b, &mut reads);
             let core = format!("({instr} {ea} {eb})");
-            let e = if matches!(
-                iop,
-                IntOp::Lt
-                    | IntOp::Le
-                    | IntOp::Gt
-                    | IntOp::Ge
-                    | IntOp::Eq
-                    | IntOp::Ne
-                    // The unsigned lane's comparisons yield an i32 too (#872) —
-                    // omitting them here spliced a raw i32 where the i64 scalar
-                    // model was expected (an INVALID module, not a wrong value).
-                    | IntOp::LtU
-                    | IntOp::LeU
-                    | IntOp::GtU
-                    | IntOp::GeU
-            ) {
-                format!("(i64.extend_i32_u {core})")
-            } else {
-                core
-            };
+            let e = if is_cmp { format!("(i64.extend_i32_u {core})") } else { core };
             Some((*dst, e, reads))
         }
-        Op::Prim { kind, dst: Some(d), args } => {
-            let mut farg = |fuser: &mut Fuser, reads: &mut BTreeSet<ValueId>, i: usize| {
-                let raw = fuser.take(args[i], reads);
-                if floats.contains(&args[i]) {
-                    raw
-                } else {
-                    format!("(f64.reinterpret_i64 {raw})")
-                }
-            };
-            let inner = match kind {
-                PrimKind::FloatUn(op) => {
-                    let x = farg(fuser, &mut reads, 0);
-                    let e = match op {
-                        FUnOp::Abs => format!("(f64.abs {x})"),
-                        FUnOp::Sqrt => format!("(f64.sqrt {x})"),
-                        FUnOp::Floor => format!("(f64.floor {x})"),
-                        FUnOp::Ceil => format!("(f64.ceil {x})"),
-                        FUnOp::Neg => format!("(f64.neg {x})"),
-                    };
-                    e
-                }
-                PrimKind::FloatBin(op) => {
-                    let a = farg(fuser, &mut reads, 0);
-                    let b = farg(fuser, &mut reads, 1);
-                    let instr = match op {
-                        FBinOp::Add => "f64.add",
-                        FBinOp::Sub => "f64.sub",
-                        FBinOp::Mul => "f64.mul",
-                        FBinOp::Div => "f64.div",
-                        FBinOp::Min => "f64.min",
-                        FBinOp::Max => "f64.max",
-                        FBinOp::CopySign => "f64.copysign",
-                    };
-                    format!("({instr} {a} {b})")
-                }
-                PrimKind::FloatCmp(op) => {
-                    let a = farg(fuser, &mut reads, 0);
-                    let b = farg(fuser, &mut reads, 1);
-                    let instr = match op {
-                        FCmpOp::Lt => "f64.lt",
-                        FCmpOp::Le => "f64.le",
-                        FCmpOp::Gt => "f64.gt",
-                        FCmpOp::Ge => "f64.ge",
-                        FCmpOp::Eq => "f64.eq",
-                        FCmpOp::Ne => "f64.ne",
-                    };
-                    return Some((
-                        *d,
-                        format!("(i64.extend_i32_u ({instr} {a} {b}))"),
-                        reads,
-                    ));
-                }
-                PrimKind::F64FromInt | PrimKind::IntToFloat => {
-                    let x = fuser.take(args[0], &mut reads);
-                    format!("(f64.convert_i64_s {x})")
-                }
-                PrimKind::FloatToInt => {
-                    let x = farg(fuser, &mut reads, 0);
-                    return Some((*d, format!("(i64.trunc_sat_f64_s {x})"), reads));
-                }
-                _ => return None,
-            };
-            // f64-valued result: keep the f64 form for a float-classified dst,
-            // else reinterpret back into the i64-uniform slot.
-            let e = if floats.contains(d) {
-                inner
-            } else {
-                format!("(i64.reinterpret_f64 {inner})")
-            };
-            Some((*d, e, reads))
-        }
+        Op::Prim { kind, dst: Some(d), args } => fusable_float_prim(kind, *d, args, fuser, floats),
         _ => None,
     }
+}
+
+/// The float-prim tier of [`fusable_expr`]: f64 unary/binary/compare/convert
+/// prims over the i64-uniform slot model. Operands classified as floats splice
+/// raw; scalar-slot operands reinterpret in, and an f64-valued result
+/// reinterprets back out unless the dst itself is float-classified.
+fn fusable_float_prim(
+    kind: &PrimKind,
+    d: ValueId,
+    args: &[ValueId],
+    fuser: &mut Fuser,
+    floats: &BTreeSet<ValueId>,
+) -> Option<(ValueId, String, BTreeSet<ValueId>)> {
+    let mut reads = BTreeSet::new();
+    let mut farg = |fuser: &mut Fuser, reads: &mut BTreeSet<ValueId>, i: usize| {
+        let raw = fuser.take(args[i], reads);
+        if floats.contains(&args[i]) {
+            raw
+        } else {
+            format!("(f64.reinterpret_i64 {raw})")
+        }
+    };
+    let inner = match kind {
+        PrimKind::FloatUn(op) => {
+            let x = farg(fuser, &mut reads, 0);
+            format!("(f64.{} {x})", float_un_name(*op))
+        }
+        PrimKind::FloatBin(op) => {
+            let a = farg(fuser, &mut reads, 0);
+            let b = farg(fuser, &mut reads, 1);
+            format!("(f64.{} {a} {b})", float_bin_name(*op))
+        }
+        PrimKind::FloatCmp(op) => {
+            let a = farg(fuser, &mut reads, 0);
+            let b = farg(fuser, &mut reads, 1);
+            let e = format!("(i64.extend_i32_u (f64.{} {a} {b}))", float_cmp_name(*op));
+            return Some((d, e, reads));
+        }
+        PrimKind::F64FromInt | PrimKind::IntToFloat => {
+            let x = fuser.take(args[0], &mut reads);
+            format!("(f64.convert_i64_s {x})")
+        }
+        PrimKind::FloatToInt => {
+            let x = farg(fuser, &mut reads, 0);
+            return Some((d, format!("(i64.trunc_sat_f64_s {x})"), reads));
+        }
+        _ => return None,
+    };
+    // f64-valued result: keep the f64 form for a float-classified dst,
+    // else reinterpret back into the i64-uniform slot.
+    let e = if floats.contains(&d) {
+        inner
+    } else {
+        format!("(i64.reinterpret_f64 {inner})")
+    };
+    Some((d, e, reads))
 }
 
 pub(crate) fn defined_value(op: &Op) -> Option<ValueId> {
@@ -199,6 +188,64 @@ pub(crate) fn defined_value(op: &Op) -> Option<ValueId> {
     }
 }
 
+/// The prim results that are heap PTRs (i32 handles): a `LoadHandle` result;
+/// an `ArgsGetList` result (a freshly-allocated heap `List[String]`); a
+/// `ReadTextFile` result (a heap `Result[String, String]`); a `ReadDir` result
+/// (a heap `Result[List[String], String]`); and their region/env/io kin — all
+/// keep Ptr repr (no i64 zero-extend). Every other prim result (a load,
+/// fd_write errno, or handle→address) is a scalar i64.
+fn prim_result_is_ptr(kind: &PrimKind) -> bool {
+    matches!(
+        kind,
+        PrimKind::LoadHandle
+            | PrimKind::RegionAllocC { .. }
+            | PrimKind::RegionLoadH { .. }
+            | PrimKind::ArgsGetList
+            | PrimKind::ArgsGetListFull
+            | PrimKind::EnvGet
+            | PrimKind::ReadLine
+            | PrimKind::ReadNBytes
+            | PrimKind::ReadTextFile
+            | PrimKind::ReadDir
+            | PrimKind::WriteTextFile
+            | PrimKind::MakeDir
+            | PrimKind::RemoveAll
+    )
+}
+
+/// The repr a single op BIRTHS (`dst` → repr), if any — the value-defining
+/// arms of [`value_reprs_wasm`]. `if` results are handled by the caller (seed
+/// scalar at `IfThen`, fix from the arm value at `EndIf`) — not here.
+fn op_birth_repr(op: &Op, m: &BTreeMap<ValueId, Repr>) -> Option<(ValueId, Repr)> {
+    match op {
+        Op::Alloc { dst, repr, .. } => Some((*dst, *repr)),
+        Op::Dup { dst, src } => {
+            let r = m.get(src).copied().unwrap_or(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
+            Some((*dst, r))
+        }
+        Op::Const { dst }
+        | Op::ConstInt { dst, .. }
+        | Op::FuncRef { dst, .. }
+        | Op::IntBinOp { dst, .. } => Some((*dst, SCALAR_REPR)),
+        // Rung-4 list ops: a literal is a fresh heap block; a scalar element load
+        // is an i64 value.
+        Op::ListLit { dst, .. } => Some((*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT })),
+        Op::ListGetScalar { dst, .. } => Some((*dst, SCALAR_REPR)),
+        Op::Prim { dst: Some(dst), kind, .. } if prim_result_is_ptr(kind) => {
+            Some((*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }))
+        }
+        Op::Prim { dst: Some(dst), .. } => Some((*dst, SCALAR_REPR)),
+        // A call's result repr is the callee's RETURN repr, carried on the op
+        // (`result`) — the same field the ownership analysis reads to know a call
+        // hands back a heap object. A String/List-returning call is a Ptr (i32),
+        // NOT a scalar; typing it i64 mismatched `$alloc`'s i32 handle.
+        Op::CallFn { dst: Some(d), result, .. } => Some((*d, result.unwrap_or(SCALAR_REPR))),
+        // An indirect (closure) call's result repr is likewise carried on the op.
+        Op::CallIndirect { dst: Some(d), result, .. } => Some((*d, result.unwrap_or(SCALAR_REPR))),
+        _ => None,
+    }
+}
+
 /// Infer each value's Repr (params + op results) for local/param/result typing.
 fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
     let mut m = BTreeMap::new();
@@ -210,58 +257,11 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
         m.insert(p.value, p.repr);
     }
     for op in &func.ops {
+        if let Some((dst, r)) = op_birth_repr(op, &m) {
+            m.insert(dst, r);
+            continue;
+        }
         match op {
-            Op::Alloc { dst, repr, .. } => {
-                m.insert(*dst, *repr);
-            }
-            Op::Dup { dst, src } => {
-                let r = m.get(src).copied().unwrap_or(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
-                m.insert(*dst, r);
-            }
-            Op::Const { dst }
-            | Op::ConstInt { dst, .. }
-            | Op::FuncRef { dst, .. }
-            | Op::IntBinOp { dst, .. } => {
-                m.insert(*dst, SCALAR_REPR);
-            }
-            // Rung-4 list ops: a literal is a fresh heap block; a scalar element load
-            // is an i64 value.
-            Op::ListLit { dst, .. } => {
-                m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
-            }
-            Op::ListGetScalar { dst, .. } => {
-                m.insert(*dst, SCALAR_REPR);
-            }
-            // A `LoadHandle` result is a heap PTR (i32 handle); an `ArgsGetList` result is a
-            // freshly-allocated heap `List[String]` PTR; a `ReadTextFile` result is a
-            // freshly-allocated heap `Result[String, String]` PTR; a `ReadDir` result is a
-            // freshly-allocated heap `Result[List[String], String]` PTR — all keep Ptr repr (no
-            // i64 zero-extend). Every other prim result (a load, fd_write errno, or
-            // handle→address) is a scalar i64.
-            Op::Prim {
-                dst: Some(dst),
-                kind: PrimKind::LoadHandle
-                    | PrimKind::RegionAllocC { .. }
-                    | PrimKind::RegionLoadH { .. }
-                    | PrimKind::ArgsGetList
-                    | PrimKind::ArgsGetListFull
-                    | PrimKind::EnvGet
-                    | PrimKind::ReadLine
-                    | PrimKind::ReadNBytes
-                    | PrimKind::ReadTextFile
-                    | PrimKind::ReadDir
-                    | PrimKind::WriteTextFile
-                    | PrimKind::MakeDir
-                    | PrimKind::RemoveAll,
-                ..
-            } => {
-                m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
-            }
-            Op::Prim { dst: Some(dst), .. } => {
-                m.insert(*dst, SCALAR_REPR);
-            }
-            // An `if` result: seed scalar, recorded on the stack; the real repr (scalar
-            // i64 or heap-result i32) is fixed from the arm value at the matching `EndIf`.
             Op::IfThen { dst, .. } => {
                 if_result_stack.push(*dst);
                 if let Some(dst) = dst {
@@ -277,17 +277,6 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             }
             Op::EndIf { val: None } => {
                 if_result_stack.pop();
-            }
-            // A call's result repr is the callee's RETURN repr, carried on the op
-            // (`result`) — the same field the ownership analysis reads to know a call
-            // hands back a heap object. A String/List-returning call is a Ptr (i32),
-            // NOT a scalar; typing it i64 mismatched `$alloc`'s i32 handle.
-            Op::CallFn { dst: Some(d), result, .. } => {
-                m.insert(*d, result.unwrap_or(SCALAR_REPR));
-            }
-            // An indirect (closure) call's result repr is likewise carried on the op.
-            Op::CallIndirect { dst: Some(d), result, .. } => {
-                m.insert(*d, result.unwrap_or(SCALAR_REPR));
             }
             _ => {}
         }
@@ -648,36 +637,49 @@ fn render_import_arg_wasm(
     ty: crate::WasmAbi,
     floats: &BTreeSet<ValueId>,
 ) -> String {
-    use crate::WasmAbi;
     match arg {
-        CallArg::Handle(v) => match ty {
-            // A heap handle is an i32 pointer — exactly the `I32` import valtype.
-            WasmAbi::I32 => format!("(local.get {})", local(*v)),
-            // A heap handle to an i64/f64 param is a type error the lowering never emits.
-            _ => format!("(local.get {})", local(*v)),
-        },
-        // An f64-classified scalar lives in a REAL f64 local (scalar call args
-        // are flexible, not poisoned): an F64 import param reads it directly,
-        // an I64 param takes its bits, an I32 (Bool) param cannot legally
-        // carry a float — the wrap goes through the bits for form's sake.
-        CallArg::Scalar(v) if floats.contains(v) => match ty {
-            WasmAbi::F64 => format!("(local.get {})", local(*v)),
-            WasmAbi::I64 => format!("(i64.reinterpret_f64 (local.get {}))", local(*v)),
-            WasmAbi::I32 => {
-                format!("(i32.wrap_i64 (i64.reinterpret_f64 (local.get {})))", local(*v))
-            }
-        },
-        CallArg::Scalar(v) => match ty {
-            WasmAbi::I64 => format!("(local.get {})", local(*v)),
-            WasmAbi::F64 => format!("(f64.reinterpret_i64 (local.get {}))", local(*v)),
-            WasmAbi::I32 => format!("(i32.wrap_i64 (local.get {}))", local(*v)),
-        },
-        CallArg::Imm(n) => match ty {
-            WasmAbi::I64 => format!("(i64.const {n})"),
-            WasmAbi::F64 => format!("(f64.reinterpret_i64 (i64.const {n}))"),
-            WasmAbi::I32 => format!("(i32.const {n})"),
-        },
+        // A heap handle is an i32 pointer — exactly the `I32` import valtype.
+        // (A handle to an i64/f64 param is a type error the lowering never emits.)
+        CallArg::Handle(v) => format!("(local.get {})", local(*v)),
+        CallArg::Scalar(v) if floats.contains(v) => float_scalar_import_arg(*v, ty),
+        CallArg::Scalar(v) => slot_scalar_import_arg(*v, ty),
+        CallArg::Imm(n) => imm_import_arg(*n, ty),
         CallArg::Label(l) => panic!("label arg {l:?} not valid for a host import call"),
+    }
+}
+
+/// An f64-classified scalar lives in a REAL f64 local (scalar call args are
+/// flexible, not poisoned): an F64 import param reads it directly, an I64
+/// param takes its bits, an I32 (Bool) param cannot legally carry a float —
+/// the wrap goes through the bits for form's sake.
+fn float_scalar_import_arg(v: ValueId, ty: crate::WasmAbi) -> String {
+    use crate::WasmAbi;
+    match ty {
+        WasmAbi::F64 => format!("(local.get {})", local(v)),
+        WasmAbi::I64 => format!("(i64.reinterpret_f64 (local.get {}))", local(v)),
+        WasmAbi::I32 => {
+            format!("(i32.wrap_i64 (i64.reinterpret_f64 (local.get {})))", local(v))
+        }
+    }
+}
+
+/// An i64-slot scalar: read direct for I64, reinterpret for F64, wrap for I32.
+fn slot_scalar_import_arg(v: ValueId, ty: crate::WasmAbi) -> String {
+    use crate::WasmAbi;
+    match ty {
+        WasmAbi::I64 => format!("(local.get {})", local(v)),
+        WasmAbi::F64 => format!("(f64.reinterpret_i64 (local.get {}))", local(v)),
+        WasmAbi::I32 => format!("(i32.wrap_i64 (local.get {}))", local(v)),
+    }
+}
+
+/// An immediate: materialize the const at the import param's valtype.
+fn imm_import_arg(n: i64, ty: crate::WasmAbi) -> String {
+    use crate::WasmAbi;
+    match ty {
+        WasmAbi::I64 => format!("(i64.const {n})"),
+        WasmAbi::F64 => format!("(f64.reinterpret_i64 (i64.const {n}))"),
+        WasmAbi::I32 => format!("(i32.const {n})"),
     }
 }
 

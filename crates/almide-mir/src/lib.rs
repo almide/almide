@@ -42,6 +42,8 @@ pub mod purity;
 pub(crate) mod mir_wellformed;
 pub mod native_result_rewrite;
 pub mod render_native;
+mod render_native_shims;
+mod render_native_op_families;
 pub mod render_wasm;
 pub mod translation_validation;
 

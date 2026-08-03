@@ -1,6 +1,12 @@
 # json
 
-JSON parsing and querying. import json.
+The JSON **format**: parsing and printing of `Value` trees. import json.
+
+The data model itself lives on `value.*` (auto-imported) — constructors
+(`value.null` / `value.int` / `value.str` / `value.object` / …) and
+accessors (`value.as_*` / `value.field` / `value.keys`) — see
+[value.md](./value.md). The old `json.*` spellings of those operations
+are retired aliases (E040, one release): see the table at the bottom.
 
 `JsonPath` (the opaque handle of `json.root()` / `json.field(...)`) resolves
 in user annotations whenever `json` is imported — bare or `json.JsonPath`.
@@ -21,84 +27,12 @@ Convert a Value to a JSON string.
 json.stringify(person.encode())
 ```
 
-### `json.get(j: Value, key: String) -> Option[Value]`
-
-Get a nested value by key. Returns none if key doesn't exist.
-
-```almd
-json.get(j, "name")
-```
-
-### `json.keys(j: Value) -> List[String]`
-
-Get all keys of a JSON object as a list of strings.
-
-```almd
-json.keys(j)
-```
-
-### `json.from_string(s: String) -> Value`
-
-Create a Json string value.
-
-```almd
-json.from_string("hello")
-```
-
-### `json.from_int(n: Int) -> Value`
-
-Create a Json integer value.
-
-```almd
-json.from_int(42)
-```
-
-### `json.from_bool(b: Bool) -> Value`
-
-Create a Json boolean value.
-
-```almd
-json.from_bool(true)
-```
-
-### `json.null() -> Value`
-
-Create a Json null value.
-
-```almd
-json.null()
-```
-
-### `json.array(items: List[Value]) -> Value`
-
-Create a Json array from a list of Json values.
-
-```almd
-json.array([json.i(1), json.i(2)])
-```
-
-### `json.from_float(n: Float) -> Value`
-
-Create a Json float value.
-
-```almd
-json.from_float(3.14)
-```
-
 ### `json.stringify_pretty(j: Value) -> String`
 
 Convert a Json value to a pretty-printed JSON string with indentation.
 
 ```almd
 json.stringify_pretty(j)
-```
-
-### `json.object(entries: List[(String, Value)]) -> Value`
-
-Create a Json object from a list of (key, value) pairs.
-
-```almd
-json.object([("name", json.s("Alice")), ("age", json.i(30))])
 ```
 
 ### `json.get_string(j: Value, key: String) -> Option[String]`
@@ -139,46 +73,6 @@ Get an array value by key. Returns none if key doesn't exist or value is not an 
 
 ```almd
 json.get_array(j, "items")
-```
-
-### `json.as_string(j: Value) -> Option[String]`
-
-Extract string from a Json value (without key lookup). Returns none if not a string.
-
-```almd
-json.as_string(j)
-```
-
-### `json.as_int(j: Value) -> Option[Int]`
-
-Extract integer from a Json value (without key lookup). Returns none if not an integer.
-
-```almd
-json.as_int(j)
-```
-
-### `json.as_float(j: Value) -> Option[Float]`
-
-Extract float from a Json value (without key lookup). Returns none if not a number.
-
-```almd
-json.as_float(j)
-```
-
-### `json.as_bool(j: Value) -> Option[Bool]`
-
-Extract boolean from a Json value (without key lookup). Returns none if not a boolean.
-
-```almd
-json.as_bool(j)
-```
-
-### `json.as_array(j: Value) -> Option[List[Value]]`
-
-Extract array from a Json value (without key lookup). Returns none if not an array.
-
-```almd
-json.as_array(j)
 ```
 
 ### `json.root() -> JsonPath`
@@ -274,3 +168,15 @@ json.to_map(j: Value) -> Option[Map[String, String]]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
+
+## Retired aliases (E040)
+
+Each of these warns for one release, then drops. `almide fix` migrates a
+file mechanically (nested calls included).
+
+| retired | survivor |
+|---|---|
+| `json.null` / `json.object` / `json.array` / `json.keys` | `value.null` / `value.object` / `value.array` / `value.keys` |
+| `json.from_string` / `json.from_int` / `json.from_bool` / `json.from_float` | `value.str` / `value.int` / `value.bool` / `value.float` |
+| `json.as_string` … `json.as_array` (returned `Option`) | `value.as_string(v)?` … `value.as_array(v)?` — `?` converts the `Result` to the same `Option` |
+| `json.get(j, k)` (returned `Option`) | `value.field(j, k)?` |

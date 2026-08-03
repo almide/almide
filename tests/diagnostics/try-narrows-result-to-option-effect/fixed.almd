@@ -1,0 +1,5 @@
+// The effect-fn move: `!` propagates the error where `?` only narrowed.
+effect fn read_tag(v: Value) -> String =
+  value.as_string(value.field(v, "type")!)!
+
+fn main() -> Unit = ()

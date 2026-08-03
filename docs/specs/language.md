@@ -1023,7 +1023,7 @@ Almide uses words, not symbols: `&&` and `||` are rejected with hints.
 
 | Operator | Syntax | Description |
 |----------|--------|-------------|
-| `!` | `expr!` | Unwrap Result/Option; propagate error (effect fn only) |
+| `!` | `expr!` | Unwrap Result/Option; propagate the failure (effect fn, or a pure fn returning Result/Option — C-211) |
 | `??` | `expr ?? fallback` | Unwrap or use fallback value |
 | `?` | `expr?` | Convert Result to Option (err becomes none) |
 | `?.` | `expr?.field` | Optional chaining (Option[Record] to Option[FieldType]) |

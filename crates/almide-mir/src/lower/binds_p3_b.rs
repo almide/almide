@@ -9,6 +9,16 @@ impl LowerCtx {
     /// inline if-else-if chain. Verbatim extraction (guard-clause flattening), no behavior
     /// change — see docs/roadmap/active/code-health-codopsy.md.
     fn classify_list_elem_drop(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
+        self.classify_elem_drop_heads(elem_ty)
+            .or_else(|| self.classify_elem_drop_pairs(elem_ty))
+            .or_else(|| self.classify_elem_drop_containers(elem_ty))
+    }
+
+    /// Rung 1 of the element-drop ladder: record / variant element heads.
+    /// (The three rungs are CONSECUTIVE slices of one ordered rule ladder —
+    /// several arms depend on earlier arms having declined, so the order
+    /// inside AND across rungs is load-bearing.)
+    fn classify_elem_drop_heads(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         // A STRUCTURAL record element (`[{key: "x", val: "2"}]` in argument position —
         // the checker leaves the literal structural, so `record_drop_type_name` alone
         // declined it, calls_p2's List-arg wall): the synthesized anon-record drop
@@ -39,6 +49,12 @@ impl LowerCtx {
                 return Some(ListElemDrop::CtorFlat);
             }
         }
+        None
+    }
+
+    /// Rung 2: the 2-tuple pair shapes (order preserved — StrMapStr and
+    /// StrClosure are checked before the generic StrVariant arm by design).
+    fn classify_elem_drop_pairs(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         if matches!(elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
                 && (matches!(tys[1], Ty::String)
@@ -98,6 +114,12 @@ impl LowerCtx {
             // `Op::DropListIntStr` (rc_dec slot1 @20 only — likewise type-agnostic).
             return Some(ListElemDrop::IntStr);
         }
+        self.classify_elem_drop_str_keyed_pairs(elem_ty)
+    }
+
+    /// Rung 2b: the `(String, <container/closure/variant>)` pair shapes —
+    /// the ordered continuation of rung 2 (same ladder, same order).
+    fn classify_elem_drop_str_keyed_pairs(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
             && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
                 if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
@@ -192,6 +214,12 @@ impl LowerCtx {
             let Some(rname) = self.record_or_anon_drop_type_name(&tys[0]) else { return None };
             return Some(ListElemDrop::RecordInt(rname));
         }
+        None
+    }
+
+    /// Rung 3: the container elements (List/Map/Option families and the
+    /// all-scalar aggregate tail).
+    fn classify_elem_drop_containers(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         if matches!(elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
                 if i.len() == 1 && matches!(i[0], Ty::String))
@@ -240,6 +268,12 @@ impl LowerCtx {
             // (B24) double-frees this shape.
             return Some(ListElemDrop::ScalarAggregate);
         }
+        self.classify_elem_drop_map_options(elem_ty)
+    }
+
+    /// Rung 3b: the Option/Map element families and the flat-aggregate tail
+    /// — the ordered continuation of rung 3 (same ladder, same order).
+    fn classify_elem_drop_map_options(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         // An `Option[Map[String, <scalar>]]` element (`[some(["k0": true]), some(n1),
         // none]` — Wave 4 L6): the payload map breaks the lenlist "one-level-exact"
         // rule (its interior owns key Strings), so it takes its OWN class with the
@@ -318,6 +352,27 @@ impl LowerCtx {
     /// structural-vs-declared field-order mismatch (the soundness crux: a structural literal's field
     /// order need not equal the declared order, so freeing it via the declared `$__drop_<R>` would
     /// corrupt). `forced_elem = None` keeps the original structural-derived behavior.
+    /// Register the freshly-built list's drop route for its element kind —
+    /// the `variant_drop_handles` name (or set membership) `drop_op_for`
+    /// dispatches on at scope end. Arms verbatim.
+    fn register_list_drop_kind(&mut self, dst: ValueId, kind: ListElemDrop) {
+        match kind {
+            ListElemDrop::StrStr => {
+                self.str_str_elem_lists.insert(dst);
+            }
+            ListElemDrop::ScalarAggregate | ListElemDrop::CtorFlat => {
+                self.heap_elem_lists.insert(dst);
+            }
+            ListElemDrop::ListStr => {
+                self.list_list_str_lists.insert(dst);
+            }
+            other => {
+                let name = drop_route_name(other);
+                self.variant_drop_handles.insert(dst, name);
+            }
+        }
+    }
+
     pub(crate) fn try_lower_record_list_literal_as(
         &mut self,
         value: &IrExpr,
@@ -376,79 +431,7 @@ impl LowerCtx {
             self.ops.push(Op::Consume { v: obj });
             self.live_heap_handles.retain(|x| *x != obj);
         }
-        match kind {
-            ListElemDrop::Record(rname) => {
-                self.variant_drop_handles.insert(dst, format!("list_{rname}"));
-            }
-            ListElemDrop::StrStr => {
-                self.str_str_elem_lists.insert(dst);
-            }
-            ListElemDrop::StrInt => {
-                self.variant_drop_handles.insert(dst, "list_str_int".to_string());
-            }
-            ListElemDrop::IntStr => {
-                self.variant_drop_handles.insert(dst, "list_int_str".to_string());
-            }
-            ListElemDrop::RecordInt(rname) => {
-                // → the GENERATED `$__drop_list_<R>_int` (drop_sources.rs — the same
-                // unconditional per-recursive-record / per-anon-record loops that already emit
-                // `$__drop_list_<R>`): per element, recurse into slot0 via `$__drop_<R>`, then
-                // free the tuple block; slot1 is scalar (nothing to free).
-                let rname_fn = drop_fn_ident(&rname);
-                self.variant_drop_handles.insert(dst, format!("list_{rname_fn}_int"));
-            }
-            ListElemDrop::StrVariant(vname) => {
-                // Routes through `Op::DropVariant`'s generic `variant_drop_handles` fallback
-                // (drop_op_for, mod_p3.rs) to `$__drop_<ty>` — `ty` = `list_str_<vname>` names
-                // the GENERATED `$__drop_list_str_<vname>` (drop_sources.rs, mirroring the
-                // `$__drop_list_<V>`/`$__drop_res_<V>` generation this session's B117 extended).
-                let vname_fn = drop_fn_ident(&vname);
-                self.variant_drop_handles.insert(dst, format!("list_str_{vname_fn}"));
-            }
-            ListElemDrop::StrMapStr => {
-                self.variant_drop_handles.insert(dst, "list_str_mss".to_string());
-            }
-            ListElemDrop::StrMapSkv => {
-                self.variant_drop_handles.insert(dst, "list_str_msb".to_string());
-            }
-            ListElemDrop::OptMapSkv => {
-                self.variant_drop_handles.insert(dst, "list_omb".to_string());
-            }
-            ListElemDrop::MapSkv => {
-                self.variant_drop_handles.insert(dst, "list_mb".to_string());
-            }
-            ListElemDrop::StrListOpt => {
-                self.variant_drop_handles.insert(dst, "list_str_mlo".to_string());
-            }
-            ListElemDrop::MapMlo => {
-                self.variant_drop_handles.insert(dst, "list_map_mlo".to_string());
-            }
-            ListElemDrop::MapHval => {
-                self.variant_drop_handles.insert(dst, "list_map_hval".to_string());
-            }
-            ListElemDrop::ScalarAggregate => {
-                self.heap_elem_lists.insert(dst);
-            }
-            ListElemDrop::ListStr => {
-                self.list_list_str_lists.insert(dst);
-            }
-            // Flat ctor elements (Option[scalar]) free exactly under the per-element `rc_dec`
-            // of the masked `DropListStr`; LenLoop elements route to the generated
-            // `$__drop_list_lenlist` (injected iff the pre-scan saw this literal — the shared
-            // `lenlist_elem_class` keeps the two decisions identical by construction).
-            ListElemDrop::CtorFlat => {
-                self.heap_elem_lists.insert(dst);
-            }
-            ListElemDrop::CtorLenLoop => {
-                self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
-            }
-            ListElemDrop::Closure => {
-                self.variant_drop_handles.insert(dst, "list_closure".to_string());
-            }
-            ListElemDrop::StrClosure => {
-                self.variant_drop_handles.insert(dst, "list_str_clo".to_string());
-            }
-        }
+        self.register_list_drop_kind(dst, kind);
         // The literal is a REAL, POPULATED nested-ownership block (every element built
         // and moved in above) — admit the element-precise `xs[i]` borrow over the bound
         // var (`try_lower_heap_field_borrow`'s materialized_lists gate; the fan.settle
@@ -509,28 +492,13 @@ impl LowerCtx {
     /// `a` then `m` = the balanced shape the checker already accepts for a List[String]
     /// element duplicated from another container). `base` is never consumed, so it remains
     /// the sole owner of its own slots (dropped once at its own scope end).
-    pub(crate) fn try_lower_spread_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
-        let IrExprKind::SpreadRecord { base, fields } = &value.kind else {
-            return None;
-        };
-        // The CANONICAL declaration-ordered (name, concrete-type) field list. The result's
-        // type carries the instantiated generic args, so a `Pair[Int,String]` field `first: A`
-        // resolves to `Int`. An unresolvable type ⇒ `None` ⇒ wall.
-        let Some((names, tys)) = self.aggregate_field_tys(&value.ty) else {
-            crate::trace::trace("ALMIDE_DBG_ELEM", || {
-                format!("[spread] no aggregate layout for ty {:?}", value.ty)
-            });
-            return None;
-        };
-        let n = tys.len();
-        if n == 0 || names.len() != n {
-            return None;
-        }
-        // The base must be a TRACKED, MATERIALIZED aggregate var — its slots are real, so a
-        // copy reads the right value (a deferred Opaque base would copy garbage). Resolve its
-        // block handle.
-        let base_block = match &base.kind {
+    /// Resolve the spread BASE to its block handle: a TRACKED, MATERIALIZED
+    /// aggregate var (a deferred Opaque base would copy garbage), or a
+    /// borrowed heap FIELD (`{ ...v._style, width: w }` — the container
+    /// keeps ownership; the copy loop Dups each heap slot, so the borrowed
+    /// base is read-only and stays valid through construction).
+    fn spread_base_block(&mut self, base: &IrExpr) -> Option<ValueId> {
+        let resolved = match &base.kind {
             IrExprKind::Var { id } if is_heap_ty(&base.ty) => {
                 let src = self.value_or_global(*id).ok()?;
                 if !self.materialized_aggregates.contains(&src) {
@@ -561,7 +529,29 @@ impl LowerCtx {
                 });
                 return None;
             }
+                };
+        Some(resolved)
+    }
+
+    pub(crate) fn try_lower_spread_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        let IrExprKind::SpreadRecord { base, fields } = &value.kind else {
+            return None;
         };
+        // The CANONICAL declaration-ordered (name, concrete-type) field list. The result's
+        // type carries the instantiated generic args, so a `Pair[Int,String]` field `first: A`
+        // resolves to `Int`. An unresolvable type ⇒ `None` ⇒ wall.
+        let Some((names, tys)) = self.aggregate_field_tys(&value.ty) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!("[spread] no aggregate layout for ty {:?}", value.ty)
+            });
+            return None;
+        };
+        let n = tys.len();
+        if n == 0 || names.len() != n {
+            return None;
+        }
+        let base_block = self.spread_base_block(base)?;
         // Per declared slot: the override expr (if the literal supplies it) or `None` (copy
         // from base). A field NOT in the declaration is a type error the checker rejects
         // upstream, so a supplied field always maps to a declared index.
@@ -679,3 +669,33 @@ impl LowerCtx {
         Some(dst)
     }
 }
+
+/// The `variant_drop_handles` route name for each name-routed element-drop
+/// kind (the set-routed kinds — StrStr / ScalarAggregate / ListStr — are
+/// registered directly in `register_list_drop_kind`). Names verbatim.
+fn drop_route_name(kind: ListElemDrop) -> String {
+    match kind {
+        ListElemDrop::Record(rname) => format!("list_{rname}"),
+        ListElemDrop::StrInt => "list_str_int".to_string(),
+        ListElemDrop::IntStr => "list_int_str".to_string(),
+        ListElemDrop::StrMapStr => "list_str_mss".to_string(),
+        ListElemDrop::StrMapSkv => "list_str_msb".to_string(),
+        ListElemDrop::OptMapSkv => "list_omb".to_string(),
+        ListElemDrop::MapSkv => "list_mb".to_string(),
+        ListElemDrop::StrListOpt => "list_str_mlo".to_string(),
+        ListElemDrop::MapMlo => "list_map_mlo".to_string(),
+        ListElemDrop::MapHval => "list_map_hval".to_string(),
+        ListElemDrop::CtorLenLoop => "list_lenlist".to_string(),
+        ListElemDrop::Closure => "list_closure".to_string(),
+        ListElemDrop::StrClosure => "list_str_clo".to_string(),
+        ListElemDrop::RecordInt(rname) => format!("list_{}_int", drop_fn_ident(&rname)),
+        ListElemDrop::StrVariant(vname) => format!("list_str_{}", drop_fn_ident(&vname)),
+        ListElemDrop::StrStr
+        | ListElemDrop::ScalarAggregate
+        | ListElemDrop::CtorFlat
+        | ListElemDrop::ListStr => {
+            unreachable!("set-routed kinds are registered directly")
+        }
+    }
+}
+

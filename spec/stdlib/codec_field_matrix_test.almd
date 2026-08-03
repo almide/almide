@@ -43,7 +43,7 @@ fn enc_opts(x: Opts) -> String = json.stringify(Opts.encode(x))
 
 fn enc_vals(x: Vals) -> String = json.stringify(Vals.encode(x))
 
-fn parse(s: String) -> Value = json.parse(s) ?? json.null()
+fn parse(s: String) -> Value = json.parse(s) ?? value.null()
 
 test "scalars: wire bytes and roundtrip" {
   let x = Scalars { s: "x", i: -3, f: 1.5, b: true }

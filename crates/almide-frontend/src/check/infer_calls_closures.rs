@@ -557,7 +557,7 @@ impl Checker {
         let ExprKind::Unwrap { expr: inner, .. } = &mut expr.kind else { unreachable!() };
         let t = self.infer_expr(inner);
         let resolved = resolve_ty(&t, &self.uf);
-        self.check_unwrap_propagation_context();
+        self.check_unwrap_propagation_context(&resolved);
         if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             inner_ty
         } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
@@ -675,20 +675,62 @@ impl Checker {
     /// fn body, outside any lambda) or inside a `test` block; reject everywhere
     /// else at type-check time so the failure is a clear diagnostic, not a
     /// codegen ICE (#608).
-    fn check_unwrap_propagation_context(&mut self) {
+    fn check_unwrap_propagation_context(&mut self, operand: &Ty) {
         if self.env.auto_unwrap || self.env.in_test_block {
             return;
         }
+        // #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates
+        // `!` exactly like an effect fn body — Result propagation is pure
+        // control flow (the derived Codec decoders have always lowered this
+        // way; every peer with hand-written codecs has the same operator: Rust
+        // `?`, Zig `try`). The closure-boundary rule is unchanged (#489):
+        // inside a lambda `!` cannot propagate out, whatever the fn returns.
+        if self.env.lambda_depth == 0 {
+            if let Some(ret) = self.env.current_ret.clone() {
+                let ret = resolve_ty(&ret, &self.uf);
+                let op = resolve_ty(operand, &self.uf);
+                match (&ret, &op) {
+                    // A Result operand's error type must BE the fn's error type
+                    // (the lowered `?` converts nothing) — unify, so a mismatch
+                    // is a check-time error, never generated-Rust E0308.
+                    (
+                        Ty::Applied(TypeConstructorId::Result, ra),
+                        Ty::Applied(TypeConstructorId::Result, oa),
+                    ) if ra.len() == 2 && oa.len() == 2 => {
+                        self.unify_infer(&ra[1], &oa[1]);
+                        return;
+                    }
+                    // Option operand in a Result fn: none becomes the same
+                    // manufactured error the effect-fn lowering already emits.
+                    (
+                        Ty::Applied(TypeConstructorId::Result, _),
+                        Ty::Applied(TypeConstructorId::Option, _),
+                    ) => return,
+                    // Option operand in an Option fn: none propagates as none.
+                    (
+                        Ty::Applied(TypeConstructorId::Option, _),
+                        Ty::Applied(TypeConstructorId::Option, _),
+                    ) => return,
+                    // Error-recovery parity with the unwrap typing rule.
+                    (
+                        Ty::Applied(TypeConstructorId::Result, _)
+                        | Ty::Applied(TypeConstructorId::Option, _),
+                        Ty::Unknown | Ty::TypeVar(_),
+                    ) => return,
+                    _ => {}
+                }
+            }
+        }
         // Inside a lambda within an effect fn the call site *looks* effectful,
         // but `?` cannot propagate out of the closure (#489) — point there
-        // specifically; otherwise the fn just needs to be `effect fn`.
-        let hint = if self.env.can_call_effect && self.env.lambda_depth > 0 {
+        // specifically; otherwise the fn needs a propagation-capable signature.
+        let hint = if self.env.lambda_depth > 0 {
             "`!` cannot propagate an error out of a lambda; use `??` for a fallback value or move the call out of the closure"
         } else {
-            "Mark the enclosing function as `effect fn`, or use `??` to provide a fallback value"
+            "Declare the fn's return type as Result (a Result operand propagates its err) or Option, mark it `effect fn`, or use `??` to provide a fallback value"
         };
         self.emit(super::err(
-            "operator '!' propagates errors and is only valid inside an `effect fn` body or a `test` block".to_string(),
+            "operator '!' propagates errors and is only valid inside an `effect fn` body, a `test` block, or a fn returning Result/Option".to_string(),
             hint,
             "operator !",
         ).with_code("E022"));
@@ -701,7 +743,7 @@ impl Checker {
             ExprKind::UnwrapOr { expr: inner, fallback, .. } => self.infer_pipe_unwrap_or(left, inner, fallback),
             ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
-                self.check_unwrap_propagation_context();
+                self.check_unwrap_propagation_context(&inner_ty);
                 // Annotate the inner expression with its resolved type so the lowering
                 // can construct the correct IR type (e.g., Result[List[T], List[E]] for
                 // result.collect rather than hardcoding Result[T, String]).

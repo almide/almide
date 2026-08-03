@@ -315,59 +315,7 @@
             ir
         };
         let ir = to_ir(src);
-        // ADT brick 5b: generate the per-type recursive-drop fns for nested-variant types and
-        // re-lower with them in scope (the same two-pass as examples/render_program.rs).
-        let anon_recs = crate::lower::collect_recursive_anon_records(&ir);
-        let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
-        // First-class function values need the uniform `$__drop_closure` (same
-        // injection as the production pipeline).
-        let closure_drop = if crate::lower::program_uses_closures(&ir) {
-            crate::lower::CLOSURE_DROP_SRC
-        } else {
-            ""
-        };
-        let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(&ir) {
-            crate::lower::LENLIST_DROP_SRC
-        } else {
-            ""
-        };
-        // `__drop_list_str` (a `List[String]` record/variant ctor field, OR a closure's
-        // nested-heap capture) — SHARED between the record and variant drop generators
-        // (see pipeline.rs's `source_to_ir_with`, the same two-pass this helper mirrors),
-        // emitted ONCE here rather than by either generator inline. Widened on
-        // `program_uses_closures` too — mirrors pipeline.rs's same conservative gate.
-        let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&ir.type_decls)
-            || crate::lower::program_uses_anon_list_str_record(&ir, &ir.type_decls)
-            || crate::lower::program_uses_closures(&ir)
-        {
-            crate::lower::LIST_STR_DROP_SRC
-        } else {
-            ""
-        };
-        // `List[<Fn>]` LITERAL — `$__drop_list_closure` (see pipeline.rs's mirror).
-        let list_closure_drop = if crate::lower::program_uses_closure_list(&ir) {
-            crate::lower::LIST_CLOSURE_DROP_SRC
-        } else {
-            ""
-        };
-        // An `Option[(String, <scalar>)]` — `$__drop_opt_str_int` (see pipeline.rs's
-        // mirror; type-driven gate, #840).
-        let opt_str_int_drop = if crate::lower::program_uses_opt_str_scalar(&ir) {
-            crate::lower::OPT_STR_INT_DROP_SRC
-        } else {
-            ""
-        };
-        let drops = format!(
-            "{}{}{}{}{}{}{}{}",
-            crate::lower::generate_variant_drop_sources(&ir.type_decls),
-            crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
-            crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(&ir), &crate::lower::collect_interp_repr_containers(&ir)),
-            closure_drop,
-            lenlist_drop,
-            list_str_drop,
-            list_closure_drop,
-            opt_str_int_drop,
-        );
+        let drops = test_drop_sources(&ir);
         let ir = if drops.trim().is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
             std::collections::HashMap::new();
@@ -407,6 +355,73 @@
             })
             .flatten()
             .collect();
+        link_self_host_runtime_for_tests(&mut functions);
+        link_print_str_and_dedup(&mut functions);
+        MirProgram { functions, exports: vec![], mutable_global_count: 0 }
+    }
+
+    /// The conditional per-type DROP/REPR helper sources [`lower_source`] appends
+    /// to the program before its second lowering pass -- mirrors `pipeline.rs`'s
+    /// `source_to_ir_with` gates one for one. Verbatim.
+    fn test_drop_sources(ir: &almide_ir::IrProgram) -> String {
+        // ADT brick 5b: generate the per-type recursive-drop fns for nested-variant types and
+        // re-lower with them in scope (the same two-pass as examples/render_program.rs).
+        let anon_recs = crate::lower::collect_recursive_anon_records(ir);
+        let uses_result_opt_str = crate::lower::program_uses_result_option_str(ir);
+        // First-class function values need the uniform `$__drop_closure` (same
+        // injection as the production pipeline).
+        let closure_drop = if crate::lower::program_uses_closures(ir) {
+            crate::lower::CLOSURE_DROP_SRC
+        } else {
+            ""
+        };
+        let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(ir) {
+            crate::lower::LENLIST_DROP_SRC
+        } else {
+            ""
+        };
+        // `__drop_list_str` (a `List[String]` record/variant ctor field, OR a closure's
+        // nested-heap capture) — SHARED between the record and variant drop generators
+        // (see pipeline.rs's `source_to_ir_with`, the same two-pass this helper mirrors),
+        // emitted ONCE here rather than by either generator inline. Widened on
+        // `program_uses_closures` too — mirrors pipeline.rs's same conservative gate.
+        let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&ir.type_decls)
+            || crate::lower::program_uses_anon_list_str_record(ir, &ir.type_decls)
+            || crate::lower::program_uses_closures(ir)
+        {
+            crate::lower::LIST_STR_DROP_SRC
+        } else {
+            ""
+        };
+        // `List[<Fn>]` LITERAL — `$__drop_list_closure` (see pipeline.rs's mirror).
+        let list_closure_drop = if crate::lower::program_uses_closure_list(ir) {
+            crate::lower::LIST_CLOSURE_DROP_SRC
+        } else {
+            ""
+        };
+        // An `Option[(String, <scalar>)]` — `$__drop_opt_str_int` (see pipeline.rs's
+        // mirror; type-driven gate, #840).
+        let opt_str_int_drop = if crate::lower::program_uses_opt_str_scalar(ir) {
+            crate::lower::OPT_STR_INT_DROP_SRC
+        } else {
+            ""
+        };
+        let drops = format!(
+            "{}{}{}{}{}{}{}{}",
+            crate::lower::generate_variant_drop_sources(&ir.type_decls),
+            crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
+            crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(ir), &crate::lower::collect_interp_repr_containers(ir)),
+            closure_drop,
+            lenlist_drop,
+            list_str_drop,
+            list_closure_drop,
+            opt_str_int_drop,
+        );
+        drops
+    }
+
+    /// The self-hosted stdlib runtime AUTO-LINK of [`lower_source`]. Verbatim.
+    fn link_self_host_runtime_for_tests(functions: &mut Vec<MirFunction>) {
         // Auto-link the self-hosted stdlib runtime: for each registry entry CALLED but not
         // defined, lower its Almide source and rename the impl fn to the call name (so
         // `(call $module.func)` resolves AND the caps gate reads it as a known-pure stdlib
@@ -452,6 +467,11 @@
                 functions.extend(rt.functions);
             }
         }
+    }
+
+    /// The print_str link + first-definition dedup + impl-name call-site rewrite
+    /// of [`lower_source`]. Verbatim.
+    fn link_print_str_and_dedup(functions: &mut Vec<MirFunction>) {
         // Auto-link the self-hosted print_str runtime (the v1 linker step) so a plain
         // `println(…)` program — which lowers to a PrintStr → `(call $print_str)` —
         // resolves, matching how render_program links it. Skip if already defined.
@@ -481,7 +501,6 @@
                 }
             }
         }
-        MirProgram { functions, exports: vec![], mutable_global_count: 0 }
     }
 
     /// Does any function CALL `name` (a `CallFn` to it)? Drives conditional auto-linking.

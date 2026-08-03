@@ -30,6 +30,9 @@ use clap::{Parser, Subcommand};
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+    /// Show internal pipeline notes (e.g. which codegen path built the binary)
+    #[arg(short = 'v', long = "verbose", global = true)]
+    verbose: bool,
 }
 
 #[derive(Subcommand)]
@@ -728,6 +731,13 @@ fn dispatch_rest(command: Commands) {
 }
 
 fn dispatch(cli: Cli) {
+    if cli.verbose {
+        // Deep pipeline code reads the env var so verbosity needs no
+        // plumbing through every call chain (same pattern as
+        // ALMIDE_FUEL_PROBE above).
+        // SAFETY: single-threaded at this point (process entry, pre-dispatch).
+        unsafe { std::env::set_var("ALMIDE_VERBOSE", "1") };
+    }
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {

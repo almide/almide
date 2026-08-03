@@ -72,17 +72,83 @@ struct MapRoute<'a> {
 
 /// Every `map.*` typed-variant route: the skv entries/from_list fast paths,
 /// then the (key, value) repr-family table (see the block comments).
-fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bool, map_key_scalar_rec: bool) -> Option<String> {
+/// `Map[String, String]` — the interleaved all-String (`_str`) shape.
+fn is_map_str_str(t: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
-    // `map.entries` / `map.from_list` over the skv repr (`Map[String, scalar]` — the
-    // tokenizer vocab): route to the skv self-hosts; the all-String repr keeps its
-    // existing `map.entries_str`. Other reprs wall (unregistered).
-    if func == "entries" {
-        if let Some(Ty::Applied(TypeConstructorId::Map, a)) = arg_tys.first() {
-            if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]) {
-                return Some("map.entries_skv".to_string());
-            }
-        }
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String))
+}
+
+/// `Map[String, (all-scalar tuple)]` — the hval-TUPLE value shape (C-039).
+fn is_map_str_scalar_tuple(t: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+        if a.len() == 2 && matches!(a[0], Ty::String)
+            && matches!(&a[1], Ty::Tuple(ts)
+                if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c))))
+}
+
+/// A 2-arg Map with a SCALAR value (any key shape).
+fn is_map_scalar_val(t: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 && !is_heap_ty(&a[1]))
+}
+
+/// A 2-arg Map with a String VALUE (any key shape).
+fn is_map_str_val(t: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 && matches!(a[1], Ty::String))
+}
+
+/// `Map[String, scalar]` — the skv result shape.
+fn is_map_str_scalar_val(t: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+        if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+}
+
+/// `Map[(Int|Bool tuple), String]` — the flat scalar-tuple key / String value
+/// shape (C-015).
+fn is_map_scalar_tuple_key_str_val(t: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+        && matches!(&a[0], Ty::Tuple(ts)
+            if !ts.is_empty() && ts.iter().all(|c| matches!(c, Ty::Int | Ty::Bool)))
+        && matches!(a[1], Ty::String))
+}
+
+/// `Map[String, <Fn>]` — the closure-valued map shape (the mclo drop family).
+fn is_map_str_fn(t: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::Fn { .. }))
+}
+
+/// `Map[String, Named]` — the named-value (`_hobj`) map shape.
+fn is_map_str_named(t: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::Named(..)))
+}
+
+/// `Map[String, List[Int]]` — the map-of-int-lists literal shape.
+fn is_map_str_int_list(t: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+        if a.len() == 2
+            && matches!(a[0], Ty::String)
+            && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
+                if b.len() == 1 && matches!(b[0], Ty::Int)))
+}
+
+/// `map.entries` / `map.from_list` over the skv repr (`Map[String, scalar]` —
+/// the tokenizer vocab): route to the skv self-hosts BEFORE the (key,value)
+/// repr table; the all-String repr keeps its existing `map.entries_str`.
+/// Other reprs wall (unregistered).
+fn map_skv_special_route(func: &str, arg_tys: &[Ty]) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    if func == "entries" && arg_tys.first().is_some_and(is_map_str_scalar_val) {
+        return Some("map.entries_skv".to_string());
     }
     if func == "from_list" {
         if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
@@ -94,6 +160,13 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bo
             }
         }
     }
+    None
+}
+
+fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bool, map_key_scalar_rec: bool) -> Option<String> {
+    if let Some(name) = map_skv_special_route(func, arg_tys) {
+        return Some(name);
+    }
     // A map's REPR is set by its (key, value) heap-ness, read from whichever Map type the call
     // exposes: arg 0 (the SUBJECT of set/get/fold/filter/…) takes priority, else the RESULT
     // (map.new() has no args). The two repr families:
@@ -104,72 +177,85 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bo
     //                            has no variant yet, so it falls through (walled by repr).
     // The element-returning forms (get → Option[V], keys/values → List[elem]) read the same
     // key/value reprs off the subject map (arg 0).
+    let route = classify_map_route(func, arg_tys, result_ty, map_key_nullary, map_key_scalar_rec)?;
+    let variant = map_variant_heap_key(route).or_else(|| map_variant_other(route));
+    match variant {
+        Some(MapName::Suffix(s)) => Some(format!("map.{func}{s}")),
+        Some(MapName::Full(name)) => Some(name.to_string()),
+        None => None,
+    }
+}
+
+/// Build the [`MapRoute`] the variant tables dispatch on: a map's REPR is set
+/// by its (key, value) heap-ness, read from whichever Map type the call
+/// exposes — arg 0 (the SUBJECT of set/get/fold/filter/…) takes priority, else
+/// the RESULT (map.new() has no args). The two repr families:
+///   key heap, value heap  → `_str` (map_str: interleaved all-String entries)
+///   key heap, value scalar → `_skv` (map_skv: String keys + i64 values, serves
+///                            Map[String,Int] AND Map[String,Float] — the value is one i64)
+///   key scalar             → the plain map_core (Map[Int,Int]); a scalar-key heap-value map
+///                            has no variant yet, so it falls through (walled by repr).
+/// The element-returning forms (get → Option[V], keys/values → List[elem]) read
+/// the same key/value reprs off the subject map (arg 0). `None` = neither the
+/// subject nor the result is a 2-arg Map.
+fn classify_map_route<'a>(
+    func: &'a str,
+    arg_tys: &'a [Ty],
+    result_ty: &'a Ty,
+    map_key_nullary: bool,
+    map_key_scalar_rec: bool,
+) -> Option<MapRoute<'a>> {
+    use almide_lang::types::constructor::TypeConstructorId;
     let map_kv = |ty: &Ty| match ty {
         Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => {
             Some((is_heap_ty(&a[0]), is_heap_ty(&a[1])))
         }
         _ => None,
     };
-    let kv = arg_tys
-        .first()
-        .and_then(&map_kv)
-        .or_else(|| map_kv(result_ty));
-    if let Some((key_heap, val_heap)) = kv {
-        // Each repr family routes ONLY the funcs its self-hosted variant file actually defines
-        // (an unlisted func keeps the plain name — never a dangling `_str`/`_skv` reference).
-        // Whether the VALUE type is exactly String — the `_str` variant stores
-        // interleaved all-String entries, so a heap-but-not-String value
-        // (`Map[String, List[Int]]`) must NOT route there (its deep-copy would
-        // read the list block as string bytes). It routes to an UNREGISTERED
-        // `_hval` name instead — a clean render wall, never invalid wasm.
-        let val_is_string = matches!(
-            arg_tys.first().or(Some(result_ty)),
-            Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[1], Ty::String)
-        );
-        // Both the `_str` (all-String interleaved entries) and `_skv` (String key + i64 value)
-        // families do KEY EQUALITY via `__str_eq`/`__skv_eq` — a byte-level compare that
-        // misreads a non-String heap block's slot-count `len` as a byte count (the same
-        // confirmed false-positive-collision class fixed above for list/set). A non-String heap
-        // KEY (a tuple, record, nested list) must NOT route to either family — CONFIRMED via
-        // probe to currently produce INVALID WASM (an i32/i64 ABI-width mismatch on `map.set`
-        // with a tuple key), not silently wrong bytes, but still not the honest wall this repr
-        // gate is meant to guarantee. Gate both families on an ACTUAL String key.
-        let key_is_string = matches!(
-            arg_tys.first().or(Some(result_ty)),
-            Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[0], Ty::String)
-        );
-        // The FLAT-heap-value class map_hval actually implements (List[scalar]).
-        let val_is_flat_list = matches!(
-            arg_tys.first().or(Some(result_ty)),
-            Some(Ty::Applied(TypeConstructorId::Map, a))
-                if a.len() == 2 && matches!(&a[1],
-                    Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0]))
-        );
-        // The CLOSURE-value class (`Map[String, () -> Unit]` — the mclo family): the
-        // hval twins are handle-level (set stores + rc-shares the value handle, get/
-        // get_or share it back), so a closure block rides them unchanged; only the
-        // DROP routes differently (`$__drop_map_mclo` — the bind/arg registration
-        // sites key on `is_map_fn_ty`). `eq` is EXCLUDED (hval eq compares values
-        // STRUCTURALLY as List — closure identity has no such compare; it stays an
-        // honest wall).
-        let val_is_fn = matches!(
-            arg_tys.first().or(Some(result_ty)),
-            Some(Ty::Applied(TypeConstructorId::Map, a))
-                if a.len() == 2 && matches!(a[1], Ty::Fn { .. })
-        );
-        let route = MapRoute {
-            func, arg_tys, result_ty, key_heap, val_heap,
-            key_is_string, val_is_string, val_is_flat_list, val_is_fn,
-            key_nullary: map_key_nullary, key_scalar_rec: map_key_scalar_rec,
-        };
-        let variant = map_variant_heap_key(route).or_else(|| map_variant_other(route));
-        return match variant {
-            Some(MapName::Suffix(s)) => Some(format!("map.{func}{s}")),
-            Some(MapName::Full(name)) => Some(name.to_string()),
-            None => None,
-        };
-    }
-    None
+    let (key_heap, val_heap) = arg_tys.first().and_then(&map_kv).or_else(|| map_kv(result_ty))?;
+    let subject = arg_tys.first().or(Some(result_ty));
+    // Whether the VALUE type is exactly String — the `_str` variant stores
+    // interleaved all-String entries, so a heap-but-not-String value
+    // (`Map[String, List[Int]]`) must NOT route there (its deep-copy would
+    // read the list block as string bytes). It routes to an UNREGISTERED
+    // `_hval` name instead — a clean render wall, never invalid wasm.
+    let val_is_string = subject.is_some_and(is_map_str_val);
+    // Both the `_str` (all-String interleaved entries) and `_skv` (String key + i64 value)
+    // families do KEY EQUALITY via `__str_eq`/`__skv_eq` — a byte-level compare that
+    // misreads a non-String heap block's slot-count `len` as a byte count (the same
+    // confirmed false-positive-collision class fixed above for list/set). A non-String heap
+    // KEY (a tuple, record, nested list) must NOT route to either family — CONFIRMED via
+    // probe to currently produce INVALID WASM (an i32/i64 ABI-width mismatch on `map.set`
+    // with a tuple key), not silently wrong bytes, but still not the honest wall this repr
+    // gate is meant to guarantee. Gate both families on an ACTUAL String key.
+    let key_is_string = matches!(
+        subject,
+        Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[0], Ty::String)
+    );
+    // The FLAT-heap-value class map_hval actually implements (List[scalar]).
+    let val_is_flat_list = matches!(
+        subject,
+        Some(Ty::Applied(TypeConstructorId::Map, a))
+            if a.len() == 2 && matches!(&a[1],
+                Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0]))
+    );
+    // The CLOSURE-value class (`Map[String, () -> Unit]` — the mclo family): the
+    // hval twins are handle-level (set stores + rc-shares the value handle, get/
+    // get_or share it back), so a closure block rides them unchanged; only the
+    // DROP routes differently (`$__drop_map_mclo` — the bind/arg registration
+    // sites key on `is_map_fn_ty`). `eq` is EXCLUDED (hval eq compares values
+    // STRUCTURALLY as List — closure identity has no such compare; it stays an
+    // honest wall).
+    let val_is_fn = matches!(
+        subject,
+        Some(Ty::Applied(TypeConstructorId::Map, a))
+            if a.len() == 2 && matches!(a[1], Ty::Fn { .. })
+    );
+    Some(MapRoute {
+        func, arg_tys, result_ty, key_heap, val_heap,
+        key_is_string, val_is_string, val_is_flat_list, val_is_fn,
+        key_nullary: map_key_nullary, key_scalar_rec: map_key_scalar_rec,
+    })
 }
 
 
@@ -276,12 +362,7 @@ fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
     // `map_set_hval`), so a closure block rides it unchanged; the RESULT's
     // type-driven drop routing (`is_map_fn_ty` → map_mclo) frees the values via
     // `__drop_closure`.
-    (true, true)
-        if func == "from_list"
-            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(a[1], Ty::Fn { .. })) =>
-    {
+    (true, true) if func == "from_list" && is_map_str_fn(result_ty) => {
         Some(MapName::Suffix("_hval"))
     }
     // `Map[String, List[Int]]` from_list / display (the map-of-lists literal):
@@ -289,24 +370,10 @@ fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
     // verbatim (the B22 suffix guard).
     // `Map[String, String]` from_list (the String-valued map literal): keyed on
     // the RESULT type (from_list's first arg is the pairs List, not a Map).
-    (true, true)
-        if func == "from_list"
-            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2
-                    && matches!(a[0], Ty::String)
-                    && matches!(a[1], Ty::String)) =>
-    {
+    (true, true) if func == "from_list" && is_map_str_str(result_ty) => {
         Some(MapName::Suffix("_str"))
     }
-    (true, true)
-        if !val_is_string
-            && func == "from_list"
-            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2
-                    && matches!(a[0], Ty::String)
-                    && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
-                        if b.len() == 1 && matches!(b[0], Ty::Int))) =>
-    {
+    (true, true) if !val_is_string && func == "from_list" && is_map_str_int_list(result_ty) => {
         Some(MapName::Suffix("_hval"))
     }
     _ => None,
@@ -404,12 +471,7 @@ fn map_heap_val_named_and_typechange_route(r: MapRoute<'_>) -> Option<MapName> {
     // slot); the RESULT's type-driven drop routing (`map_named_value_drop`)
     // decides the correct sweep, and an unadmitted value type walls THERE —
     // never a leaky flat link here.
-    (true, true)
-        if func == "from_list"
-            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(a[1], Ty::Named(..))) =>
-    {
+    (true, true) if func == "from_list" && is_map_str_named(result_ty) => {
         Some(MapName::Suffix("_hobj"))
     }
     // An ALL-SCALAR record key with a String value (`Map[Color, String]` —
@@ -419,35 +481,18 @@ fn map_heap_val_named_and_typechange_route(r: MapRoute<'_>) -> Option<MapName> {
     (true, true)
         if map_key_scalar_rec
             && matches!(func, "from_list" | "get")
-            && {
-                let str_val = |t: &Ty| {
-                    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && matches!(a[1], Ty::String))
-                };
-                arg_tys.first().is_some_and(str_val) || str_val(result_ty)
-            } =>
+            && (arg_tys.first().is_some_and(is_map_str_val) || is_map_str_val(result_ty)) =>
     {
         Some(MapName::Suffix("_srec"))
     }
     // `map.entries` over the hval-TUPLE flavor (`Map[String, (Int, Int)]` —
     // the C-039 tuple-valued map.map result): the typechange twin.
-    (true, true)
-        if func == "entries"
-            && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
-                if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(&a[1], Ty::Tuple(ts)
-                        if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))) =>
-    {
+    (true, true) if func == "entries" && arg_tys.first().is_some_and(is_map_str_scalar_tuple) => {
         Some(MapName::Suffix("_hvalt"))
     }
     // TYPE-CHANGING `map.map` str → skv (`map.map(ms, (v) => string.len(v))`
     // — C-039): the result value narrows to a scalar.
-    (true, true)
-        if key_is_string
-            && func == "map"
-            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1])) =>
-    {
+    (true, true) if key_is_string && func == "map" && is_map_str_scalar_val(result_ty) => {
         Some(MapName::Suffix("_str2skv"))
     }
     _ => None,
@@ -464,57 +509,65 @@ fn map_heap_val_named_and_typechange_route(r: MapRoute<'_>) -> Option<MapName> {
 /// order the single table used, so which variant a call routes to is
 /// unchanged.
 fn map_variant_other(r: MapRoute<'_>) -> Option<MapName> {
-    use almide_lang::types::constructor::TypeConstructorId;
-    let MapRoute {
-        func, arg_tys, result_ty, key_heap, val_heap,
-        key_is_string, val_is_string, val_is_flat_list, val_is_fn,
-        key_nullary: map_key_nullary, key_scalar_rec: map_key_scalar_rec,
-    } = r;
+    if r.key_heap {
+        map_variant_other_heap_key(r)
+    } else {
+        map_variant_other_scalar_key(r)
+    }
+}
+
+/// The funcs the skv variant file (map_skv.almd) actually defines — an
+/// unlisted func routes to the `_skv_wall` name (never a dangling `_skv`
+/// reference).
+const SKV_FUNCS: &[&str] = &[
+    "new", "set", "remove", "filter", "get", "get_or", "keys", "values", "len", "is_empty",
+    "contains", "all", "any", "count", "fold", "eq", "find", "update", "merge", "map",
+];
+
+/// The HEAP-KEY rows of [`map_variant_other`]: String keys (skv and its
+/// type-changing `map.map` twins), the nullary-variant tag key, the flat
+/// scalar-tuple key, and the explicit non-String heap-key wall. Verbatim.
+fn map_variant_other_heap_key(r: MapRoute<'_>) -> Option<MapName> {
+    map_variant_skv_rows(r).or_else(|| map_variant_vkey_rows(r))
+}
+
+/// The STRING-key rows of [`map_variant_other`]: the skv family and its
+/// type-changing `map.map` twins. Verbatim, in the original order.
+fn map_variant_skv_rows(r: MapRoute<'_>) -> Option<MapName> {
+    let MapRoute { func, result_ty, key_heap, val_heap, key_is_string, .. } = r;
     match (key_heap, val_heap) {
-    (true, false)
-        if key_is_string
-            && func == "map"
-            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(a[1], Ty::String)) =>
-    {
+    (true, false) if key_is_string && func == "map" && is_map_str_str(result_ty) => {
         Some(MapName::Suffix("_skv2str"))
     }
     // TYPE-CHANGING `map.map` skv → hval-TUPLE (`map.map(mi, (v) => (v, v*v))`
     // — C-039): all-scalar tuple values → the raw skv-split build twin.
-    (true, false)
-        if key_is_string
-            && func == "map"
-            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2 && matches!(a[0], Ty::String)
-                    && matches!(&a[1], Ty::Tuple(ts)
-                        if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))) =>
-    {
+    (true, false) if key_is_string && func == "map" && is_map_str_scalar_tuple(result_ty) => {
         Some(MapName::Suffix("_skv2hvalt"))
     }
     // `map.map` transforms the VALUES — the skv impl is scalar-value in AND out, so
     // it also needs the RESULT map's value scalar (a `(v) => int.to_string(v)` maps
     // into the `_str` repr — no skv form; wall it rather than mislink).
-    (true, false)
-        if key_is_string
-            && func == "map"
-            && !matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2 && !is_heap_ty(&a[1])) =>
-    {
+    (true, false) if key_is_string && func == "map" && !is_map_scalar_val(result_ty) => {
         Some(MapName::Suffix("_skv_wall"))
     }
-    (true, false) if key_is_string => Some(
-        if matches!(
-            func,
-            "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
-                | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
-                | "eq" | "find" | "update" | "merge" | "map"
-        ) {
-            MapName::Suffix("_skv")
-        } else {
-            MapName::Suffix("_skv_wall")
-        },
-    ),
+    (true, false) if key_is_string => Some(if SKV_FUNCS.contains(&func) {
+        MapName::Suffix("_skv")
+    } else {
+        MapName::Suffix("_skv_wall")
+    }),
+        _ => None,
+    }
+}
+
+/// The NON-String heap-key rows of [`map_variant_other`]: the nullary-variant
+/// tag key, the flat scalar-tuple key, and the explicit heap-key wall.
+/// Verbatim, in the original order (the wall row stays LAST).
+fn map_variant_vkey_rows(r: MapRoute<'_>) -> Option<MapName> {
+    let MapRoute {
+        func, arg_tys, result_ty, key_heap, val_heap,
+        key_nullary: map_key_nullary, ..
+    } = r;
+    match (key_heap, val_heap) {
     // A NULLARY-ONLY variant key with a SCALAR value (`Map[Direction, Int]` —
     // the hash_protocol deriving-Hash shape): the key's identity IS its tag,
     // so normalize to a raw i64 key (map_vkey.almd's from_list/get). Other
@@ -522,15 +575,10 @@ fn map_variant_other(r: MapRoute<'_>) -> Option<MapName> {
     (true, false)
         if map_key_nullary
             && matches!(func, "from_list" | "get")
-            && {
-                // from_list's FIRST arg is the pairs List — probe the
-                // RESULT type too (the is_ivh OR discipline).
-                let scalar_val = |t: &Ty| {
-                    matches!(t, Ty::Applied(TypeConstructorId::Map, a)
-                        if a.len() == 2 && !is_heap_ty(&a[1]))
-                };
-                arg_tys.first().is_some_and(scalar_val) || scalar_val(result_ty)
-            } =>
+            // from_list's FIRST arg is the pairs List — probe the
+            // RESULT type too (the is_ivh OR discipline).
+            && (arg_tys.first().is_some_and(is_map_scalar_val)
+                || is_map_scalar_val(result_ty)) =>
     {
         Some(MapName::Suffix("_vtag"))
     }
@@ -540,18 +588,9 @@ fn map_variant_other(r: MapRoute<'_>) -> Option<MapName> {
     // identity ⇔ string identity. `len` reads the backing str-flavor header
     // directly; the lookup/build set routes `_srec`.
     (true, true) | (true, false)
-        if {
-            let tup_key_str_val = |t: &Ty| {
-                matches!(t, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
-                    && matches!(&a[0], Ty::Tuple(ts)
-                        if !ts.is_empty()
-                            && ts.iter().all(|c| matches!(c, Ty::Int | Ty::Bool)))
-                    && matches!(a[1], Ty::String))
-            };
-            (arg_tys.first().is_some_and(tup_key_str_val)
-                || tup_key_str_val(result_ty))
-                && matches!(func, "from_list" | "get" | "set" | "contains" | "len")
-        } =>
+        if (arg_tys.first().is_some_and(is_map_scalar_tuple_key_str_val)
+            || is_map_scalar_tuple_key_str_val(result_ty))
+            && matches!(func, "from_list" | "get" | "set" | "contains" | "len") =>
     {
         if func == "len" {
             // `len` on the tuple-key/String-value repr has no `_srec` twin; it
@@ -567,6 +606,17 @@ fn map_variant_other(r: MapRoute<'_>) -> Option<MapName> {
     // and produces INVALID WASM (an i32/i64 ABI-width mismatch, CONFIRMED by probe) —
     // a crash, not the honest compile-time wall this repr gate exists to guarantee.
     (true, true) | (true, false) => Some(MapName::Suffix("_key_wall")),
+        _ => None,
+    }
+}
+
+/// The SCALAR-KEY rows of [`map_variant_other`]: `Map[Int|Bool, String]`
+/// (ivh and its type-changing `map.map` twin), `Map[Int, Float]` from_list,
+/// the synthesized display passthroughs, and the ivh wall. Verbatim.
+fn map_variant_other_scalar_key(r: MapRoute<'_>) -> Option<MapName> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let MapRoute { func, arg_tys, result_ty, key_heap, val_heap, .. } = r;
+    match (key_heap, val_heap) {
     // `Map[Int, String]` — the implemented scalar-key/heap-value variant
     // (new/set/eq). Other funcs, and other heap value types, keep an
     // UNREGISTERED wall name (never the plain Map[Int,Int] i64-slot link

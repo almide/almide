@@ -4,7 +4,7 @@
 // v1 self-host owns the rep: a List[String] of segments, root-first — "f<name>" is a
 // field step, "i<int>" an index step (digits from int.to_string, so int.parse always
 // round-trips). The newtype eraser publishes Named("JsonPath") → List[String], making
-// user-side binds route the List[String] drop. get_path walks the PROVEN value.get /
+// user-side binds route the List[String] drop. get_path walks the PROVEN value.field /
 // value.as_array / generic list.get path, byte-matching almide_json_get_path: a field
 // step on a non-object → none; an index step wraps a NEGATIVE i from the end (len + i)
 // and misses out-of-range.
@@ -29,7 +29,7 @@ fn json_path_get_go(j: Value, path: List[String], k: Int) -> Option[Value] =
     let seg = list.get(path, k) ?? ""
     let rest = string.drop(seg, 1)
     if string.take(seg, 1) == "f" then
-      match value.get(j, rest) {
+      match value.field(j, rest) {
         ok(v) => json_path_get_go(v, path, k + 1)
         err(_) => none
       }

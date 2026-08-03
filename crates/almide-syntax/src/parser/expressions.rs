@@ -100,9 +100,7 @@ impl Parser {
             if l_bp < min_bp { break; }
 
             let span = Some(self.current_span());
-            let op_value = self.current().value.clone();
-            let (op_line, op_col, op_end_col) =
-                { let t = self.current(); (t.line, t.col, t.end_col) };
+            let op_tok = self.current().clone();
             self.advance();
             self.skip_newlines();
 
@@ -111,89 +109,25 @@ impl Parser {
                 && self.check(TokenType::Match)
                 && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
             {
-                self.advance(); // consume 'match'
-                self.skip_newlines();
-                self.expect(TokenType::LBrace)?;
-                self.skip_newlines();
-                let mut arms = Vec::new();
-                while !self.check(TokenType::RBrace) {
-                    arms.push(self.parse_match_arm()?);
-                    self.skip_newlines();
-                    if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
-                }
-                self.expect(TokenType::RBrace)?;
-                left = Expr::new(self.next_id(), span, ExprKind::Match {
-                    subject: Box::new(left), arms,
-                });
+                left = self.parse_pipe_match(left, span)?;
                 continue;
             }
 
             let right = self.parse_expr_bp(r_bp)?;
 
             // ── Build AST node ──
-            left = match tt {
-                TokenType::PipeArrow => Expr::new(self.next_id(), span, ExprKind::Pipe {
-                    left: Box::new(left), right: Box::new(right),
-                }),
-                TokenType::ComposeArrow => Expr::new(self.next_id(), span, ExprKind::Compose {
-                    left: Box::new(left), right: Box::new(right),
-                }),
-                TokenType::DotDotLt => Expr::new(self.next_id(), span, ExprKind::Range {
-                    start: Box::new(left), end: Box::new(right), inclusive: false,
-                }),
-                TokenType::DotDotDot => Expr::new(self.next_id(), span, ExprKind::Range {
-                    start: Box::new(left), end: Box::new(right), inclusive: true,
-                }),
-                // #966: the Rust-style range spellings were retired for the
-                // self-describing Swift pair. The range still PARSES — `almide
-                // fix`/`fmt` need the AST to migrate the file, and downstream
-                // sees the program — but the E031 tombstone makes every
-                // compile path fail loudly, with a machine-applicable fix-it
-                // on the operator span.
-                TokenType::DotDot | TokenType::DotDotEq => {
-                    let inclusive = tt == TokenType::DotDotEq;
-                    let new_spelling = if inclusive { "..." } else { "..<" };
-                    let mut d = crate::diagnostic::Diagnostic::error(
-                        format!(
-                            "'{}' was retired: {} ranges are written '{}'",
-                            op_value,
-                            if inclusive { "end-inclusive" } else { "end-exclusive" },
-                            new_spelling,
-                        ),
-                        "run `almide fix` on this file to migrate every range mechanically",
-                        "range expression",
-                    ).with_code("E031")
-                     .with_try_replace(op_line, op_col, op_end_col, new_spelling);
-                    if let Some(f) = &self.file { d.file = Some(f.clone()); }
-                    d.line = Some(op_line);
-                    d.col = Some(op_col);
-                    d.end_col = Some(op_end_col);
-                    self.errors.push(d);
-                    Expr::new(self.next_id(), span, ExprKind::Range {
-                        start: Box::new(left), end: Box::new(right), inclusive,
-                    })
-                }
-                _ => Expr::new(self.next_id(), span, ExprKind::Binary {
-                    op: sym(&op_value), left: Box::new(left), right: Box::new(right),
-                }),
-            };
+            left = self.build_infix_node(tt, span, &op_tok, left, right);
 
             // ── Reject chained comparisons: a < b < c ──
-            if matches!(tt, TokenType::EqEq | TokenType::BangEq
+            let is_cmp = |t: &TokenType| matches!(t, TokenType::EqEq | TokenType::BangEq
                 | TokenType::LAngle | TokenType::RAngle
-                | TokenType::LtEq | TokenType::GtEq)
-            {
-                if matches!(self.current().token_type,
-                    TokenType::EqEq | TokenType::BangEq
-                    | TokenType::LAngle | TokenType::RAngle
-                    | TokenType::LtEq | TokenType::GtEq)
-                {
-                    let tok = self.current();
-                    return Err(format!(
-                        "Chained comparison operators are not allowed at line {}:{}\n  Hint: Use 'and' to combine comparisons. Write: a < b and b < c",
-                        tok.line, tok.col
-                    ));
-                }
+                | TokenType::LtEq | TokenType::GtEq);
+            if is_cmp(&tt) && is_cmp(&self.current().token_type) {
+                let tok = self.current();
+                return Err(format!(
+                    "Chained comparison operators are not allowed at line {}:{}\n  Hint: Use 'and' to combine comparisons. Write: a < b and b < c",
+                    tok.line, tok.col
+                ));
             }
 
             // ── Reject chained ranges: 0..1..2 ──
@@ -226,6 +160,85 @@ impl Parser {
         let cur = self.current();
         let Some(next) = self.peek_at(1) else { return false; };
         next.line == cur.line && next.col == cur.end_col
+    }
+
+    /// `left |> match { arms }` — pipe into a subject-less match: the piped
+    /// value becomes the subject.
+    fn parse_pipe_match(&mut self, left: Expr, span: Option<Span>) -> Result<Expr, String> {
+        self.advance(); // consume 'match'
+        self.skip_newlines();
+        self.expect(TokenType::LBrace)?;
+        self.skip_newlines();
+        let mut arms = Vec::new();
+        while !self.check(TokenType::RBrace) {
+            arms.push(self.parse_match_arm()?);
+            self.skip_newlines();
+            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+        }
+        self.expect(TokenType::RBrace)?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::Match {
+            subject: Box::new(left), arms,
+        }))
+    }
+
+    /// Build the infix AST node for `left <op> right`. `op_tok` is the
+    /// operator token — its value names Binary ops, its position anchors the
+    /// E031 retired-range tombstone's machine-applicable fix-it.
+    fn build_infix_node(
+        &mut self,
+        tt: TokenType,
+        span: Option<Span>,
+        op_tok: &crate::lexer::Token,
+        left: Expr,
+        right: Expr,
+    ) -> Expr {
+        match tt {
+            TokenType::PipeArrow => Expr::new(self.next_id(), span, ExprKind::Pipe {
+                left: Box::new(left), right: Box::new(right),
+            }),
+            TokenType::ComposeArrow => Expr::new(self.next_id(), span, ExprKind::Compose {
+                left: Box::new(left), right: Box::new(right),
+            }),
+            TokenType::DotDotLt => Expr::new(self.next_id(), span, ExprKind::Range {
+                start: Box::new(left), end: Box::new(right), inclusive: false,
+            }),
+            TokenType::DotDotDot => Expr::new(self.next_id(), span, ExprKind::Range {
+                start: Box::new(left), end: Box::new(right), inclusive: true,
+            }),
+            // #966: the Rust-style range spellings were retired for the
+            // self-describing Swift pair. The range still PARSES — `almide
+            // fix`/`fmt` need the AST to migrate the file, and downstream
+            // sees the program — but the E031 tombstone makes every
+            // compile path fail loudly, with a machine-applicable fix-it
+            // on the operator span.
+            TokenType::DotDot | TokenType::DotDotEq => {
+                let (op_line, op_col, op_end_col) = (op_tok.line, op_tok.col, op_tok.end_col);
+                let inclusive = tt == TokenType::DotDotEq;
+                let new_spelling = if inclusive { "..." } else { "..<" };
+                let mut d = crate::diagnostic::Diagnostic::error(
+                    format!(
+                        "'{}' was retired: {} ranges are written '{}'",
+                        op_tok.value,
+                        if inclusive { "end-inclusive" } else { "end-exclusive" },
+                        new_spelling,
+                    ),
+                    "run `almide fix` on this file to migrate every range mechanically",
+                    "range expression",
+                ).with_code("E031")
+                 .with_try_replace(op_line, op_col, op_end_col, new_spelling);
+                if let Some(f) = &self.file { d.file = Some(f.clone()); }
+                d.line = Some(op_line);
+                d.col = Some(op_col);
+                d.end_col = Some(op_end_col);
+                self.errors.push(d);
+                Expr::new(self.next_id(), span, ExprKind::Range {
+                    start: Box::new(left), end: Box::new(right), inclusive,
+                })
+            }
+            _ => Expr::new(self.next_id(), span, ExprKind::Binary {
+                op: sym(&op_tok.value), left: Box::new(left), right: Box::new(right),
+            }),
+        }
     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
@@ -261,61 +274,85 @@ impl Parser {
             if self.check(TokenType::Dot) {
                 expr = self.parse_postfix_dot(expr)?;
             } else if self.check(TokenType::LBracket) && self.peek_type_args_call() {
-                let span = Some(self.current_span());
-                let ta = self.parse_type_args()?;
-                self.expect(TokenType::LParen)?;
-                let (args, named_args) = self.parse_call_args()?;
-                self.expect(TokenType::RParen)?;
-                expr = Expr::new(self.next_id(), span, ExprKind::Call {
-                    callee: Box::new(expr), args, named_args, type_args: Some(ta),
-                });
+                expr = self.parse_postfix_type_args_call(expr)?;
             } else if self.check(TokenType::LBracket) && !self.newline_before_current() {
-                let span = Some(self.current_span());
-                let open = self.current().clone();
-                self.advance();
-                let index = self.parse_expr()?;
-                self.expect_closing(TokenType::RBracket, open.line, open.col, "index access")?;
-                expr = Expr::new(self.next_id(), span, ExprKind::IndexAccess {
-                    object: Box::new(expr), index: Box::new(index),
-                });
+                expr = self.parse_postfix_index(expr)?;
             } else if self.check(TokenType::LParen) && !self.newline_before_current() {
                 expr = self.parse_postfix_call(expr)?;
-            } else if self.check(TokenType::Bang) && !self.newline_before_current() {
-                // expr! — unwrap with error propagation
-                let span = Some(self.current_span());
-                self.advance();
-                expr = Expr::new(self.next_id(), span, ExprKind::Unwrap {
-                    expr: Box::new(expr),
-                });
-            } else if self.check(TokenType::QuestionQuestion) {
-                // expr ?? fallback — unwrap with default
-                let span = Some(self.current_span());
-                self.advance();
-                self.skip_newlines();
-                let fallback = self.parse_unary()?;
-                expr = Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
-                    expr: Box::new(expr), fallback: Box::new(fallback),
-                });
-            } else if self.check(TokenType::QuestionDot) && !self.newline_before_current() {
-                // expr?.field — optional chaining
-                let span = Some(self.current_span());
-                self.advance();
-                let field = self.expect_any_name()?;
-                expr = Expr::new(self.next_id(), span, ExprKind::OptionalChain {
-                    expr: Box::new(expr), field,
-                });
-            } else if self.check(TokenType::Question) && !self.newline_before_current() {
-                // expr? — convert to Option
-                let span = Some(self.current_span());
-                self.advance();
-                expr = Expr::new(self.next_id(), span, ExprKind::ToOption {
-                    expr: Box::new(expr),
-                });
             } else {
-                break;
+                let (next, consumed) = self.parse_postfix_unwrap_op(expr)?;
+                expr = next;
+                if !consumed { break; }
             }
         }
         Ok(expr)
+    }
+
+    /// `expr[T](args)` — a call with explicit type arguments.
+    fn parse_postfix_type_args_call(&mut self, expr: Expr) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        let ta = self.parse_type_args()?;
+        self.expect(TokenType::LParen)?;
+        let (args, named_args) = self.parse_call_args()?;
+        self.expect(TokenType::RParen)?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::Call {
+            callee: Box::new(expr), args, named_args, type_args: Some(ta),
+        }))
+    }
+
+    /// `expr[index]` — index access.
+    fn parse_postfix_index(&mut self, expr: Expr) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        let open = self.current().clone();
+        self.advance();
+        let index = self.parse_expr()?;
+        self.expect_closing(TokenType::RBracket, open.line, open.col, "index access")?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::IndexAccess {
+            object: Box::new(expr), index: Box::new(index),
+        }))
+    }
+
+    /// The unwrap-family postfixes: `expr!` (propagating unwrap),
+    /// `expr ?? fallback`, `expr?.field` (optional chain), `expr?`
+    /// (Result→Option). Returns `(expr, consumed)`; `consumed = false` hands
+    /// the unchanged expr back to the caller's loop to break.
+    fn parse_postfix_unwrap_op(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
+        if self.check(TokenType::Bang) && !self.newline_before_current() {
+            // expr! — unwrap with error propagation
+            let span = Some(self.current_span());
+            self.advance();
+            return Ok((Expr::new(self.next_id(), span, ExprKind::Unwrap {
+                expr: Box::new(expr),
+            }), true));
+        }
+        if self.check(TokenType::QuestionQuestion) {
+            // expr ?? fallback — unwrap with default
+            let span = Some(self.current_span());
+            self.advance();
+            self.skip_newlines();
+            let fallback = self.parse_unary()?;
+            return Ok((Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
+                expr: Box::new(expr), fallback: Box::new(fallback),
+            }), true));
+        }
+        if self.check(TokenType::QuestionDot) && !self.newline_before_current() {
+            // expr?.field — optional chaining
+            let span = Some(self.current_span());
+            self.advance();
+            let field = self.expect_any_name()?;
+            return Ok((Expr::new(self.next_id(), span, ExprKind::OptionalChain {
+                expr: Box::new(expr), field,
+            }), true));
+        }
+        if self.check(TokenType::Question) && !self.newline_before_current() {
+            // expr? — convert to Option
+            let span = Some(self.current_span());
+            self.advance();
+            return Ok((Expr::new(self.next_id(), span, ExprKind::ToOption {
+                expr: Box::new(expr),
+            }), true));
+        }
+        Ok((expr, false))
     }
 
     /// Handles the `.` postfix branch: tuple index (`expr.0`), field member

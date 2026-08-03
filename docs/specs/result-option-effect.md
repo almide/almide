@@ -177,7 +177,7 @@ guard condition else { diverge_expr }
 ✅ ? で Result → Option 変換
 ✅ ?? で Result ok/err の分岐
 ✅ ?? で Option some/none の分岐
-✅ ?? で json.get() (Option) のフォールバック
+✅ ?? で value.field()? (Option) のフォールバック
 ✅ guard else { err("msg")! } で早期リターン
 ✅ effect fn が暗黙に Result 包装
 ```

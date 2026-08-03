@@ -792,3 +792,5 @@ include!("pipeline_test_runner.rs");
 include!("pipeline_global_slots.rs");
 include!("pipeline_b.rs");
 include!("pipeline_c.rs");
+include!("pipeline_link.rs");
+include!("pipeline_native_rungs.rs");

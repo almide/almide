@@ -489,6 +489,13 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
     if ctx.is_test {
         format!("({}).unwrap()", s)
     } else {
+        // An Option operand in a fn that does NOT return Result can only have
+        // passed the checker in an OPTION-returning pure fn (#1067): there the
+        // Rust `?` propagates the none directly — the ok_or template variant
+        // would build a Result inside an Option fn (E0277).
+        if inner.ty.is_option() && ctx.fn_err_ty.is_none() && !ctx.auto_unwrap {
+            return format!("({})?", s);
+        }
         // Determine the right template variant based on inner type.
         // For Result with non-String error, use map_err variants
         // (the template decides whether/how to coerce — target-agnostic).

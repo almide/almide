@@ -152,31 +152,15 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
         fn track_interp_part_containers(&mut self, part_ty: &Ty) {
             match part_ty {
                 Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                    if let Ty::Named(n, args) = &a[0] {
-                        self.track_list_named(*n, args);
-                    }
-                    // `${List[(Int, String)]}` — a scalar-component tuple
-                    // element: the generator emits its `__repr_list_tup_<key>`.
-                    if let Ty::Tuple(ts) = &a[0] {
-                        self.track_list_tuple(ts);
-                    }
+                    self.track_elem_container(&a[0], true);
                 }
                 Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                    if let Ty::Named(n, args) = &a[0] {
-                        self.track_option_named(*n, args);
-                    }
-                    // `${Option[(Bool, Bool)]}` (a list.min/max result) — the
-                    // generator emits its `__repr_opt_tup_<key>`.
-                    if let Ty::Tuple(ts) = &a[0] {
-                        self.track_option_tuple(ts);
-                    }
+                    self.track_elem_container(&a[0], false);
                 }
                 Ty::Applied(TypeConstructorId::Map, a)
                     if a.len() == 2 && matches!(a[0], Ty::String) =>
                 {
-                    if let Ty::Named(n, _) = &a[1] {
-                        self.track_map_named(*n);
-                    }
+                    self.track_map_value(&a[1]);
                 }
                 // A GENERIC-variant instance part (`${l}` over
                 // `ReprEither[Int, String]`) — record the instantiation so the
@@ -196,6 +180,34 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
         }
     }
     impl C {
+        /// The shared List/Option element dispatch: a Named element tracks its
+        /// rec/variant repr; a scalar-component tuple element tracks its
+        /// `__repr_list_tup_<key>` / `__repr_opt_tup_<key>` (list.min/max
+        /// results land in the Option lane).
+        fn track_elem_container(&mut self, elem: &Ty, is_list: bool) {
+            if let Ty::Named(n, args) = elem {
+                if is_list {
+                    self.track_list_named(*n, args);
+                } else {
+                    self.track_option_named(*n, args);
+                }
+            }
+            if let Ty::Tuple(ts) = elem {
+                if is_list {
+                    self.track_list_tuple(ts);
+                } else {
+                    self.track_option_tuple(ts);
+                }
+            }
+        }
+
+        /// A `Map[String, <Named>]` VALUE tracks the named type's map repr.
+        fn track_map_value(&mut self, v: &Ty) {
+            if let Ty::Named(n, _) = v {
+                self.track_map_named(*n);
+            }
+        }
+
         /// The `List[<Named>]` NAMED-element container-tracking for the `${l}` string-interp
         /// part scan above. Verbatim extraction (guard-clause flattening) of the former inline
         /// if-else-if chain, no behavior change — see
@@ -370,41 +382,17 @@ fn flatten_variant_cases(
 /// (type-param fields substituted with the use-site args). A RECORD-variant case
 /// renders v0's `Tag { name: "hi", n: 3 }` (field names, brace form); a tuple
 /// case renders `Pair(3, true)`; a nullary case its bare name.
-fn emit_variant_repr_body(
+/// Emit ONE payload field's repr binding (`let f{i} = …`) for
+/// [`emit_variant_repr_body`] — the per-type dispatch, arms verbatim (the
+/// caller assembles the concat chain).
+fn emit_variant_repr_field(
     out: &mut String,
-    fname: &str,
-    tspell: &str,
-    cases: &[(String, Vec<(Option<String>, Ty)>)],
+    i: usize,
+    ty: &Ty,
     scalar_rec_names: &std::collections::HashSet<String>,
     names: &std::collections::HashSet<String>,
 ) {
-    out.push_str(&format!("fn __repr_{fname}(e: {tspell}) -> String = {{\n"));
-    out.push_str("  let h = prim.handle(e)\n");
-    out.push_str(&format!("  let t = prim.load64(h + {})\n", layout::slot_offset(0)));
-    let mut first = true;
-    for (tag, (cname, fields)) in cases.iter().enumerate() {
-        let is_record = fields.iter().any(|(n, _)| n.is_some());
-        let tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
-        let kw = if first { "if" } else { "  else if" };
-        first = false;
-        if tys.is_empty() {
-            out.push_str(&format!("  {kw} t == {tag} then \"{cname}\"\n"));
-            continue;
-        }
-        out.push_str(&format!("  {kw} t == {tag} then {{\n"));
-        let mut concat = if is_record {
-            format!("\"{cname} {{ \"")
-        } else {
-            format!("\"{cname}(\"")
-        };
-        for (i, ty) in tys.iter().enumerate() {
-            let off = layout::slot_offset(1 + i);
-            if i > 0 {
-                concat.push_str(" + \", \"");
-            }
-            if let Some(fld) = &fields[i].0 {
-                concat.push_str(&format!(" + \"{fld}: \""));
-            }
+    let off = layout::slot_offset(1 + i);
             match ty {
                 t if repr_int_field(t) => {
                     out.push_str(&format!(
@@ -484,6 +472,43 @@ fn emit_variant_repr_body(
                     ));
                 }
             }
+}
+
+fn emit_variant_repr_body(
+    out: &mut String,
+    fname: &str,
+    tspell: &str,
+    cases: &[(String, Vec<(Option<String>, Ty)>)],
+    scalar_rec_names: &std::collections::HashSet<String>,
+    names: &std::collections::HashSet<String>,
+) {
+    out.push_str(&format!("fn __repr_{fname}(e: {tspell}) -> String = {{\n"));
+    out.push_str("  let h = prim.handle(e)\n");
+    out.push_str(&format!("  let t = prim.load64(h + {})\n", layout::slot_offset(0)));
+    let mut first = true;
+    for (tag, (cname, fields)) in cases.iter().enumerate() {
+        let is_record = fields.iter().any(|(n, _)| n.is_some());
+        let tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
+        let kw = if first { "if" } else { "  else if" };
+        first = false;
+        if tys.is_empty() {
+            out.push_str(&format!("  {kw} t == {tag} then \"{cname}\"\n"));
+            continue;
+        }
+        out.push_str(&format!("  {kw} t == {tag} then {{\n"));
+        let mut concat = if is_record {
+            format!("\"{cname} {{ \"")
+        } else {
+            format!("\"{cname}(\"")
+        };
+        for (i, ty) in tys.iter().enumerate() {
+            if i > 0 {
+                concat.push_str(" + \", \"");
+            }
+            if let Some(fld) = &fields[i].0 {
+                concat.push_str(&format!(" + \"{fld}: \""));
+            }
+emit_variant_repr_field(out, i, ty, scalar_rec_names, names);
             concat.push_str(&format!(" + f{i}"));
         }
         concat.push_str(if is_record { " + \" }\"" } else { " + \")\"" });

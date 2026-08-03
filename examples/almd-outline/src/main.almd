@@ -36,7 +36,7 @@ fn render_type(t: Value) -> String = {
   }
 }
 
-fn render_inner(t: Value, key: String) -> String = match json.get(t, key) {
+fn render_inner(t: Value, key: String) -> String = match value.field(t, key)? {
   some(inner) => render_type(inner),
   none => "?",
 }
@@ -58,13 +58,13 @@ fn render_named(t: Value) -> String = {
 // ── Decl rendering ─────────────────────────────────────────────────
 fn render_param(p: Value) -> String = {
   let name = json.get_string(p, "name") ?? "?"
-  let ty = json.get(p, "type") ?? json.null()
+  let ty = value.field(p, "type") ?? value.null()
   "${name}: ${render_type(ty)}"
 }
 
 fn render_generics(node: Value) -> String = match json.get_array(node, "generics") {
   some(gs) => if list.is_empty(gs) then ""
-  else "[${gs |> list.map((g) => json.as_string(g) ?? "?") |> list.join(", ")}]",
+  else "[${gs |> list.map((g) => value.as_string(g) ?? "?") |> list.join(", ")}]",
   none => "",
 }
 
@@ -72,7 +72,7 @@ fn render_function(f: Value) -> String = {
   let name = json.get_string(f, "name") ?? "?"
   let is_effect = json.get_bool(f, "effect") ?? false
   let params = json.get_array(f, "params") ?? []
-  let ret = json.get(f, "return") ?? json.null()
+  let ret = value.field(f, "return") ?? value.null()
   let generics = render_generics(f)
   let param_str = params |> list.map(render_param) |> list.join(", ")
   let kw = if is_effect then "effect fn " else "fn "
@@ -81,7 +81,7 @@ fn render_function(f: Value) -> String = {
 
 fn render_constant(c: Value) -> String = {
   let name = json.get_string(c, "name") ?? "?"
-  let ty = json.get(c, "type") ?? json.null()
+  let ty = value.field(c, "type") ?? value.null()
   "let ${name}: ${render_type(ty)}"
 }
 
@@ -89,7 +89,7 @@ fn render_record_fields(node: Value) -> String = {
   let fields = json.get_array(node, "fields") ?? []
   let rendered = fields |> list.map((f) => {
     let fname = json.get_string(f, "name") ?? "?"
-    let fty = json.get(f, "type") ?? json.null()
+    let fty = value.field(f, "type") ?? value.null()
     "${fname}: ${render_type(fty)}"
   }) |> list.join(", ")
   "{ ${rendered} }"
@@ -102,7 +102,7 @@ fn render_variant_cases(node: Value) -> String = {
 
 fn render_type_decl(t: Value) -> String = {
   let name = json.get_string(t, "name") ?? "?"
-  let kind_node = json.get(t, "kind") ?? json.null()
+  let kind_node = value.field(t, "kind") ?? value.null()
   let kind = json.get_string(kind_node, "kind") ?? "?"
   let shape = match kind {
     "record" => render_record_fields(kind_node),

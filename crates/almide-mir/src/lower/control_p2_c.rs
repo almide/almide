@@ -8,6 +8,43 @@ impl LowerCtx {
     /// temp itself (arm calls borrow it; if the arm MOVES it out, the release-parity sweep
     /// compensates with a drop on the empty side). ELSE (len == 0) = the `[]` arm. Same
     /// IfThen/Else/EndIf merge + release-parity discipline as the Result opener.
+    /// Roll a declined probe back — ops, lifted lambdas and the scope-drop
+    /// list to their marks (a probed subject may have lifted a lambda whose
+    /// dead CallFn would double-count the caps gate's mir tally).
+    fn probe_rollback(&mut self, ops_mark: usize, lifted_mark: usize, lhh_mark: usize) {
+        self.ops.truncate(ops_mark);
+        self.lifted.truncate(lifted_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+    }
+
+    /// Probe the match SUBJECT to a real borrowed/owned block handle via
+    /// `lower_call_args`; a non-handle result or a deferred-Opaque bind
+    /// declines (rolled back) — the callee would read an empty block.
+    fn probe_match_subject(
+        &mut self,
+        subject: &IrExpr,
+        ops_mark: usize,
+        lifted_mark: usize,
+        lhh_mark: usize,
+    ) -> Option<ValueId> {
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
+                return None;
+            }
+        };
+        if self.deferred_opaque_binds.contains(&subj) {
+            self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
+            return None;
+        }
+        Some(subj)
+    }
+
     pub(crate) fn try_lower_list_match_value(
         &mut self,
         subject: &IrExpr,
@@ -22,57 +59,11 @@ impl LowerCtx {
         if !matches!(&subject.ty, Ty::Applied(TypeConstructorId::List, a) if a.len() == 1) {
             return None;
         }
-        let mut empty_arm: Option<&IrExpr> = None;
-        let mut rest_arm: Option<(&IrExpr, Option<VarId>)> = None;
-        for arm in arms {
-            match &arm.pattern {
-                IrPattern::List { elements } if elements.is_empty() => {
-                    if empty_arm.is_some() {
-                        return None;
-                    }
-                    empty_arm = Some(&arm.body);
-                }
-                IrPattern::Bind { var, .. } => {
-                    if rest_arm.is_some() {
-                        return None;
-                    }
-                    rest_arm = Some((&arm.body, Some(*var)));
-                }
-                IrPattern::Wildcard => {
-                    if rest_arm.is_some() {
-                        return None;
-                    }
-                    rest_arm = Some((&arm.body, None));
-                }
-                _ => return None,
-            }
-        }
-        let (empty_body, (rest_body, rest_bind)) = match (empty_arm, rest_arm) {
-            (Some(e), Some(r)) => (e, r),
-            _ => return None,
-        };
+        let (empty_body, (rest_body, rest_bind)) = classify_empty_rest_arms(arms)?;
         let ops_mark = self.ops.len();
         let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
-        let subj = match self
-            .lower_call_args(std::slice::from_ref(subject))
-            .ok()
-            .and_then(|a| a.into_iter().next())
-        {
-            Some(CallArg::Handle(v)) => v,
-            _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                return None;
-            }
-        };
-        if self.deferred_opaque_binds.contains(&subj) {
-            self.ops.truncate(ops_mark);
-            self.lifted.truncate(lifted_mark);
-            self.live_heap_handles.truncate(lhh_mark);
-            return None;
-        }
+        let subj = self.probe_match_subject(subject, ops_mark, lifted_mark, lhh_mark)?;
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
@@ -86,9 +77,7 @@ impl LowerCtx {
         let rest_obj = match self.lower_heap_result_arm(rest_body, result_ty) {
             Some(v) => v,
             _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
+                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
                 return None;
             }
         };
@@ -101,9 +90,7 @@ impl LowerCtx {
         let empty_obj = match self.lower_heap_result_arm(empty_body, result_ty) {
             Some(v) => v,
             _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
+                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
                 return None;
             }
         };
@@ -320,6 +307,49 @@ impl LowerCtx {
     /// scalar element via literal equality; wildcards free), dispatched
     /// first-match-wins on the flat-marker chain. Scalar result, no guards, a
     /// trailing wildcard, all elements plain Vars.
+    /// Resolve the tuple subject's elements for the refinement matches: a
+    /// plain Var (variant block or scalar), or a SCALAR expression
+    /// materialized to a fresh value (read once — the by-value tuple subject
+    /// semantics). `None` = a decline (ops rolled back to the marks).
+    fn resolve_tuple_match_elems(
+        &mut self,
+        elements: &[IrExpr],
+        ops_mark: usize,
+        lhh_mark: usize,
+    ) -> Option<Vec<(ValueId, Ty)>> {
+    // Elements: a plain Var (variant block or scalar), or a SCALAR expression
+    // materialized to a fresh value (read once — exactly the by-value tuple
+    // subject semantics; the match reads only these copies).
+    let mut elems: Vec<(ValueId, Ty)> = Vec::with_capacity(elements.len());
+    for e in elements {
+        let v = match &e.kind {
+            IrExprKind::Var { id } => match self.value_for(*id) {
+                Ok(v) => v,
+                Err(_) => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            },
+            _ if !is_heap_ty(&e.ty) => match self.lower_scalar_value(e) {
+                Some(v) => v,
+                None => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            },
+            _ => {
+                self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        elems.push((v, e.ty.clone()));
+    }
+        Some(elems)
+    }
+
     pub(crate) fn try_lower_tuple_refinement_match(
         &mut self,
         subject: &IrExpr,
@@ -349,33 +379,10 @@ impl LowerCtx {
             s.ops.truncate(ops_mark);
             s.live_heap_handles.truncate(lhh_mark);
         };
-        // Elements: a plain Var (variant block or scalar), or a SCALAR expression
-        // materialized to a fresh value (read once — exactly the by-value tuple
-        // subject semantics; the match reads only these copies).
-        let mut elems: Vec<(ValueId, Ty)> = Vec::with_capacity(elements.len());
-        for e in elements {
-            let v = match &e.kind {
-                IrExprKind::Var { id } => match self.value_for(*id) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        rollback(self);
-                        return None;
-                    }
-                },
-                _ if !is_heap_ty(&e.ty) => match self.lower_scalar_value(e) {
-                    Some(v) => v,
-                    None => {
-                        rollback(self);
-                        return None;
-                    }
-                },
-                _ => {
-                    rollback(self);
-                    return None;
-                }
-            };
-            elems.push((v, e.ty.clone()));
-        }
+        let Some(elems) = self.resolve_tuple_match_elems(elements, ops_mark, lhh_mark) else {
+            return None;
+        };
+
         // Validate every refutable arm up front (no mid-emission decline).
         for a in &arms[..arms.len() - 1] {
             let IrPattern::Tuple { elements: pats } = &a.pattern else {
@@ -424,6 +431,44 @@ impl LowerCtx {
     /// (only the taken arm executes — `unit_arm_depth` raised per arm, exactly the
     /// `lower_variant_unit_arm` discipline). Returns `true` iff fully lowered;
     /// rolls back and returns `false` on any decline.
+    /// Are every non-default arm's rows within the unit-refinement subset —
+    /// a width-matched tuple pattern whose components are wildcards, scalar
+    /// literals, or valid nested variant refinements? Verbatim.
+    fn tuple_refinement_rows_valid(&self, elems: &[(ValueId, Ty)], arms: &[IrMatchArm]) -> bool {
+    let mut valid = true;
+    'outer: for a in &arms[..arms.len() - 1] {
+        let IrPattern::Tuple { elements: pats } = &a.pattern else {
+            valid = false;
+            break;
+        };
+        if pats.len() != elems.len() {
+            valid = false;
+            break;
+        }
+        for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
+            let ok = match p {
+                IrPattern::Wildcard => true,
+                IrPattern::Literal { expr } => {
+                    !is_heap_ty(ty)
+                        && matches!(
+                            expr.kind,
+                            IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. }
+                        )
+                }
+                IrPattern::Constructor { .. } => self
+                    .custom_variant_type_name(ty)
+                    .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
+                _ => false,
+            };
+            if !ok {
+                valid = false;
+                break 'outer;
+            }
+        }
+    }
+        valid
+    }
+
     pub(crate) fn try_lower_tuple_refinement_unit_match(
         &mut self,
         subject: &IrExpr,
@@ -454,37 +499,7 @@ impl LowerCtx {
                 }
             }
         }
-        let mut valid = true;
-        'outer: for a in &arms[..arms.len() - 1] {
-            let IrPattern::Tuple { elements: pats } = &a.pattern else {
-                valid = false;
-                break;
-            };
-            if pats.len() != elems.len() {
-                valid = false;
-                break;
-            }
-            for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
-                let ok = match p {
-                    IrPattern::Wildcard => true,
-                    IrPattern::Literal { expr } => {
-                        !is_heap_ty(ty)
-                            && matches!(
-                                expr.kind,
-                                IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. }
-                            )
-                    }
-                    IrPattern::Constructor { .. } => self
-                        .custom_variant_type_name(ty)
-                        .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
-                    _ => false,
-                };
-                if !ok {
-                    valid = false;
-                    break 'outer;
-                }
-            }
-        }
+        let valid = self.tuple_refinement_rows_valid(&elems, arms);
         if !valid || !self.tuple_refinement_unit_chain(&elems, arms) {
             self.ops.truncate(ops_mark);
             self.live_heap_handles.truncate(lhh_mark);
@@ -564,3 +579,40 @@ impl LowerCtx {
     }
 }
 include!("result_match_value.rs");
+
+/// The `[[], rest]` arm classification of
+/// [`LowerCtx::try_lower_list_match_value`]: the empty-list arm and the
+/// bind-all/wildcard rest arm, in either order.
+fn classify_empty_rest_arms(
+    arms: &[IrMatchArm],
+) -> Option<(&IrExpr, (&IrExpr, Option<VarId>))> {
+    let mut empty_arm: Option<&IrExpr> = None;
+    let mut rest_arm: Option<(&IrExpr, Option<VarId>)> = None;
+    for arm in arms {
+        match &arm.pattern {
+            IrPattern::List { elements } if elements.is_empty() => {
+                if empty_arm.is_some() {
+                    return None;
+                }
+                empty_arm = Some(&arm.body);
+            }
+            IrPattern::Bind { var, .. } => {
+                if rest_arm.is_some() {
+                    return None;
+                }
+                rest_arm = Some((&arm.body, Some(*var)));
+            }
+            IrPattern::Wildcard => {
+                if rest_arm.is_some() {
+                    return None;
+                }
+                rest_arm = Some((&arm.body, None));
+            }
+            _ => return None,
+        }
+    }
+    match (empty_arm, rest_arm) {
+        (Some(e), Some(r)) => Some((e, r)),
+        _ => None,
+    }
+}

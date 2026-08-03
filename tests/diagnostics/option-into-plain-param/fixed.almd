@@ -1,0 +1,6 @@
+fn first_abs(items: List[Int]) -> Int = {
+  let found = items |> list.find((x) => x > 0)
+  int.abs(found ?? 0)
+}
+
+fn main() -> Unit = ()

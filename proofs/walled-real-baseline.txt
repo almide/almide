@@ -36,3 +36,4 @@ spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_string_go
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested Codec: direct field, list elements, Option none omission
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[Option], List[List], deep Option[List[Option]]
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_variant record case: Option field omits none, folds missing/null to none
+#

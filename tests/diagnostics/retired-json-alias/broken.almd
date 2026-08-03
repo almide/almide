@@ -1,0 +1,9 @@
+// #1075: json.* accessor spellings are retired aliases of the value.* data
+// model (E040, one release) — json keeps the format (parse / stringify).
+// The survivor returns Result; `?` restores the Option this call produced.
+import json
+
+fn main() -> Unit = {
+  let n = json.as_int(json.parse("7") ?? value.null())
+  println(int.to_string(n ?? 0))
+}

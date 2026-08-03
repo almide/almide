@@ -193,17 +193,34 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
     extract_with_version(program, module_name, source, None)
 }
 
+/// Shared lookup context for the per-section extractors below — the two
+/// type-name lookups plus the doc/deprecation index parsed from source.
+struct ExtractCtx {
+    record_names: RecordLookup,
+    variant_names: VariantLookup,
+    doc_info: HashMap<std::string::String, DocInfo>,
+}
+
 pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Option<&str>, version: Option<&str>) -> ModuleInterface {
-    let record_names = build_record_lookup(program);
-    let variant_names = build_variant_lookup(program);
-    let doc_info = source.map(|s| extract_docs(s)).unwrap_or_default();
+    let cx = ExtractCtx {
+        record_names: build_record_lookup(program),
+        variant_names: build_variant_lookup(program),
+        doc_info: source.map(|s| extract_docs(s)).unwrap_or_default(),
+    };
+    ModuleInterface {
+        module: module_name.to_string(),
+        version: version.map(|v| v.to_string()),
+        types: extract_types(program, &cx),
+        functions: extract_functions(program, &cx),
+        constants: extract_constants(program, &cx),
+        dependencies: extract_dependencies(program),
+    }
+}
 
+/// The `types` section: every public type decl, with its ABI layout and docs.
+fn extract_types(program: &IrProgram, cx: &ExtractCtx) -> Vec<TypeExport> {
+    let ExtractCtx { record_names, variant_names, doc_info } = cx;
     let mut types = Vec::new();
-    let mut functions = Vec::new();
-    let mut constants = Vec::new();
-    let mut dependencies = Vec::new();
-
-    // Types
     for td in &program.type_decls {
         if !matches!(td.visibility, IrVisibility::Public) { continue; }
         let generics = td.generics.as_ref()
@@ -250,8 +267,14 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
             deprecated: info.and_then(|i| i.deprecated.clone()),
         });
     }
+    types
+}
 
-    // Functions
+/// The `functions` section: every public fn (plus wasm imports, which are
+/// part of the contract whether or not they are `pub`).
+fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport> {
+    let ExtractCtx { record_names, variant_names, doc_info } = cx;
+    let mut functions = Vec::new();
     for func in &program.functions {
         if func.is_test { continue; }
         // Imports (@extern(wasm, ...)) are always part of the contract —
@@ -297,8 +320,13 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
             import,
         });
     }
+    functions
+}
 
-    // Top-level constants (with values for literals)
+/// The `constants` section: top-level lets, with values for literals.
+fn extract_constants(program: &IrProgram, cx: &ExtractCtx) -> Vec<ConstantExport> {
+    let ExtractCtx { record_names, variant_names, doc_info } = cx;
+    let mut constants = Vec::new();
     for tl in &program.top_lets {
         let name = program.var_table.get(tl.var).name.to_string();
         let value = extract_const_value(&tl.value);
@@ -309,8 +337,12 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
             doc: doc_info.get(&name).and_then(|i| i.doc.clone()),
         });
     }
+    constants
+}
 
-    // Dependencies (imported modules)
+/// The `dependencies` section: imported modules, stdlib-flagged.
+fn extract_dependencies(program: &IrProgram) -> Vec<DependencyExport> {
+    let mut dependencies = Vec::new();
     for m in &program.modules {
         let name = m.name.to_string();
         let is_stdlib = almide_lang::stdlib_info::is_stdlib_module(&name);
@@ -319,15 +351,7 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
             stdlib: is_stdlib,
         });
     }
-
-    ModuleInterface {
-        module: module_name.to_string(),
-        version: version.map(|v| v.to_string()),
-        types,
-        functions,
-        constants,
-        dependencies,
-    }
+    dependencies
 }
 
 // ── Constant value extraction ──

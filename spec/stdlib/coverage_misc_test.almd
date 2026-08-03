@@ -31,9 +31,9 @@ test "value.as_array" {
   assert_eq(list.len(r), 2)
 }
 
-test "value.get" {
+test "value.field" {
   let v = json.parse('{"key": "val"}')!
-  let r = value.get(v, "key")
+  let r = value.field(v, "key")
   assert(result.is_ok(r))
 }
 

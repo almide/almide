@@ -10,25 +10,25 @@ type Point: Codec = { x: Int, y: Float }
 
 fn main() -> Unit = {
   // Missing required field 'y' → "missing field 'y'" (field name interpolated).
-  let missing = json.parse('{"x": 1}') ?? json.null()
+  let missing = json.parse('{"x": 1}') ?? value.null()
   println(match Point.decode(missing) {
     ok(_) => "ok",
     err(e) => e,
   })
   // Wrong type: x is a string where an Int is required → "expected Int".
-  let wrong = json.parse('{"x": "nope", "y": 2.0}') ?? json.null()
+  let wrong = json.parse('{"x": "nope", "y": 2.0}') ?? value.null()
   println(match Point.decode(wrong) {
     ok(_) => "ok",
     err(e) => e,
   })
   // Decoding a non-object → "expected Object".
-  let notobj = json.parse("42") ?? json.null()
+  let notobj = json.parse("42") ?? value.null()
   println(match Point.decode(notobj) {
     ok(_) => "ok",
     err(e) => e,
   })
   // Direct value.as_* type-mismatch errors mirror the native variant names.
-  let s = json.parse('"hi"') ?? json.null()
+  let s = json.parse('"hi"') ?? value.null()
   println(match value.as_int(s) {
     ok(_) => "ok",
     err(e) => e,
@@ -37,7 +37,7 @@ fn main() -> Unit = {
     ok(_) => "ok",
     err(e) => e,
   })
-  let n = json.parse("5") ?? json.null()
+  let n = json.parse("5") ?? value.null()
   println(match value.as_string(n) {
     ok(_) => "ok",
     err(e) => e,

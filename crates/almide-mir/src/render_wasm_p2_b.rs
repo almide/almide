@@ -608,6 +608,17 @@ fn render_op_prim_float(
         .unwrap_or_else(|| render_op_prim_f32(kind, args))
 }
 
+/// #806 step 3a: an f64-CLASSIFIED dst takes the f64 result directly (a real
+/// f64 local — the hot-loop shape with zero reinterprets); a scalar-slot dst
+/// reinterprets it back into the i64-uniform slot.
+fn f64_result_into_slot(inner: String, dst: &Option<ValueId>, floats: &BTreeSet<ValueId>) -> String {
+    if dst.is_some_and(|d| floats.contains(&d)) {
+        inner
+    } else {
+        format!("(i64.reinterpret_f64 {inner})")
+    }
+}
+
 fn render_op_prim_f64(
     kind: &PrimKind,
     dst: &Option<ValueId>,
@@ -620,11 +631,7 @@ fn render_op_prim_f64(
                 // An f64-classified dst (step 3a) takes the convert result directly.
                 PrimKind::F64FromInt => {
                     let conv = format!("(f64.convert_i64_s {})", fuser.operand(args[0]));
-                    if dst.is_some_and(|d| floats.contains(&d)) {
-                        conv
-                    } else {
-                        format!("(i64.reinterpret_f64 {conv})")
-                    }
+                    f64_result_into_slot(conv, dst, floats)
                 }
                 // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the
                 // op. #806 step 3a: an f64-CLASSIFIED operand is read bare (it is a real
@@ -633,51 +640,20 @@ fn render_op_prim_f64(
                 // single-use defs (step 3c).
                 PrimKind::FloatUn(op) => {
                     let x = float_operand(fuser, floats, args[0]);
-                    let inner = match op {
-                        FUnOp::Abs => format!("(f64.abs {x})"),
-                        FUnOp::Sqrt => format!("(f64.sqrt {x})"),
-                        FUnOp::Floor => format!("(f64.floor {x})"),
-                        FUnOp::Ceil => format!("(f64.ceil {x})"),
-                        FUnOp::Neg => format!("(f64.neg {x})"),
-                    };
-                    if dst.is_some_and(|d| floats.contains(&d)) {
-                        inner
-                    } else {
-                        format!("(i64.reinterpret_f64 {inner})")
-                    }
+                    let inner = format!("(f64.{} {x})", float_un_name(*op));
+                    f64_result_into_slot(inner, dst, floats)
                 }
                 PrimKind::FloatBin(op) => {
                     let a = float_operand(fuser, floats, args[0]);
                     let b = float_operand(fuser, floats, args[1]);
-                    let instr = match op {
-                        FBinOp::Add => "f64.add",
-                        FBinOp::Sub => "f64.sub",
-                        FBinOp::Mul => "f64.mul",
-                        FBinOp::Div => "f64.div",
-                        FBinOp::Min => "f64.min",
-                        FBinOp::Max => "f64.max",
-                        FBinOp::CopySign => "f64.copysign",
-                    };
-                    let inner = format!("({instr} {a} {b})");
-                    if dst.is_some_and(|d| floats.contains(&d)) {
-                        inner
-                    } else {
-                        format!("(i64.reinterpret_f64 {inner})")
-                    }
+                    let inner = format!("(f64.{} {a} {b})", float_bin_name(*op));
+                    f64_result_into_slot(inner, dst, floats)
                 }
                 PrimKind::FloatCmp(op) => {
                     let a = float_operand(fuser, floats, args[0]);
                     let b = float_operand(fuser, floats, args[1]);
-                    let instr = match op {
-                        FCmpOp::Lt => "f64.lt",
-                        FCmpOp::Le => "f64.le",
-                        FCmpOp::Gt => "f64.gt",
-                        FCmpOp::Ge => "f64.ge",
-                        FCmpOp::Eq => "f64.eq",
-                        FCmpOp::Ne => "f64.ne",
-                    };
                     // f64 compare yields an i32 0/1 — extend to the i64-uniform Bool.
-                    format!("(i64.extend_i32_u ({instr} {a} {b}))")
+                    format!("(i64.extend_i32_u (f64.{} {a} {b}))", float_cmp_name(*op))
                 }
                 // SATURATING float→int (i64.trunc_SAT_f64_s), matching Rust's `as` cast (v0): NaN → 0,
                 // > i64::MAX → i64::MAX, < i64::MIN → i64::MIN — NO trap. The plain `i64.trunc_f64_s`
@@ -689,11 +665,7 @@ fn render_op_prim_f64(
                 }
                 PrimKind::IntToFloat => {
                     let conv = format!("(f64.convert_i64_s {})", fuser.operand(args[0]));
-                    if dst.is_some_and(|d| floats.contains(&d)) {
-                        conv
-                    } else {
-                        format!("(i64.reinterpret_f64 {conv})")
-                    }
+                    f64_result_into_slot(conv, dst, floats)
                 }
                 // to_bits / bits_to_float: the value IS the bits — identity pass-through.
                 PrimKind::FloatBits => format!("(local.get {})", local(args[0])),
@@ -727,17 +699,9 @@ fn render_op_prim_f32(kind: &PrimKind, args: &[ValueId]) -> String {
                     let f = |a: usize| {
                         format!("(f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))", local(args[a]))
                     };
-                    let instr = match op {
-                        FBinOp::Add => "f32.add",
-                        FBinOp::Sub => "f32.sub",
-                        FBinOp::Mul => "f32.mul",
-                        FBinOp::Div => "f32.div",
-                        FBinOp::Min => "f32.min",
-                        FBinOp::Max => "f32.max",
-                        FBinOp::CopySign => "f32.copysign",
-                    };
                     format!(
-                        "(i64.extend_i32_u (i32.reinterpret_f32 ({instr} {} {})))",
+                        "(i64.extend_i32_u (i32.reinterpret_f32 (f32.{} {} {})))",
+                        float_bin_name(*op),
                         f(0),
                         f(1)
                     )
@@ -746,26 +710,12 @@ fn render_op_prim_f32(kind: &PrimKind, args: &[ValueId]) -> String {
                     let f = |a: usize| {
                         format!("(f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))", local(args[a]))
                     };
-                    let instr = match op {
-                        FCmpOp::Lt => "f32.lt",
-                        FCmpOp::Le => "f32.le",
-                        FCmpOp::Gt => "f32.gt",
-                        FCmpOp::Ge => "f32.ge",
-                        FCmpOp::Eq => "f32.eq",
-                        FCmpOp::Ne => "f32.ne",
-                    };
-                    format!("(i64.extend_i32_u ({instr} {} {}))", f(0), f(1))
+                    format!("(i64.extend_i32_u (f32.{} {} {}))", float_cmp_name(*op), f(0), f(1))
                 }
                 PrimKind::F32Un(op) => {
                     let x =
                         format!("(f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))", local(args[0]));
-                    let inner = match op {
-                        FUnOp::Abs => format!("(f32.abs {x})"),
-                        FUnOp::Sqrt => format!("(f32.sqrt {x})"),
-                        FUnOp::Floor => format!("(f32.floor {x})"),
-                        FUnOp::Ceil => format!("(f32.ceil {x})"),
-                        FUnOp::Neg => format!("(f32.neg {x})"),
-                    };
+                    let inner = format!("(f32.{} {x})", float_un_name(*op));
                     format!("(i64.extend_i32_u (i32.reinterpret_f32 {inner}))")
                 }
         _ => unreachable!("render_op_prim_f32: {kind:?} is not in this group"),

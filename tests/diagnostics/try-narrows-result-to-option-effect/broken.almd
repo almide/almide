@@ -1,0 +1,7 @@
+// #1071 (effect variant): `?` narrows the Result to an Option and breaks
+// the argument type. In an effect fn body the propagating unwrap is `!` —
+// the hint teaches the one-character replacement.
+effect fn read_tag(v: Value) -> String =
+  value.as_string(value.field(v, "type")?)!
+
+fn main() -> Unit = ()

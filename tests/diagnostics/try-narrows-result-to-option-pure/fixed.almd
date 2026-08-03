@@ -1,0 +1,5 @@
+// The pure-fn move: unwrap the Result with `??` before passing it on.
+fn read_tag(v: Value) -> String =
+  value.as_string(value.field(v, "type") ?? value.null()) ?? "unknown"
+
+fn main() -> Unit = ()

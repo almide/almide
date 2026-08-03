@@ -27,43 +27,11 @@ fn extract_first_callarg_branch(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
         }
         return None;
     }
-    // A heap CONCAT operand may wrap a call-arg branch (`"len=" + (if c then a else b)` — a returned
-    // String/List concat whose operand is a heap branch). Recurse into each operand so the inner
-    // branch is ANF-lifted (`let t = if …; lhs + t`), which `desugar_let_bound_heap_branch` then
-    // tail-duplicates into a heap-result `if` with concat arms — both already lower
-    // (`try_lower_heap_result_if` + `try_lower_concat_str`/`try_lower_concat_list`). `count_ir_calls`
-    // counts each Concat node as one call on the SAME desugared tree, so mir==ir is preserved.
     if let IrExprKind::BinOp {
-        op: bop @ (almide_ir::BinOp::ConcatStr | almide_ir::BinOp::ConcatList),
-        left,
-        right,
+        op: almide_ir::BinOp::ConcatStr | almide_ir::BinOp::ConcatList, ..
     } = &e.kind
     {
-        let mk = |nl: Box<IrExpr>, nr: Box<IrExpr>| IrExpr {
-            kind: IrExprKind::BinOp { op: *bop, left: nl, right: nr },
-            ty: e.ty.clone(),
-            span: e.span.clone(),
-            def_id: e.def_id,
-        };
-        if let Some((branch, nl)) = extract_first_callarg_branch(left, tmp) {
-            return Some((branch, mk(Box::new(nl), right.clone())));
-        }
-        if let Some((branch, nr)) = extract_first_callarg_branch(right, tmp) {
-            return Some((branch, mk(left.clone(), Box::new(nr))));
-        }
-        let var_of = |b: &IrExpr| IrExpr {
-            kind: IrExprKind::Var { id: tmp },
-            ty: b.ty.clone(),
-            span: b.span.clone(),
-            def_id: None,
-        };
-        if is_heap_branch(left) {
-            return Some((left.as_ref().clone(), mk(Box::new(var_of(left)), right.clone())));
-        }
-        if is_heap_branch(right) {
-            return Some((right.as_ref().clone(), mk(left.clone(), Box::new(var_of(right)))));
-        }
-        return None;
+        return extract_callarg_branch_from_concat(e, tmp);
     }
     let IrExprKind::Call { target, args, type_args } = &e.kind else {
         return None;
@@ -97,6 +65,49 @@ fn extract_first_callarg_branch(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
         def_id: None,
     };
     Some((branch, rebuild(new_args)))
+}
+
+/// The heap-CONCAT operand case of [`extract_first_callarg_branch`]: a call-arg branch wrapped in
+/// a String/List concat (`"len=" + (if c then a else b)` — a returned concat whose operand is a
+/// heap branch). Recurse into each operand so the inner branch is ANF-lifted (`let t = if …;
+/// lhs + t`), which `desugar_let_bound_heap_branch` then tail-duplicates into a heap-result `if`
+/// with concat arms — both already lower (`try_lower_heap_result_if` +
+/// `try_lower_concat_str`/`try_lower_concat_list`). `count_ir_calls` counts each Concat node as
+/// one call on the SAME desugared tree, so mir==ir is preserved. Verbatim.
+fn extract_callarg_branch_from_concat(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+    let IrExprKind::BinOp {
+        op: bop @ (almide_ir::BinOp::ConcatStr | almide_ir::BinOp::ConcatList),
+        left,
+        right,
+    } = &e.kind
+    else {
+        unreachable!("caller matched the concat binop")
+    };
+    let mk = |nl: Box<IrExpr>, nr: Box<IrExpr>| IrExpr {
+        kind: IrExprKind::BinOp { op: *bop, left: nl, right: nr },
+        ty: e.ty.clone(),
+        span: e.span.clone(),
+        def_id: e.def_id,
+    };
+    if let Some((branch, nl)) = extract_first_callarg_branch(left, tmp) {
+        return Some((branch, mk(Box::new(nl), right.clone())));
+    }
+    if let Some((branch, nr)) = extract_first_callarg_branch(right, tmp) {
+        return Some((branch, mk(left.clone(), Box::new(nr))));
+    }
+    let var_of = |b: &IrExpr| IrExpr {
+        kind: IrExprKind::Var { id: tmp },
+        ty: b.ty.clone(),
+        span: b.span.clone(),
+        def_id: None,
+    };
+    if is_heap_branch(left) {
+        return Some((left.as_ref().clone(), mk(Box::new(var_of(left)), right.clone())));
+    }
+    if is_heap_branch(right) {
+        return Some((right.as_ref().clone(), mk(left.clone(), Box::new(var_of(right)))));
+    }
+    None
 }
 
 /// ANF-LIFT a heap-result `if`/`match` out of a CALL-ARGUMENT into a fresh let-bind, so the
@@ -208,29 +219,92 @@ pub fn desugar_callarg_heap_if(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
     None
 }
 
+/// The predicate+recursion step shared by every container arm of the unwrap
+/// finder: if `child` IS the unwrap/try, take it and stand in `Var(tmp)`;
+/// otherwise keep searching inside it.
+fn take_unwrap_or_recurse(child: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+    if matches!(&child.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
+        let var = IrExpr {
+            kind: IrExprKind::Var { id: tmp },
+            ty: child.ty.clone(),
+            span: child.span.clone(),
+            def_id: None,
+        };
+        return Some((child.clone(), var));
+    }
+    extract_first_callarg_unwrap(child, tmp)
+}
+
+/// The single-child wrapper arms of [`extract_first_callarg_unwrap`] —
+/// ctor wrappers, unwrap/try, `if` COND / `match` SUBJECT (unconditionally
+/// evaluated FIRST; arms never descended), and access objects. Verbatim.
+fn extract_unwrap_from_wrapper(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: e.ty.clone(), span: e.span.clone(), def_id: e.def_id };
+    match &e.kind {
+        IrExprKind::ResultOk { expr } => take_unwrap_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultOk { expr: Box::new(ne) }))),
+        IrExprKind::ResultErr { expr } => take_unwrap_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultErr { expr: Box::new(ne) }))),
+        IrExprKind::OptionSome { expr } => take_unwrap_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::OptionSome { expr: Box::new(ne) }))),
+        IrExprKind::Unwrap { expr } => extract_first_callarg_unwrap(expr, tmp)
+            .map(|(u, ne)| (u, mk(IrExprKind::Unwrap { expr: Box::new(ne) }))),
+        IrExprKind::Try { expr } => extract_first_callarg_unwrap(expr, tmp)
+            .map(|(u, ne)| (u, mk(IrExprKind::Try { expr: Box::new(ne) }))),
+        // An `if` COND / `match` SUBJECT is evaluated unconditionally FIRST, so an unwrap
+        // there lifts soundly (the desugared assert shape `if f(x)! == 42 then () else die`
+        // reaches its unwrap through the cond). ARMS are conditional — never descended.
+        IrExprKind::If { cond, then, else_ } => take_unwrap_or_recurse(cond, tmp).map(|(u, nc)| {
+            (u, mk(IrExprKind::If { cond: Box::new(nc), then: then.clone(), else_: else_.clone() }))
+        }),
+        IrExprKind::Match { subject, arms } => take_unwrap_or_recurse(subject, tmp).map(|(u, ns)| {
+            (u, mk(IrExprKind::Match { subject: Box::new(ns), arms: arms.clone() }))
+        }),
+        // Field/element access objects (`f(x)!.field`, `xs[g()!]`) and the `??` operand —
+        // all unconditionally evaluated subpositions (the `??` FALLBACK is conditional).
+        IrExprKind::Member { object, field } => take_unwrap_or_recurse(object, tmp).map(|(u, no)| {
+            (u, mk(IrExprKind::Member { object: Box::new(no), field: *field }))
+        }),
+        IrExprKind::TupleIndex { object, index } => take_unwrap_or_recurse(object, tmp).map(|(u, no)| {
+            (u, mk(IrExprKind::TupleIndex { object: Box::new(no), index: *index }))
+        }),
+        _ => unreachable!("caller matched the wrapper kinds"),
+    }
+}
+
 /// Find the FIRST unwrap-`!` ([`IrExprKind::Unwrap`]) NESTED as a CHILD of a container — a `Call`
 /// argument, a `BinOp` operand, a `Tuple` element, or an `ok`/`err`/`Some` ctor argument — and
 /// return (the `e!` to hoist, the container with that child replaced by `Var(tmp)`). NOT `e` itself
 /// (a top-level `e!` is [`desugar_let_unwrap`]'s job). The hoist + that pass turn `f(.., g(x)!, ..)`
 /// / `ok(int.parse(s)!)` into the proven match-based early-return.
 fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
-    fn take_or_recurse(child: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
-        if matches!(&child.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
-            let var = IrExpr {
-                kind: IrExprKind::Var { id: tmp },
-                ty: child.ty.clone(),
-                span: child.span.clone(),
-                def_id: None,
-            };
-            return Some((child.clone(), var));
+    match &e.kind {
+        IrExprKind::Call { .. } | IrExprKind::Tuple { .. } | IrExprKind::StringInterp { .. } => {
+            extract_unwrap_from_element_list(e, tmp)
         }
-        extract_first_callarg_unwrap(child, tmp)
+        IrExprKind::BinOp { .. }
+        | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. }
+        | IrExprKind::UnwrapOr { .. } => extract_unwrap_from_operands(e, tmp),
+        IrExprKind::ResultOk { .. }
+        | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. }
+        | IrExprKind::Unwrap { .. }
+        | IrExprKind::Try { .. }
+        | IrExprKind::If { .. }
+        | IrExprKind::Match { .. }
+        | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. } => extract_unwrap_from_wrapper(e, tmp),
+        _ => None,
     }
+}
+
+/// The POSITIONAL-LIST arms of [`extract_first_callarg_unwrap`] — call
+/// arguments, tuple elements, and string-interpolation parts, each scanned
+/// left to right and replaced at its index. Verbatim.
+fn extract_unwrap_from_element_list(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
     let mk = |kind: IrExprKind| IrExpr { kind, ty: e.ty.clone(), span: e.span.clone(), def_id: e.def_id };
     match &e.kind {
         IrExprKind::Call { target, args, type_args } => {
             for (idx, a) in args.iter().enumerate() {
-                if let Some((u, na)) = take_or_recurse(a, tmp) {
+                if let Some((u, na)) = take_unwrap_or_recurse(a, tmp) {
                     let mut v = args.clone();
                     v[idx] = na;
                     return Some((u, mk(IrExprKind::Call { target: target.clone(), args: v, type_args: type_args.clone() })));
@@ -238,18 +312,9 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
             }
             None
         }
-        IrExprKind::BinOp { op, left, right } => {
-            if let Some((u, nl)) = take_or_recurse(left, tmp) {
-                return Some((u, mk(IrExprKind::BinOp { op: *op, left: Box::new(nl), right: right.clone() })));
-            }
-            if let Some((u, nr)) = take_or_recurse(right, tmp) {
-                return Some((u, mk(IrExprKind::BinOp { op: *op, left: left.clone(), right: Box::new(nr) })));
-            }
-            None
-        }
         IrExprKind::Tuple { elements } => {
             for (idx, el) in elements.iter().enumerate() {
-                if let Some((u, ne)) = take_or_recurse(el, tmp) {
+                if let Some((u, ne)) = take_unwrap_or_recurse(el, tmp) {
                     let mut v = elements.clone();
                     v[idx] = ne;
                     return Some((u, mk(IrExprKind::Tuple { elements: v })));
@@ -268,7 +333,7 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
         IrExprKind::StringInterp { parts } => {
             for (idx, p) in parts.iter().enumerate() {
                 let almide_ir::IrStringPart::Expr { expr } = p else { continue };
-                if let Some((u, ne)) = take_or_recurse(expr, tmp) {
+                if let Some((u, ne)) = take_unwrap_or_recurse(expr, tmp) {
                     let mut v = parts.clone();
                     v[idx] = almide_ir::IrStringPart::Expr { expr: ne };
                     return Some((u, mk(IrExprKind::StringInterp { parts: v })));
@@ -276,50 +341,45 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
             }
             None
         }
-        IrExprKind::ResultOk { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultOk { expr: Box::new(ne) }))),
-        IrExprKind::ResultErr { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultErr { expr: Box::new(ne) }))),
-        IrExprKind::OptionSome { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::OptionSome { expr: Box::new(ne) }))),
-        IrExprKind::Unwrap { expr } => extract_first_callarg_unwrap(expr, tmp)
-            .map(|(u, ne)| (u, mk(IrExprKind::Unwrap { expr: Box::new(ne) }))),
-        IrExprKind::Try { expr } => extract_first_callarg_unwrap(expr, tmp)
-            .map(|(u, ne)| (u, mk(IrExprKind::Try { expr: Box::new(ne) }))),
-        // An `if` COND / `match` SUBJECT is evaluated unconditionally FIRST, so an unwrap
-        // there lifts soundly (the desugared assert shape `if f(x)! == 42 then () else die`
-        // reaches its unwrap through the cond). ARMS are conditional — never descended.
-        IrExprKind::If { cond, then, else_ } => take_or_recurse(cond, tmp).map(|(u, nc)| {
-            (u, mk(IrExprKind::If { cond: Box::new(nc), then: then.clone(), else_: else_.clone() }))
-        }),
-        IrExprKind::Match { subject, arms } => take_or_recurse(subject, tmp).map(|(u, ns)| {
-            (u, mk(IrExprKind::Match { subject: Box::new(ns), arms: arms.clone() }))
-        }),
-        // Field/element access objects (`f(x)!.field`, `xs[g()!]`) and the `??` operand —
-        // all unconditionally evaluated subpositions (the `??` FALLBACK is conditional).
-        IrExprKind::Member { object, field } => take_or_recurse(object, tmp).map(|(u, no)| {
-            (u, mk(IrExprKind::Member { object: Box::new(no), field: *field }))
-        }),
-        IrExprKind::TupleIndex { object, index } => take_or_recurse(object, tmp).map(|(u, no)| {
-            (u, mk(IrExprKind::TupleIndex { object: Box::new(no), index: *index }))
-        }),
+        _ => unreachable!("caller matched the element-list kinds"),
+    }
+}
+
+/// The OPERAND arms of [`extract_first_callarg_unwrap`] — binop operands and
+/// index/map accesses (object first, then index/key — evaluation order), plus
+/// the `??` operand (its FALLBACK is conditional — never descended). Verbatim.
+fn extract_unwrap_from_operands(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: e.ty.clone(), span: e.span.clone(), def_id: e.def_id };
+    match &e.kind {
+        IrExprKind::BinOp { op, left, right } => {
+            if let Some((u, nl)) = take_unwrap_or_recurse(left, tmp) {
+                return Some((u, mk(IrExprKind::BinOp { op: *op, left: Box::new(nl), right: right.clone() })));
+            }
+            if let Some((u, nr)) = take_unwrap_or_recurse(right, tmp) {
+                return Some((u, mk(IrExprKind::BinOp { op: *op, left: left.clone(), right: Box::new(nr) })));
+            }
+            None
+        }
         IrExprKind::IndexAccess { object, index } => {
-            if let Some((u, no)) = take_or_recurse(object, tmp) {
+            if let Some((u, no)) = take_unwrap_or_recurse(object, tmp) {
                 return Some((u, mk(IrExprKind::IndexAccess { object: Box::new(no), index: index.clone() })));
             }
-            take_or_recurse(index, tmp).map(|(u, ni)| {
+            take_unwrap_or_recurse(index, tmp).map(|(u, ni)| {
                 (u, mk(IrExprKind::IndexAccess { object: object.clone(), index: Box::new(ni) }))
             })
         }
         IrExprKind::MapAccess { object, key } => {
-            if let Some((u, no)) = take_or_recurse(object, tmp) {
+            if let Some((u, no)) = take_unwrap_or_recurse(object, tmp) {
                 return Some((u, mk(IrExprKind::MapAccess { object: Box::new(no), key: key.clone() })));
             }
-            take_or_recurse(key, tmp).map(|(u, nk)| {
+            take_unwrap_or_recurse(key, tmp).map(|(u, nk)| {
                 (u, mk(IrExprKind::MapAccess { object: object.clone(), key: Box::new(nk) }))
             })
         }
-        IrExprKind::UnwrapOr { expr, fallback } => take_or_recurse(expr, tmp).map(|(u, ne)| {
+        IrExprKind::UnwrapOr { expr, fallback } => take_unwrap_or_recurse(expr, tmp).map(|(u, ne)| {
             (u, mk(IrExprKind::UnwrapOr { expr: Box::new(ne), fallback: fallback.clone() }))
         }),
-        _ => None,
+        _ => unreachable!("caller matched the operand kinds"),
     }
 }
 
@@ -443,140 +503,89 @@ fn count_expr_nodes(e: &IrExpr) -> usize {
     c.0
 }
 
+/// One branch-desugar PASS: rewrite the body (or return `None` = not mine).
+type BranchPass = fn(&IrExpr, &mut u32, &crate::lower::VariantLayouts) -> Option<IrExpr>;
+
+/// The branch-desugar pass PIPELINE, applied to a fixpoint in order — the
+/// order is load-bearing (each row's comment says why it sits where it
+/// does). Adding a pass is adding a row.
+const BRANCH_PASSES: &[BranchPass] = &[
+    // FIRST: hoist a non-pure (call) match subject to a single eval, so the literal-arm chain
+    // dispatches on a cheap Var instead of duplicating the call per arm — a correctness fix
+    // (single eval) and the alignment that keeps `mir <= ir` for a resolved cross-module/self-pkg
+    // call subject. Runs before the call-arg lifts so they see the hoisted (Var-subject) form.
+    |src, next_var, _| desugar_match_subject_hoist(src, next_var),
+    // Route a non-empty map literal through `map.from_list` so it materializes a real map (else a
+    // deferred-Opaque empty block silently miscompiles every subsequent map op).
+    |src, _, _| desugar_map_literal(src),
+    // Inline a `fan.race`/`fan.any` over a literal thunk list (avoids an unrepresentable
+    // List[funcref]) into a plain match-over-a-call chain.
+    |src, next_var, _| desugar_fan_race_any(src, next_var),
+    // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
+    // the guarded-variant case reduces to the two already-proven pieces.
+    |src, next_var, layouts| desugar_grouped_variant_match(src, next_var, layouts),
+    // Hoist a LITERAL record/tuple interpolation part (`"${(1, \"x\", true)}"`) to a
+    // temp binding so the part becomes a materialized Var the EXPAND display folds
+    // (a literal part is never a tracked block, so it fell to the unlinked
+    // `compound.to_string` wall).
+    |src, next_var, _| desugar_interp_literal_aggregate_hoist(src, next_var),
+    // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
+    // tuple sub-match a multi-field variant regroup produces).
+    |src, _, _| desugar_tuple_match(src),
+    |src, _, _| desugar_if_arm_unwrap(src),
+    |src, _, _| desugar_flatten_let_block(src),
+    |src, _, _| desugar_inline_tail_accumulator(src),
+    |src, next_var, _| desugar_callarg_heap_if(src, next_var),
+    |src, next_var, _| desugar_callarg_unwrap(src, next_var),
+    // Compile a tuple-of-VARIANTS match while it is still a VALUE match (binder-free
+    // literal arms) — AFTER the call-arg lift above has pulled it out of an argument
+    // position (`println(match (Red, Green) {…})` → `let tmp = match …; println(tmp)`,
+    // the r5 in-arg shape) but BEFORE the let-bound tail-duplication below pushes
+    // `let tmp = …; <rest>` continuations into its arms (duplicated binder-carrying
+    // bodies the column compilers must decline). Both also run in the outer chains
+    // (idempotent there).
+    |src, _, _| desugar_tuple_variant_match(src),
+    |src, _, layouts| desugar_tuple_variant_match_deep(src, layouts),
+    |src, _, _| desugar_let_bound_heap_branch(src),
+    // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
+    // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
+    // bare tail-call arms instead of a heap-Option continuation match.
+    |src, _, _| desugar_unwrap_rewrap_identity(src),
+    |src, _, _| desugar_let_unwrap(src),
+    // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
+    // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
+    // lower like the hand-written form instead of walling on the `Block`-wrapped arm.
+    |src, _, _| desugar_flatten_empty_block(src),
+    // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
+    // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
+    |src, next_var, _| desugar_loop_unwrap(src, next_var),
+    // `break` inside a `for`/`while` body → the `__bk` flag form (whole-arm breaks only;
+    // see `desugar_loop_break`). Runs in this SHARED desugar (count-invariant flag ops).
+    |src, next_var, _| desugar_loop_break(src, next_var),
+    // A UNIT `if` conditionally reassigning ONE heap var → SSA-ify to a let-bound
+    // value-`if` (the lp5 wrong-value class; see `desugar_unit_if_heap_reassign`).
+    |src, next_var, _| desugar_unit_if_heap_reassign(src, next_var),
+    // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
+    // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
+    // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
+    // SHARED desugar so the duplicated `after` is counted 1:1 by the caps gate (mir == ir).
+    |src, _, layouts| desugar_stmt_control_unwrap(src, layouts),
+    |src, next_var, layouts| desugar_nested_branch_arms(src, next_var, layouts),
+];
+
 fn desugar_heap_branches_inner(
     body: &IrExpr,
     next_var: &mut u32,
     layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
     let mut cur: Option<IrExpr> = None;
-    loop {
+    'fixpoint: loop {
         let src = cur.as_ref().unwrap_or(body);
-        // FIRST: hoist a non-pure (call) match subject to a single eval, so the literal-arm chain
-        // dispatches on a cheap Var instead of duplicating the call per arm — a correctness fix
-        // (single eval) and the alignment that keeps `mir <= ir` for a resolved cross-module/self-pkg
-        // call subject. Runs before the call-arg lifts so they see the hoisted (Var-subject) form.
-        if let Some(r) = desugar_match_subject_hoist(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // Route a non-empty map literal through `map.from_list` so it materializes a real map (else a
-        // deferred-Opaque empty block silently miscompiles every subsequent map op).
-        if let Some(r) = desugar_map_literal(src) {
-            cur = Some(r);
-            continue;
-        }
-        // Inline a `fan.race`/`fan.any` over a literal thunk list (avoids an unrepresentable
-        // List[funcref]) into a plain match-over-a-call chain.
-        if let Some(r) = desugar_fan_race_any(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
-        // the guarded-variant case reduces to the two already-proven pieces.
-        if let Some(r) = desugar_grouped_variant_match(src, next_var, layouts) {
-            cur = Some(r);
-            continue;
-        }
-        // Hoist a LITERAL record/tuple interpolation part (`"${(1, \"x\", true)}"`) to a
-        // temp binding so the part becomes a materialized Var the EXPAND display folds
-        // (a literal part is never a tracked block, so it fell to the unlinked
-        // `compound.to_string` wall).
-        if let Some(r) = desugar_interp_literal_aggregate_hoist(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
-        // tuple sub-match a multi-field variant regroup produces).
-        if let Some(r) = desugar_tuple_match(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_if_arm_unwrap(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_flatten_let_block(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_inline_tail_accumulator(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_callarg_heap_if(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_callarg_unwrap(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // Compile a tuple-of-VARIANTS match while it is still a VALUE match (binder-free
-        // literal arms) — AFTER the call-arg lift above has pulled it out of an argument
-        // position (`println(match (Red, Green) {…})` → `let tmp = match …; println(tmp)`,
-        // the r5 in-arg shape) but BEFORE the let-bound tail-duplication below pushes
-        // `let tmp = …; <rest>` continuations into its arms (duplicated binder-carrying
-        // bodies the column compilers must decline). Both also run in the outer chains
-        // (idempotent there).
-        if let Some(r) = desugar_tuple_variant_match(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_tuple_variant_match_deep(src, layouts) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_let_bound_heap_branch(src) {
-            cur = Some(r);
-            continue;
-        }
-        // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
-        // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
-        // bare tail-call arms instead of a heap-Option continuation match.
-        if let Some(r) = desugar_unwrap_rewrap_identity(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_let_unwrap(src) {
-            cur = Some(r);
-            continue;
-        }
-        // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
-        // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
-        // lower like the hand-written form instead of walling on the `Block`-wrapped arm.
-        if let Some(r) = desugar_flatten_empty_block(src) {
-            cur = Some(r);
-            continue;
-        }
-        // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
-        // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
-        if let Some(r) = desugar_loop_unwrap(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // `break` inside a `for`/`while` body → the `__bk` flag form (whole-arm breaks only;
-        // see `desugar_loop_break`). Runs in this SHARED desugar (count-invariant flag ops).
-        if let Some(r) = desugar_loop_break(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // A UNIT `if` conditionally reassigning ONE heap var → SSA-ify to a let-bound
-        // value-`if` (the lp5 wrong-value class; see `desugar_unit_if_heap_reassign`).
-        if let Some(r) = desugar_unit_if_heap_reassign(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
-        // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
-        // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
-        // SHARED desugar so the duplicated `after` is counted 1:1 by the caps gate (mir == ir).
-        if let Some(r) = desugar_stmt_control_unwrap(src, layouts) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_nested_branch_arms(src, next_var, layouts) {
-            cur = Some(r);
-            continue;
+        for pass in BRANCH_PASSES {
+            if let Some(r) = pass(src, next_var, layouts) {
+                cur = Some(r);
+                continue 'fixpoint;
+            }
         }
         return cur;
     }

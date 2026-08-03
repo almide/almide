@@ -972,3 +972,31 @@ fn error_let_mut_hint() {
     let msg = &errors[0];
     assert!(msg.contains("var"), "should hint about 'var': {}", msg);
 }
+
+// ---- #1072: fn main() { — first-contact spelling gets the full fix-it ----
+
+#[test]
+fn fn_body_without_return_type_teaches_complete_form() {
+    let errors = parse_errors("fn main() {\n  println(\"hi\")\n}");
+    assert!(!errors.is_empty());
+    let msg = &errors[0];
+    assert!(msg.contains("fn main() -> Unit = { ... }"), "should show the full form: {}", msg);
+    assert!(msg.contains("effect fn main() -> Unit"), "should mention the effect-fn main spelling: {}", msg);
+}
+
+#[test]
+fn effect_fn_body_without_return_type_shows_effect_form_once() {
+    let errors = parse_errors("effect fn main() {\n  println(\"hi\")\n}");
+    assert!(!errors.is_empty());
+    let msg = &errors[0];
+    assert!(msg.contains("effect fn main() -> Unit = { ... }"), "should show the effect form: {}", msg);
+    assert_eq!(msg.matches("effect fn main()").count(), 1, "no redundant second suggestion: {}", msg);
+}
+
+#[test]
+fn fn_eq_without_return_type_teaches_return_type() {
+    let errors = parse_errors("fn add(a: Int, b: Int) = a + b");
+    assert!(!errors.is_empty());
+    let msg = &errors[0];
+    assert!(msg.contains("-> Type = { ... }"), "should teach the return-type rule: {}", msg);
+}

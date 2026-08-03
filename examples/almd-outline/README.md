@@ -34,7 +34,7 @@ effectful I/O) is clean to write, that's a stronger validation than any
 micro-benchmark. This file is ~140 lines and covers:
 
 - `import json / env / fs` with explicit-import discipline for effectful modules
-- `Value` + `json.as_*` / `json.get_*` option-returning walkers
+- `Value` + `value.as_*` (`?` for the Option form) / `json.get_*` walkers
 - `match` on tag strings with string-interpolated arms
 - Pipe chains: `xs |> list.map(f) |> list.join(", ")`
 - Recursive rendering (`render_type` → `render_inner` → `render_type` via records)

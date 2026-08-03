@@ -66,11 +66,11 @@ impl Checker {
         true
     }
 
-    // Fix-it hint for `emit_call_arg_mismatch`: Float-sibling hint when
-    // `float_sibling` is set (an Int-only math builtin given a Float, #740),
-    // else a likely-typevar hint (an undeclared capitalized bare name), else
-    // a generic conversion hint.
-    fn call_arg_mismatch_hint(&self, fn_name: &str, expected: &Ty, arg_ty: &Ty, float_sibling: Option<&'static str>) -> String {
+    // Fix-it hint for `emit_call_arg_mismatch`: the first Some in a chain of
+    // focused hint derivations wins — Float-sibling (#740), `?`-narrowing
+    // (#1071), likely-typevar, unwrap-family confusion, wrapped-into-plain
+    // (#1050 + its Option sibling) — else the generic conversion hint.
+    fn call_arg_mismatch_hint(&self, fn_name: &str, tys: MismatchTys<'_>, float_sibling: Option<&'static str>) -> String {
         if let Some(sib) = float_sibling {
             return format!(
                 "`{}` is Int-only. For Floats use `{}(x)`, which preserves the Float — \
@@ -78,45 +78,56 @@ impl Checker {
                 fn_name, sib
             );
         }
-        if let Ty::Named(name, args) = expected {
-            let n = name.as_str();
-            let is_likely_typevar = args.is_empty()
-                && !n.is_empty()
-                && n.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
-                && !self.env.types.contains_key(name)
-                && !self.env.constructors.contains_key(name);
-            if is_likely_typevar {
-                return format!("'{}' is not a known type. To use it as a type parameter, declare it: fn {}[{}](...)", n, fn_name, n);
-            }
+        self.narrowed_try_hint(tys)
+            .or_else(|| self.likely_typevar_hint(fn_name, tys))
+            .or_else(|| unwrap_family_hint(fn_name, tys))
+            .or_else(|| wrapped_into_plain_hint(tys))
+            .unwrap_or_else(|| Self::hint_with_conversion("Fix the argument type", tys.expected, tys.arg))
+    }
+
+    /// #1071: an Option[T] handed to a T param where the argument expression
+    /// is a `?` postfix. The writer wanted error propagation; `?` IS the
+    /// Result→Option conversion (one meaning everywhere), so name that rule —
+    /// the templates after this would guess from the types alone and teach a
+    /// false move. `!` is the propagating unwrap, and since #1067 it works in
+    /// a pure fn too when the fn's declared return is Result/Option (C-211) —
+    /// the hint names the condition instead of branching on it.
+    fn narrowed_try_hint(&self, tys: MismatchTys<'_>) -> Option<String> {
+        let inner = tys.arg_resolved.option_inner()?;
+        if types_mismatch(tys.expected_resolved, &inner) || !self.arg_is_try_postfix() {
+            return None;
         }
-        // A plain value handed to the unwrap family means the caller believes
-        // it is still wrapped — the classic effect-fn confusion: there,
-        // Result-returning calls are auto-propagated, so values arrive
-        // already unwrapped and the fallback belongs on the producing call.
-        let unwrap_family = matches!(fn_name,
-            "option.unwrap_or" | "option.unwrap_or_else" | "option.unwrap"
-            | "result.unwrap_or" | "result.unwrap_or_else" | "result.unwrap");
-        if unwrap_family
-            && (expected.is_option() || expected.is_result())
-            && !arg_ty.is_option() && !arg_ty.is_result() && !arg_ty.is_unresolved()
-        {
-            return format!(
-                "nothing to unwrap — the value is already {}. In an effect fn, a \
-                 Result-returning call is auto-propagated (`?`), so its value arrives \
-                 unwrapped; for a fallback, apply `?? <default>` to the producing call instead",
-                arg_ty.display());
-        }
-        // The reverse of the unwrap-family case: a Result handed to a plain-T
-        // param means the caller meant the payload. "Fix the argument type"
-        // names no path; the unwrap operators are the path (#1050).
-        if arg_ty.is_result() && !expected.is_result() && !expected.is_unresolved() {
-            return format!(
-                "the argument is a {} — unwrap it first: `!` propagates the error \
-                 (effect fn body), `?? fallback` supplies a default, or `match` \
-                 handles ok/err",
-                arg_ty.display());
-        }
-        Self::hint_with_conversion("Fix the argument type", expected, arg_ty)
+        Some("`?` converts a Result to an Option — it is not error propagation. \
+              `!` is the propagating unwrap (valid in an effect fn body, a test \
+              block, or a fn returning Result/Option): replace the `?` with `!`; \
+              or `?? fallback` supplies a default, `match` handles ok/err"
+            .to_string())
+    }
+
+    /// An undeclared capitalized bare name in the expected type — likely a
+    /// missing type parameter on the writer's OWN fn. #1071: never taught for
+    /// a callee the writer does not own (a stdlib signature cannot be
+    /// re-declared), nor for a name that IS a known builtin type (`Value`,
+    /// the runtime-backed stdlib nominals) — the premise "'X' is not a known
+    /// type" would be false.
+    fn likely_typevar_hint(&self, fn_name: &str, tys: MismatchTys<'_>) -> Option<String> {
+        let Ty::Named(name, args) = tys.expected else { return None };
+        let n = name.as_str();
+        let callee_is_stdlib = fn_name
+            .split_once('.')
+            .map_or(false, |(m, f)| crate::stdlib::lookup_sig(m, f).is_some());
+        let is_known_builtin = n == "Value"
+            || almide_lang::stdlib_info::runtime_backed_type_owner(n).is_some();
+        let is_likely_typevar = args.is_empty()
+            && !n.is_empty()
+            && n.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+            && !self.env.types.contains_key(name)
+            && !self.env.constructors.contains_key(name)
+            && !callee_is_stdlib
+            && !is_known_builtin;
+        is_likely_typevar.then(|| {
+            format!("'{}' is not a known type. To use it as a type parameter, declare it: fn {}[{}](...)", n, fn_name, n)
+        })
     }
 
     // Emits the E005 argument-type-mismatch diagnostic for
@@ -136,7 +147,8 @@ impl Checker {
         } else {
             None
         };
-        let hint = self.call_arg_mismatch_hint(fn_name, expected, arg_ty, float_sibling);
+        let tys = MismatchTys { expected, arg: arg_ty, expected_resolved, arg_resolved };
+        let hint = self.call_arg_mismatch_hint(fn_name, tys, float_sibling);
         let mut diag = super::err(
             format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
             hint,
@@ -157,6 +169,20 @@ impl Checker {
         }
         self.emit(diag);
     }
+    // Whether the argument expression currently under the E005 caret is a
+    // `?` postfix. The checker unifies on types, not AST nodes, so the arg
+    // expression itself is out of reach here — but `current_span` covers
+    // exactly the argument text, and a trailing `?` in that slice can only
+    // be the Try postfix (`??` ends in its right operand, string literals in
+    // a quote).
+    fn arg_is_try_postfix(&self) -> bool {
+        self.current_span
+            .and_then(|sp| self.source_slice(sp))
+            .map_or(false, |src| {
+                let t = src.trim_end();
+                t.ends_with('?') && !t.ends_with("??")
+            })
+    }
     /// Substitute Ty::TypeVar("Self") with a concrete type in a protocol method return type.
     fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
         match ty {
@@ -164,4 +190,58 @@ impl Checker {
             _ => ty.map_children(&|child| self.substitute_self_in_ty(child, replacement)),
         }
     }
+}
+
+/// The two views of an E005 mismatch — the declared types and their
+/// env-resolved forms, for both sides. The four travel together through the
+/// hint chain (a hint that mixes a resolved expected with an unresolved arg
+/// compares the wrong pair).
+#[derive(Copy, Clone)]
+struct MismatchTys<'a> {
+    expected: &'a Ty,
+    arg: &'a Ty,
+    expected_resolved: &'a Ty,
+    arg_resolved: &'a Ty,
+}
+
+/// A plain value handed to the unwrap family means the caller believes it is
+/// still wrapped — the classic effect-fn confusion: there, Result-returning
+/// calls are auto-propagated, so values arrive already unwrapped and the
+/// fallback belongs on the producing call.
+fn unwrap_family_hint(fn_name: &str, tys: MismatchTys<'_>) -> Option<String> {
+    let unwrap_family = matches!(fn_name,
+        "option.unwrap_or" | "option.unwrap_or_else" | "option.unwrap"
+        | "result.unwrap_or" | "result.unwrap_or_else" | "result.unwrap");
+    if unwrap_family
+        && (tys.expected.is_option() || tys.expected.is_result())
+        && !tys.arg.is_option() && !tys.arg.is_result() && !tys.arg.is_unresolved()
+    {
+        return Some(format!(
+            "nothing to unwrap — the value is already {}. In an effect fn, a \
+             Result-returning call is auto-propagated (`?`), so its value arrives \
+             unwrapped; for a fallback, apply `?? <default>` to the producing call instead",
+            tys.arg.display()));
+    }
+    None
+}
+
+/// The reverse of the unwrap-family case: a Result (or Option, its #1071
+/// sibling) handed to a plain-T param means the caller meant the payload.
+/// "Fix the argument type" names no path; the unwrap operators are the path
+/// (#1050).
+fn wrapped_into_plain_hint(tys: MismatchTys<'_>) -> Option<String> {
+    if tys.arg.is_result() && !tys.expected.is_result() && !tys.expected.is_unresolved() {
+        return Some(format!(
+            "the argument is a {} — unwrap it first: `!` propagates the error \
+             (effect fn body), `?? fallback` supplies a default, or `match` \
+             handles ok/err",
+            tys.arg.display()));
+    }
+    if tys.arg_resolved.is_option() && !tys.expected_resolved.is_option() && !tys.expected_resolved.is_unresolved() {
+        return Some(format!(
+            "the argument is an {} — unwrap it first: `?? fallback` supplies \
+             a default, or `match` handles the none case",
+            tys.arg.display()));
+    }
+    None
 }

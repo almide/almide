@@ -1,49 +1,49 @@
 // json_test — JSON module tests
 import json
 
-// ── json.from_string / json.stringify ──
+// ── value.str / json.stringify ──
 test "json from_string and stringify" {
-  let v = json.from_string("hello")
+  let v = value.str("hello")
   let s = json.stringify(v)
   assert_eq(s.contains("hello"), true)
 }
 
-// ── json.from_int ──
+// ── value.int ──
 test "json from_int" {
-  let v = json.from_int(42)
+  let v = value.int(42)
   let s = json.stringify(v)
   assert_eq(s.contains("42"), true)
 }
 
-// ── json.from_float ──
+// ── value.float ──
 test "json from_float" {
-  let v = json.from_float(3.14)
+  let v = value.float(3.14)
   let s = json.stringify(v)
   assert_eq(s.contains("3.14"), true)
 }
 
-// ── json.from_bool ──
+// ── value.bool ──
 test "json from_bool true" {
-  let v = json.from_bool(true)
+  let v = value.bool(true)
   assert_eq(json.stringify(v), "true")
 }
 
 test "json from_bool false" {
-  let v = json.from_bool(false)
+  let v = value.bool(false)
   assert_eq(json.stringify(v), "false")
 }
 
-// NOTE: json.null() has no runtime — skipped
+// NOTE: value.null() has no runtime — skipped
 // ── json.object ──
 test "json object simple" {
-  let v = json.object([("name", json.from_string("Alice"))])
+  let v = value.object([("name", value.str("Alice"))])
   let s = json.stringify(v)
   assert_eq(s.contains("name"), true)
   assert_eq(s.contains("Alice"), true)
 }
 
 test "json object multiple fields" {
-  let v = json.object([("id", json.from_int(1)), ("active", json.from_bool(true))])
+  let v = value.object([("id", value.int(1)), ("active", value.bool(true))])
   let s = json.stringify(v)
   assert_eq(s.contains("id"), true)
   assert_eq(s.contains("active"), true)
@@ -51,7 +51,7 @@ test "json object multiple fields" {
 
 // ── json.array ──
 test "json array" {
-  let v = json.array([json.from_int(1), json.from_int(2), json.from_int(3)])
+  let v = value.array([value.int(1), value.int(2), value.int(3)])
   let s = json.stringify(v)
   assert_eq(s.contains("1"), true)
   assert_eq(s.contains("2"), true)
@@ -59,7 +59,7 @@ test "json array" {
 }
 
 test "json empty array" {
-  let v = json.array([])
+  let v = value.array([])
   assert_eq(json.stringify(v), "[]")
 }
 
@@ -83,7 +83,7 @@ test "json parse invalid" {
 
 // ── json.get via stringify check ──
 test "json object field accessible via stringify" {
-  let obj = json.object([("x", json.from_int(10))])
+  let obj = value.object([("x", value.int(10))])
   let s = json.stringify(obj)
   assert_eq(s.contains("10"), true)
   assert_eq(s.contains("x"), true)
@@ -91,7 +91,7 @@ test "json object field accessible via stringify" {
 
 // ── json.parse and roundtrip ──
 test "json roundtrip object" {
-  let original = json.object([("a", json.from_int(1)), ("b", json.from_string("two"))])
+  let original = value.object([("a", value.int(1)), ("b", value.str("two"))])
   let text = json.stringify(original)
   match json.parse(text) {
     ok(parsed) => {
@@ -104,8 +104,8 @@ test "json roundtrip object" {
 }
 
 test "json nested object" {
-  let inner = json.object([("value", json.from_int(42))])
-  let outer = json.object([("data", inner)])
+  let inner = value.object([("value", value.int(42))])
+  let outer = value.object([("data", inner)])
   let s = json.stringify(outer)
   assert_eq(s.contains("data"), true)
   assert_eq(s.contains("42"), true)

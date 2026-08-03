@@ -26,178 +26,216 @@ fn is_pure_match_subject(e: &IrExpr) -> bool {
 /// `try_lower_variant_value_match`), so it is left untouched (no v0-corpus shape changes). Recurses
 /// into block stmts / tails / if & match arms so a nested such match is hoisted too.
 fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    if let IrExprKind::Match { subject, arms } = &body.kind {
+        if match_subject_needs_hoist(subject, arms) {
+            return Some(hoist_match_subject(body, subject, arms, next_var));
+        }
+    }
+    // Recurse into the structural positions a match can hide in.
+    match &body.kind {
+        IrExprKind::Block { .. } => hoist_subject_in_block(body, next_var),
+        IrExprKind::If { .. } => hoist_subject_in_if(body, next_var),
+        IrExprKind::Match { .. } => hoist_subject_in_arms(body, next_var),
+        _ => None,
+    }
+}
+
+/// Does this match need the single-eval subject hoist? A NON-VARIANT literal
+/// match with a non-pure subject fires; a variant subject (Option/Result/user
+/// ADT) goes through the variant path (single-eval), NOT `build_match_chain` —
+/// left alone UNLESS the subject is one of the hoistable call shapes.
+fn match_subject_needs_hoist(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> bool {
     use almide_lang::types::constructor::TypeConstructorId as TC;
     use almide_lang::types::Ty;
-    // A variant subject (Option/Result/user ADT) goes through the variant path (single-eval),
-    // NOT build_match_chain — leave it alone.
     let is_variant_subject = |ty: &Ty| {
         matches!(ty, Ty::Applied(TC::Option | TC::Result, _))
             || matches!(ty, Ty::Named(..) | Ty::Variant { .. })
     };
-    if let IrExprKind::Match { subject, arms } = &body.kind {
-        let has_literal_arm = arms
-            .iter()
-            .any(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }));
-        // A COMPUTED-call (funcref / `Op::CallIndirect`) subject cannot lower INLINE through the
-        // variant path (which materializes only a Var / Named / Module subject), so hoist it to a
-        // `let $t = f(x); match $t` even for an Option/Result subject — the bind's heap-result
-        // CallIndirect + seeded read-shape then makes the match lower (the `fan.map` traverse `match
-        // f(x) { ok/err }` shape).
-        let is_computed_call = matches!(
-            &subject.kind,
-            IrExprKind::Call { target: almide_ir::CallTarget::Computed { .. }, .. }
-        ) || matches!(
-            &subject.kind,
-            // `fan.map` (a compiler intrinsic lowered to a self-host Result call) as a match subject —
-            // hoist it so the bind seeds its cap-as-tag read-shape, then `match $t { ok/err }` lowers
-            // (its auto-`!` desugars to exactly this match).
-            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
-                if module.as_str() == "fan" && func.as_str() == "map"
-        ) || matches!(
-            &subject.kind,
-            // `regex.find(...)` (a self-host Option[String] call) as a match subject —
-            // hoist so the bind seeds its materialized-Option read-shape, then
-            // `match $t { some/none }` lowers (the regex-corpus match shape).
-            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
-                if module.as_str() == "regex" && (func.as_str() == "find" || func.as_str() == "captures")
-        ) || matches!(
-            &subject.kind,
-            // A HEAP-accumulator `list.fold` (the Option-returning `list.fold_ols` route) as a
-            // match subject — a HOF call with a closure arg cannot materialize inline through
-            // the variant path; hoist so the BIND's self-host HOF linkage + seeded
-            // materialized-Option read-shape make `match $t { some/none }` lower
-            // (is_balanced's paren-stack fold).
-            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
-                if module.as_str() == "list"
-                    && func.as_str() == "fold"
-                    && matches!(&subject.ty, Ty::Applied(TC::Option, _))
-        );
-        if (has_literal_arm
-            && !is_pure_match_subject(subject)
-            && !is_variant_subject(&subject.ty))
-            || is_computed_call
-        {
-            let tmp = VarId(*next_var);
-            *next_var += 1;
-            let tmp_var = IrExpr {
-                kind: IrExprKind::Var { id: tmp },
-                ty: subject.ty.clone(),
-                span: subject.span.clone(),
-                def_id: None,
-            };
-            // The match dispatching on the hoisted `Var(tmp)` (arms unchanged — they reference the
-            // subject only through the desugar's `subject.clone()`, now the cheap Var).
-            let new_match = IrExpr {
-                kind: IrExprKind::Match { subject: Box::new(tmp_var), arms: arms.clone() },
-                ty: body.ty.clone(),
-                span: body.span.clone(),
-                def_id: body.def_id,
-            };
-            let bind = IrStmt {
-                kind: IrStmtKind::Bind {
-                    var: tmp,
-                    mutability: almide_ir::Mutability::Let,
-                    ty: subject.ty.clone(),
-                    value: (**subject).clone(),
-                },
-                span: body.span.clone(),
-            };
+    let has_literal_arm = arms
+        .iter()
+        .any(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }));
+    (has_literal_arm && !is_pure_match_subject(subject) && !is_variant_subject(&subject.ty))
+        || is_hoistable_call_subject(subject)
+}
+
+/// The call shapes hoisted EVEN for an Option/Result subject: a COMPUTED call
+/// (funcref / `Op::CallIndirect`) cannot lower INLINE through the variant path
+/// (which materializes only a Var / Named / Module subject), so `let $t =
+/// f(x); match $t` makes the bind's heap-result CallIndirect + seeded
+/// read-shape lower the match (the `fan.map` traverse `match f(x) { ok/err }`
+/// shape).
+fn is_hoistable_call_subject(subject: &IrExpr) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    use almide_lang::types::Ty;
+    matches!(
+        &subject.kind,
+        IrExprKind::Call { target: almide_ir::CallTarget::Computed { .. }, .. }
+    ) || matches!(
+        &subject.kind,
+        // `fan.map` (a compiler intrinsic lowered to a self-host Result call) as a match subject —
+        // hoist it so the bind seeds its cap-as-tag read-shape, then `match $t { ok/err }` lowers
+        // (its auto-`!` desugars to exactly this match).
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
+            if module.as_str() == "fan" && func.as_str() == "map"
+    ) || matches!(
+        &subject.kind,
+        // `regex.find(...)` (a self-host Option[String] call) as a match subject —
+        // hoist so the bind seeds its materialized-Option read-shape, then
+        // `match $t { some/none }` lowers (the regex-corpus match shape).
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
+            if module.as_str() == "regex" && (func.as_str() == "find" || func.as_str() == "captures")
+    ) || matches!(
+        &subject.kind,
+        // A HEAP-accumulator `list.fold` (the Option-returning `list.fold_ols` route) as a
+        // match subject — a HOF call with a closure arg cannot materialize inline through
+        // the variant path; hoist so the BIND's self-host HOF linkage + seeded
+        // materialized-Option read-shape make `match $t { some/none }` lower
+        // (is_balanced's paren-stack fold).
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
+            if module.as_str() == "list"
+                && func.as_str() == "fold"
+                && matches!(&subject.ty, Ty::Applied(TC::Option, _))
+    )
+}
+
+/// The REWRITE: `let __m = subject; match __m { … }` (arms unchanged — they
+/// reference the subject only through the desugar's `subject.clone()`, now the
+/// cheap Var).
+fn hoist_match_subject(
+    body: &IrExpr,
+    subject: &IrExpr,
+    arms: &[almide_ir::IrMatchArm],
+    next_var: &mut u32,
+) -> IrExpr {
+    let tmp = VarId(*next_var);
+    *next_var += 1;
+    let tmp_var = IrExpr {
+        kind: IrExprKind::Var { id: tmp },
+        ty: subject.ty.clone(),
+        span: subject.span.clone(),
+        def_id: None,
+    };
+    let new_match = IrExpr {
+        kind: IrExprKind::Match { subject: Box::new(tmp_var), arms: arms.to_vec() },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    };
+    let bind = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: tmp,
+            mutability: almide_ir::Mutability::Let,
+            ty: subject.ty.clone(),
+            value: subject.clone(),
+        },
+        span: body.span.clone(),
+    };
+    IrExpr {
+        kind: IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(new_match)) },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    }
+}
+
+/// The BLOCK recursion of [`desugar_match_subject_hoist`]: each stmt's value
+/// (Bind / Expr / Assign — the value-bearing stmts a match can sit in), then
+/// the tail. Verbatim.
+fn hoist_subject_in_block(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr } = &body.kind else {
+        unreachable!("caller matched a block")
+    };
+    for (i, s) in stmts.iter().enumerate() {
+        let v = match &s.kind {
+            IrStmtKind::Expr { expr } => Some(expr),
+            IrStmtKind::Bind { value, .. } => Some(value),
+            IrStmtKind::Assign { value, .. } => Some(value),
+            _ => None,
+        };
+        if let Some(v) = v {
+            if let Some(nv) = desugar_match_subject_hoist(v, next_var) {
+                let mut ns = stmts.clone();
+                ns[i].kind = match s.kind.clone() {
+                    IrStmtKind::Expr { .. } => IrStmtKind::Expr { expr: nv },
+                    IrStmtKind::Bind { var, mutability, ty, .. } => {
+                        IrStmtKind::Bind { var, mutability, ty, value: nv }
+                    }
+                    IrStmtKind::Assign { var, .. } => IrStmtKind::Assign { var, value: nv },
+                    other => other,
+                };
+                return Some(IrExpr {
+                    kind: IrExprKind::Block { stmts: ns, expr: expr.clone() },
+                    ty: body.ty.clone(),
+                    span: body.span.clone(),
+                    def_id: body.def_id,
+                });
+            }
+        }
+    }
+    if let Some(t) = expr {
+        if let Some(nt) = desugar_match_subject_hoist(t, next_var) {
             return Some(IrExpr {
-                kind: IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(new_match)) },
+                kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
                 ty: body.ty.clone(),
                 span: body.span.clone(),
                 def_id: body.def_id,
             });
         }
     }
-    // Recurse into the structural positions a match can hide in.
-    match &body.kind {
-        IrExprKind::Block { stmts, expr } => {
-            // Recurse into each stmt's value (Bind / Expr / Assign — the value-bearing stmts a
-            // match can sit in) by cloning the stmt and replacing its value via `map_children`.
-            for (i, s) in stmts.iter().enumerate() {
-                let v = match &s.kind {
-                    IrStmtKind::Expr { expr } => Some(expr),
-                    IrStmtKind::Bind { value, .. } => Some(value),
-                    IrStmtKind::Assign { value, .. } => Some(value),
-                    _ => None,
-                };
-                if let Some(v) = v {
-                    if let Some(nv) = desugar_match_subject_hoist(v, next_var) {
-                        let mut ns = stmts.clone();
-                        ns[i].kind = match s.kind.clone() {
-                            IrStmtKind::Expr { .. } => IrStmtKind::Expr { expr: nv },
-                            IrStmtKind::Bind { var, mutability, ty, .. } => {
-                                IrStmtKind::Bind { var, mutability, ty, value: nv }
-                            }
-                            IrStmtKind::Assign { var, .. } => IrStmtKind::Assign { var, value: nv },
-                            other => other,
-                        };
-                        return Some(IrExpr {
-                            kind: IrExprKind::Block { stmts: ns, expr: expr.clone() },
-                            ty: body.ty.clone(),
-                            span: body.span.clone(),
-                            def_id: body.def_id,
-                        });
-                    }
-                }
-            }
-            if let Some(t) = expr {
-                if let Some(nt) = desugar_match_subject_hoist(t, next_var) {
-                    return Some(IrExpr {
-                        kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
-                        ty: body.ty.clone(),
-                        span: body.span.clone(),
-                        def_id: body.def_id,
-                    });
-                }
-            }
-            None
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            if let Some(nt) = desugar_match_subject_hoist(then, next_var) {
-                return Some(IrExpr {
-                    kind: IrExprKind::If {
-                        cond: cond.clone(),
-                        then: Box::new(nt),
-                        else_: else_.clone(),
-                    },
-                    ty: body.ty.clone(),
-                    span: body.span.clone(),
-                    def_id: body.def_id,
-                });
-            }
-            if let Some(ne) = desugar_match_subject_hoist(else_, next_var) {
-                return Some(IrExpr {
-                    kind: IrExprKind::If {
-                        cond: cond.clone(),
-                        then: then.clone(),
-                        else_: Box::new(ne),
-                    },
-                    ty: body.ty.clone(),
-                    span: body.span.clone(),
-                    def_id: body.def_id,
-                });
-            }
-            None
-        }
-        IrExprKind::Match { subject, arms } => {
-            for (i, a) in arms.iter().enumerate() {
-                if let Some(nb) = desugar_match_subject_hoist(&a.body, next_var) {
-                    let mut na = arms.clone();
-                    na[i].body = nb;
-                    return Some(IrExpr {
-                        kind: IrExprKind::Match { subject: subject.clone(), arms: na },
-                        ty: body.ty.clone(),
-                        span: body.span.clone(),
-                        def_id: body.def_id,
-                    });
-                }
-            }
-            None
-        }
-        _ => None,
+    None
+}
+
+/// The IF recursion of [`desugar_match_subject_hoist`]: then, then else. Verbatim.
+fn hoist_subject_in_if(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    let IrExprKind::If { cond, then, else_ } = &body.kind else {
+        unreachable!("caller matched an if")
+    };
+    if let Some(nt) = desugar_match_subject_hoist(then, next_var) {
+        return Some(IrExpr {
+            kind: IrExprKind::If {
+                cond: cond.clone(),
+                then: Box::new(nt),
+                else_: else_.clone(),
+            },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
     }
+    if let Some(ne) = desugar_match_subject_hoist(else_, next_var) {
+        return Some(IrExpr {
+            kind: IrExprKind::If {
+                cond: cond.clone(),
+                then: then.clone(),
+                else_: Box::new(ne),
+            },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
+    }
+    None
+}
+
+/// The MATCH-ARM recursion of [`desugar_match_subject_hoist`] (a match whose
+/// own subject did NOT fire): each arm body. Verbatim.
+fn hoist_subject_in_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    let IrExprKind::Match { subject, arms } = &body.kind else {
+        unreachable!("caller matched a match")
+    };
+    for (i, a) in arms.iter().enumerate() {
+        if let Some(nb) = desugar_match_subject_hoist(&a.body, next_var) {
+            let mut na = arms.clone();
+            na[i].body = nb;
+            return Some(IrExpr {
+                kind: IrExprKind::Match { subject: subject.clone(), arms: na },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            });
+        }
+    }
+    None
 }
 
 /// Count the occurrences of `var` (as an `IrExprKind::Var`) inside `e` — a local use-count for the

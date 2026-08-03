@@ -272,143 +272,20 @@ fn desugar_lambda_let_branches(body: &IrExpr) -> Option<IrExpr> {
     // Recurse structurally (let-branch desugar only) into the parts that may host a defunc lambda or a
     // nested let-bound branch. A change anywhere — here or the top-level duplication above — yields Some.
     let recursed = match &src.kind {
-        IrExprKind::Block { stmts, expr: Some(tail) } => {
-            let mut changed = false;
-            let new_stmts: Vec<IrStmt> = stmts
-                .iter()
-                .map(|s| match &s.kind {
-                    IrStmtKind::Bind { var, mutability, ty, value } => {
-                        match desugar_lambda_let_branches(value) {
-                            Some(nv) => {
-                                changed = true;
-                                IrStmt {
-                                    kind: IrStmtKind::Bind {
-                                        var: *var,
-                                        mutability: *mutability,
-                                        ty: ty.clone(),
-                                        value: nv,
-                                    },
-                                    span: s.span.clone(),
-                                }
-                            }
-                            None => s.clone(),
-                        }
-                    }
-                    _ => s.clone(),
-                })
-                .collect();
-            let nt = desugar_lambda_let_branches(tail);
-            if nt.is_some() {
-                changed = true;
-            }
-            if changed {
-                Some(IrExpr {
-                    kind: IrExprKind::Block {
-                        stmts: new_stmts,
-                        expr: Some(Box::new(nt.unwrap_or_else(|| (**tail).clone()))),
-                    },
-                    ty: src.ty.clone(),
-                    span: src.span.clone(),
-                    def_id: src.def_id,
-                })
-            } else {
-                None
-            }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            let nt = desugar_lambda_let_branches(then);
-            let ne = desugar_lambda_let_branches(else_);
-            if nt.is_none() && ne.is_none() {
-                None
-            } else {
-                Some(IrExpr {
-                    kind: IrExprKind::If {
-                        cond: cond.clone(),
-                        then: Box::new(nt.unwrap_or_else(|| (**then).clone())),
-                        else_: Box::new(ne.unwrap_or_else(|| (**else_).clone())),
-                    },
-                    ty: src.ty.clone(),
-                    span: src.span.clone(),
-                    def_id: src.def_id,
-                })
-            }
-        }
-        IrExprKind::Match { subject, arms } => {
-            let mut changed = false;
-            let new_arms: Vec<almide_ir::IrMatchArm> = arms
-                .iter()
-                .map(|a| match desugar_lambda_let_branches(&a.body) {
-                    Some(nb) => {
-                        changed = true;
-                        almide_ir::IrMatchArm {
-                            pattern: a.pattern.clone(),
-                            guard: a.guard.clone(),
-                            body: nb,
-                        }
-                    }
-                    None => a.clone(),
-                })
-                .collect();
-            if changed {
-                Some(IrExpr {
-                    kind: IrExprKind::Match { subject: subject.clone(), arms: new_arms },
-                    ty: src.ty.clone(),
-                    span: src.span.clone(),
-                    def_id: src.def_id,
-                })
-            } else {
-                None
-            }
-        }
+        IrExprKind::Block { expr: Some(_), .. } => recurse_lambda_branches_block(src),
+        IrExprKind::If { .. } => recurse_lambda_branches_if(src),
+        IrExprKind::Match { .. } => recurse_lambda_branches_match(src),
         // An inner HOF call (`get_arr(pl,"fields") |> list.flat_map((pe) => { … })`): recurse into its
         // lambda args so a let-bound branch in a NESTED loop body is reached too. SKIP a `list.fold`
         // lambda — the tuple-accumulator fold lowers its OWN multi-statement body (a `let store =
         // if/match` interior stmt materialized by `lower_bind`); tail-duplicating it here would turn the
         // `(acc+[store], n+step)` tuple body into an if-of-tuples the tuple-fold gate cannot match.
-        IrExprKind::Call { target, args, type_args }
+        IrExprKind::Call { target, .. }
             if !matches!(target,
                 CallTarget::Module { module, func, .. }
                     if module.as_str() == "list" && func.as_str() == "fold") =>
         {
-            let mut changed = false;
-            let new_args: Vec<IrExpr> = args
-                .iter()
-                .map(|a| match &a.kind {
-                    IrExprKind::Lambda { params, body: lam_body, lambda_id } => {
-                        match desugar_lambda_let_branches(lam_body) {
-                            Some(nb) => {
-                                changed = true;
-                                IrExpr {
-                                    kind: IrExprKind::Lambda {
-                                        params: params.clone(),
-                                        body: Box::new(nb),
-                                        lambda_id: *lambda_id,
-                                    },
-                                    ty: a.ty.clone(),
-                                    span: a.span.clone(),
-                                    def_id: a.def_id,
-                                }
-                            }
-                            None => a.clone(),
-                        }
-                    }
-                    _ => a.clone(),
-                })
-                .collect();
-            if changed {
-                Some(IrExpr {
-                    kind: IrExprKind::Call {
-                        target: target.clone(),
-                        args: new_args,
-                        type_args: type_args.clone(),
-                    },
-                    ty: src.ty.clone(),
-                    span: src.span.clone(),
-                    def_id: src.def_id,
-                })
-            } else {
-                None
-            }
+            recurse_lambda_branches_hof_args(src)
         }
         _ => None,
     };
@@ -417,6 +294,159 @@ fn desugar_lambda_let_branches(body: &IrExpr) -> Option<IrExpr> {
         (_, Some(r)) => Some(r),
         (Some(s), None) => Some(s),
         (None, None) => None,
+    }
+}
+
+/// The BLOCK arm of [`desugar_lambda_let_branches`]'s structural recursion — recurse into each
+/// let-bound value and the block tail. Verbatim.
+fn recurse_lambda_branches_block(src: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &src.kind else {
+        unreachable!("caller matched a tailed block")
+    };
+    let mut changed = false;
+    let new_stmts: Vec<IrStmt> = stmts
+        .iter()
+        .map(|s| match &s.kind {
+            IrStmtKind::Bind { var, mutability, ty, value } => {
+                match desugar_lambda_let_branches(value) {
+                    Some(nv) => {
+                        changed = true;
+                        IrStmt {
+                            kind: IrStmtKind::Bind {
+                                var: *var,
+                                mutability: *mutability,
+                                ty: ty.clone(),
+                                value: nv,
+                            },
+                            span: s.span.clone(),
+                        }
+                    }
+                    None => s.clone(),
+                }
+            }
+            _ => s.clone(),
+        })
+        .collect();
+    let nt = desugar_lambda_let_branches(tail);
+    if nt.is_some() {
+        changed = true;
+    }
+    if changed {
+        Some(IrExpr {
+            kind: IrExprKind::Block {
+                stmts: new_stmts,
+                expr: Some(Box::new(nt.unwrap_or_else(|| (**tail).clone()))),
+            },
+            ty: src.ty.clone(),
+            span: src.span.clone(),
+            def_id: src.def_id,
+        })
+    } else {
+        None
+    }
+}
+
+/// The IF arm of [`desugar_lambda_let_branches`]'s structural recursion — recurse into both
+/// arms (never the cond — no lambda hosts there). Verbatim.
+fn recurse_lambda_branches_if(src: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::If { cond, then, else_ } = &src.kind else {
+        unreachable!("caller matched an if")
+    };
+    let nt = desugar_lambda_let_branches(then);
+    let ne = desugar_lambda_let_branches(else_);
+    if nt.is_none() && ne.is_none() {
+        None
+    } else {
+        Some(IrExpr {
+            kind: IrExprKind::If {
+                cond: cond.clone(),
+                then: Box::new(nt.unwrap_or_else(|| (**then).clone())),
+                else_: Box::new(ne.unwrap_or_else(|| (**else_).clone())),
+            },
+            ty: src.ty.clone(),
+            span: src.span.clone(),
+            def_id: src.def_id,
+        })
+    }
+}
+
+/// The MATCH arm of [`desugar_lambda_let_branches`]'s structural recursion — recurse into each
+/// arm body. Verbatim.
+fn recurse_lambda_branches_match(src: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Match { subject, arms } = &src.kind else {
+        unreachable!("caller matched a match")
+    };
+    let mut changed = false;
+    let new_arms: Vec<almide_ir::IrMatchArm> = arms
+        .iter()
+        .map(|a| match desugar_lambda_let_branches(&a.body) {
+            Some(nb) => {
+                changed = true;
+                almide_ir::IrMatchArm {
+                    pattern: a.pattern.clone(),
+                    guard: a.guard.clone(),
+                    body: nb,
+                }
+            }
+            None => a.clone(),
+        })
+        .collect();
+    if changed {
+        Some(IrExpr {
+            kind: IrExprKind::Match { subject: subject.clone(), arms: new_arms },
+            ty: src.ty.clone(),
+            span: src.span.clone(),
+            def_id: src.def_id,
+        })
+    } else {
+        None
+    }
+}
+
+/// The HOF-CALL arm of [`desugar_lambda_let_branches`]'s structural recursion — recurse into each
+/// lambda argument (the `list.fold` skip lives in the caller's guard). Verbatim.
+fn recurse_lambda_branches_hof_args(src: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Call { target, args, type_args } = &src.kind else {
+        unreachable!("caller matched a call")
+    };
+    let mut changed = false;
+    let new_args: Vec<IrExpr> = args
+        .iter()
+        .map(|a| match &a.kind {
+            IrExprKind::Lambda { params, body: lam_body, lambda_id } => {
+                match desugar_lambda_let_branches(lam_body) {
+                    Some(nb) => {
+                        changed = true;
+                        IrExpr {
+                            kind: IrExprKind::Lambda {
+                                params: params.clone(),
+                                body: Box::new(nb),
+                                lambda_id: *lambda_id,
+                            },
+                            ty: a.ty.clone(),
+                            span: a.span.clone(),
+                            def_id: a.def_id,
+                        }
+                    }
+                    None => a.clone(),
+                }
+            }
+            _ => a.clone(),
+        })
+        .collect();
+    if changed {
+        Some(IrExpr {
+            kind: IrExprKind::Call {
+                target: target.clone(),
+                args: new_args,
+                type_args: type_args.clone(),
+            },
+            ty: src.ty.clone(),
+            span: src.span.clone(),
+            def_id: src.def_id,
+        })
+    } else {
+        None
     }
 }
 

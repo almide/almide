@@ -73,6 +73,39 @@ impl LowerCtx {
     ///   - `Result[heap, heap]`    → `materialized_results_str` + `heap_elem_lists` (cap-as-tag)
     /// `param_values` already holds the borrowed handle (the caller owns it), so this adds only the
     /// READ-shape knowledge, no ownership change.
+    /// The BOTH-ARMS-HEAP Result param seed — the cap-as-tag 1-slot
+    /// DynListStr. The DROP differs by Ok-arm: a `List[Value]` Ok
+    /// (`value.as_array`) frees recursively (`value_result_lists`), else a
+    /// String Ok (`value.as_string`) frees flat (`heap_elem_lists`).
+    fn seed_heap_result_param(&mut self, v: ValueId, ty: &Ty, err_ty: &Ty) {
+        self.materialized_results_str.insert(v);
+        if is_result_listval_ty(ty) {
+            self.value_result_lists.insert(v);
+            return;
+        }
+        if is_value_result_ty(ty) {
+            self.value_result_results.insert(v);
+            return;
+        }
+        self.heap_elem_lists.insert(v);
+        // A RICH custom-variant Err payload (`Result[String, MathError]` —
+        // Overflow(String) owns nested heap): the flat DropListStr would
+        // free the variant BLOCK but leak its fields. Route the drop to the
+        // Err-side recursion (`reserr:` — DropWrapperRec `err_rec`); the
+        // heap_elem_lists membership stays for the bind gates (drop_op_for
+        // consults variant_drop_handles first). A PARAM is never dropped
+        // (it stays in param_values), so the entry is read-inert there.
+        let Some(vn) = self.custom_variant_type_name(err_ty) else {
+            return;
+        };
+        if !self.variant_layouts.needs_recursive_drop(&vn, &|rn| {
+            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+        }) {
+            return;
+        }
+        self.variant_drop_handles.insert(v, format!("reserr:{vn}"));
+    }
+
     fn seed_variant_param(&mut self, v: ValueId, ty: &Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         match ty {
@@ -84,37 +117,7 @@ impl LowerCtx {
             }
             Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
                 if is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                    // Both arms heap — the cap-as-tag 1-slot DynListStr. The DROP differs by Ok-arm:
-                    // a `List[Value]` Ok (`value.as_array`) frees recursively (`value_result_lists`),
-                    // else a String Ok (`value.as_string`) frees flat (`heap_elem_lists`).
-                    self.materialized_results_str.insert(v);
-                    if is_result_listval_ty(ty) {
-                        self.value_result_lists.insert(v);
-                    } else if is_value_result_ty(ty) {
-                        self.value_result_results.insert(v);
-                    } else {
-                        self.heap_elem_lists.insert(v);
-                        // A RICH custom-variant Err payload (`Result[String, MathError]` —
-                        // Overflow(String) owns nested heap): the flat DropListStr would
-                        // free the variant BLOCK but leak its fields. Route the drop to the
-                        // Err-side recursion (`reserr:` — DropWrapperRec `err_rec`); the
-                        // heap_elem_lists membership stays for the bind gates (drop_op_for
-                        // consults variant_drop_handles first). A PARAM is never dropped
-                        // (it stays in param_values), so the entry is read-inert there.
-                        // Guard-clause flattening (`return` targets `seed_variant_param` — sound
-                        // because this is the tail of its `match ty { .. }`, the function's last
-                        // statement, so returning early here is identical to falling through to
-                        // the function's end). No behavior change.
-                        let Some(vn) = self.custom_variant_type_name(&a[1]) else {
-                            return;
-                        };
-                        if !self.variant_layouts.needs_recursive_drop(&vn, &|rn| {
-                            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
-                        }) {
-                            return;
-                        }
-                        self.variant_drop_handles.insert(v, format!("reserr:{vn}"));
-                    }
+                    self.seed_heap_result_param(v, ty, &a[1]);
                 } else {
                     // Scalar Ok (`Result[Int, String]`) — len-as-tag, scalar Ok payload. A heap Err
                     // payload is owned by the Result block (DropListStr frees it); mark the nested-
@@ -160,7 +163,17 @@ impl LowerCtx {
     /// expression. The tail lowering walls anything outside the subset, so the
     /// wrapping never weakens the boundary (control-flow / unsupported tails still
     /// become an explicit `Unsupported`).
-    pub(crate) fn lower_body_into(&mut self, body: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+    /// The ordered body-desugar ladder; the first firing pass wins, `None` =
+    /// fully desugared. Split into two rungs purely by insertion — the pass
+    /// order is IDENTICAL to the original single ladder.
+    fn first_body_desugar(&self, body: &IrExpr) -> Option<IrExpr> {
+        self.first_resolution_desugar(body)
+            .or_else(|| self.first_match_shape_desugar(body))
+    }
+
+    /// Ladder rung 1 — resolution + effect-monad + guard + call-shape desugars.
+    /// Verbatim, original order.
+    fn first_resolution_desugar(&self, body: &IrExpr) -> Option<IrExpr> {
         // TAIL-DUPLICATION desugar: a `let s = <heap-result if/match>; <rest>` (which `lower_bind`
         // walls — the merged-dst has no sound flat-cert scope-end drop) is rewritten PURELY in the
         // IR to push the continuation `<rest>` into each arm (`if c then { let s = A; <rest> } else
@@ -189,16 +202,16 @@ impl LowerCtx {
         // (a Method Call and its resolved Named Call both count as one), so the caps gate stays
         // exact; the SAME step runs in `desugar_all` for the `count_ir_calls` side.
         if let Some(rewritten) = crate::lower::desugar_method_calls(body, &self.record_layouts) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_guard(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_beta_reduce(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_tuple_unwrap_or(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         // `unit_main` (the void-main die-on-error convention) applies ONLY to a `main` that
         // declares the SYNTHETIC void return (bare `Unit`, no explicit Result/Option) — a
@@ -210,49 +223,65 @@ impl LowerCtx {
         if let Some(rewritten) =
             desugar_effect_unwrap(body, unit_main, self.ret_is_result_abi, &self.variant_layouts)
         {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if unit_main {
             if let Some(rewritten) = crate::lower::desugar_unit_main_err_arms(body) {
-                return self.lower_body_into(&rewritten);
+                return Some(rewritten);
             }
         }
         if let Some(rewritten) = crate::lower::desugar_sort_by_cached_keys(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
+        None
+    }
+
+    /// Ladder rung 2 — the match-shape desugars (heap branches, tuple/guard/
+    /// record/list match forms, fan blocks). Verbatim, original order.
+    fn first_match_shape_desugar(&self, body: &IrExpr) -> Option<IrExpr> {
         if let Some(rewritten) = crate::lower::desugar_to_option_calls(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_offtype_testing_asserts(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = desugar_heap_branches(body, &self.variant_layouts) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_scalar_tuple_literal_match(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_scalar_guard_match(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_tuple_variant_match(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) =
             crate::lower::desugar_tuple_variant_match_deep(body, &self.variant_layouts)
         {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_tuple_empty_list_match(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_fan_block(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_record_destructure_match(body) {
-            return self.lower_body_into(&rewritten);
+            return Some(rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_list_pattern_match(body) {
+            return Some(rewritten);
+        }
+        None
+    }
+
+    pub(crate) fn lower_body_into(&mut self, body: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+        // The ordered desugar ladder (each pass's rationale documented at its
+        // rung): the FIRST firing pass wins and the body re-enters, so later
+        // passes always see the rewritten result.
+        if let Some(rewritten) = self.first_body_desugar(body) {
             return self.lower_body_into(&rewritten);
         }
         // DEBUG (env `DBG_LOWER_FN`): the FULLY-desugared body this function actually lowers — the
@@ -433,24 +462,38 @@ impl LowerCtx {
         // a heap reassignment keeps the existing branch-arm DEFER below. The local
         // is the var's own already-defined slot, so SetLocal carries no new heap
         // ownership (cert-neutral, like the loop-carried SetLocal above).
-        if self.unit_arm_depth > 0 && !is_heap_ty(&value.ty) {
-            if let Some(result) = self.lower_stmt_assign_unit_scalar(var, value) {
+        if self.unit_arm_depth > 0 {
+            if let Some(result) = self.lower_stmt_assign_unit_arm(var, value) {
                 return result;
             }
         }
-        // A HEAP reassignment inside an EXECUTING unit arm (`if let v = x {
-        // out = int.to_string(v) }` — the statement if-let / variant-match
-        // arms): the var already owns a stable scope-tracked heap local, so
-        // the write is drop-old + `SetLocal` IN PLACE — the same rebind unit
-        // the loop-carried slot proves (per-arm the `i` of the fresh value
-        // and the `d` of the old one balance; the slot's scope-end drop
-        // frees whichever object the taken arm left). A borrowed-param slot
-        // is excluded (its drop-old would release the caller's reference).
-        if self.unit_arm_depth > 0 && is_heap_ty(&value.ty) {
-            if let Some(result) = self.lower_stmt_assign_unit_heap(var, value) {
-                return result;
-            }
+        self.lower_stmt_assign_fallback(var, value)
+    }
+
+    /// The unit-arm reassignment router of [`Self::lower_stmt_assign`]: a
+    /// SCALAR write mutates the var's stable local in place; a HEAP write
+    /// (`if let v = x { out = int.to_string(v) }` — the statement if-let /
+    /// variant-match arms) is drop-old + `SetLocal` IN PLACE — the same rebind
+    /// unit the loop-carried slot proves (per-arm the `i` of the fresh value
+    /// and the `d` of the old one balance; the slot's scope-end drop frees
+    /// whichever object the taken arm left). A borrowed-param slot is excluded
+    /// (its drop-old would release the caller's reference). `None` = the shape
+    /// declines; the caller falls through to the frame defer / plain rebind.
+    fn lower_stmt_assign_unit_arm(
+        &mut self,
+        var: VarId,
+        value: &IrExpr,
+    ) -> Option<Result<(), LowerError>> {
+        if is_heap_ty(&value.ty) {
+            self.lower_stmt_assign_unit_heap(var, value)
+        } else {
+            self.lower_stmt_assign_unit_scalar(var, value)
         }
+    }
+
+    /// The tail of [`Self::lower_stmt_assign`]: the control-flow-frame HEAP
+    /// defer (or its strict-mode refusal), else the plain rebind.
+    fn lower_stmt_assign_fallback(&mut self, var: VarId, value: &IrExpr) -> Result<(), LowerError> {
         if self.in_frame > 0 && is_heap_ty(&value.ty) {
             // STRICT value mode: this defer DROPS the write. In an EXECUTING frame
             // (a `try_lower_unit_if` arm) that is a silent wrong value on the

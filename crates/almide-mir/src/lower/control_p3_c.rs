@@ -155,12 +155,31 @@ impl LowerCtx {
         ty: &Ty,
         depth: u32,
     ) -> Option<ValueId> {
-        use almide_lang::types::constructor::TypeConstructorId as TC;
         const MAX_EQ_DEPTH: u32 = 8;
         if depth > MAX_EQ_DEPTH {
             return None;
         }
-        // Scalars — the slot IS the value.
+        // The three tiers fall through IN ORDER (scalar/module call, then the
+        // custom-variant routes, then the container recursion); an OUTER `Some`
+        // is that tier's final verdict — `Some(None)` is an honest wall, not a
+        // fall-through.
+        if let Some(r) = self.scalar_or_module_slot_eq(lv, rv, ty) {
+            return r;
+        }
+        if let Some(r) = self.variant_slot_eq(lv, rv, ty, depth) {
+            return r;
+        }
+        self.container_slot_eq(lv, rv, ty, depth)
+    }
+
+    /// Tier 1 of [`Self::typed_slot_eq`]: scalars (the slot IS the value) and
+    /// the String/Value/List borrowed-handle module eq call. Verbatim.
+    fn scalar_or_module_slot_eq(
+        &mut self,
+        lv: ValueId,
+        rv: ValueId,
+        ty: &Ty,
+    ) -> Option<Option<ValueId>> {
         if Self::float_operand_ty(ty) {
             let dst = self.fresh_value();
             self.ops.push(Op::Prim {
@@ -168,25 +187,41 @@ impl LowerCtx {
                 dst: Some(dst),
                 args: vec![lv, rv],
             });
-            return Some(dst);
+            return Some(Some(dst));
         }
         if Self::int_eq_operand_ty(ty) {
             let dst = self.fresh_value();
             self.ops.push(Op::IntBinOp { dst, op: IntOp::Eq, a: lv, b: rv });
-            return Some(dst);
+            return Some(Some(dst));
         }
-        // String / Value / List[T] — the borrowed-handle module eq call.
-        let module_eq: Option<&str> = Self::module_eq_call_name(ty);
-        if let Some(name) = module_eq {
+        if let Some(name) = Self::module_eq_call_name(ty) {
+            let Ok(result) = repr_of(&Ty::Bool) else {
+                return Some(None);
+            };
             let dst = self.fresh_value();
             self.ops.push(Op::CallFn {
                 dst: Some(dst),
                 name: name.to_string(),
                 args: vec![CallArg::Handle(lv), CallArg::Handle(rv)],
-                result: Some(repr_of(&Ty::Bool).ok()?),
+                result: Some(result),
             });
-            return Some(dst);
+            return Some(Some(dst));
         }
+        None
+    }
+
+    /// Tier 2 of [`Self::typed_slot_eq`]: the custom-variant routes — a
+    /// `List[<custom variant>]` via its synthesized loop helper, and a custom
+    /// VARIANT via its helper (recursive) or the proven inline tag-dispatch
+    /// chain. Verbatim.
+    fn variant_slot_eq(
+        &mut self,
+        lv: ValueId,
+        rv: ValueId,
+        ty: &Ty,
+        depth: u32,
+    ) -> Option<Option<ValueId>> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
         // A `List[<custom variant>]` — the synthesized loop helper (the element
         // eq is the variant helper; a non-variant element stayed in the module
         // table above). Generated once per parent fn, called at the site.
@@ -200,10 +235,10 @@ impl LowerCtx {
                             instantiate_variant_layout(&elem_name, &elem_layout, &es[0]);
                         if self.ensure_list_eq_helper(&elem_key, &elem_inst) {
                             let name = self.list_eq_helper_name(&elem_key);
-                            return Some(self.emit_eq_helper_call(name, lv, rv));
+                            return Some(Some(self.emit_eq_helper_call(name, lv, rv)));
                         }
                     }
-                    return None;
+                    return Some(None);
                 }
             }
         }
@@ -221,14 +256,29 @@ impl LowerCtx {
                 if self.synth_eq_types.contains(&key) || self.variant_needs_eq_helper(&tyname) {
                     if self.ensure_variant_eq_helper(&key, &layout) {
                         let name = self.eq_helper_name(&key);
-                        return Some(self.emit_eq_helper_call(name, lv, rv));
+                        return Some(Some(self.emit_eq_helper_call(name, lv, rv)));
                     }
-                    return None;
+                    return Some(None);
                 }
-                return self.variant_eq_from_handles(lv, rv, &layout, depth);
+                return Some(self.variant_eq_from_handles(lv, rv, &layout, depth));
             }
         }
-        // Option[T] — the scalar masked compare or the heap conditional compare.
+        None
+    }
+
+    /// Tier 3 of [`Self::typed_slot_eq`]: the container recursion — Option
+    /// (scalar masked / heap conditional), Result (the proven masked core for
+    /// the (scalar Ok, String Err) layout; the general both-Ok/both-Err
+    /// conditional recursion otherwise), and tuple/record per-slot AND-fold.
+    /// Verbatim.
+    fn container_slot_eq(
+        &mut self,
+        lv: ValueId,
+        rv: ValueId,
+        ty: &Ty,
+        depth: u32,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
         if let Ty::Applied(TC::Option, oa) = ty {
             if oa.len() == 1 {
                 if !is_heap_ty(&oa[0]) {
@@ -237,8 +287,6 @@ impl LowerCtx {
                 return self.option_heap_eq_from_handles(lv, rv, &oa[0], depth);
             }
         }
-        // Result[T, E] — the proven masked core for the (scalar Ok, String Err) layout;
-        // the general both-Ok/both-Err conditional recursion for every other payload pair.
         if let Ty::Applied(TC::Result, ra) = ty {
             if ra.len() == 2 {
                 if !is_heap_ty(&ra[0]) && matches!(ra[1], Ty::String) {

@@ -561,51 +561,23 @@ fn display_leaf_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
 /// byte. Nested lists are walled deliberately: v1 does not yet materialize a `List[List[_]]` literal
 /// (the inner handles are never stored), so a nested element formatter would read garbage slots;
 /// walling is the sound choice. (Map/Set/Option/Result top-level `to_string` stay unlinked = walled.)
-fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
+/// `${Set[T]}` renders v0's `set.from_list([<elems>])` (insertion order).
+/// Self-hosted for Int/String; any other element routes to the UNLINKED
+/// `set.to_string_x` (walls cleanly).
+fn interp_set_to_string(elem: &Ty) -> (&'static str, &'static str) {
+    match elem {
+        Ty::Int => ("set", "to_string"),
+        Ty::String => ("set", "to_string_s"),
+        _ => ("set", "to_string_x"),
+    }
+}
+
+/// `${Map[K, V]}` display routing per (key, value) pairing — v0's
+/// `["k": v, …]` (insertion order; empty → `[:]`). An unsupported pairing
+/// routes to the UNLINKED `map.to_string_x` (walls cleanly).
+fn interp_map_to_string(k: &Ty, v: &Ty) -> (&'static str, &'static str) {
     use almide_lang::types::constructor::TypeConstructorId;
-    Some(match ty {
-        // SIZED ints display like Int: a v1 scalar value is a uniform i64 (widened at
-        // the literal/load), so int.to_string prints the exact stored value including
-        // negative Int8/16/32. UInt64 is EXCLUDED (above i64::MAX would misprint).
-        Ty::Int
-        | Ty::Int8
-        | Ty::Int16
-        | Ty::Int32
-        | Ty::Int64
-        | Ty::UInt8
-        | Ty::UInt16
-        | Ty::UInt32 => ("int", "to_string"),
-        Ty::Bool => ("bool", "to_string"),
-        // Scalar `${f}` interp uses v0's Display format, which DROPS the `.0` for integer-valued
-        // floats (`3.0`->`3`, `100.0`->`100`) — exactly the compound formatter
-        // `float.to_string_compound`, NOT `float.to_string` (which keeps `.0` for an EXPLICIT
-        // `float.to_string(x)` call). Same drop-.0 Display a Float record/list field already uses.
-        Ty::Float => ("float", "to_string_compound"),
-        // Decomposed (#781, cog 121): the List/Option/Result routings are verbatim
-        // text moves into interp_{list,option,result}_to_string.
-        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
-            interp_list_to_string(&args[0])
-        }
-        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
-            interp_option_to_string(&args[0])
-        }
-        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
-            interp_result_to_string(&args[0], &args[1])
-        }
-        // `${Set[T]}` renders v0's `set.from_list([<elems>])` (insertion order). Self-hosted for Int;
-        // any other element routes to the UNLINKED `set.to_string_x` (walls cleanly).
-        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => match &args[0] {
-            Ty::Int => ("set", "to_string"),
-            Ty::String => ("set", "to_string_s"),
-            _ => ("set", "to_string_x"),
-        },
-        // Map top-level `to_string` is not self-hosted → the synthesized call is UNLINKED, so the
-        // using function walls at render (never a wrong byte). Keep routing it so the gate accounts the
-        // same call name the lowering emits (mir == ir), exactly as before.
-        // `${Map[K, V]}` renders v0's `["k": v, …]` (insertion order; empty → `[:]`). Self-hosted for
-        // (String, Int); any other pairing routes to the UNLINKED `map.to_string_x` (walls cleanly).
-        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
-            match (&args[0], &args[1]) {
+    match (k, v) {
                 (Ty::String, Ty::Int) => ("map", "to_string"),
                 // `${Map[String, String]}` — quoted keys AND values (stdlib/map_to_string.almd).
                 (Ty::String, Ty::String) => ("map", "to_string_ss"),
@@ -639,25 +611,14 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                 }
                 _ => ("map", "to_string_x"),
             }
-        }
-        // Tuple / Record / variant / any other type has no self-hosted `to_string` yet.
-        // Route to an UNLINKED `to_string` so the interp DESUGARS to a real CallFn that the
-        // render wall REJECTS (the function walls cleanly) — NEVER leave it Opaque, which
-        // makes `println("${tuple}")` emit NOTHING (a silent empty miscompile). This is the
-        // nested-`List` lesson (above) applied UNIFORMLY: no interp Expr part may fall to
-        // Opaque. NEVER registered, so every such function walls all-or-nothing.
-        _ => ("compound", "to_string"),
-    })
 }
 
-/// `${List[T]}` interp routing per element type. Verbatim text move (#781).
-fn interp_list_to_string(inner: &Ty) -> (&'static str, &'static str) {
+/// The NESTED-container element rows of [`interp_list_to_string`]
+/// (`List[List[…]]` / `List[Option[…]]` / `List[Result[…]]`), verbatim; an
+/// unsupported nesting falls to the same UNLINKED `to_string_x` wall.
+fn interp_list_nested_elem(inner: &Ty) -> (&'static str, &'static str) {
     use almide_lang::types::constructor::TypeConstructorId;
     match inner {
-        Ty::Int => ("list", "to_string"),
-        Ty::Float => ("list", "to_string_f"),
-        Ty::Bool => ("list", "to_string_b"),
-        Ty::String => ("list", "to_string_s"),
         // A NESTED `List[List[Int/Float]]` renders through the composed self-host
         // (each row via the flat to_string, joined in brackets — byte-matches v0's Debug).
         Ty::Applied(TypeConstructorId::List, inner)
@@ -693,6 +654,15 @@ fn interp_list_to_string(inner: &Ty) -> (&'static str, &'static str) {
         {
             ("list", "to_string_lr")
         }
+        _ => ("list", "to_string_x"),
+    }
+}
+
+/// The MAP element rows of [`interp_list_to_string`] (`List[Map[…]]`),
+/// verbatim; an unsupported pairing falls to the same UNLINKED wall.
+fn interp_list_map_elem(inner: &Ty) -> (&'static str, &'static str) {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match inner {
         // `${List[Map[String, List[Option[Int]]]]}` — compound_repr_interp's `deep`,
         // composed from the per-element mlo map display (stdlib/map_mlo.almd).
         Ty::Applied(TypeConstructorId::Map, kv)
@@ -713,6 +683,77 @@ fn interp_list_to_string(inner: &Ty) -> (&'static str, &'static str) {
         {
             ("list", "to_string_lmh")
         }
+        _ => ("list", "to_string_x"),
+    }
+}
+
+fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    Some(match ty {
+        // SIZED ints display like Int: a v1 scalar value is a uniform i64 (widened at
+        // the literal/load), so int.to_string prints the exact stored value including
+        // negative Int8/16/32. UInt64 is EXCLUDED (above i64::MAX would misprint).
+        Ty::Int
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::Int64
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32 => ("int", "to_string"),
+        Ty::Bool => ("bool", "to_string"),
+        // Scalar `${f}` interp uses v0's Display format, which DROPS the `.0` for integer-valued
+        // floats (`3.0`->`3`, `100.0`->`100`) — exactly the compound formatter
+        // `float.to_string_compound`, NOT `float.to_string` (which keeps `.0` for an EXPLICIT
+        // `float.to_string(x)` call). Same drop-.0 Display a Float record/list field already uses.
+        Ty::Float => ("float", "to_string_compound"),
+        // Decomposed (#781, cog 121): the List/Option/Result routings are verbatim
+        // text moves into interp_{list,option,result}_to_string.
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            interp_list_to_string(&args[0])
+        }
+        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
+            interp_option_to_string(&args[0])
+        }
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+            interp_result_to_string(&args[0], &args[1])
+        }
+        // `${Set[T]}` renders v0's `set.from_list([<elems>])` (insertion order). Self-hosted for Int;
+        // any other element routes to the UNLINKED `set.to_string_x` (walls cleanly).
+        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => {
+            interp_set_to_string(&args[0])
+        }
+        // Map top-level `to_string` is not self-hosted → the synthesized call is UNLINKED, so the
+        // using function walls at render (never a wrong byte). Keep routing it so the gate accounts the
+        // same call name the lowering emits (mir == ir), exactly as before.
+        // `${Map[K, V]}` renders v0's `["k": v, …]` (insertion order; empty → `[:]`). Self-hosted for
+        // (String, Int); any other pairing routes to the UNLINKED `map.to_string_x` (walls cleanly).
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+            interp_map_to_string(&args[0], &args[1])
+        }
+        // Tuple / Record / variant / any other type has no self-hosted `to_string` yet.
+        // Route to an UNLINKED `to_string` so the interp DESUGARS to a real CallFn that the
+        // render wall REJECTS (the function walls cleanly) — NEVER leave it Opaque, which
+        // makes `println("${tuple}")` emit NOTHING (a silent empty miscompile). This is the
+        // nested-`List` lesson (above) applied UNIFORMLY: no interp Expr part may fall to
+        // Opaque. NEVER registered, so every such function walls all-or-nothing.
+        _ => ("compound", "to_string"),
+    })
+}
+
+/// `${List[T]}` interp routing per element type. Verbatim text move (#781).
+fn interp_list_to_string(inner: &Ty) -> (&'static str, &'static str) {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match inner {
+        Ty::Int => ("list", "to_string"),
+        Ty::Float => ("list", "to_string_f"),
+        Ty::Bool => ("list", "to_string_b"),
+        Ty::String => ("list", "to_string_s"),
+        Ty::Applied(
+            TypeConstructorId::List | TypeConstructorId::Option | TypeConstructorId::Result,
+            _,
+        ) => interp_list_nested_elem(inner),
+        Ty::Applied(TypeConstructorId::Map, _) => interp_list_map_elem(inner),
         // `${List[(String, Int)]}` → `[("é", 2), ("a", 1)]` — string.run_length_encode's
         // pair list (stdlib/list_to_string_lsi.almd).
         Ty::Tuple(ts)
