@@ -340,64 +340,10 @@ impl LowerCtx {
     /// structural-vs-declared field-order mismatch (the soundness crux: a structural literal's field
     /// order need not equal the declared order, so freeing it via the declared `$__drop_<R>` would
     /// corrupt). `forced_elem = None` keeps the original structural-derived behavior.
-    pub(crate) fn try_lower_record_list_literal_as(
-        &mut self,
-        value: &IrExpr,
-        forced_elem: Option<&Ty>,
-    ) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
-        use almide_lang::types::constructor::TypeConstructorId;
-        let IrExprKind::List { elements } = &value.kind else { return None };
-        if elements.is_empty() {
-            return None;
-        }
-        let elem_ty = match forced_elem {
-            Some(t) => t.clone(),
-            None => match &value.ty {
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
-                _ => return None,
-            },
-        };
-        // The element's drop kind (`classify_list_elem_drop`): a recursive-drop record
-        // (`$__drop_list_<R>`), a `(String,String)` tuple (`Op::DropListStrStr` — the
-        // map.entries / `[(k,v), …]` literal shape), OR an Option/Result CTOR element
-        // (`[some(1), none]`, `[ok(1), err("x")]` — the collect-test shapes): a Flat class
-        // (scalar payload — the per-element `rc_dec` of `DropListStr` is exact) or a LenLoop
-        // class (owned handle slots — the generated `$__drop_list_lenlist`). Anything else →
-        // `None` (the caller keeps the scalar / wall path).
-        let Some(kind) = self.classify_list_elem_drop(&elem_ty) else {
-            return None;
-        };
-        // Lower each element to an OWNED handle BEFORE the alloc (a field expr that allocates
-        // must not interleave with the store sequence).
-        let mut objs: Vec<ValueId> = Vec::with_capacity(elements.len());
-        for e in elements {
-            if let Some(obj) = self.lower_record_list_element(e, forced_elem, &elem_ty, kind.clone())? {
-                objs.push(obj);
-            }
-        }
-        let n = elements.len();
-        let len = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
-        let dst = self.fresh_value();
-        self.ops.push(Op::Alloc {
-            dst,
-            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-            init: crate::Init::DynList { len },
-        });
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
-        for (i, obj) in objs.into_iter().enumerate() {
-            let off = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(i) as i64 });
-            let addr = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
-            let handle = self.fresh_value();
-            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![obj] });
-            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, handle] });
-            self.ops.push(Op::Consume { v: obj });
-            self.live_heap_handles.retain(|x| *x != obj);
-        }
+    /// Register the freshly-built list's drop route for its element kind —
+    /// the `variant_drop_handles` name (or set membership) `drop_op_for`
+    /// dispatches on at scope end. Arms verbatim.
+    fn register_list_drop_kind(&mut self, dst: ValueId, kind: ListElemDrop) {
         match kind {
             ListElemDrop::Record(rname) => {
                 self.variant_drop_handles.insert(dst, format!("list_{rname}"));
@@ -471,6 +417,67 @@ impl LowerCtx {
                 self.variant_drop_handles.insert(dst, "list_str_clo".to_string());
             }
         }
+    }
+
+    pub(crate) fn try_lower_record_list_literal_as(
+        &mut self,
+        value: &IrExpr,
+        forced_elem: Option<&Ty>,
+    ) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        use almide_lang::types::constructor::TypeConstructorId;
+        let IrExprKind::List { elements } = &value.kind else { return None };
+        if elements.is_empty() {
+            return None;
+        }
+        let elem_ty = match forced_elem {
+            Some(t) => t.clone(),
+            None => match &value.ty {
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+                _ => return None,
+            },
+        };
+        // The element's drop kind (`classify_list_elem_drop`): a recursive-drop record
+        // (`$__drop_list_<R>`), a `(String,String)` tuple (`Op::DropListStrStr` — the
+        // map.entries / `[(k,v), …]` literal shape), OR an Option/Result CTOR element
+        // (`[some(1), none]`, `[ok(1), err("x")]` — the collect-test shapes): a Flat class
+        // (scalar payload — the per-element `rc_dec` of `DropListStr` is exact) or a LenLoop
+        // class (owned handle slots — the generated `$__drop_list_lenlist`). Anything else →
+        // `None` (the caller keeps the scalar / wall path).
+        let Some(kind) = self.classify_list_elem_drop(&elem_ty) else {
+            return None;
+        };
+        // Lower each element to an OWNED handle BEFORE the alloc (a field expr that allocates
+        // must not interleave with the store sequence).
+        let mut objs: Vec<ValueId> = Vec::with_capacity(elements.len());
+        for e in elements {
+            if let Some(obj) = self.lower_record_list_element(e, forced_elem, &elem_ty, kind.clone())? {
+                objs.push(obj);
+            }
+        }
+        let n = elements.len();
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        for (i, obj) in objs.into_iter().enumerate() {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(i) as i64 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            let handle = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![obj] });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, handle] });
+            self.ops.push(Op::Consume { v: obj });
+            self.live_heap_handles.retain(|x| *x != obj);
+        }
+        self.register_list_drop_kind(dst, kind);
         // The literal is a REAL, POPULATED nested-ownership block (every element built
         // and moved in above) — admit the element-precise `xs[i]` borrow over the bound
         // var (`try_lower_heap_field_borrow`'s materialized_lists gate; the fan.settle
@@ -531,28 +538,13 @@ impl LowerCtx {
     /// `a` then `m` = the balanced shape the checker already accepts for a List[String]
     /// element duplicated from another container). `base` is never consumed, so it remains
     /// the sole owner of its own slots (dropped once at its own scope end).
-    pub(crate) fn try_lower_spread_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
-        let IrExprKind::SpreadRecord { base, fields } = &value.kind else {
-            return None;
-        };
-        // The CANONICAL declaration-ordered (name, concrete-type) field list. The result's
-        // type carries the instantiated generic args, so a `Pair[Int,String]` field `first: A`
-        // resolves to `Int`. An unresolvable type ⇒ `None` ⇒ wall.
-        let Some((names, tys)) = self.aggregate_field_tys(&value.ty) else {
-            crate::trace::trace("ALMIDE_DBG_ELEM", || {
-                format!("[spread] no aggregate layout for ty {:?}", value.ty)
-            });
-            return None;
-        };
-        let n = tys.len();
-        if n == 0 || names.len() != n {
-            return None;
-        }
-        // The base must be a TRACKED, MATERIALIZED aggregate var — its slots are real, so a
-        // copy reads the right value (a deferred Opaque base would copy garbage). Resolve its
-        // block handle.
-        let base_block = match &base.kind {
+    /// Resolve the spread BASE to its block handle: a TRACKED, MATERIALIZED
+    /// aggregate var (a deferred Opaque base would copy garbage), or a
+    /// borrowed heap FIELD (`{ ...v._style, width: w }` — the container
+    /// keeps ownership; the copy loop Dups each heap slot, so the borrowed
+    /// base is read-only and stays valid through construction).
+    fn spread_base_block(&mut self, base: &IrExpr) -> Option<ValueId> {
+        let resolved = match &base.kind {
             IrExprKind::Var { id } if is_heap_ty(&base.ty) => {
                 let src = self.value_or_global(*id).ok()?;
                 if !self.materialized_aggregates.contains(&src) {
@@ -583,7 +575,29 @@ impl LowerCtx {
                 });
                 return None;
             }
+                };
+        Some(resolved)
+    }
+
+    pub(crate) fn try_lower_spread_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        let IrExprKind::SpreadRecord { base, fields } = &value.kind else {
+            return None;
         };
+        // The CANONICAL declaration-ordered (name, concrete-type) field list. The result's
+        // type carries the instantiated generic args, so a `Pair[Int,String]` field `first: A`
+        // resolves to `Int`. An unresolvable type ⇒ `None` ⇒ wall.
+        let Some((names, tys)) = self.aggregate_field_tys(&value.ty) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || {
+                format!("[spread] no aggregate layout for ty {:?}", value.ty)
+            });
+            return None;
+        };
+        let n = tys.len();
+        if n == 0 || names.len() != n {
+            return None;
+        }
+        let base_block = self.spread_base_block(base)?;
         // Per declared slot: the override expr (if the literal supplies it) or `None` (copy
         // from base). A field NOT in the declaration is a type error the checker rejects
         // upstream, so a supplied field always maps to a declared index.
