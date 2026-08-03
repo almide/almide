@@ -11,6 +11,7 @@ mod declarations;
 mod diagnostics;
 mod entry;
 mod expressions;
+mod fan;
 pub mod hints;
 mod helpers;
 mod patterns;

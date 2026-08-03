@@ -1,19 +1,21 @@
 /// Render an expression.
 ///
-/// Split into four EXHAUSTIVE groups by shape — leaf, wrapper (a fixed prefix or
-/// suffix around one child), infix, and the block-shaped forms that already have
-/// their own helpers. Each group returns `bool` (handled / not mine) instead of
-/// `Option`, so the compiler still cannot warn about a dropped arm; instead the
-/// `debug_assert` below fails loudly the first time a NEW `ExprKind` is added
-/// without a rendering, which is the property the original single match had by
-/// exhaustiveness. Splitting it any other way (a wildcard `_` in each group)
-/// would have silently shrunk the formatter's coverage — the one thing this
-/// function must not do, since a missing arm means source that fmt drops.
+/// Split into five EXHAUSTIVE groups by shape — leaf, wrapper (a fixed prefix or
+/// suffix around one child), infix, the value-shaped compounds, and the
+/// block-shaped forms that already have their own helpers. Each group returns
+/// `bool` (handled / not mine) instead of `Option`, so the compiler still
+/// cannot warn about a dropped arm; instead the `debug_assert` below fails
+/// loudly the first time a NEW `ExprKind` is added without a rendering, which
+/// is the property the original single match had by exhaustiveness. Splitting
+/// it any other way (a wildcard `_` in each group) would have silently shrunk
+/// the formatter's coverage — the one thing this function must not do, since a
+/// missing arm means source that fmt drops.
 fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
     let handled = fmt_expr_leaf(out, expr)
         || fmt_expr_wrapper(out, expr, depth)
         || fmt_expr_infix(out, expr, depth)
-        || fmt_expr_compound(out, expr, depth);
+        || fmt_expr_compound(out, expr, depth)
+        || fmt_expr_blocklike(out, expr, depth);
     debug_assert!(handled, "fmt_expr: no rendering for {:?}", std::mem::discriminant(&expr.kind));
     if !handled {
         // Release builds must still emit SOMETHING parseable rather than silently
@@ -26,11 +28,7 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
 fn fmt_expr_leaf(out: &mut String, expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Int { raw, .. } => out.push_str(raw),
-        ExprKind::Float { value, .. } => {
-            let s = format!("{value}");
-            out.push_str(&s);
-            if !s.contains('.') { out.push_str(".0"); }
-        }
+        ExprKind::Float { value, .. } => fmt_expr_float(out, *value),
         ExprKind::String { value, .. } => fmt_expr_string(out, value),
         ExprKind::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
         ExprKind::Unit => out.push_str("()"),
@@ -41,16 +39,26 @@ fn fmt_expr_leaf(out: &mut String, expr: &Expr) -> bool {
         ExprKind::Break => out.push_str("break"),
         ExprKind::Continue => out.push_str("continue"),
         ExprKind::Ident { name, .. } | ExprKind::TypeName { name, .. } => out.push_str(name),
-        ExprKind::Todo { message, .. } => {
-            if message.is_empty() {
-                out.push_str("todo");
-            } else {
-                w!(out, "todo(\"{}\")", crate::fmt::escape_dquoted(message));
-            }
-        }
+        ExprKind::Todo { message, .. } => fmt_expr_todo(out, message),
         _ => return false,
     }
     true
+}
+
+/// A float literal always prints with a decimal point (`1.0`, not `1`) so it
+/// re-parses as a Float.
+fn fmt_expr_float(out: &mut String, value: f64) {
+    let s = format!("{value}");
+    out.push_str(&s);
+    if !s.contains('.') { out.push_str(".0"); }
+}
+
+fn fmt_expr_todo(out: &mut String, message: &str) {
+    if message.is_empty() {
+        out.push_str("todo");
+    } else {
+        w!(out, "todo(\"{}\")", crate::fmt::escape_dquoted(message));
+    }
 }
 
 /// One child wrapped in a fixed prefix and/or suffix.
@@ -121,8 +129,10 @@ fn fmt_expr_infix(out: &mut String, expr: &Expr, depth: usize) -> bool {
     true
 }
 
-/// Collections, interpolation, and the block-shaped forms — each already owns a
-/// helper that handles its own line breaking.
+/// Collections, interpolation, calls and lambdas — the value-shaped compound
+/// forms. (The statement-shaped forms are `fmt_expr_blocklike`'s group; the
+/// two together are the original compound group, split along the same
+/// shape-axis as leaf/wrapper/infix.)
 fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
     match &expr.kind {
         ExprKind::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
@@ -136,6 +146,16 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::Record { .. } => fmt_expr_record(out, expr, depth),
         ExprKind::SpreadRecord { .. } => fmt_expr_spread_record(out, expr, depth),
         ExprKind::Call { .. } => fmt_expr_call(out, expr, depth),
+        ExprKind::Lambda { .. } => fmt_expr_lambda(out, expr, depth),
+        ExprKind::TypeAscription { .. } => fmt_expr_type_ascription(out, expr, depth),
+        _ => return false,
+    }
+    true
+}
+
+/// The block-shaped / control-flow forms — each helper owns its line breaking.
+fn fmt_expr_blocklike(out: &mut String, expr: &Expr, depth: usize) -> bool {
+    match &expr.kind {
         ExprKind::If { .. } => fmt_expr_if(out, expr, depth),
         ExprKind::IfLet { .. } => fmt_expr_iflet(out, expr, depth),
         ExprKind::Match { .. } => fmt_expr_match(out, expr, depth),
@@ -148,8 +168,6 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::FanTimeout { .. } => fmt_expr_fan_timeout(out, expr, depth),
         ExprKind::ForIn { .. } => fmt_expr_forin(out, expr, depth),
         ExprKind::While { .. } => fmt_expr_while(out, expr, depth),
-        ExprKind::Lambda { .. } => fmt_expr_lambda(out, expr, depth),
-        ExprKind::TypeAscription { .. } => fmt_expr_type_ascription(out, expr, depth),
         _ => return false,
     }
     true
@@ -208,34 +226,8 @@ fn fmt_expr_spread_record(out: &mut String, expr: &Expr, depth: usize) {
 
 fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Call { callee, args, type_args, named_args, .. } = &expr.kind else { unreachable!() };
-    // Wave 1 block forms: the parser synthesizes `fan.__any_block([() => …])`
-    // internally — RE-SUGAR to the surface spelling, or fmt would rewrite the
-    // user's block into an internal name that does not parse.
-    if let ExprKind::Member { object, field } = &callee.kind {
-        if let ExprKind::Ident { name, .. } = &object.kind {
-            if name.as_str() == "fan"
-                && matches!(field.as_str(), "__any_block" | "__settle_block")
-            {
-                if let [arg] = &args[..] {
-                    if let ExprKind::List { elements } = &arg.kind {
-                        let head = if field.as_str() == "__any_block" { "any" } else { "settle" };
-                        w!(out, "fan.{head} {{\n");
-                        for el in elements {
-                            let body: &Expr = match &el.kind {
-                                ExprKind::Lambda { params, body } if params.is_empty() => body,
-                                _ => el,
-                            };
-                            out.push_str(&ind(depth + 1));
-                            fmt_expr(out, body, depth + 1);
-                            out.push('\n');
-                        }
-                        out.push_str(&ind(depth));
-                        out.push('}');
-                        return;
-                    }
-                }
-            }
-        }
+    if try_fmt_fan_block_resugar(out, callee, args, depth) {
+        return;
     }
     fmt_expr(out, callee, depth);
     if let Some(ta) = type_args { out.push('['); comma_sep(out, ta, |out, t| fmt_type(out, t, depth)); out.push(']'); }
@@ -249,6 +241,33 @@ fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
         });
     }
     out.push(')');
+}
+
+/// Wave 1 block forms: the parser synthesizes `fan.__any_block([() => …])`
+/// internally — RE-SUGAR to the surface spelling, or fmt would rewrite the
+/// user's block into an internal name that does not parse. True = handled.
+fn try_fmt_fan_block_resugar(out: &mut String, callee: &Expr, args: &[Expr], depth: usize) -> bool {
+    let ExprKind::Member { object, field } = &callee.kind else { return false };
+    let ExprKind::Ident { name, .. } = &object.kind else { return false };
+    if name.as_str() != "fan" || !matches!(field.as_str(), "__any_block" | "__settle_block") {
+        return false;
+    }
+    let [arg] = args else { return false };
+    let ExprKind::List { elements } = &arg.kind else { return false };
+    let head = if field.as_str() == "__any_block" { "any" } else { "settle" };
+    w!(out, "fan.{head} {{\n");
+    for el in elements {
+        let body: &Expr = match &el.kind {
+            ExprKind::Lambda { params, body } if params.is_empty() => body,
+            _ => el,
+        };
+        out.push_str(&ind(depth + 1));
+        fmt_expr(out, body, depth + 1);
+        out.push('\n');
+    }
+    out.push_str(&ind(depth));
+    out.push('}');
+    true
 }
 
 fn fmt_expr_if(out: &mut String, expr: &Expr, depth: usize) {

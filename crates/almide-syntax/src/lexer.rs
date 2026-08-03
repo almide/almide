@@ -83,101 +83,106 @@ impl Lexer {
             src
         };
         let chars: Vec<char> = src.chars().collect();
-        let mut pos = 0;
-        let mut line = 1;
-        let mut col = 1;
-
-        while pos < chars.len() {
-            let ch = chars[pos];
-
-            // Skip whitespace (except newlines)
-            if ch == ' ' || ch == '\t' || ch == '\r' {
-                pos += 1; col += 1;
-                continue;
-            }
-
-            // Newline
-            if ch == '\n' {
-                tokens.push(Token { token_type: TokenType::Newline, value: String::new(), line, col, end_col: col + 1 });
-                pos += 1; line += 1; col = 1;
-                continue;
-            }
-
-            // Line comment
-            if ch == '/' && peek(&chars, pos + 1) == Some('/') {
-                let (tok, new_pos) = lex_line_comment(&chars, pos, line, col);
-                col += new_pos - pos;
-                pos = new_pos;
-                tokens.push(tok);
-                continue;
-            }
-
-            // Block comment /* ... */ — nestable, fully skipped (not a token)
-            if ch == '/' && peek(&chars, pos + 1) == Some('*') {
-                let result = skip_block_comment(&chars, pos, line, col);
-                pos = result.0; line = result.1; col = result.2;
-                continue;
-            }
-
-            // Raw string literal: r"..." or r"""..."""
-            if ch == 'r' && peek(&chars, pos + 1) == Some('"') {
-                let (tok, new_pos, new_line, new_col) = lex_raw_string(&chars, pos, line, col);
-                tokens.push(tok);
-                pos = new_pos; line = new_line; col = new_col;
-                continue;
-            }
-
-            // String literal (double or single quote)
-            if ch == '"' {
-                let (tok, new_pos, new_line, new_col) = lex_string(&chars, pos, line, col);
-                tokens.push(tok);
-                pos = new_pos; line = new_line; col = new_col;
-                continue;
-            }
-            if ch == '\'' {
-                let (tok, new_pos, new_line, new_col) = lex_single_quote_string(&chars, pos, line, col);
-                tokens.push(tok);
-                pos = new_pos; line = new_line; col = new_col;
-                continue;
-            }
-
-            // Number
-            if ch.is_ascii_digit() {
-                let (tok, new_pos) = lex_number(&chars, pos, line, col);
-                let len = new_pos - pos;
-                tokens.push(tok);
-                pos = new_pos; col += len;
-                continue;
-            }
-
-            // Backtick-escaped identifier: `protocol`, `type`, etc.
-            // Allows keywords to be used as identifiers (Swift-style).
-            if ch == '`' {
-                let (tok, new_pos) = lex_backtick_ident(&chars, pos, line, col);
-                let len = new_pos - pos;
-                tokens.push(tok);
-                pos = new_pos; col += len;
-                continue;
-            }
-
-            // Identifier or keyword (lone `_` falls through to operator lexing → Underscore)
-            if ch.is_ascii_alphabetic() || (ch == '_' && pos + 1 < chars.len() && (chars[pos + 1].is_ascii_alphanumeric() || chars[pos + 1] == '_')) {
-                let (tok, new_pos) = lex_ident(&chars, pos, line, col);
-                let len = new_pos - pos;
-                tokens.push(tok);
-                pos = new_pos; col += len;
-                continue;
-            }
-
+        let mut cur = Cursor { pos: 0, line: 1, col: 1 };
+        while cur.pos < chars.len() {
+            if lex_trivia(&chars, &mut cur, &mut tokens) { continue; }
+            if lex_string_or_number(&chars, &mut cur, &mut tokens) { continue; }
+            if lex_word(&chars, &mut cur, &mut tokens) { continue; }
             // Operators and delimiters
-            let (tok, len) = lex_operator(&chars, pos, line, col);
+            let (tok, len) = lex_operator(&chars, cur.pos, cur.line, cur.col);
             tokens.push(tok);
-            pos += len; col += len;
+            cur.pos += len; cur.col += len;
         }
 
-        tokens.push(Token { token_type: TokenType::EOF, value: String::new(), line, col, end_col: col });
+        tokens.push(Token { token_type: TokenType::EOF, value: String::new(), line: cur.line, col: cur.col, end_col: cur.col });
         tokens
     }
+}
+
+/// The tokenize loop's scan position (line/col are 1-based).
+struct Cursor { pos: usize, line: usize, col: usize }
+
+/// Whitespace, newlines and comments. True = consumed.
+fn lex_trivia(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool {
+    let ch = chars[cur.pos];
+    // Skip whitespace (except newlines)
+    if ch == ' ' || ch == '\t' || ch == '\r' {
+        cur.pos += 1; cur.col += 1;
+        return true;
+    }
+    if ch == '\n' {
+        tokens.push(Token { token_type: TokenType::Newline, value: String::new(), line: cur.line, col: cur.col, end_col: cur.col + 1 });
+        cur.pos += 1; cur.line += 1; cur.col = 1;
+        return true;
+    }
+    // Line comment
+    if ch == '/' && peek(chars, cur.pos + 1) == Some('/') {
+        let (tok, new_pos) = lex_line_comment(chars, cur.pos, cur.line, cur.col);
+        cur.col += new_pos - cur.pos;
+        cur.pos = new_pos;
+        tokens.push(tok);
+        return true;
+    }
+    // Block comment /* ... */ — nestable, fully skipped (not a token)
+    if ch == '/' && peek(chars, cur.pos + 1) == Some('*') {
+        let (p, l, c) = skip_block_comment(chars, cur.pos, cur.line, cur.col);
+        cur.pos = p; cur.line = l; cur.col = c;
+        return true;
+    }
+    false
+}
+
+/// String literals (raw / double / single quote) and numbers — the
+/// multi-line-capable lexers that manage their own line/col. True = consumed.
+fn lex_string_or_number(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool {
+    let ch = chars[cur.pos];
+    // Raw string literal: r"..." or r"""..."""
+    let string_lexer = if ch == 'r' && peek(chars, cur.pos + 1) == Some('"') {
+        Some(lex_raw_string as fn(&[char], usize, usize, usize) -> (Token, usize, usize, usize))
+    } else if ch == '"' {
+        Some(lex_string as fn(&[char], usize, usize, usize) -> (Token, usize, usize, usize))
+    } else if ch == '\'' {
+        Some(lex_single_quote_string as fn(&[char], usize, usize, usize) -> (Token, usize, usize, usize))
+    } else {
+        Option::None
+    };
+    if let Some(lexer) = string_lexer {
+        let (tok, new_pos, new_line, new_col) = lexer(chars, cur.pos, cur.line, cur.col);
+        tokens.push(tok);
+        cur.pos = new_pos; cur.line = new_line; cur.col = new_col;
+        return true;
+    }
+    if ch.is_ascii_digit() {
+        let (tok, new_pos) = lex_number(chars, cur.pos, cur.line, cur.col);
+        cur.col += new_pos - cur.pos;
+        cur.pos = new_pos;
+        tokens.push(tok);
+        return true;
+    }
+    false
+}
+
+/// Identifiers, keywords and backtick-escaped identifiers. True = consumed.
+fn lex_word(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool {
+    let ch = chars[cur.pos];
+    // Backtick-escaped identifier (`protocol`, `type`) — keywords usable as
+    // identifiers, Swift-style.
+    let is_backtick = ch == '`';
+    // Identifier or keyword (lone `_` falls through to operator lexing → Underscore)
+    let is_ident_start = ch.is_ascii_alphabetic()
+        || (ch == '_' && cur.pos + 1 < chars.len() && (chars[cur.pos + 1].is_ascii_alphanumeric() || chars[cur.pos + 1] == '_'));
+    if !is_backtick && !is_ident_start {
+        return false;
+    }
+    let (tok, new_pos) = if is_backtick {
+        lex_backtick_ident(chars, cur.pos, cur.line, cur.col)
+    } else {
+        lex_ident(chars, cur.pos, cur.line, cur.col)
+    };
+    cur.col += new_pos - cur.pos;
+    cur.pos = new_pos;
+    tokens.push(tok);
+    true
 }
 
 // ── Line comment lexing ─────────────────────────────────────────
@@ -453,33 +458,9 @@ fn lex_interpolation(chars: &[char], start: usize, buf: &mut String) -> usize {
     let mut depth = 1;
     while pos < chars.len() && depth > 0 {
         let c = chars[pos];
-        // `\"`-delimited nested string (outer-string escape habit):
-        // capture as a plain `"…"` literal, dropping the delimiter
-        // backslashes. Inside, escape pairs pass through untouched, and
-        // either `\"` or a bare `"` closes.
+        // `\"`-delimited nested string (outer-string escape habit).
         if c == '\\' && chars.get(pos + 1) == Some(&'"') {
-            buf.push('"');
-            pos += 2;
-            while pos < chars.len() {
-                if chars[pos] == '\\' && chars.get(pos + 1) == Some(&'"') {
-                    buf.push('"');
-                    pos += 2;
-                    break;
-                }
-                if chars[pos] == '"' {
-                    buf.push('"');
-                    pos += 1;
-                    break;
-                }
-                if chars[pos] == '\\' && pos + 1 < chars.len() {
-                    buf.push(chars[pos]);
-                    buf.push(chars[pos + 1]);
-                    pos += 2;
-                    continue;
-                }
-                buf.push(chars[pos]);
-                pos += 1;
-            }
+            pos = scan_habit_quoted_literal(chars, pos, buf);
             continue;
         }
         // Bare nested string literal: capture atomically, escapes intact,
@@ -494,6 +475,35 @@ fn lex_interpolation(chars: &[char], start: usize, buf: &mut String) -> usize {
         pos += 1;
     }
     buf.push('}');
+    pos
+}
+
+/// Capture a `\"`-delimited nested string (the outer-string escape habit —
+/// `\${x ?? \"d\"}` written as if still inside the outer quotes) as a plain
+/// `"…"` literal, dropping the delimiter backslashes; `chars[pos]` is the
+/// opening `\\`. Inside, escape pairs pass through untouched, and either
+/// `\"` or a bare `"` closes.
+fn scan_habit_quoted_literal(chars: &[char], pos: usize, buf: &mut String) -> usize {
+    buf.push('"');
+    let mut pos = pos + 2;
+    while pos < chars.len() {
+        if chars[pos] == '\\' && chars.get(pos + 1) == Some(&'"') {
+            buf.push('"');
+            return pos + 2;
+        }
+        if chars[pos] == '"' {
+            buf.push('"');
+            return pos + 1;
+        }
+        if chars[pos] == '\\' && pos + 1 < chars.len() {
+            buf.push(chars[pos]);
+            buf.push(chars[pos + 1]);
+            pos += 2;
+            continue;
+        }
+        buf.push(chars[pos]);
+        pos += 1;
+    }
     pos
 }
 
@@ -588,23 +598,9 @@ fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
         }
     }
 
-    let mut pos = start;
-    let mut is_float = false;
-    pos = scan_digit_run(chars, pos);
-
-    if pos < chars.len() && chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit() {
-        is_float = true;
-        pos += 1;
-        pos = scan_digit_run(chars, pos);
-    }
-
-    // Scientific notation
-    if pos < chars.len() && (chars[pos] == 'e' || chars[pos] == 'E') {
-        is_float = true;
-        pos += 1;
-        if pos < chars.len() && (chars[pos] == '+' || chars[pos] == '-') { pos += 1; }
-        while pos < chars.len() && chars[pos].is_ascii_digit() { pos += 1; }
-    }
+    let mut pos = scan_digit_run(chars, start);
+    let (tail_pos, is_float) = scan_float_tail(chars, pos);
+    pos = tail_pos;
 
     let raw: String = chars[start..pos].iter().collect();
     let tt = if is_float { TokenType::Float } else { TokenType::Int };
@@ -638,6 +634,25 @@ fn lex_radix_number(
     let raw: String = chars[start..pos].iter().collect();
     let end_col = col + (pos - start);
     Some((Token { token_type: TokenType::Int, value: raw, line, col, end_col }, pos))
+}
+
+/// Scans the float tail — an optional fraction (`.` + digit run) and an
+/// optional exponent (`e`/`E` with sign) — returning the new position and
+/// whether either was present (= the literal is a Float).
+fn scan_float_tail(chars: &[char], mut pos: usize) -> (usize, bool) {
+    let mut is_float = false;
+    if pos < chars.len() && chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit() {
+        is_float = true;
+        pos = scan_digit_run(chars, pos + 1);
+    }
+    // Scientific notation
+    if pos < chars.len() && (chars[pos] == 'e' || chars[pos] == 'E') {
+        is_float = true;
+        pos += 1;
+        if pos < chars.len() && (chars[pos] == '+' || chars[pos] == '-') { pos += 1; }
+        while pos < chars.len() && chars[pos].is_ascii_digit() { pos += 1; }
+    }
+    (pos, is_float)
 }
 
 /// Scans a run of ASCII digits/underscores starting at `pos`, returning the
@@ -689,88 +704,80 @@ fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> 
     (Token { token_type, value, line, col, end_col }, pos)
 }
 
+/// The keyword table — data, not control flow: one row per spelling
+/// (`ok`/`Ok` are two rows to the same token). Adding a keyword is adding a
+/// row; `keyword` itself never changes.
+const KEYWORDS: &[(&str, TokenType)] = &[
+    ("module", TokenType::Module), ("import", TokenType::Import),
+    ("type", TokenType::Type), ("protocol", TokenType::Protocol),
+    ("for", TokenType::For), ("in", TokenType::In), ("fn", TokenType::Fn),
+    ("let", TokenType::Let), ("var", TokenType::Var), ("mut", TokenType::Mut),
+    ("if", TokenType::If), ("then", TokenType::Then),
+    ("else", TokenType::Else), ("match", TokenType::Match),
+    ("ok", TokenType::Ok), ("Ok", TokenType::Ok),
+    ("err", TokenType::Err), ("Err", TokenType::Err),
+    ("some", TokenType::Some), ("Some", TokenType::Some),
+    ("none", TokenType::None), ("None", TokenType::None),
+    ("todo", TokenType::Todo),
+    ("true", TokenType::True), ("false", TokenType::False),
+    ("not", TokenType::Not), ("and", TokenType::And),
+    ("or", TokenType::Or), ("strict", TokenType::Strict),
+    ("pub", TokenType::Pub), ("effect", TokenType::Effect),
+    ("test", TokenType::Test),
+    ("guard", TokenType::Guard), ("break", TokenType::Break),
+    ("continue", TokenType::Continue), ("while", TokenType::While),
+    ("local", TokenType::Local), ("mod", TokenType::Mod),
+    ("fan", TokenType::Fan),
+];
+
 fn keyword(s: &str) -> Option<TokenType> {
-    match s {
-        "module" => Some(TokenType::Module), "import" => Some(TokenType::Import),
-        "type" => Some(TokenType::Type), "protocol" => Some(TokenType::Protocol),
-        "for" => Some(TokenType::For),
-        "in" => Some(TokenType::In), "fn" => Some(TokenType::Fn),
-        "let" => Some(TokenType::Let), "var" => Some(TokenType::Var), "mut" => Some(TokenType::Mut),
-        "if" => Some(TokenType::If), "then" => Some(TokenType::Then),
-        "else" => Some(TokenType::Else), "match" => Some(TokenType::Match),
-        "ok" | "Ok" => Some(TokenType::Ok), "err" | "Err" => Some(TokenType::Err),
-        "some" | "Some" => Some(TokenType::Some), "none" | "None" => Some(TokenType::None),
-        "todo" => Some(TokenType::Todo),
-        "true" => Some(TokenType::True), "false" => Some(TokenType::False),
-        "not" => Some(TokenType::Not), "and" => Some(TokenType::And),
-        "or" => Some(TokenType::Or), "strict" => Some(TokenType::Strict),
-        "pub" => Some(TokenType::Pub), "effect" => Some(TokenType::Effect),
-        "test" => Some(TokenType::Test),
-        "guard" => Some(TokenType::Guard), "break" => Some(TokenType::Break),
-        "continue" => Some(TokenType::Continue), "while" => Some(TokenType::While),
-        "local" => Some(TokenType::Local), "mod" => Some(TokenType::Mod),
-        "fan" => Some(TokenType::Fan),
-        _ => None,
-    }
+    KEYWORDS.iter().find(|(k, _)| *k == s).map(|(_, t)| *t)
 }
 
 // ── Operator / delimiter lexing ─────────────────────────────────
 
+/// The operator/delimiter table — longest pattern first, so a plain top-down
+/// scan IS longest-match. Each row is (source pattern, token, token VALUE):
+/// value differs from pattern only for aliases (`**` lexes as the power
+/// operator `^`). Adding an operator is adding a row in length order.
+const OPERATORS: &[(&str, TokenType, &str)] = &[
+    // Three-char
+    ("..=", TokenType::DotDotEq, "..="), ("...", TokenType::DotDotDot, "..."),
+    ("..<", TokenType::DotDotLt, "..<"),
+    // Two-char
+    ("->", TokenType::Arrow, "->"), ("=>", TokenType::FatArrow, "=>"),
+    ("==", TokenType::EqEq, "=="), ("!=", TokenType::BangEq, "!="),
+    ("<=", TokenType::LtEq, "<="), (">>", TokenType::ComposeArrow, ">>"),
+    (">=", TokenType::GtEq, ">="), ("++", TokenType::PlusPlus, "++"),
+    ("|>", TokenType::PipeArrow, "|>"), ("&&", TokenType::AmpAmp, "&&"),
+    ("||", TokenType::PipePipe, "||"), ("??", TokenType::QuestionQuestion, "??"),
+    ("?.", TokenType::QuestionDot, "?."), ("..", TokenType::DotDot, ".."),
+    ("**", TokenType::Caret, "^"), // ** is an alias for ^ (power)
+    // Single-char
+    ("(", TokenType::LParen, "("), (")", TokenType::RParen, ")"),
+    ("{", TokenType::LBrace, "{"), ("}", TokenType::RBrace, "}"),
+    ("[", TokenType::LBracket, "["), ("]", TokenType::RBracket, "]"),
+    (",", TokenType::Comma, ","), (".", TokenType::Dot, "."),
+    (":", TokenType::Colon, ":"), (";", TokenType::Semicolon, ";"),
+    ("=", TokenType::Eq, "="), ("!", TokenType::Bang, "!"),
+    ("<", TokenType::LAngle, "<"), (">", TokenType::RAngle, ">"),
+    ("+", TokenType::Plus, "+"), ("-", TokenType::Minus, "-"),
+    ("*", TokenType::Star, "*"), ("/", TokenType::Slash, "/"),
+    ("%", TokenType::Percent, "%"), ("|", TokenType::Pipe, "|"),
+    ("^", TokenType::Caret, "^"), ("?", TokenType::Question, "?"),
+    ("_", TokenType::Underscore, "_"), ("@", TokenType::At, "@"),
+];
+
 fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, usize) {
-    let ch = chars[pos];
-    let next = peek(chars, pos + 1);
-    let next2 = peek(chars, pos + 2);
-
-    let (tt, val, len) = match (ch, next, next2) {
-        // Three-char
-        ('.', Some('.'), Some('=')) => (TokenType::DotDotEq, "..=", 3),
-        ('.', Some('.'), Some('.')) => (TokenType::DotDotDot, "...", 3),
-        ('.', Some('.'), Some('<')) => (TokenType::DotDotLt, "..<", 3),
-        // Two-char
-        ('-', Some('>'), _) => (TokenType::Arrow, "->", 2),
-        ('=', Some('>'), _) => (TokenType::FatArrow, "=>", 2),
-        ('=', Some('='), _) => (TokenType::EqEq, "==", 2),
-        ('!', Some('='), _) => (TokenType::BangEq, "!=", 2),
-        ('<', Some('='), _) => (TokenType::LtEq, "<=", 2),
-        ('>', Some('>'), _) => (TokenType::ComposeArrow, ">>", 2),
-        ('>', Some('='), _) => (TokenType::GtEq, ">=", 2),
-        ('+', Some('+'), _) => (TokenType::PlusPlus, "++", 2),
-        ('|', Some('>'), _) => (TokenType::PipeArrow, "|>", 2),
-        ('&', Some('&'), _) => (TokenType::AmpAmp, "&&", 2),
-        ('|', Some('|'), _) => (TokenType::PipePipe, "||", 2),
-        ('?', Some('?'), _) => (TokenType::QuestionQuestion, "??", 2),
-        ('?', Some('.'), _) => (TokenType::QuestionDot, "?.", 2),
-        ('.', Some('.'), _) => (TokenType::DotDot, "..", 2),
-        // Single-char
-        ('(', _, _) => (TokenType::LParen, "(", 1),
-        (')', _, _) => (TokenType::RParen, ")", 1),
-        ('{', _, _) => (TokenType::LBrace, "{", 1),
-        ('}', _, _) => (TokenType::RBrace, "}", 1),
-        ('[', _, _) => (TokenType::LBracket, "[", 1),
-        (']', _, _) => (TokenType::RBracket, "]", 1),
-        (',', _, _) => (TokenType::Comma, ",", 1),
-        ('.', _, _) => (TokenType::Dot, ".", 1),
-        (':', _, _) => (TokenType::Colon, ":", 1),
-        (';', _, _) => (TokenType::Semicolon, ";", 1),
-        ('=', _, _) => (TokenType::Eq, "=", 1),
-        ('!', _, _) => (TokenType::Bang, "!", 1),
-        ('<', _, _) => (TokenType::LAngle, "<", 1),
-        ('>', _, _) => (TokenType::RAngle, ">", 1),
-        ('+', _, _) => (TokenType::Plus, "+", 1),
-        ('-', _, _) => (TokenType::Minus, "-", 1),
-        ('*', Some('*'), _) => (TokenType::Caret, "^", 2), // ** is an alias for ^ (power)
-        ('*', _, _) => (TokenType::Star, "*", 1),
-        ('/', _, _) => (TokenType::Slash, "/", 1),
-        ('%', _, _) => (TokenType::Percent, "%", 1),
-        ('|', _, _) => (TokenType::Pipe, "|", 1),
-        ('^', _, _) => (TokenType::Caret, "^", 1),
-        ('?', _, _) => (TokenType::Question, "?", 1),
-        ('_', _, _) => (TokenType::Underscore, "_", 1),
-        ('@', _, _) => (TokenType::At, "@", 1),
-        _ => (TokenType::EOF, "", 1), // skip unknown char
-    };
-
-    (Token { token_type: tt, value: val.to_string(), line, col, end_col: col + len }, len)
+    for (pat, tt, val) in OPERATORS {
+        let len = pat.len(); // operator patterns are ASCII: bytes == chars
+        if chars[pos..].len() >= len && pat.chars().zip(&chars[pos..]).all(|(p, &c)| p == c) {
+            let tok = Token { token_type: *tt, value: (*val).to_string(), line, col, end_col: col + len };
+            return (tok, len);
+        }
+    }
+    // Unknown char: skip it (an EOF-typed placeholder, exactly the old wildcard arm).
+    (Token { token_type: TokenType::EOF, value: String::new(), line, col, end_col: col + 1 }, 1)
 }
 
 fn peek(chars: &[char], pos: usize) -> Option<char> {
