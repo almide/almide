@@ -127,11 +127,18 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
                 ));
                 std::process::exit(1);
             }
-            // The fallback is SILENT no more (#931): the user asked for the
-            // verified render, so tell them in one line that they did not get
-            // it and why — the full reason, not a Debug dump. The env var now
-            // only adds the success-path confirmation above.
-            err(&format!("note: verified native render walled — building via the standard codegen\n  reason: {e}"));
+            // #931 made this note loud because verified was an explicit
+            // opt-in; #1074 makes it opt-in again because verified is now the
+            // DEFAULT and a wall is normal operation for a large legitimate
+            // class of programs (every derived Codec returns Value). The
+            // routing changes nothing observable — the standard codegen
+            // produces a correct binary — so ambient stderr noise reads as a
+            // false warning. `-v` / ALMIDE_VERBOSE=1 (or the deeper
+            // ALMIDE_VERIFIED_DEBUG) surfaces it for native-rung-coverage
+            // debugging. The wasm leg is untouched: there a wall IS an error.
+            if std::env::var("ALMIDE_VERBOSE").is_ok() || std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                err(&format!("note: verified native render walled — building via the standard codegen\n  reason: {e}"));
+            }
             rs_code
         }
     }
