@@ -293,6 +293,49 @@ impl LowerCtx {
     /// scalar element via literal equality; wildcards free), dispatched
     /// first-match-wins on the flat-marker chain. Scalar result, no guards, a
     /// trailing wildcard, all elements plain Vars.
+    /// Resolve the tuple subject's elements for the refinement matches: a
+    /// plain Var (variant block or scalar), or a SCALAR expression
+    /// materialized to a fresh value (read once — the by-value tuple subject
+    /// semantics). `None` = a decline (ops rolled back to the marks).
+    fn resolve_tuple_match_elems(
+        &mut self,
+        elements: &[IrExpr],
+        ops_mark: usize,
+        lhh_mark: usize,
+    ) -> Option<Vec<(ValueId, Ty)>> {
+    // Elements: a plain Var (variant block or scalar), or a SCALAR expression
+    // materialized to a fresh value (read once — exactly the by-value tuple
+    // subject semantics; the match reads only these copies).
+    let mut elems: Vec<(ValueId, Ty)> = Vec::with_capacity(elements.len());
+    for e in elements {
+        let v = match &e.kind {
+            IrExprKind::Var { id } => match self.value_for(*id) {
+                Ok(v) => v,
+                Err(_) => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            },
+            _ if !is_heap_ty(&e.ty) => match self.lower_scalar_value(e) {
+                Some(v) => v,
+                None => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            },
+            _ => {
+                self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        elems.push((v, e.ty.clone()));
+    }
+        Some(elems)
+    }
+
     pub(crate) fn try_lower_tuple_refinement_match(
         &mut self,
         subject: &IrExpr,
@@ -322,33 +365,10 @@ impl LowerCtx {
             s.ops.truncate(ops_mark);
             s.live_heap_handles.truncate(lhh_mark);
         };
-        // Elements: a plain Var (variant block or scalar), or a SCALAR expression
-        // materialized to a fresh value (read once — exactly the by-value tuple
-        // subject semantics; the match reads only these copies).
-        let mut elems: Vec<(ValueId, Ty)> = Vec::with_capacity(elements.len());
-        for e in elements {
-            let v = match &e.kind {
-                IrExprKind::Var { id } => match self.value_for(*id) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        rollback(self);
-                        return None;
-                    }
-                },
-                _ if !is_heap_ty(&e.ty) => match self.lower_scalar_value(e) {
-                    Some(v) => v,
-                    None => {
-                        rollback(self);
-                        return None;
-                    }
-                },
-                _ => {
-                    rollback(self);
-                    return None;
-                }
-            };
-            elems.push((v, e.ty.clone()));
-        }
+        let Some(elems) = self.resolve_tuple_match_elems(elements, ops_mark, lhh_mark) else {
+            return None;
+        };
+
         // Validate every refutable arm up front (no mid-emission decline).
         for a in &arms[..arms.len() - 1] {
             let IrPattern::Tuple { elements: pats } = &a.pattern else {
