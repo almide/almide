@@ -237,5 +237,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-207 | CM-1 is a versioned constant with a ratio-only wall-clock claim | 0.47.0 | active | fixture | 1 |
 | C-208 | fan.timeout is omega-relative: fixed ends everywhere, fixed omega replays byte-identically | 0.47.0 | active | fixture | 1 |
 | C-209 | Codec encode omits none; decode folds missing/null to none; Value passes through verbatim | 0.52.0 | active | fixture | 1 |
-| C-210 | NaN observation is canonical — the deterministic-profile conformance law | 0.52.0 | active | fixture | 2 |
+| C-210 | NaN observation is canonical — the deterministic-profile conformance law | 0.53.0 | active | fixture | 2 |
 
