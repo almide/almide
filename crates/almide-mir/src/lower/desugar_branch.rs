@@ -474,140 +474,89 @@ fn count_expr_nodes(e: &IrExpr) -> usize {
     c.0
 }
 
+/// One branch-desugar PASS: rewrite the body (or return `None` = not mine).
+type BranchPass = fn(&IrExpr, &mut u32, &crate::lower::VariantLayouts) -> Option<IrExpr>;
+
+/// The branch-desugar pass PIPELINE, applied to a fixpoint in order — the
+/// order is load-bearing (each row's comment says why it sits where it
+/// does). Adding a pass is adding a row.
+const BRANCH_PASSES: &[BranchPass] = &[
+    // FIRST: hoist a non-pure (call) match subject to a single eval, so the literal-arm chain
+    // dispatches on a cheap Var instead of duplicating the call per arm — a correctness fix
+    // (single eval) and the alignment that keeps `mir <= ir` for a resolved cross-module/self-pkg
+    // call subject. Runs before the call-arg lifts so they see the hoisted (Var-subject) form.
+    |src, next_var, _| desugar_match_subject_hoist(src, next_var),
+    // Route a non-empty map literal through `map.from_list` so it materializes a real map (else a
+    // deferred-Opaque empty block silently miscompiles every subsequent map op).
+    |src, _, _| desugar_map_literal(src),
+    // Inline a `fan.race`/`fan.any` over a literal thunk list (avoids an unrepresentable
+    // List[funcref]) into a plain match-over-a-call chain.
+    |src, next_var, _| desugar_fan_race_any(src, next_var),
+    // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
+    // the guarded-variant case reduces to the two already-proven pieces.
+    |src, next_var, layouts| desugar_grouped_variant_match(src, next_var, layouts),
+    // Hoist a LITERAL record/tuple interpolation part (`"${(1, \"x\", true)}"`) to a
+    // temp binding so the part becomes a materialized Var the EXPAND display folds
+    // (a literal part is never a tracked block, so it fell to the unlinked
+    // `compound.to_string` wall).
+    |src, next_var, _| desugar_interp_literal_aggregate_hoist(src, next_var),
+    // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
+    // tuple sub-match a multi-field variant regroup produces).
+    |src, _, _| desugar_tuple_match(src),
+    |src, _, _| desugar_if_arm_unwrap(src),
+    |src, _, _| desugar_flatten_let_block(src),
+    |src, _, _| desugar_inline_tail_accumulator(src),
+    |src, next_var, _| desugar_callarg_heap_if(src, next_var),
+    |src, next_var, _| desugar_callarg_unwrap(src, next_var),
+    // Compile a tuple-of-VARIANTS match while it is still a VALUE match (binder-free
+    // literal arms) — AFTER the call-arg lift above has pulled it out of an argument
+    // position (`println(match (Red, Green) {…})` → `let tmp = match …; println(tmp)`,
+    // the r5 in-arg shape) but BEFORE the let-bound tail-duplication below pushes
+    // `let tmp = …; <rest>` continuations into its arms (duplicated binder-carrying
+    // bodies the column compilers must decline). Both also run in the outer chains
+    // (idempotent there).
+    |src, _, _| desugar_tuple_variant_match(src),
+    |src, _, layouts| desugar_tuple_variant_match_deep(src, layouts),
+    |src, _, _| desugar_let_bound_heap_branch(src),
+    // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
+    // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
+    // bare tail-call arms instead of a heap-Option continuation match.
+    |src, _, _| desugar_unwrap_rewrap_identity(src),
+    |src, _, _| desugar_let_unwrap(src),
+    // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
+    // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
+    // lower like the hand-written form instead of walling on the `Block`-wrapped arm.
+    |src, _, _| desugar_flatten_empty_block(src),
+    // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
+    // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
+    |src, next_var, _| desugar_loop_unwrap(src, next_var),
+    // `break` inside a `for`/`while` body → the `__bk` flag form (whole-arm breaks only;
+    // see `desugar_loop_break`). Runs in this SHARED desugar (count-invariant flag ops).
+    |src, next_var, _| desugar_loop_break(src, next_var),
+    // A UNIT `if` conditionally reassigning ONE heap var → SSA-ify to a let-bound
+    // value-`if` (the lp5 wrong-value class; see `desugar_unit_if_heap_reassign`).
+    |src, next_var, _| desugar_unit_if_heap_reassign(src, next_var),
+    // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
+    // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
+    // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
+    // SHARED desugar so the duplicated `after` is counted 1:1 by the caps gate (mir == ir).
+    |src, _, layouts| desugar_stmt_control_unwrap(src, layouts),
+    |src, next_var, layouts| desugar_nested_branch_arms(src, next_var, layouts),
+];
+
 fn desugar_heap_branches_inner(
     body: &IrExpr,
     next_var: &mut u32,
     layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
     let mut cur: Option<IrExpr> = None;
-    loop {
+    'fixpoint: loop {
         let src = cur.as_ref().unwrap_or(body);
-        // FIRST: hoist a non-pure (call) match subject to a single eval, so the literal-arm chain
-        // dispatches on a cheap Var instead of duplicating the call per arm — a correctness fix
-        // (single eval) and the alignment that keeps `mir <= ir` for a resolved cross-module/self-pkg
-        // call subject. Runs before the call-arg lifts so they see the hoisted (Var-subject) form.
-        if let Some(r) = desugar_match_subject_hoist(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // Route a non-empty map literal through `map.from_list` so it materializes a real map (else a
-        // deferred-Opaque empty block silently miscompiles every subsequent map op).
-        if let Some(r) = desugar_map_literal(src) {
-            cur = Some(r);
-            continue;
-        }
-        // Inline a `fan.race`/`fan.any` over a literal thunk list (avoids an unrepresentable
-        // List[funcref]) into a plain match-over-a-call chain.
-        if let Some(r) = desugar_fan_race_any(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
-        // the guarded-variant case reduces to the two already-proven pieces.
-        if let Some(r) = desugar_grouped_variant_match(src, next_var, layouts) {
-            cur = Some(r);
-            continue;
-        }
-        // Hoist a LITERAL record/tuple interpolation part (`"${(1, \"x\", true)}"`) to a
-        // temp binding so the part becomes a materialized Var the EXPAND display folds
-        // (a literal part is never a tracked block, so it fell to the unlinked
-        // `compound.to_string` wall).
-        if let Some(r) = desugar_interp_literal_aggregate_hoist(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
-        // tuple sub-match a multi-field variant regroup produces).
-        if let Some(r) = desugar_tuple_match(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_if_arm_unwrap(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_flatten_let_block(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_inline_tail_accumulator(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_callarg_heap_if(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_callarg_unwrap(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // Compile a tuple-of-VARIANTS match while it is still a VALUE match (binder-free
-        // literal arms) — AFTER the call-arg lift above has pulled it out of an argument
-        // position (`println(match (Red, Green) {…})` → `let tmp = match …; println(tmp)`,
-        // the r5 in-arg shape) but BEFORE the let-bound tail-duplication below pushes
-        // `let tmp = …; <rest>` continuations into its arms (duplicated binder-carrying
-        // bodies the column compilers must decline). Both also run in the outer chains
-        // (idempotent there).
-        if let Some(r) = desugar_tuple_variant_match(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_tuple_variant_match_deep(src, layouts) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_let_bound_heap_branch(src) {
-            cur = Some(r);
-            continue;
-        }
-        // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
-        // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
-        // bare tail-call arms instead of a heap-Option continuation match.
-        if let Some(r) = desugar_unwrap_rewrap_identity(src) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_let_unwrap(src) {
-            cur = Some(r);
-            continue;
-        }
-        // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
-        // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
-        // lower like the hand-written form instead of walling on the `Block`-wrapped arm.
-        if let Some(r) = desugar_flatten_empty_block(src) {
-            cur = Some(r);
-            continue;
-        }
-        // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
-        // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
-        if let Some(r) = desugar_loop_unwrap(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // `break` inside a `for`/`while` body → the `__bk` flag form (whole-arm breaks only;
-        // see `desugar_loop_break`). Runs in this SHARED desugar (count-invariant flag ops).
-        if let Some(r) = desugar_loop_break(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // A UNIT `if` conditionally reassigning ONE heap var → SSA-ify to a let-bound
-        // value-`if` (the lp5 wrong-value class; see `desugar_unit_if_heap_reassign`).
-        if let Some(r) = desugar_unit_if_heap_reassign(src, next_var) {
-            cur = Some(r);
-            continue;
-        }
-        // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
-        // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
-        // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
-        // SHARED desugar so the duplicated `after` is counted 1:1 by the caps gate (mir == ir).
-        if let Some(r) = desugar_stmt_control_unwrap(src, layouts) {
-            cur = Some(r);
-            continue;
-        }
-        if let Some(r) = desugar_nested_branch_arms(src, next_var, layouts) {
-            cur = Some(r);
-            continue;
+        for pass in BRANCH_PASSES {
+            if let Some(r) = pass(src, next_var, layouts) {
+                cur = Some(r);
+                continue 'fixpoint;
+            }
         }
         return cur;
     }
