@@ -87,19 +87,17 @@ impl Checker {
         // expression is a `?` postfix. The writer wanted error propagation;
         // `?` IS the Result→Option conversion (one meaning everywhere), so
         // name that rule — the templates below would guess from the types
-        // alone and teach a false move.
+        // alone and teach a false move. `!` is the propagating unwrap, and
+        // since #1067 it works in a pure fn too when the fn's declared
+        // return is Result/Option (C-211) — the hint names the condition
+        // instead of branching on it.
         if let Some(inner) = arg_resolved.option_inner() {
             if !types_mismatch(expected_resolved, &inner) && self.arg_is_try_postfix() {
-                return if self.env.can_call_effect {
-                    "`?` converts a Result to an Option — it is not error propagation. \
-                     In an effect fn body, `!` is the propagating unwrap: replace the \
-                     `?` with `!` (or use `?? fallback` for a default)".to_string()
-                } else {
-                    "`?` converts a Result to an Option here — a pure fn has no error \
-                     propagation. Unwrap instead: `?? fallback` supplies a default, \
-                     `match` handles ok/err (to propagate, make the caller an \
-                     `effect fn`)".to_string()
-                };
+                return "`?` converts a Result to an Option — it is not error propagation. \
+                        `!` is the propagating unwrap (valid in an effect fn body, a test \
+                        block, or a fn returning Result/Option): replace the `?` with `!`; \
+                        or `?? fallback` supplies a default, `match` handles ok/err"
+                    .to_string();
             }
         }
         if let Ty::Named(name, args) = expected {
