@@ -8,6 +8,15 @@ impl LowerCtx {
     /// temp itself (arm calls borrow it; if the arm MOVES it out, the release-parity sweep
     /// compensates with a drop on the empty side). ELSE (len == 0) = the `[]` arm. Same
     /// IfThen/Else/EndIf merge + release-parity discipline as the Result opener.
+    /// Roll a declined probe back — ops, lifted lambdas and the scope-drop
+    /// list to their marks (a probed subject may have lifted a lambda whose
+    /// dead CallFn would double-count the caps gate's mir tally).
+    fn probe_rollback(&mut self, ops_mark: usize, lifted_mark: usize, lhh_mark: usize) {
+        self.ops.truncate(ops_mark);
+        self.lifted.truncate(lifted_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+    }
+
     pub(crate) fn try_lower_list_match_value(
         &mut self,
         subject: &IrExpr,
@@ -22,35 +31,7 @@ impl LowerCtx {
         if !matches!(&subject.ty, Ty::Applied(TypeConstructorId::List, a) if a.len() == 1) {
             return None;
         }
-        let mut empty_arm: Option<&IrExpr> = None;
-        let mut rest_arm: Option<(&IrExpr, Option<VarId>)> = None;
-        for arm in arms {
-            match &arm.pattern {
-                IrPattern::List { elements } if elements.is_empty() => {
-                    if empty_arm.is_some() {
-                        return None;
-                    }
-                    empty_arm = Some(&arm.body);
-                }
-                IrPattern::Bind { var, .. } => {
-                    if rest_arm.is_some() {
-                        return None;
-                    }
-                    rest_arm = Some((&arm.body, Some(*var)));
-                }
-                IrPattern::Wildcard => {
-                    if rest_arm.is_some() {
-                        return None;
-                    }
-                    rest_arm = Some((&arm.body, None));
-                }
-                _ => return None,
-            }
-        }
-        let (empty_body, (rest_body, rest_bind)) = match (empty_arm, rest_arm) {
-            (Some(e), Some(r)) => (e, r),
-            _ => return None,
-        };
+        let (empty_body, (rest_body, rest_bind)) = classify_empty_rest_arms(arms)?;
         let ops_mark = self.ops.len();
         let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
@@ -61,16 +42,12 @@ impl LowerCtx {
         {
             Some(CallArg::Handle(v)) => v,
             _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
+                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
                 return None;
             }
         };
         if self.deferred_opaque_binds.contains(&subj) {
-            self.ops.truncate(ops_mark);
-            self.lifted.truncate(lifted_mark);
-            self.live_heap_handles.truncate(lhh_mark);
+            self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
             return None;
         }
         let h = self.fresh_value();
@@ -86,9 +63,7 @@ impl LowerCtx {
         let rest_obj = match self.lower_heap_result_arm(rest_body, result_ty) {
             Some(v) => v,
             _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
+                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
                 return None;
             }
         };
@@ -101,9 +76,7 @@ impl LowerCtx {
         let empty_obj = match self.lower_heap_result_arm(empty_body, result_ty) {
             Some(v) => v,
             _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
+                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
                 return None;
             }
         };
@@ -564,3 +537,40 @@ impl LowerCtx {
     }
 }
 include!("result_match_value.rs");
+
+/// The `[[], rest]` arm classification of
+/// [`LowerCtx::try_lower_list_match_value`]: the empty-list arm and the
+/// bind-all/wildcard rest arm, in either order.
+fn classify_empty_rest_arms(
+    arms: &[IrMatchArm],
+) -> Option<(&IrExpr, (&IrExpr, Option<VarId>))> {
+    let mut empty_arm: Option<&IrExpr> = None;
+    let mut rest_arm: Option<(&IrExpr, Option<VarId>)> = None;
+    for arm in arms {
+        match &arm.pattern {
+            IrPattern::List { elements } if elements.is_empty() => {
+                if empty_arm.is_some() {
+                    return None;
+                }
+                empty_arm = Some(&arm.body);
+            }
+            IrPattern::Bind { var, .. } => {
+                if rest_arm.is_some() {
+                    return None;
+                }
+                rest_arm = Some((&arm.body, Some(*var)));
+            }
+            IrPattern::Wildcard => {
+                if rest_arm.is_some() {
+                    return None;
+                }
+                rest_arm = Some((&arm.body, None));
+            }
+            _ => return None,
+        }
+    }
+    match (empty_arm, rest_arm) {
+        (Some(e), Some(r)) => Some((e, r)),
+        _ => None,
+    }
+}
