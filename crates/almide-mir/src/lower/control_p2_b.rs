@@ -530,25 +530,7 @@ impl LowerCtx {
         let ops_mark = self.ops.len();
         let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
-        let subj = match self
-            .lower_call_args(std::slice::from_ref(subject))
-            .ok()
-            .and_then(|a| a.into_iter().next())
-        {
-            Some(CallArg::Handle(v)) => v,
-            _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                return None;
-            }
-        };
-        if self.deferred_opaque_binds.contains(&subj) {
-            self.ops.truncate(ops_mark);
-            self.lifted.truncate(lifted_mark);
-            self.live_heap_handles.truncate(lhh_mark);
-            return None;
-        }
+        let subj = self.probe_match_subject(subject, ops_mark, lifted_mark, lhh_mark)?;
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });

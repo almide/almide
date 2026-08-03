@@ -17,6 +17,34 @@ impl LowerCtx {
         self.live_heap_handles.truncate(lhh_mark);
     }
 
+    /// Probe the match SUBJECT to a real borrowed/owned block handle via
+    /// `lower_call_args`; a non-handle result or a deferred-Opaque bind
+    /// declines (rolled back) — the callee would read an empty block.
+    fn probe_match_subject(
+        &mut self,
+        subject: &IrExpr,
+        ops_mark: usize,
+        lifted_mark: usize,
+        lhh_mark: usize,
+    ) -> Option<ValueId> {
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
+                return None;
+            }
+        };
+        if self.deferred_opaque_binds.contains(&subj) {
+            self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
+            return None;
+        }
+        Some(subj)
+    }
+
     pub(crate) fn try_lower_list_match_value(
         &mut self,
         subject: &IrExpr,
@@ -35,21 +63,7 @@ impl LowerCtx {
         let ops_mark = self.ops.len();
         let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
-        let subj = match self
-            .lower_call_args(std::slice::from_ref(subject))
-            .ok()
-            .and_then(|a| a.into_iter().next())
-        {
-            Some(CallArg::Handle(v)) => v,
-            _ => {
-                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
-                return None;
-            }
-        };
-        if self.deferred_opaque_binds.contains(&subj) {
-            self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
-            return None;
-        }
+        let subj = self.probe_match_subject(subject, ops_mark, lifted_mark, lhh_mark)?;
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
