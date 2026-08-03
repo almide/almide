@@ -4,6 +4,16 @@
 // impl block's first four methods moved verbatim.
 
 impl LowerCtx {
+    /// Track a freshly-produced owned field handle in `live_heap_handles`
+    /// (idempotent) — the move-in bookkeeping every group's arms end with; the
+    /// caller MUST later `Consume` it and remove it from the live set.
+    fn track_owned_field(&mut self, obj: ValueId) -> Option<ValueId> {
+        if !self.live_heap_handles.contains(&obj) {
+            self.live_heap_handles.push(obj);
+        }
+        Some(obj)
+    }
+
     /// Lower a record/tuple field EXPRESSION whose type is HEAP to a FRESH OWNED handle the
     /// aggregate will own (moved into its slot). The admitted kinds mirror
     /// [`Self::try_lower_str_list_literal`]'s element kinds:
@@ -46,27 +56,18 @@ impl LowerCtx {
                 let obj = self.try_lower_concat_str(expr)?;
                 // try_lower_concat_str returns a fresh owned String (a CallFn result); track it
                 // so the caller's Consume + live-set removal balances it.
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             // A list CONCAT field (`children: parent.children + [child]` — the svg add_child spread
             // override): a fresh owned list (`__list_concat`/`_rc`), the new record co-owns it; the
             // result's per-element drop tracking is set by try_lower_concat_list (incl List[Record]).
             IrExprKind::BinOp { op: BinOp::ConcatList, .. } => {
                 let obj = self.try_lower_concat_list(expr)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             IrExprKind::StringInterp { parts } => {
                 let obj = self.try_lower_string_interp(parts)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             // A LAMBDA field (`{ run: (x) => n + ":" + x, name: n }` — the record_fn_field
             // make_handler class): LIFT it to a closure block (the full capture machinery —
@@ -75,10 +76,7 @@ impl LowerCtx {
             // slot. The record's drop frees it via the generated `__drop_closure` field arm.
             IrExprKind::Lambda { params, body, .. } => {
                 let blk = self.lift_lambda(params, body)?;
-                if !self.live_heap_handles.contains(&blk) {
-                    self.live_heap_handles.push(blk);
-                }
-                Some(blk)
+                self.track_owned_field(blk)
             }
             // A tracked LOCAL heap var, or a MODULE-LEVEL global (`_style: _default` — the
             // ceangal View ctors): `value_or_global` materializes a global's const/record
@@ -144,10 +142,7 @@ impl LowerCtx {
                 let obj = self
                     .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &expr.ty)
                     .ok()?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             // A `List[Int/Float/Bool]` LITERAL field (`{ items: [1, 2, 3] }`, `{ items: [] }`) —
             // materialize the scalar-element block (flat slots, no nested ownership) as a fresh
@@ -213,10 +208,7 @@ impl LowerCtx {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 self.record_masks.remove(&obj);
                 self.variant_drop_handles.insert(obj, "value_tuple".to_string());
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             // An empty Map field — `attrs: [:]` (the svg `el` record). A v1 Map is a List block of
             // paired slots; an EMPTY one is the same layout-agnostic 0-length block as an empty list.
@@ -367,7 +359,20 @@ impl LowerCtx {
     /// `_ => None` meant. Collapsing them makes a declined field fall through to
     /// a later group and lower by the wrong rule.
     fn lower_owned_heap_field_call(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
-        use almide_ir::BinOp;
+        match &expr.kind {
+            IrExprKind::EmptyMap
+            | IrExprKind::MapLiteral { .. }
+            | IrExprKind::Record { .. }
+            | IrExprKind::Tuple { .. }
+            | IrExprKind::SpreadRecord { .. } => self.lower_owned_heap_field_construct(expr),
+            _ => self.lower_owned_heap_field_branch_or_call(expr),
+        }
+    }
+
+    /// The CONSTRUCTION arms of [`Self::lower_owned_heap_field_call`]: empty
+    /// maps, nested record/tuple literals (recursive-drop, scalar-only), and
+    /// nested spreads. Verbatim.
+    fn lower_owned_heap_field_construct(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
         Some(match &expr.kind {
             IrExprKind::EmptyMap => {
                 let obj = self.try_lower_scalar_list_slots(&[])?;
@@ -398,10 +403,7 @@ impl LowerCtx {
                 if let Some(name) = self.record_or_anon_drop_type_name(&expr.ty) {
                     self.variant_drop_handles.insert(obj, name);
                 }
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             // A NESTED RECORD/TUPLE LITERAL field (`Outer { p: Point { x: 1, y: 2 }, n: 5 }`) —
             // materialize the inner block as a fresh OWNED aggregate the outer owns. Its own
@@ -415,19 +417,7 @@ impl LowerCtx {
             // ANONYMOUS heap-nested aggregate (no `__drop_<R>` to route through) defers (`None`)
             // → the outer walls (never wrong bytes, never a leak).
             IrExprKind::Record { .. } | IrExprKind::Tuple { .. } => {
-                let scalar_only = self
-                    .aggregate_field_tys(&expr.ty)
-                    .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t)));
-                if !scalar_only {
-                    return Some(None);
-                }
-                let obj = match &expr.kind {
-                    IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(expr)?,
-                    IrExprKind::Tuple { elements } => self.try_lower_scalar_tuple_construct(elements)?,
-                    _ => return None,
-                };
-                self.live_heap_handles.push(obj);
-                Some(obj)
+                return self.lower_scalar_only_aggregate_field(expr);
             }
             // A NESTED SPREAD field (`{ ...v, _style: { ...v._style, width: w } }` — the
             // ceangal modifier class): build the inner record via the SAME spread machinery
@@ -442,11 +432,37 @@ impl LowerCtx {
                     self.record_masks.remove(&obj);
                     self.variant_drop_handles.insert(obj, name);
                 }
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
+            _ => return None,
+        })
+    }
+
+    /// The SCALAR-ONLY nested record/tuple literal field: admitted only when
+    /// no field is heap (nothing for the outer's one-level mask to leak); a
+    /// heap-nested ANONYMOUS aggregate declines (`Some(None)`) so the outer
+    /// walls — never wrong bytes, never a leak.
+    fn lower_scalar_only_aggregate_field(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
+        let scalar_only = self
+            .aggregate_field_tys(&expr.ty)
+            .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t)));
+        if !scalar_only {
+            return Some(None);
+        }
+        let obj = match &expr.kind {
+            IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(expr)?,
+            IrExprKind::Tuple { elements } => self.try_lower_scalar_tuple_construct(elements)?,
+            _ => return None,
+        };
+        self.live_heap_handles.push(obj);
+        Some(Some(obj))
+    }
+
+    /// The BRANCH / CALL / BLOCK arms of [`Self::lower_owned_heap_field_call`]:
+    /// heap-result `if`/`match` elements, Option/Result ctor fields, closure
+    /// calls, and the ANF Block wrapper. Verbatim.
+    fn lower_owned_heap_field_branch_or_call(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
+        Some(match &expr.kind {
             // A heap-result `if`/`match` ELEMENT (`(if retries == 0 then "pass-1shot" else "pass-retry",
             // "")` — the dojo `classify` tuple-result-if shape). EXECUTE it via the proven heap-result-`if`
             // machinery: each arm `Alloc`s + `Consume`s its value (the per-arm `"im"` move-out balance),
@@ -457,10 +473,7 @@ impl LowerCtx {
             // nested-`if` chain first; an out-of-subset arm rolls back (`None`) → the tuple defers.
             IrExprKind::If { cond, then, else_ } => {
                 let obj = self.try_lower_heap_result_if(cond, then, else_, &expr.ty)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             // An Option/Result-SUBJECT match reaches here whenever a variant combinator is
             // used as an owned-heap ELEMENT — `some(option.unwrap_or(s0, (1, 2)))` desugars
@@ -478,10 +491,7 @@ impl LowerCtx {
                 // exactly like the `If` arm above — push it so the enclosing aggregate's
                 // per-slot `Consume` MOVES it into the slot.
                 let obj = self.try_lower_variant_value_match(subject, arms, &expr.ty)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             IrExprKind::Match { subject, arms } => {
                 let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
@@ -489,10 +499,7 @@ impl LowerCtx {
                     return Some(None);
                 };
                 let obj = self.try_lower_heap_result_if(cond, then, else_, &expr.ty)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             // An Option/Result CTOR field (`Node { val: 5, next: some(10) }` — a record/tuple whose
             // field is `some(..)`/`none`/`ok(..)`/`err(..)`): build the Option/Result block via the
@@ -506,10 +513,7 @@ impl LowerCtx {
             | IrExprKind::ResultOk { .. }
             | IrExprKind::ResultErr { .. } => {
                 let obj = self.try_lower_option_ctor(expr, &expr.ty)?;
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                Some(obj)
+                self.track_owned_field(obj)
             }
             // A CLOSURE-CALL field (`{ ...c, _val: f(c._val) }` — cell.update's
             // spread override, `f` a Fn param): dispatch through the tracked
