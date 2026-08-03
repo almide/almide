@@ -1,3 +1,149 @@
+/// The GATE of [`LowerCtx::try_lower_defunc_scalar_tuple_fold`] — pure shape
+/// classification and per-component projection, no ops emitted.
+struct ScalarTupleFoldPlan<'a> {
+    t1: Ty,
+    t2: Ty,
+    init_elems: &'a [IrExpr],
+    extra_stmts: &'a [IrStmt],
+    proj1: IrExpr,
+    proj2: IrExpr,
+    a1: VarId,
+    a2: VarId,
+}
+
+fn plan_scalar_tuple_fold<'a>(
+    params: &[(VarId, Ty)],
+    body: &'a IrExpr,
+    init: &'a IrExpr,
+    result_ty: &Ty,
+) -> Option<ScalarTupleFoldPlan<'a>> {
+    use almide_ir::{IrPattern, IrStmtKind};
+
+        // Accumulator type: a 2-tuple of scalars; the result is the same tuple.
+        let (t1, t2) = match result_ty {
+            Ty::Tuple(ts) if ts.len() == 2 && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]) => {
+                (ts[0].clone(), ts[1].clone())
+            }
+            _ => return None,
+        };
+        let _ = (&t1, &t2);
+        // init = (e1, e2), both scalar-lowerable.
+        let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
+        if init_elems.len() != 2 {
+            return None;
+        }
+        // body = Block{ [let (a1, a2) = acc, ...maybe nothing else], tail }
+        let acc_var = params[0].0;
+        let IrExprKind::Block { stmts, expr: Some(tail) } = &body.kind else { return None };
+        if stmts.is_empty() {
+            return None;
+        }
+        // stmts[0] must be the acc destructure; any FURTHER stmts (`let a = …; let rank = …`
+        // — the best_pair_index preamble) lower per-iteration via the ordinary stmt
+        // machinery inside the loop (their heap temps freed within the iteration).
+        let extra_stmts = &stmts[1..];
+        let (a1, a2) = acc_pair_binds(&stmts[0], acc_var)?;
+        // tail: an if-TREE whose every leaf is a 2-tuple (`if a then (..) else if b
+        // then (..) else (..)` — the find_chunk chain). PROJECT the tree per
+        // component: the same conditions, each leaf replaced by its idx-th element
+        // (conditions are pure scalar expressions — the scalar path admits nothing
+        // effectful — so evaluating them once per component is value-identical).
+        fn project(e: &IrExpr, idx: usize, comp_ty: &Ty) -> Option<IrExpr> {
+            match &e.kind {
+                IrExprKind::Tuple { elements } if elements.len() == 2 => {
+                    Some(elements[idx].clone())
+                }
+                IrExprKind::If { cond, then, else_ } => {
+                    let t = project(then, idx, comp_ty)?;
+                    let el = project(else_, idx, comp_ty)?;
+                    Some(IrExpr {
+                        kind: IrExprKind::If {
+                            cond: cond.clone(),
+                            then: Box::new(t),
+                            else_: Box::new(el),
+                        },
+                        ty: comp_ty.clone(),
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    })
+                }
+                _ => None,
+            }
+        }
+        let proj1 = project(tail, 0, &t1)?;
+        let proj2 = project(tail, 1, &t2)?;
+    Some(ScalarTupleFoldPlan { t1, t2, init_elems, extra_stmts, proj1, proj2, a1, a2 })
+}
+
+/// The GATE of [`LowerCtx::try_lower_scalar_tuple_option_match_bind`] — an
+/// `Option[<2-scalar tuple>]` subject with exactly two guard-free arms, the
+/// Some arm the pure payload passthrough (`some(p) => p`), the None arm a
+/// 2-element scalar-lowerable fallback tuple. Returns the fallback elements.
+fn plan_scalar_tuple_option_match<'a>(
+    subject: &IrExpr,
+    arms: &'a [almide_ir::IrMatchArm],
+) -> Option<&'a [IrExpr]> {
+    use almide_ir::{IrMatchArm, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    if !is_option_scalar_pair_ty(&subject.ty) {
+        return None;
+    }
+    if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+        return None;
+    }
+    let find = |want_some: bool| -> Option<&IrMatchArm> {
+        arms.iter().find(|a| match &a.pattern {
+            IrPattern::Some { .. } => want_some,
+            IrPattern::None | IrPattern::Wildcard => !want_some,
+            _ => false,
+        })
+    };
+    let some_arm = find(true)?;
+    let none_arm = find(false)?;
+    if !some_arm_is_payload_passthrough(some_arm) {
+        return None;
+    }
+    // none => (f1, f2) with scalar-lowerable components.
+    let IrExprKind::Tuple { elements: fb } = &none_arm.body.kind else { return None };
+    if fb.len() != 2 {
+        return None;
+    }
+    Some(fb)
+}
+
+/// An `Option[(scalar, scalar)]` — the 2-scalar-tuple Option subject shape.
+fn is_option_scalar_pair_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1
+            && matches!(&a[0], Ty::Tuple(ts)
+                if ts.len() == 2 && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1])))
+}
+
+/// `some(p) => p` — the pure payload passthrough, the only admitted Some body.
+fn some_arm_is_payload_passthrough(some_arm: &almide_ir::IrMatchArm) -> bool {
+    use almide_ir::IrPattern;
+    let IrPattern::Some { inner } = &some_arm.pattern else { return false };
+    let IrPattern::Bind { var, .. } = &**inner else { return false };
+    matches!(&some_arm.body.kind, IrExprKind::Var { id } if id == var)
+}
+
+/// `let (a1, a2) = acc` — the accumulator pair destructure heading the body.
+fn acc_pair_binds(stmt: &IrStmt, acc_var: VarId) -> Option<(VarId, VarId)> {
+    use almide_ir::{IrPattern, IrStmtKind};
+    let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value } =
+        &stmt.kind
+    else {
+        return None;
+    };
+    if pats.len() != 2 || !matches!(&value.kind, IrExprKind::Var { id } if *id == acc_var) {
+        return None;
+    }
+    let IrPattern::Bind { var: a1, .. } = &pats[0] else { return None };
+    let IrPattern::Bind { var: a2, .. } = &pats[1] else { return None };
+    Some((*a1, *a2))
+}
+
 impl LowerCtx {
     /// Lower a fold-accumulator BODY that is a direct CALL (`(h, k) => step(h, k)` —
     /// the transformer layer fold) to a BARE fresh owned heap value: a Named user fn
@@ -60,75 +206,9 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         let DefuncLambda { params, body } = lambda;
         use crate::{IntOp, PrimKind};
-        use almide_ir::{IrPattern, IrStmtKind};
-        // Accumulator type: a 2-tuple of scalars; the result is the same tuple.
-        let (t1, t2) = match result_ty {
-            Ty::Tuple(ts) if ts.len() == 2 && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]) => {
-                (ts[0].clone(), ts[1].clone())
-            }
-            _ => return None,
-        };
+        let plan = plan_scalar_tuple_fold(params, body, init, result_ty)?;
+        let ScalarTupleFoldPlan { t1, t2, init_elems, extra_stmts, proj1, proj2, a1, a2 } = plan;
         let _ = (&t1, &t2);
-        // init = (e1, e2), both scalar-lowerable.
-        let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
-        if init_elems.len() != 2 {
-            return None;
-        }
-        // body = Block{ [let (a1, a2) = acc, ...maybe nothing else], tail }
-        let acc_var = params[0].0;
-        let IrExprKind::Block { stmts, expr: Some(tail) } = &body.kind else { return None };
-        if stmts.is_empty() {
-            return None;
-        }
-        // stmts[0] must be the acc destructure; any FURTHER stmts (`let a = …; let rank = …`
-        // — the best_pair_index preamble) lower per-iteration via the ordinary stmt
-        // machinery inside the loop (their heap temps freed within the iteration).
-        let extra_stmts = &stmts[1..];
-        let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value } =
-            &stmts[0].kind
-        else {
-            return None;
-        };
-        if pats.len() != 2 || !matches!(&value.kind, IrExprKind::Var { id } if *id == acc_var) {
-            return None;
-        }
-        let a1 = match &pats[0] {
-            IrPattern::Bind { var, .. } => *var,
-            _ => return None,
-        };
-        let a2 = match &pats[1] {
-            IrPattern::Bind { var, .. } => *var,
-            _ => return None,
-        };
-        // tail: an if-TREE whose every leaf is a 2-tuple (`if a then (..) else if b
-        // then (..) else (..)` — the find_chunk chain). PROJECT the tree per
-        // component: the same conditions, each leaf replaced by its idx-th element
-        // (conditions are pure scalar expressions — the scalar path admits nothing
-        // effectful — so evaluating them once per component is value-identical).
-        fn project(e: &IrExpr, idx: usize, comp_ty: &Ty) -> Option<IrExpr> {
-            match &e.kind {
-                IrExprKind::Tuple { elements } if elements.len() == 2 => {
-                    Some(elements[idx].clone())
-                }
-                IrExprKind::If { cond, then, else_ } => {
-                    let t = project(then, idx, comp_ty)?;
-                    let el = project(else_, idx, comp_ty)?;
-                    Some(IrExpr {
-                        kind: IrExprKind::If {
-                            cond: cond.clone(),
-                            then: Box::new(t),
-                            else_: Box::new(el),
-                        },
-                        ty: comp_ty.clone(),
-                        span: e.span.clone(),
-                        def_id: e.def_id,
-                    })
-                }
-                _ => None,
-            }
-        }
-        let proj1 = project(tail, 0, &t1)?;
-        let proj2 = project(tail, 1, &t2)?;
 
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
@@ -271,46 +351,7 @@ impl LowerCtx {
         use crate::{IntOp, PrimKind};
         use almide_lang::types::constructor::TypeConstructorId;
         use almide_ir::{IrMatchArm, IrPattern};
-        // Option[<2-scalar tuple>] subject, exactly two guard-free arms.
-        let tuple_ty = match &subject.ty {
-            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => match &a[0] {
-                Ty::Tuple(ts)
-                    if ts.len() == 2 && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]) =>
-                {
-                    a[0].clone()
-                }
-                _ => return None,
-            },
-            _ => return None,
-        };
-        if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
-            return None;
-        }
-        let find = |want_some: bool| -> Option<&IrMatchArm> {
-            arms.iter().find(|a| match &a.pattern {
-                IrPattern::Some { .. } => want_some,
-                IrPattern::None | IrPattern::Wildcard => !want_some,
-                _ => false,
-            })
-        };
-        let some_arm = find(true)?;
-        let none_arm = find(false)?;
-        // some(p) => Var(p) (the payload passthrough) — the only admitted Some body.
-        let p_var = match &some_arm.pattern {
-            IrPattern::Some { inner } => match &**inner {
-                IrPattern::Bind { var, .. } => *var,
-                _ => return None,
-            },
-            _ => return None,
-        };
-        if !matches!(&some_arm.body.kind, IrExprKind::Var { id } if *id == p_var) {
-            return None;
-        }
-        // none => (f1, f2) with scalar-lowerable components.
-        let IrExprKind::Tuple { elements: fb } = &none_arm.body.kind else { return None };
-        if fb.len() != 2 {
-            return None;
-        }
+        let fb = plan_scalar_tuple_option_match(subject, arms)?;
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         macro_rules! bail {
@@ -397,7 +438,6 @@ impl LowerCtx {
                 args: vec![addr, *comp],
             });
         }
-        let _ = tuple_ty;
         Some(tup)
     }
 }
