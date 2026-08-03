@@ -38,6 +38,50 @@ pub(crate) struct OptFoldSlots {
     pub val: ValueId,
 }
 
+/// The GATE of [`LowerCtx::try_lower_defunc_opt_tuple_fold`] — a
+/// `(scalar, Option[scalar])` accumulator seeded `(e0, none)`, the body a
+/// single acc-pair destructure over a tail tree. Returns the destructured
+/// component vars `(p_var, found_var)`.
+fn plan_opt_tuple_fold(
+    params: &[(VarId, Ty)],
+    body: &IrExpr,
+    init: &IrExpr,
+    result_ty: &Ty,
+) -> Option<(VarId, VarId)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_ir::{IrPattern, IrStmtKind};
+    match result_ty {
+        Ty::Tuple(ts)
+            if ts.len() == 2
+                && !is_heap_ty(&ts[0])
+                && matches!(&ts[1],
+                    Ty::Applied(TypeConstructorId::Option, a)
+                        if a.len() == 1 && !is_heap_ty(&a[0])) => {}
+        _ => return None,
+    }
+    // Seed: (e0, none).
+    let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
+    if init_elems.len() != 2 || !matches!(init_elems[1].kind, IrExprKind::OptionNone) {
+        return None;
+    }
+    let acc_var = params[0].0;
+    let IrExprKind::Block { stmts, expr: Some(_) } = &body.kind else { return None };
+    if stmts.len() != 1 {
+        return None;
+    }
+    let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value } =
+        &stmts[0].kind
+    else {
+        return None;
+    };
+    if pats.len() != 2 || !matches!(&value.kind, IrExprKind::Var { id } if *id == acc_var) {
+        return None;
+    }
+    let IrPattern::Bind { var: p_var, .. } = &pats[0] else { return None };
+    let IrPattern::Bind { var: found_var, .. } = &pats[1] else { return None };
+    Some((*p_var, *found_var))
+}
+
 impl LowerCtx {
 
     /// C1 defunc for a `(scalar, Option[scalar])` accumulator fold — the wav
@@ -68,42 +112,10 @@ impl LowerCtx {
         use crate::{IntOp, PrimKind};
         use almide_lang::types::constructor::TypeConstructorId;
         use almide_ir::{BinOp, IrPattern, IrStmtKind};
-        // (scalar, Option[scalar]) accumulator only.
-        match result_ty {
-            Ty::Tuple(ts)
-                if ts.len() == 2
-                    && !is_heap_ty(&ts[0])
-                    && matches!(&ts[1],
-                        Ty::Applied(TypeConstructorId::Option, a)
-                            if a.len() == 1 && !is_heap_ty(&a[0])) => {}
-            _ => return None,
-        }
-        // Seed: (e0, none).
-        let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
-        if init_elems.len() != 2 || !matches!(init_elems[1].kind, IrExprKind::OptionNone) {
-            return None;
-        }
+        let (p_var, found_var) = plan_opt_tuple_fold(params, body, init, result_ty)?;
         let acc_var = params[0].0;
-        let IrExprKind::Block { stmts, expr: Some(tail) } = &body.kind else { return None };
-        if stmts.len() != 1 {
-            return None;
-        }
-        let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value } =
-            &stmts[0].kind
-        else {
-            return None;
-        };
-        if pats.len() != 2 || !matches!(&value.kind, IrExprKind::Var { id } if *id == acc_var) {
-            return None;
-        }
-        let p_var = match &pats[0] {
-            IrPattern::Bind { var, .. } => *var,
-            _ => return None,
-        };
-        let found_var = match &pats[1] {
-            IrPattern::Bind { var, .. } => *var,
-            _ => return None,
-        };
+        let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
+        let IrExprKind::Block { expr: Some(tail), .. } = &body.kind else { return None };
         // Synthetic vars standing for the tag/payload locals inside projected trees.
         let base = crate::lower::max_var_id(body).max(crate::lower::max_var_id(init)) + 1;
         let ft = VarId(base);
@@ -169,8 +181,8 @@ impl LowerCtx {
                     Comp::C1Val => int_expr(IrExprKind::Var { id: fv }, e),
                 }),
                 IrExprKind::If { cond, then, else_ } => {
-                    let t = project(then, comp, OptFoldVars { param: p_var, acc: OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } })?;
-                    let el = project(else_, comp, OptFoldVars { param: p_var, acc: OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } })?;
+                    let t = project(then, comp, vars)?;
+                    let el = project(else_, comp, vars)?;
                     Some(IrExpr {
                         kind: IrExprKind::If {
                             cond: cond.clone(),
@@ -183,7 +195,7 @@ impl LowerCtx {
                     })
                 }
                 IrExprKind::Block { stmts, expr: Some(tail) } => {
-                    let t = project(tail, comp, OptFoldVars { param: p_var, acc: OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } })?;
+                    let t = project(tail, comp, vars)?;
                     Some(IrExpr {
                         kind: IrExprKind::Block {
                             stmts: stmts.clone(),
@@ -200,6 +212,23 @@ impl LowerCtx {
                         && arms.len() == 2
                         && arms.iter().all(|a| a.guard.is_none()) =>
                 {
+                    project_found_match(e, arms, comp, vars)
+                }
+                _ => None,
+            }
+        }
+        /// The `match found { some(b) => X, none => Y }` arm of `project` —
+        /// `if ft != 0 then X[b:=fv] else Y`. Verbatim.
+        fn project_found_match(
+            e: &IrExpr,
+            arms: &[almide_ir::IrMatchArm],
+            comp: Comp,
+            vars: OptFoldVars,
+        ) -> Option<IrExpr> {
+            let OptFoldVars { acc, .. } = vars;
+            let fv = acc.found_val;
+            let ft = acc.found_tag;
+
                     let some_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Some { .. }))?;
                     let none_arm = arms
                         .iter()
@@ -212,8 +241,8 @@ impl LowerCtx {
                         },
                         _ => return None,
                     };
-                    let t = project(&some_body, comp, OptFoldVars { param: p_var, acc: OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } })?;
-                    let el = project(&none_arm.body, comp, OptFoldVars { param: p_var, acc: OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } })?;
+                    let t = project(&some_body, comp, vars)?;
+                    let el = project(&none_arm.body, comp, vars)?;
                     let cond = int_expr(
                         IrExprKind::BinOp {
                             op: BinOp::Neq,
@@ -232,15 +261,14 @@ impl LowerCtx {
                         span: e.span.clone(),
                         def_id: e.def_id,
                     })
-                }
-                _ => None,
-            }
         }
         // The tail must be a projectable component tree (the gate) — checked up front so
         // the single-pass emitter below never leaves partial control flow on a decline.
-        if project(tail, Comp::C0, OptFoldVars { param: p_var, acc: OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } }).is_none()
-            || project(tail, Comp::C1Tag, OptFoldVars { param: p_var, acc: OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } }).is_none()
-            || project(tail, Comp::C1Val, OptFoldVars { param: p_var, acc: OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv } }).is_none()
+        let acc = OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv };
+        let vars = OptFoldVars { param: p_var, acc };
+        if project(tail, Comp::C0, vars).is_none()
+            || project(tail, Comp::C1Tag, vars).is_none()
+            || project(tail, Comp::C1Val, vars).is_none()
         {
             return None;
         }
@@ -306,8 +334,8 @@ impl LowerCtx {
         self.in_frame += 1;
         self.in_defunc_body += 1;
         self.scalar_loop_depth += 1;
-        let emitted =
-            self.emit_opt_tuple_fold_body(tail, OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv }, OptFoldSlots { scalar: s0, tag: tloc, val: vloc });
+        let slots = OptFoldSlots { scalar: s0, tag: tloc, val: vloc };
+        let emitted = self.emit_opt_tuple_fold_body(tail, acc, slots);
         self.scalar_loop_depth -= 1;
         self.in_defunc_body -= 1;
         self.in_frame -= 1;
@@ -416,7 +444,7 @@ impl LowerCtx {
                     }
                 }
                 let r = if ok {
-                    self.emit_opt_tuple_fold_body(tail, OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv }, OptFoldSlots { scalar: s0, tag: tloc, val: vloc })
+                    self.emit_opt_tuple_fold_body(tail, acc, slots)
                 } else {
                     None
                 };
@@ -429,10 +457,10 @@ impl LowerCtx {
             IrExprKind::If { cond, then, else_ } => {
                 let c = self.lower_heap_result_cond(cond)?;
                 self.ops.push(Op::IfThen { cond: c, dst: None });
-                let t = self.emit_opt_tuple_fold_body(then, OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv }, OptFoldSlots { scalar: s0, tag: tloc, val: vloc });
+                let t = self.emit_opt_tuple_fold_body(then, acc, slots);
                 self.ops.push(Op::Else { val: None });
                 let el = t.and_then(|_| {
-                    self.emit_opt_tuple_fold_body(else_, OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv }, OptFoldSlots { scalar: s0, tag: tloc, val: vloc })
+                    self.emit_opt_tuple_fold_body(else_, acc, slots)
                 });
                 self.ops.push(Op::EndIf { val: None });
                 el
@@ -460,12 +488,12 @@ impl LowerCtx {
                 };
                 self.ops.push(Op::IfThen { cond: tloc, dst: None });
                 let t = self.emit_opt_tuple_fold_body(
-                    &some_body, OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv }, OptFoldSlots { scalar: s0, tag: tloc, val: vloc },
+                    &some_body, acc, slots,
                 );
                 self.ops.push(Op::Else { val: None });
                 let el = t.and_then(|_| {
                     self.emit_opt_tuple_fold_body(
-                        &none_arm.body, OptFoldAcc { acc: acc_var, found: found_var, found_tag: ft, found_val: fv }, OptFoldSlots { scalar: s0, tag: tloc, val: vloc },
+                        &none_arm.body, acc, slots,
                     )
                 });
                 self.ops.push(Op::EndIf { val: None });
