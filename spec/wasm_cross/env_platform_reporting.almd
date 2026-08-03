@@ -1,27 +1,36 @@
 // @contract: C-189
-// env.os / env.temp_dir — the ONLY stdlib observables exempt from the
-// native == wasm law, and the fixture that keeps that exemption CLOSED.
+// env.os / env.temp_dir / fs.temp_dir — the ONLY stdlib observables exempt
+// from the native == wasm law, and the fixture that keeps that exemption
+// CLOSED.
 //
-// Both fns REPORT THE HOST they are running on: native answers the real OS
-// name and the real temp directory, the wasm leg answers the WASI sandbox
-// ("wasi", "/tmp"). Reporting the same platform on both legs would be the
-// DEFECT — a program asking "where am I" must be told the truth.
+// All three REPORT THE HOST they are running on: native answers the real OS
+// name and the real temp directory; the wasm leg answers "wasi" for os and,
+// for the temp dir, the HOST's `$TMPDIR` claim first (the Go/Python WASI
+// convention — the runner passes the host env through, so the guest
+// converges on the native answer wherever the host sets it), falling back
+// to the "/tmp" preopen convention. Reporting the same platform on both
+// legs unconditionally would be the DEFECT — a program asking "where am I"
+// must be told the truth.
 //
-// The raw value therefore differs by target by design, so — exactly like
+// The raw value therefore may differ by target by design, so — exactly like
 // C-112, where random.int's draw is nondeterministic — the certified
 // observable is the deterministic INVARIANT that holds identically on both:
-// os is a member of the closed platform set, and temp_dir is a non-empty
-// path that is absolute on every posix host. Both legs print the same bytes.
+// os is a member of the closed platform set, and the temp dir is a
+// non-empty path that is absolute on every posix host, with fs.temp_dir
+// and env.temp_dir agreeing byte-for-byte (one observable, two spellings).
+// Both legs print the same bytes.
 //
 // Everything else in the process-environment surface stays byte-identical:
-// env.args (C-096), env.get (C-118), random.int's range (C-112). If a third
-// fn ever needs an exemption, it belongs in C-189's statement and here.
+// env.args (C-096), env.get (C-118), random.int's range (C-112). If a
+// fourth fn ever needs an exemption, it belongs in C-189's statement and
+// here.
 //
 // The reference interpreter ABSTAINS on this fixture (ledgered alongside
 // env_args / env_get). It is a third leg that is neither native nor the WASI
 // sandbox, so "which platform is the interpreter" needs its own deliberate
 // answer rather than one inherited from whatever host it happens to run on.
 import env
+import fs
 
 effect fn main() -> Unit = {
   let os = env.os()
@@ -33,4 +42,8 @@ effect fn main() -> Unit = {
   let tmp = env.temp_dir()
   let shaped = string.len(tmp) > 0 and (os == "windows" or string.starts_with(tmp, "/"))
   if shaped then println("temp_dir:shaped") else println("temp_dir:MALFORMED")
+  // One observable, two spellings: fs.temp_dir must agree with env.temp_dir
+  // byte-for-byte on every leg.
+  let ftmp = fs.temp_dir()
+  if ftmp == tmp then println("fs_temp_dir:agrees") else println("fs_temp_dir:DIVERGES")
 }

@@ -437,8 +437,9 @@ effect fn main() -> Unit = {
 `effect fn main()` is auto-wrapped to return `Result<(), String>`. No need to write `ok(())` or `-> Result[...]`.
 
 **Temp files**: never hardcode `/tmp` — it does not exist on Windows. Use
-`fs.temp_dir()` (platform-correct: `%TMP%` on Windows, `/tmp` on the wasm
-leg) or `fs.create_temp_file(prefix)` / `fs.create_temp_dir(prefix)`:
+`fs.temp_dir()` (platform-correct: `%TMP%` on Windows native; on wasm the
+Go/Python WASI rule `$TMPDIR` else `/tmp`, so it converges on the host's
+real temp dir) or `fs.create_temp_file(prefix)` / `fs.create_temp_dir(prefix)`:
 
 ```almide
 let dir = fs.temp_dir()

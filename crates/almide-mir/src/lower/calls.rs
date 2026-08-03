@@ -703,6 +703,11 @@ fn is_admitted_effectful_entropy_env_clock(module: &str, func: &str) -> bool {
         // $env_get floor), so its prim is in the program map and the transitive
         // cap_witness counts CliArgs. Returns Option[String] (heap Option block).
         || (module == "env" && func == "get")
+        // `env.temp_dir` / `fs.temp_dir` — one temp-dir observable, two spellings
+        // (C-189). Self-hosted to `$TMPDIR ?? "/tmp"` (the Go/Python WASI rule),
+        // so the reach is exactly env.get's: Capability::CliArgs (environ).
+        || (module == "env" && func == "temp_dir")
+        || (module == "fs" && func == "temp_dir")
         || (module == "env" && func == "unix_timestamp")
         // `datetime.now` (Unix seconds) / `env.millis` (milliseconds) — the SAME WASI
         // wall-clock floor as env.unix_timestamp (clock_now.almd → prim.clock_time_get,
