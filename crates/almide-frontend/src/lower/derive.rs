@@ -5,7 +5,7 @@ use crate::types::Ty;
 use almide_base::intern::{Sym, sym};
 use super::LowerCtx;
 use super::derive_codec::{
-    auto_derive_encode, auto_derive_decode,
+    auto_derive_encode, auto_derive_decode, derive_option_list_workers,
     auto_derive_variant_encode, auto_derive_variant_decode,
     derive_container_helpers,
 };
@@ -97,6 +97,8 @@ fn derive_codec(
             }
             if wants("decode") {
                 out.push(auto_derive_decode(&mut ctx.var_table, &td.name, type_ty, fields));
+                let field_tys: Vec<Ty> = fields.iter().map(|f| f.ty.clone()).collect();
+                out.extend(derive_option_list_workers(&mut ctx.var_table, &td.name, &field_tys));
             }
         }
         (None, IrTypeDeclKind::Variant { cases, .. }) => {
@@ -105,6 +107,11 @@ fn derive_codec(
             }
             if wants("decode") {
                 out.push(auto_derive_variant_decode(&mut ctx.var_table, &td.name, type_ty, cases));
+                let field_tys: Vec<Ty> = cases.iter().flat_map(|c| match &c.kind {
+                    IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>(),
+                    _ => vec![],
+                }).collect();
+                out.extend(derive_option_list_workers(&mut ctx.var_table, &td.name, &field_tys));
             }
         }
         (None, _) => {}

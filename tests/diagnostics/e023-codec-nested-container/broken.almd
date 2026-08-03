@@ -1,0 +1,5 @@
+// #1061: the derive supports one container level with leaf elements; deeper
+// nesting is rejected at declaration (wrap the element in a named Codec type).
+type L: Codec = { xs: List[Option[Int]] }
+
+fn main() -> Unit = println("unreachable")

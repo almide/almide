@@ -45,13 +45,15 @@ type Color: Eq, Repr = Red | Green | Blue   // convention after type name with :
 **Variant serialization — recommended pattern.** When a variant type
 crosses a serialization boundary (JSON / file IO / dojo fixtures),
 declare `: Codec` to auto-generate `Type.encode` / `Type.decode`
-instead of hand-writing `match` ladders. The auto-derived Codec emits
-tagged-JSON with the ctor name as the tag and payload fields under
-`value`:
+instead of hand-writing `match` ladders. The derived Codec is
+externally tagged — the ctor name is the single key; a record payload
+keeps its field names, a tuple payload is a positional array, a unit
+case is `null`:
 ```
-type Event: Codec = | Click(Int, Int) | Scroll{dy: Int}
-// Event.encode(Click(10, 20)) → {"tag": "Click", "value": [10, 20]}
-// Event.encode(Scroll { dy: 5 }) → {"tag": "Scroll", "value": {"dy": 5}}
+type Event: Codec = | Click(Int, Int) | Scroll{dy: Int} | Quit
+// Event.encode(Click(10, 20))    → {"Click": [10, 20]}
+// Event.encode(Scroll { dy: 5 }) → {"Scroll": {"dy": 5}}
+// Event.encode(Quit)             → {"Quit": null}
 ```
 Skip `: Codec` only for variants that never serialize
 (internal enums like `Endian` in `stdlib/bytes.almd`). Every other
@@ -485,6 +487,90 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [io](stdlib/io.md) | Standard I/O | `import io` | 7 |
 | [http](stdlib/http.md) | HTTP client and server | `import http` | 23 |
 | [random](stdlib/random.md) | Random number generation | `import random` | 4 |
+
+## JSON & the wire
+
+Typed Codec is the default path for ALL JSON work. The dynamic `json.*` API
+(29 functions) is for exploration and schemaless passthrough only — if you
+know the shape, declare a type.
+
+**Rule 1 — wire types use wire names.** A type that describes a foreign JSON
+format mirrors the format's field names verbatim, even when they break Almide's
+snake_case convention. The type IS the documentation of the wire; no renaming
+layer exists to misremember:
+
+```almide
+type OtlpSpan: Codec = {
+  traceId: String,           // camelCase because the WIRE says traceId
+  spanId: String,
+  parentSpanId: Option[String],  // none = key omitted (proto3 unset)
+  startTimeUnixNano: String,
+}
+// send:    http.request("POST", url, json.stringify(OtlpSpan.encode(s)), headers)
+// receive: OtlpSpan.decode(json.parse(body) ?? json.null())
+```
+Domain logic that wants Almide-shaped names defines its own type and maps in
+plain code (a constructor call — the checker verifies every field). Use the
+field alias `name as "wire": T` ONLY for keys that cannot be Almide
+identifiers (`@type`, `$ref`, `user-id`).
+
+**Rule 2 — none omits the key.** Encode drops a `none` Option field entirely
+(no `null`); decode folds a missing key or explicit `null` back to `none`.
+`decode(encode(x)) == x` always. Fields with `= default` values stay emitted.
+This matches proto3 JSON, so protobuf-defined APIs (OTLP etc.) work directly —
+and a proto3 `oneof` is just an all-Option mirror type:
+
+```almide
+type AnyValue: Codec = {
+  stringValue: Option[String] = none,
+  intValue: Option[String] = none,    // proto3 JSON: int64 rides as string
+  boolValue: Option[Bool] = none,
+}
+AnyValue { stringValue: some("hi") }  // → {"stringValue":"hi"} — exactly one key
+```
+
+**Rule 3 — `Value` is the escape hatch.** A `Value` field passes through
+verbatim in both directions (nested docs, explicit nulls). `Option[Value]` is
+the ONE place absent and null differ: missing → `none`, explicit `null` →
+`some(json.null())` — use it for RFC-7386-style patch semantics.
+
+**Rule 4 — foreign variant shapes are hand-written codecs.** The derived
+variant form is externally tagged (`{"Click": {...}}`). For an API that tags
+internally (`{"type": "click", ...}`), give each case its own Codec record and
+hand-write only the dispatch — the convention methods compose with every
+derived Codec automatically:
+
+```almide
+type Click: Codec = { x: Int, y: Int }
+type Scroll: Codec = { dy: Int }
+type Event = | C(Click) | S(Scroll)
+
+fn Event.encode(e: Event) -> Value = match e {
+  C(c) => value.merge(Click.encode(c), value.object([("type", value.str("click"))])),
+  S(s) => value.merge(Scroll.encode(s), value.object([("type", value.str("scroll"))])),
+}
+fn Event.decode(v: Value) -> Result[Event, String] =
+  match value.field(v, "type") {
+    ok(tv) => match value.as_string(tv) {
+      ok(tag) => match tag {
+        "click"  => result.map(Click.decode(v), (c) => C(c))
+        "scroll" => result.map(Scroll.decode(v), (s) => S(s))
+        _ => err("unknown Event tag: ${tag}")
+      }
+      err(e) => err(e)
+    }
+    err(e) => err(e)
+  }
+// Event now nests in derived Codec types like any other: { evt: Event, at: Int }
+```
+Always pair a hand-written codec with a roundtrip test:
+`test "Event roundtrips" { assert_eq(Event.decode(Event.encode(C(Click{x:1,y:2}))), ok(C(Click{x:1,y:2}))) }`
+
+Codec field types are `String`/`Int`/`Float`/`Bool`/`Value`, other Codec
+types, and one level of `Option`/`List` of those. Anything else (Map, Bytes,
+tuples, sized ints, `Option[Option[T]]`, nested containers) is rejected at
+declaration — wrap it in a named Codec type or convert at the boundary.
+
 ## Key rules
 - Newline = statement separator (no semicolons needed)
 - `[]` for generics, NOT `<>`

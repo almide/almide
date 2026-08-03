@@ -1,0 +1,6 @@
+// The fix: wrap the element in a named Codec type.
+type Cell: Codec = { v: Option[Int] }
+
+type L: Codec = { xs: List[Cell] }
+
+fn main() -> Unit = println("ok")

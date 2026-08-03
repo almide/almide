@@ -1,0 +1,4 @@
+// The fix: carry base64 in a String field.
+type B: Codec = { data: String }
+
+fn main() -> Unit = println("ok")

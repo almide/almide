@@ -1,0 +1,5 @@
+// #1061: JSON has one number type; sized numerics are rejected at declaration
+// (use Int/Float in wire types and convert at the boundary).
+type S: Codec = { n: Int8 }
+
+fn main() -> Unit = println("unreachable")

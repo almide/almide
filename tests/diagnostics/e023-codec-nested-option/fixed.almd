@@ -1,0 +1,4 @@
+// The fix: a Value field distinguishes absent from explicit null verbatim.
+type D: Codec = { a: Option[Value] }
+
+fn main() -> Unit = println("ok")

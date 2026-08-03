@@ -1,0 +1,4 @@
+// The fix: wire types carry Int; convert at the boundary.
+type S: Codec = { n: Int }
+
+fn main() -> Unit = println("ok")
