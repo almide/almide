@@ -47,7 +47,12 @@ pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String {
 }
 pub fn almide_rt_float_is_nan(n: f64) -> bool { n.is_nan() }
 pub fn almide_rt_float_is_infinite(n: f64) -> bool { n.is_infinite() }
-pub fn almide_rt_float_to_bits(f: f64) -> i64 { f.to_bits() as i64 }
+// NaN observation is canonical (C-210): raw NaN bits are arch-dependent (x86
+// arithmetic sets the sign where aarch64 does not) and payload-smuggleable via
+// from_bits — every observer sees the single canonical pattern instead.
+pub fn almide_rt_float_to_bits(f: f64) -> i64 {
+    if f.is_nan() { 0x7FF8_0000_0000_0000_u64 as i64 } else { f.to_bits() as i64 }
+}
 
 // ── Sized conversions (for `@intrinsic` migration of `float.to_*`) ──
 

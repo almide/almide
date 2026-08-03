@@ -2236,11 +2236,12 @@ evidence  = [
 id        = "C-178"
 spec      = "ALS-M5"
 title     = "A mutual tail-recursion chain runs at unbounded depth on the wasm target"
-statement = "A cross-function tail-recursion chain (`is_even`/`is_odd`, an accumulator `ping`/`pong`) computes the same value on both targets at a depth (1,000,000) that overflows a plain-call chain on wasm (#864 — the legacy almide-codegen emitted return_call, but the port was missed when almide-mir became the default renderer: the chain compiled to plain `call`s and trapped `call stack exhausted`). The renderer now classifies a FUNCTION-TAIL `CallFn` — one whose result flows UNMODIFIED through only Else/EndIf value merges (plus its own Consume move-out marker) to the function's `ret`, with nothing else (no drops, no stores) on the path from the call to the exit — and emits `return_call`, transferring the frame; the dead merge plumbing after it is unreachable-but-valid wasm. The classification is render-side only (MIR ops, certificate, and caps counts are unchanged — the call op is the same op, differently encoded), and anything breaking the pattern keeps today's plain `call`. SELF tail recursion still takes the upstream TCO loop rewrite and is not affected. Native Rust emit is byte-identical (emit-diffs 0 across the 1001-file corpus); the wasm re-encode was suite-verified (all three spec legs plus flagship outputs byte-identical)."
+statement = "A cross-function tail-recursion chain (`is_even`/`is_odd`, an accumulator `ping`/`pong`) computes the same value on both targets at a depth (1,000,000) that overflows a plain-call chain on wasm (#864 — the legacy almide-codegen emitted return_call, but the port was missed when almide-mir became the default renderer: the chain compiled to plain `call`s and trapped `call stack exhausted`). The renderer now classifies a FUNCTION-TAIL `CallFn` — one whose result flows UNMODIFIED through only Else/EndIf value merges (plus its own Consume move-out marker) to the function's `ret`, with nothing else (no drops, no stores) on the path from the call to the exit — and emits `return_call`, transferring the frame; the dead merge plumbing after it is unreachable-but-valid wasm. The classification is render-side only (MIR ops, certificate, and caps counts are unchanged — the call op is the same op, differently encoded), and anything breaking the pattern keeps today's plain `call`. SELF tail recursion still takes the upstream TCO loop rewrite and is not affected. Native Rust emit is byte-identical (emit-diffs 0 across the 1001-file corpus); the wasm re-encode was suite-verified (all three spec legs plus flagship outputs byte-identical). The INDIRECT twin (2026-08-03): the same classification admits a function-tail `CallIndirect`, so a closure call in the reaches-ret-unmodified shape renders as `return_call_indirect` (the closure_tail_recursion fixture's `step`; the instruction encoding is machine-pinned by crates/almide-mir/tests/tail_call_indirect_test.rs). The depth claim stays honest: a cycle that ALLOCATES a closure per hop keeps one creator frame per round on BOTH targets — the creator's post-call drop correctly declines the transfer, a transferred frame would leak the closure — so the indirect fixture pins parity at a survivable depth plus the instruction gate, not an overflow-proving depth; an unbounded pure-indirect cycle needs a creator-free closure chain no spine-lowerable construction produces today."
 since     = "0.37.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mutual_tail_recursion.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_tail_recursion.almd", class = "fixture" },
 ]
 
 # ── THE UNSIGNED 64-BIT LANE ─
@@ -2625,4 +2626,17 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/codec_none_omission.almd", class = "fixture" },
   { path = "spec/stdlib/codec_field_matrix_test.almd", class = "fixture" },
+]
+
+# ── NaN OBSERVATION IS CANONICAL — Wasm 3.0 deterministic-profile conformance ─
+[[contract]]
+id        = "C-210"
+spec      = "ALS-T2"
+title     = "NaN observation is canonical — the deterministic-profile conformance law"
+statement = "A NaN's raw sign/payload bits are the one place the byte-identical law would leak host state: x86 arithmetic produces sign-set NaNs where aarch64 does not, engines may or may not propagate payloads, and `int.bits_to_float` can smuggle arbitrary payloads in. Every OBSERVATION boundary therefore collapses NaN to a single canonical pattern — `float.to_bits` answers 0x7FF8000000000000 for every NaN however produced (arithmetic, negation, from_bits round-trip), and the bytes float writes (`bytes.append_f64_le/be`, `append_f32_le/be`) write the same canonical f64 pattern / the canonical f32 pattern 0x7FC00000. Non-NaN bits stay raw (to_bits(1.5) == 0x3FF8000000000000 — normalization never over-reaches), and a non-canonical NaN still EXISTS as a value (from_bits -> arithmetic keeps IEEE semantics); only observers are blind to its representation. This is the Wasm 3.0 deterministic-profile stance applied at the language layer, so it holds on BOTH targets and on every host architecture — stronger than the profile itself, which constrains only the wasm leg. The emitted module also stays inside the profile's instruction subset: no relaxed SIMD, no threads/atomics/shared memory (machine-checked by crates/almide-mir/tests/deterministic_profile_test.rs)."
+since     = "0.53.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nan_canonical_observation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nan_canonical_bytes_write.almd", class = "fixture" },
 ]

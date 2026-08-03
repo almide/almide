@@ -84,9 +84,9 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 | Version | 大機能 | Issue |
 |---|---|---|
 | 0.51 | effect 表面規則の統一と診断修復（OTel dogfooding 発の #1049–#1054 一括）— `!` は effect call 上で常に可（never-err は無警告 no-op）、二項演算子オペランドの implicit unwrap（lowering の A-正規化込み）、unresolved import の wall taxonomy 修復、runtime-backed 型のユーザー注釈（HttpRequest/HttpResponse/JsonPath + 完備性 matrix gate）、E025 shape 導出。**出荷済 v0.51.0**。派生: [#1055](https://github.com/almide/almide/issues/1055)（effect-typed fn params）, [#1056](https://github.com/almide/almide/issues/1056) | [#1049](https://github.com/almide/almide/issues/1049)–[#1054](https://github.com/almide/almide/issues/1054) |
-| 0.52 | QualifiedRef newtype + hole-hunt レンズ — optimizer 手術の前の構造的安全化を 1 Unit に束ねる。QualifiedRef は v1 MIR 上で bare type identity を表現不能にし（#433 クラスの型による根絶）、以後の optimizer 追加はこの型の上で行う。hole-hunt は pass-ordering / checker-accepts-but-lowering-reinterprets / 診断乖離 / host-env 依存の検出器。実例棚: [#1018](https://github.com/almide/almide/issues/1018)（map.fold closure の under-check）。どちらも 0.53 の optimizer 接続より前という順序制約は不変 | [#908](https://github.com/almide/almide/issues/908), [#912](https://github.com/almide/almide/issues/912), [#1018](https://github.com/almide/almide/issues/1018) |
-| 0.53 | wasm leg に nanopass optimizer 群を接続 | [#929](https://github.com/almide/almide/issues/929) |
-| 0.54 | wasm SIMD | [#929](https://github.com/almide/almide/issues/929) |
+| 0.52 | JSON interop の設計決定（#1062）— 追加機構ゼロで決着: wire 型は wire の名前をそのまま鏡映、`as "wire"` は識別子になれないキー限定、外来 tag 形は手書き codec。C-209 = encode は none 省略 / decode は missing・null を none に畳む / `Option[Value]` が 3 状態の脱出口 / underivable shape は宣言時 E023。#1061 の 13 セル全消化 + コンテナ任意ネスト（#1065）。同梱: temp-dir 表面の TMPDIR 規約（C-189 改訂）、wasmtime 47。**出荷済 v0.52.0** | [#1062](https://github.com/almide/almide/issues/1062), [#1064](https://github.com/almide/almide/issues/1064), [#1065](https://github.com/almide/almide/issues/1065) |
+| 0.53 | プラットフォーム conformance（Wasm 3.0 / WASI 監査残件の全消化）— NaN 観測の canonical 化 = deterministic profile 準拠（C-210 + relaxed SIMD/atomics/shared 不使用の命令 gate、native 側含め全ホストアーキで成立）。self-host リンク同名異署名衝突 = invalid-wasm 脱出の wall 化（#1068）。return_call_indirect（C-178 の indirect twin、深度主張の正直化込み）。**Windows ホストの wasm レッグ開通 + push ごとの常設 CI gate**（#1066、fs パス契約 = Go 互換を Go/Rust/wasi-libc 比較つきで明文化）。**出荷済 v0.53.0** | [#1066](https://github.com/almide/almide/issues/1066), [#1068](https://github.com/almide/almide/issues/1068) |
+| 0.54 | pre-optimizer 安全化 → wasm optimizer 接続 + SIMD — QualifiedRef newtype（v1 MIR 上で bare type identity を表現不能に、#433 クラスの型による根絶）と hole-hunt レンズ（実例棚 [#1018](https://github.com/almide/almide/issues/1018)）を前段に据え、その上で nanopass optimizer 群と v128 SIMD を wasm leg へ接続する（optimizer と SIMD はどちらも #929 の同一アーク）。「optimizer より前」という順序制約は Unit 内順序として保存 | [#908](https://github.com/almide/almide/issues/908), [#912](https://github.com/almide/almide/issues/912), [#929](https://github.com/almide/almide/issues/929) |
 | 0.55 | RcCow 表現コスト phase 1 — allocation-heavy 文字列ワークロードの対 Rust ~1.7x を解剖・縮小 | [#1004](https://github.com/almide/almide/issues/1004) |
 | 0.56 | RcCow phase 2 — 対 Rust ギャップをラチェット下に。表現変更は cranelift（0.6x）が対象コードを生成し始める前に完了 | [#1004](https://github.com/almide/almide/issues/1004) |
 | 0.57 | 10k 行 dogfood プロジェクト完成・公開 — 0.46 着工分の完了、スケール数字（LOC・モジュール数・ビルド時間）を README に | [#1001](https://github.com/almide/almide/issues/1001) |
@@ -101,6 +101,14 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 > optimizer 前提の内部安全化より先に返すべき負債だからである。QualifiedRef は消えたのではなく
 > 0.52 に統合され、「0.53 の optimizer 接続より前」という順序制約ごと保存されている。
 > 静かな番号の付け替えではなく、この注記が記録である。
+>
+> **0.52 / 0.53 の差し替え（2026-08-03、連続 2 件）**: 0.52 の計画枠（QualifiedRef + hole-hunt）は
+> #1062 の JSON interop 設計決定（並行レーンで同日出荷）に、0.53 の計画枠（optimizer 接続）は
+> Wasm 3.0 / WASI 監査残件の全消化（プラットフォーム conformance）に、それぞれ席を譲った。
+> QualifiedRef + hole-hunt は 0.54 の**前段**に統合 — 0.54 の本体（optimizer 接続 + SIMD、
+> どちらも #929）はまさにこの 2 つを前提とするので、順序制約は Unit 内順序として保存される。
+> 3 連続の差し替えが示す実態 — 「計画 Unit より、dogfooding と監査が吐く負債の方が先に
+> 返済期日を迎える」— もここに記録しておく。
 
 ## 0.6x — rustc からの独立（debug ビルド）
 

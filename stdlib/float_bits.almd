@@ -1,9 +1,18 @@
 // float_bits — SELF-HOSTED `float.to_bits` / `int.bits_to_float` over the Float prim floor.
 // In the i64-uniform model a Float value ALREADY holds the f64 bits, so both are the raw
 // bit reinterpret = an identity pass-through (prim.fbits / prim.ffrombits). Byte-exact with
-// v0's `f.to_bits() as i64` / `f64::from_bits(b as u64)`. Pure scalar — cert untouched.
+// v0's `f.to_bits() as i64` / `f64::from_bits(b as u64)` — for every non-NaN. Pure scalar —
+// cert untouched.
+//
+// NaN OBSERVATION IS CANONICAL (Wasm 3.0 deterministic-profile conformance, C-210): a NaN's
+// raw payload/sign is where the byte-identical guarantee would leak — x86 arithmetic
+// produces sign-set NaNs where aarch64 does not, engines may or may not propagate payloads,
+// and `int.bits_to_float` can smuggle arbitrary payloads in. Every observation boundary
+// therefore collapses NaN to the single canonical pattern 0x7FF8000000000000; a
+// non-canonical payload survives from_bits→arithmetic but never reaches an observer.
 
-fn float_to_bits(x: Float) -> Int = prim.fbits(x)
+fn float_to_bits(x: Float) -> Int =
+  if float.is_nan(x) then 0x7FF8000000000000 else prim.fbits(x)
 fn int_bits_to_float(b: Int) -> Float = prim.ffrombits(b)
 
 // int.bits_to_f32(bits) = `f32::from_bits(bits as u32) as f64` — read the low 32 bits as an f32,

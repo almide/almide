@@ -584,8 +584,16 @@ fn tail_call_indexes(func: &MirFunction) -> BTreeSet<usize> {
     let Some(ret) = func.ret else { return BTreeSet::new() };
     let mut out = BTreeSet::new();
     for (i, op) in func.ops.iter().enumerate() {
-        let Op::CallFn { dst: Some(d), .. } = op else { continue };
-        if call_result_reaches_ret_unmodified(func, i, *d, ret) {
+        // A closure call in the same function-tail shape transfers its frame
+        // too (`return_call_indirect`) — the recursion cycle that hops
+        // through a closure param is the shape the named-only classification
+        // could not reach (C-178's indirect twin).
+        let d = match op {
+            Op::CallFn { dst: Some(d), .. } => *d,
+            Op::CallIndirect { dst: Some(d), .. } => *d,
+            _ => continue,
+        };
+        if call_result_reaches_ret_unmodified(func, i, d, ret) {
             out.insert(i);
         }
     }

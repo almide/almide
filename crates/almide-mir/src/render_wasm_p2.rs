@@ -376,6 +376,19 @@ fn render_op_call_light(
                 Some(r) if r.is_heap() => "_h",
                 Some(_) => "",
             };
+            // A FUNCTION-TAIL closure call (`tail_call_indexes`, same predicate
+            // as the CallFn arm): `return_call_indirect` transfers the frame,
+            // so a recursion cycle that hops through a closure runs in
+            // constant stack like the named mutual chain (C-178). The tail
+            // guard implies dst-reaches-ret, so the callee's result class
+            // (scalar `""` / heap `"_h"`) matches the caller's declared
+            // result and the type annotation stays the arity type.
+            if tail_call && dst.is_some() {
+                return format!(
+                    "    (return_call_indirect (type $closure_fn{arity}{suffix}) {argstr} (i32.wrap_i64 (local.get {})))\n",
+                    local(*table_idx)
+                );
+            }
             // The table index is a wasm i32; the MIR value is the uniform i64, so wrap it.
             let call = format!(
                 "(call_indirect (type $closure_fn{arity}{suffix}) {argstr} (i32.wrap_i64 (local.get {})))",
