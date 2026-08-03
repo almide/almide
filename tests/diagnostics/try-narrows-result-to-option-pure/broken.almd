@@ -1,0 +1,8 @@
+// #1071: in a pure fn `?` is the Result→Option conversion, not error
+// propagation — value.as_string receives an Option[Value] and E005 fires.
+// The hint must name that rule, never "declare a type parameter" on a
+// stdlib fn the writer does not own.
+fn read_tag(v: Value) -> String =
+  value.as_string(value.field(v, "type")?) ?? "unknown"
+
+fn main() -> Unit = ()

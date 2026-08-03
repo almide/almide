@@ -1,0 +1,8 @@
+// #1071 guard: suppressing the type-parameter hint for stdlib callees must
+// not kill its legitimate use — a USER fn whose param names an undeclared
+// uppercase type still gets "declare it as a type parameter".
+fn box_it(x: Wibble) -> Int = 1
+
+fn main() -> Unit = {
+  let _ = box_it(1)
+}

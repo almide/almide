@@ -1,0 +1,8 @@
+// #1071 follow-through: an Option handed to a plain-T param without a `?`
+// in sight — the hint names the unwrap paths instead of "fix the type".
+fn first_abs(items: List[Int]) -> Int = {
+  let found = items |> list.find((x) => x > 0)
+  int.abs(found)
+}
+
+fn main() -> Unit = ()

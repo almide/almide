@@ -1,0 +1,5 @@
+fn box_it[Wibble](x: Wibble) -> Int = 1
+
+fn main() -> Unit = {
+  let _ = box_it(1)
+}

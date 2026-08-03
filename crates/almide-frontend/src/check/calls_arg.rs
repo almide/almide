@@ -68,9 +68,14 @@ impl Checker {
 
     // Fix-it hint for `emit_call_arg_mismatch`: Float-sibling hint when
     // `float_sibling` is set (an Int-only math builtin given a Float, #740),
-    // else a likely-typevar hint (an undeclared capitalized bare name), else
-    // a generic conversion hint.
-    fn call_arg_mismatch_hint(&self, fn_name: &str, expected: &Ty, arg_ty: &Ty, float_sibling: Option<&'static str>) -> String {
+    // else the `?`-narrowing hint (Option[T] into a T param off a `?`
+    // postfix, #1071), else a likely-typevar hint (an undeclared capitalized
+    // bare name), else a generic conversion hint.
+    fn call_arg_mismatch_hint(
+        &self, fn_name: &str, expected: &Ty, arg_ty: &Ty,
+        expected_resolved: &Ty, arg_resolved: &Ty,
+        float_sibling: Option<&'static str>,
+    ) -> String {
         if let Some(sib) = float_sibling {
             return format!(
                 "`{}` is Int-only. For Floats use `{}(x)`, which preserves the Float — \
@@ -78,13 +83,44 @@ impl Checker {
                 fn_name, sib
             );
         }
+        // #1071: an Option[T] handed to a T param where the argument
+        // expression is a `?` postfix. The writer wanted error propagation;
+        // `?` IS the Result→Option conversion (one meaning everywhere), so
+        // name that rule — the templates below would guess from the types
+        // alone and teach a false move.
+        if let Some(inner) = arg_resolved.option_inner() {
+            if !types_mismatch(expected_resolved, &inner) && self.arg_is_try_postfix() {
+                return if self.env.can_call_effect {
+                    "`?` converts a Result to an Option — it is not error propagation. \
+                     In an effect fn body, `!` is the propagating unwrap: replace the \
+                     `?` with `!` (or use `?? fallback` for a default)".to_string()
+                } else {
+                    "`?` converts a Result to an Option here — a pure fn has no error \
+                     propagation. Unwrap instead: `?? fallback` supplies a default, \
+                     `match` handles ok/err (to propagate, make the caller an \
+                     `effect fn`)".to_string()
+                };
+            }
+        }
         if let Ty::Named(name, args) = expected {
             let n = name.as_str();
+            // #1071: never teach "declare a type parameter" for a callee the
+            // writer does not own (a stdlib signature cannot be re-declared),
+            // nor for a name that IS a known builtin type (`Value`, the
+            // runtime-backed stdlib nominals) — the premise "'X' is not a
+            // known type" would be false.
+            let callee_is_stdlib = fn_name
+                .split_once('.')
+                .map_or(false, |(m, f)| crate::stdlib::lookup_sig(m, f).is_some());
+            let is_known_builtin = n == "Value"
+                || almide_lang::stdlib_info::runtime_backed_type_owner(n).is_some();
             let is_likely_typevar = args.is_empty()
                 && !n.is_empty()
                 && n.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
                 && !self.env.types.contains_key(name)
-                && !self.env.constructors.contains_key(name);
+                && !self.env.constructors.contains_key(name)
+                && !callee_is_stdlib
+                && !is_known_builtin;
             if is_likely_typevar {
                 return format!("'{}' is not a known type. To use it as a type parameter, declare it: fn {}[{}](...)", n, fn_name, n);
             }
@@ -116,6 +152,15 @@ impl Checker {
                  handles ok/err",
                 arg_ty.display());
         }
+        // The Option sibling of the Result case above (#1071): an Option
+        // handed to a plain-T param means the caller meant the payload —
+        // name the unwrap paths instead of "fix the type".
+        if arg_resolved.is_option() && !expected_resolved.is_option() && !expected_resolved.is_unresolved() {
+            return format!(
+                "the argument is an {} — unwrap it first: `?? fallback` supplies \
+                 a default, or `match` handles the none case",
+                arg_ty.display());
+        }
         Self::hint_with_conversion("Fix the argument type", expected, arg_ty)
     }
 
@@ -136,7 +181,7 @@ impl Checker {
         } else {
             None
         };
-        let hint = self.call_arg_mismatch_hint(fn_name, expected, arg_ty, float_sibling);
+        let hint = self.call_arg_mismatch_hint(fn_name, expected, arg_ty, expected_resolved, arg_resolved, float_sibling);
         let mut diag = super::err(
             format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
             hint,
@@ -156,6 +201,20 @@ impl Checker {
             }
         }
         self.emit(diag);
+    }
+    // Whether the argument expression currently under the E005 caret is a
+    // `?` postfix. The checker unifies on types, not AST nodes, so the arg
+    // expression itself is out of reach here — but `current_span` covers
+    // exactly the argument text, and a trailing `?` in that slice can only
+    // be the Try postfix (`??` ends in its right operand, string literals in
+    // a quote).
+    fn arg_is_try_postfix(&self) -> bool {
+        self.current_span
+            .and_then(|sp| self.source_slice(sp))
+            .map_or(false, |src| {
+                let t = src.trim_end();
+                t.ends_with('?') && !t.ends_with("??")
+            })
     }
     /// Substitute Ty::TypeVar("Self") with a concrete type in a protocol method return type.
     fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
