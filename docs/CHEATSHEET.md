@@ -433,6 +433,15 @@ effect fn main() -> Unit = {
 }
 ```
 `effect fn main()` is auto-wrapped to return `Result<(), String>`. No need to write `ok(())` or `-> Result[...]`.
+
+**Temp files**: never hardcode `/tmp` — it does not exist on Windows. Use
+`fs.temp_dir()` (platform-correct: `%TMP%` on Windows, `/tmp` on the wasm
+leg) or `fs.create_temp_file(prefix)` / `fs.create_temp_dir(prefix)`:
+
+```almide
+let dir = fs.temp_dir()
+fs.write("${dir}/scratch.txt", data)!
+```
 Command-line arguments are accessed via `process.args()` (not main parameters).
 
 ## Operators (precedence high→low)

@@ -1,0 +1,5 @@
+// fs_temp_dir — SELF-HOSTED `fs.temp_dir()` for the v1 trust-spine WASM target.
+// The same constant as env_temp_dir (the WASI preopen convention — no host
+// reach, pure on this target); the native target's real host read (%TMP% on
+// Windows via std::env::temp_dir) lives in the runtime intrinsic.
+fn fs_temp_dir() -> String = "/tmp"
