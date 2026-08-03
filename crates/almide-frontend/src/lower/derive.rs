@@ -5,7 +5,7 @@ use crate::types::Ty;
 use almide_base::intern::{Sym, sym};
 use super::LowerCtx;
 use super::derive_codec::{
-    auto_derive_encode, auto_derive_decode,
+    auto_derive_encode, auto_derive_decode, CodecWk,
     auto_derive_variant_encode, auto_derive_variant_decode,
     derive_container_helpers,
 };
@@ -90,25 +90,38 @@ fn derive_codec(
 ) -> Vec<IrFunction> {
     let mut out = Vec::new();
     let wants = |suffix: &str| !fn_names.contains(format!("{}.{}", td.name, suffix).as_str());
-    match (fields, &td.kind) {
-        (Some(fields), _) => {
-            if wants("encode") {
-                out.push(auto_derive_encode(&mut ctx.var_table, &td.name, type_ty, fields));
+    // Nested-container shapes generate per-type workers on demand (#1065);
+    // `wk` collects them across the encode/decode builders, memoized by name.
+    let mut workers = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    {
+        let mut wk = CodecWk {
+            vt: &mut ctx.var_table,
+            type_name: td.name.as_str(),
+            out: &mut workers,
+            seen: &mut seen,
+        };
+        match (fields, &td.kind) {
+            (Some(fields), _) => {
+                if wants("encode") {
+                    out.push(auto_derive_encode(&mut wk, type_ty, fields));
+                }
+                if wants("decode") {
+                    out.push(auto_derive_decode(&mut wk, type_ty, fields));
+                }
             }
-            if wants("decode") {
-                out.push(auto_derive_decode(&mut ctx.var_table, &td.name, type_ty, fields));
+            (None, IrTypeDeclKind::Variant { cases, .. }) => {
+                if wants("encode") {
+                    out.push(auto_derive_variant_encode(&mut wk, type_ty, cases));
+                }
+                if wants("decode") {
+                    out.push(auto_derive_variant_decode(&mut wk, type_ty, cases));
+                }
             }
+            (None, _) => {}
         }
-        (None, IrTypeDeclKind::Variant { cases, .. }) => {
-            if wants("encode") {
-                out.push(auto_derive_variant_encode(&mut ctx.var_table, &td.name, type_ty, cases));
-            }
-            if wants("decode") {
-                out.push(auto_derive_variant_decode(&mut ctx.var_table, &td.name, type_ty, cases));
-            }
-        }
-        (None, _) => {}
     }
+    out.append(&mut workers);
     // The four container helpers (`__{en,de}code_{list,option}_T`, #790 piece 1)
     // every Codec type provides — real bodies the v1 leg links; on v0 the
     // BuiltinLowering call-rewrite keeps them unused (DCE'd).

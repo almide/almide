@@ -19,8 +19,14 @@ test "! is a no-op on a never-err Bool-returning effect call" {
 }
 
 test "! still unwraps a can-err effect call" {
-  fs.write("/tmp/almide_i1049_test.txt", "abc")!
-  let s = fs.read_text("/tmp/almide_i1049_test.txt")!
+  // fs.temp_dir(), never a literal "/tmp": the platform-correct temp root
+  // (%TMP% on Windows native, the /tmp preopen on the wasm leg). A fixed
+  // file name overwritten per run needs no cleanup — that is what a temp
+  // dir is for, and fs.remove would push this off the wasm test leg.
+  let dir = fs.temp_dir()
+  let path = "${dir}/almide_i1049_probe.txt"
+  fs.write(path, "abc")!
+  let s = fs.read_text(path)!
   assert_eq(string.len(s), 3)
 }
 

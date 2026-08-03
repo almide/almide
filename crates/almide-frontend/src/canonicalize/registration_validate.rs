@@ -72,6 +72,85 @@ fn codec_unsupported_container(ty: &Ty) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// The accepted Codec field-type grammar. Everything outside it is rejected
+/// HERE, at declaration — passing `check` and dying in codegen is the one
+/// forbidden outcome (#1061). Containers nest arbitrarily (#1065); the
+/// rejected shapes are semantic, not depth-based:
+///
+///   field := scalar | Value | named | Option[field'] | List[field']
+///     where Option[Option[..]] is void on the wire at ANY depth (encode
+///     omits/nulls a none, decode folds it back — some(none) and none cannot
+///     be told apart), and Option[Value] is only meaningful at FIELD position
+///     (elements have no "absent" state, so its 3-state contract cannot hold).
+///   scalar := String | Int | Float | Bool
+///
+/// `named` acceptance (user nominal must itself derive Codec; unknown module
+/// nominals pass) is validated by the leaf machinery in the caller, not here.
+/// Returns (offending description, hint).
+fn codec_field_shape_error(ty: &Ty) -> Option<(String, String)> {
+    use almide_lang::types::TypeConstructorId as TC;
+    fn is_atom(ty: &Ty) -> bool {
+        matches!(ty, Ty::String | Ty::Int | Ty::Float | Ty::Bool | Ty::Named(..))
+    }
+    fn sized_numeric(ty: &Ty) -> bool {
+        matches!(ty,
+            Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64)
+    }
+    fn is_value(ty: &Ty) -> bool {
+        matches!(ty, Ty::Named(n, _) if n.as_str() == "Value")
+    }
+    fn leaf_error(ty: &Ty) -> Option<(String, String)> {
+        if is_atom(ty) { return None; }
+        if sized_numeric(ty) {
+            return Some((
+                format!("sized numeric type '{}'", ty.display()),
+                "Use Int or Float in wire types (JSON has a single number type) and convert at the boundary with the to_* conversions.".to_string(),
+            ));
+        }
+        if matches!(ty, Ty::Bytes) {
+            return Some((
+                "type 'Bytes'".to_string(),
+                "JSON has no bytes — carry base64 in a String field (base64.encode / base64.decode), or hand-write Type.encode/Type.decode.".to_string(),
+            ));
+        }
+        Some((
+            format!("type '{}'", ty.display()),
+            "Codec fields are String/Int/Float/Bool/Value, Codec types, and Option/List combinations of those. Wrap other shapes in a named Codec type, or hand-write Type.encode/Type.decode.".to_string(),
+        ))
+    }
+    fn walk(ty: &Ty, at_field_root: bool) -> Option<(String, String)> {
+        match ty {
+            Ty::Applied(TC::Option, args) if args.len() == 1 => match &args[0] {
+                Ty::Applied(TC::Option, _) => Some((
+                    "nested type 'Option[Option[...]]'".to_string(),
+                    "Encode omits a none field and decode folds missing/null back to none, so some(none) and none cannot be told apart on the wire. Use a `Value` field to distinguish absent from explicit null.".to_string(),
+                )),
+                inner if is_value(inner) && !at_field_root => Some((
+                    "an element-position 'Option[Value]'".to_string(),
+                    "Option[Value]'s absent-vs-null contract needs a KEY that can be omitted, which an element position does not have. List[Value] already carries explicit nulls verbatim.".to_string(),
+                )),
+                inner => walk(inner, false),
+            },
+            Ty::Applied(TC::List, args) if args.len() == 1 => walk(&args[0], false),
+            other => leaf_error(other),
+        }
+    }
+    walk(ty, true).map(|(offender, hint)| {
+        // When the offender sits INSIDE a container, name the whole field type
+        // as well — "has type 'List[Int]'" for a List[List[Int]] field reads
+        // as if the legal part were the problem.
+        if matches!(ty, Ty::Applied(TC::Option, _) | Ty::Applied(TC::List, _))
+            && !offender.contains(&ty.display())
+        {
+            (format!("{} inside its type '{}'", offender, ty.display()), hint)
+        } else {
+            (offender, hint)
+        }
+    })
+}
 /// A type that derives a field-recursive protocol (Codec/Ord/Hash) requires every field type to ALSO satisfy it — otherwise the derive emits a call to a non-existent `Field.encode` (Codec) or a Rust `#[derive(Ord/Hash)]` over a field whose Rust type lacks the impl, both of which the checker previously accepted and codegen then rejected as "invalid Rust" (#611). This validates the requirement structurally, at the checker, independent of target.
 fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>) {
     let pairs: Vec<(Sym, Vec<Sym>)> = env.type_protocols.iter()
@@ -124,6 +203,17 @@ fn validate_derive_field(
                         container),
                     format!("type {} : Codec", type_name),
                 ).with_code("E023"));
+            }
+        } else if !field_ty.contains_typevar() {
+            if let Some((offender, hint)) = codec_field_shape_error(field_ty) {
+                if reported.insert((type_name, proto, sym(&offender))) {
+                    diagnostics.push(err(
+                        format!("type '{}' derives 'Codec' but field '{}' has {}, which the Codec derive cannot encode",
+                            type_name, field_name, offender),
+                        hint,
+                        format!("type {} : Codec", type_name),
+                    ).with_code("E023"));
+                }
             }
         }
     }

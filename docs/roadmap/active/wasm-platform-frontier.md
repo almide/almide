@@ -56,11 +56,15 @@
 ソケット・HTTP クライアント・プロセス起動は無い (`calls_http.rs` は
 `http.response`/`http.json` の純粋ビルダーのみ)。
 
-標準側の現在地 (2026-06 検証済み):
+標準側の現在地 (2026-08 再検証):
 - WASI 0.2 stable。`wasi-http` は wasmtime にホスト実装あり、ブラウザ/Node は jco
-- **WASI 0.3 released 2026-02** (wasmtime 37+ プレビュー)。canonical ABI レベルの
-  native async (`stream<T>`/`future<T>`)。WASI 1.0 は 2026 年後半目標
+- **WASI 0.3.0 正式リリース 2026-06-11・同月 ratify で stable** (RC は 2025-11 の
+  Spin v3.5 が初出、正式サポートは wasmtime 43+)。canonical ABI レベルの native
+  async (`async func` / `stream<T>` / `future<T>`)、`wasi:io` は Canonical ABI に
+  吸収され廃止。以後 0.3.x はリリーストレイン。WASI 1.0 は 2026 年後半目標のまま
 - ブラウザは WASI を直接話さない — 0.2 でも 0.3 でも jco かシムが必要
+- 本 repo の CI は wasmtime 47.0.3 に pin（2026-08 更新: 42.0.1 から bump。0.3
+  ホスト 43+ と厳格検証 45+ の両前提を満たす）
 
 解禁されるもの: `wasi-http` + native async stream = LLM API への SSE ストリーミング。
 エージェントループを Almide で書き 1 つの component として wasmtime / Spin /

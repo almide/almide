@@ -1,0 +1,4 @@
+// #1061: Result is not a wire concept — model outcomes as a variant or Option.
+type R: Codec = { r: Result[Int, String] }
+
+fn main() -> Unit = println("unreachable")

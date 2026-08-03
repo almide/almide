@@ -120,8 +120,8 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v42.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v42.0.1-x86_64-linux
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
       - name: Install wasmtime
         # Required by the cross-target gate (wasm_cross_target_spec) and the
         # wasm_runtime_test capture tests — without it they skip, so the
@@ -132,7 +132,7 @@ jobs:
           # (the uncached variant burned all 5 retries on a 429 storm, 2026-07-11).
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v42.0.1
+          VERSION=v47.0.3
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -280,15 +280,15 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v42.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v42.0.1-x86_64-linux
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v42.0.1
+          VERSION=v47.0.3
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -352,15 +352,15 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v42.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v42.0.1-x86_64-linux
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v42.0.1
+          VERSION=v47.0.3
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -589,7 +589,7 @@ jobs:
           #
           # An install that cannot install must fail its own step. The trailing
           # `wasmtime --version` is what makes that true.
-          VERSION=v42.0.1
+          VERSION=v47.0.3
           case "${{ runner.os }}" in
             macOS) ARCH_TRIPLE="aarch64-macos" ;;
             *)     ARCH_TRIPLE="x86_64-linux"  ;;

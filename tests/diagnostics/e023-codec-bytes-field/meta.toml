@@ -1,0 +1,3 @@
+expects_code = "E023"
+expects_error = "Bytes"
+hint_substring = "base64"

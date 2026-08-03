@@ -1,0 +1,3 @@
+expects_code = "E023"
+expects_error = "element-position 'Option[Value]'"
+hint_substring = "List[Value]"

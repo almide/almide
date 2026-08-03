@@ -1,0 +1,6 @@
+// #1061: encode omits none and decode folds missing/null back to none, so
+// some(none) and none are indistinguishable on the wire — nested Option is
+// rejected at declaration instead of dying in codegen.
+type D: Codec = { a: Option[Option[Int]] }
+
+fn main() -> Unit = println("unreachable")

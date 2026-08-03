@@ -1,0 +1,6 @@
+// The fix: a record names its fields on the wire.
+type Pair: Codec = { n: Int, s: String }
+
+type T: Codec = { pair: Pair }
+
+fn main() -> Unit = println("ok")

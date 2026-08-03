@@ -1,0 +1,4 @@
+// #1061: JSON has no tuple — use a record (named fields on the wire).
+type T: Codec = { pair: (Int, String) }
+
+fn main() -> Unit = println("unreachable")

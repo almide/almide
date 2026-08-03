@@ -140,7 +140,7 @@ evidence  = [
 id        = "C-006"
 spec      = "ALS-R3"
 title     = "fan.timeout does not exist — wall-clock deadlines live at the host boundary"
-statement = "`fan.timeout` was removed in 0.29.0: a wall-clock timeout has no portable cross-target meaning (wasm has no clock, scheduler, or threads), and it was the sole stdlib surface whose result was not a function of the program + its inputs — the deadline firing depended on machine load, even native-to-native. Referencing it is a check-time tombstone error (E027) with a host-boundary migration hint, identical on both targets since type check precedes the target split. This retired the ledger's LAST flagged-for-revision entry: the ratchet stands at zero, so the equivalence claim carries no clause for divergences awaiting a fix. It is not exception-free in the absolute sense — the platform-reporting fns `env.os` / `env.temp_dir` differ by design and are exempt under C-189, which bounds that carve-out to exactly those two."
+statement = "`fan.timeout` was removed in 0.29.0: a wall-clock timeout has no portable cross-target meaning (wasm has no clock, scheduler, or threads), and it was the sole stdlib surface whose result was not a function of the program + its inputs — the deadline firing depended on machine load, even native-to-native. Referencing it is a check-time tombstone error (E027) with a host-boundary migration hint, identical on both targets since type check precedes the target split. This retired the ledger's LAST flagged-for-revision entry: the ratchet stands at zero, so the equivalence claim carries no clause for divergences awaiting a fix. It is not exception-free in the absolute sense — the platform-reporting fns `env.os` / `env.temp_dir` differ by design and are exempt under C-189, which bounds that carve-out to exactly that surface (env.os and the env/fs temp_dir pair)."
 since     = "0.29.0"
 status    = "active"
 doc       = "C-006-fan-timeout-removed.md"
@@ -2371,8 +2371,8 @@ evidence  = [
 [[contract]]
 id        = "C-189"
 spec      = "ALS-R5"
-title     = "env.os / env.temp_dir report the HOST — the equivalence law's only exemption, and it is closed"
-statement = "`env.os()` and `env.temp_dir()` are the ONLY stdlib observables whose bytes may differ between native and wasm, and they differ BY DESIGN: both report the host they are running on, so native answers the real OS name and the real temp directory while the wasm leg answers the WASI sandbox (\"wasi\", \"/tmp\"). Agreeing across targets would be the defect — a program asking which platform it is on must be told the truth. The exemption is bounded, not open: the certified observable is the deterministic INVARIANT that holds identically on both legs (os is a member of the closed platform set {macos, linux, windows, wasi}; temp_dir is non-empty and absolute on every posix host), the same technique C-112 uses for random.int's nondeterministic draw. Every other fn in the process-environment surface stays byte-identical — env.args (C-096), env.get (C-118), random.int's range (C-112) — and `env.cwd` is not an exemption but a diagnosed wall on wasm. Adding a third exempt fn REQUIRES amending this statement and its fixture, which is what keeps the carve-out from widening silently."
+title     = "env.os and the temp-dir surface report the HOST — the equivalence law's only exemption, and it is closed"
+statement = "`env.os()` and the temp-dir surface (`env.temp_dir()` / `fs.temp_dir()` — one observable, two spellings, agreeing byte-for-byte on every leg) are the ONLY stdlib observables whose bytes may differ between native and wasm, and they differ BY DESIGN: all report the host they are running on. Native answers the real OS name and the real temp directory (std::env::temp_dir — $TMPDIR on unix, GetTempPath on Windows); the wasm leg answers \"wasi\" for os and, for the temp dir, the HOST's $TMPDIR claim first with the \"/tmp\" preopen convention as the fallback — the Go/Python WASI rule (Go wasip1: $TMPDIR else /tmp; Rust std punts with a panic), so the guest converges on the native answer wherever the runner passes the host env through. Agreeing across targets unconditionally would be the defect — a program asking which platform it is on must be told the truth. The exemption is bounded, not open: the certified observable is the deterministic INVARIANT that holds identically on both legs (os is a member of the closed platform set {macos, linux, windows, wasi}; the temp dir is non-empty, absolute on every posix host, and identical across its two spellings), the same technique C-112 uses for random.int's nondeterministic draw. Every other fn in the process-environment surface stays byte-identical — env.args (C-096), env.get (C-118), random.int's range (C-112) — and `env.cwd` is not an exemption but a diagnosed wall on wasm. Adding a FOURTH exempt fn REQUIRES amending this statement and its fixture, which is what keeps the carve-out from widening silently."
 since     = "0.37.0"
 status    = "active"
 evidence  = [
@@ -2612,4 +2612,17 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fuel_timeout_ends.almd", class = "fixture" },
   { path = "tests/charge_probe_test.rs", class = "by-construction", name = "timeout_deterministic_ends_and_replay" },
+]
+
+# ── CODEC NONE/NULL LAW + Value PASSTHROUGH — the #1062 design decision ─
+[[contract]]
+id        = "C-209"
+spec      = "ALS-D6"
+title     = "Codec encode omits none; decode folds missing/null to none; Value passes through verbatim"
+statement = "Derived Codec encode OMITS a none Option field (proto3-style unset; every peer that started null-by-default — serde, Go v1, aeson — grew an opt-out afterward, so Almide omits from day one). Decode keeps folding missing and explicit null to none, giving the retraction law decode(encode(x)) == x while encode(decode(doc)) normalizes the document. Fields with declared defaults stay emitted — the only omission rule is none, monotone and value-independent. `Value` fields never interpret the wire (identity both directions, explicit nulls preserved), so `Option[Value]` is the 3-state escape hatch: missing → none, explicit null → some(null), value → some(v) — the ONE Option cell where absent and null differ, and the sanctioned spelling for RFC-7386-style explicit null. List ELEMENTS keep null in both directions (an array position cannot be omitted). Containers nest arbitrarily (List[Option[T]] carries meaningful element nulls, List[List[T]] and Option[List[...]] compose — #1065); the rejected cells are SEMANTIC: Option[Option] at any depth, Option[Value] anywhere but field root, and non-wire leaves (Map/Set, sized numerics, Bytes, tuples, fn types, Result) — all E023 at declaration; passing check and dying in codegen is the forbidden outcome (#1061). Verified byte-identical native == wasm."
+since     = "0.52.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/codec_none_omission.almd", class = "fixture" },
+  { path = "spec/stdlib/codec_field_matrix_test.almd", class = "fixture" },
 ]

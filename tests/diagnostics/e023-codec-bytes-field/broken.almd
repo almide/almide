@@ -1,0 +1,4 @@
+// #1061: JSON has no bytes — carry base64 in a String field.
+type B: Codec = { data: Bytes }
+
+fn main() -> Unit = println("unreachable")

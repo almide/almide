@@ -143,7 +143,10 @@ impl VariantLayouts {
                             || matches!(a[0], Ty::String)
                             || self.field_is_variant(&a[0])))
                 || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
-                    if a.len() == 1 && !is_heap_ty(&a[0]))
+                    if a.len() == 1
+                        && (!is_heap_ty(&a[0])
+                            || matches!(a[0], Ty::String)
+                            || self.field_is_variant(&a[0])))
         };
         let mut any_heap = false;
         let mut all_supported = true;

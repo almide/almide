@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-208 contracts
+209 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -216,7 +216,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-186 | Appending an inline index read to a list accumulator lowers and runs on both targets | 0.37.0 | active | fixture | 1 |
 | C-187 | An in-place mutator writing through a module-level `var` buffer behaves identically on both targets | 0.37.0 | active | fixture | 3 |
 | C-188 | A scalar `if` arm executes its statement effects — global writes land and outer-var reassignments hit the stable local | 0.37.0 | active | fixture | 1 |
-| C-189 | env.os / env.temp_dir report the HOST — the equivalence law's only exemption, and it is closed | 0.37.0 | active | fixture | 1 |
+| C-189 | env.os and the temp-dir surface report the HOST — the equivalence law's only exemption, and it is closed | 0.37.0 | active | fixture | 1 |
 | C-190 | A closure captures any scalar, not just Int and Bool — Float and every sized int width included | 0.37.0 | active | fixture | 1 |
 | C-191 | A module-level global reads its true value on every branch path — the materialization memo is scoped to straight-line context | 0.37.1 | active | fixture | 1 |
 | C-192 | An auto-unwrapped effect call inside a string interpolation lifts and propagates like a call argument | 0.37.1 | active | fixture | 1 |
@@ -236,4 +236,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-206 | A settle block settles every arm into its own tuple slot, in arm order | 0.47.0 | active | fixture | 1 |
 | C-207 | CM-1 is a versioned constant with a ratio-only wall-clock claim | 0.47.0 | active | fixture | 1 |
 | C-208 | fan.timeout is omega-relative: fixed ends everywhere, fixed omega replays byte-identically | 0.47.0 | active | fixture | 1 |
+| C-209 | Codec encode omits none; decode folds missing/null to none; Value passes through verbatim | 0.52.0 | active | fixture | 1 |
 

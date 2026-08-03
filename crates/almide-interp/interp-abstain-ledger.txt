@@ -24,6 +24,7 @@ checked_conversion_value_match  out-of-interp-scope capability: prim.args_get_li
 chunk_str  out-of-interp-scope capability: prim.handle
 codec_decode_errors  out-of-interp-scope capability: prim.handle
 codec_float_int  out-of-interp-scope capability: prim.handle
+codec_none_omission  out-of-interp-scope capability: prim.alloc_value
 compound_eq  out-of-interp-scope capability: prim.handle
 compound_repr_interp  out-of-interp-scope capability: prim.handle
 compound_repr_records_interp  out-of-interp-scope capability: prim.handle
@@ -36,11 +37,12 @@ empty_from_list_mono  out-of-interp-scope capability: prim.alloc_map
 encoding_base64  out-of-interp-scope capability: prim.handle
 env_args  out-of-interp-scope capability: prim.args_get_list
 env_get  interp fuel/recursion budget exhausted
+env_platform_reporting  interp fuel/recursion budget exhausted
 fan_any_allfail  out-of-interp-scope capability: fan.any
 fan_any_early_winner  out-of-interp-scope capability: fan.any
 fan_deterministic  out-of-interp-scope capability: fan.any
 fan_pure_thunks  out-of-interp-scope capability: fan.any
-fan_settle_tuple  out-of-interp-scope capability: fs.read_text
+fan_settle_tuple  out-of-interp-scope capability: prim.read_text_file
 fan_var_thunk_list  out-of-interp-scope capability: fan.any
 float_sign_minmax_ieee  out-of-interp-scope capability: transcendental `math.log2` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 fs_preopen_resolve  out-of-interp-scope capability: prim.write_text_file

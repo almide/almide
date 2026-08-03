@@ -152,16 +152,15 @@ impl LowerCtx {
         | IrExprKind::ResultErr { expr } = &value.kind
         {
             use almide_lang::types::constructor::TypeConstructorId;
-            if matches!(&expr.ty,
-                Ty::Applied(TypeConstructorId::List, _) | Ty::Applied(TypeConstructorId::Map, _))
-            {
-                return Err(LowerError::Unsupported(
-                    "some/ok of a list or map payload outside the executable subset cannot be \
-                     faithfully materialized in this brick (e.g. an empty `[:]` — would defer \
-                     to an empty container)"
-                        .into(),
-                ));
-            }
+            // A LIST/MAP-typed payload the ctor materializer declined (a list
+            // literal with Option/record/list elements, a computed list, an
+            // empty `[:]`, …) takes the ANF route below UNCONDITIONALLY: the
+            // general bind machinery lowers strictly more list shapes than the
+            // ctor pieces, and the deferred-Opaque guard walls whatever it
+            // cannot — the same honesty the blanket wall here used to provide,
+            // minus the false positives (#1065: `some([some("a"), none])`).
+            let list_or_map_payload = matches!(&expr.ty,
+                Ty::Applied(TypeConstructorId::List, _) | Ty::Applied(TypeConstructorId::Map, _));
             // A CALL payload (`ok(result.unwrap_or(…))` — the C-149
             // nested-share chain): ANF-materialize the call into a synth temp via
             // the SAME `lower_bind` path a `let tmp = call` takes (tracked, typed
@@ -198,13 +197,15 @@ impl LowerCtx {
             // the Call|Tuple|If guard missed it and the ctor fell to the #810
             // terminal wall; the ANF bind routes it through the same proven
             // heap-result branch machinery the If class uses).
-            if matches!(
-                expr.kind,
-                IrExprKind::Call { .. }
-                    | IrExprKind::Tuple { .. }
-                    | IrExprKind::If { .. }
-                    | IrExprKind::Match { .. }
-            ) {
+            if list_or_map_payload
+                || matches!(
+                    expr.kind,
+                    IrExprKind::Call { .. }
+                        | IrExprKind::Tuple { .. }
+                        | IrExprKind::If { .. }
+                        | IrExprKind::Match { .. }
+                )
+            {
                 let payload_ty = expr.ty.clone();
                 let payload = (**expr).clone();
                 let tmp = self.fresh_synth_var();

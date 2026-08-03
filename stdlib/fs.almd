@@ -71,8 +71,11 @@ effect fn remove_all(path: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_fs_file_size")
 effect fn file_size(path: String) -> Result[Int, String] = _
 
+// Effect fn: the answer is a host read (`$TMPDIR` / GetTempPath), not a
+// constant — the bare-`fn` spelling was a misdeclaration (env.temp_dir was
+// always declared effect).
 @intrinsic("almide_rt_fs_temp_dir")
-fn temp_dir() -> String = _
+effect fn temp_dir() -> String = _
 
 @intrinsic("almide_rt_fs_stat")
 effect fn stat(path: String) -> Result[FileStat, String] = _

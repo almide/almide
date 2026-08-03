@@ -242,8 +242,13 @@ fn variant_drop_supported_heap_field(
                 && (!is_heap_ty(&a[0])
                     || matches!(a[0], Ty::String)
                     || variant_field_name(&a[0], variant_names).is_some()))
+        // An `Option[T]` field frees exactly like its `List[T]` twin (the
+        // 0-or-1-element block) — same supported payload set (#1064).
         || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
-            if a.len() == 1 && !is_heap_ty(&a[0]))
+            if a.len() == 1
+                && (!is_heap_ty(&a[0])
+                    || matches!(a[0], Ty::String)
+                    || variant_field_name(&a[0], variant_names).is_some()))
 }
 
 fn variant_case_field_tys(kind: &almide_ir::IrVariantKind) -> Vec<&Ty> {

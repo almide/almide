@@ -1,0 +1,3 @@
+expects_code = "E023"
+expects_error = "Option[Option"
+hint_substring = "Value"
