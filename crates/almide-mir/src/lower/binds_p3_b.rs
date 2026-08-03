@@ -9,6 +9,16 @@ impl LowerCtx {
     /// inline if-else-if chain. Verbatim extraction (guard-clause flattening), no behavior
     /// change — see docs/roadmap/active/code-health-codopsy.md.
     fn classify_list_elem_drop(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
+        self.classify_elem_drop_heads(elem_ty)
+            .or_else(|| self.classify_elem_drop_pairs(elem_ty))
+            .or_else(|| self.classify_elem_drop_containers(elem_ty))
+    }
+
+    /// Rung 1 of the element-drop ladder: record / variant element heads.
+    /// (The three rungs are CONSECUTIVE slices of one ordered rule ladder —
+    /// several arms depend on earlier arms having declined, so the order
+    /// inside AND across rungs is load-bearing.)
+    fn classify_elem_drop_heads(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         // A STRUCTURAL record element (`[{key: "x", val: "2"}]` in argument position —
         // the checker leaves the literal structural, so `record_drop_type_name` alone
         // declined it, calls_p2's List-arg wall): the synthesized anon-record drop
@@ -39,6 +49,12 @@ impl LowerCtx {
                 return Some(ListElemDrop::CtorFlat);
             }
         }
+        None
+    }
+
+    /// Rung 2: the 2-tuple pair shapes (order preserved — StrMapStr and
+    /// StrClosure are checked before the generic StrVariant arm by design).
+    fn classify_elem_drop_pairs(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         if matches!(elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
                 && (matches!(tys[1], Ty::String)
@@ -192,6 +208,12 @@ impl LowerCtx {
             let Some(rname) = self.record_or_anon_drop_type_name(&tys[0]) else { return None };
             return Some(ListElemDrop::RecordInt(rname));
         }
+        None
+    }
+
+    /// Rung 3: the container elements (List/Map/Option families and the
+    /// all-scalar aggregate tail).
+    fn classify_elem_drop_containers(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         if matches!(elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
                 if i.len() == 1 && matches!(i[0], Ty::String))
