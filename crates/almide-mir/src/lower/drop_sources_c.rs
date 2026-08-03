@@ -215,6 +215,72 @@ pub fn generate_record_drop_sources(
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");
     }
+    emit_record_wrapper_drops(&mut out, type_decls, &rec_names, uses_result_opt_str);
+    // SYNTHESIZED recursive drops for the ANONYMOUS record return/binding shapes the corpus uses
+    // (`{ data: Bytes, state: Cfb8State }` — aes cfb8). An anon record is NOT a `type` decl, so the
+    // loop above never names it; it would otherwise drop via the flat one-level mask `DropListStr`,
+    // which `rc_dec`s the `state` BLOCK but LEAKS the Bytes INSIDE Cfb8State. Each shape gets a
+    // content-hashed `__drop_anonrec_<hash>` (dedup'd) with the SAME per-field-type recursion the
+    // named generator emits — so the `state` field is freed through `__drop_Cfb8State`. The param is
+    // the structural anon record type in source (`e: { data: Bytes, state: Cfb8State }`). Sorted by
+    // name for host-determinism. (The discovery of WHICH anon shapes appear is the caller's; see
+    // `generate_anon_record_drop_sources`.)
+    let mut anon_sorted: Vec<&Vec<(almide_lang::intern::Sym, Ty)>> = anon_records.iter().collect();
+    anon_sorted.sort_by_key(|fields| anon_record_drop_name(fields));
+    anon_sorted.dedup_by_key(|fields| anon_record_drop_name(fields));
+    for fields in anon_sorted {
+        if !anon_record_needs_recursive_drop(fields) {
+            continue;
+        }
+        let name = anon_record_drop_name(fields);
+        let field_tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
+        let param_ty = anon_record_source_ty(fields);
+        out.push_str(&format!("fn __drop_{name}(e: {param_ty}) -> Unit = {{\n"));
+        out.push_str("  let h = prim.handle(e)\n");
+        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
+        let mut needs = DropNeeds {
+            map_ss: need_map_ss, list_str: need_list_str,
+            matrix: need_matrix, list_matrix: need_list_matrix,
+        };
+        out.push_str(&record_drop_field_frees(
+            &field_tys,
+            DropShapes {
+                rec_names: &rec_names,
+                flat_variant_names: &flat_variant_names,
+                rec_variant_names: &rec_variant_names,
+                generic_decls: &generic_decls,
+            },
+            &mut list_drops,
+            &mut needs,
+        ));
+        need_map_ss = needs.map_ss;
+        need_list_str = needs.list_str;
+        need_matrix = needs.matrix;
+        need_list_matrix = needs.list_matrix;
+        out.push_str("  } else ()\n");
+        out.push_str("  prim.rc_dec(h)\n");
+        out.push_str("}\n");
+    }
+    emit_anon_list_wrapper_drops(&mut out, anon_records);
+    let _ = &list_drops; // (subsumed by rec_names below)
+    emit_record_list_wrapper_drops(&mut out, &rec_names);
+    emit_demanded_shared_drops(&mut out, need_map_ss, need_matrix, need_list_matrix);
+    let _ = need_list_str;
+    out
+}
+
+
+/// The per-record WRAPPER drops: `__drop_opt_<R>` (an `Option[R]` — the
+/// `resrec:opt_<R>` bases), `__drop_opt_str` (only when the program constructs
+/// `Result[Option[String], String]`), and `__drop_tup_int_<R>` (a `(R, Int)`
+/// tuple block — the `resrec:tup_int_<R>` gguf shape). Verbatim.
+fn emit_record_wrapper_drops(
+    out: &mut String,
+    type_decls: &[almide_ir::IrTypeDecl],
+    rec_names: &std::collections::HashSet<String>,
+    uses_result_opt_str: bool,
+) {
+    use almide_ir::IrTypeDeclKind;
     // `$__drop_opt_<R>` for each recursive-drop record R — frees an `Option[R]` (the 0-or-1-element
     // layout) used by `Result[Option[R], String]` wrappers (`resrec:opt_<R>`, porta read_message's
     // `ok(none)` / `ok(r)` bases). The `match` drops the bound record `r` at the Some-arm end (routing
@@ -265,51 +331,16 @@ pub fn generate_record_drop_sources(
 "
         ));
     }
-    // SYNTHESIZED recursive drops for the ANONYMOUS record return/binding shapes the corpus uses
-    // (`{ data: Bytes, state: Cfb8State }` — aes cfb8). An anon record is NOT a `type` decl, so the
-    // loop above never names it; it would otherwise drop via the flat one-level mask `DropListStr`,
-    // which `rc_dec`s the `state` BLOCK but LEAKS the Bytes INSIDE Cfb8State. Each shape gets a
-    // content-hashed `__drop_anonrec_<hash>` (dedup'd) with the SAME per-field-type recursion the
-    // named generator emits — so the `state` field is freed through `__drop_Cfb8State`. The param is
-    // the structural anon record type in source (`e: { data: Bytes, state: Cfb8State }`). Sorted by
-    // name for host-determinism. (The discovery of WHICH anon shapes appear is the caller's; see
-    // `generate_anon_record_drop_sources`.)
-    let mut anon_sorted: Vec<&Vec<(almide_lang::intern::Sym, Ty)>> = anon_records.iter().collect();
-    anon_sorted.sort_by_key(|fields| anon_record_drop_name(fields));
-    anon_sorted.dedup_by_key(|fields| anon_record_drop_name(fields));
-    for fields in anon_sorted {
-        if !anon_record_needs_recursive_drop(fields) {
-            continue;
-        }
-        let name = anon_record_drop_name(fields);
-        let field_tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
-        let param_ty = anon_record_source_ty(fields);
-        out.push_str(&format!("fn __drop_{name}(e: {param_ty}) -> Unit = {{\n"));
-        out.push_str("  let h = prim.handle(e)\n");
-        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
-        let mut needs = DropNeeds {
-            map_ss: need_map_ss, list_str: need_list_str,
-            matrix: need_matrix, list_matrix: need_list_matrix,
-        };
-        out.push_str(&record_drop_field_frees(
-            &field_tys,
-            DropShapes {
-                rec_names: &rec_names,
-                flat_variant_names: &flat_variant_names,
-                rec_variant_names: &rec_variant_names,
-                generic_decls: &generic_decls,
-            },
-            &mut list_drops,
-            &mut needs,
-        ));
-        need_map_ss = needs.map_ss;
-        need_list_str = needs.list_str;
-        need_matrix = needs.matrix;
-        need_list_matrix = needs.list_matrix;
-        out.push_str("  } else ()\n");
-        out.push_str("  prim.rc_dec(h)\n");
-        out.push_str("}\n");
-    }
+}
+
+/// The per-element list wrapper for each synthesized ANON-record drop (and its
+/// `(<anon>, <scalar>)` tuple-list twin) — a STRUCTURAL record-list literal
+/// routes to `list_anonrec_<hash>`; without this wrapper the route referenced
+/// a missing `$__drop_list_anonrec_<hash>`. Verbatim.
+fn emit_anon_list_wrapper_drops(
+    out: &mut String,
+    anon_records: &[Vec<(almide_lang::intern::Sym, Ty)>],
+) {
     // The SAME per-element list wrapper for each synthesized ANON-record drop — a
     // STRUCTURAL record-list literal (`take([{key: "x", val: "2"}])`, the checker
     // leaves the elements structural) routes to `list_anonrec_<hash>`; without this
@@ -357,10 +388,12 @@ pub fn generate_record_drop_sources(
             ));
         }
     }
-    // A per-element-recursive `$__drop_list_<R>` for EVERY recursive-drop record R (not just the
-    // field-referenced ones in `list_drops`) — so a standalone `List[R]` LITERAL value (`group([…])`)
-    // routes its drop here too. Sorted for host-determinism.
-    let _ = &list_drops; // (subsumed by rec_names below)
+}
+
+/// A per-element-recursive `$__drop_list_<R>` (+ the `(R, Int)` tuple-list
+/// twin) for EVERY recursive-drop record R — so a standalone `List[R]` LITERAL
+/// value routes its drop here too. Sorted for host-determinism. Verbatim.
+fn emit_record_list_wrapper_drops(out: &mut String, rec_names: &std::collections::HashSet<String>) {
     let mut list_drop_names: Vec<&String> = rec_names.iter().collect();
     list_drop_names.sort();
     for rn in list_drop_names {
@@ -400,6 +433,17 @@ pub fn generate_record_drop_sources(
                }}\n"
         ));
     }
+}
+
+/// The DEMAND-gated shared sweep drops (`__drop_map_ss`, `__drop_matrix`,
+/// `__drop_list_matrix`) — emitted only when a freed field shape demanded
+/// them. Verbatim.
+fn emit_demanded_shared_drops(
+    out: &mut String,
+    need_map_ss: bool,
+    need_matrix: bool,
+    need_list_matrix: bool,
+) {
     if need_map_ss {
         // v1's `Map[String,String]` borrows the `map_skv` (String,Int) layout: the n KEYS are the
         // first n slots (`@ 12 + i*8`), DEEP-COPIED + owned by the map (`__skv_store_key` store_str);
@@ -451,8 +495,6 @@ pub fn generate_record_drop_sources(
     // independent inline copies would be a duplicate-fn compile error. `need_list_str`
     // is still computed above (by `record_drop_field_frees`) purely to preserve that
     // function's shared signature with the anon-record caller; its value is unused here.
-    let _ = need_list_str;
-    out
 }
 
 /// The C-015 STRING-FIELD-record key/element twins (`__krec_*`) — generated per
