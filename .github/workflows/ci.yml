@@ -358,7 +358,12 @@ jobs:
             done
           fi
           unzip -oq "$ZIP"
-          echo "$PWD/wasmtime-${VERSION}-x86_64-windows" >> "$GITHUB_PATH"
+          # NATIVE spelling, not git-bash's /d/... form: the runner prepends
+          # this string to PATH verbatim, and the almide.exe → CreateProcess
+          # lookup can only resolve Windows-form entries (bash resolving
+          # `wasmtime --version` fine while the spawned compiler got
+          # "program not found" was exactly this).
+          cygpath -w "$PWD/wasmtime-${VERSION}-x86_64-windows" >> "$GITHUB_PATH"
 
       - name: Cross-target parity on a Windows host
         shell: bash

@@ -53,6 +53,36 @@
 | memory64 | 4GB で足りる用途に bounds check コストだけ増える |
 | multiple memories | 単一メモリは iOS Safari 互換のための意図的設計 (`emit_wasm/mod.rs` Memory section コメント) |
 
+## wasm レッグの fs パス契約（2026-08-03 決定 — 他言語実装との整合を確認済み）
+
+WASI p1 に cwd は**存在しない**（chdir/getcwd syscall なし、パスは preopen fd 相対）。
+各言語は userspace で虚構を再発明している — 決定にあたり実装を確認した:
+
+| 言語 | wasip1 の cwd |
+|------|----------------|
+| Go | userspace 変数: `$PWD`（guest 絶対化）→ 無ければ **`preopens[0].name`**。Chdir/Getwd をエミュレート（syscall/fs_wasip1.go） |
+| Rust | `env::current_dir()` = unsupported error で**放棄**。相対パスは preopen prefix 一致頼み |
+| wasi-libc (C/Python) | userspace chdir エミュレーション（`__wasilibc_cwd`）、prefix 一致解決 |
+
+**Almide の契約**（#874 の設計は元々 Go 互換だったことを確認、Windows 対応で完成）:
+
+1. guest の相対パス解決は env 駆動の cwd 虚構: **`ALMIDE_CWD`（launcher pin、優先）→ `PWD`（Go 互換 fallback）**。
+   launcher pin が Go の既知の PWD-staleness（Node execFileSync 等）を潰す。
+2. launcher（`almide run/test`）は cwd を「guest から見える綴り」で pin する:
+   **unix** = ホスト絶対パス（`--dir=/` の下でそのまま guest 有効 = Go の PWD 値と同型）/
+   **Windows** = `.`（`--dir=.` preopen の guest 名 = Go の `preopens[0].name` fallback と同値）。
+3. temp は `$TMPDIR ?? "/tmp"`（C-189、Go/Python 規約）。Windows launcher はホスト temp を
+   guest `/tmp` に map し `TMPDIR=/tmp` を注入。
+4. ホスト絶対パスの透過は **unix ホスト限定**（`--dir=/`）。Windows ホストで unix 絶対パスを
+   通せる言語は存在しない — 相対パス + `/tmp` が可搬な綴り（CHEATSHEET の教え）。
+5. **chdir は導入しない**: Go の Chdir 相当の可変 userspace 状態は決定性に反する。
+   `env.cwd` は wasm では diagnosed wall のまま。
+6. WASI 0.2/0.3 の wasi:filesystem は no-ambient-cwd の capability handle モデル —
+   この preopen 契約はそのまま前方互換。
+
+実装: `wasmtime_fs_args`（src/cli/run.rs）+ WAT shim の ALMIDE_CWD/PWD スキャン
+（render_wasm_fs_wat.rs）。検証: ci.yml `Test WASM (Windows host)`（#1066）。
+
 ## フロンティア — 3.0 の外側
 
 ### 1. WASI 0.2/0.3 + Component Model — http/async の標準 ABI
