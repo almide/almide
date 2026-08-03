@@ -63,8 +63,8 @@
   async (`async func` / `stream<T>` / `future<T>`)、`wasi:io` は Canonical ABI に
   吸収され廃止。以後 0.3.x はリリーストレイン。WASI 1.0 は 2026 年後半目標のまま
 - ブラウザは WASI を直接話さない — 0.2 でも 0.3 でも jco かシムが必要
-- 本 repo の CI/ローカル実行は wasmtime 42.0.1 に pin (0.3 ホストは 43+、上の
-  「厳格検証は wasmtime 45+ 前提」とも離れつつある — Phase 2 着手時に更新)
+- 本 repo の CI は wasmtime 47.0.3 に pin（2026-08 更新: 42.0.1 から bump。0.3
+  ホスト 43+ と厳格検証 45+ の両前提を満たす）
 
 解禁されるもの: `wasi-http` + native async stream = LLM API への SSE ストリーミング。
 エージェントループを Almide で書き 1 つの component として wasmtime / Spin /
