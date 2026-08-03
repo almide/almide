@@ -406,18 +406,90 @@ fn lex_numeric_escape(chars: &[char], pos: usize) -> Option<(char, usize)> {
 }
 
 /// Process an interpolation `${...}` block. Returns the new position.
+///
+/// The region is scanned quote-aware (#1073): a nested string literal —
+/// `"…"` or `'…'`, escape pairs kept intact — is captured atomically, so
+/// quotes and braces inside it neither end the outer string nor move the
+/// brace depth (`"${x ?? "}"}"` used to close the interpolation on the
+/// brace inside the literal and silently drop the rest of the line).
+/// The habit spelling `\"…\"` — escaping the quotes as if still inside
+/// the outer string, the prior every JS/Kotlin/Python writer carries in —
+/// is normalized at capture time: the `\` before each delimiter is
+/// dropped, so the sub-parser sees a well-formed literal either way.
 fn lex_interpolation(chars: &[char], start: usize, buf: &mut String) -> usize {
     buf.push('$');
     buf.push('{');
     let mut pos = start + 2;
     let mut depth = 1;
     while pos < chars.len() && depth > 0 {
-        if chars[pos] == '{' { depth += 1; }
-        if chars[pos] == '}' { depth -= 1; }
-        if depth > 0 { buf.push(chars[pos]); }
+        let c = chars[pos];
+        // `\"`-delimited nested string (outer-string escape habit):
+        // capture as a plain `"…"` literal, dropping the delimiter
+        // backslashes. Inside, escape pairs pass through untouched, and
+        // either `\"` or a bare `"` closes.
+        if c == '\\' && chars.get(pos + 1) == Some(&'"') {
+            buf.push('"');
+            pos += 2;
+            while pos < chars.len() {
+                if chars[pos] == '\\' && chars.get(pos + 1) == Some(&'"') {
+                    buf.push('"');
+                    pos += 2;
+                    break;
+                }
+                if chars[pos] == '"' {
+                    buf.push('"');
+                    pos += 1;
+                    break;
+                }
+                if chars[pos] == '\\' && pos + 1 < chars.len() {
+                    buf.push(chars[pos]);
+                    buf.push(chars[pos + 1]);
+                    pos += 2;
+                    continue;
+                }
+                buf.push(chars[pos]);
+                pos += 1;
+            }
+            continue;
+        }
+        // Bare nested string literal: capture atomically, escapes intact,
+        // so `\"` inside it stays an escape and braces stay literal text.
+        if c == '"' || c == '\'' {
+            pos = scan_nested_string_literal(chars, pos, buf);
+            continue;
+        }
+        if c == '{' { depth += 1; }
+        if c == '}' { depth -= 1; }
+        if depth > 0 { buf.push(c); }
         pos += 1;
     }
     buf.push('}');
+    pos
+}
+
+/// Capture a nested string literal (`"…"` / `'…'`) atomically, escape pairs
+/// kept verbatim; `chars[pos]` is the opening delimiter. Pushes the literal
+/// (delimiters included) onto `buf` and returns the position after the
+/// closing delimiter. Shared by the lexer's interpolation scan above and
+/// the parser's `${...}` splitter (`parse_interpolation_expr_part`) — the
+/// two scans MUST agree on where a nested literal ends, or the splitter
+/// re-introduces the brace-blindness the lexer just fixed (#1073).
+pub(crate) fn scan_nested_string_literal(chars: &[char], pos: usize, buf: &mut String) -> usize {
+    let quote = chars[pos];
+    buf.push(quote);
+    let mut pos = pos + 1;
+    while pos < chars.len() {
+        if chars[pos] == '\\' && pos + 1 < chars.len() {
+            buf.push(chars[pos]);
+            buf.push(chars[pos + 1]);
+            pos += 2;
+            continue;
+        }
+        let done = chars[pos] == quote;
+        buf.push(chars[pos]);
+        pos += 1;
+        if done { break; }
+    }
     pos
 }
 

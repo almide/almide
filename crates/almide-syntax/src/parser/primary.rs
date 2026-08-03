@@ -788,6 +788,16 @@ impl Parser {
         let mut depth = 1;
         let mut expr_str = String::new();
         while *i < chars.len() && depth > 0 {
+            // #1073: a nested string literal is captured atomically — its
+            // quotes and braces are literal text, not structure. Delegates
+            // to the same scanner the lexer's interpolation scan uses, so
+            // the two passes agree on where the literal ends.
+            if chars[*i] == '"' || chars[*i] == '\'' {
+                let start = *i;
+                *i = crate::lexer::scan_nested_string_literal(chars, *i, &mut expr_str);
+                *col_offset += *i - start;
+                continue;
+            }
             if chars[*i] == '{' { depth += 1; }
             if chars[*i] == '}' { depth -= 1; if depth == 0 { break; } }
             expr_str.push(chars[*i]);
