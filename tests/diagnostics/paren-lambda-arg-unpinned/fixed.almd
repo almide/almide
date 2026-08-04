@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  let m: Map[String, Int] = ["a": 1, "b": 2]
+  let total = map.fold(m, 0, ((acc, k, v) => acc + v))
+  println("${total}")
+}

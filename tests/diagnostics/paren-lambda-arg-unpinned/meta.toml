@@ -1,0 +1,2 @@
+expects_error = "operator '+' requires numeric, String, or List types but got Int and String"
+hint_substring = "numeric types"

@@ -1,0 +1,10 @@
+// #1018: a lambda argument wrapped in redundant parentheses was not recognized
+// as a lambda, so its params were never pinned from the callee's signature and
+// this body inferred against fresh vars. map.fold's real parameter order is
+// (acc, k, v), so naming them (k, v, acc) makes `acc + v` add Int to String.
+// `check` used to accept this and the first complaint arrived at IR verify.
+effect fn main() -> Unit = {
+  let m: Map[String, Int] = ["a": 1, "b": 2]
+  let total = map.fold(m, 0, ((k, v, acc) => acc + v))
+  println("${total}")
+}

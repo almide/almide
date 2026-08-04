@@ -6,7 +6,7 @@ pub use almide::{
     ast, canonicalize, check, codegen, diagnostic, diagnostic_render, fmt,
     import_table, intern, ir, lexer, lower, mono, optimize,
     parser, project, project_fetch, resolve, stdlib, types,
-    out, out_no_nl, err, err_no_nl,
+    out, out_no_nl, err, err_no_nl, WASM_WALL_MARKER,
 };
 
 // `cli/*.rs` call these via `crate::<name>` — re-exported here (private,

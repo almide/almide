@@ -174,11 +174,8 @@ result
 // ✓ use map / flat_map / filter_map
 items |> list.map((item) => transform(item))
 
-// ✓ with index: list.enumerate
-cases |> list.enumerate |> list.map((entry) => {
-  let (idx, case) = entry
-  "${int.to_string(idx)}: ${case}"
-})
+// ✓ with index: list.enumerate — destructure the pair in the parameter
+cases |> list.enumerate |> list.map(((idx, case)) => "${idx}: ${case}")
 ```
 
 ### Prefer list.find over var + for search

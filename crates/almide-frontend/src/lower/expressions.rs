@@ -387,14 +387,50 @@ fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                 Ty::Fn { params: ptys, .. } => ptys.clone(),
                 _ => vec![],
             };
+            // A tuple-pattern parameter stays ONE runtime parameter and is
+            // destructured on entry, which is exactly what the documented
+            // `let (a, b) = entry` workaround did by hand (#1060).
+            let mut destructure: Vec<IrStmt> = Vec::new();
             let ir_params: Vec<(VarId, Ty)> = params.iter().enumerate().map(|(i, p)| {
                 let param_ty = p.ty.as_ref().map(|te| resolve_type_expr(te))
                     .or_else(|| lambda_param_tys.get(i).cloned())
                     .unwrap_or(Ty::Unknown);
-                let var = ctx.define_var(&p.name, param_ty.clone(), Mutability::Let, None);
-                (var, param_ty)
+                match &p.tuple_names {
+                    Some(names) if names.len() > 1 => {
+                        let var = ctx.define_var(
+                            &format!("__tuple_param_{}", i), param_ty.clone(), Mutability::Let, None);
+                        let elem_tys: Vec<Ty> = match &param_ty {
+                            Ty::Tuple(es) if es.len() == names.len() => es.clone(),
+                            _ => vec![Ty::Unknown; names.len()],
+                        };
+                        let elements: Vec<IrPattern> = names.iter().zip(elem_tys.iter())
+                            .map(|(n, et)| {
+                                let v = ctx.define_var(n, et.clone(), Mutability::Let, None);
+                                IrPattern::Bind { var: v, ty: et.clone() }
+                            })
+                            .collect();
+                        let value = ctx.mk(IrExprKind::Var { id: var }, param_ty.clone(), None);
+                        destructure.push(IrStmt {
+                            kind: IrStmtKind::BindDestructure {
+                                pattern: IrPattern::Tuple { elements }, value,
+                            },
+                            span: None,
+                        });
+                        (var, param_ty)
+                    }
+                    _ => {
+                        let var = ctx.define_var(&p.name, param_ty.clone(), Mutability::Let, None);
+                        (var, param_ty)
+                    }
+                }
             }).collect();
-            let ir_body = lower_expr(ctx, body);
+            let mut ir_body = lower_expr(ctx, body);
+            if !destructure.is_empty() {
+                let body_ty = ir_body.ty.clone();
+                ir_body = ctx.mk(IrExprKind::Block {
+                    stmts: destructure, expr: Some(Box::new(ir_body)),
+                }, body_ty, span);
+            }
             ctx.pop_scope();
             let lambda_id = Some(ctx.next_lambda_id());
             ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body), lambda_id }, ty, span)
