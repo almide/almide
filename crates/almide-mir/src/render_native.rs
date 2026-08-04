@@ -133,6 +133,12 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
         // The Perceus balance is machine-checked on the SAME ops this render
         // erases Drops from — the certificate that scope-end drop realizes it.
         if let Err(violations) = crate::verify_ownership(func) {
+            if std::env::var_os("ALMIDE_DUMP_VERIFY").is_some() {
+                eprintln!("== verify-stage fn {} ==", func.name);
+                for (i, op) in func.ops.iter().enumerate() {
+                    eprintln!("  [{i}] {op:?}");
+                }
+            }
             return Err(wall(format!(
                 "native: ownership verification failed for `{}`: {violations:?}",
                 func.name

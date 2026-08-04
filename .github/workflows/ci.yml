@@ -689,25 +689,43 @@ jobs:
         # installing binaryen.
         run: brew install binaryen && wasm-opt --version
 
-      # Parallel on every OS: the build-scratch lock (BuildDirLock) is now
-      # cross-platform (flock / LockFileEx via fs2), so concurrent `almide`
-      # subprocesses no longer race the shared scratch dir on Windows.
+      # These legs verify WHAT ONLY THIS PLATFORM CAN: the release binary
+      # builds, and the OS-dependent surfaces work. The full `cargo test
+      # --workspace` runs ONCE, on Linux (test-rust) — running it here too made
+      # every release PR ~48m, gated entirely by this Windows leg (#1039).
       #
-      # --workspace: a bare `cargo test` tests only the ROOT package — the
-      # member crates' suites (almide-interp's abstain ledger, almide-mir's
-      # ratchets) silently never ran on these legs (#983; same fix as
-      # test-rust's, which documented the mistake without this job following).
+      # NARROWING EVIDENCE (#1039 step 2 — audited every failed release-PR CI
+      # run in the preceding month before removing anything): the Windows
+      # workspace run never caught a failure Linux did not (it is unarmed, so
+      # the tool-gated wasm suites all skip there); the macOS workspace run
+      # caught only (a) one failure duplicated by the same run's Linux leg and
+      # (b) two tool_arming_tripwire failures — i.e. ITS OWN broken wasmtime
+      # install (#1036). The unique platform catches came from elsewhere:
+      # `Test Rust (windows)`'s spec run with the real binary (a Windows path
+      # bug, os error 3, 2026-08-02) and the #1008 lsp_test Windows hang.
+      # The kept set below is exactly those proven-valuable surfaces:
       #
-      # ALMIDE_EXPECT_TOOLS arms the tool tripwire (tests/
-      # tool_arming_tripwire_test.rs): on legs that claim tool coverage a
-      # missing wasmtime/wasm-opt is a FAILURE, not a silent skip. Windows is
-      # DELIBERATELY unarmed (#983 decision): wasmtime is not installed there,
-      # so the tool-gated wasm suites skip on Windows by design — Linux
-      # (test-rust) and macOS are the armed legs.
-      - name: Cargo tests (workspace)
+      #   - tool_arming_tripwire_test: the leg stays honest about its own
+      #     tools — a broken wasmtime/binaryen install FAILS here instead of
+      #     letting the wasm suites skip-as-pass (#983's lesson, kept).
+      #   - wasm_runtime_test (macOS, armed): the byte-compare harness on the
+      #     other tool-bearing platform — cross-target equivalence is checked
+      #     on a second OS, not just Linux.
+      #   - lsp_test + fix_test + diagnostic_harness_test: the path- and
+      #     process-sensitive root suites (tmp dirs, binary spawning, path
+      #     separators) — the classes behind #1008 and the os-error-3 catch.
+      #
+      # ALMIDE_EXPECT_TOOLS arms the tripwire on macOS; Windows is DELIBERATELY
+      # unarmed (#983 decision — wasmtime is not installed there).
+      - name: Cargo tests (platform-sensitive set)
         env:
           ALMIDE_EXPECT_TOOLS: ${{ runner.os == 'Windows' && '0' || '1' }}
-        run: cargo test --workspace
+        shell: bash
+        run: |
+          cargo test --test tool_arming_tripwire_test --test lsp_test --test fix_test --test diagnostic_harness_test
+          if [ "${{ runner.os }}" != "Windows" ]; then
+            cargo test --test wasm_runtime_test
+          fi
 
       - uses: actions/upload-artifact@v7
         with:

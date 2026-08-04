@@ -317,12 +317,6 @@ impl Checker {
             }
         }
 
-        // #1075: retired dynamic-surface alias → E040 deprecation warning
-        // with a mechanical rewrite. Checked on the resolved qualified name
-        // so selective-import bare spellings warn too.
-        let resolved_for_alias = qualified_via_direct.as_deref().unwrap_or(name);
-        self.warn_retired_dynamic_alias(resolved_for_alias);
-
         // Decomposed (#781, cog 137): the unresolved-name fallback (~110 lines of ctor / diagnostics handling) is a verbatim text move.
         let Some(sig) = sig else {
             return self.check_unresolved_named_call(name, arg_tys);

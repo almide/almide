@@ -1,0 +1,115 @@
+// @contract: C-213
+// Cross-target differential fixture: the `bytes` BYTE-LEVEL WRITER family.
+//
+// One buffer, written through every shape the family has:
+//   - `append_*`   — encode and extend (widths 1/2/4/8, both orders, floats)
+//   - `set_*`      — splice at an offset, a silent no-op when it does not fit
+//   - `write_/set_/read_<sized>` — endianness as an ARGUMENT (#1098)
+//   - `write_*`    — the BE serialization cursor, bool + length-prefixed string (#1099)
+//   - `fill` / `copy_from` / `copy_within`
+//
+// Every value is printed as its byte list, so the assertion is the exact
+// layout — truncation of a wide value, two's-complement of a negative one, the
+// f32 rounding, and the out-of-range writes that must change nothing.
+//
+// This is also the fixture that makes the interpreter a real third VOTE on the
+// family (#1021): it deliberately avoids `hex.encode` and the other self-hosted
+// bodies that reach `prim.handle`, which is the next abstain frontier.
+fn show(label: String, b: Bytes) -> Unit = println(label + " " + "${bytes.to_list(b)}")
+
+fn main() -> Unit = {
+  // ── append: width, order, and the truncating cast ──
+  var a = bytes.new(0)
+  bytes.append_u8(a, 511)
+  bytes.append_u16_le(a, 258)
+  bytes.append_u16_be(a, 258)
+  bytes.append_u32_le(a, 258)
+  bytes.append_i32_be(a, -2)
+  show("append", a)
+  // A negative value and its unsigned twin write the SAME bytes — two's
+  // complement, not a separate signed encoding.
+  var s = bytes.new(0)
+  bytes.append_i16_le(s, -2)
+  bytes.append_u16_le(s, -2)
+  bytes.append_i64_be(s, -1)
+  show("signed", s)
+  // ── floats: f32 rounds on the way in, f64 is exact ──
+  var f = bytes.new(0)
+  bytes.append_f32_le(f, 1.5)
+  bytes.append_f64_be(f, 1.5)
+  show("float", f)
+  // ── set: splice in place; a window past the end changes nothing ──
+  var p = bytes.new(6)
+  bytes.set_u32_le(p, 1, 258)
+  show("set_fit", p)
+  bytes.set_u32_le(p, 4, 999)
+  show("set_past_end", p)
+  bytes.set_at(p, 0, 511)
+  bytes.set_at(p, 6, 7)
+  show("set_at", p)
+  // ── the Endian-parameterized sized-type surface (#1098 closed the native
+  // leg: the runtime owns the enum + dispatch; wasm links the bytes_typed
+  // twins) — the order is an ARGUMENT, not part of the name ──
+  var t = bytes.new(0)
+  bytes.write_uint16(t, 258, LittleEndian)
+  bytes.write_uint16(t, 258, BigEndian)
+  bytes.write_uint32(t, 258, BigEndian)
+  bytes.write_int32(t, -2, LittleEndian)
+  bytes.write_float32(t, 1.5, LittleEndian)
+  show("sized_append", t)
+  var u = bytes.new(4)
+  bytes.set_uint32(u, 0, 258, LittleEndian)
+  bytes.set_uint16(u, 2, 258, BigEndian)
+  show("sized_set", u)
+  // The read half round-trips the same bytes through both orders.
+  let sr = bytes.from_list([
+    2,
+    1,
+    0,
+    0,
+    1,
+    2,
+    0,
+    0
+  ])
+  println(int.to_string(int.from_uint16(bytes.read_uint16(sr, 0, LittleEndian))))
+  println(int.to_string(int.from_uint16(bytes.read_uint16(sr, 4, BigEndian))))
+  println(int.to_string(int.from_uint32(bytes.read_uint32(sr, 0, LittleEndian))))
+  println(int.to_string(int.from_int32(bytes.read_int32(sr, 0, LittleEndian))))
+  println(float.to_string(float.from_float32(bytes.read_float32(bytes.from_list([0, 0, 192, 63]), 0, LittleEndian))))
+  // ── the serialization cursor: BE twins, bool, and the length-prefixed
+  // string (#1099 closed the wasm self-host gap) ──
+  var w = bytes.new(0)
+  bytes.write_u8(w, 7)
+  bytes.write_u32_be(w, 258)
+  bytes.write_i64_be(w, -1)
+  bytes.write_bool(w, true)
+  bytes.write_bool(w, false)
+  bytes.write_string_be(w, "hi")
+  show("cursor", w)
+  // f64 BE: 1.5 = 0x3FF8000000000000.
+  var wf = bytes.new(0)
+  bytes.write_f64_be(wf, 1.5)
+  show("cursor_f64", wf)
+  // A multibyte string counts BYTES in its prefix, not characters.
+  var m = bytes.new(0)
+  bytes.write_string_be(m, "é")
+  show("cursor_utf8", m)
+  // ── fill / copy_from / copy_within ──
+  var g = bytes.new(3)
+  bytes.fill(g, 511)
+  show("fill", g)
+  var empty = bytes.new(0)
+  bytes.fill(empty, 7)
+  show("fill_empty", empty)
+  let src = bytes.from_list([7, 8, 9])
+  var d = bytes.new(4)
+  bytes.copy_from(d, src, 1, 0, 99)
+  show("copy_from_clamped", d)
+  var c = bytes.from_list([1, 2, 3, 0, 0])
+  bytes.copy_within(c, 0, 3, 2)
+  show("copy_within", c)
+  var c2 = bytes.from_list([1, 2, 3])
+  bytes.copy_within(c2, 0, 3, 1)
+  show("copy_within_no_fit", c2)
+}

@@ -43,6 +43,11 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
     let mut t = ResultWindowTracker::default();
 
     for op in ops {
+        // ROLLBACK GUARD (#1100): if this op READS anything a pending window
+        // swallowed and is not that window's own next recognized step, the
+        // window's producer guess was wrong — restore its buffered ops before
+        // processing, so nothing downstream ever references a dropped def.
+        t.flush_windows_read_by(&op, &mut out);
         match &op {
             Op::ConstInt { dst, value } => {
                 t.const_vals.insert(*dst, *value);
@@ -56,8 +61,18 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
             Op::Alloc { dst, init: Init::DynListStr { len }, .. }
                 if t.const_vals.get(len) == Some(&1) =>
             {
-                t.pending.insert(*dst, Pending { handle: None, payload: None });
-                // NOT emitted — replaced by the ResMake* at window completion.
+                let dst = *dst;
+                t.pending.insert(
+                    dst,
+                    Pending {
+                        handle: None,
+                        payload: None,
+                        buffered: vec![op],
+                        owned: BTreeSet::from([dst]),
+                    },
+                );
+                // NOT emitted — replaced by the ResMake* at completion, or
+                // flushed back verbatim if the window is abandoned (#1100).
             }
             Op::Prim { kind: PrimKind::Handle, dst: Some(_), args } if args.len() == 1 => {
                 t.track_handle(op, &mut out);
@@ -88,14 +103,27 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
         }
     }
 
+    // A window still pending at function end never completed — restore it.
+    t.flush_all(&mut out);
     sweep_dead_window_material(&mut out, f.ret);
     f.ops = out;
 }
 
 /// In-flight producers: R → (its Handle, stored payload, payload-was-str-handle).
+///
+/// A window is SPECULATIVE until it completes (#1100): every op it swallows is
+/// buffered in `buffered` and every dst it swallows recorded in `owned`, so an
+/// op that proves the guess wrong — a len-1 `DynListStr` that is NOT a Result
+/// producer, e.g. the tuple-payload bind the matrix fixture lowers — flushes
+/// the buffer back verbatim and the stream is exactly as if the window had
+/// never opened. Completion discards the buffer. "Unrecognized never means
+/// wrong" only holds with the rollback; eager dropping orphaned the window's
+/// downstream loads.
 struct Pending {
     handle: Option<ValueId>,
     payload: Option<(ValueId, bool)>,
+    buffered: Vec<Op>,
+    owned: BTreeSet<ValueId>,
 }
 
 /// Running knowledge of the window recognizer, all keyed by ValueId.
@@ -131,6 +159,8 @@ impl ResultWindowTracker {
         let (d, a) = (*d, args[0]);
         if let Some(p) = self.pending.get_mut(&a) {
             p.handle = Some(d);
+            p.buffered.push(op);
+            p.owned.insert(d);
             self.pending_handles.insert(d, a);
         } else if self.res_vals.contains(&a) {
             self.res_handles.insert(d, a);
@@ -152,6 +182,10 @@ impl ResultWindowTracker {
         let off = self.const_vals.get(b).copied();
         if let (Some(r), Some(o)) = (self.pending_handles.get(&a).copied(), off) {
             self.pending_addrs.insert(dst, (r, o));
+            if let Some(p) = self.pending.get_mut(&r) {
+                p.buffered.push(op);
+                p.owned.insert(dst);
+            }
         } else if let (Some(r), Some(o)) = (self.res_handles.get(&a).copied(), off) {
             self.res_addrs.insert(dst, (r, o));
         } else {
@@ -168,7 +202,7 @@ impl ResultWindowTracker {
         };
         let (width, addr, stored) = (*width, args[0], args[1]);
         match self.pending_addrs.get(&addr).copied() {
-            Some((r, 12)) if width == 8 => self.store_producer_payload(r, stored, out),
+            Some((r, 12)) if width == 8 => self.store_producer_payload(r, stored, op, out),
             Some((r, 4)) if width == 4 && self.const_vals.get(&stored) == Some(&0) => {
                 self.complete_ok_producer(r, out);
             }
@@ -178,37 +212,41 @@ impl ResultWindowTracker {
 
     /// The offset-12 payload store. An Err(str) completes HERE (len stays 1 =
     /// Err tag); Ok(scalar) completes at the len:=0 store.
-    fn store_producer_payload(&mut self, r: ValueId, stored: ValueId, out: &mut Vec<Op>) {
+    fn store_producer_payload(&mut self, r: ValueId, stored: ValueId, op: Op, out: &mut Vec<Op>) {
         let (payload, is_str) = match self.str_handles.get(&stored) {
             Some(s) => (*s, true),
             None => (stored, false),
         };
         if let Some(p) = self.pending.get_mut(&r) {
             p.payload = Some((payload, is_str));
-        }
-        if !is_str {
+            if !is_str {
+                // Not a completion yet — the Ok tag store may still arrive, or
+                // the window may be abandoned; either way the op must survive
+                // in the buffer (#1100).
+                p.buffered.push(op);
+                return;
+            }
+        } else {
             return;
         }
-        let Some(p) = self.pending.remove(&r) else { return };
-        if let Some(h) = p.handle {
-            self.pending_handles.remove(&h);
-        }
+        let Some(p) = self.remove_window(r) else { return };
+        let _ = p; // Err completes: the buffered window ops are REPLACED.
         out.push(Op::Prim { kind: PrimKind::ResMakeErrStr, dst: Some(r), args: vec![payload] });
         self.res_vals.insert(r);
     }
 
-    /// The Ok tag store (len := 0): complete the Ok(scalar) producer. A str
-    /// payload with an Ok tag is outside the recognized set — the window ops
-    /// were already dropped, so re-emitting is impossible; leave R undefined
-    /// and let the render wall on its use.
+    /// The Ok tag store (len := 0): complete the Ok(scalar) producer. A shape
+    /// outside the recognized set (a str payload with an Ok tag, no payload at
+    /// all) FLUSHES the buffered window back instead — re-emitting is possible
+    /// now, so R is never left undefined (#1100).
     fn complete_ok_producer(&mut self, r: ValueId, out: &mut Vec<Op>) {
-        let Some(p) = self.pending.remove(&r) else { return };
-        if let Some(h) = p.handle {
-            self.pending_handles.remove(&h);
-        }
-        if let Some((payload, false)) = p.payload {
-            out.push(Op::Prim { kind: PrimKind::ResMakeOk, dst: Some(r), args: vec![payload] });
-            self.res_vals.insert(r);
+        let Some(p) = self.remove_window(r) else { return };
+        match p.payload {
+            Some((payload, false)) => {
+                out.push(Op::Prim { kind: PrimKind::ResMakeOk, dst: Some(r), args: vec![payload] });
+                self.res_vals.insert(r);
+            }
+            _ => out.extend(p.buffered),
         }
     }
 
@@ -248,6 +286,80 @@ impl ResultWindowTracker {
             self.if_dsts.pop();
         }
         out.push(op);
+    }
+
+    // ── the #1100 rollback machinery ────────────────────────────────────
+
+    /// Remove window `r` from every tracker map, returning its state.
+    fn remove_window(&mut self, r: ValueId) -> Option<Pending> {
+        let p = self.pending.remove(&r)?;
+        self.pending_handles.retain(|_, pr| *pr != r);
+        self.pending_addrs.retain(|_, (pr, _)| *pr != r);
+        Some(p)
+    }
+
+    /// Restore window `r`'s buffered ops verbatim — the stream continues
+    /// exactly as if the producer guess had never been made.
+    fn flush_window(&mut self, r: ValueId, out: &mut Vec<Op>) {
+        if let Some(p) = self.remove_window(r) {
+            out.extend(p.buffered);
+        }
+    }
+
+    /// Flush every window still pending (function end — no completion came).
+    fn flush_all(&mut self, out: &mut Vec<Op>) {
+        let rs: Vec<ValueId> = self.pending.keys().copied().collect();
+        for r in rs {
+            self.flush_window(r, out);
+        }
+    }
+
+    /// The rollback guard: flush any pending window whose swallowed material
+    /// this op READS, unless the op is that window's own next recognized step
+    /// (which reads window material by design — the Handle over R, the offset
+    /// Add over the window handle, and the two recognized Store forms).
+    fn flush_windows_read_by(&mut self, op: &Op, out: &mut Vec<Op>) {
+        if self.pending.is_empty() {
+            return;
+        }
+        if self.is_window_continuation(op) {
+            return;
+        }
+        let mut reads = BTreeSet::new();
+        collect_reads(op, &mut reads);
+        if reads.is_empty() {
+            return;
+        }
+        let hit: Vec<ValueId> = self
+            .pending
+            .iter()
+            .filter(|(_, p)| p.owned.iter().any(|v| reads.contains(v)))
+            .map(|(r, _)| *r)
+            .collect();
+        for r in hit {
+            self.flush_window(r, out);
+        }
+    }
+
+    /// Is this op one of the shapes the window recognizer itself consumes?
+    /// Only those may read window material without abandoning the window.
+    fn is_window_continuation(&self, op: &Op) -> bool {
+        match op {
+            Op::Prim { kind: PrimKind::Handle, dst: Some(_), args } if args.len() == 1 => {
+                self.pending.contains_key(&args[0])
+            }
+            Op::IntBinOp { op: crate::IntOp::Add, a, b, .. } => {
+                self.pending_handles.contains_key(a) && self.const_vals.contains_key(b)
+            }
+            Op::Prim { kind: PrimKind::Store { width }, dst: None, args } if args.len() == 2 => {
+                match self.pending_addrs.get(&args[0]).copied() {
+                    Some((_, 12)) => *width == 8,
+                    Some((_, 4)) => *width == 4 && self.const_vals.get(&args[1]) == Some(&0),
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
     }
 }
 

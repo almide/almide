@@ -3,6 +3,8 @@ fn rewrite_to_loop(
     func: &mut IrFunction,
     var_table: &mut VarTable,
     infer_bindings: &mut std::collections::BTreeSet<VarId>,
+    tco_owned_params: &mut HashSet<VarId>,
+    always_clone_vars: &HashSet<VarId>,
 ) -> HashSet<usize> {
     let fn_name = func.name.clone();
     // For effect fns returning Result[T, E], the TCO result variable should hold T
@@ -106,10 +108,25 @@ fn rewrite_to_loop(
         eprintln!("[tco] {} dec_params={:?}", fn_name.as_str(), names(&dec_params));
     }
 
+    // Heap params whose clone/move decisions THIS pass owns (the native
+    // accumulator O(n²) fix): every consuming read in the rewritten body is
+    // either explicitly Clone-wrapped below or a deliberate bare move at a
+    // per-path-final read. CloneInsertion skips these ids entirely — its
+    // blanket inside-a-loop-always-clone rule is what cloned a list/string
+    // accumulator on every iteration (O(n) per pass → O(n²) total) while the
+    // wasm renderer's in-place reuse ran O(n) (the nightly Hang-divergence
+    // class, seed 1785824938231857375 index 303: build(1000000) — 787s
+    // native vs 0.01s wasm). rustc's borrow checker verifies every bare
+    // move: a wrong decision here is a LOUD E0382/E0505, never a silent
+    // wrong value (a move rustc accepts is observationally identical to the
+    // clone — the source binding is provably never read again).
+    let owned_params = tco_owned_candidates(func, &bytes_borrowed_params, always_clone_vars);
+
     // Rewrite the body expression
     let old_body = std::mem::take(&mut func.body);
     let is_effect = func.is_effect;
-    let rewritten = rewrite_tail_expr(old_body, &fn_name, &params, &temps, result_var, is_effect, &dec_params);
+    let rewritten = rewrite_tail_expr(old_body, &fn_name, &params, &temps, result_var, is_effect, &dec_params, &owned_params);
+    tco_owned_params.extend(owned_params.iter().copied());
 
     // Build the default value for the result variable
     let default_val = default_for_type(&ret_ty);
@@ -294,11 +311,12 @@ fn rewrite_tail_expr(
     result_var: VarId,
     is_effect: bool,
     dec_params: &[VarId],
+    owned_params: &HashSet<VarId>,
 ) -> IrExpr {
     match expr.kind {
         // Self-recursive call in tail position -> reassign params and continue
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name == fn_name => {
-            emit_tail_call_replacement(args, params, temps, result_var, dec_params)
+            emit_tail_call_replacement(args, params, temps, result_var, dec_params, owned_params)
         }
 
         // #557: `(self-call)?` / `(self-call)!` — a frontend auto-? wrapping a
@@ -309,7 +327,7 @@ fn rewrite_tail_expr(
             if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. } if name == fn_name) =>
         {
             match inner.kind {
-                IrExprKind::Call { args, .. } => emit_tail_call_replacement(args, params, temps, result_var, dec_params),
+                IrExprKind::Call { args, .. } => emit_tail_call_replacement(args, params, temps, result_var, dec_params, owned_params),
                 _ => unreachable!("guard guarantees a self-call"),
             }
         }
@@ -320,16 +338,19 @@ fn rewrite_tail_expr(
         // emitted the whole inner as a base case, so a wasm-arm
         // `Ok(Try(Call self))` was mis-emitted as a base value (no loop).
         IrExprKind::ResultOk { expr: inner } if is_effect => {
-            rewrite_tail_expr(*inner, fn_name, params, temps, result_var, is_effect, dec_params)
+            rewrite_tail_expr(*inner, fn_name, params, temps, result_var, is_effect, dec_params, owned_params)
         }
 
-        // If: recurse into both branches
+        // If: recurse into both branches. The condition is a NON-terminal
+        // region: every consuming owned-param read in it clones (this pass
+        // owns those decisions now — CloneInsertion skips owned params).
         IrExprKind::If { cond, then, else_ } => {
-            let new_then = rewrite_tail_expr(*then, fn_name, params, temps, result_var, is_effect, dec_params);
-            let new_else = rewrite_tail_expr(*else_, fn_name, params, temps, result_var, is_effect, dec_params);
+            let new_cond = wrap_owned_reads(*cond, owned_params);
+            let new_then = rewrite_tail_expr(*then, fn_name, params, temps, result_var, is_effect, dec_params, owned_params);
+            let new_else = rewrite_tail_expr(*else_, fn_name, params, temps, result_var, is_effect, dec_params, owned_params);
             IrExpr {
                 kind: IrExprKind::If {
-                    cond,
+                    cond: Box::new(new_cond),
                     then: Box::new(new_then),
                     else_: Box::new(new_else),
                 },
@@ -338,28 +359,32 @@ fn rewrite_tail_expr(
             }
         }
 
-        // Match: recurse into arm bodies
+        // Match: recurse into arm bodies. Subject and guards are non-terminal
+        // regions — owned-param reads there clone (see the If arm).
         IrExprKind::Match { subject, arms } => {
+            let new_subject = wrap_owned_reads(*subject, owned_params);
             let new_arms = arms.into_iter().map(|arm| {
                 IrMatchArm {
                     pattern: arm.pattern,
-                    guard: arm.guard,
-                    body: rewrite_tail_expr(arm.body, fn_name, params, temps, result_var, is_effect, dec_params),
+                    guard: arm.guard.map(|g| wrap_owned_reads(g, owned_params)),
+                    body: rewrite_tail_expr(arm.body, fn_name, params, temps, result_var, is_effect, dec_params, owned_params),
                 }
             }).collect();
             IrExpr {
-                kind: IrExprKind::Match { subject, arms: new_arms },
+                kind: IrExprKind::Match { subject: Box::new(new_subject), arms: new_arms },
                 ty: Ty::Unit,
                 span: expr.span, def_id: None,
             }
         }
 
-        // Block: recurse into trailing expr
+        // Block: recurse into trailing expr. The leading statements are a
+        // non-terminal region — owned-param reads there clone.
         IrExprKind::Block { stmts, expr: Some(tail) } => {
-            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect, dec_params);
+            let new_stmts = stmts.into_iter().map(|s| wrap_owned_reads_stmt(s, owned_params)).collect();
+            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect, dec_params, owned_params);
             IrExpr {
                 kind: IrExprKind::Block {
-                    stmts,
+                    stmts: new_stmts,
                     expr: Some(Box::new(new_tail)),
                 },
                 ty: Ty::Unit,
@@ -404,7 +429,7 @@ fn rewrite_tail_expr(
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::IterChain { .. }
         | IrExprKind::Hole | IrExprKind::Todo { .. } => {
-            emit_base_case(expr, result_var, dec_params)
+            emit_base_case(expr, result_var, dec_params, owned_params)
         }
     }
 }
@@ -432,6 +457,7 @@ fn emit_tail_call_replacement(
     temps: &[(VarId, Ty)],
     _result_var: VarId,
     dec_params: &[VarId],
+    owned_params: &HashSet<VarId>,
 ) -> IrExpr {
     let mut stmts: Vec<IrStmt> = Vec::new();
 
@@ -445,20 +471,49 @@ fn emit_tail_call_replacement(
         matches!(&arg.kind, IrExprKind::Var { id } if *id == params[i].0)
     }).collect();
 
-    // Bind temporaries to argument expressions.
     // Strip Borrow from arg unless this param position is kept-borrowed
     // (e.g. Bytes borrow preserved across iterations).
-    for (i, arg) in args.into_iter().enumerate() {
-        if identity_carry[i] { continue; }
-        let (tmp_var, tmp_ty) = &temps[i];
+    let args: Vec<Option<IrExpr>> = args.into_iter().enumerate().map(|(i, arg)| {
+        if identity_carry[i] { return None; }
         let keep = TCO_BORROWED_PARAMS.with(|s| s.borrow().contains(&i));
-        let unwrapped = if keep { arg } else { strip_borrow(arg) };
+        Some(if keep { arg } else { strip_borrow(arg) })
+    }).collect();
+
+    // The accumulator move: this temp block ends by reassigning every
+    // non-identity param and continuing, so an owned param's FINAL read here
+    // is dead the moment the temps are bound — it may MOVE instead of clone.
+    // Kept sound by the narrowest sufficient rule: move only a param that is
+    // reassigned in THIS block (non-identity — an identity carry keeps its
+    // value into the next iteration) and whose reads across the whole block
+    // total exactly ONE, that read being a bare consuming Var (a borrow, an
+    // access-object, a lambda capture, or any second read disqualifies — no
+    // sibling E0505, no order hazard). Every other consuming read clones.
+    let mut census: HashMap<VarId, OwnedReadCensus> = HashMap::new();
+    for arg in args.iter().flatten() {
+        census_owned_reads(arg, owned_params, false, &mut census);
+    }
+    let mut moved: HashSet<VarId> = HashSet::new();
+    for (j, (p_var, _)) in params.iter().enumerate() {
+        if identity_carry.get(j).copied().unwrap_or(false) { continue; }
+        if !owned_params.contains(p_var) { continue; }
+        if let Some(c) = census.get(p_var) {
+            if c.bare == 1 && c.other == 0 && c.lambda == 0 {
+                moved.insert(*p_var);
+            }
+        }
+    }
+
+    // Bind temporaries to argument expressions.
+    for (i, arg) in args.into_iter().enumerate() {
+        let Some(arg) = arg else { continue };
+        let (tmp_var, tmp_ty) = &temps[i];
+        let value = wrap_owned_reads_except(arg, owned_params, &moved);
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {
                 var: *tmp_var,
                 mutability: Mutability::Let,
                 ty: tmp_ty.clone(),
-                value: unwrapped,
+                value,
             },
             span: None,
         });
@@ -514,7 +569,7 @@ fn emit_tail_call_replacement(
 /// __tco_result = expr
 /// break
 /// ```
-fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId]) -> IrExpr {
+fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId], owned_params: &HashSet<VarId>) -> IrExpr {
     // A heap-typed base-case result may MOVE a managed param out to the caller
     // (e.g. `then s` returns the accumulator). Freeing the param here would then
     // be a use-after-free on the returned value, so suppress the exit Dec for a
@@ -522,6 +577,18 @@ fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId]) -> IrEx
     // carry a param out, so the params are dead after the assign and freeing the
     // final loop value here balances the entry `Inc`.
     let result_is_heap = tco_is_heap(&expr.ty);
+
+    // The base case ends the loop (`break` follows; only `__tco_result` is
+    // read afterwards), so it is a terminal block like the temp block above:
+    // an owned param whose sole read here is a bare consuming Var MOVES into
+    // the result — no reassignment requirement, the params die with the loop.
+    // (`__tco_result = acc` was previously an O(n) parting clone.)
+    let mut census: HashMap<VarId, OwnedReadCensus> = HashMap::new();
+    census_owned_reads(&expr, owned_params, false, &mut census);
+    let moved: HashSet<VarId> = owned_params.iter().copied().filter(|p| {
+        census.get(p).is_some_and(|c| c.bare == 1 && c.other == 0 && c.lambda == 0)
+    }).collect();
+    let expr = wrap_owned_reads_except(expr, owned_params, &moved);
 
     let assign = IrStmt {
         kind: IrStmtKind::Assign {
@@ -593,6 +660,233 @@ fn default_for_type(ty: &Ty) -> IrExpr {
         ty: ty.clone(),
         span: None, def_id: None,
     }
+}
+
+// ── TCO-owned clone/move decisions ──────────────────────────────────
+//
+// CloneInsertion's blanket rule — "inside a loop, every consuming read
+// clones" — is correct for a general loop but pessimal for the loop THIS
+// pass constructs: every iteration path ends by either reassigning all
+// non-identity params (`continue`) or leaving the loop for good (`break`),
+// so a param's final read on a path is provably dead afterwards and may
+// MOVE. On a list/string accumulator (`build(n - 1, acc + [x])` — the
+// idiomatic Almide tail recursion) the per-iteration clone is O(len),
+// turning the whole loop O(n²); the move makes it O(n) (AlmideConcat
+// extends in place). For each param it can prove safe, this pass takes
+// over ALL clone decisions (`tco_owned_params` — CloneInsertion skips the
+// id): reads it cannot prove dead get an explicit `Clone` here, the one
+// provably-final read stays a bare move. rustc's borrow checker re-proves
+// every move — a wrong decision is a loud E0382/E0505 at codegen-output
+// compile time, never a silent wrong value.
+
+/// How a tracked param is read inside a region: `bare` = a consuming
+/// `Var` (renders as a move if left alone); `other` = a read that stays a
+/// reference (immediate Borrow child, an access-object, an in-place
+/// mutation target, an RC op); `lambda` = any read inside a lambda body (a
+/// closure capture — CaptureClone's domain, disqualifying).
+#[derive(Default)]
+struct OwnedReadCensus {
+    bare: u32,
+    other: u32,
+    lambda: u32,
+}
+
+struct OwnedReadCensusVisitor<'a> {
+    tracked: &'a HashSet<VarId>,
+    lambda_depth: u32,
+    out: &'a mut HashMap<VarId, OwnedReadCensus>,
+}
+
+impl OwnedReadCensusVisitor<'_> {
+    fn note_bare(&mut self, id: VarId) {
+        let c = self.out.entry(id).or_default();
+        if self.lambda_depth > 0 { c.lambda += 1 } else { c.bare += 1 }
+    }
+    fn note_shielded(&mut self, id: VarId) {
+        let c = self.out.entry(id).or_default();
+        if self.lambda_depth > 0 { c.lambda += 1 } else { c.other += 1 }
+    }
+    /// The immediate tracked `Var` of a reference-taking position
+    /// (Borrow child / access object), or None.
+    fn shielded_var(&self, e: &IrExpr) -> Option<VarId> {
+        match &e.kind {
+            IrExprKind::Var { id } if self.tracked.contains(id) => Some(*id),
+            _ => None,
+        }
+    }
+}
+
+impl almide_ir::visit::IrVisitor for OwnedReadCensusVisitor<'_> {
+    fn visit_expr(&mut self, e: &IrExpr) {
+        use almide_ir::visit::walk_expr;
+        match &e.kind {
+            IrExprKind::Var { id } => {
+                if self.tracked.contains(id) { self.note_bare(*id); }
+            }
+            IrExprKind::Borrow { expr, .. } => {
+                if let Some(id) = self.shielded_var(expr) { self.note_shielded(id); }
+                else { self.visit_expr(expr); }
+            }
+            IrExprKind::Member { object, .. } => {
+                if let Some(id) = self.shielded_var(object) { self.note_shielded(id); }
+                else { self.visit_expr(object); }
+            }
+            IrExprKind::IndexAccess { object, index } => {
+                if let Some(id) = self.shielded_var(object) { self.note_shielded(id); }
+                else { self.visit_expr(object); }
+                self.visit_expr(index);
+            }
+            IrExprKind::MapAccess { object, key } => {
+                if let Some(id) = self.shielded_var(object) { self.note_shielded(id); }
+                else { self.visit_expr(object); }
+                self.visit_expr(key);
+            }
+            IrExprKind::Lambda { body, .. } => {
+                self.lambda_depth += 1;
+                self.visit_expr(body);
+                self.lambda_depth -= 1;
+            }
+            _ => walk_expr(self, e),
+        }
+    }
+    fn visit_stmt(&mut self, s: &IrStmt) {
+        use almide_ir::visit::walk_stmt;
+        // An in-place mutation / RC op pins the var (reads-and-writes it
+        // through its binding) — it must never be moved away from.
+        match &s.kind {
+            IrStmtKind::IndexAssign { target, .. }
+            | IrStmtKind::MapInsert { target, .. }
+            | IrStmtKind::FieldAssign { target, .. }
+            | IrStmtKind::ListSwap { target, .. }
+            | IrStmtKind::ListReverse { target, .. }
+            | IrStmtKind::ListRotateLeft { target, .. } => {
+                if self.tracked.contains(target) { self.note_shielded(*target); }
+            }
+            IrStmtKind::ListCopySlice { dst, src, .. } => {
+                if self.tracked.contains(dst) { self.note_shielded(*dst); }
+                if self.tracked.contains(src) { self.note_shielded(*src); }
+            }
+            IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => {
+                if self.tracked.contains(var) { self.note_shielded(*var); }
+            }
+            _ => {}
+        }
+        walk_stmt(self, s);
+    }
+}
+
+fn census_owned_reads(
+    e: &IrExpr,
+    tracked: &HashSet<VarId>,
+    in_lambda: bool,
+    out: &mut HashMap<VarId, OwnedReadCensus>,
+) {
+    if tracked.is_empty() { return; }
+    use almide_ir::visit::IrVisitor;
+    let mut v = OwnedReadCensusVisitor {
+        tracked,
+        lambda_depth: if in_lambda { 1 } else { 0 },
+        out,
+    };
+    v.visit_expr(e);
+}
+
+/// The params whose clone/move decisions this pass takes over. Everything
+/// with a competing ownership protocol opts out: a kept-borrow Bytes param
+/// (never owned), an `always_clone_vars` id, a closure/type-var param
+/// (CloneInsertion's own `always` class), a clone-free scalar (nothing to
+/// decide), and any param read inside a lambda (its capture handling
+/// belongs to CaptureClone). A dec-managed param does NOT opt out: its
+/// `RcInc`/`RcDec` protocol renders to NOTHING on the Rust target
+/// (walker/statements.rs emits the empty string — Perceus RC is the wasm
+/// renderer's concern, and wasm never consumes this pass's output), so a
+/// move past a no-op Dec is exactly as safe as any other move here and
+/// rustc re-proves it. Excluding them would leave the STRING accumulator
+/// (`acc + "x"` — ConcatStr is a fresh alloc, so such params are always
+/// dec-managed) on the O(n²) clone path this fix exists to close.
+fn tco_owned_candidates(
+    func: &IrFunction,
+    kept_borrow: &HashSet<usize>,
+    always_clone_vars: &HashSet<VarId>,
+) -> HashSet<VarId> {
+    let mut set: HashSet<VarId> = func.params.iter().enumerate().filter_map(|(i, p)| {
+        if kept_borrow.contains(&i) { return None; }
+        if always_clone_vars.contains(&p.var) { return None; }
+        if matches!(p.ty, Ty::Fn { .. } | Ty::TypeVar(_)) { return None; }
+        if almide_ir::top_let_storage::clone_free(&p.ty) { return None; }
+        Some(p.var)
+    }).collect();
+    if set.is_empty() { return set; }
+    let mut census: HashMap<VarId, OwnedReadCensus> = HashMap::new();
+    census_owned_reads(&func.body, &set, false, &mut census);
+    set.retain(|p| census.get(p).is_none_or(|c| c.lambda == 0));
+    set
+}
+
+/// Wrap every bare consuming read of a var in `wrap` (minus `except`) in an
+/// explicit `Clone`. Reference-taking positions keep their bare Var — a
+/// Borrow child (wrapping would borrow a temporary and lose writes through
+/// an `&mut`) and access objects (CloneInsertion's own IndexAccess /
+/// MapAccess / Member arms strip container clones and clone the ELEMENT).
+/// Lambda bodies are left untouched (owned params are proven lambda-free).
+fn wrap_owned_reads_except(expr: IrExpr, wrap: &HashSet<VarId>, except: &HashSet<VarId>) -> IrExpr {
+    if wrap.is_empty() { return expr; }
+    let IrExpr { kind, ty, span, def_id } = expr;
+    let kind = match kind {
+        IrExprKind::Var { id } if wrap.contains(&id) && !except.contains(&id) => {
+            IrExprKind::Clone {
+                expr: Box::new(IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span, def_id }),
+            }
+        }
+        IrExprKind::Borrow { expr: inner, as_str, mutable } => {
+            let inner = if matches!(&inner.kind, IrExprKind::Var { .. }) { inner }
+                        else { Box::new(wrap_owned_reads_except(*inner, wrap, except)) };
+            IrExprKind::Borrow { expr: inner, as_str, mutable }
+        }
+        IrExprKind::Member { object, field } => {
+            let object = if matches!(&object.kind, IrExprKind::Var { .. }) { object }
+                         else { Box::new(wrap_owned_reads_except(*object, wrap, except)) };
+            IrExprKind::Member { object, field }
+        }
+        IrExprKind::IndexAccess { object, index } => {
+            let object = if matches!(&object.kind, IrExprKind::Var { .. }) { object }
+                         else { Box::new(wrap_owned_reads_except(*object, wrap, except)) };
+            IrExprKind::IndexAccess { object, index: Box::new(wrap_owned_reads_except(*index, wrap, except)) }
+        }
+        IrExprKind::MapAccess { object, key } => {
+            let object = if matches!(&object.kind, IrExprKind::Var { .. }) { object }
+                         else { Box::new(wrap_owned_reads_except(*object, wrap, except)) };
+            IrExprKind::MapAccess { object, key: Box::new(wrap_owned_reads_except(*key, wrap, except)) }
+        }
+        IrExprKind::Clone { expr: inner } => {
+            // Already cloned — never double-wrap the immediate Var.
+            let inner = if matches!(&inner.kind, IrExprKind::Var { .. }) { inner }
+                        else { Box::new(wrap_owned_reads_except(*inner, wrap, except)) };
+            IrExprKind::Clone { expr: inner }
+        }
+        IrExprKind::Lambda { params, body, lambda_id } => {
+            IrExprKind::Lambda { params, body, lambda_id }
+        }
+        other => {
+            return IrExpr { kind: other, ty, span, def_id }
+                .map_children(&mut |c| wrap_owned_reads_except(c, wrap, except));
+        }
+    };
+    IrExpr { kind, ty, span, def_id }
+}
+
+/// [`wrap_owned_reads_except`] with no exceptions — for the non-terminal
+/// regions (conditions, match subjects and guards, leading block
+/// statements) where no read is provably final.
+fn wrap_owned_reads(expr: IrExpr, owned: &HashSet<VarId>) -> IrExpr {
+    if owned.is_empty() { return expr; }
+    wrap_owned_reads_except(expr, owned, &HashSet::new())
+}
+
+fn wrap_owned_reads_stmt(stmt: IrStmt, owned: &HashSet<VarId>) -> IrStmt {
+    if owned.is_empty() { return stmt; }
+    let except = HashSet::new();
+    stmt.map_exprs(&mut |e| wrap_owned_reads_except(e, owned, &except))
 }
 
 /// Returns true if we can produce a valid default value for this type.

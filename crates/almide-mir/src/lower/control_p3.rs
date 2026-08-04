@@ -131,10 +131,10 @@ impl LowerCtx {
                 return None;
             }
         }
-        let is_named_variant_call = matches!(
-            &expr.kind,
-            IrExprKind::Call { target: CallTarget::Named { .. }, .. }
-        ) && is_variant_ty(&expr.ty);
+        // Shared with the caps counter (`unwrap_or_named_variant_operand`) so the gate that
+        // ADMITS a user-fn operand here and the gate that CREDITS its synthetic helper call in
+        // `count_ir_calls` can never drift apart (#1079).
+        let is_named_variant_call = unwrap_or_named_variant_operand(expr);
         let cx = UnwrapOrCtx {
             is_result: self.unwrap_or_is_result(expr, is_named_variant_call),
             track_result,

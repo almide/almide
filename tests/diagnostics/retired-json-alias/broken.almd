@@ -1,6 +1,8 @@
-// #1075: json.* accessor spellings are retired aliases of the value.* data
-// model (E040, one release) — json keeps the format (parse / stringify).
-// The survivor returns Result; `?` restores the Option this call produced.
+// #1075 -> #1078: the json.* accessor spellings were retired aliases of the
+// value.* data model. After the one-release E040 window they were DROPPED —
+// this fixture is the executable half of "aliases must not resolve": a
+// retired spelling is an ordinary undefined-function error now, never a
+// silent resolve and never a warning.
 import json
 
 fn main() -> Unit = {

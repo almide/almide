@@ -388,7 +388,7 @@ fn wasm_value_array_access() {
 import json
 
 fn main() -> Unit = {
-  let v = json.parse("[1, 2, 3]") ?? json.null()
+  let v = json.parse("[1, 2, 3]") ?? value.null()
   let arr = value.as_array(v) ?? []
   println(int.to_string(list.len(arr)))
 }
@@ -401,8 +401,8 @@ fn wasm_value_object_get() {
 import json
 
 fn main() -> Unit = {
-  let v = json.parse("{\"name\":\"test\",\"val\":42}") ?? json.null()
-  let name_val = value.get(v, "name") ?? json.null()
+  let v = json.parse("{\"name\":\"test\",\"val\":42}") ?? value.null()
+  let name_val = value.field(v, "name") ?? value.null()
   let name = value.as_string(name_val) ?? "none"
   println(name)
 }

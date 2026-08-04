@@ -414,7 +414,7 @@ fn main() -> Unit = {
 import json
 fn main() -> Unit = {
   match json.parse("[1, 2, 3]") {
-    ok(v) => println(int.to_string(list.len(option.unwrap_or(json.as_array(v), []))))
+    ok(v) => println(int.to_string(list.len(value.as_array(v) ?? [])))
     err(e) => println(e)
   }
 }

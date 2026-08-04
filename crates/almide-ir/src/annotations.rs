@@ -91,6 +91,19 @@ pub struct CodegenAnnotations {
     /// ConcretizeTypes postcondition rightly refuses. Populated by
     /// `TailCallOptPass`.
     pub infer_binding_tys: BTreeSet<VarId>,
+    /// TCO loop params whose clone/move decisions the `TailCallOptPass` made
+    /// ITSELF: every consuming read in the rewritten loop body is either
+    /// explicitly `Clone`-wrapped by the pass or a deliberate bare move at a
+    /// read the pass proved dead afterwards (the accumulator's last read
+    /// before its reassignment / the base case's read before `break`).
+    /// `CloneInsertionPass` must skip these ids entirely — its blanket
+    /// inside-a-loop-always-clone rule is what made every tail-recursive
+    /// list/string accumulator O(n²) on native while the wasm renderer's
+    /// in-place reuse ran O(n) (the nightly Hang-divergence class, seed
+    /// 1785824938231857375 index 303). rustc's borrow checker verifies every
+    /// bare move: a wrong decision here is a LOUD E0382/E0505 codegen bug,
+    /// never a silent wrong value.
+    pub tco_owned_params: HashSet<VarId>,
 }
 
 impl CodegenAnnotations {

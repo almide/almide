@@ -27,4 +27,7 @@ v1（MIR）経路特有の lowering エッジ — scalar 値の端形・tuple/li
 クラスタ・stdlib 呼び出し payload の ctor 直束縛・heap-Ok Result の値系
 コンビネータ・ctor の if-payload・scalar リストリテラルの非 silent-empty 保証
 — は v0 と byte 一致する（v1 検証行脚の固定化契約群）。
-Contracts: C-075, C-107, C-109, C-116, C-120, C-138, C-139, C-143, C-144, C-152。
+self-host モジュールを 2 つ以上リンクする際、`__` 始まりのモジュール内ヘルパが
+同名衝突した場合は**名前一致でマージしない** — 正直な link エラーで壁にする
+（マージは呼び出し側を誤シグネチャに再束縛し、`Ok` 応答後に wasm 検証で落ちる）。
+Contracts: C-075, C-107, C-109, C-116, C-120, C-138, C-139, C-143, C-144, C-152, C-212。

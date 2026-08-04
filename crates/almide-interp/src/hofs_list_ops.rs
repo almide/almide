@@ -696,9 +696,10 @@ impl<'a> Interpreter<'a> {
 
 /// The stdlib container ops with a `mut` receiver — they mutate the receiver
 /// IN PLACE and the program observes the effect on the bound `var`, not a
-/// returned value. The interp cannot model these (args arrive by value, so the
-/// binding is unreachable from the dispatch point); it reports `Unsupported`
-/// for them so the 3-way oracle records an honest skip instead of a wrong vote.
+/// returned value. They are intercepted BEFORE the eager argument evaluation, so
+/// the receiver is still an expression whose binding can be written back
+/// (`inplace.rs`); a receiver shape with no binding to write to reports
+/// `Unsupported`, so the 3-way oracle records an honest skip, never a wrong vote.
 ///
 /// Source of truth: the receiver-mutating Unit/Option-returning functions in
 /// `stdlib/{list,map,string,bytes}.almd`. The FUNCTIONAL siblings (`list.set`,
@@ -716,6 +717,11 @@ impl<'a> Interpreter<'a> {
 /// `write_*` in `stdlib/bytes.almd` returns Unit and mutates in place, and the
 /// functional `bytes.set(b, i, v) -> Bytes` is excluded by the underscore — the
 /// prefix is the whole rule, and a new family member is covered on arrival.
+///
+/// NOT here: `bytes.heap_save` / `bytes.heap_restore`. They take a checkpoint
+/// Int, not a buffer, so there is no receiver to write back — they are the
+/// wasm-only arena pair, and native's no-ops are the vote the bridge casts
+/// (`bridge.rs::bytes_fn`).
 pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
     if module == "bytes"
         && (func.starts_with("set_") || func.starts_with("append_") || func.starts_with("write_"))
@@ -737,6 +743,5 @@ pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
             | ("bytes", "fill")
             | ("bytes", "copy_from")
             | ("bytes", "copy_within")
-            | ("bytes", "heap_restore")
     )
 }

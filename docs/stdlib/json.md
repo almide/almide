@@ -5,8 +5,9 @@ The JSON **format**: parsing and printing of `Value` trees. import json.
 The data model itself lives on `value.*` (auto-imported) — constructors
 (`value.null` / `value.int` / `value.str` / `value.object` / …) and
 accessors (`value.as_*` / `value.field` / `value.keys`) — see
-[value.md](./value.md). The old `json.*` spellings of those operations
-are retired aliases (E040, one release): see the table at the bottom.
+[value.md](./value.md). The old `json.*` spellings of those operations were retired aliases —
+dropped after their one-release E040 deprecation window; the migration map
+is in [Renamed operations](#renamed-operations) at the bottom.
 
 `JsonPath` (the opaque handle of `json.root()` / `json.field(...)`) resolves
 in user annotations whenever `json` is imported — bare or `json.JsonPath`.
@@ -133,31 +134,17 @@ let m = json.to_map(obj) ?? map.new()
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (29 functions)
+## Signature index (15 functions)
 
 ```
 json.parse(text: String) -> Result[Value, String]
 json.stringify(v: Value) -> String
-json.get(j: Value, key: String) -> Option[Value]
-json.keys(j: Value) -> List[String]
-json.from_string(s: String) -> Value
-json.from_int(n: Int) -> Value
-json.from_bool(b: Bool) -> Value
-json.null() -> Value
-json.array(items: List[Value]) -> Value
-json.from_float(n: Float) -> Value
 json.stringify_pretty(j: Value) -> String
-json.object(entries: List[()]) -> Value
 json.get_string(j: Value, key: String) -> Option[String]
 json.get_int(j: Value, key: String) -> Option[Int]
 json.get_float(j: Value, key: String) -> Option[Float]
 json.get_bool(j: Value, key: String) -> Option[Bool]
 json.get_array(j: Value, key: String) -> Option[List[Value]]
-json.as_string(j: Value) -> Option[String]
-json.as_int(j: Value) -> Option[Int]
-json.as_float(j: Value) -> Option[Float]
-json.as_bool(j: Value) -> Option[Bool]
-json.as_array(j: Value) -> Option[List[Value]]
 json.root() -> JsonPath
 json.field(path: JsonPath, name: String) -> JsonPath
 json.index(path: JsonPath, i: Int) -> JsonPath
@@ -169,10 +156,10 @@ json.to_map(j: Value) -> Option[Map[String, String]]
 
 <!-- END GENERATED SIGNATURE INDEX -->
 
-## Retired aliases (E040)
+## Renamed operations
 
-Each of these warns for one release, then drops. `almide fix` migrates a
-file mechanically (nested calls included).
+Dropped in #1078 after a one-release deprecation window (E040, v0.53.1 –
+v0.53.4). A retired spelling is an ordinary E002 undefined-function error now.
 
 | retired | survivor |
 |---|---|
@@ -180,3 +167,8 @@ file mechanically (nested calls included).
 | `json.from_string` / `json.from_int` / `json.from_bool` / `json.from_float` | `value.str` / `value.int` / `value.bool` / `value.float` |
 | `json.as_string` … `json.as_array` (returned `Option`) | `value.as_string(v)?` … `value.as_array(v)?` — `?` converts the `Result` to the same `Option` |
 | `json.get(j, k)` (returned `Option`) | `value.field(j, k)?` |
+| `value.get(j, k)` | `value.field(j, k)` |
+
+Note one behavioral tightening: the dropped `json.as_int` widened a Float
+value to Int; `value.as_int` does not (`err("expected Int")`) — the widening
+direction lives on `value.as_float`, which accepts an Int.

@@ -1,2 +1,2 @@
-expects_code = "E040"
-hint_substring = "value.as_int"
+expects_code = "E002"
+hint_substring = "No function 'as_int' in module 'json'"

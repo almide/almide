@@ -183,6 +183,47 @@ fn runtime_entry_is_called(
     any_called
 }
 
+/// Dedup the linked runtime functions BY NAME — a no-op merge ONLY when the two bodies are
+/// the same function (one source linked via two registry paths).
+///
+/// Two DIFFERENT functions sharing a name (e.g. two modules' `__`-private helpers with
+/// different arities — the `__hex_fill` 4-vs-5-arg collision between `hex_encode.almd` and
+/// `int_hex.almd`, #1068) must NOT merge: keeping either rebinds the OTHER module's call
+/// sites to a wrong signature, and the module then fails wasm validation AFTER the render
+/// wall has already answered `Ok` — the invalid-wasm-as-Ok class the trust ledger audits as
+/// zero. Wall it instead, so the failure is an honest compile error naming both arities.
+///
+/// A free fn (not inlined in the fixpoint loop) so the wall is unit-testable without
+/// building a whole program: see the `dedup_*` tests below.
+fn dedup_linked_by_name(functions: &mut Vec<crate::MirFunction>) -> Result<(), LowerError> {
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut kept: Vec<crate::MirFunction> = Vec::with_capacity(functions.len());
+    for f in functions.drain(..) {
+        match seen.get(f.name.as_str()) {
+            None => {
+                seen.insert(f.name.clone(), kept.len());
+                kept.push(f);
+            }
+            Some(&i) if kept[i] == f => {}
+            Some(&i) => {
+                return Err(LowerError::at(
+                    None,
+                    format!(
+                        "self-host link collision: two different functions are both named `{}` \
+                         ({} vs {} param(s)) — module-local helpers must have distinct names; \
+                         merging them would emit an invalid module",
+                        f.name,
+                        kept[i].params.len(),
+                        f.params.len(),
+                    ),
+                ));
+            }
+        }
+    }
+    *functions = kept;
+    Ok(())
+}
+
 /// Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an
 /// entry is called but not defined, renaming its impl fn to the call name. A linked impl
 /// may call ANOTHER registry entry, so this iterates to a FIXPOINT. Extracted verbatim
@@ -199,7 +240,7 @@ fn link_self_host_runtime_to_fixpoint(
             let any_defined =
                 entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
             if any_called && !any_defined {
-                let rt = source_to_ir(rt_source)?;
+                let rt = source_to_ir(rt_source).map_err(|e| LowerError::Unsupported(format!("in registry source (first entry {:?}): {e:?}", entries.first())))?;
                 let linked_from = functions.len();
                 for f in &rt.functions {
                     lower_and_link_one_runtime_fn(f, layouts, entries, verbose, functions);
@@ -216,39 +257,7 @@ fn link_self_host_runtime_to_fixpoint(
                 crate::concat_to_append::rewrite_self_append(&mut functions[linked_from..]);
             }
         }
-        // Dedup by name — a no-op merge ONLY when the two bodies are the same
-        // function (one source linked via two registry paths). Two DIFFERENT
-        // functions sharing a name (e.g. two modules' `__`-private helpers
-        // with different arities — the `__hex_fill` 4-vs-5-arg collision,
-        // #1068) must NOT merge: keeping either rebinds the other module's
-        // call sites to a wrong signature and the module fails validation
-        // AFTER the render wall — the invalid-wasm-as-Ok class the ledger
-        // audits as zero. Wall it instead.
-        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut kept: Vec<crate::MirFunction> = Vec::with_capacity(functions.len());
-        for f in functions.drain(..) {
-            match seen.get(f.name.as_str()) {
-                None => {
-                    seen.insert(f.name.clone(), kept.len());
-                    kept.push(f);
-                }
-                Some(&i) if kept[i] == f => {}
-                Some(&i) => {
-                    return Err(LowerError::at(
-                        None,
-                        format!(
-                            "self-host link collision: two different functions are both named `{}` \
-                             ({} vs {} param(s)) — module-local helpers must have distinct names; \
-                             merging them would emit an invalid module",
-                            f.name,
-                            kept[i].params.len(),
-                            f.params.len(),
-                        ),
-                    ));
-                }
-            }
-        }
-        *functions = kept;
+        dedup_linked_by_name(functions)?;
         if functions.len() == before {
             break;
         }
@@ -295,3 +304,48 @@ fn link_print_str_runtime(
 }
 
 
+/// The #1068 collision wall, tested at the seam rather than through a whole program:
+/// two self-host modules whose `__`-private helpers collide must FAIL the link, not
+/// silently merge into a module that fails wasm validation after `Ok`.
+#[cfg(test)]
+mod dedup_link_tests {
+    use crate::{MirFunction, MirParam, Repr, ScalarWidth, ValueId};
+
+    fn f(name: &str, arity: usize) -> MirFunction {
+        MirFunction {
+            name: name.to_string(),
+            params: (0..arity)
+                .map(|i| MirParam {
+                    value: ValueId(i as u32),
+                    repr: Repr::Scalar { width: ScalarWidth::Double },
+                })
+                .collect(),
+            ..MirFunction::default()
+        }
+    }
+
+    #[test]
+    fn dedup_merges_two_links_of_the_same_function() {
+        // One source reached through two registry paths: identical bodies, a real no-op merge.
+        let mut fns = vec![f("__hex_fill", 5), f("__hex_fill", 5), f("other", 1)];
+        super::dedup_linked_by_name(&mut fns).expect("identical bodies must merge silently");
+        assert_eq!(fns.len(), 2);
+        assert_eq!(fns[0].name, "__hex_fill");
+        assert_eq!(fns[1].name, "other");
+    }
+
+    #[test]
+    fn dedup_walls_a_name_collision_between_different_functions() {
+        // The exact #1068 shape: hex_encode's 5-param `__hex_fill` vs int_hex's 4-param one.
+        // Merging by NAME rebound the loser's call sites to the wrong signature and wasmtime
+        // rejected the module ("expected i64 but nothing on stack") AFTER the render wall
+        // answered Ok. The link must refuse instead.
+        let mut fns = vec![f("__hex_fill", 5), f("__hex_fill", 4)];
+        let err = super::dedup_linked_by_name(&mut fns)
+            .expect_err("a name collision between DIFFERENT functions must wall");
+        let msg = format!("{err:?}");
+        assert!(msg.contains("self-host link collision"), "unexpected error: {msg}");
+        assert!(msg.contains("__hex_fill"), "the error must name the collision: {msg}");
+        assert!(msg.contains("5 vs 4"), "the error must name both arities: {msg}");
+    }
+}

@@ -825,3 +825,108 @@ fn huge_range_for_in_is_fuel_bounded_not_oom() {
         out.status
     );
 }
+
+// ── #1022: mut-parameter copy-in/copy-out (C-132's interp leg) ──
+
+#[test]
+fn mut_param_list_push_reaches_the_caller() {
+    // Statement position, value-returning callee in Bind position, and a
+    // nested-expression position — every call position writes back.
+    let src = r#"
+fn push9(mut v: List[Int], x: Int) -> Int = {
+  list.push(v, x)
+  list.len(v) - 1
+}
+
+fn main() -> Unit = {
+  var v = [1, 2]
+  push9(v, 7)
+  let i = push9(v, 8)
+  let t = 100 + push9(v, 9)
+  println("${v} ${i} ${t}")
+}
+"#;
+    expect_out(src, "[1, 2, 7, 8, 9] 3 104\n");
+}
+
+#[test]
+fn mut_param_copy_out_is_cow_for_aliases() {
+    // An alias bound BEFORE the call keeps its own elements — the copy-out
+    // assigns the callee's final buffer into the caller's slot only (the same
+    // value-semantics promise as C-033 alias_cow).
+    let src = r#"
+fn grow(mut v: List[Int]) -> Unit = list.push(v, 9)
+
+fn main() -> Unit = {
+  var v = [1]
+  let snap = v
+  grow(v)
+  println("${v} ${snap}")
+}
+"#;
+    expect_out(src, "[1, 9] [1]\n");
+}
+
+#[test]
+fn mut_param_record_field_argument_writes_back() {
+    // The record-FIELD argument form (`push9(b.items, 7)`) — the backends
+    // FieldAssign the buffer back; the interp's copy-out mirrors it.
+    let src = r#"
+type Box = { items: List[Int] }
+
+fn add(mut v: List[Int], x: Int) -> Unit = list.push(v, x)
+
+fn main() -> Unit = {
+  var b = Box { items: [1] }
+  add(b.items, 5)
+  add(b.items, 6)
+  println("${b.items}")
+}
+"#;
+    expect_out(src, "[1, 5, 6]\n");
+}
+
+#[test]
+fn mut_param_chains_through_a_nested_callee() {
+    // A callee forwarding its OWN mut param to another mut-param fn: the inner
+    // copy-out lands on the outer callee's frame binding, and the outer
+    // copy-out carries it the rest of the way to the caller.
+    let src = r#"
+fn inner(mut v: List[Int]) -> Unit = list.push(v, 2)
+fn outer(mut v: List[Int]) -> Unit = {
+  list.push(v, 1)
+  inner(v)
+}
+
+fn main() -> Unit = {
+  var v: List[Int] = []
+  outer(v)
+  println("${v}")
+}
+"#;
+    expect_out(src, "[1, 2]\n");
+}
+
+#[test]
+fn mut_param_map_insert_reaches_the_caller() {
+    // The C-061 shape: a `mut Map` param mutated by `map.insert`, insert-new
+    // and overwrite both landing in the caller's slot. (The read-back
+    // `map.get_or` route is covered by the real `mut_map_param` fixture in the
+    // 3-way gate — its Int-key self-host body is out of scope at this
+    // harness's no-mono cut.)
+    let src = r#"
+fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = map.insert(m, k, v)
+
+fn main() -> Unit = {
+  var counts: Map[Int, Int] = [:]
+  put(counts, 1, 100)
+  put(counts, 1, 111)
+  put(counts, 2, 200)
+  println("${map.len(counts)}")
+  println("${counts}")
+}
+"#;
+    expect_out(src, "2\n[1: 111, 2: 200]\n");
+}
+
+

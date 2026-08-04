@@ -410,6 +410,16 @@ fn count_ir_calls(
                             // `option.unwrap_or_str` CallFn, so credit the node +1.
                             || almide_mir::lower::unwrap_or_operand_admitted(expr)
                     }
+                    // A USER function returning `Option[String]` (`fn first_char(s) ->
+                    // Option[String]`, `first_char("hi") ?? "<none>"`): the lowering admits it
+                    // through the `is_named_variant_call` operand route and then emits ONE
+                    // `option.unwrap_or_str` — the SAME synthetic call a self-host operand gets.
+                    // Credit it by the SAME shared predicate the lowering uses (#1079: uncredited,
+                    // this was `mir 3 > ir 2`, a caps wall breach on correct output).
+                    almide_ir::IrExprKind::Call {
+                        target: almide_ir::CallTarget::Named { .. },
+                        ..
+                    } => almide_mir::lower::unwrap_or_named_variant_operand(expr),
                     _ => false,
                 };
                 if matches!(fallback.ty, almide_lang::types::Ty::String)
@@ -463,6 +473,15 @@ fn count_ir_calls(
                             // synthetic `result.value_unwrap_or` CallFn, so credit the node +1.
                             || almide_mir::lower::unwrap_or_operand_admitted(expr)
                     }
+                    // A USER function returning a heap-payload variant (`fn lookup(k) ->
+                    // Result[Value, String]`): admitted by the SAME `is_named_variant_call`
+                    // operand route, then routed to ONE `result.value_unwrap_or` /
+                    // `option.value_unwrap_or` helper — credit it, mirroring the String case
+                    // above (#1079).
+                    almide_ir::IrExprKind::Call {
+                        target: almide_ir::CallTarget::Named { .. },
+                        ..
+                    } => almide_mir::lower::unwrap_or_named_variant_operand(expr),
                     _ => false,
                 };
                 if operand_is_value_result

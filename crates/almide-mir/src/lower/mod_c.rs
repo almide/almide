@@ -684,9 +684,9 @@ mod tail;
 mod control;
 mod calls;
 
-// The `??`-operand admission gate (a free fn in the private `control` module) — re-exported so the
-// `classify_corpus` caps counter consults the SAME predicate the lowering uses (no count drift).
-pub use control::unwrap_or_operand_admitted;
+// The `??`-operand admission gates (free fns in the private `control` module) — re-exported so the
+// `classify_corpus` caps counter consults the SAME predicates the lowering uses (no count drift).
+pub use control::{unwrap_or_named_variant_operand, unwrap_or_operand_admitted};
 
 // The in-place `&mut` mutator surface (a free fn in the private `calls` module) — re-exported so
 // `inline_pure_call_globals`'s receiver fence tests the SAME predicate the receiver COW does, and

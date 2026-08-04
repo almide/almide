@@ -319,11 +319,15 @@ pub fn rust_templates_inline() -> TemplateSet {
         }],
     });
 
-    // binary op: concat
+    // binary op: concat. Both arms route through AlmideConcat, whose owned
+    // impls extend in place (`push_str` / `extend`) — same bytes as the old
+    // `format!("{}{}")` String arm, but an OWNED left operand (the TCO
+    // accumulator move) keeps its capacity, so a tail-recursive string
+    // builder is amortized O(n) instead of reallocating every iteration.
     ts.entries.insert("concat_expr".into(), TemplateEntry {
         rules: vec![
             TemplateRule {
-                template: "format!(\"{{}}{{}}\", {left}, {right})".into(),
+                template: "AlmideConcat::concat({left}, {right})".into(),
                 when_type: Some("String".into()),
                 when_attr: None,
             },
@@ -374,8 +378,11 @@ mod tests {
     #[test]
     fn test_concat_type_dispatch() {
         let ts = rust_templates();
+        // Both arms route through AlmideConcat: the owned String impl
+        // extends in place (push_str), so a TCO-moved accumulator keeps its
+        // capacity — the old format!("{}{}") arm reallocated every step.
         let str_result = ts.render_with("concat_expr", Some("String"), &[], &[("left", "a"), ("right", "b")]);
-        assert_eq!(str_result, Some("format!(\"{}{}\", a, b)".to_string()));
+        assert_eq!(str_result, Some("AlmideConcat::concat(a, b)".to_string()));
 
         let list_result = ts.render_with("concat_expr", Some("List"), &[], &[("left", "a"), ("right", "b")]);
         assert_eq!(list_result, Some("AlmideConcat::concat(a, b)".to_string()));

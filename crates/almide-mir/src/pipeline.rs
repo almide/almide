@@ -293,8 +293,10 @@ fn source_to_ir_with(
     // silently compile a truncated program instead of walling honestly.
     if !parser.errors.is_empty() {
         let messages: Vec<String> = parser.errors.iter().map(|d| d.display()).collect();
+        let nlines = source.lines().count();
+        let head: String = source.lines().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(60).collect();
         return Err(LowerError::Unsupported(format!(
-            "parse error: {}",
+            "parse error [{nlines} lines, head {head:?}]: {}",
             messages.join("\n")
         )));
     }

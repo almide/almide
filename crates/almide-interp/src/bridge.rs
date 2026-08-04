@@ -135,6 +135,72 @@ fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
                 .collect();
             Flow::val(Value::str(String::from_utf8_lossy(&raw).into_owned()))
         }
+        // The WASM-only arena pair. Native is literally `almide_rt_bytes_heap_save()
+        // -> 0` and `almide_rt_bytes_heap_restore(_) {}` (runtime/rs/src/bytes.rs) —
+        // there is no arena to check-point outside wasm, and the interp models
+        // `Bytes` as an owned `List` with no arena either. Mirroring the native
+        // no-ops is the faithful vote; anything else would invent a behaviour
+        // neither backend has on this leg (#1021).
+        "heap_save" => Flow::val(Value::Int(0)),
+        "heap_restore" => Flow::val(Value::Unit),
+        // The Endian-parameterized sized reads (#1098): dispatch on the ctor of
+        // the `Endian` argument, mirror the native guards exactly — an
+        // out-of-range window reads the documented 0 / 0.0 default, never
+        // aborts (`almide_rt_bytes_read_u16_le`'s `checked_add` shape).
+        "read_uint16" | "read_uint32" | "read_int32" | "read_float32" => {
+            let raw: Vec<u8> = args
+                .first()?
+                .as_iter_items()?
+                .iter()
+                .map(|v| match v { Value::Int(i) => *i as u8, _ => 0 })
+                .collect();
+            let pos = as_int(args.get(1))?;
+            let big = match args.get(2)? {
+                Value::Variant { ctor, .. } => match ctor.as_str() {
+                    "LittleEndian" => false,
+                    "BigEndian" => true,
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            let width = if func == "read_uint16" { 2 } else { 4 };
+            let p = pos as usize;
+            let window = (pos >= 0)
+                .then(|| p.checked_add(width))
+                .flatten()
+                .filter(|end| *end <= raw.len())
+                .map(|_| &raw[p..p + width]);
+            let val = match (func, window) {
+                (_, None) if func == "read_float32" => Value::Float(0.0),
+                (_, None) => Value::Int(0),
+                ("read_uint16", Some(w)) => {
+                    let b = [w[0], w[1]];
+                    Value::Int(
+                        (if big { u16::from_be_bytes(b) } else { u16::from_le_bytes(b) }) as i64,
+                    )
+                }
+                ("read_uint32", Some(w)) => {
+                    let b = [w[0], w[1], w[2], w[3]];
+                    Value::Int(
+                        (if big { u32::from_be_bytes(b) } else { u32::from_le_bytes(b) }) as i64,
+                    )
+                }
+                ("read_int32", Some(w)) => {
+                    let b = [w[0], w[1], w[2], w[3]];
+                    Value::Int(
+                        (if big { i32::from_be_bytes(b) } else { i32::from_le_bytes(b) }) as i64,
+                    )
+                }
+                ("read_float32", Some(w)) => {
+                    let b = [w[0], w[1], w[2], w[3]];
+                    Value::Float(
+                        (if big { f32::from_be_bytes(b) } else { f32::from_le_bytes(b) }) as f64,
+                    )
+                }
+                _ => return None,
+            };
+            Flow::val(val)
+        }
         _ => return None,
     };
     Some(f)
@@ -168,6 +234,19 @@ fn abort_args(module: &str, func: &str) -> Flow {
 // ── int ─────────────────────────────────────────────────────────
 
 fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    // The sized→Int widenings (`int.from_uint16`, `int.from_int32`, …): every
+    // native impl is a widening/bit-preserving cast into i64 — the carrier the
+    // interp already holds, with the value pre-wrapped to its declared width by
+    // whatever produced it (C-180). Identity here, exactly like the reverse
+    // `to_*` casts' truncation lives with the producers.
+    if let Some(rest) = func.strip_prefix("from_") {
+        if matches!(
+            rest,
+            "uint8" | "uint16" | "uint32" | "uint64" | "int8" | "int16" | "int32" | "int64"
+        ) {
+            return Some(Flow::val(Value::Int(as_int(args.first())?)));
+        }
+    }
     int_fn_a(func, args)
         .or_else(|| int_fn_b(func, args))
 }

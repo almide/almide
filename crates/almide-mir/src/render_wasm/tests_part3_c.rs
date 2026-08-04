@@ -465,57 +465,59 @@
     }
 
     #[test]
-    fn self_hosted_json_scalar() {
-        // json scalar constructors + accessors over the SHARED Value repr (value_core's tag@4 block).
-        // from_int(7) |> as_int = Some 7; from_bool(true) |> as_bool = Some true; a TAG MISMATCH ->
-        // None (as_bool on an Int Value, as_int on null) -> the `??` fallback. Exercises the
-        // materialized-Option return + DropValue (flat scalar drop) end-to-end through v1.
+    fn self_hosted_value_scalar_accessors() {
+        // value scalar constructors + accessors over the SHARED Value repr (value_core's tag@4 block).
+        // int(7) |> as_int = ok 7; bool(true) |> as_bool = ok true; a TAG MISMATCH -> err (as_bool
+        // on an Int Value, as_int on a Float or null — value.as_int does NOT widen Float, unlike the
+        // dropped json.as_int alias) -> the `??` fallback. Exercises the materialized-Result return +
+        // DropValue (flat scalar drop) end-to-end through v1.
         let src = "import json\nfn main() -> Unit = {\n  \
-            let vi = json.from_int(7)\n  \
-            let oi = json.as_int(vi)\n  let i = oi ?? 0\n  println(int.to_string(i))\n  \
-            let vf = json.from_float(3.0)\n  \
-            let ofi = json.as_int(vf)\n  let fi = ofi ?? 0\n  println(int.to_string(fi))\n  \
-            let vb = json.from_bool(true)\n  \
-            let ob = json.as_bool(vb)\n  let b = ob ?? false\n  let bi = if b then 1 else 0\n  println(int.to_string(bi))\n  \
-            let on = json.as_bool(vi)\n  let nb = on ?? false\n  let nbi = if nb then 1 else 0\n  println(int.to_string(nbi))\n  \
-            let vn = json.null()\n  \
-            let onv = json.as_int(vn)\n  let nv = onv ?? 0\n  println(int.to_string(nv)) }\n";
+            let vi = value.int(7)\n  \
+            let oi = value.as_int(vi)\n  let i = oi ?? 0\n  println(int.to_string(i))\n  \
+            let vf = value.float(3.0)\n  \
+            let ofi = value.as_int(vf)\n  let fi = ofi ?? 0\n  println(int.to_string(fi))\n  \
+            let vb = value.bool(true)\n  \
+            let ob = value.as_bool(vb)\n  let b = ob ?? false\n  let bi = if b then 1 else 0\n  println(int.to_string(bi))\n  \
+            let on = value.as_bool(vi)\n  let nb = on ?? false\n  let nbi = if nb then 1 else 0\n  println(int.to_string(nbi))\n  \
+            let vn = value.null()\n  \
+            let onv = value.as_int(vn)\n  let nv = onv ?? 0\n  println(int.to_string(nv)) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "json.from_int"));
-        assert!(prog.functions.iter().any(|f| f.name == "json.as_int"));
+        assert!(prog.functions.iter().any(|f| f.name == "value.int"));
+        assert!(prog.functions.iter().any(|f| f.name == "value.as_int"));
         if let Some(out) = build_and_run("json_scalar", &render_wasm_program(&prog)) {
-            // as_int(Int 7)=7; as_int(Float 3.0)=3 (the f64->i64 WIDENING); as_bool(Bool true)=1;
-            // as_bool(Int)=None->0; as_int(null)=None->0. Materialized-Option return + DropValue e2e.
-            assert_eq!(out, "7\n3\n1\n0\n0");
+            // as_int(Int 7)=7; as_int(Float 3.0)=err->0 (value.as_int does not widen — the
+            // dropped json.as_int did); as_bool(Bool true)=1; as_bool(Int)=err->0;
+            // as_int(null)=err->0. Materialized-Result return + DropValue e2e.
+            assert_eq!(out, "7\n0\n1\n0\n0");
         }
     }
 
     #[test]
-    fn self_hosted_json_string() {
+    fn self_hosted_value_string_accessors() {
         // json STR-payload over the SHARED Value repr (tag 4 = Str, the payload String @12). from_string
-        // builds a Str Value owning a deep copy; as_string returns Option[String] (the repr-poly 0-or-1-
+        // builds a Str Value owning a deep copy; as_string returns Result[String, String] (the repr-poly 0-or-1-
         // element DynListStr materialization, same path as list.get_str). as_string(Str "hi")=Some("hi")
-        // -> match "hi"; as_string(Int)=None -> "none". The `??` lines exercise json.as_string in the
+        // -> match "hi"; as_string(Int)=err -> "none". The `??` lines exercise value.as_string in the
         // heap-`??` path (the case originally dodged with `match`, now CLOSED via option.unwrap_or_str):
         // as_string(Str "Z") ?? "X" = "Z"; as_string(Int) ?? "X" = "X". The trailing 4000-iter loop
         // builds + drops a Str Value AND its Option each round (string.len reads the borrowed Some
         // payload = 5): bounded, no leak/double-free — DropValue (tag-dispatched Str free) + Option e2e.
         let src = "import json\nfn main() -> Unit = {\n  \
-            let vs = json.from_string(\"hi\")\n  \
-            let os = json.as_string(vs)\n  match os {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
-            let vi = json.from_int(5)\n  \
-            let oi = json.as_string(vi)\n  match oi {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
-            let vz = json.from_string(\"Z\")\n  let oz = json.as_string(vz)\n  let sz = oz ?? \"X\"\n  println(sz)\n  \
-            let vj = json.from_int(9)\n  let sj = json.as_string(vj) ?? \"X\"\n  println(sj)\n  \
+            let vs = value.str(\"hi\")\n  \
+            let os = value.as_string(vs)\n  match os {\n    ok(v) => println(v),\n    err(_) => println(\"none\"),\n  }\n  \
+            let vi = value.int(5)\n  \
+            let oi = value.as_string(vi)\n  match oi {\n    ok(v) => println(v),\n    err(_) => println(\"none\"),\n  }\n  \
+            let vz = value.str(\"Z\")\n  let oz = value.as_string(vz)\n  let sz = oz ?? \"X\"\n  println(sz)\n  \
+            let vj = value.int(9)\n  let sj = value.as_string(vj) ?? \"X\"\n  println(sj)\n  \
             var i = 0\n  var last = 0\n  \
             while i < 4000 {\n    \
-              let vx = json.from_string(\"abcde\")\n    let ox = json.as_string(vx)\n    \
-              match ox { Some(s) => { let n = string.len(s)\n last = n }, None => { last = 0 }, }\n    \
+              let vx = value.str(\"abcde\")\n    let ox = value.as_string(vx)\n    \
+              match ox { ok(s) => { let n = string.len(s)\n last = n }, err(_) => { last = 0 }, }\n    \
               i = i + 1\n  }\n  \
             println(int.to_string(last)) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "json.from_string"));
-        assert!(prog.functions.iter().any(|f| f.name == "json.as_string"));
+        assert!(prog.functions.iter().any(|f| f.name == "value.str"));
+        assert!(prog.functions.iter().any(|f| f.name == "value.as_string"));
         if let Some(out) = build_and_run("json_string", &render_wasm_program(&prog)) {
             // as_string(Str "hi")=Some->match->"hi"; as_string(Int 5)=None->"none"; as_string(Str "Z")
             // ?? "X" = "Z"; as_string(Int 9) ?? "X" = "X"; loop last = string.len("abcde") = 5.

@@ -1,4 +1,4 @@
 effect fn main() -> Unit = {
-  let v = json.stringify(json.null())
+  let v = json.stringify(value.null())
   println(v)
 }
