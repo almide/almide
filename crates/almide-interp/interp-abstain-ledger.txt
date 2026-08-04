@@ -97,8 +97,7 @@ matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
 memory_stress  out-of-interp-scope capability: prim.alloc_list
 module_global_const  out-of-interp-scope capability: prim.handle
 module_var_alias_cow  out-of-interp-scope capability: prim.alloc_list
-mut_heap_param  out-of-interp-scope capability: in-place container mutation `list.push` through a `mut` parameter (the callee's frame owns the binding, so a write-back here would not reach the caller's slot the way MutParamLoweringPass does — C-132, issue #1022)
-mut_map_param  out-of-interp-scope capability: in-place container mutation `map.insert` through a `mut` parameter (the callee's frame owns the binding, so a write-back here would not reach the caller's slot the way MutParamLoweringPass does — C-132, issue #1022)
+mut_map_param  out-of-interp-scope capability: prim.handle
 mutable_global_bytes_arena  out-of-interp-scope capability: prim.handle
 mutable_global_bytes_copy_from  out-of-interp-scope capability: prim.handle
 mutable_global_repeat_writes  out-of-interp-scope capability: prim.handle

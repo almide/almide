@@ -34,7 +34,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use almide_base::intern::Sym;
-use almide_ir::{IrFunction, IrProgram, VarId};
+use almide_ir::{IrFunction, IrProgram};
 
 /// The observable result of an interpreter run — the SAME 3-tuple shape as the
 /// existing `run_native_capture` / `run_wasm_capture` harness helpers, plus a
@@ -113,12 +113,6 @@ pub struct Interpreter<'a> {
     /// Current call-stack depth, bounded to avoid a native stack overflow on
     /// adversarial deep recursion.
     pub(crate) depth: Cell<u32>,
-    /// Every `VarId` bound as a `mut` parameter, anywhere in the program.
-    /// `VarId`s are globally unique by construction (lowering assigns one per
-    /// binding — see the crates/CLAUDE.md design principle), so one flat set is
-    /// exact and needs no per-frame bookkeeping. The in-place write-back tier
-    /// reads it to refuse a receiver whose binding lives in the callee's frame.
-    pub(crate) mut_param_vars: HashSet<VarId>,
     /// ADR-0001 deterministic meter (fan.bounded / fan.race). Mirrors the MIR
     /// W1 charge placement EXACTLY — user-fn entries, loop-head checks
     /// (while: n+1 condition evaluations; for-in: n iterations + 1 exit
@@ -274,21 +268,6 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        // Index every `mut` parameter binding. The in-place write-back tier
-        // refuses these receivers: `call_function` binds a parameter in the
-        // callee's own frame, so assigning there would never reach the
-        // caller's slot the way the backends' mut-param lowering does.
-        // `fns` is scanned rather than `program.functions` alone so the
-        // self-hosted stdlib bodies layered in above are covered too.
-        let mut mut_param_vars: HashSet<VarId> = HashSet::new();
-        for f in fns.values() {
-            for p in &f.params {
-                if p.is_mut {
-                    mut_param_vars.insert(p.var);
-                }
-            }
-        }
-
         Interpreter {
             program,
             fns,
@@ -300,7 +279,6 @@ impl<'a> Interpreter<'a> {
             stderr: String::new(),
             fuel: Cell::new(DEFAULT_FUEL),
             depth: Cell::new(0),
-            mut_param_vars,
             det_fuel: Cell::new(i64::MAX),
             det_entry: Cell::new(0),
             det_verdict: Cell::new(0),
@@ -582,9 +560,23 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         base: &env::Scope,
     ) -> Flow {
+        self.call_function_keeping_frame(func, args, base).0
+    }
+
+    /// [`Self::call_function`], but the callee's FRAME survives the call so the
+    /// caller can read the final values of `mut` parameters back out — the
+    /// copy-out half of the backends' mut-param lowering (C-132: the callee
+    /// returns the buffer and every call position writes it back). See
+    /// `eval_named_call`'s write-back (#1022).
+    pub(crate) fn call_function_keeping_frame(
+        &mut self,
+        func: &'a IrFunction,
+        args: Vec<Value>,
+        base: &env::Scope,
+    ) -> (Flow, env::Scope) {
         let d = self.depth.get();
         if d >= MAX_DEPTH {
-            return Flow::Fuel;
+            return (Flow::Fuel, base.child());
         }
         self.depth.set(d + 1);
 
@@ -599,7 +591,7 @@ impl<'a> Interpreter<'a> {
             if self.det_cut() {
                 self.det_in_user.set(det_was_user);
                 self.depth.set(d);
-                return Flow::Value(Value::Int(0));
+                return (Flow::Value(Value::Int(0)), base.child());
             }
         }
 
@@ -614,7 +606,7 @@ impl<'a> Interpreter<'a> {
         };
         self.det_in_user.set(det_was_user);
         self.depth.set(d);
-        result
+        (result, frame)
     }
 
     /// Apply a closure value to arguments. Used by the in-interp HOFs and by

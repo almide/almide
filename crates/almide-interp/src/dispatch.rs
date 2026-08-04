@@ -122,15 +122,120 @@ impl<'a> Interpreter<'a> {
 
         // 3. A user / stdlib free function lowered into the program.
         if let Some(func) = self.fns.get(&name).copied() {
+            // #1022: mut-parameter copy-in/copy-out. The backends' lowering
+            // returns each `mut` param's final buffer and writes it back at
+            // EVERY call position (C-132) — the interp mirrors that by keeping
+            // the callee frame alive and assigning each recorded caller lvalue
+            // from the param's final value. Recorded BEFORE evaluation, while
+            // the argument is still an expression with a binding identity.
+            let writebacks = match self.mut_param_lvalues(func, args) {
+                Ok(wb) => wb,
+                Err(flow) => return flow,
+            };
             let mut evaled = Vec::with_capacity(args.len());
             for a in args {
                 evaled.push(val!(self.eval_expr(a, scope)));
             }
             let root = self.root_scope();
-            return self.call_function(func, evaled, &root);
+            let (flow, frame) = self.call_function_keeping_frame(func, evaled, &root);
+            // Copy-out only on a normal return — an abort/abstain never
+            // half-writes state the backends would not have written either.
+            if matches!(flow, Flow::Value(_)) {
+                for (idx, lv) in writebacks {
+                    let Some(final_v) = frame.get(func.params[idx].var) else { continue };
+                    if let Err(e) = self.write_mut_lvalue(lv, final_v, scope) {
+                        return e;
+                    }
+                }
+            }
+            return flow;
         }
 
         Flow::Unsupported(format!("named call `{}`", n))
+    }
+
+    /// The caller-side lvalues of a call's `mut`-parameter arguments — the
+    /// slots the copy-out writes after the call (#1022).
+    ///
+    /// A plain `Var` and the one-level record field (`push9(b.items, 7)`) are
+    /// the two shapes the backends' fixtures pin. Any OTHER lvalue shape (an
+    /// index, a nested field) abstains by name: the backends write those back,
+    /// and silently dropping the effect would be a wrong third vote. A
+    /// non-lvalue argument cannot reach a checked program (E007 rejects a
+    /// temporary to a `mut` param); the fall-through skip is defensive only.
+    fn mut_param_lvalues(
+        &self,
+        func: &almide_ir::IrFunction,
+        args: &[IrExpr],
+    ) -> Result<Vec<(usize, MutLvalue)>, Flow> {
+        let mut out = Vec::new();
+        for (i, (param, arg)) in func.params.iter().zip(args.iter()).enumerate() {
+            if !param.is_mut {
+                continue;
+            }
+            match &arg.kind {
+                almide_ir::IrExprKind::Var { id } => out.push((i, MutLvalue::Var(*id))),
+                almide_ir::IrExprKind::Member { object, field } => match &object.kind {
+                    almide_ir::IrExprKind::Var { id } => {
+                        out.push((i, MutLvalue::Field(*id, *field)))
+                    }
+                    _ => {
+                        return Err(Flow::Unsupported(format!(
+                            "mut-parameter argument through a nested lvalue \
+                             (`{}` param {i}) — only a Var or one-level record \
+                             field copies out (#1022)",
+                            func.name.as_str()
+                        )))
+                    }
+                },
+                almide_ir::IrExprKind::IndexAccess { .. }
+                | almide_ir::IrExprKind::MapAccess { .. }
+                | almide_ir::IrExprKind::TupleIndex { .. } => {
+                    return Err(Flow::Unsupported(format!(
+                        "mut-parameter argument through an index lvalue \
+                         (`{}` param {i}) — not yet copied out (#1022)",
+                        func.name.as_str()
+                    )))
+                }
+                // Unreachable in a checked program (E007 forbids a temporary
+                // to a `mut` param) — defensively skip rather than guess.
+                _ => {}
+            }
+        }
+        Ok(out)
+    }
+
+    /// Assign a copy-out value into a caller lvalue. The field arm is the same
+    /// clone-record-and-set shape `exec_stmt_field_assign` uses, so the two
+    /// cannot diverge on COW semantics.
+    fn write_mut_lvalue(&mut self, lv: MutLvalue, v: Value, scope: &Scope) -> Result<(), Flow> {
+        match lv {
+            MutLvalue::Var(id) => {
+                if scope.assign(id, v) {
+                    Ok(())
+                } else {
+                    Err(Flow::Abort("internal: mut-param copy-out to an unbound var".into()))
+                }
+            }
+            MutLvalue::Field(id, field) => {
+                let cur = scope.get(id).ok_or_else(|| {
+                    Flow::Abort("internal: mut-param copy-out to an unbound record".into())
+                })?;
+                match cur {
+                    Value::Record { name, fields } => {
+                        let mut new = (*fields).clone();
+                        if let Some(slot) = new.iter_mut().find(|(k, _)| *k == field) {
+                            slot.1 = v;
+                        } else {
+                            new.push((field, v));
+                        }
+                        scope.assign(id, Value::Record { name, fields: std::rc::Rc::new(new) });
+                        Ok(())
+                    }
+                    _ => Err(Flow::Abort("internal: mut-param copy-out on non-Record".into())),
+                }
+            }
+        }
     }
 
     /// `eval_named_call`'s builtins group (println/print/eprintln/eprint/
@@ -274,13 +379,10 @@ impl<'a> Interpreter<'a> {
                  (a record field / index / temporary has no single binding to write back to)"
             ));
         };
-        if self.mut_param_vars.contains(&recv) {
-            return Flow::Unsupported(format!(
-                "in-place container mutation `{m}.{f}` through a `mut` parameter \
-                 (the callee's frame owns the binding, so a write-back here would not \
-                 reach the caller's slot the way MutParamLoweringPass does — C-132, issue #1022)"
-            ));
-        }
+        // A `mut`-PARAMETER receiver is fine now: the write lands on the
+        // callee frame's binding, and `eval_named_call`'s mut-param copy-out
+        // (#1022) carries it back to the caller's slot — the same two-step the
+        // backends' MutParamLoweringPass performs (C-132).
         let mut rest = Vec::with_capacity(args.len().saturating_sub(1));
         for a in &args[1..] {
             rest.push(val!(self.eval_expr(a, scope)));
@@ -383,9 +485,27 @@ impl<'a> Interpreter<'a> {
 
         // An almide-bodied stdlib fn lowered into the program (pre-ir_link it
         // lives under program.modules; some helpers are top-level fns).
+        //
+        // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
+        // caller lvalue is already gone — the Named path's copy-out (#1022)
+        // cannot run here. A mut-param callee must abstain rather than
+        // silently drop the write-back (a wrong third vote).
+        let mut_param_gate = |func_def: &almide_ir::IrFunction| -> Option<Flow> {
+            func_def.params.iter().any(|p| p.is_mut).then(|| {
+                Flow::Unsupported(format!(
+                    "module call `{}.{}` with a `mut` parameter through the \
+                     eager dispatch path (no caller lvalue to copy out — #1022)",
+                    module.as_str(),
+                    func.as_str()
+                ))
+            })
+        };
         if let Some(func_def) = self.module_fns.get(&(module, func)).copied() {
             // Only interpret if it has a real (non-Hole) body.
             if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
+                if let Some(flow) = mut_param_gate(func_def) {
+                    return flow;
+                }
                 let root = self.root_scope();
                 return self.call_function(func_def, args, &root);
             }
@@ -393,6 +513,9 @@ impl<'a> Interpreter<'a> {
         // A top-level fn named exactly `func` (some stdlib helpers flatten).
         if let Some(func_def) = self.fns.get(&func).copied() {
             if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
+                if let Some(flow) = mut_param_gate(func_def) {
+                    return flow;
+                }
                 let root = self.root_scope();
                 return self.call_function(func_def, args, &root);
             }
@@ -451,6 +574,15 @@ impl<'a> Interpreter<'a> {
 }
 
 // ── Constructor registry ────────────────────────────────────────
+
+/// A caller-side slot a `mut`-parameter argument names — where the copy-out
+/// lands after the call (#1022).
+#[derive(Clone, Copy)]
+pub(crate) enum MutLvalue {
+    Var(almide_ir::VarId),
+    /// One-level record field (`push9(b.items, 7)`).
+    Field(almide_ir::VarId, Sym),
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum CtorKind {
