@@ -2666,3 +2666,15 @@ evidence  = [
   { path = "spec/wasm_cross/hex_two_module_link.almd", class = "fixture" },
   { path = "crates/almide-mir/src/pipeline_link.rs", name = "dedup_linked_by_name", class = "by-construction" },
 ]
+
+[[contract]]
+id        = "C-213"
+spec      = "ALS-C5"
+title     = "The bytes byte-level writers encode the same buffer on both targets, out-of-range writes included"
+statement = "Every `bytes` byte-level writer produces a byte-identical buffer native == wasm: `append_*` encodes width and order with a TRUNCATING cast (`append_u8(b, 511)` stores 255, `append_u32_le(b, 258)` stores `[2,1,0,0]`), a negative value and its unsigned twin write the SAME bytes (two's complement — `append_i16_le(b, -2)` and `append_u16_le(b, -2)` are both `[254,255]`), `append_f32_*` rounds f64 to f32 on the way in while `append_f64_*` is exact, and `set_*` splices at an offset where a window that does not fit — past the end, or a NEGATIVE offset, which is enormous as the native `pos as usize` — is a SILENT no-op that neither aborts nor grows the buffer. `fill` overwrites every existing byte and never changes the length (an empty buffer stays empty); `copy_from` no-ops when either offset is at-or-past its buffer's end and otherwise clamps `len` to the shorter remaining tail; `copy_within` clamps `src_end` to the length and moves only when the source range is non-empty AND the destination window fits. `runtime/rs/src/bytes.rs` is the oracle for each. TWO PARTS OF THE FAMILY ARE NOT YET CROSS-TARGET and are excluded by name, not by omission: the `Endian`-parameterized sized-type surface does not compile natively (#1098) and the `write_*` serialization cursor has no wasm self-host definition (#1099). The interpreter models the WHOLE family from the name (`almide-interp` `inplace.rs`, gated total over `stdlib/bytes.almd` by `every_stdlib_bytes_writer_is_modeled`), so it becomes a third vote on the excluded parts the day their target leg lands."
+since     = "0.53.5"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_writer_family.almd", class = "fixture" },
+  { path = "crates/almide-interp/src/inplace.rs", name = "bytes_write_op", class = "by-construction" },
+]

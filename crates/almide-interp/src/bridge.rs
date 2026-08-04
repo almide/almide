@@ -135,6 +135,14 @@ fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
                 .collect();
             Flow::val(Value::str(String::from_utf8_lossy(&raw).into_owned()))
         }
+        // The WASM-only arena pair. Native is literally `almide_rt_bytes_heap_save()
+        // -> 0` and `almide_rt_bytes_heap_restore(_) {}` (runtime/rs/src/bytes.rs) —
+        // there is no arena to check-point outside wasm, and the interp models
+        // `Bytes` as an owned `List` with no arena either. Mirroring the native
+        // no-ops is the faithful vote; anything else would invent a behaviour
+        // neither backend has on this leg (#1021).
+        "heap_save" => Flow::val(Value::Int(0)),
+        "heap_restore" => Flow::val(Value::Unit),
         _ => return None,
     };
     Some(f)

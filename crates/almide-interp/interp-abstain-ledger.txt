@@ -48,10 +48,9 @@ fan_var_thunk_list  out-of-interp-scope capability: fan.any
 float_sign_minmax_ieee  out-of-interp-scope capability: transcendental `math.log2` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 fs_preopen_resolve  out-of-interp-scope capability: prim.write_text_file
 fs_relative_path  out-of-interp-scope capability: prim.make_dir
-heap_arena  out-of-interp-scope capability: in-place byte-level buffer write `bytes.heap_restore` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
 heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
-hex_two_module_link  out-of-interp-scope capability: in-place byte-level buffer write `bytes.append_u32_le` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
+hex_two_module_link  out-of-interp-scope capability: prim.handle
 host_floor_string_alloc  out-of-interp-scope capability: prim.make_dir
 int_from_hex  out-of-interp-scope capability: prim.handle
 int_pow_negative_exponent  out-of-interp-scope capability: transcendental `math.pow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
@@ -100,12 +99,12 @@ module_global_const  out-of-interp-scope capability: prim.handle
 module_var_alias_cow  out-of-interp-scope capability: prim.alloc_list
 mut_heap_param  out-of-interp-scope capability: in-place container mutation `list.push` through a `mut` parameter (the callee's frame owns the binding, so a write-back here would not reach the caller's slot the way MutParamLoweringPass does — C-132, issue #1022)
 mut_map_param  out-of-interp-scope capability: in-place container mutation `map.insert` through a `mut` parameter (the callee's frame owns the binding, so a write-back here would not reach the caller's slot the way MutParamLoweringPass does — C-132, issue #1022)
-mutable_global_bytes_arena  out-of-interp-scope capability: in-place byte-level buffer write `bytes.set_f32_le` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
-mutable_global_bytes_copy_from  out-of-interp-scope capability: in-place byte-level buffer write `bytes.set_at` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
-mutable_global_repeat_writes  out-of-interp-scope capability: in-place byte-level buffer write `bytes.set_at` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
+mutable_global_bytes_arena  out-of-interp-scope capability: prim.handle
+mutable_global_bytes_copy_from  out-of-interp-scope capability: prim.handle
+mutable_global_repeat_writes  out-of-interp-scope capability: prim.handle
 mutual_append  out-of-interp-scope capability: prim.handle
 mutual_tail_recursion  interp fuel/recursion budget exhausted
-nan_canonical_bytes_write  out-of-interp-scope capability: in-place byte-level buffer write `bytes.append_f64_le` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
+nan_canonical_bytes_write  out-of-interp-scope capability: prim.handle
 negative_offset_and_width_totality  out-of-interp-scope capability: prim.handle
 nested_hof_lambda_inference  out-of-interp-scope capability: prim.handle
 nested_match_heap_arm  out-of-interp-scope capability: prim.handle
@@ -121,7 +120,7 @@ repeat_size_ceiling  out-of-interp-scope capability: prim.args_get_list
 result_list_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
 result_match_rewrap_modcall  out-of-interp-scope capability: prim.handle
 result_value_int_tuple  out-of-interp-scope capability: prim.alloc_value
-scalar_if_arm_effects  out-of-interp-scope capability: in-place byte-level buffer write `bytes.set_i32_le` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
+scalar_if_arm_effects  out-of-interp-scope capability: prim.handle
 set_insertion_order  out-of-interp-scope capability: prim.handle
 spread_record_share  out-of-interp-scope capability: prim.handle
 str_result_heap_bind  out-of-interp-scope capability: prim.alloc_value
