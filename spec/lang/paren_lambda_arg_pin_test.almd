@@ -1,0 +1,22 @@
+// #1018: a lambda argument wrapped in redundant parentheses was not recognized
+// as a lambda, so its parameters were never pinned from the callee's signature.
+// The body then inferred against fresh vars — an ill-typed `+` unified as
+// concat instead of colliding — and the first complaint arrived at IR verify,
+// past the point where an E-diagnostic promises a check-green program builds.
+//
+// Reported against map.fold with a scalar accumulator, but the trigger is the
+// wrapping paren, so every parenthesized lambda argument was affected.
+test "a parenthesized lambda still sees its pinned parameter types (#1018)" {
+  let m: Map[String, Int] = ["a": 1, "b": 2]
+  // The REAL parameter order is (acc, k, v); naming them (k, v, acc) means the
+  // body adds the accumulator to the key. Both spellings must agree that this
+  // is well-typed only when the names line up with the signature.
+  assert_eq(map.fold(m, 0, ((acc, k, v) => acc + v)), 3)
+  assert_eq(map.fold(m, 0, (acc, k, v) => acc + v), 3)
+}
+
+test "the paren does not change what a lambda means (#1018)" {
+  assert_eq([1, 2, 3] |> list.map((x) => x * 2), [2, 4, 6])
+  assert_eq([1, 2, 3] |> list.map(((x) => x * 2)), [2, 4, 6])
+  assert_eq(list.fold([1, 2, 3], 0, ((a, b) => a + b)), 6)
+}

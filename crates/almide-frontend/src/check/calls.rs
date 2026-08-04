@@ -143,7 +143,7 @@ impl Checker {
         let mut bindings: HashMap<Sym, Ty> = HashMap::new();
         let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
         for (i, a) in args.iter_mut().enumerate() {
-            let pinned = if matches!(&a.kind, ExprKind::Lambda { .. }) {
+            let pinned = if is_lambda_arg(a) {
                 call_sig.as_ref().and_then(|sig| self.lambda_pin_for_arg(sig, i, &bindings))
             } else { None };
             let prev_hint = self.lambda_arg_hint.take();
@@ -783,3 +783,19 @@ fn is_clean_fn_name(s: &str) -> bool {
 include!("calls_ufcs.rs");
 
 include!("calls_arg.rs");
+
+/// Is this argument a lambda, looking through redundant parentheses?
+///
+/// `f(xs, ((a, b) => …))` is the same call as `f(xs, (a, b) => …)`, but the
+/// wrapping `Paren` made the arg fail a bare `ExprKind::Lambda` test, so the
+/// closure's parameters were never pinned from the callee's signature. The body
+/// then inferred against fresh vars, an ill-typed `+` unified as concat instead
+/// of colliding, and the first complaint arrived at IR verify — past the point
+/// where an E-diagnostic promises that a check-green program builds (#1018).
+fn is_lambda_arg(a: &ast::Expr) -> bool {
+    match &a.kind {
+        ExprKind::Lambda { .. } => true,
+        ExprKind::Paren { expr } => is_lambda_arg(expr),
+        _ => false,
+    }
+}
