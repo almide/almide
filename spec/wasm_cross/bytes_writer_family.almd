@@ -4,6 +4,8 @@
 // One buffer, written through every shape the family has:
 //   - `append_*`   — encode and extend (widths 1/2/4/8, both orders, floats)
 //   - `set_*`      — splice at an offset, a silent no-op when it does not fit
+//   - `write_/set_/read_<sized>` — endianness as an ARGUMENT (#1098)
+//   - `write_*`    — the BE serialization cursor, bool + length-prefixed string (#1099)
 //   - `fill` / `copy_from` / `copy_within`
 //
 // Every value is printed as its byte list, so the assertion is the exact
@@ -45,11 +47,36 @@ fn main() -> Unit = {
   bytes.set_at(p, 0, 511)
   bytes.set_at(p, 6, 7)
   show("set_at", p)
-  // NOT covered here: the `Endian`-parameterized sized-type surface
-  // (`bytes.write_uint16(b, v, LittleEndian)`). It runs on wasm but does not
-  // compile natively, so it cannot be a cross-target fixture yet — see #1098.
-  // The interpreter models it regardless (`inplace.rs::BytesWrite::AppendSized`,
-  // unit-tested), so it is covered the day the native leg is fixed.
+  // ── the Endian-parameterized sized-type surface (#1098 closed the native
+  // leg: the runtime owns the enum + dispatch; wasm links the bytes_typed
+  // twins) — the order is an ARGUMENT, not part of the name ──
+  var t = bytes.new(0)
+  bytes.write_uint16(t, 258, LittleEndian)
+  bytes.write_uint16(t, 258, BigEndian)
+  bytes.write_uint32(t, 258, BigEndian)
+  bytes.write_int32(t, -2, LittleEndian)
+  bytes.write_float32(t, 1.5, LittleEndian)
+  show("sized_append", t)
+  var u = bytes.new(4)
+  bytes.set_uint32(u, 0, 258, LittleEndian)
+  bytes.set_uint16(u, 2, 258, BigEndian)
+  show("sized_set", u)
+  // The read half round-trips the same bytes through both orders.
+  let sr = bytes.from_list([
+    2,
+    1,
+    0,
+    0,
+    1,
+    2,
+    0,
+    0
+  ])
+  println(int.to_string(int.from_uint16(bytes.read_uint16(sr, 0, LittleEndian))))
+  println(int.to_string(int.from_uint16(bytes.read_uint16(sr, 4, BigEndian))))
+  println(int.to_string(int.from_uint32(bytes.read_uint32(sr, 0, LittleEndian))))
+  println(int.to_string(int.from_int32(bytes.read_int32(sr, 0, LittleEndian))))
+  println(float.to_string(float.from_float32(bytes.read_float32(bytes.from_list([0, 0, 192, 63]), 0, LittleEndian))))
   // ── the serialization cursor: BE twins, bool, and the length-prefixed
   // string (#1099 closed the wasm self-host gap) ──
   var w = bytes.new(0)

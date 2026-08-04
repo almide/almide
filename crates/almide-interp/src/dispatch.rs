@@ -120,6 +120,19 @@ impl<'a> Interpreter<'a> {
             };
         }
 
+        // 2b. The stdlib's only BUNDLED variant type (bytes.Endian): its decl
+        //     lives in the bundled module, never in the program, so the ctor
+        //     registry above misses it. The checker already typed the ctor —
+        //     build the variant value directly (the same value the inplace
+        //     tier's `endian_is_big` and the bytes read bridge dispatch on).
+        if args.is_empty() && matches!(n, "LittleEndian" | "BigEndian") {
+            return Flow::val(Value::Variant {
+                ty: None,
+                ctor: name,
+                payload: VariantPayload::Unit,
+            });
+        }
+
         // 3. A user / stdlib free function lowered into the program.
         if let Some(func) = self.fns.get(&name).copied() {
             // #1022: mut-parameter copy-in/copy-out. The backends' lowering
