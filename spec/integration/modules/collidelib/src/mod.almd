@@ -1,0 +1,4 @@
+import self.domain
+import self.wire
+
+fn run() -> String = wire.show(domain.make("op", 3))

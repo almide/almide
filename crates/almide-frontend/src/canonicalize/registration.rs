@@ -22,6 +22,21 @@ fn resolve(env: &TypeEnv, te: &ast::TypeExpr) -> Ty {
 fn resolve_in(env: &TypeEnv, te: &ast::TypeExpr, cur_mod: Option<&str>) -> Ty {
     crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&env.types), cur_mod)
 }
+/// The module a TYPE reference should be resolved against.
+///
+/// `infer_module` re-registers a module's declarations with `prefix: None` on
+/// purpose — the KEYS must be bare so the module's own bodies resolve their own
+/// names. But the TYPES still have to pin to `mod.Type`: with `cur_mod` unset,
+/// a bare `Span` declared in two modules has no unique owner, so it stayed
+/// bare and the #433 name-pin gate refused the build (#1087). That pass marks
+/// itself with `alias_owner_module`, which names the module the bare keys
+/// really belong to.
+fn type_cur_mod<'a>(env: &TypeEnv, prefix: Option<&'a str>) -> Option<&'a str>
+where
+    'static: 'a,
+{
+    prefix.or_else(|| env.alias_owner_module.map(|m| m.as_str()))
+}
 /// Infer type from a literal expression (for top-level `let` without annotation). Used at registration time — before the full checker runs — so module top_lets have a concrete `env.top_lets` entry the moment the main program's inference looks them up. A shallow scalar-only version regresses records / lists / maps to `Ty::Unknown`, which later surfaces as `LazyLock<_>` in generated Rust and `ConcretizeTypes` post-condition failures on WASM. Recurse structurally through record / list / tuple / map literals so the cross-module user sees the right type. Seed type for an UNANNOTATED top-let. `infer_literal_type` covers literals and anonymous records only; a NAMED constructor (`Cfg { … }`) fell to `Ty::Unknown`, and because every driver checks MAIN before the modules, main's inference read that stale Unknown for a cross-module `m.CFG` — a spread of it then carried Unknown into the AllTypesConcrete refusal (#502). Resolve the ctor name through the SAME #433 predicate an explicit `: Cfg` annotation uses, so both spellings seed identically. Generic decls (unresolved type params) deliberately stay Unknown — the ctor args are not inferable here and the later module-check writeback only corrects exact-Unknown seeds.
 pub fn infer_top_let_seed(env: &TypeEnv, prefix: Option<&str>, value: &ast::Expr) -> Ty {
     match &value.kind {
@@ -280,6 +295,7 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     }
     // A bare `self` first parameter is sugar for `self: Self` (the parser always types it `TypeExpr::Simple { name: "Self" }`). Inside a `protocol { ... }` declaration `Self` is a legitimate unresolved placeholder, but on a real convention method (`fn Type.method(self, ...)`) it must resolve to the enclosing type, the same way `Self` in a protocol's own signature gets substituted when checked against one.
     let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+    let tcm = type_cur_mod(env, prefix);
     let ptys: Vec<(Sym, Ty)> = params.iter().enumerate().map(|(i, p)| {
         if i == 0 && p.name.as_str() == "self" {
             if let (ast::TypeExpr::Simple { name: tn }, Some(rt)) = (&p.ty, &receiver_ty) {
@@ -288,13 +304,13 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
                 }
             }
         }
-        (sym(&p.name), resolve_in(env, &p.ty, prefix))
+        (sym(&p.name), resolve_in(env, &p.ty, tcm))
     }).collect();
     let mut_params: Vec<usize> = params.iter().enumerate()
         .filter(|(_, p)| p.is_mut)
         .map(|(i, _)| i)
         .collect();
-    let ret = resolve_in(env, return_type, prefix);
+    let ret = resolve_in(env, return_type, tcm);
     for gn in &gnames { env.types.remove(gn); }
     let is_effect = effect.unwrap_or(false);
     let key = prefixed_key(prefix, name);

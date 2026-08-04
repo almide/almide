@@ -1,0 +1,12 @@
+// The other half: the SAME bare type name, this one deriving Codec. The
+// convention-method table is keyed by the bare name, so registering this
+// derive used to bind against the sibling's `Span` — reported as a field
+// mismatch attributed to the sibling's file, which declares no Codec at all.
+import json
+import self.domain
+
+type Span: Codec = { name: String, kind: Int }
+
+fn to_wire(s: domain.Span) -> Span = Span { name: s.name, kind: s.n }
+
+fn show(s: domain.Span) -> String = json.stringify(Span.encode(to_wire(s)))
