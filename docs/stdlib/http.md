@@ -39,7 +39,7 @@ http.json(200, json.stringify(data))
 Create a response with custom headers
 
 ```almd
-http.with_headers(200, body, {"Content-Type": "text/html"})
+http.with_headers(200, body, ["Content-Type": "text/html"])
 ```
 
 ### `http.redirect(url: String) -> HttpResponse`

@@ -414,6 +414,31 @@ impl Parser {
         }
     }
 
+    /// Skip newlines only when the next line begins a method chain — a `.`
+    /// followed by a NAME. This is the `.`-continuation half of SPEC.md §2.1
+    /// "Line Continuation Rules" (#1091), and it mirrors
+    /// `skip_newlines_if_followed_by_any` for infix operators.
+    ///
+    /// The name test is what keeps the skip unambiguous: `.` followed by an
+    /// integer is a tuple index, so continuing there would silently join
+    /// `let x = 1` and a following `.5` into `1.5`-as-tuple-index instead of
+    /// reporting the stray token. Nothing else in the grammar starts a line
+    /// with a bare `.`, so no other program changes meaning.
+    pub(crate) fn skip_newlines_if_method_chain(&mut self) {
+        let saved = self.pos;
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            self.advance();
+        }
+        let continues = self.check(TokenType::Dot)
+            && self
+                .tokens
+                .get(self.pos + 1)
+                .is_some_and(|t| Self::is_name_token(&t.token_type));
+        if !continues {
+            self.pos = saved; // restore — the newlines are significant
+        }
+    }
+
     pub(crate) fn skip_newlines_into_stmts(&mut self, stmts: &mut Vec<Stmt>) {
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
             if self.check(TokenType::Comment) {
@@ -421,6 +446,21 @@ impl Parser {
             }
             self.advance();
         }
+    }
+
+    /// Skip newlines, returning any comments passed over. Use this instead of
+    /// `skip_newlines` wherever the comment has an owner in the AST — a
+    /// comment is the one artifact the compiler cannot reconstruct, so
+    /// discarding it makes the formatter lossy (#1090).
+    pub(crate) fn skip_newlines_take_comments(&mut self) -> Vec<String> {
+        let mut comments = Vec::new();
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                comments.push(self.current().value.clone());
+            }
+            self.advance();
+        }
+        comments
     }
 
     /// Skip newlines and collect comments. Returns (comments, blank_line_count).

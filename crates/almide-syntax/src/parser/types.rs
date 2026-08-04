@@ -195,11 +195,13 @@ impl Parser {
     }
     fn parse_record_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::LBrace)?;
-        self.skip_newlines();
+        // A comment inside a record body belongs to the field below it, so it
+        // is collected rather than skipped (#1090).
+        let mut pending = self.skip_newlines_take_comments();
         let mut fields = Vec::new();
         let mut open = false;
         while !self.check(TokenType::RBrace) {
-            self.skip_newlines();
+            pending.extend(self.skip_newlines_take_comments());
             if self.check(TokenType::DotDot) {
                 self.advance();
                 open = true;
@@ -210,7 +212,7 @@ impl Parser {
             let mut attrs = Vec::new();
             while self.check(TokenType::At) {
                 attrs.push(self.parse_attribute()?);
-                self.skip_newlines();
+                pending.extend(self.skip_newlines_take_comments());
             }
             let field_name = self.expect_any_name()?;
             let alias = self.parse_field_alias()?;
@@ -222,9 +224,10 @@ impl Parser {
             } else {
                 None
             };
-            fields.push(FieldType { name: field_name, ty: field_type, default, alias, attrs });
-            self.skip_newlines();
-            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+            let comments = std::mem::take(&mut pending);
+            fields.push(FieldType { name: field_name, ty: field_type, default, alias, attrs, comments });
+            pending.extend(self.skip_newlines_take_comments());
+            if self.check(TokenType::Comma) { self.advance(); pending.extend(self.skip_newlines_take_comments()); }
         }
         self.expect(TokenType::RBrace)?;
         if open { Ok(TypeExpr::OpenRecord { fields }) }
@@ -232,12 +235,13 @@ impl Parser {
     }
     pub(crate) fn parse_field_type_list(&mut self) -> Result<Vec<FieldType>, String> {
         let mut fields = Vec::new();
+        let mut pending: Vec<String> = Vec::new();
         while !self.check(TokenType::RBrace) {
-            self.skip_newlines();
+            pending.extend(self.skip_newlines_take_comments());
             let mut attrs = Vec::new();
             while self.check(TokenType::At) {
                 attrs.push(self.parse_attribute()?);
-                self.skip_newlines();
+                pending.extend(self.skip_newlines_take_comments());
             }
             let field_name = self.expect_any_name()?;
             let alias = self.parse_field_alias()?;
@@ -249,9 +253,10 @@ impl Parser {
             } else {
                 None
             };
-            fields.push(FieldType { name: field_name, ty: field_type, default, alias, attrs });
-            self.skip_newlines();
-            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+            let comments = std::mem::take(&mut pending);
+            fields.push(FieldType { name: field_name, ty: field_type, default, alias, attrs, comments });
+            pending.extend(self.skip_newlines_take_comments());
+            if self.check(TokenType::Comma) { self.advance(); pending.extend(self.skip_newlines_take_comments()); }
         }
         Ok(fields)
     }

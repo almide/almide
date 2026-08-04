@@ -19,3 +19,28 @@ fn tag_count(items: List[String]) -> Int = items |> list.filter_map(parse_tag) |
 fn make_wrap(n: Int) -> Wrapper = Wrap(n)
 
 fn make_circle(r: Int) -> Shape = Circle { radius: r }
+
+// #1088: a defaulted parameter must stay optional across a module boundary.
+// The default lives in the callee's module; the caller's lowering never sees
+// that program, so the value has to travel with the exported signature.
+fn greet(name: String, greeting: String = "Hello") -> String = "${greeting}, ${name}!"
+
+// The default is a module-level CONSTANT, not a literal. It is written in this
+// module's scope but lowered at the CALLER's, where the name does not exist —
+// which bound it to whatever global happened to be first in the caller, a
+// silently wrong value (#1088). A SCREAMING_CASE name lexes as a TypeName, so
+// that spelling is the one the fix has to cover.
+let SALUTE = "Ahoy"
+
+fn hail(name: String, greeting: String = SALUTE) -> String = "${greeting}, ${name}!"
+
+// #1087: a convention method must be reachable from ANOTHER module. Both the
+// explicit `fn Tone.repr` and `Pigment`'s DERIVED Codec are registered under
+// different key shapes, and every consumer starts from the qualified
+// `varlib.Tone` / `varlib.Pigment` — so both spellings have to resolve.
+type Tone = | Warm | Cool
+
+fn Tone.repr(t: Tone) -> String = match t {
+  Warm => "warm",
+  Cool => "cool",
+}

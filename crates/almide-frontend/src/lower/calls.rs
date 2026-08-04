@@ -152,11 +152,67 @@ fn rewrite_crossmodule_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &m
 /// it would turn a diagnostic into a link failure.
 fn rewrite_local_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &mut Vec<IrExpr>) {
     let CallTarget::Method { object, method } = &*target else { return };
-    if method.as_str().contains('.') || !ctx.env.functions.contains_key(method) {
+    // A dotted CONVENTION key (`P.encode`) is rewritten too, not just a
+    // dot-free one. Left as a `Method`, the emitter flattens it to `P_encode`
+    // with no module, while the definition a derived method links to is
+    // `almide_rt_lib_P_encode` — the `Named` path is the one that re-attaches
+    // the module, and it is already what `lib.P.encode(x)` lowers to (#1087).
+    // A lowercase-prefixed dotted method is a module call and was rewritten by
+    // `rewrite_crossmodule_ufcs` above; anything still unknown here is the
+    // checker's error to report.
+    if !ctx.env.functions.contains_key(method) && !is_convention_method_of(ctx, &object.ty, method) {
         return;
     }
     ir_args.insert(0, (**object).clone());
     *target = CallTarget::Named { name: *method };
+}
+
+/// True when `method` (a dotted `Type.name` key) is a convention method of
+/// the receiver's type under EITHER registration spelling.
+///
+/// An explicit `fn Color.repr` inside a module is registered prefixed
+/// (`lib.Color.repr`), so the bare emit key `Color.repr` is absent from
+/// `env.functions` and the plain existence test above missed it — leaving the
+/// call a `Method`, which the emitter flattens with no module (#1087).
+fn is_convention_method_of(ctx: &LowerCtx, obj_ty: &Ty, method: &Sym) -> bool {
+    let Some((_, name)) = method.as_str().rsplit_once('.') else { return false };
+    let Ty::Named(type_name, _) = obj_ty else { return false };
+    crate::canonicalize::registration::convention_fn_key(ctx.env, &type_name.to_string(), name).is_some()
+}
+
+/// The `env.functions` / `env.fn_defaults` key for a call target, when the
+/// target names a statically-known function. A `Module` target is keyed by the
+/// same `module.func` string registration used, so an imported callee is
+/// looked up exactly like a local one.
+fn target_fn_key(target: &CallTarget) -> Option<Sym> {
+    match target {
+        CallTarget::Named { name } => Some(*name),
+        CallTarget::Module { module, func, .. } => sym(&format!("{}.{}", module, func)).into(),
+        _ => None,
+    }
+}
+
+/// Default parameter expressions for a call target.
+///
+/// The per-file map answers first for a local call; `env.fn_defaults` carries
+/// the prefixed entries, which is what lets a call into an imported module
+/// fill its defaults at all — lowering runs once per module and never sees the
+/// callee's program (#1088).
+fn target_defaults(ctx: &LowerCtx, target: &CallTarget) -> Option<Vec<Option<ast::Expr>>> {
+    if let CallTarget::Named { name } = target {
+        if let Some(d) = ctx.fn_defaults.get(name) {
+            return Some(d.clone());
+        }
+    }
+    let mut defaults = ctx.env.fn_defaults.get(&target_fn_key(target)?).cloned()?;
+    // A default from ANOTHER module is written in that module's scope, so its
+    // names are qualified before it is lowered here (#1088).
+    if let CallTarget::Module { module, .. } = target {
+        for d in defaults.iter_mut().flatten() {
+            qualify_callee_module_idents(d, *module, ctx.env);
+        }
+    }
+    Some(defaults)
 }
 
 /// Place named arguments into their positional slots, filling any gap from the
@@ -172,11 +228,11 @@ fn fill_named_args(
     named_args: &[(almide_base::intern::Sym, ast::Expr)],
     target: &CallTarget,
 ) {
-    let CallTarget::Named { name } = target else { return };
-    let param_names: Vec<String> = ctx.env.functions.get(name)
+    let Some(key) = target_fn_key(target) else { return };
+    let param_names: Vec<String> = ctx.env.functions.get(&key)
         .map(|sig| sig.params.iter().map(|(n, _)| n.to_string()).collect())
         .unwrap_or_default();
-    let defaults = ctx.fn_defaults.get(name).cloned();
+    let defaults = target_defaults(ctx, target);
     let positional_count = ir_args.len();
     if positional_count > param_names.len() {
         return;
@@ -320,9 +376,9 @@ fn lower_call_json_convenience(
 /// a 1:1 arg/param alignment so prepended const-type-args / UFCS objects
 /// don't desync the mapping. Verbatim text move; mutates `ir_args` in place.
 fn lower_call_fill_defaults(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, args: &[ast::Expr], target: &CallTarget) {
-    let CallTarget::Named { name } = target else { return };
-    let Some(defaults) = ctx.fn_defaults.get(name).cloned() else { return };
-    let param_names: Vec<Sym> = ctx.env.functions.get(name)
+    let Some(key) = target_fn_key(target) else { return };
+    let Some(defaults) = target_defaults(ctx, target) else { return };
+    let param_names: Vec<Sym> = ctx.env.functions.get(&key)
         .map(|sig| sig.params.iter().map(|(n, _)| almide_base::intern::sym(&n.to_string())).collect())
         .unwrap_or_default();
     let n_provided = ir_args.len();

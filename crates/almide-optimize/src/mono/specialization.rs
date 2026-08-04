@@ -330,6 +330,10 @@ fn substitute_match_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
 
 fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
     let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
+    // A protocol method specialized to a concrete type, rewritten to the
+    // `Named` + receiver-as-argument-0 form (see below). Collected first
+    // because it replaces `target` and pushes onto `args`.
+    let mut specialized: Option<(almide_base::intern::Sym, IrExpr)> = None;
     match target {
         CallTarget::Method { object, method } => {
             substitute_expr_types(object, bindings);
@@ -338,8 +342,23 @@ fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
                 let tv_name = &method[..dot_pos];
                 if let Some(concrete_ty) = bindings.get(tv_name) {
                     if let Some(concrete_name) = ty_to_name(concrete_ty) {
-                        let method_name = &method[dot_pos+1..];
-                        *method = format!("{}.{}", concrete_name, method_name).into();
+                        let method_name = &method[dot_pos + 1..];
+                        // The DEFINITION of a convention method is named with
+                        // the BARE type and carries its module in
+                        // `module_origin`, and only the `Named` path
+                        // re-attaches that module. Left as a qualified
+                        // `Method`, this flattened to a call to
+                        // `lib_P_encode` against a definition called
+                        // `almide_rt_lib_P_encode`, so a `[T: Codec]` bound
+                        // could not be applied to a type from another module
+                        // (#1087).
+                        let bare = concrete_name
+                            .rsplit_once('.')
+                            .map_or(concrete_name.as_str(), |(_, t)| t);
+                        specialized = Some((
+                            almide_base::intern::sym(&format!("{}.{}", bare, method_name)),
+                            (**object).clone(),
+                        ));
                     }
                 }
             }
@@ -348,6 +367,10 @@ fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
             substitute_expr_types(object, bindings);
         }
         _ => {}
+    }
+    if let Some((name, receiver)) = specialized {
+        *target = CallTarget::Named { name };
+        args.insert(0, receiver);
     }
     for a in args { substitute_expr_types(a, bindings); }
 }

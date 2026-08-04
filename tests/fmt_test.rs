@@ -326,6 +326,42 @@ fn fmt_for_in_comments() {
     assert!(out.contains("// process item"));
 }
 
+// A comment inside a record body is the one artifact the compiler cannot
+// reconstruct — the formatter used to collapse the record to one line and drop
+// it silently, so a documented field lost its unit or invariant on every save
+// (#1090).
+#[test]
+fn fmt_record_type_field_comments() {
+    let out = roundtrip(
+        "module app\ntype Tracer = {\n  service: String,\n  // ns at monotonic zero\n  anchor: Int,\n}",
+    );
+    assert!(out.contains("// ns at monotonic zero"), "field comment dropped: {out}");
+    assert!(out.contains("service: String"));
+    assert!(out.contains("anchor: Int"));
+    // Idempotent: the multi-line shape the printer emits must reparse to itself.
+    assert_eq!(roundtrip(&out), out);
+}
+
+#[test]
+fn fmt_record_type_comments_survive_defaults_and_aliases() {
+    let out = roundtrip(
+        "module app\ntype W = {\n  // the wire spells it camelCase\n  trace_id as \"traceId\": String,\n  // absent means unset\n  parent: Option[String] = none,\n}",
+    );
+    assert!(out.contains("// the wire spells it camelCase"), "{out}");
+    assert!(out.contains("// absent means unset"), "{out}");
+    assert!(out.contains("as \"traceId\""), "alias dropped: {out}");
+    assert!(out.contains("= none"), "default dropped: {out}");
+    assert_eq!(roundtrip(&out), out);
+}
+
+// A record with no field comments keeps the single-line shape, so adding
+// comment support does not churn every existing source file.
+#[test]
+fn fmt_record_type_without_comments_stays_single_line() {
+    let out = roundtrip("module app\ntype Point = {\n  x: Int,\n  y: Int,\n}");
+    assert!(out.contains("type Point = { x: Int, y: Int }"), "{out}");
+}
+
 // ---- Roundtrip & Idempotency over all spec/ files ----
 
 #[test]

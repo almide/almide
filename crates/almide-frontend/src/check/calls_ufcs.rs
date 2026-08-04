@@ -121,11 +121,13 @@ impl Checker {
     fn check_call_target_convention(&mut self, obj_concrete: &Ty, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
         let type_name_opt = self.resolve_type_name(obj_concrete);
         if let Some(type_name) = type_name_opt {
-            let convention_key = format!("{}.{}", type_name, field);
-            if self.env.functions.contains_key(&sym(&convention_key)) {
+            // A derived method is keyed bare while the receiver's type is
+            // qualified, so probing only `lib.P.encode` missed every derived
+            // method across an import (#1087).
+            if let Some(key) = crate::canonicalize::registration::convention_fn_key(&self.env, &type_name, field) {
                 let mut all_args = vec![obj_ty.clone()];
                 all_args.extend(arg_tys.iter().cloned());
-                return Some(self.check_named_call(&convention_key, &all_args));
+                return Some(self.check_named_call(&key.to_string(), &all_args));
             }
         }
         None

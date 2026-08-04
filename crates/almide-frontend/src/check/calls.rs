@@ -403,10 +403,16 @@ impl Checker {
     }
     /// Validate argument count, emitting a placeholder-signature E004 on mismatch. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     fn check_arg_count(&mut self, name: &str, sig: &crate::types::FnSig, arg_tys: &[Ty]) {
-        let min_params = match name.split_once('.') {
-            Some((module, func)) => crate::stdlib::min_params(module, func).unwrap_or(sig.params.len()),
-            None => self.env.fn_min_params.get(&sym(name)).copied().unwrap_or(sig.params.len()),
-        };
+        // `fn_min_params` is keyed by the SAME string used to look the
+        // signature up, module prefix included, so it answers for a user
+        // module's `lib.greet` as well as a local `greet`. Branching on "does
+        // the name contain a dot" sent every dotted name to the stdlib table
+        // instead, and a defaulted parameter in an imported module became
+        // mandatory (#1088). Stdlib is the fallback, not the first stop.
+        let min_params = self.env.fn_min_params.get(&sym(name)).copied()
+            .or_else(|| name.split_once('.')
+                .and_then(|(module, func)| crate::stdlib::min_params(module, func)))
+            .unwrap_or(sig.params.len());
         if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
             // Build a placeholder call showing the full signature so LLMs can see exactly which args are missing / extraneous.
             let placeholder = sig.params.iter()

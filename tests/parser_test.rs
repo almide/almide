@@ -578,6 +578,30 @@ fn parse_block_spaced_minus_still_continues() {
     }
 }
 
+// SPEC.md §2.1 lists a line starting with `.` as a continuation, but the
+// parser only accepted a chain on one line (#1091).
+#[test]
+fn parse_leading_dot_method_chain_continues() {
+    let expr = parse_expr("xs\n  .filter(f)\n  .map(g)");
+    // Outermost node is the `.map(g)` call, so the whole chain was consumed.
+    assert!(matches!(expr.kind, ExprKind::Call { .. }), "got {:?}", expr.kind);
+}
+
+#[test]
+fn parse_trailing_dot_method_chain_continues() {
+    let expr = parse_expr("xs.\n  filter(f).\n  map(g)");
+    assert!(matches!(expr.kind, ExprKind::Call { .. }), "got {:?}", expr.kind);
+}
+
+// The continuation is gated on a NAME after the dot. `.5` on its own line is a
+// tuple index, and joining it to the previous line would silently rewrite two
+// statements into `1.5`-as-tuple-index instead of reporting the stray token.
+#[test]
+fn parse_leading_dot_number_does_not_continue() {
+    let errs = parse_errors("module app\nfn f() -> Int = {\n  let x = 1\n  .5\n  x\n}");
+    assert!(!errs.is_empty(), "a line-leading `.5` must not join the previous line");
+}
+
 #[test]
 fn parse_block_leading_plus_continues() {
     // Leading `+` continuation (no unary `+` exists) still works.
