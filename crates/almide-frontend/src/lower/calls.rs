@@ -204,7 +204,15 @@ fn target_defaults(ctx: &LowerCtx, target: &CallTarget) -> Option<Vec<Option<ast
             return Some(d.clone());
         }
     }
-    ctx.env.fn_defaults.get(&target_fn_key(target)?).cloned()
+    let mut defaults = ctx.env.fn_defaults.get(&target_fn_key(target)?).cloned()?;
+    // A default from ANOTHER module is written in that module's scope, so its
+    // names are qualified before it is lowered here (#1088).
+    if let CallTarget::Module { module, .. } = target {
+        for d in defaults.iter_mut().flatten() {
+            qualify_callee_module_idents(d, *module, ctx.env);
+        }
+    }
+    Some(defaults)
 }
 
 /// Place named arguments into their positional slots, filling any gap from the

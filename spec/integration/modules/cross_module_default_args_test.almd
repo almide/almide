@@ -16,3 +16,9 @@ test "cross-module call overrides the default positionally (#1088)" {
 test "cross-module call overrides the default by name (#1088)" {
   assert_eq(varlib.greet("Carol", greeting: "Yo"), "Yo, Carol!")
 }
+
+test "a default that names the callee module's own constant (#1088)" {
+  // Not a literal: the default resolves `SALUTE` in varlib, not here.
+  assert_eq(varlib.hail("Dana"), "Ahoy, Dana!")
+  assert_eq(varlib.hail("Eve", "Yo"), "Yo, Eve!")
+}

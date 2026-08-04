@@ -361,6 +361,36 @@ fn lower_call_target_cross_module_ufcs(ctx: &mut LowerCtx, object: &ast::Expr, f
 /// A self-referential argument (`rect(w)` passing a caller-local `w` for param
 /// `w`) is left untouched: that name already resolves correctly at the call site,
 /// and replacing it would re-enter this pre-order visitor forever.
+/// Qualify a default expression's bare identifiers against the module that
+/// DECLARED it, before lowering it at a call site in another module.
+///
+/// A default is written in the callee's scope (`greeting: String = GREETING`)
+/// but lowered in the caller's, where that name does not exist. Lowering then
+/// bound it to whatever global happened to be first in the CALLER — a silently
+/// wrong value that only rustc's type check caught, and only when the types
+/// differed. Rewriting `GREETING` to `lib.GREETING` sends it through the
+/// ordinary cross-module top-let path instead (#1088).
+///
+/// Only names the callee module actually declares are touched: a default
+/// referencing an earlier PARAMETER is already substituted by
+/// `substitute_call_params`, and must keep resolving to the caller's argument.
+pub(super) fn qualify_callee_module_idents(expr: &mut ast::Expr, module: Sym, env: &crate::types::TypeEnv) {
+    ast::visit_expr_mut(expr, &mut |e| {
+        // A SCREAMING_CASE constant lexes as a `TypeName`, not an `Ident`, so
+        // both spellings have to be considered or the common shape — a
+        // module-level constant as the default — is the one that slips through.
+        let name = match &e.kind {
+            ast::ExprKind::Ident { name } | ast::ExprKind::TypeName { name } => *name,
+            _ => return,
+        };
+        if !env.top_lets.contains_key(&sym(&format!("{}.{}", module, name))) {
+            return;
+        }
+        let obj = ast::Expr::new(e.id, e.span, ast::ExprKind::Ident { name: module });
+        e.kind = ast::ExprKind::Member { object: Box::new(obj), field: name };
+    });
+}
+
 fn substitute_call_params(expr: &mut ast::Expr, param_values: &std::collections::HashMap<Sym, ast::Expr>) {
     ast::visit_expr_mut(expr, &mut |e| {
         if let ast::ExprKind::Ident { name } = &e.kind {
