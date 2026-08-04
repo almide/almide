@@ -171,6 +171,21 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
         _ => {
             let op_str = binop_symbol(op);
             let op_s = op_str.to_string();
+            // An ORDERING comparison on strings must agree about ownership on
+            // both sides. A `String` parameter is emitted as `&str`, a literal
+            // as `"…".to_string()`, and whether the bare var also got
+            // `.to_string()` was decided per-USE by clone insertion — so in
+            // `c >= "0" and c <= "9"` the first `c` (not the last use) was
+            // cloned and the second was moved, leaving one comparison
+            // comparing `&str` with `String`. rustc rejected code that
+            // `almide check` had accepted, and only on the native leg (#1033).
+            // Coercing both operands here makes the pairing independent of use
+            // position; `.to_string()` on an owned String is a no-op clone.
+            let (l, r) = if is_string_ordering(op, left, right) {
+                (coerce_to_owned_string(&l, left), coerce_to_owned_string(&r, right))
+            } else {
+                (l, r)
+            };
             ctx.templates.render_with("binary_op", None, &[], &[("left", l.as_str()), ("op", op_s.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("({} {} {})", "l", op_str, "r"))
         }
@@ -479,6 +494,13 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
 /// Rust's `.to_string()` is idempotent on owned `String` (it clones), so
 /// even when the branch is already owned the result is correct, just with
 /// one redundant allocation.
+/// Is this an ordering comparison (`<`, `<=`, `>`, `>=`) whose operands are
+/// strings? Equality has its own `almide_eq!` macro path and is unaffected.
+fn is_string_ordering(op: BinOp, left: &IrExpr, right: &IrExpr) -> bool {
+    matches!(op, BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte)
+        && (matches!(left.ty, Ty::String) || matches!(right.ty, Ty::String))
+}
+
 fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
     let is_bare_string_var = match &expr.kind {
         IrExprKind::Var { .. } => matches!(expr.ty, Ty::String),

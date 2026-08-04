@@ -540,7 +540,28 @@ impl Checker {
                 .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned().flatten()))
                 .unwrap_or_else(|| self.fresh_var());
             let concrete = resolve_ty(&ty, &self.uf);
-            self.env.define_var(&p.name, concrete);
+            // A tuple-pattern parameter (`((k, v)) => …`) binds EVERY name, not
+            // just the first. The parser has produced `tuple_names` since the
+            // form was introduced, but nothing downstream read it — so the
+            // second name was simply undefined and the writer got E003 on a
+            // variable they had just written (#1060).
+            match &p.tuple_names {
+                Some(names) if names.len() > 1 => {
+                    let elems: Vec<Ty> = match &concrete {
+                        Ty::Tuple(es) if es.len() == names.len() => es.clone(),
+                        _ => {
+                            let fresh: Vec<Ty> = names.iter().map(|_| self.fresh_var()).collect();
+                            self.constrain(ty.clone(), Ty::Tuple(fresh.clone()), "tuple lambda parameter");
+                            fresh
+                        }
+                    };
+                    for (n, et) in names.iter().zip(elems.iter()) {
+                        let e = resolve_ty(et, &self.uf);
+                        self.env.define_var(n, e);
+                    }
+                }
+                _ => self.env.define_var(&p.name, concrete),
+            }
             ty
         }).collect();
         let ret_ty = self.infer_expr(body);
