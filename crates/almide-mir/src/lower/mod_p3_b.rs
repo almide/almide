@@ -585,6 +585,11 @@ const BYTES_INPLACE_APPENDS: &[&str] = &[
     "append_i64_le", "append_i64_be", "append_f32_le", "append_f32_be",
     "append_f64_le", "append_f64_be",
     "write_uint16", "write_uint32", "write_int32", "write_float32",
+    // The BE serialization cursor (#1099): three are `append_*_be` under
+    // another name, `write_u8` is the 1-byte push, and bool/string have their
+    // own functional twins in bytes_append_multi.almd.
+    "write_u8", "write_u32_be", "write_i64_be", "write_f64_be",
+    "write_bool", "write_string_be",
 ];
 
 /// Rewrite a v0 IN-PLACE mutator call in statement position to its functional
@@ -626,7 +631,16 @@ fn rewrite_bytes_append(module: &str, func: &str, args: &[IrExpr]) -> Option<IrS
         return None;
     }
     let IrExprKind::Var { id } = &args[0].kind else { return None };
-    let fname = if matches!(func, "push" | "append_u8") { "append" } else { func };
+    let fname = match func {
+        // The 1-byte pushes all route to the one `bytes.append` twin.
+        "push" | "append_u8" | "write_u8" => "append",
+        // The BE cursor writes ARE the append family under another name —
+        // same width, same order, same native byte layout.
+        "write_u32_be" => "append_u32_be",
+        "write_i64_be" => "append_i64_be",
+        "write_f64_be" => "append_f64_be",
+        _ => func,
+    };
     let append = IrExpr {
         kind: IrExprKind::Call {
             target: CallTarget::Module { module: sym("bytes"), func: sym(fname), def_id: None },

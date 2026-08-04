@@ -50,11 +50,24 @@ fn main() -> Unit = {
   // compile natively, so it cannot be a cross-target fixture yet — see #1098.
   // The interpreter models it regardless (`inplace.rs::BytesWrite::AppendSized`,
   // unit-tested), so it is covered the day the native leg is fixed.
-  // NOT covered here either: the `write_*` serialization cursor
-  // (`write_u8` / `write_u32_be` / `write_bool` / `write_string_be`). Those have
-  // no wasm self-host definition, so the render wall rejects the whole program
-  // rather than emit a dangling call — honest, but it means they cannot be
-  // byte-compared yet (#1099). The interpreter models them all the same.
+  // ── the serialization cursor: BE twins, bool, and the length-prefixed
+  // string (#1099 closed the wasm self-host gap) ──
+  var w = bytes.new(0)
+  bytes.write_u8(w, 7)
+  bytes.write_u32_be(w, 258)
+  bytes.write_i64_be(w, -1)
+  bytes.write_bool(w, true)
+  bytes.write_bool(w, false)
+  bytes.write_string_be(w, "hi")
+  show("cursor", w)
+  // f64 BE: 1.5 = 0x3FF8000000000000.
+  var wf = bytes.new(0)
+  bytes.write_f64_be(wf, 1.5)
+  show("cursor_f64", wf)
+  // A multibyte string counts BYTES in its prefix, not characters.
+  var m = bytes.new(0)
+  bytes.write_string_be(m, "é")
+  show("cursor_utf8", m)
   // ── fill / copy_from / copy_within ──
   var g = bytes.new(3)
   bytes.fill(g, 511)
