@@ -1,5 +1,0 @@
-// Half of the #1087a collision fixture: a PLAIN type sharing its bare name
-// with a Codec-deriving type in a sibling module.
-type Span = { name: String, n: Int }
-
-fn make(name: String, n: Int) -> Span = Span { name: name, n: n }

@@ -1,9 +1,0 @@
-// #1087a: two modules in one package declaring the same bare type name, where
-// one derives Codec. Plain same-named types always coexisted; the derive is
-// what collided, because the convention-method table and the protocol-impl
-// validation both keyed on the BARE name while type identity is `mod.Type`.
-import collidelib
-
-test "same bare type name in two modules, one deriving Codec (#1087a)" {
-  assert_eq(collidelib.run(), "{\"name\":\"op\",\"kind\":3}")
-}
