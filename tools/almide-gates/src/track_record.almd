@@ -82,7 +82,7 @@ effect fn night_of(repo: String, run: json.Value, job_name: String, step_name: S
   if in_flight(state) then
     Night { date: date_of(run), id: id, conclusion: state, verdict: "IN PROGRESS (not scored)", scored: false }
   else {
-    let jobs = json.parse(gh_api("repos/" + repo + "/actions/runs/" + id + "/jobs")!) ?? json.null()
+    let jobs = json.parse(gh_api("repos/" + repo + "/actions/runs/" + id + "/jobs")!) ?? value.null()
     let step = campaign_step(jobs, job_name, step_name)
     Night { date: date_of(run), id: id, conclusion: state, verdict: verdict_text(state, step), scored: true }
   }
@@ -90,7 +90,7 @@ effect fn night_of(repo: String, run: json.Value, job_name: String, step_name: S
 
 effect fn report(repo: String, n: Int, job_name: String, step_name: String) -> List[String] = {
   let url = "repos/" + repo + "/actions/workflows/fuzz-nightly.yml/runs?event=schedule&per_page=" + int.to_string(n)
-  let runs = json.get_array(json.parse(gh_api(url)!) ?? json.null(), "workflow_runs") ?? []
+  let runs = json.get_array(json.parse(gh_api(url)!) ?? value.null(), "workflow_runs") ?? []
   var nights: List[Night] = []
   for r in runs {
     nights = nights + [night_of(repo, r, job_name, step_name)!]
