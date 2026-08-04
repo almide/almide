@@ -1,22 +1,25 @@
-//! #1075: the dynamic-surface namespace gate.
+//! #1075 → #1078: the dynamic-surface namespace gate, END STATE.
 //!
-//! End state being enforced: **no fn reachable under two module names.**
+//! What is enforced: **no fn reachable under two module names.**
 //! `value.*` is the data model (constructors/accessors), `json.*` is the
 //! format over it (parse / stringify / pretty, plus the json-branded path
 //! API and typed-key conveniences, which have no second name).
 //!
-//! During the one-release deprecation window the aliases still exist and
-//! warn (E040); this gate pins that window exactly:
+//! The one-release E040 deprecation window (#1075) closed in #1078: the
+//! aliases, the `RETIRED_DYNAMIC_ALIASES` table, the E040 checker, and the
+//! `almide fix` rewrite were dropped together. This gate pins the end state:
 //!
-//! 1. every name that IS dual-reachable appears in
-//!    `RETIRED_DYNAMIC_ALIASES` (no UN-deprecated duplicates can be added),
-//! 2. `json.almd`'s public surface is exactly the allowed identity set plus
-//!    the deprecated aliases (nothing new can grow on the json side),
-//! 3. every table entry still resolves (so the drop release must delete
-//!    the aliases and the table TOGETHER — at which point rule 2's
-//!    deprecated set is empty and the gate asserts the final identity).
+//! 1. json's surface is EXACTLY the format identity — nothing else resolves,
+//!    and none of the dropped alias names may ever reappear;
+//! 2. no intrinsic is reachable under two public names (the rule the window
+//!    existed to reach);
+//! 3. `value.get` never regrows — `get → Option` is the map/list convention,
+//!    and the Result accessor is `value.field`.
+//!
+//! The executable twin of rule 1 is `tests/diagnostics/retired-json-alias/`
+//! (a retired spelling must FAIL with E002) and
+//! `tests/fix_test.rs::retired_aliases_no_longer_resolve`.
 
-use almide::stdlib_info::{RETIRED_DYNAMIC_ALIASES};
 use std::collections::{HashMap, HashSet};
 
 /// Parse `stdlib/<file>.almd` for `(fn_name, intrinsic)` pairs — the public
@@ -58,16 +61,34 @@ fn surface_decls(file: &str) -> Vec<(String, Option<String>)> {
     out
 }
 
-fn retired_set() -> HashSet<&'static str> {
-    RETIRED_DYNAMIC_ALIASES.iter().map(|(old, _, _)| *old).collect()
-}
+/// The names dropped in #1078. None of them may ever be declared again —
+/// resurrecting one silently re-opens the two-names problem the whole
+/// retirement existed to close.
+const DROPPED: &[&str] = &[
+    "json.null",
+    "json.object",
+    "json.array",
+    "json.keys",
+    "json.from_string",
+    "json.from_int",
+    "json.from_bool",
+    "json.from_float",
+    "json.as_string",
+    "json.as_int",
+    "json.as_float",
+    "json.as_bool",
+    "json.as_array",
+    "json.get",
+    "value.get",
+];
 
-/// Rule 2: json's surface is the format identity + deprecated aliases, nothing else.
+/// Rule 1: json's surface is EXACTLY the format identity, and the dropped
+/// aliases do not resolve — in either module.
 #[test]
-fn json_surface_is_format_plus_deprecated_window() {
+fn json_surface_is_exactly_the_format_identity() {
     // The one-sentence identity: json is the FORMAT (parse/print), plus the
     // json-branded path API and typed-key conveniences that have no second
-    // name. Anything else must be a table-listed retired alias.
+    // name. Anything else is a regression toward the two-names problem.
     let allowed: HashSet<&str> = [
         "parse", "stringify", "stringify_pretty",
         "root", "field", "index", "get_path", "set_path", "remove_path",
@@ -75,20 +96,40 @@ fn json_surface_is_format_plus_deprecated_window() {
         "to_map",
     ]
     .into();
-    let retired = retired_set();
+    let mut declared: HashSet<String> = HashSet::new();
+    for (file, module) in [("json.almd", "json"), ("value.almd", "value")] {
+        for (name, _) in surface_decls(file) {
+            declared.insert(format!("{module}.{name}"));
+        }
+    }
     for (name, _) in surface_decls("json.almd") {
-        let qualified = format!("json.{name}");
         assert!(
-            allowed.contains(name.as_str()) || retired.contains(qualified.as_str()),
-            "json.{name} is neither in json's format identity nor a table-listed retired alias — \
-             the dynamic surface lives on value.* (#1075); do not grow json's side"
+            allowed.contains(name.as_str()),
+            "json.{name} is outside json's format identity — the dynamic surface \
+             lives on value.*; do not grow json's side"
         );
+    }
+    for dropped in DROPPED {
+        assert!(
+            !declared.contains(*dropped),
+            "{dropped} is a dropped alias and may not be re-declared — \
+             one fn, one name"
+        );
+    }
+    // The survivors must all exist, or a dropped alias lost its operation.
+    for survivor in [
+        "value.null", "value.object", "value.array", "value.keys", "value.str",
+        "value.int", "value.bool", "value.float", "value.as_string", "value.as_int",
+        "value.as_float", "value.as_bool", "value.as_array", "value.field",
+    ] {
+        assert!(declared.contains(survivor), "survivor {survivor} is not declared");
     }
 }
 
-/// Rule 1: an intrinsic reachable under two public names must be in the table.
+/// Rule 2: no intrinsic is reachable under two public names — the end state
+/// the deprecation window existed to reach, now with no exceptions.
 #[test]
-fn dual_intrinsic_bindings_are_all_deprecated() {
+fn no_intrinsic_is_reachable_under_two_names() {
     let mut by_intrinsic: HashMap<String, Vec<String>> = HashMap::new();
     for (file, module) in [("json.almd", "json"), ("value.almd", "value")] {
         for (name, intrinsic) in surface_decls(file) {
@@ -97,54 +138,23 @@ fn dual_intrinsic_bindings_are_all_deprecated() {
             }
         }
     }
-    let retired = retired_set();
     for (sym, names) in by_intrinsic {
-        if names.len() < 2 {
-            continue;
-        }
-        let undeprecated: Vec<&String> =
-            names.iter().filter(|n| !retired.contains(n.as_str())).collect();
         assert!(
-            undeprecated.len() <= 1,
-            "intrinsic {sym} is reachable under {names:?} and more than one \
-             ({undeprecated:?}) is not a retired alias — one fn, one name (#1075)"
+            names.len() <= 1,
+            "intrinsic {sym} is reachable under {names:?} — one fn, one name"
         );
     }
 }
 
-/// Rule 3: the table and the aliases retire together — every entry's OLD
-/// name still exists as a declaration, and every survivor exists too.
+/// Rule 3: the value side never regrows a `get`-shaped Result accessor:
+/// `value.field` is the survivor, and `get → Option` is the map/list
+/// convention.
 #[test]
-fn retirement_table_matches_declarations() {
-    let mut declared: HashSet<String> = HashSet::new();
-    for (file, module) in [("json.almd", "json"), ("value.almd", "value")] {
-        for (name, _) in surface_decls(file) {
-            declared.insert(format!("{module}.{name}"));
-        }
-    }
-    for (old, new, _) in RETIRED_DYNAMIC_ALIASES {
-        assert!(
-            declared.contains(*old),
-            "{old} is in RETIRED_DYNAMIC_ALIASES but no longer declared — \
-             the drop release must remove the alias AND its table row in the same PR"
-        );
-        assert!(
-            declared.contains(*new),
-            "{old}'s survivor {new} is not declared — the table names a fn that does not exist"
-        );
-    }
-}
-
-/// The value side never re-grows a `get`-shaped Result accessor once the
-/// alias drops: `value.field` is the survivor. (While the window is open the
-/// table covers `value.get`; after the drop this pins the end state.)
-#[test]
-fn value_get_is_only_reachable_via_table() {
-    let retired = retired_set();
+fn value_get_never_regrows() {
     let has_get = surface_decls("value.almd").iter().any(|(n, _)| n == "get");
     assert!(
-        !has_get || retired.contains("value.get"),
-        "value.get exists but is not in the retirement table — \
-         get→Option is the map/list convention; the Result accessor is value.field (#1075)"
+        !has_get,
+        "value.get regrew — get→Option is the map/list convention; \
+         the Result accessor is value.field"
     );
 }

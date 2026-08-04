@@ -22,7 +22,6 @@
 mod types;
 mod infer;
 pub(crate) mod calls;
-mod retired_aliases;
 mod builtin_calls;
 mod static_dispatch;
 mod solving;

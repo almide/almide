@@ -79,7 +79,7 @@
 
     #[test]
     fn value_get_and_as_array_unwrap_execute_on_wasmtime() {
-        // THE LAYOUT BRICK read side: a heap-Result-of-Value (`value.get` → Result[Value,String]) and
+        // THE LAYOUT BRICK read side: a heap-Result-of-Value (`value.field` → Result[Value,String]) and
         // a heap-Result-of-List (`value.as_array` → Result[List[Value],String]) round-trip through
         // BOTH a `match` (tag@16 read, @12 payload bound as a borrow) AND a `??` (routed to the
         // self-hosted result.value_unwrap_or / result.list_value_unwrap_or, the Ok arm Dup'ing @12).
@@ -87,16 +87,16 @@
         let src = "import json\n\
             effect fn main() -> Unit = {\n  \
               let o = value.object([(\"a\", value.int(7)), (\"b\", value.str(\"hi\"))])\n  \
-              match value.get(o, \"a\") { ok(v) => println(int.to_string(value.as_int(v) ?? 0)), err(e) => println(\"e:\" + e) }\n  \
-              match value.get(o, \"zzz\") { ok(v) => println(\"got\"), err(e) => println(e) }\n  \
-              let g = value.get(o, \"b\") ?? value.null()\n  println(value.stringify(g))\n  \
+              match value.field(o, \"a\") { ok(v) => println(int.to_string(value.as_int(v) ?? 0)), err(e) => println(\"e:\" + e) }\n  \
+              match value.field(o, \"zzz\") { ok(v) => println(\"got\"), err(e) => println(e) }\n  \
+              let g = value.field(o, \"b\") ?? value.null()\n  println(value.stringify(g))\n  \
               let arr = value.array([value.int(10), value.int(20), value.int(30)])\n  \
               let items = value.as_array(arr) ?? []\n  \
               var s = 0\n  for it in items { s = s + (value.as_int(it) ?? 0) }\n  println(int.to_string(s))\n  \
-              var n = 0\n  for i in 0..2000 { let oo = value.object([(\"k\", value.int(i))]); let gg = value.get(oo, \"k\") ?? value.null(); n = n + (value.as_int(gg) ?? 0) }\n  \
+              var n = 0\n  for i in 0..2000 { let oo = value.object([(\"k\", value.int(i))]); let gg = value.field(oo, \"k\") ?? value.null(); n = n + (value.as_int(gg) ?? 0) }\n  \
               println(int.to_string(n)) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "value.get"));
+        assert!(prog.functions.iter().any(|f| f.name == "value.field"));
         if let Some(out) = build_and_run("value_get_unwrap", &render_wasm_program(&prog)) {
             assert_eq!(out, "7\nmissing field 'zzz'\n\"hi\"\n60\n1999000");
         }
@@ -165,7 +165,7 @@
               let rows = value.as_array(v) ?? []\n  \
               let header = [\"name\", \"city\"]\n  \
               let lines = rows |> list.map((row) =>\n    \
-                header |> list.map((h) => escape_cell(value.as_string(value.get(row, h) ?? value.null()) ?? \"\")) |> list.join(\",\"))\n  \
+                header |> list.map((h) => escape_cell(value.as_string(value.field(row, h) ?? value.null()) ?? \"\")) |> list.join(\",\"))\n  \
               lines |> list.join(\"\\n\")\n }\n\
             effect fn main() -> Unit = {\n  \
               let recs = value.array([\n    \
@@ -173,7 +173,7 @@
                 value.object([(\"name\", value.str(\"bob\")), (\"city\", value.str(\"LA, CA\"))])\n  \
               ])\n  \
               println(rows_to_csv(recs))\n  \
-              var n = 0\n  for i in 0..2000 { let o = value.object([(\"k\", value.str(\"x\"))]); let cs = [\"k\"] |> list.map((h) => value.as_string(value.get(o, h) ?? value.null()) ?? \"\"); n = n + string.len(cs |> list.join(\",\")) }\n  \
+              var n = 0\n  for i in 0..2000 { let o = value.object([(\"k\", value.str(\"x\"))]); let cs = [\"k\"] |> list.map((h) => value.as_string(value.field(o, h) ?? value.null()) ?? \"\"); n = n + string.len(cs |> list.join(\",\")) }\n  \
               println(int.to_string(n)) }\n";
         let prog = lower_source(src);
         if let Some(out) = build_and_run("capturing_heap_map", &render_wasm_program(&prog)) {
@@ -485,17 +485,16 @@
     }
 
     #[test]
-    fn value_object_and_json_keys_execute_on_wasmtime() {
+    fn value_object_and_value_keys_execute_on_wasmtime() {
         // The dynamic Value OBJECT (tag 6) self-host: `value.object(pairs)` builds a 2-slot-per-pair
         // block (key String + value Value, each rc_inc'd in — the Object co-owns them, freed by the
-        // recursive __vdrop_obj at the last ref via __drop_value). `json.keys` reads them back. The
+        // recursive __vdrop_obj at the last ref via __drop_value). `value.keys` reads them back. The
         // SLOT count (@8 = 2*pairs) is what the freelist reclaims — storing the pair count there
         // leaked 2 slots/iter (the 2-pair OOM this caught). 2000x is the leak gate (multi-pair).
-        let src = "import json\n\
-            effect fn main() -> Unit = {\n  \
+        let src = "effect fn main() -> Unit = {\n  \
               let o = value.object([(\"a\", value.int(1)), (\"bb\", value.str(\"x\"))])\n  \
-              println(int.to_string(list.len(json.keys(o))))\n  \
-              var k = 0\n  for i in 0..2000 { let p = value.object([(\"a\", value.int(i)), (\"b\", value.int(i))]); k = k + list.len(json.keys(p)) }\n  \
+              println(int.to_string(list.len(value.keys(o))))\n  \
+              var k = 0\n  for i in 0..2000 { let p = value.object([(\"a\", value.int(i)), (\"b\", value.int(i))]); k = k + list.len(value.keys(p)) }\n  \
               println(int.to_string(k)) }\n";
         let prog = lower_source(src);
         if let Some(out) = build_and_run("value_object", &render_wasm_program(&prog)) {

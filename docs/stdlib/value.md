@@ -10,8 +10,9 @@ Get a field from a Value object by key. `err("expected Object")` on a
 non-Object subject, `err("missing field '<k>'")` when absent. For an
 Option instead, apply `?`: `value.field(v, k)?`.
 
-(`value.get` is a retired alias of this fn — E040, one release. `get` means
-Option everywhere else: `map.get` / `list.get`.)
+(The retired `value.get` alias of this fn was dropped after its E040
+deprecation window — `get` means Option everywhere else: `map.get` /
+`list.get`.)
 
 ### `value.keys(v: Value) -> List[String]`
 
@@ -91,7 +92,7 @@ Convert a Value to a JSON-like string representation.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (21 functions)
+## Signature index (20 functions)
 
 ```
 value.array(items: List[Value]) -> Value
@@ -102,7 +103,6 @@ value.as_int(v: Value) -> Result[Int, String]
 value.as_string(v: Value) -> Result[String, String]
 value.bool(b: Bool) -> Value
 value.float(f: Float) -> Value
-value.get(v: Value, key: String) -> Result[Value, String]
 value.int(n: Int) -> Value
 value.merge(a: Value, b: Value) -> Value
 value.null() -> Value

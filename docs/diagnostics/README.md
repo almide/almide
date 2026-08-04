@@ -24,8 +24,12 @@ Use `almide explain <code>` to read these from the CLI.
 | [E029](E029.md) | Unknown type name in an annotation or record literal |
 | [E030](E030.md) | Type has no ordering (sort/min/max over Map/Set/Fn or compound Float) |
 | [E031](E031.md) | Retired range spelling (`..`/`..=` → `..<`/`...`, fix-it + `almide fix`) |
-| [E040](E040.md) | Retired json.*/value.* alias (survivor: `value.*` data model / `json.*` format, `almide fix`) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
+
+Retired codes: **E040** (the json.*/value.* alias deprecation window) fired
+for one release and was retired when the aliases dropped (#1078) — a retired
+spelling is an ordinary [E002](E002.md) now; the migration map is recorded in
+[docs/stdlib/json.md](../stdlib/json.md#renamed-operations).
 
 Codes in the 4-digit range (`E0001` and up) that leak into output
 are **rustc** errors, not Almide ones — they indicate a codegen bug

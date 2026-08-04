@@ -32,7 +32,6 @@ struct FixReport<'a> {
     letin_removed: usize,
     operator_rewrites: usize,
     range_rewrites: usize,
-    alias_rewrites: usize,
     return_removed: usize,
     manual_pending: Vec<ManualDiag>,
     /// True if the file was written (or would be, in --dry-run). Harness can
@@ -61,7 +60,6 @@ struct FixOutcome<'a> {
     imports_added: Vec<String>,
     operator_count: usize,
     range_count: usize,
-    alias_count: usize,
     letin_count: usize,
     return_count: usize,
     manual: Vec<ManualDiag>,
@@ -83,12 +81,6 @@ fn print_fix_detail_lines(outcome: &FixOutcome, print: fn(&str)) {
         print(&format!(
             "  Migrated {} retired range spelling(s) (`..` -> `..<`, `..=` -> `...`)",
             outcome.range_count
-        ));
-    }
-    if outcome.alias_count > 0 {
-        print(&format!(
-            "  Migrated {} retired json.*/value.* alias call(s) to the value.* survivors (#1075)",
-            outcome.alias_count
         ));
     }
     if outcome.letin_count > 0 {
@@ -152,7 +144,6 @@ fn report_fix_result(outcome: FixOutcome, dry_run: bool, json: bool) {
             letin_removed: outcome.letin_count,
             operator_rewrites: outcome.operator_count,
             range_rewrites: outcome.range_count,
-            alias_rewrites: outcome.alias_count,
             return_removed: outcome.return_count,
             manual_pending: outcome.manual,
             changed: outcome.any_change,
@@ -243,7 +234,7 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
     // DELETED by the write (#1077). Textual fixes (range migration,
     // `let-in` / `return` removal) are span-surgical and still run; the
     // AST family waits for a clean parse.
-    let (import_messages, operator_count, alias_count) = if parse_clean {
+    let (import_messages, operator_count) = if parse_clean {
         // Auto-imports: adds missing `import json` / `import fs` / etc.
         let import_messages = auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
         // AST-level rewrite: `int.gt(a, b)` / `.lt` / `.eq` / `.neq` / `.le` /
@@ -252,17 +243,12 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
         // from Go-ish / Java-ish training data. Mechanically substituting to
         // `a > b` etc. turns the error case into working code.
         let operator_count = rewrite_comparison_calls(&mut program);
-        // #1075: retired dynamic-surface aliases (`json.null` → `value.null`,
-        // `json.as_int(x)` → `value.as_int(x)?`, `value.get` → `value.field`) —
-        // the E040 migration. AST-level (like the comparison rewrite) so nested
-        // deprecated calls and multi-line calls rewrite correctly in one pass.
-        let alias_count = rewrite_retired_aliases(&mut program);
-        (import_messages, operator_count, alias_count)
+        (import_messages, operator_count)
     } else {
-        (Vec::new(), 0, 0)
+        (Vec::new(), 0)
     };
     let has_import_changes = !import_messages.is_empty();
-    let has_ast_changes = has_import_changes || operator_count > 0 || alias_count > 0;
+    let has_ast_changes = has_import_changes || operator_count > 0;
 
     // Start from the formatter output if any AST-level change happened,
     // else keep the original text verbatim so other textual fixes don't
@@ -282,7 +268,7 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
     let letin_count = LETIN_REMOVAL.apply(&mut working);
     let return_count = RETURN_REMOVAL.apply(&mut working);
 
-    let any_change = has_import_changes || operator_count > 0 || alias_count > 0 || letin_count > 0 || return_count > 0 || range_count > 0;
+    let any_change = has_import_changes || operator_count > 0 || letin_count > 0 || return_count > 0 || range_count > 0;
 
     // Extract "Added `import X`" → bare module names for JSON.
     let imports_added: Vec<String> = import_messages.iter()
@@ -301,7 +287,7 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
 
     report_fix_result(FixOutcome {
         file, working: &working, import_messages: &import_messages, imports_added,
-        operator_count, range_count, alias_count, letin_count, return_count, manual, any_change,
+        operator_count, range_count, letin_count, return_count, manual, any_change,
     }, dry_run, json);
 }
 
@@ -351,59 +337,6 @@ fn extract_module_call(callee: &Expr) -> Option<(String, String)> {
     let ExprKind::Member { object, field } = &callee.kind else { return None };
     let ExprKind::Ident { name } = &object.kind else { return None };
     Some((name.to_string(), field.to_string()))
-}
-
-/// #1075: rewrite calls to retired dynamic-surface aliases into their
-/// survivors, per `almide_lang::stdlib_info::RETIRED_DYNAMIC_ALIASES`.
-/// `RenameAndNarrow` entries (the survivor returns `Result` where the alias
-/// returned `Option`) additionally wrap the call in `?`, which restores the
-/// exact expression type. Only the explicit qualified spelling
-/// (`json.get(...)`) matches — UFCS receivers (`v.get(k)`) need type
-/// knowledge and are left to the E040 warning's hint.
-fn rewrite_retired_aliases(program: &mut ast::Program) -> usize {
-    use almide_lang::stdlib_info::{retired_dynamic_alias, RetiredAliasKind};
-    fn rename_call(callee: &mut Expr, survivor: &str) {
-        let (new_mod, new_fn) = survivor.split_once('.').expect("survivor is module-qualified");
-        let ExprKind::Member { object, field } = &mut callee.kind else { unreachable!() };
-        let ExprKind::Ident { name } = &mut object.kind else { unreachable!() };
-        *name = sym(new_mod);
-        *field = sym(new_fn);
-    }
-    let mut count = 0;
-    ast::visit_exprs_mut(program, &mut |expr: &mut Expr| {
-        // `alias(x) ?? d` — `??` unwraps a Result natively, so a Narrow
-        // survivor directly under `??` needs no `?`: `json.get(v,k) ?? d`
-        // becomes `value.field(v,k) ?? d`, the proven idiom, not
-        // `value.field(v,k)? ?? d`. Handled here on the parent (visits are
-        // pre-order) so the generic arm below never sees the child.
-        if let ExprKind::UnwrapOr { expr: operand, .. } = &mut expr.kind {
-            if let ExprKind::Call { callee, .. } = &mut operand.kind {
-                if let Some((module, func)) = extract_module_call(callee) {
-                    if let Some((survivor, RetiredAliasKind::RenameAndNarrow)) =
-                        retired_dynamic_alias(&format!("{module}.{func}"))
-                    {
-                        rename_call(callee, survivor);
-                        count += 1;
-                    }
-                }
-            }
-            return;
-        }
-        let ExprKind::Call { callee, .. } = &mut expr.kind else { return };
-        let Some((module, func)) = extract_module_call(callee) else { return };
-        let Some((survivor, kind)) = retired_dynamic_alias(&format!("{module}.{func}")) else { return };
-        rename_call(callee, survivor);
-        if kind == RetiredAliasKind::RenameAndNarrow {
-            // Wrap the whole call in the `?` postfix (ToOption — the
-            // Result→Option conversion), restoring the exact expression
-            // type. The wrapper reuses the call's id/span — this AST feeds
-            // only the formatter, which never reads ids.
-            let inner = expr.clone();
-            expr.kind = ExprKind::ToOption { expr: Box::new(inner) };
-        }
-        count += 1;
-    });
-    count
 }
 
 /// Source-level fix: delete occurrences of a single keyword at positions

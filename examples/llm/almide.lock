@@ -1,3 +1,3 @@
 # almide.lock — auto-generated, do not edit
 
-almai = { git = "https://github.com/almide/almai", ref = "main", commit = "a2e8c0647dbe73a88269f32596ce548f50761774" }
+almai = { git = "https://github.com/almide/almai", ref = "main", commit = "316db1038b3d2285891e1bea4f30ad065215ad25" }

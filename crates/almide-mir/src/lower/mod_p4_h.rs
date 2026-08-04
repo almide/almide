@@ -239,9 +239,6 @@ fn list_heap_call_name_module_routed(
         "result" | "option" if func == "unwrap_or" => unwrap_or_call_name(module, arg_tys),
         "option" => option_call_name(func, arg_tys, result_ty),
         "result" => result_call_name(func, arg_tys, result_ty),
-        // `value.keys` IS `json.keys` (one impl, two stdlib names) — remap to the
-        // registered self-host; every other value.* rides its own dotted name.
-        "value" if func == "keys" => Some("json.keys".to_string()),
         _ => None,
     }
 }
