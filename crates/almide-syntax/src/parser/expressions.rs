@@ -271,6 +271,9 @@ impl Parser {
     pub(crate) fn parse_postfix(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_primary()?;
         loop {
+            // `obj\n  .method()` — the leading-dot half of the chain
+            // continuation rule (#1091).
+            self.skip_newlines_if_method_chain();
             if self.check(TokenType::Dot) {
                 expr = self.parse_postfix_dot(expr)?;
             } else if self.check(TokenType::LBracket) && self.peek_type_args_call() {
@@ -362,6 +365,11 @@ impl Parser {
     fn parse_postfix_dot(&mut self, expr: Expr) -> Result<Expr, String> {
         let dot_span = self.current_span();
         self.advance();
+        // `obj.\n  method()` — the trailing-dot half of the chain continuation
+        // rule (#1091). Once the `.` is consumed a continuation is mandatory,
+        // so the newlines cannot be significant and the skip is unconditional
+        // (same shape as the trailing-operator skip in `parse_expr_bp`).
+        self.skip_newlines();
         if self.check(TokenType::Int) {
             let idx_str = self.current().value.clone();
             self.advance();

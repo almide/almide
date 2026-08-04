@@ -80,6 +80,11 @@ pub struct FieldType {
     pub alias: Option<Sym>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attrs: Vec<Attribute>,
+    /// Comments written above this field inside the record body. Carried so
+    /// the formatter can put them back: a field's comment is usually the only
+    /// record of its unit or invariant, and dropping it is unrecoverable.
+    #[serde(skip)]
+    pub comments: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

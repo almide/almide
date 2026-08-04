@@ -83,7 +83,14 @@ fn comma_sep<T>(out: &mut String, items: &[T], f: impl Fn(&mut String, &T)) {
 /// wildcard arm). Additions keep using the precise AST walk.
 fn token_module_refs(source: &str) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
     use almide_lang::lexer::{Lexer, TokenType};
-    let tokens = Lexer::tokenize(source);
+    // Trivia is dropped before windowing: a method chain may break the line
+    // before its `.` (#1091), so `json\n  .parse(s)` must still register as a
+    // reference to `json` — otherwise the REMOVE side would delete the very
+    // import that call needs.
+    let tokens: Vec<_> = Lexer::tokenize(source)
+        .into_iter()
+        .filter(|t| !matches!(t.token_type, TokenType::Newline | TokenType::Comment))
+        .collect();
     let mut refs: std::collections::HashMap<String, std::collections::HashSet<String>> = Default::default();
     for w in tokens.windows(3) {
         if matches!(w[0].token_type, TokenType::Ident | TokenType::TypeName)
@@ -608,14 +615,22 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
             out.push(']');
         }
         TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
-            out.push_str("{ ");
-            comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
-            match (matches!(ty, TypeExpr::OpenRecord { .. }), fields.is_empty()) {
-                (true, false) => out.push_str(", .. "),
-                (true, true) => out.push_str(".. "),
-                (false, _) => out.push(' '),
+            let open = matches!(ty, TypeExpr::OpenRecord { .. });
+            // A field comment has nowhere to go on one line, so a record that
+            // carries one is emitted multi-line. Records without comments keep
+            // the single-line shape, so existing sources do not churn (#1090).
+            if fields.iter().any(|f| !f.comments.is_empty()) {
+                fmt_record_type_multiline(out, fields, open, depth);
+            } else {
+                out.push_str("{ ");
+                comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
+                match (open, fields.is_empty()) {
+                    (true, false) => out.push_str(", .. "),
+                    (true, true) => out.push_str(".. "),
+                    (false, _) => out.push(' '),
+                }
+                out.push('}');
             }
-            out.push('}');
         }
         TypeExpr::Fn { params, ret } => {
             out.push_str("fn(");
@@ -666,11 +681,34 @@ fn fmt_variant_case(out: &mut String, case: &VariantCase, depth: usize) {
 }
 
 
-/// One record-field declaration: `name [as "alias"]: Ty [= default]`.
-/// The formatter must NOT drop the default or the serialization alias —
-/// both are semantic (defaults make fields omissible; aliases name the
-/// wire key), and silently deleting them broke round-tripped sources.
+/// A record type whose fields carry comments: one field per line, so each
+/// comment can sit above the field it documents.
+fn fmt_record_type_multiline(out: &mut String, fields: &[FieldType], open: bool, depth: usize) {
+    let inner = ind(depth + 1);
+    out.push_str("{\n");
+    for f in fields {
+        for c in &f.comments {
+            wln!(out, "{inner}{c}");
+        }
+        w!(out, "{inner}");
+        fmt_field_type(out, f, depth + 1);
+        out.push_str(",\n");
+    }
+    if open {
+        wln!(out, "{inner}..");
+    }
+    w!(out, "{}}}", ind(depth));
+}
+
+/// One record-field declaration: `[@attr…] name [as "alias"]: Ty [= default]`.
+/// The formatter must NOT drop the default, the serialization alias, or the
+/// attributes — all three are semantic (defaults make fields omissible,
+/// aliases name the wire key, attributes drive layout), and silently deleting
+/// them broke round-tripped sources.
 fn fmt_field_type(out: &mut String, f: &FieldType, depth: usize) {
+    for a in &f.attrs {
+        w!(out, "{} ", format_attribute(a));
+    }
     w!(out, "{}", f.name);
     if let Some(alias) = &f.alias { w!(out, " as \"{}\"", escape_dquoted(alias.as_str())); }
     out.push_str(": ");
