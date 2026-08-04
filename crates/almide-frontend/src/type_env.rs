@@ -118,6 +118,11 @@ pub struct TypeEnv {
     pub generic_protocol_bounds: std::collections::HashMap<Sym, Vec<Sym>>,
     /// Minimum required arguments for functions with default params: fn key -> min count
     pub fn_min_params: std::collections::HashMap<Sym, usize>,
+    /// Default parameter expressions, keyed by the SAME prefixed fn key as
+    /// `fn_min_params` (`lib.greet`, not `greet`). Lowering's own per-file map
+    /// only ever sees the program being lowered, so a call into an imported
+    /// module had no defaults to fill from (#1088).
+    pub fn_defaults: std::collections::HashMap<Sym, Vec<Option<almide_lang::ast::Expr>>>,
     /// Protocol definitions: protocol name → ProtocolDef
     pub protocols: std::collections::HashMap<Sym, ProtocolDef>,
     /// Types' declared protocol conformances: type name → set of protocol names
@@ -185,6 +190,7 @@ impl TypeEnv {
             structural_bounds: std::collections::HashMap::new(),
             generic_protocol_bounds: std::collections::HashMap::new(),
             fn_min_params: std::collections::HashMap::new(),
+            fn_defaults: std::collections::HashMap::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
             fn_decl_spans: std::collections::HashMap::new(),

@@ -159,6 +159,33 @@ fn rewrite_local_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &mut Vec
     *target = CallTarget::Named { name: *method };
 }
 
+/// The `env.functions` / `env.fn_defaults` key for a call target, when the
+/// target names a statically-known function. A `Module` target is keyed by the
+/// same `module.func` string registration used, so an imported callee is
+/// looked up exactly like a local one.
+fn target_fn_key(target: &CallTarget) -> Option<Sym> {
+    match target {
+        CallTarget::Named { name } => Some(*name),
+        CallTarget::Module { module, func, .. } => sym(&format!("{}.{}", module, func)).into(),
+        _ => None,
+    }
+}
+
+/// Default parameter expressions for a call target.
+///
+/// The per-file map answers first for a local call; `env.fn_defaults` carries
+/// the prefixed entries, which is what lets a call into an imported module
+/// fill its defaults at all — lowering runs once per module and never sees the
+/// callee's program (#1088).
+fn target_defaults(ctx: &LowerCtx, target: &CallTarget) -> Option<Vec<Option<ast::Expr>>> {
+    if let CallTarget::Named { name } = target {
+        if let Some(d) = ctx.fn_defaults.get(name) {
+            return Some(d.clone());
+        }
+    }
+    ctx.env.fn_defaults.get(&target_fn_key(target)?).cloned()
+}
+
 /// Place named arguments into their positional slots, filling any gap from the
 /// callee's defaults.
 ///
@@ -172,11 +199,11 @@ fn fill_named_args(
     named_args: &[(almide_base::intern::Sym, ast::Expr)],
     target: &CallTarget,
 ) {
-    let CallTarget::Named { name } = target else { return };
-    let param_names: Vec<String> = ctx.env.functions.get(name)
+    let Some(key) = target_fn_key(target) else { return };
+    let param_names: Vec<String> = ctx.env.functions.get(&key)
         .map(|sig| sig.params.iter().map(|(n, _)| n.to_string()).collect())
         .unwrap_or_default();
-    let defaults = ctx.fn_defaults.get(name).cloned();
+    let defaults = target_defaults(ctx, target);
     let positional_count = ir_args.len();
     if positional_count > param_names.len() {
         return;
@@ -320,9 +347,9 @@ fn lower_call_json_convenience(
 /// a 1:1 arg/param alignment so prepended const-type-args / UFCS objects
 /// don't desync the mapping. Verbatim text move; mutates `ir_args` in place.
 fn lower_call_fill_defaults(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, args: &[ast::Expr], target: &CallTarget) {
-    let CallTarget::Named { name } = target else { return };
-    let Some(defaults) = ctx.fn_defaults.get(name).cloned() else { return };
-    let param_names: Vec<Sym> = ctx.env.functions.get(name)
+    let Some(key) = target_fn_key(target) else { return };
+    let Some(defaults) = target_defaults(ctx, target) else { return };
+    let param_names: Vec<Sym> = ctx.env.functions.get(&key)
         .map(|sig| sig.params.iter().map(|(n, _)| almide_base::intern::sym(&n.to_string())).collect())
         .unwrap_or_default();
     let n_provided = ir_args.len();

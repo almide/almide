@@ -272,6 +272,12 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     }
     if min_p < params.len() {
         env.fn_min_params.insert(sym(&key), min_p);
+        // Keyed by the prefixed name so a caller in another module can fill
+        // these in — lowering's per-file map never sees an imported program.
+        env.fn_defaults.insert(
+            sym(&key),
+            params.iter().map(|p| p.default.as_ref().map(|d| (**d).clone())).collect(),
+        );
     }
 }
 pub fn validate_protocols(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>, derives: &[Sym], type_name: &str) {
