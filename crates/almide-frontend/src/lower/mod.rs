@@ -111,6 +111,14 @@ impl<'a> LowerCtx<'a> {
             if self.explicit_convention_fns.contains(&fn_name) {
                 return Some(fn_name);
             }
+            // The set above only holds the program being lowered, so a custom
+            // `repr` defined in ANOTHER module was silently skipped and the
+            // value fell through to the derived `AlmideRepr` impl — printing
+            // the variant name with no error anywhere (#1087).
+            let held = crate::canonicalize::registration::convention_fn_key(self.env, &type_name.to_string(), convention)?;
+            if self.env.explicit_convention_fns.contains(&held) {
+                return crate::canonicalize::registration::convention_emit_key(self.env, &type_name.to_string(), convention);
+            }
         }
         None
     }
@@ -118,9 +126,10 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn find_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
         if let Ty::Named(type_name, _) = ty {
             let fn_name = sym(&format!("{}.{}", type_name, convention));
-            // Check explicit definition
-            if self.env.functions.contains_key(&fn_name) {
-                return Some(fn_name);
+            // Check explicit definition, then the bare spelling a derived
+            // method is registered under (#1087).
+            if let Some(key) = crate::canonicalize::registration::convention_emit_key(self.env, &type_name.to_string(), convention) {
+                return Some(key);
             }
             // Check if auto-derive will generate it
             let conv_upper = match convention {

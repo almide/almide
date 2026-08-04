@@ -152,11 +152,32 @@ fn rewrite_crossmodule_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &m
 /// it would turn a diagnostic into a link failure.
 fn rewrite_local_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &mut Vec<IrExpr>) {
     let CallTarget::Method { object, method } = &*target else { return };
-    if method.as_str().contains('.') || !ctx.env.functions.contains_key(method) {
+    // A dotted CONVENTION key (`P.encode`) is rewritten too, not just a
+    // dot-free one. Left as a `Method`, the emitter flattens it to `P_encode`
+    // with no module, while the definition a derived method links to is
+    // `almide_rt_lib_P_encode` — the `Named` path is the one that re-attaches
+    // the module, and it is already what `lib.P.encode(x)` lowers to (#1087).
+    // A lowercase-prefixed dotted method is a module call and was rewritten by
+    // `rewrite_crossmodule_ufcs` above; anything still unknown here is the
+    // checker's error to report.
+    if !ctx.env.functions.contains_key(method) && !is_convention_method_of(ctx, &object.ty, method) {
         return;
     }
     ir_args.insert(0, (**object).clone());
     *target = CallTarget::Named { name: *method };
+}
+
+/// True when `method` (a dotted `Type.name` key) is a convention method of
+/// the receiver's type under EITHER registration spelling.
+///
+/// An explicit `fn Color.repr` inside a module is registered prefixed
+/// (`lib.Color.repr`), so the bare emit key `Color.repr` is absent from
+/// `env.functions` and the plain existence test above missed it — leaving the
+/// call a `Method`, which the emitter flattens with no module (#1087).
+fn is_convention_method_of(ctx: &LowerCtx, obj_ty: &Ty, method: &Sym) -> bool {
+    let Some((_, name)) = method.as_str().rsplit_once('.') else { return false };
+    let Ty::Named(type_name, _) = obj_ty else { return false };
+    crate::canonicalize::registration::convention_fn_key(ctx.env, &type_name.to_string(), name).is_some()
 }
 
 /// The `env.functions` / `env.fn_defaults` key for a call target, when the

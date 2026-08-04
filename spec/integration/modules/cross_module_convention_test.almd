@@ -1,0 +1,27 @@
+// #1087 / #1089: convention methods are keyed by the BARE type name while a
+// checked expression carries the canonical `varlib.T`, so every spelling that
+// starts from the receiver's type missed across an import. `varlib.T.method(x)`
+// — the one form that throws the module segment away — was the only one that
+// worked, and the custom-repr case failed SILENTLY by falling back to the
+// variant name.
+import json
+import varlib
+
+test "UFCS convention method resolves across a module boundary (#1087)" {
+  assert_eq(varlib.Warm.repr(), "warm")
+  assert_eq(varlib.Cool.repr(), "cool")
+}
+
+test "a custom repr is honoured by interpolation across a module boundary (#1087)" {
+  // The silent one: with no explicit repr found, this rendered `Warm`.
+  assert_eq("${varlib.Warm}", "warm")
+}
+
+test "derived encode resolves in method form across a module boundary (#1087)" {
+  let p = varlib.Pigment { r: 1, g: 2, b: 3 }
+  assert_eq(json.stringify(p.encode()), "{\"r\":1,\"g\":2,\"b\":3}")
+}
+
+test "json.encode convenience works across a module boundary (#1089)" {
+  assert_eq(json.encode(varlib.Pigment { r: 4, g: 5, b: 6 }), "{\"r\":4,\"g\":5,\"b\":6}")
+}

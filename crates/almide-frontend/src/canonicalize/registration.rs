@@ -114,6 +114,44 @@ pub fn infer_literal_composite(expr: &ast::Expr) -> Option<Ty> {
 pub fn prefixed_key(prefix: Option<&str>, name: &str) -> String {
     prefix.map(|p| format!("{}.{}", p, name)).unwrap_or_else(|| name.to_string())
 }
+
+/// The `env.functions` key for a convention method (`encode`, `repr`, …) on
+/// `type_name`, or `None` when the type has no such method.
+///
+/// The two producers disagree on shape and both are load-bearing: an EXPLICIT
+/// `fn Color.repr` inside module `lib` is registered prefixed
+/// (`lib.Color.repr`), while a DERIVED method is registered bare
+/// (`P.encode`) because that bare name is what lowering emits and what the
+/// backend resolves via `module_origin`. A checked expression carries the
+/// canonical `lib.P` either way, so the qualified spelling is tried first and
+/// the bare one is the fallback. Consumers must use the key this RETURNS —
+/// guessing one shape is exactly how `p.encode()`, `json.encode(p)` and
+/// `[T: Codec]` came to fail across an import (#1087, #1089).
+pub fn convention_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
+    let qualified = sym(&format!("{}.{}", type_name, method));
+    if env.functions.contains_key(&qualified) {
+        return Some(qualified);
+    }
+    let k = sym(&format!("{}.{}", bare_type_name(type_name), method));
+    env.functions.contains_key(&k).then_some(k)
+}
+
+fn bare_type_name(type_name: &str) -> &str {
+    type_name.rsplit_once('.').map_or(type_name, |(_, t)| t)
+}
+
+/// The name a convention-method CALL must carry, when the method exists.
+///
+/// Deliberately different from [`convention_fn_key`]: the checker needs the
+/// key that holds the signature (prefixed for an explicit method), while
+/// lowering needs the name the DEFINITION lowers to — always the bare
+/// `Type.method`, with the module re-attached later from `module_origin`.
+/// Emitting the prefixed spelling produced calls to `lib_Color_repr` against a
+/// definition called `almide_rt_lib_Color_repr` (#1087).
+pub fn convention_emit_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
+    convention_fn_key(env, type_name, method)
+        .map(|_| sym(&format!("{}.{}", bare_type_name(type_name), method)))
+}
 /// Substitute `Self` → concrete type in a protocol method type.
 fn substitute_self(ty: &Ty, replacement: &Ty) -> Ty {
     match ty {
@@ -304,29 +342,25 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
     let value_ty = Ty::Named(sym("Value"), vec![]);
     let empty_sb: HashMap<Sym, Ty> = HashMap::new();
     let empty_pb: HashMap<Sym, Vec<Sym>> = HashMap::new();
+    // The VALUE type is canonical (#433); the KEYS stay BARE. Consumers that
+    // hold a qualified `Ty::Named("lib.P")` reach these through
+    // `convention_fn_key`, which falls back to the bare spelling — registering
+    // the qualified key here instead would change the name LOWERING emits, and
+    // the backend resolves a derived method by its bare name plus
+    // `module_origin` (#1087).
+    let mut register = |env: &mut TypeEnv, method: &str, sig: FnSig| {
+        let key = format!("{}.{}", type_name, method);
+        if !env.functions.contains_key(&sym(&key)) {
+            env.functions.insert(sym(&key), sig);
+        }
+    };
     for d in derives {
         match d.as_str() {
-            "Eq" => {
-                let fn_key = format!("{}.eq", type_name);
-                if !env.functions.contains_key(&sym(&fn_key)) {
-                    env.functions.insert(sym(&fn_key), FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
-                }
-            }
-            "Repr" => {
-                let fn_key = format!("{}.repr", type_name);
-                if !env.functions.contains_key(&sym(&fn_key)) {
-                    env.functions.insert(sym(&fn_key), FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
-                }
-            }
+            "Eq" => register(env, "eq", FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] }),
+            "Repr" => register(env, "repr", FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] }),
             "Codec" => {
-                let encode_key = format!("{}.encode", type_name);
-                if !env.functions.contains_key(&sym(&encode_key)) {
-                    env.functions.insert(sym(&encode_key), FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
-                }
-                let decode_key = format!("{}.decode", type_name);
-                if !env.functions.contains_key(&sym(&decode_key)) {
-                    env.functions.insert(sym(&decode_key), FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
-                }
+                register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
+                register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
             }
             _ => {}
         }
@@ -514,12 +548,21 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
             _ => {}
         }
     }
-    validate_protocol_impls(env, diagnostics);
-    validate_derive_field_support(env, diagnostics);
+    // `infer_module` re-registers a module's decls UNPREFIXED so its own
+    // bodies resolve bare names, and marks that pass with `alias_owner_module`.
+    // Validating from inside it compared one module's bare `Span` against
+    // another's — over the WHOLE env, attributed to whichever file was under
+    // inference — which is how a Codec on one module's type produced a field
+    // mismatch pointing at an unrelated file (#1087). The canonical prefixed
+    // registration validates the same declarations properly.
+    if env.alias_owner_module.is_none() {
+        validate_protocol_impls(env, diagnostics);
+        validate_derive_field_support(env, diagnostics);
+    }
 }
 /// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function diagnostic (skipped for `@extern` re-exports), signature registration, and DefTable registration. Verbatim text move; `continue` in the original loop becomes an early `return` here (both simply skip the rest of this decl's registration and move on to the next `decl`).
 fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_fn: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl, prefix: Option<&str>) {
-    let ast::Decl::Fn { name, params, return_type, effect, generics, span, visibility, extern_attrs, .. } = decl else { unreachable!() };
+    let ast::Decl::Fn { name, params, return_type, effect, generics, span, visibility, extern_attrs, body, .. } = decl else { unreachable!() };
     // Skip duplicates that come from @extern re-export (name may appear twice by design).
     if extern_attrs.is_empty() {
         let key = prefixed_key(prefix, name);
@@ -556,6 +599,13 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
     let ret = env.functions.get(&sym(&fn_key)).map(|s| s.ret.clone()).unwrap_or(Ty::Unknown);
     let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Function, ret);
     env.def_map.insert(sym(&fn_key), did);
+    // An EXPLICIT `fn Type.method` with a body, recorded on the shared env so
+    // another module can find it. Lowering's own set only ever holds the
+    // program being lowered, so a custom `repr` was silently ignored across an
+    // import and `"${lib.Red}"` fell back to the variant name (#1087).
+    if name.contains('.') && body.is_some() {
+        env.explicit_convention_fns.insert(sym(&fn_key));
+    }
 }
 /// `ast::Decl::Test` arm of [`register_decls`] — E012 duplicate-test diagnostic. Verbatim text move; `continue` becomes an early `return` (see [`register_decl_fn`]).
 fn register_decl_test(diagnostics: &mut Vec<Diagnostic>, seen_test: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl) {
@@ -597,11 +647,18 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Type, resolved_ty);
     env.def_map.insert(sym(&type_key), did);
     if let Some(derives) = deriving {
+        // Recorded under the bare name AND the canonical prefixed one: a
+        // `[T: Codec]` bound resolves its argument to `Ty::Named("lib.P")` and
+        // looked that up here, where only bare `P` had ever been written — so
+        // a conforming type from another module was reported as not
+        // implementing the protocol (#1087).
         for d in derives {
-            env.type_protocols
-                .entry(sym(name))
-                .or_insert_with(std::collections::HashSet::new)
-                .insert(sym(d));
+            for key in [sym(name), sym(&type_key)] {
+                env.type_protocols
+                    .entry(key)
+                    .or_insert_with(std::collections::HashSet::new)
+                    .insert(sym(d));
+            }
         }
     }
 }

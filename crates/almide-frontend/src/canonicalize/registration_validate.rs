@@ -240,6 +240,14 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
         .collect();
 
     for (type_name, protocol_names) in &type_protocols {
+        // A BARE name that mirrors a prefixed type is a dual-registration
+        // alias, and the last module to register wins that slot. Validating
+        // through it compared one module's method against another module's
+        // fields, and filed the mismatch against whichever file happened to be
+        // under inference. The qualified entry is validated instead (#1087).
+        if env.prefixed_bare_aliases.contains(type_name) {
+            continue;
+        }
         let is_generic = env.types.get(type_name).is_some_and(|t| t.contains_typevar());
         let type_ty = Ty::Named(*type_name, vec![]);
 
@@ -274,7 +282,10 @@ fn validate_protocol_method_impl(
     method_sig: &crate::types::ProtocolMethodSig,
 ) {
     let ImplTarget { name: type_name, is_generic, ty: type_ty } = *target;
-    let fn_key = format!("{}.{}", type_name, method_sig.name);
+    // A derived method is keyed bare while an explicit one is keyed prefixed,
+    // so the key has to be resolved rather than assumed (#1087).
+    let fn_key = super::registration::convention_fn_key(env, &type_name.to_string(), &method_sig.name.to_string())
+        .map_or_else(|| format!("{}.{}", type_name, method_sig.name), |k| k.to_string());
     let Some(sig) = env.functions.get(&sym(&fn_key)) else {
         let is_builtin = matches!(proto_name.as_str(),
             "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode"

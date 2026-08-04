@@ -267,12 +267,15 @@ fn lower_call_target_convention_method(ctx: &mut LowerCtx, object: &ast::Expr, f
         _ => None,
     };
     if let Some(type_name) = type_name_opt {
-        let convention_key = format!("{}.{}", type_name, field);
-        if ctx.env.functions.contains_key(&sym(&convention_key))
-            || ctx.find_convention_fn(&Ty::Named(sym(&type_name), vec![]), field).is_some()
-        {
+        // Emit the key that EXISTS, not a key built from the receiver's type
+        // name. A derived method is registered (and defined) under the bare
+        // `P.encode`; constructing `lib.P.encode` here produced a call the IR
+        // verifier could not resolve (#1087).
+        let resolved = crate::canonicalize::registration::convention_emit_key(ctx.env, &type_name, field)
+            .or_else(|| ctx.find_convention_fn(&Ty::Named(sym(&type_name), vec![]), field));
+        if let Some(key) = resolved {
             let ir_obj = lower_expr(ctx, object);
-            return Some(CallTarget::Method { object: Box::new(ir_obj), method: sym(&convention_key) });
+            return Some(CallTarget::Method { object: Box::new(ir_obj), method: key });
         }
     }
     None

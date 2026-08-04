@@ -125,9 +125,14 @@ impl Checker {
             return Some(self.resolve_time_ctor(module, field, arg_tys));
         }
         // Codec convenience: `json.encode(t)` is String when `t` has `T.encode`.
+        // This arm returns before `resolve_module_member`, which is where the
+        // import is normally marked used — so `import json` was reported
+        // unused on a file whose very next token used it, and following the
+        // hint broke the build in a package (#1089).
         if field == "encode" && arg_tys.len() == 1 {
             let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
             if self.has_codec_encode(&arg_concrete) {
+                self.env.import_table.mark_used(module);
                 return Some(Ty::String);
             }
         }
@@ -461,7 +466,7 @@ impl Checker {
     /// Check if a type has a Codec encode function registered.
     fn has_codec_encode(&self, ty: &Ty) -> bool {
         match ty {
-            Ty::Named(name, _) => self.env.functions.contains_key(&sym(&format!("{}.encode", name))),
+            Ty::Named(name, _) => crate::canonicalize::registration::convention_fn_key(&self.env, &name.to_string(), "encode").is_some(),
             Ty::Record { .. } | Ty::Variant { .. } => {
                 self.env.types.iter().any(|(name, t)| t == ty && self.env.functions.contains_key(&sym(&format!("{}.encode", name))))
             }
