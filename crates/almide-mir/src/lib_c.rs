@@ -125,6 +125,13 @@ struct OwnershipScan {
         entry_rc: BTreeMap<ValueId, i64>,
         entry_dead: BTreeMap<ValueId, bool>,
         then_exit: Option<(BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>)>,
+        /// The `IfThen`'s result slot, and whether any arm merged a HEAP value
+        /// into it — the branch-result modeling of #1037's second gap: each arm
+        /// `Consume`s its value into the merge (net 0 inside the arm), and the
+        /// join re-materializes the moved reference as a fresh owned object on
+        /// `dst`, which the scope-end `Drop`/`Consume` then releases.
+        dst: Option<ValueId>,
+        merged_heap: bool,
     }
 
 impl OwnershipScan {
@@ -162,6 +169,24 @@ impl OwnershipScan {
             // the scalar element/index/value carry no ownership.
             Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => {
                 self.check_borrowed_use(i, *list)
+            }
+            // Scalar arithmetic carries no ownership — EXCEPT the ADDRESS form
+            // the payload-borrow idiom lowers to (`prim.handle(x) + offset`,
+            // then a `LoadHandle` at that address — `load_at_offset`): an `Add`
+            // with exactly one handle-derived operand denotes an address INTO
+            // that operand's object, and the alias must survive to the
+            // `LoadHandle` so the loaded child handle can be accounted rather
+            // than fall off the model (#1037 — every `option.unwrap_or` tuple/
+            // heap payload walled the native verifier on exactly this chain).
+            // The `PrimKind::Handle` rule, extended one hop; no `dead` entry is
+            // created — an address is never itself live-checked, only traversed.
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
+                match (self.object_of.get(a).copied(), self.object_of.get(b).copied()) {
+                    (Some(o), None) | (None, Some(o)) => {
+                        self.object_of.insert(*dst, o);
+                    }
+                    _ => {}
+                }
             }
             // A scalar — no ownership accounting.
             Op::Const { dst: _ }
@@ -223,9 +248,9 @@ impl OwnershipScan {
             }
             // The if-markers carry no ownership of their own, but they scope the
             // BRANCH JOIN: both arms run from the entry state and must agree.
-            Op::IfThen { .. } => self.enter_branch_frame(),
-            Op::Else { .. } => self.switch_to_else_arm(),
-            Op::EndIf { .. } => self.join_branch_arms(i),
+            Op::IfThen { dst, .. } => self.enter_branch_frame(*dst),
+            Op::Else { val } => self.switch_to_else_arm(*val),
+            Op::EndIf { val } => self.join_branch_arms(i, *val),
             // VALUE-RC modeling (柱C extension) — bring the Value refcount ops out of the prim blind
             // spot for the NAMEABLE case: prim.handle(v) carries its source object in args[0], so the
             // self.rc events on it verify against the same self.rc machine. load64-fed handles have no carrier
@@ -335,19 +360,24 @@ impl OwnershipScan {
 
     /// Extracted from [`Self::step`] (codopsy r2, #852): the `IfThen` arm — open a
     /// branch frame remembering the ENTRY state both arms run from. Verbatim.
-    fn enter_branch_frame(&mut self) {
+    fn enter_branch_frame(&mut self, dst: Option<ValueId>) {
         self.branches.push(BranchFrame {
             entry_rc: self.rc.clone(),
             entry_dead: self.dead.clone(),
             then_exit: None,
+            dst,
+            merged_heap: false,
         });
     }
 
     /// Extracted from [`Self::step`] (codopsy r2, #852): the `Else` arm — park the
     /// then arm's EXIT state in the frame and rewind the scan to the entry state, so
     /// the else arm runs from the same place the then arm did. Verbatim.
-    fn switch_to_else_arm(&mut self) {
+    fn switch_to_else_arm(&mut self, val: Option<ValueId>) {
+        let then_val_heap =
+            val.is_some_and(|v| self.object_of.contains_key(&v));
         if let Some(fr) = self.branches.last_mut() {
+            fr.merged_heap |= then_val_heap;
             fr.then_exit = Some((self.rc.clone(), self.dead.clone()));
             self.rc = fr.entry_rc.clone();
             self.dead = fr.entry_dead.clone();
@@ -357,11 +387,22 @@ impl OwnershipScan {
     /// Extracted from [`Self::step`] (codopsy r2, #852): the `EndIf` arm — close the
     /// frame, then run the two phases the arm always ran in this order, the
     /// agreement CHECK first (it only reads) and the JOIN second. Verbatim.
-    fn join_branch_arms(&mut self, i: usize) {
-        if let Some(fr) = self.branches.pop() {
+    fn join_branch_arms(&mut self, i: usize, val: Option<ValueId>) {
+        let this_arm_heap = val.is_some_and(|v| self.object_of.contains_key(&v));
+        if let Some(mut fr) = self.branches.pop() {
+            fr.merged_heap |= this_arm_heap;
+            let dst = fr.dst.filter(|_| fr.merged_heap);
             let (then_rc, then_dead) = self.take_then_arm_exit(fr);
             self.check_branch_agreement(i, &then_rc);
             self.merge_branch_exits(then_rc, then_dead);
+            // A HEAP branch result: each arm moved its value into the merge
+            // (`Consume`, net 0 in-arm), so the join owns the moved reference —
+            // a fresh object on the `IfThen` dst, released by the scope-end
+            // Drop/Consume exactly like a call result (#1037, second gap: the
+            // unmodeled dst made every later Drop of it a phantom DoubleFree).
+            if let Some(d) = dst {
+                self.own_fresh_object(d);
+            }
         }
     }
 
@@ -441,6 +482,23 @@ impl OwnershipScan {
             // borrowing use (a `CallArg::Handle` into println) live-checks
             // against the Result value the caller still owns.
             PrimKind::ResErrStr => {
+                if let (Some(d), Some(&o)) =
+                    (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
+                {
+                    self.object_of.insert(*d, o);
+                    self.dead.insert(*d, false);
+                }
+            }
+            // A `LoadHandle` through a TRACKED address (the `IntBinOp Add` alias
+            // above): the loaded CHILD handle — an Option/Result payload, a
+            // record field — ALIASES the parent object for accounting, the same
+            // conflation `ResErrStr` already makes for the Err String. A `Dup`
+            // of it acquires a reference counted on the parent; the matching
+            // `Drop` releases it — per-object balance is preserved, and the
+            // live-check grounds out on the parent the frame still owns
+            // (#1037). An address with NO tracked root stays off the model
+            // (the pre-existing load64 floor) — unknown, never guessed.
+            PrimKind::LoadHandle => {
                 if let (Some(d), Some(&o)) =
                     (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
                 {

@@ -168,4 +168,119 @@ mod tests {
         assert!(Repr::Boxed { layout: PLACEHOLDER_LAYOUT }.is_heap());
         assert!(!Repr::Scalar { width: ScalarWidth::Double }.is_heap());
     }
+
+    // ── #1037: the payload-borrow chain and the heap branch result ──
+
+    /// The `option.unwrap_or` payload chain: `prim.handle(opt) + 12` →
+    /// `LoadHandle` (the BORROWED payload) → `Dup` (a fresh owned ref) → reads
+    /// → `Drop`. Pre-#1037 the address `IntBinOp` broke the alias chain, the
+    /// loaded handle fell off the model, and the `Dup` was a phantom
+    /// UseAfterFree.
+    fn shape_payload_borrow() -> MirFunction {
+        let (opt, addr_h, off, addr, payload, owned) = (v(0), v(1), v(2), v(3), v(4), v(5));
+        func(vec![
+            Op::Alloc { dst: opt, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(addr_h), args: vec![opt] },
+            Op::ConstInt { dst: off, value: 12 },
+            Op::IntBinOp { dst: addr, op: IntOp::Add, a: addr_h, b: off },
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(payload), args: vec![addr] },
+            Op::Dup { dst: owned, src: payload },
+            Op::ListGetScalar { dst: v(6), list: owned, idx: off },
+            Op::Drop { v: owned },
+            Op::Drop { v: opt },
+        ])
+    }
+
+    #[test]
+    fn payload_borrow_chain_verifies_balanced() {
+        assert_eq!(verify_ownership(&shape_payload_borrow()), Ok(()));
+    }
+
+    #[test]
+    fn payload_borrow_after_parent_free_is_caught() {
+        // The same chain with the PARENT dropped before the Dup: the loaded
+        // handle aliases a freed object — must stay a violation, or the
+        // widening would accept a real use-after-free.
+        let (opt, addr_h, off, addr, payload, owned) = (v(0), v(1), v(2), v(3), v(4), v(5));
+        let f = func(vec![
+            Op::Alloc { dst: opt, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(addr_h), args: vec![opt] },
+            Op::ConstInt { dst: off, value: 12 },
+            Op::IntBinOp { dst: addr, op: IntOp::Add, a: addr_h, b: off },
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(payload), args: vec![addr] },
+            Op::Drop { v: opt }, // parent freed FIRST
+            Op::Dup { dst: owned, src: payload },
+            Op::Drop { v: owned },
+        ]);
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::UseAfterFree));
+    }
+
+    #[test]
+    fn untracked_load_handle_stays_off_the_model() {
+        // A LoadHandle through a RAW address (no tracked root): the loaded
+        // handle stays unknown, and a Dup of it still reports — the load64
+        // floor is not widened (#1037's discipline: unknown, never guessed).
+        let (raw, payload, owned) = (v(0), v(1), v(2));
+        let f = func(vec![
+            Op::ConstInt { dst: raw, value: 8192 },
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(payload), args: vec![raw] },
+            Op::Dup { dst: owned, src: payload },
+            Op::Drop { v: owned },
+        ]);
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::UseAfterFree));
+    }
+
+    /// A HEAP branch result: each arm nets 0 (its value is Consumed into the
+    /// merge), the join owns the moved reference on the `IfThen` dst, and the
+    /// scope-end Consume releases it. Pre-#1037 the dst was unmodeled and the
+    /// release was a phantom UseAfterMove.
+    fn shape_heap_branch_result() -> MirFunction {
+        let (opt, cond, res, payload, owned, lit) = (v(0), v(1), v(2), v(3), v(4), v(5));
+        func(vec![
+            Op::Alloc { dst: opt, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(v(6)), args: vec![opt] },
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(payload), args: vec![v(6)] },
+            Op::Const { dst: cond },
+            Op::IfThen { cond, dst: Some(res) },
+            Op::Dup { dst: owned, src: payload },
+            Op::Consume { v: owned }, // moved into the merge
+            Op::Else { val: Some(owned) },
+            Op::ListLit { dst: lit, elems: vec![] },
+            Op::Consume { v: lit }, // moved into the merge
+            Op::EndIf { val: Some(lit) },
+            Op::Drop { v: opt },
+            Op::Consume { v: res }, // the branch result, released at scope end
+        ])
+    }
+
+    #[test]
+    fn heap_branch_result_verifies_balanced() {
+        assert_eq!(verify_ownership(&shape_heap_branch_result()), Ok(()));
+    }
+
+    #[test]
+    fn double_release_of_a_branch_result_is_caught() {
+        let mut f = shape_heap_branch_result();
+        f.ops.push(Op::Drop { v: v(2) }); // a second release of the result
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::DoubleFree && e.value == v(2)));
+    }
+
+    #[test]
+    fn scalar_branch_result_stays_unmodeled() {
+        // A SCALAR IfThen dst (both arm vals untracked) must NOT become an
+        // owned object — no phantom Leak at function end.
+        let (cond, res) = (v(0), v(1));
+        let f = func(vec![
+            Op::Const { dst: cond },
+            Op::IfThen { cond, dst: Some(res) },
+            Op::ConstInt { dst: v(2), value: 1 },
+            Op::Else { val: Some(v(2)) },
+            Op::ConstInt { dst: v(3), value: 2 },
+            Op::EndIf { val: Some(v(3)) },
+        ]);
+        assert_eq!(verify_ownership(&f), Ok(()));
+    }
 }
