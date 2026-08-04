@@ -6,6 +6,13 @@
 //
 // Reported against map.fold with a scalar accumulator, but the trigger is the
 // wrapping paren, so every parenthesized lambda argument was affected.
+//
+// NOTE: this file pins the POSITIVE side only — that a parenthesized lambda
+// still means what it says. It passes on the buggy compiler too, because the
+// defect was an ill-typed program being ACCEPTED, which a runnable test cannot
+// express. The actual guard is the negative fixture
+// `tests/diagnostics/paren-lambda-arg-unpinned/`, which asserts that the
+// ill-typed spelling is rejected; verify changes there.
 test "a parenthesized lambda still sees its pinned parameter types (#1018)" {
   let m: Map[String, Int] = ["a": 1, "b": 2]
   // The REAL parameter order is (acc, k, v); naming them (k, v, acc) means the
