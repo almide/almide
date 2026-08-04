@@ -794,6 +794,16 @@ pub fn almide_rt_bytes_append_i64_le(b: &mut Vec<u8>, val: i64) {
 // the stdlib decl.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Endian { LittleEndian, BigEndian }
+// The repr the codegen-emitted decl used to carry — the decl emission is
+// skipped now (the runtime owns the type), so the impl lives here.
+impl AlmideRepr for Endian {
+    fn almide_repr(&self) -> String {
+        match self {
+            Endian::LittleEndian => "LittleEndian".to_string(),
+            Endian::BigEndian => "BigEndian".to_string(),
+        }
+    }
+}
 #[allow(non_snake_case)]
 pub fn LittleEndian() -> Endian { Endian::LittleEndian }
 #[allow(non_snake_case)]

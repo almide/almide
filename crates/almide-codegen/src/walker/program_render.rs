@@ -104,6 +104,16 @@ fn render_program_type_decls(ctx: &RenderContext, program: &IrProgram, parts: &m
     // Track emitted names to deduplicate across modules
     let mut emitted_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for td in &program.type_decls {
+        // `bytes.Endian` is RUNTIME-OWNED (#1098): the native runtime defines
+        // the enum (plus its ctor shims for the auto-import case, where this
+        // decl never reaches the program), so emitting the bundled decl here
+        // duplicated it (E0428) whenever `import bytes` was explicit. The
+        // ctor REGISTRATION stays (register_ctor_to_enum) so construction
+        // still emits `Endian::LittleEndian`. A user type named Endian cannot
+        // exist — the checker rejects it as ambiguous against the stdlib decl.
+        if td.name.as_str() == "Endian" {
+            continue;
+        }
         emitted_types.insert(td.name.as_str().to_string());
         let mut rendered = render_type_decl(ctx, td);
         if let Some(ref doc) = td.doc {
