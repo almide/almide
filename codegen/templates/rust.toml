@@ -49,10 +49,15 @@ template = "almide_index!({object}, {index})"
 template = "{callee}({pipe_arg}, {args})"
 
 # ── Concat (type-dispatched) ──
+# Both arms route through AlmideConcat, whose owned impls extend in place
+# (push_str / extend) — same bytes as the old format!("{}{}") String arm,
+# but an OWNED left operand (the TCO accumulator move) keeps its capacity,
+# making a tail-recursive string builder amortized O(n) instead of
+# reallocating on every iteration.
 
 [[concat_expr]]
 when_type = "String"
-template = "format!(\"{{}}{{}}\", {left}, {right})"
+template = "AlmideConcat::concat({left}, {right})"
 
 [[concat_expr]]
 when_type = "List"

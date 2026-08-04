@@ -31,7 +31,8 @@ impl NanoPass for CloneInsertionPass {
         let syntactic = compute_syntactic_counts_program(&program);
 
         let always_marks = program.codegen_annotations.always_clone_vars.clone();
-        let (always, eligible) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks);
+        let tco_owned = program.codegen_annotations.tco_owned_params.clone();
+        let (always, eligible) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks, &tco_owned);
         let mut remaining = build_remaining(&eligible, &syntactic);
 
         for func in &mut program.functions {
@@ -48,7 +49,7 @@ impl NanoPass for CloneInsertionPass {
         for module in modules.iter_mut() {
             let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
             let module_syntactic = compute_syntactic_counts_module(module);
-            let (m_always, m_eligible) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks);
+            let (m_always, m_eligible) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks, &tco_owned);
             let mut m_remaining = build_remaining(&m_eligible, &module_syntactic);
 
             for func in module.functions.iter_mut() {
@@ -143,6 +144,7 @@ fn split_clone_ids(
     top_let_vars: &HashSet<VarId>,
     syntactic: &HashMap<VarId, u32>,
     always_clone_marks: &HashSet<VarId>,
+    tco_owned_params: &HashSet<VarId>,
 ) -> (HashSet<VarId>, HashSet<VarId>) {
     let mut always = HashSet::new();
     let mut eligible = HashSet::new();
@@ -151,6 +153,13 @@ fn split_clone_ids(
         let id = VarId(i as u32);
         let info = vt.get(id);
         if !needs_clone(&info.ty) { continue; }
+        // A TCO loop param whose clone/move decisions the TailCallOpt pass
+        // made itself: every consuming read is already explicitly Clone-
+        // wrapped or a deliberate bare move at a provably-final read. In
+        // NEITHER set, its remaining bare reads fall through as moves —
+        // the in-loop always-clone rule here is what made tail-recursive
+        // list/string accumulators O(n²) on native (wasm ran O(n)).
+        if tco_owned_params.contains(&id) { continue; }
 
         let name = almide_base::intern::resolve(info.name);
         if top_let_vars.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_))
