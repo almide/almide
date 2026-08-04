@@ -283,4 +283,33 @@ mod tests {
         ]);
         assert_eq!(verify_ownership(&f), Ok(()));
     }
+
+    #[test]
+    fn nested_branch_result_merged_live_is_a_move() {
+        // The charge-probe `branch` fixture's `classify` shape: an INNER
+        // branch result (owned by the inner join) merged LIVE into the outer
+        // EndIf. The merge is the move — released inside the arm — so the
+        // arms agree and nothing leaks. This was the CI regression the first
+        // #1037 join modeling shipped (BranchDisagreement + Leak on the inner
+        // result).
+        let (c1, outer, s1, c2, inner, s2, s3) = (v(0), v(1), v(2), v(3), v(4), v(5), v(6));
+        let mut f = func(vec![
+            Op::Const { dst: c1 },
+            Op::IfThen { cond: c1, dst: Some(outer) },
+            Op::Alloc { dst: s1, repr: heap(), init: Init::Str("zero".into()) },
+            Op::Consume { v: s1 },
+            Op::Else { val: Some(s1) },
+            Op::Const { dst: c2 },
+            Op::IfThen { cond: c2, dst: Some(inner) },
+            Op::Alloc { dst: s2, repr: heap(), init: Init::Str("one".into()) },
+            Op::Consume { v: s2 },
+            Op::Else { val: Some(s2) },
+            Op::Alloc { dst: s3, repr: heap(), init: Init::Str("two".into()) },
+            Op::Consume { v: s3 },
+            Op::EndIf { val: Some(s3) },
+            Op::EndIf { val: Some(inner) }, // the inner result merged LIVE
+        ]);
+        f.ret = Some(outer); // the boundary consume releases the outer result
+        assert_eq!(verify_ownership(&f), Ok(()));
+    }
 }

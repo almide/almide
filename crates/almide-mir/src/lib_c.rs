@@ -125,13 +125,18 @@ struct OwnershipScan {
         entry_rc: BTreeMap<ValueId, i64>,
         entry_dead: BTreeMap<ValueId, bool>,
         then_exit: Option<(BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>)>,
-        /// The `IfThen`'s result slot, and whether any arm merged a HEAP value
-        /// into it — the branch-result modeling of #1037's second gap: each arm
-        /// `Consume`s its value into the merge (net 0 inside the arm), and the
-        /// join re-materializes the moved reference as a fresh owned object on
-        /// `dst`, which the scope-end `Drop`/`Consume` then releases.
+        /// The `IfThen`'s result slot, and whether any arm MOVED a heap value
+        /// into it — the branch-result modeling of #1037's second gap. An arm's
+        /// merge value arrives either already `Consume`d (the Alloc+Consume
+        /// pattern) or as a LIVE owned value (a nested branch result), which
+        /// the merge itself moves ([`OwnershipScan::merge_val_move`] releases
+        /// it). Either way the arm nets 0 and the join re-materializes the
+        /// moved reference as a fresh owned object on `dst`, which the
+        /// scope-end `Drop`/`Consume` then releases. A live-but-UNOWNED value
+        /// (a borrowed param) is NOT a move — `dst` stays unmodeled and a
+        /// later release of it walls conservatively, as before.
         dst: Option<ValueId>,
-        merged_heap: bool,
+        moved_in: bool,
     }
 
 impl OwnershipScan {
@@ -366,7 +371,7 @@ impl OwnershipScan {
             entry_dead: self.dead.clone(),
             then_exit: None,
             dst,
-            merged_heap: false,
+            moved_in: false,
         });
     }
 
@@ -374,10 +379,11 @@ impl OwnershipScan {
     /// then arm's EXIT state in the frame and rewind the scan to the entry state, so
     /// the else arm runs from the same place the then arm did. Verbatim.
     fn switch_to_else_arm(&mut self, val: Option<ValueId>) {
-        let then_val_heap =
-            val.is_some_and(|v| self.object_of.contains_key(&v));
+        // The move into the merge happens BEFORE the arm's exit state is
+        // snapshotted — the release is part of the then arm's accounting.
+        let moved = self.merge_val_move(val);
         if let Some(fr) = self.branches.last_mut() {
-            fr.merged_heap |= then_val_heap;
+            fr.moved_in |= moved;
             fr.then_exit = Some((self.rc.clone(), self.dead.clone()));
             self.rc = fr.entry_rc.clone();
             self.dead = fr.entry_dead.clone();
@@ -388,22 +394,43 @@ impl OwnershipScan {
     /// frame, then run the two phases the arm always ran in this order, the
     /// agreement CHECK first (it only reads) and the JOIN second. Verbatim.
     fn join_branch_arms(&mut self, i: usize, val: Option<ValueId>) {
-        let this_arm_heap = val.is_some_and(|v| self.object_of.contains_key(&v));
+        let moved = self.merge_val_move(val);
         if let Some(mut fr) = self.branches.pop() {
-            fr.merged_heap |= this_arm_heap;
-            let dst = fr.dst.filter(|_| fr.merged_heap);
+            fr.moved_in |= moved;
+            let dst = fr.dst.filter(|_| fr.moved_in);
             let (then_rc, then_dead) = self.take_then_arm_exit(fr);
             self.check_branch_agreement(i, &then_rc);
             self.merge_branch_exits(then_rc, then_dead);
             // A HEAP branch result: each arm moved its value into the merge
-            // (`Consume`, net 0 in-arm), so the join owns the moved reference —
-            // a fresh object on the `IfThen` dst, released by the scope-end
-            // Drop/Consume exactly like a call result (#1037, second gap: the
-            // unmodeled dst made every later Drop of it a phantom DoubleFree).
+            // (explicitly `Consume`d, or released by `merge_val_move`), so the
+            // join owns the moved reference — a fresh object on the `IfThen`
+            // dst, released by the scope-end Drop/Consume exactly like a call
+            // result (#1037, second gap: the unmodeled dst made every later
+            // Drop of it a phantom DoubleFree).
             if let Some(d) = dst {
                 self.own_fresh_object(d);
             }
         }
+    }
+
+    /// Does this arm's merge value MOVE a heap reference into the branch
+    /// result? Three cases (#1037, refined by the nested-branch regression the
+    /// charge-probe `branch` fixture caught):
+    ///   - already dead: the arm `Consume`d it into the merge (Alloc+Consume);
+    ///   - live and OWNED (rc >= 1 — a nested branch result): the merge itself
+    ///     is the move, so release the reference here, inside the arm;
+    ///   - live but unowned (a borrowed param), or untracked (scalar): no move.
+    fn merge_val_move(&mut self, val: Option<ValueId>) -> bool {
+        let Some(v) = val else { return false };
+        let Some(&o) = self.object_of.get(&v) else { return false };
+        if self.dead.get(&v).copied().unwrap_or(true) {
+            return true;
+        }
+        if self.rc.get(&o).copied().unwrap_or(0) >= 1 {
+            let _ = release(&self.object_of, &mut self.rc, &mut self.dead, &self.borrowed, v);
+            return true;
+        }
+        false
     }
 
     /// Extracted from [`Self::step`]'s `EndIf` arm (codopsy r2, #852, phase 1 of 3):
