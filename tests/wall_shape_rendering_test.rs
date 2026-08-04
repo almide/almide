@@ -122,4 +122,76 @@ fn while_heap_accumulator_wall_renders_headline_hint_caret_and_note() {
         !headline_line.contains("model-one-iteration"),
         "the raw reason leaked back into the headline:\n{stderr}"
     );
+    assert_wall_marker_line(&stderr);
+}
+
+/// Every wall's stderr must carry the ONE machine-readable line the nightly
+/// fuzzer's honest-wall classifier keys on: `wall: <reason>` (the shared
+/// `almide::WASM_WALL_MARKER`). The human diagnostic may be reworked freely;
+/// dropping this line turns every honest wall into a phantom
+/// WasmBuildFailure finding and fails the night on subset debt — which is
+/// exactly what happened when #931 reworked the old `wall: {e:?}` form.
+fn assert_wall_marker_line(stderr: &str) {
+    let marker_lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with(almide::WASM_WALL_MARKER))
+        .collect();
+    assert!(
+        marker_lines.len() == 1,
+        "expected exactly one `{}` marker line, got {}:\n{stderr}",
+        almide::WASM_WALL_MARKER,
+        marker_lines.len()
+    );
+    let reason = &marker_lines[0][almide::WASM_WALL_MARKER.len()..];
+    assert!(!reason.trim().is_empty(), "empty wall reason in marker line:\n{stderr}");
+}
+
+/// The nightly regression shape (seed 1785822431097787593 index 16): a
+/// higher-order stdlib argument whose closure CAPTURES a local, on a NESTED
+/// Result (the flat `Result[Int, String]` variant is liftable and already
+/// compiles). This walls through the SPANLESS render path (no caret, banner
+/// form) — the marker line must be there too, or the fuzzer misfiles the
+/// wall as a finding.
+const CAPTURING_CLOSURE_HOF: &str = r#"fn main() -> Unit = {
+  let n: Result[Result[Int, String], String] = err("boom")
+  let r: Result[Result[Int, String], String] = result.or_else(n, ((e) => n))
+  println("${result.is_ok(r)}")
+}
+"#;
+
+#[test]
+fn capturing_closure_hof_wall_emits_the_marker_line() {
+    if !tool_available() {
+        eprintln!("skipping: almide binary not available");
+        return;
+    }
+    let dir =
+        std::env::temp_dir().join(format!("almide-wall-marker-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("wall.almd");
+    std::fs::write(&src, CAPTURING_CLOSURE_HOF).unwrap();
+
+    let output = Command::new(almide_bin())
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "-o",
+            dir.join("wall.wasm").to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn almide");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    std::fs::remove_dir_all(&dir).ok();
+
+    // If this build ever SUCCEEDS, the subset absorbed capturing-closure
+    // HOF arguments — celebrate, then repoint the fixture at the next
+    // still-walled shape from the wall histogram.
+    assert!(
+        !output.status.success(),
+        "a walled build must fail (v0 was retired; a wall is an honest error), got success.\nstderr: {stderr}"
+    );
+    assert_wall_marker_line(&stderr);
 }

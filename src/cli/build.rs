@@ -568,6 +568,15 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
                      https://github.com/almide/almide/issues"
                 ));
             }
+            // The one machine-readable line in a wall's stderr, on BOTH render
+            // paths: `wall: <reason>`, whitespace-flattened to stay a single
+            // line. The nightly fuzzer's honest-wall classifier keys on
+            // crate::WASM_WALL_MARKER (shared through its `almide` path-dep) —
+            // the human diagnostic above may be reworked freely, this line may
+            // not (tests/wall_shape_rendering_test.rs pins it).
+            let reason_one_line =
+                e.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
+            err(&format!("{}{reason_one_line}", crate::WASM_WALL_MARKER));
             Err(())
         }
     }

@@ -53,6 +53,21 @@ pub mod project;
 pub mod project_fetch;
 pub mod resolve;
 
+// ── Wall marker: the machine-readable line of a wasm wall's stderr ──
+//
+// When the verified wasm renderer refuses a program (an honest wall, #782),
+// the HUMAN diagnostic is free to evolve — #931 already reworked it once,
+// from `wall: {e:?}` to headline + caret + note — but the nightly fuzzer's
+// honest-wall classifier string-matched the OLD form and silently rotted:
+// every wall became a WasmBuildFailure finding and the night went red on
+// subset debt. This constant is the contract now: a walled
+// `almide build/run --target wasm` always emits exactly one stderr line
+// `wall: <reason>` (whitespace-flattened, after the human diagnostic), and
+// xtarget-fuzz's ladder classifies on this same constant through its
+// `almide` path-dep. tests/wall_shape_rendering_test.rs pins the emission —
+// a diagnostic rework that drops the line fails the test, not the nightly.
+pub const WASM_WALL_MARKER: &str = "wall: ";
+
 // ── CLI output routing ──
 //
 // A CLI's whole job is printing to the user, so println!/eprintln!/print!/

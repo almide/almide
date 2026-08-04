@@ -22,11 +22,12 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "almide"
-version = "0.41.0"
+version = "0.53.4"
 dependencies = [
  "almide-base",
  "almide-codegen",
  "almide-dialect",
+ "almide-driver",
  "almide-frontend",
  "almide-interp",
  "almide-ir",
@@ -80,6 +81,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-driver"
+version = "0.12.2"
+dependencies = [
+ "almide-base",
+ "almide-frontend",
+ "almide-ir",
+ "almide-lang",
+ "almide-optimize",
+]
+
+[[package]]
 name = "almide-egg-lab"
 version = "0.1.0"
 dependencies = [
@@ -105,6 +117,7 @@ name = "almide-interp"
 version = "0.1.0"
 dependencies = [
  "almide-base",
+ "almide-driver",
  "almide-frontend",
  "almide-ir",
  "almide-lang",
@@ -136,6 +149,7 @@ dependencies = [
 name = "almide-mir"
 version = "0.1.0"
 dependencies = [
+ "almide-driver",
  "almide-frontend",
  "almide-ir",
  "almide-lang",

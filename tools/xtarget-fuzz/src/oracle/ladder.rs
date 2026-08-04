@@ -36,11 +36,15 @@ pub enum Outcome {
     Finding(Finding),
 
     /// The v1 wasm renderer declined the program with an HONEST wall
-    /// (`Unsupported(...)` — #782: a wall is a clean error, never a silent
-    /// fallback). This is SUBSET-COVERAGE debt, not a divergence bug: the
-    /// program has no wasm leg to compare. Counted separately (the wall
-    /// rate is its own metric); `reason` is the wall line for the
-    /// burn-down histogram.
+    /// (#782: a wall is a clean error, never a silent fallback). This is
+    /// SUBSET-COVERAGE debt, not a divergence bug: the program has no wasm
+    /// leg to compare. Counted separately (the wall rate is its own
+    /// metric); `reason` is the wall reason for the burn-down histogram.
+    /// Recognized by the `almide::WASM_WALL_MARKER` stderr line — a shared
+    /// constant, not a copied string: the first classifier here matched a
+    /// diagnostic form (`wall: Unsupported(...)`) that #931's rework then
+    /// removed, so every wall was misfiled as a WasmBuildFailure finding
+    /// and the nightly went red on subset debt.
     Walled { reason: String },
 
     /// The program could not be evaluated to a comparison (e.g. wasm
@@ -223,12 +227,20 @@ pub fn run_ladder(
     // ── Rung (d): wasm build ──
     let wasm_build = tc.build_wasm(file, wasm_out);
     if !wasm_build.success() {
-        // An HONEST wall (`wall: Unsupported(...)`) is subset-coverage debt,
-        // not a finding — there is no wasm leg to diverge. Anything else
-        // (validator failure, panic, missing-wall crash) stays a finding.
+        // An HONEST wall is subset-coverage debt, not a finding — there is
+        // no wasm leg to diverge. Anything else (validator failure, panic,
+        // missing-wall crash) stays a finding. The marker is the shared
+        // `almide::WASM_WALL_MARKER` contract line the CLI emits on every
+        // wall path (pinned by tests/wall_shape_rendering_test.rs) — never
+        // a locally copied string, which is how the first classifier here
+        // silently rotted when #931 reworked the wall diagnostic.
         let stderr = String::from_utf8_lossy(&wasm_build.stderr);
-        if let Some(line) = stderr.lines().find(|l| l.contains("wall: Unsupported")) {
-            return Outcome::Walled { reason: line.trim().to_string() };
+        if let Some(line) =
+            stderr.lines().map(str::trim).find(|l| l.starts_with(almide::WASM_WALL_MARKER))
+        {
+            return Outcome::Walled {
+                reason: line[almide::WASM_WALL_MARKER.len()..].to_string(),
+            };
         }
         return Outcome::Finding(Finding {
             rung: Rung::WasmBuild,
