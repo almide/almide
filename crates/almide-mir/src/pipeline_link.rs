@@ -240,7 +240,7 @@ fn link_self_host_runtime_to_fixpoint(
             let any_defined =
                 entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
             if any_called && !any_defined {
-                let rt = source_to_ir(rt_source)?;
+                let rt = source_to_ir(rt_source).map_err(|e| LowerError::Unsupported(format!("in registry source (first entry {:?}): {e:?}", entries.first())))?;
                 let linked_from = functions.len();
                 for f in &rt.functions {
                     lower_and_link_one_runtime_fn(f, layouts, entries, verbose, functions);

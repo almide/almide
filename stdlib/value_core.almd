@@ -3,7 +3,11 @@
 // payload@12]: the `len` header field carries the variant TAG (0=Null, 1=Bool, 2=Int, 3=Float),
 // the 8-byte payload slot holds the scalar value (Bool 0/1, Int, or f64 BITS). Drops flat (scalar
 // payload, no nested ownership). Str/Array/Object (heap payloads, tags 4/5/6) are a refinement.
-import prim
+//
+// NO `import prim` here (and do not let `almide fmt` insert one): the render
+// pipeline SPLICES this file after the user program (`{source}\n{value_core_src}\n{drops}`,
+// pipeline.rs), where a mid-file import is a parse error — the #1078 fmt sweep
+// broke every Codec-deriving wasm build exactly this way.
 
 fn value_null() -> Value = {
   let v = prim.alloc_value(1)
