@@ -216,11 +216,13 @@ fn test_walker_concat_type_dispatch() {
         span: None, def_id: None,
     };
 
-    // Rust: format!("{}{}", a, b)
+    // Rust: AlmideConcat::concat(a, b) — the owned String impl extends in
+    // place (push_str), so a TCO-moved accumulator keeps its capacity; the
+    // old format!("{}{}") arm reallocated on every step.
     let rust_templates = template::rust_templates();
     let rust_ctx = RenderContext::new(&rust_templates, &var_table);
     let rust_out = walker::render_expr(&rust_ctx, &concat);
-    assert!(rust_out.contains("format!"), "Rust concat should use format!: {}", rust_out);
+    assert!(rust_out.contains("AlmideConcat::concat"), "Rust concat should use AlmideConcat: {}", rust_out);
 
 }
 
