@@ -474,9 +474,41 @@ Remove all elements in place. Requires var binding.
 list.clear(xs)
 ```
 
+
+## The try_* family — effectful pipelines (#1041)
+
+Each `try_<core>` takes the same callback as its core, lifted to
+`-> Result[_, E]`, returns `Result[_, E]`, and **short-circuits on the first
+err** (elements after it are never evaluated). Inside an effect fn the
+callback's body may call effect fns, so the pipeline keeps the combinator
+shape instead of falling back to `var + for`:
+
+```almd
+effect fn read_all(files: List[String]) -> List[Entry] =
+  files |> list.try_map((f) => read_meta(f))!
+```
+
+| fn | callback | returns |
+|---|---|---|
+| `try_map` | `(A) -> Result[B, E]` | `Result[List[B], E]` |
+| `try_filter` | `(A) -> Result[Bool, E]` | `Result[List[A], E]` |
+| `try_flat_map` | `(A) -> Result[List[B], E]` | `Result[List[B], E]` |
+| `try_filter_map` | `(A) -> Result[Option[B], E]` | `Result[List[B], E]` |
+| `try_fold` | `(B, A) -> Result[B, E]` | `Result[B, E]` |
+| `try_find` | `(A) -> Result[Bool, E]` | `Result[Option[A], E]` |
+| `try_each` | `(A) -> Result[Unit, E]` | `Result[Unit, E]` |
+
+Deliberate omissions: `try_any` / `try_all` / `try_count` (`try_find` answers
+the predicate-query shapes) and `try_sort_by` (an erring key extractor has no
+meaningful order). The completeness rule is machine-checked by
+`tests/list_try_family_gate_test.rs`.
+
+When a callback that never errs leaves `E` unconstrained, annotate the result:
+`let evens: Result[List[Int], String] = list.try_filter(xs, (n) => ok(n % 2 == 0))`.
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (66 functions)
+## Signature index (73 functions)
 
 ```
 list.len(xs: List[A]) -> Int
@@ -545,6 +577,13 @@ list.clear(xs: List[A]) -> Unit
 list.bundled_probe(n: Int) -> Int
 list.split_at(xs: List[T], n: Int) -> ()
 list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
+list.try_map(xs: List[A], f: (A) -> Result[B, E]) -> Result[List[B], E]
+list.try_filter(xs: List[A], f: (A) -> Result[Bool, E]) -> Result[List[A], E]
+list.try_flat_map(xs: List[A], f: (A) -> Result[List[B], E]) -> Result[List[B], E]
+list.try_filter_map(xs: List[A], f: (A) -> Result[Option[B], E]) -> Result[List[B], E]
+list.try_fold(xs: List[A], init: B, f: (B, A) -> Result[B, E]) -> Result[B, E]
+list.try_find(xs: List[A], f: (A) -> Result[Bool, E]) -> Result[Option[A], E]
+list.try_each(xs: List[A], f: (A) -> Result[Unit, E]) -> Result[Unit, E]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

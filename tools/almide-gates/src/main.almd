@@ -43,19 +43,7 @@ effect fn entry_of(root: String, rel: String) -> Entry = {
 // and DROPS any row with an empty date (`[ -z "$date" ] && continue`), so a done/ file
 // missing its `<!-- done: -->` line silently vanishes from the table. Reproduced exactly —
 // a byte-match is the acceptance check, so a "fix" here would be a divergence.
-effect fn entries_of(root: String, files: List[String]) -> List[Entry] = {
-  // The effect call is hoisted out of the combinator chain on purpose: `list.map` takes a
-  // PURE callback, so `list.map(files, (f) => entry_of(root, f))` types the element as
-  // `Result[Entry, String]` and every downstream stage has to unwrap it. A `for` here keeps
-  // the effect at one place and lets the rest of the pipeline stay pure.
-  var out: List[Entry] = []
-  for f in files {
-    out = out + [
-      entry_of(root, f)!
-    ]
-  }
-  out
-}
+effect fn entries_of(root: String, files: List[String]) -> List[Entry] = files |> list.try_map((f) => entry_of(root, f))!
 
 effect fn plain_section(root: String, sub: String, heading: String) -> String = {
   let files = md_files(root, sub)
@@ -132,10 +120,7 @@ effect fn main() -> Unit = {
     // implementation rather than a shell copy and an Almide copy.
     "fuzz-track-record" => {
       let n = int.parse(list.get_or(args, 2, "20")) ?? 20
-      list.join(
-        track_record.report("almide/almide", n, "Generative differential fuzz", "Run fuzz campaign")!,
-        "\n",
-      ) + "\n"
+      list.join(track_record.report("almide/almide", n, "Generative differential fuzz", "Run fuzz campaign")!, "\n") + "\n"
     },
     // The contract-ledger gate. Like `output-parity` it reports through its EXIT CODE — the
     // `::error::` prefix is how GitHub Actions annotates a line, and the non-zero exit is what

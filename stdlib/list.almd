@@ -9,9 +9,7 @@
 // isolated calls. All other ops (non-closure, mutable, and the closure
 // ops not in the IterChain list) go through the declarative bundled
 // path.
-
 // ── basic accessors ──
-
 @intrinsic("almide_rt_list_len")
 fn len[A](xs: List[A]) -> Int = _
 
@@ -102,88 +100,85 @@ fn join(xs: List[String], sep: String) -> String = _
 //    count, flat_map, filter_map, fold — the `try_lower_to_iter_chain`
 //    intercept in `pass_stdlib_lowering` fires before the `@inline_rust`
 //    dispatch below and produces a fused iterator chain) ──
-
 @intrinsic("almide_rt_list_map")
 @consume(xs)
-fn map[A, B](xs: List[A], f: (A) -> B) -> List[B] = _
+fn map[A, B](xs: List[A], f: fn(A) -> B) -> List[B] = _
 
 @intrinsic("almide_rt_list_filter")
 @consume(xs)
-fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
+fn filter[A](xs: List[A], f: fn(A) -> Bool) -> List[A] = _
 
 @intrinsic("almide_rt_list_find")
 @consume(xs)
-fn find[A](xs: List[A], f: (A) -> Bool) -> Option[A] = _
+fn find[A](xs: List[A], f: fn(A) -> Bool) -> Option[A] = _
 
 @intrinsic("almide_rt_list_any")
-fn any[A](xs: List[A], f: (A) -> Bool) -> Bool = _
+fn any[A](xs: List[A], f: fn(A) -> Bool) -> Bool = _
 
 @intrinsic("almide_rt_list_all")
-fn all[A](xs: List[A], f: (A) -> Bool) -> Bool = _
+fn all[A](xs: List[A], f: fn(A) -> Bool) -> Bool = _
 
 @intrinsic("almide_rt_list_count")
-fn count[A](xs: List[A], f: (A) -> Bool) -> Int = _
+fn count[A](xs: List[A], f: fn(A) -> Bool) -> Int = _
 
 @intrinsic("almide_rt_list_flat_map")
 @consume(xs)
-fn flat_map[A, B](xs: List[A], f: (A) -> List[B]) -> List[B] = _
+fn flat_map[A, B](xs: List[A], f: fn(A) -> List[B]) -> List[B] = _
 
 @intrinsic("almide_rt_list_filter_map")
 @consume(xs)
-fn filter_map[A, B](xs: List[A], f: (A) -> Option[B]) -> List[B] = _
+fn filter_map[A, B](xs: List[A], f: fn(A) -> Option[B]) -> List[B] = _
 
 @intrinsic("almide_rt_list_fold")
 @consume(xs)
-fn fold[A, B](xs: List[A], init: B, f: (B, A) -> B) -> B = _
+fn fold[A, B](xs: List[A], init: B, f: fn(B, A) -> B) -> B = _
 
 // ── closure-bearing (not IterChain-handled — direct runtime dispatch) ──
-
 @intrinsic("almide_rt_list_sort_by")
 @consume(xs)
-fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
+fn sort_by[A, B](xs: List[A], f: fn(A) -> B) -> List[A] = _
 
 @intrinsic("almide_rt_list_take_while")
 @consume(xs)
-fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
+fn take_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A] = _
 
 @intrinsic("almide_rt_list_drop_while")
 @consume(xs)
-fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
+fn drop_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A] = _
 
 @intrinsic("almide_rt_list_partition")
 @consume(xs)
-fn partition[A](xs: List[A], f: (A) -> Bool) -> (List[A], List[A]) = _
+fn partition[A](xs: List[A], f: fn(A) -> Bool) -> (List[A], List[A]) = _
 
 @intrinsic("almide_rt_list_reduce")
 @consume(xs)
-fn reduce[A](xs: List[A], f: (A, A) -> A) -> Option[A] = _
+fn reduce[A](xs: List[A], f: fn(A, A) -> A) -> Option[A] = _
 
 @intrinsic("almide_rt_list_group_by")
 @consume(xs)
-fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
+fn group_by[A, B](xs: List[A], f: fn(A) -> B) -> Map[B, List[A]] = _
 
 @intrinsic("almide_rt_list_find_index")
 @consume(xs)
-fn find_index[A](xs: List[A], f: (A) -> Bool) -> Option[Int] = _
+fn find_index[A](xs: List[A], f: fn(A) -> Bool) -> Option[Int] = _
 
 @intrinsic("almide_rt_list_update")
 @consume(xs)
-fn update[A](xs: List[A], i: Int, f: (A) -> A) -> List[A] = _
+fn update[A](xs: List[A], i: Int, f: fn(A) -> A) -> List[A] = _
 
 @intrinsic("almide_rt_list_scan")
 @consume(xs)
-fn scan[A, B](xs: List[A], init: B, f: (B, A) -> B) -> List[B] = _
+fn scan[A, B](xs: List[A], init: B, f: fn(B, A) -> B) -> List[B] = _
 
 @intrinsic("almide_rt_list_zip_with")
 @consume(xs, ys)
-fn zip_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] = _
+fn zip_with[A, B, C](xs: List[A], ys: List[B], f: fn(A, B) -> C) -> List[C] = _
 
 @intrinsic("almide_rt_list_unique_by")
 @consume(xs)
-fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
+fn unique_by[A, K](xs: List[A], f: fn(A) -> K) -> List[A] = _
 
 // ── non-closure constructors / slicing ──
-
 @intrinsic("almide_rt_list_range")
 fn range(start: Int, end: Int) -> List[Int] = _
 
@@ -232,7 +227,6 @@ fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 fn binary_search(xs: List[Int], target: Int) -> Option[Int] = _
 
 // ── mutable (in-place) ──
-
 @intrinsic("almide_rt_list_push")
 fn push[A](mut xs: List[A], x: A) -> Unit = _
 
@@ -249,18 +243,110 @@ fn pop[A](mut xs: List[A]) -> Option[A] = _
 fn clear[A](mut xs: List[A]) -> Unit = _
 
 // ── bundled-Almide extensions (non-TOML, pure Almide body) ──
-
 // Smoke fn: covered by spec/stdlib/list_bundled_test.almd as a regression
 // guard for the bundled-dispatch pipeline. Do not remove.
 fn bundled_probe(n: Int) -> Int = n + 1
 
 // Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
 // Demonstrates bundled-Almide calling existing stdlib fns.
-fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) =
-  (list.take(xs, n), list.drop(xs, n))
+fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
 
 // Build [seed, f(seed), f(f(seed)), ...] of length `n`.
 // Pure-Almide recursion using the bundled-dispatch path end-to-end.
-fn iterate[T](seed: T, f: fn(T) -> T, n: Int) -> List[T] =
-  if n <= 0 then []
-  else [seed] + iterate(f(seed), f, n - 1)
+fn iterate[T](seed: T, f: fn(T) -> T, n: Int) -> List[T] = if n <= 0 then []
+else [seed] + iterate(f(seed), f, n - 1)
+
+// ── the try_* family (#1041): effectful pipelines keep the combinator shape ──
+//
+// Each try_<core> takes the SAME callback as its core, lifted to
+// `-> Result[_, E]`, and short-circuits on the FIRST err — so a body that
+// calls effect fns yields `Result[List[B], E]` instead of `List[Result[B, E]]`
+// and the writer never falls back to `var + for`. Pure-Almide SELF-recursion
+// over `list.get`/`list.drop` (the `iterate` bundled-dispatch precedent — a
+// sibling `__` helper would not monomorphize from a bundled body today);
+// elements after the first err are NEVER evaluated (the short-circuit is
+// observable). Cost is the bundled-recursion norm (`iterate`'s O(n²) copy
+// shape) — fine at tool scale, self-host later if a hot path appears.
+//
+// FAMILY COMPLETENESS (the API-family rule): a try_ twin exists for exactly
+// the TRANSFORMING closure-bearing core — map, filter, flat_map, filter_map,
+// fold, find, each. Deliberate omissions: `any` / `all` / `count` (an erring
+// PREDICATE query is try_find's domain — `try_find(xs, p)` answers all three
+// shapes), and `sort_by` (an erring key extractor has no meaningful partial
+// order). The executable matrix gate is tests/list_try_family_gate_test.rs.
+fn try_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E] = match list.get(xs, 0) {
+  none => ok([]),
+  some(x) => match f(x) {
+    ok(b) => match try_map(list.drop(xs, 1), f) {
+      ok(rest) => ok([b] + rest),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  },
+}
+
+fn try_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E] = match list.get(xs, 0) {
+  none => ok([]),
+  some(x) => match f(x) {
+    ok(keep) => match try_filter(list.drop(xs, 1), f) {
+      ok(rest) => ok(if keep then [x] + rest
+      else rest),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  },
+}
+
+fn try_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[List[B], E] = match list.get(xs, 0) {
+  none => ok([]),
+  some(x) => match f(x) {
+    ok(bs) => match try_flat_map(list.drop(xs, 1), f) {
+      ok(rest) => ok(bs + rest),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  },
+}
+
+fn try_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E] = match list.get(xs, 0) {
+  none => ok([]),
+  some(x) => match f(x) {
+    ok(kept) => match try_filter_map(list.drop(xs, 1), f) {
+      ok(rest) => ok(match kept {
+        some(b) => [b] + rest,
+        none => rest,
+      }),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  },
+}
+
+fn try_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E] = match list.get(xs, 0) {
+  none => ok(init),
+  some(x) => match f(init, x) {
+    ok(b) => try_fold(list.drop(xs, 1), b, f),
+    err(e) => err(e),
+  },
+}
+
+// The first element the (erring) predicate ACCEPTS, `none` when no element
+// matches — or the first err. `try_find(xs, p)` also answers the any/all/
+// count shapes, which is why those have no try_ twins.
+fn try_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E] = match list.get(xs, 0) {
+  none => ok(none),
+  some(x) => match f(x) {
+    ok(true) => ok(some(x)),
+    ok(false) => try_find(list.drop(xs, 1), f),
+    err(e) => err(e),
+  },
+}
+
+// Run an effectful step per element for its effect, stopping at the first err.
+fn try_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E] = match list.get(xs, 0) {
+  none => ok(()),
+  some(x) => match f(x) {
+    ok(_) => try_each(list.drop(xs, 1), f),
+    err(e) => err(e),
+  },
+}
