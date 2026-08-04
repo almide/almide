@@ -49,12 +49,31 @@ fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
     // type is now the namespaced `mod.Type` is named `mod.Type.method`, but a
     // caller writing the unqualified `Type.method` must still resolve to the same
     // `almide_rt_<origin>_Type_method` definition (#433 × #411-B).
+    // Values are the EMITTED SYMBOL, not the origin: the definition builds
+    // `almide_rt_{origin}_{base}` where `base` is the flattened IR name with a
+    // leading `{origin}_` stripped when it happens to match. For a DEPENDENCY it
+    // does not match — the fn is `codeclib.inner.Pigment.encode` while the
+    // origin is the versioned `codeclib_v0_inner` — so every call site that
+    // rebuilt the name from its own guess disagreed with the definition
+    // (#1094). Storing what the definition emits means no consumer has to guess.
     let mut add = |map: &mut HashMap<String, String>, name: &str, origin: &str| {
-        if name.contains('.') {
-            map.insert(name.to_string(), origin.to_string());
-            if let Some(bare) = name.strip_prefix(&format!("{}.", origin)) {
-                map.insert(bare.to_string(), origin.to_string());
-            }
+        if !name.contains('.') {
+            return;
+        }
+        let flat = name.replace('.', "_");
+        let base = flat.strip_prefix(&format!("{}_", origin)).unwrap_or(&flat);
+        let symbol = format!("almide_rt_{}_{}", origin, base);
+        map.insert(name.to_string(), symbol.clone());
+        if let Some(bare) = name.strip_prefix(&format!("{}.", origin)) {
+            map.insert(bare.to_string(), symbol.clone());
+        }
+        // The trailing `Type.method` is what a caller inside the owning module
+        // emits, and it is the only spelling that survives when the module
+        // segments differ from the origin's.
+        let segs: Vec<&str> = name.split('.').collect();
+        if segs.len() > 2 {
+            let tail = format!("{}.{}", segs[segs.len() - 2], segs[segs.len() - 1]);
+            map.entry(tail).or_insert(symbol);
         }
     };
     for f in &program.functions {
@@ -130,10 +149,9 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
         let is_encode = name.starts_with("__encode");
         let codec_op = if is_encode { "encode" } else { "decode" };
         let codec_method = format!("{}.{}", type_name, codec_op);
-        let func_ref = MODULE_METHOD_FNS.with(|c| {
-            c.borrow().get(&codec_method)
-                .map(|m| format!("almide_rt_{}_{}_{}", m, type_name.rsplit('.').next().unwrap_or(type_name), codec_op))
-        }).unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
+        let func_ref = MODULE_METHOD_FNS
+            .with(|c| c.borrow().get(&codec_method).cloned())
+            .unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
         // The per-element codec function reference has a
         // precise signature — leaving it `Ty::Unknown` here
         // is exactly the latent unresolved-type that the
@@ -185,10 +203,9 @@ fn rewrite_call_option_codec(name: Sym, type_name: String, args: Vec<IrExpr>, ty
     let is_encode = name.starts_with("__encode");
     let codec_op = if is_encode { "encode" } else { "decode" };
     let codec_method = format!("{}.{}", type_name, codec_op);
-    let func_ref = MODULE_METHOD_FNS.with(|c| {
-        c.borrow().get(&codec_method)
-            .map(|m| format!("almide_rt_{}_{}_{}", m, type_name.rsplit('.').next().unwrap_or(type_name), codec_op))
-    }).unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
+    let func_ref = MODULE_METHOD_FNS
+        .with(|c| c.borrow().get(&codec_method).cloned())
+        .unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
     let elem_ty = Ty::Named(type_name.into(), vec![]);
     let value_ty = Ty::Named("Value".into(), vec![]);
     use almide_lang::types::constructor::TypeConstructorId;
@@ -309,17 +326,9 @@ fn rewrite_call_named(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, 
     // matches its `almide_rt_<module>_Type_method` definition (#411-B).
     if name.contains('.') {
         let flat = name.replace('.', "_");
-        let resolved = MODULE_METHOD_FNS.with(|c| {
-            c.borrow().get(name.as_str()).map(|m| {
-                // The method key may be qualified by the type's now-namespaced
-                // module (`varlib.Pigment.encode`); the runtime fn is
-                // `almide_rt_<origin>_<Type>_<method>`, so strip a leading
-                // `<origin>.` before flattening to avoid doubling the module
-                // (#433 × #411-B). A bare `Color.encode` is unaffected.
-                let rest = name.as_str().strip_prefix(&format!("{}.", m)).unwrap_or(name.as_str());
-                format!("almide_rt_{}_{}", m, rest.replace('.', "_"))
-            })
-        }).unwrap_or(flat);
+        let resolved = MODULE_METHOD_FNS
+            .with(|c| c.borrow().get(name.as_str()).cloned())
+            .unwrap_or(flat);
         return IrExpr { kind: IrExprKind::Call {
             target: CallTarget::Named { name: resolved.into() },
             args, type_args,

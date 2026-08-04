@@ -473,7 +473,21 @@ fn bridge_cross_module_derived_methods(
             // owner map by the BASE name (the same normalization the variant-layout
             // bridging above applies).
             let base = td.name.as_str().rsplit('.').next().unwrap_or(td.name.as_str());
-            owners.entry(base).or_default().push(m.name.as_str());
+            // Only a module that actually DEFINES a method on the type owns the
+            // name here. Counting bare declarations let a module that derives
+            // nothing claim co-ownership, and the unique-owner test below then
+            // declined for every caller — so two modules declaring the same bare
+            // type name walled the wasm leg while native, whose equivalent map is
+            // built from function definitions, linked fine (#1093).
+            let defines_method = m
+                .functions
+                .iter()
+                .any(|f| f.name.as_str().rsplit_once('.').is_some_and(|(ty, _)| {
+                    ty.rsplit('.').next().unwrap_or(ty) == base
+                }));
+            if defines_method {
+                owners.entry(base).or_default().push(m.name.as_str());
+            }
         }
     }
     struct Rw<'a> {
