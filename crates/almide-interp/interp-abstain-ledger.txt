@@ -51,6 +51,7 @@ fs_relative_path  out-of-interp-scope capability: prim.make_dir
 heap_arena  out-of-interp-scope capability: in-place byte-level buffer write `bytes.heap_restore` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
 heap_result_if_match_arm_frame  out-of-interp-scope capability: prim.alloc_value
 heap_result_tuple_return  out-of-interp-scope capability: prim.alloc_value
+hex_two_module_link  out-of-interp-scope capability: in-place byte-level buffer write `bytes.append_u32_le` (writes a scalar into a buffer at an offset; each carries its own bounds rule and byte order — issue #1021)
 host_floor_string_alloc  out-of-interp-scope capability: prim.make_dir
 int_from_hex  out-of-interp-scope capability: prim.handle
 int_pow_negative_exponent  out-of-interp-scope capability: transcendental `math.pow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)

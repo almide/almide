@@ -1,0 +1,34 @@
+// @contract: C-030, C-212
+// Cross-target differential fixture: `hex.encode` and `int.to_hex` in ONE program.
+//
+// The two live in DIFFERENT self-host sources (stdlib/hex_encode.almd and
+// stdlib/int_hex.almd), and both used to define a `__`-private helper named
+// `__hex_fill` — with different arities (5 params vs 4). The link-time dedup
+// merged by NAME alone, so whichever linked first rebound the other module's
+// call sites to a wrong signature: `--target wasm` rendered "successfully" and
+// wasmtime rejected the module with `type mismatch: expected i64 but nothing on
+// stack` — an invalid module escaping as `Ok`, the class the trust ledger audits
+// as zero (#1068).
+//
+// It stayed at zero only because NO corpus program linked both modules. This
+// fixture is that program. The class guard is the link-collision wall
+// (`dedup_linked_by_name`, unit-tested in pipeline_link.rs); this is the
+// instance guard — the two really do coexist, byte-identical on both targets.
+import hex
+
+fn main() -> Unit = {
+  // int_hex's leg — expects: ff / 0 / 102
+  println(int.to_hex(255))
+  println(int.to_hex(0))
+  println(int.to_hex(258))
+  // hex_encode's leg, over the exact bytes from the issue's repro —
+  // expects: 02010000 / 4869
+  var b = bytes.new(0)
+  bytes.append_u32_le(b, 258)
+  println(hex.encode(b))
+  println(hex.encode_upper(bytes.from_string("Hi")))
+  // Both legs in ONE expression, so neither can be dead-code-eliminated away
+  // from the other: whichever links first, the second must keep its own
+  // helper — expects: fff:7a
+  println(int.to_hex(4095) + ":" + hex.encode(bytes.from_string("z")))
+}

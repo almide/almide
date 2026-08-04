@@ -438,11 +438,12 @@ evidence  = [
 id        = "C-030"
 spec      = "ALS-T11"
 title     = "hex.encode / hex.decode are byte-identical incl. positional error detail"
-statement = "`hex.encode` / `hex.decode` produce byte-identical output native == wasm, including the positional decode error strings `hex string has odd length: N` and `invalid hex char at N` (hi nibble at `2*pair`, lo at `2*pair+1`). Native runtime/rs/src/hex.rs is the oracle; the wasm rt_encoding.rs runtime must mirror it exactly, including the error detail the old wasm strings dropped."
+statement = "`hex.encode` / `hex.decode` produce byte-identical output native == wasm, including the positional decode error strings `hex string has odd length: N` and `invalid hex char at N` (hi nibble at `2*pair`, lo at `2*pair+1`). Native runtime/rs/src/hex.rs is the oracle; the wasm rt_encoding.rs runtime must mirror it exactly, including the error detail the old wasm strings dropped. `hex.encode`/`hex.encode_upper` also hold alongside `int.to_hex` in the SAME program — the two self-host sources' private helpers no longer collide (C-212)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/encoding_base64.almd", class = "fixture" },
+  { path = "spec/wasm_cross/hex_two_module_link.almd", class = "fixture" },
 ]
 
 # ── JSON PATH OPS ────────────────────────────────────────────────────
@@ -2652,4 +2653,16 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/pure_bang_propagation.almd", class = "fixture" },
   { path = "spec/lang/pure_result_bang_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-212"
+spec      = "ALS-I3"
+title     = "Two self-host modules with same-named private helpers link cleanly or wall — never an invalid module"
+statement = "A program that pulls TWO self-host stdlib sources whose `__`-private helpers share a name links to a VALID wasm module, or fails with an honest compile error — never renders `Ok` and then fails wasm validation. The link-time dedup merges by FULL `MirFunction` equality (one source reached through two registry paths), not by name: two DIFFERENT functions sharing a name are a render wall (`self-host link collision: two different functions are both named ...`, naming both arities). Merging by name alone rebound the loser's call sites to a wrong signature, so `hex.encode` + `int.to_hex` in one program (their `__hex_fill` helpers were 5-param and 4-param) rendered successfully and wasmtime rejected the module with `type mismatch: expected i64 but nothing on stack` — the invalid-wasm-as-Ok class the ledger audits as zero, which stayed at zero only because no corpus program linked both modules (#1068). The instance is also fixed at the source (int_hex's helper is `__int_hex_fill`), and both legs are byte-identical native == wasm in one program."
+since     = "0.52.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/hex_two_module_link.almd", class = "fixture" },
+  { path = "crates/almide-mir/src/pipeline_link.rs", name = "dedup_linked_by_name", class = "by-construction" },
 ]
