@@ -479,6 +479,22 @@ pub fn unwrap_or_operand_admitted(expr: &IrExpr) -> bool {
     }
 }
 
+/// The STRUCTURAL gate for the USER-function `??` operand (`f(x) ?? d` where `f` is a plain
+/// `fn … -> Option[T]` / `-> Result[T, E]`): [`LowerCtx::try_lower_option_unwrap_or`] admits it
+/// through `call_unwrap_or_operand` (the `is_named_variant_call` route), so the operand
+/// MATERIALIZES and the `??` proceeds to a heap route that emits ONE synthetic unwrap-helper
+/// `CallFn` — exactly like a self-host or `materialize_unwrap_or_operand` operand.
+///
+/// Pure (no `&self`) so the `classify_corpus` caps counter consults the SAME admission the lowering
+/// uses — the "no count drift" discipline of [`unwrap_or_operand_admitted`]. Without the counter
+/// consulting it, a user-fn operand credited 0 while the lowering emitted 1, breaching the
+/// `mir_calls <= ir_calls` caps invariant (#1079: `println(first_char("hi") ?? "<none>")`,
+/// mir 3 > ir 2 — the FIRST corpus shape to cover a non-self-host variant operand).
+pub fn unwrap_or_named_variant_operand(expr: &IrExpr) -> bool {
+    matches!(&expr.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. })
+        && is_variant_ty(&expr.ty)
+}
+
 /// Detect the enumerate+map FUSION shape: `list.map(list.enumerate(real), (entry) => { let (i,key) =
 /// entry; <tail> })`. Returns `(real, i_var, key_var, key_ty, tail)` — the inner iterates `real`
 /// binding i=loop-index + key=element, running `<tail>` (the block minus the leading destructure), so
