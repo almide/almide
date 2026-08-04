@@ -57,14 +57,29 @@ fn scratch(name: &str, modules: &[(&str, &str)], main: &str) -> std::path::PathB
 
 /// stdout+stderr of `almide run main.almd` inside `dir`.
 fn run_in(dir: &Path) -> String {
+    run_target(dir, None)
+}
+
+fn run_target(dir: &Path, target: Option<&str>) -> String {
+    let mut args = vec!["run", "main.almd"];
+    if let Some(t) = target {
+        args.push("--target");
+        args.push(t);
+    }
     let output = Command::new(almide_bin())
-        .args(["run", "main.almd"])
+        .args(&args)
         .current_dir(dir)
         .output()
         .expect("failed to spawn almide");
     let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
     combined.push_str(&String::from_utf8_lossy(&output.stderr));
     combined
+}
+
+/// wasmtime is not on every dev machine; the wasm assertions skip rather than
+/// fail when the runner reports it missing, and CI's wasm leg has it.
+fn wasm_runner_missing(out: &str) -> bool {
+    out.contains("wasmtime") && (out.contains("not found") || out.contains("No such file"))
 }
 
 const LIB: &str = concat!(
@@ -104,6 +119,19 @@ fn same_bare_type_name_in_two_modules_one_deriving_codec() {
     assert!(
         out.contains(r#"{"name":"op","kind":3}"#),
         "same-named types in two modules must stay distinct, got:\n{out}"
+    );
+    // native == wasm is a contract, and this shape used to hold on native only:
+    // the wasm bridge built its owner map from type DECLARATIONS, so a module
+    // that declares `Span` and derives nothing still claimed co-ownership and
+    // the unique-owner test declined for every caller (#1093).
+    let wasm = run_target(&dir, Some("wasm"));
+    if wasm_runner_missing(&wasm) {
+        eprintln!("skip wasm leg: runner unavailable");
+        return;
+    }
+    assert!(
+        wasm.contains(r#"{"name":"op","kind":3}"#),
+        "wasm leg diverged from native:\n{wasm}"
     );
 }
 

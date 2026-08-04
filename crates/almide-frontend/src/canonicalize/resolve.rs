@@ -34,7 +34,30 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
 pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<Sym> {
     canonical_user_type_sym_own_module(name, types, cur_mod)
         .or_else(|| canonical_user_type_sym_qualified(name, types))
+        .or_else(|| canonical_user_type_sym_sibling(name, types, cur_mod))
         .or_else(|| canonical_user_type_sym_bare(name, types, cur_mod))
+}
+
+// A SIBLING submodule's type, referenced by the short module name the source
+// actually writes: `domain.Span` inside `collidelib.wire` is
+// `collidelib.domain.Span`.
+//
+// Inside a package reached by `import self.x` the two spellings coincide, so
+// this only matters once that package is itself a DEPENDENCY and every module
+// carries the package prefix. Without it the qualified reference fell through
+// to the bare fallback below, which strips the module and finds the
+// REFERENCING file's own same-named type — silently, since a structurally
+// compatible type still type-checks (#1094).
+fn canonical_user_type_sym_sibling(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<Sym> {
+    let pkg = cur_mod?.split('.').next()?;
+    if !name.contains('.') || almide_lang::stdlib_info::is_bundled_module(pkg) {
+        return None;
+    }
+    let qual = sym(&format!("{}.{}", pkg, name));
+    types
+        .get(&qual)
+        .is_some_and(|t| matches!(t, Ty::Record { .. } | Ty::Variant { .. }))
+        .then_some(qual)
 }
 
 // A user module's own bare reference to its own declared type → `mod.Type`.
