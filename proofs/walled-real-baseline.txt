@@ -37,3 +37,19 @@ spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested Codec: direct fie
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[Option], List[List], deep Option[List[Option]]
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_variant record case: Option field omits none, folds missing/null to none
 #
+#
+# (2026-08-05, #1041) The list.try_* family (effectful pipelines keep the
+# combinator shape) ships as pure-Almide BUNDLED GENERIC HOFs — the
+# split_at/iterate dispatch precedent. Their closure-typed parameters are
+# outside the v1 wasm HOF-lifting subset (`unliftable/closure-list
+# higher-order argument`), so the spec file's test fns wall on the wasm leg
+# and run via the native fallback. These entries are the honest wasm frontier
+# for bundled generic HOFs, to be pruned when the defunctionalization brick
+# admits bundled closure params (the same brick list.iterate waits on).
+spec/stdlib/list_try_test.almd :: __test_almd_try_each runs to completion or stops at the first err
+spec/stdlib/list_try_test.almd :: __test_almd_try_filter keeps by an erring predicate
+spec/stdlib/list_try_test.almd :: __test_almd_try_filter_map keeps ok(some), drops ok(none), stops at err
+spec/stdlib/list_try_test.almd :: __test_almd_try_find returns ok(some/none) and propagates err
+spec/stdlib/list_try_test.almd :: __test_almd_try_flat_map concatenates and short-circuits
+spec/stdlib/list_try_test.almd :: __test_almd_try_fold threads the accumulator and stops at err
+spec/stdlib/list_try_test.almd :: __test_almd_try_map collects ok values

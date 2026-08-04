@@ -99,6 +99,63 @@ pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<Proce
     }
 }
 
+/// #1040: the timeout twin of `exec_status` — the ONE place a timeout is
+/// admissible: spawning a process is already outside the byte-identity
+/// contract, so bounding it adds no nondeterminism the spawn did not.
+/// The contract's two halves (C-214): IF the deadline fires, the error value
+/// is exactly `exec timed out after <ms>ms` and the child is killed; WHETHER
+/// it fires is a function of the host and is not promised.
+///
+/// stdout/stderr are drained on READER THREADS so a chatty child can never
+/// deadlock against a full pipe while the parent polls `try_wait`.
+pub fn almide_rt_process_exec_status_timeout(
+    cmd: &str,
+    args: &[String],
+    timeout_ms: i64,
+) -> Result<ProcessStatus, String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("exec failed: {}", e))?;
+    fn drain<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut r) = r {
+                let _ = r.read_to_end(&mut buf);
+            }
+            buf
+        })
+    }
+    let out_h = drain(child.stdout.take());
+    let err_h = drain(child.stderr.take());
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    // Join the drains so the pipes close cleanly before we return.
+                    let _ = out_h.join();
+                    let _ = err_h.join();
+                    return Err(format!("exec timed out after {}ms", timeout_ms));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(e) => return Err(format!("exec failed: {}", e)),
+        }
+    };
+    let stdout = String::from_utf8_lossy(&out_h.join().unwrap_or_default()).to_string();
+    let stderr = String::from_utf8_lossy(&err_h.join().unwrap_or_default()).to_string();
+    Ok(ProcessStatus { code: status.code().unwrap_or(-1) as i64, stdout, stderr })
+}
+
 pub fn almide_rt_process_pid() -> i64 {
     std::process::id() as i64
 }

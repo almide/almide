@@ -587,6 +587,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_process_exec" => &[false, false],
         "almide_rt_process_exec_in" => &[false, false, false],
         "almide_rt_process_exec_status" => &[false, false],
+        "almide_rt_process_exec_status_timeout" => &[false, false, false],
         "almide_rt_process_exec_with_stdin" => &[false, false, false],
         "almide_rt_process_exit" => &[false],
         "almide_rt_process_is_alive" => &[false],
