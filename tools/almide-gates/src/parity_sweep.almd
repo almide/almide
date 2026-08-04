@@ -23,15 +23,15 @@ import process
 import parity
 
 type Sweep = { lines: List[String], matches: List[String], ok: Bool }
+
 type Candidates = { files: List[String], skipped: Int }
 
-// `perl -e 'alarm …; exec …'` — macOS has no `timeout(1)`, and the bash reaches for the same
-// wrapper. Kept identical rather than replaced with a sleep/kill pair: a different killing
-// mechanism produces a different exit code, and the exit code is part of what this gate
-// compares.
+// The perl `alarm; exec` wrapper is GONE (#1040): `process.exec_status_timeout`
+// kills on the deadline in the runtime itself. A fired deadline maps to code
+// 124 here — the same observable the perl wrapper produced — so the compared
+// exit codes are unchanged.
 effect fn run_capped(secs: Int, cmd: String, args: List[String]) -> process.ProcessStatus = {
-  let wrapped = ["-e", "alarm shift @ARGV; exec @ARGV", int.to_string(secs), cmd] + args
-  process.exec_status("perl", wrapped) ?? process.ProcessStatus { code: 124, stdout: "", stderr: "" }
+  process.exec_status_timeout(cmd, args, secs * 1000) ?? process.ProcessStatus { code: 124, stdout: "", stderr: "" }
 }
 
 // One fixture through both pipelines. `render_program` writes WAT to stdout, so the WAT lands
@@ -46,12 +46,7 @@ effect fn run_one(root: String, alm: String, rp: String, file: String, secs: Int
   } else {
     fs.write(wat, render.stdout)!
     let v1 = run_capped(secs, "wasmtime", [wat])!
-    parity.verdict_full(
-      v0.code == 0, true, v1.code == 0,
-      v0.stdout, v1.stdout,
-      v0.code, v1.code,
-      v0.stderr, v1.stderr, wat,
-    )
+    parity.verdict_full(v0.code == 0, true, v1.code == 0, v0.stdout, v1.stdout, v0.code, v1.code, v0.stderr, v1.stderr, wat)
   }
 }
 
@@ -60,8 +55,7 @@ effect fn run_one(root: String, alm: String, rp: String, file: String, secs: Int
 // proves nothing about either pipeline.
 effect fn is_runnable(path: String) -> Bool = {
   let src = fs.read_text(path) ?? ""
-  string.contains(src, "fn main")
-    and not string.contains(list.get_or(string.split(src, "\n"), 0, ""), "wasm:skip")
+  string.contains(src, "fn main") and not string.contains(list.get_or(string.split(src, "\n"), 0, ""), "wasm:skip")
 }
 
 // The skipped files are COUNTED, not merely dropped: the bash reports `skip=N` in its summary
@@ -77,7 +71,11 @@ effect fn candidates(root: String) -> Candidates = {
   var out: List[String] = []
   var skipped = 0
   for p in all {
-    if is_runnable(p)! then out = out + [p] else skipped = skipped + 1
+    if is_runnable(p)! then {
+      out = out + [p]
+    } else {
+      skipped = skipped + 1
+    }
   }
   Candidates { files: out, skipped: skipped }
 }
@@ -85,7 +83,9 @@ effect fn candidates(root: String) -> Candidates = {
 effect fn classify_all(root: String, alm: String, rp: String, files: List[String]) -> List[(String, String)] = {
   var out: List[(String, String)] = []
   for f in files {
-    out = out + [(f, run_one(root, alm, rp, f, 20)!)]
+    out = out + [
+      (f, run_one(root, alm, rp, f, 20)!)
+    ]
   }
   out
 }
@@ -95,22 +95,24 @@ effect fn retry_suspects(root: String, alm: String, rp: String, first: List[(Str
   var out: List[(String, String)] = []
   for cell in first {
     let (f, v) = cell
-    if v == "match" then out = out + [(f, v)]
-    else out = out + [(f, run_one(root, alm, rp, f, 60)!)]
+    if v == "match" then {
+      out = out + [(f, v)]
+    } else {
+      out = out + [
+        (f, run_one(root, alm, rp, f, 60)!)
+      ]
+    }
   }
   out
 }
 
-fn count_of(cells: List[(String, String)], want: String) -> Int =
-  cells |> list.filter((c) => c.1 == want) |> list.len
+fn count_of(cells: List[(String, String)], want: String) -> Int = cells |> list.filter((c) => c.1 == want) |> list.len
 
-fn files_of(cells: List[(String, String)], want: String) -> List[String] =
-  cells |> list.filter((c) => c.1 == want) |> list.map((c) => c.0)
+fn files_of(cells: List[(String, String)], want: String) -> List[String] = cells |> list.filter((c) => c.1 == want) |> list.map((c) => c.0)
 
 // A failure class NAMES its files. Counts alone leave nothing to act on, and MISMATCH is the
 // silent-miscompile class — the one the gate exists for.
-fn class_report(cells: List[(String, String)], want: String, marker: String, heading: String) -> List[String] =
-  class_report_wrapped(cells, want, marker, [heading])
+fn class_report(cells: List[(String, String)], want: String, marker: String, heading: String) -> List[String] = class_report_wrapped(cells, want, marker, [heading])
 
 // The XFAIL heading is TWO lines in the bash — a wrapped sentence, not two headings. The
 // wrapping is not decoration: this list goes into CI logs verbatim, and rewrapping it is a
@@ -125,42 +127,29 @@ fn class_report_wrapped(cells: List[(String, String)], want: String, marker: Str
 // under the same collation before the set difference: a committed file may have been generated
 // under a different locale, where `.` and `_` invert, which made the same files appear as both
 // a regression AND a new match on every run.
-fn missing_from(want: List[String], have: List[String]) -> List[String] =
-  want |> list.filter((f) => not list.contains(have, f))
+fn missing_from(want: List[String], have: List[String]) -> List[String] = want |> list.filter((f) => not list.contains(have, f))
 
 effect fn sweep(root: String, alm: String, rp: String, baseline_path: String) -> Sweep = {
   let cand = candidates(root)!
   let cells = retry_suspects(root, alm, rp, classify_all(root, alm, rp, cand.files)!)!
   let matches = files_of(cells, "match") |> list.sort
-  let summary = "output-parity: match=" + int.to_string(count_of(cells, "match"))
-    + " wall=" + int.to_string(count_of(cells, "wall"))
-    + " MISMATCH=" + int.to_string(count_of(cells, "mismatch"))
-    + " RUNERR=" + int.to_string(count_of(cells, "runerr"))
-    + " XFAIL=" + int.to_string(count_of(cells, "xfail"))
-    + " v0fail=" + int.to_string(count_of(cells, "v0fail"))
-    + " skip=" + int.to_string(cand.skipped)
-  let classes =
-    class_report(cells, "mismatch", "!", "  (MISMATCH = renders and runs but the stdout bytes diverge — silent miscompile class):")
-    + class_report(cells, "runerr", "r", "  (RUNERR = renders but wasmtime rejects or traps where v0 succeeds):")
-    + class_report_wrapped(cells, "xfail", "x", [
-        "  (XFAIL = a trap/abort fixture whose v1 observable [stderr+exit] diverges from v0 —",
-        "   the trap-semantics contract surface not yet implemented on the MIR render path):",
-      ])
+  let summary = "output-parity: match=" + int.to_string(count_of(cells, "match")) + " wall=" + int.to_string(count_of(cells, "wall")) + " MISMATCH=" + int.to_string(count_of(cells, "mismatch")) + " RUNERR=" + int.to_string(count_of(cells, "runerr")) + " XFAIL=" + int.to_string(count_of(cells, "xfail")) + " v0fail=" + int.to_string(count_of(cells, "v0fail")) + " skip=" + int.to_string(cand.skipped)
+  let classes = class_report(cells, "mismatch", "!", "  (MISMATCH = renders and runs but the stdout bytes diverge — silent miscompile class):") + class_report(cells, "runerr", "r", "  (RUNERR = renders but wasmtime rejects or traps where v0 succeeds):") + class_report_wrapped(cells, "xfail", "x", [
+    "  (XFAIL = a trap/abort fixture whose v1 observable [stderr+exit] diverges from v0 —",
+    "   the trap-semantics contract surface not yet implemented on the MIR render path):"
+  ])
   let baseline = (fs.read_lines(baseline_path) ?? []) |> list.filter((l) => l != "") |> list.sort
   let regressions = missing_from(baseline, matches)
   let gained = missing_from(matches, baseline)
   let gained_lines = if list.len(gained) == 0 then []
-    else ["output-parity: NEW matches not yet in baseline (run --update to ratchet):"]
-      + (gained |> list.map((f) => "  + " + f))
-  let tail = if list.len(regressions) > 0 then
-      ["output-parity: REGRESSION — these baseline files stopped byte-matching v0:"]
-        + (regressions |> list.map((f) => "  - " + f))
-    else ["output-parity: OK — all " + int.to_string(list.len(baseline)) + " baseline files still byte-match v0."]
-  Sweep {
-    lines: [summary] + classes + gained_lines + tail,
-    matches: matches,
-    ok: list.len(regressions) == 0,
-  }
+  else [
+    "output-parity: NEW matches not yet in baseline (run --update to ratchet):"
+  ] + (gained |> list.map((f) => "  + " + f))
+  let tail = if list.len(regressions) > 0 then [
+    "output-parity: REGRESSION — these baseline files stopped byte-matching v0:"
+  ] + (regressions |> list.map((f) => "  - " + f))
+  else ["output-parity: OK — all " + int.to_string(list.len(baseline)) + " baseline files still byte-match v0."]
+  Sweep { lines: [summary] + classes + gained_lines + tail, matches: matches, ok: list.len(regressions) == 0 }
 }
 
 test "the skipped files are counted, not silently dropped" {
@@ -188,9 +177,7 @@ test "an empty class prints nothing at all, not an empty heading" {
 }
 
 test "counting is per class, and the classes do not overlap" {
-  let cells: List[(String, String)] = [
-    ("a", "match"), ("b", "match"), ("c", "wall"), ("d", "mismatch"), ("e", "v0fail"),
-  ]
+  let cells: List[(String, String)] = [("a", "match"), ("b", "match"), ("c", "wall"), ("d", "mismatch"), ("e", "v0fail")]
   assert_eq(count_of(cells, "match"), 2)
   assert_eq(count_of(cells, "wall"), 1)
   assert_eq(count_of(cells, "runerr"), 0)

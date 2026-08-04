@@ -115,7 +115,17 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
             || (module == "process"
                 && matches!(
                     func,
-                    "exec" | "exit" | "run" | "spawn" | "kill" | "is_alive" | "exec_status" | "env"
+                    "exec"
+                        | "exit"
+                        | "run"
+                        | "spawn"
+                        | "kill"
+                        | "is_alive"
+                        | "exec_status"
+                        // #1040: the deadline twin — same no-child-process
+                        // structural class as exec_status.
+                        | "exec_status_timeout"
+                        | "env"
                 ))
             || (module == "http" && matches!(func, "request" | "serve"))
             || (module == "testing" && func == "assert_throws")

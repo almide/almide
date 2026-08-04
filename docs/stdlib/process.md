@@ -98,9 +98,26 @@ Get the current process ID.
 let my_pid = process.pid()
 ```
 
+
+### `process.exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String]`
+
+`exec_status` with a deadline — the one admissible timeout (C-214): spawning a
+process is already outside the byte-identity contract, so bounding it adds no
+nondeterminism. If the deadline fires the child is killed and the err is
+exactly `exec timed out after <ms>ms`; whether it fires is a function of the
+host. A fired deadline is commonly mapped to exit code 124 by callers that
+compare exit codes.
+
+```almd
+match process.exec_status_timeout("cargo", ["build"], 60000) {
+  ok(st) => println(int.to_string(st.code)),
+  err(e) => println(e),   // "exec timed out after 60000ms" on a hang
+}
+```
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (13 functions)
+## Signature index (14 functions)
 
 ```
 effect process.exec(cmd: String, args: List[String]) -> String
@@ -110,6 +127,7 @@ effect process.stdin_lines() -> List[String]
 effect process.exec_in(dir: String, cmd: String, args: List[String]) -> String
 effect process.exec_with_stdin(cmd: String, args: List[String], input: String) -> String
 effect process.exec_status(cmd: String, args: List[String]) -> ProcessStatus
+effect process.exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> ProcessStatus
 process.pid() -> Int
 process.env(key: String) -> Option[String]
 effect process.spawn(cmd: String, args: List[String]) -> Int

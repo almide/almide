@@ -2678,3 +2678,14 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_writer_family.almd", class = "fixture" },
   { path = "crates/almide-interp/src/inplace.rs", name = "bytes_write_op", class = "by-construction" },
 ]
+
+[[contract]]
+id        = "C-214"
+spec      = "ALS-R5"
+title     = "process.exec_status_timeout: the fire-path error is pinned; whether it fires is the host's"
+statement = "`process.exec_status_timeout(cmd, args, timeout_ms)` is the ONE admissible timeout: spawning a process is already outside the byte-identity contract, so bounding it adds no nondeterminism the spawn did not — while bounding a PURE computation would make its result a function of the machine, which is why the wall-clock `fan.timeout` of 0.29.0 stayed removed and its successor is the deterministic omega-replay form (T5-1). The contract has two halves. GUARANTEED: if the deadline fires, the child is KILLED and the error value is exactly `exec timed out after <ms>ms` — same message, same err path, on every host and (when a target grows process spawning) every target; a fast child completes with its real ProcessStatus, a chatty child cannot deadlock the drain (stdout/stderr ride reader threads), and a missing binary is the `exec failed:` error, never a timeout. NOT GUARANTEED: whether the deadline fires — that is a function of the host, which is why the fixture's firing case uses a wide margin (a 5s sleeper against a 100ms bound — the C-200 fan-trap discipline). The admissibility RULE is the family: a timeout twin may exist exactly for operations already outside byte-identity (process spawn now; an http.get deadline is the recorded intended next cell) and never for a pure combinator. The process surface is native-only today (wasip1 has no spawn; the render wall rejects it honestly on wasm), so the fixture runs on the native leg; the pinned error shape binds any future leg on arrival."
+since     = "0.53.6"
+status    = "active"
+evidence  = [
+  { path = "spec/stdlib/process_timeout_test.almd", class = "fixture" },
+]
