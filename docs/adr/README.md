@@ -51,3 +51,4 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0004](./0004-error-branchability-doctrine.md) | Error branchability — String stays terminal; doctrine, lint, and context instead of tags | Accepted | 2026-08-05 |
 | [0005](./0005-operators-desugar-to-stdlib.md) | Value-level operators are desugarings of named stdlib functions | Accepted | 2026-08-05 |
 | [0006](./0006-fallibility-polymorphic-hofs.md) | One-bit fallibility polymorphism for HOFs; the try_* family is dissolved | Accepted | 2026-08-05 |
+| [0007](./0007-partition-replaces-collect.md) | result.collect is removed; partition is the substance for all-errors collection | Accepted | 2026-08-05 |
