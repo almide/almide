@@ -78,8 +78,28 @@ A bare prefix (`0x` with no digits) is a compile error, never a silent `0`.
 ## Functions
 ```
 fn name(x: Type, y: Type) -> RetType = expr
+fn name(x: Type) -> Int!                             // pure-fallible: sugar for Result[Int, String]
 effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
 ```
+
+### Pure-fallible marker `-> T!` (ADR-0002 Phase 1)
+
+`-> T!` declares a pure fn that can fail: the return IS `Result[T, String]`.
+The body writes the Result directly — pass a fallible call through, or build
+it with ok/err; `!` propagates inside (no effect fn needed):
+
+```almide
+fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through
+fn checked(s: String) -> Int! = {
+  let n = int.parse(s)!                              // ! propagates in a T! body
+  guard n > 0 else err("must be positive")
+  ok(n)
+}
+```
+
+`!` is legal ONLY in return position of a fn declaration. E is always String —
+a custom error type keeps the explicit `Result[T, MyError]` spelling
+(ADR-0003/0004: branch on structure, not message text).
 
 ### Visibility (optional prefix before fn/type)
 - `fn f()` — public (default)

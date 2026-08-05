@@ -141,6 +141,14 @@ pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym
             }
         },
         ast::TypeExpr::Generic { name, args } => {
+            // ADR-0002 Phase 1 (#1103): the pseudo-generic `!` is the
+            // pure-fallible return marker — `-> T!` ≡ `-> Result[T, String]`
+            // (E is String by decision D2; custom E keeps the explicit
+            // Result[T, E] spelling).
+            if name.as_str() == "!" && args.len() == 1 {
+                let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
+                return Ty::result(inner, Ty::String);
+            }
             let ra: Vec<Ty> = args.iter().map(|a| resolve_type_expr_in(a, known_types, cur_mod)).collect();
             resolve_generic_type_expr(name, ra, known_types, cur_mod)
         },
