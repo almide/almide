@@ -331,8 +331,46 @@ impl Parser {
         if self.check(TokenType::QuestionQuestion) {
             // expr ?? fallback — unwrap with default
             let span = Some(self.current_span());
+            let qq_tok = (self.current().line, self.current().col, self.current().end_col);
+            let qq_after_newline = self.newline_before_current();
             self.advance();
             self.skip_newlines();
+            // Terminal `??` — nothing that can start an expression follows.
+            if matches!(self.current().token_type, TokenType::RBrace | TokenType::EOF) {
+                let mut d = crate::diagnostic::Diagnostic::error(
+                    "`??` is missing its fallback operand",
+                    "Write the default after ??: `expr ?? fallback`",
+                    "?? fallback",
+                ).with_code("E038");
+                if let Some(f) = &self.file { d.file = Some(f.clone()); }
+                d.line = Some(qq_tok.0);
+                d.col = Some(qq_tok.1);
+                d.end_col = Some(qq_tok.2);
+                self.errors.push(d);
+                return Ok((expr, true));
+            }
+            // #1112: at statement level (delimiter depth 0) the fallback must
+            // start on the SAME line as `??`, and `??` on the same line as its
+            // operand — otherwise the next statement is silently swallowed as
+            // the fallback (`let v = f()??\n-5` parsed as `f() ?? -5`, and a
+            // following `println(v)` became the fallback expr, surfacing as a
+            // distant E003). Multiline fallbacks are spelled with parens.
+            if self.delim_depth == 0
+                && (qq_after_newline || self.current().line != qq_tok.0)
+            {
+                let mut d = crate::diagnostic::Diagnostic::error(
+                    "the ?? fallback is not on this line",
+                    "Write the fallback on the same line as `??`; for a multiline \
+                     fallback wrap the whole expression in parentheses with `??` \
+                     trailing:\n        (expr ??\n          fallback)",
+                    "?? fallback",
+                ).with_code("E038");
+                if let Some(f) = &self.file { d.file = Some(f.clone()); }
+                d.line = Some(qq_tok.0);
+                d.col = Some(qq_tok.1);
+                d.end_col = Some(qq_tok.2);
+                self.errors.push(d);
+            }
             let fallback = self.parse_unary()?;
             return Ok((Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
                 expr: Box::new(expr), fallback: Box::new(fallback),

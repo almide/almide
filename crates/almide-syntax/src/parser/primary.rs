@@ -181,6 +181,16 @@ impl Parser {
     fn parse_some_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
         self.advance();
         let open = self.current().clone();
+        // #1111 interim: a bare `some` (no parens) is most often an attempted
+        // function value (`list.map(xs, some)`). Until builtin ctors become
+        // first-class, name the eta-expansion escape instead of a bare
+        // "Expected LParen".
+        if open.token_type != TokenType::LParen {
+            return Err(format!(
+                "`some` needs its payload here: `some(value)` at line {}:{}\n  Hint: to pass it as a function value, write the lambda form: (x) => some(x)",
+                open.line, open.col
+            ));
+        }
         self.expect(TokenType::LParen)?;
         let expr = self.parse_expr()?;
         self.expect_closing(TokenType::RParen, open.line, open.col, "some()")?;
@@ -190,6 +200,16 @@ impl Parser {
     fn parse_ok_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
         self.advance();
         let open = self.current().clone();
+        // #1111 interim: a bare `ok` (no parens) is most often an attempted
+        // function value (`list.map(xs, ok)`). Until builtin ctors become
+        // first-class, name the eta-expansion escape instead of a bare
+        // "Expected LParen".
+        if open.token_type != TokenType::LParen {
+            return Err(format!(
+                "`ok` needs its payload here: `ok(value)` at line {}:{}\n  Hint: to pass it as a function value, write the lambda form: (x) => ok(x)",
+                open.line, open.col
+            ));
+        }
         self.expect(TokenType::LParen)?;
         let expr = self.parse_expr()?;
         self.expect_closing(TokenType::RParen, open.line, open.col, "ok()")?;
@@ -199,6 +219,16 @@ impl Parser {
     fn parse_err_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
         self.advance();
         let open = self.current().clone();
+        // #1111 interim: a bare `err` (no parens) is most often an attempted
+        // function value (`list.map(xs, err)`). Until builtin ctors become
+        // first-class, name the eta-expansion escape instead of a bare
+        // "Expected LParen".
+        if open.token_type != TokenType::LParen {
+            return Err(format!(
+                "`err` needs its payload here: `err(value)` at line {}:{}\n  Hint: to pass it as a function value, write the lambda form: (e) => err(e)",
+                open.line, open.col
+            ));
+        }
         self.expect(TokenType::LParen)?;
         let expr = self.parse_expr()?;
         self.expect_closing(TokenType::RParen, open.line, open.col, "err()")?;

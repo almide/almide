@@ -146,6 +146,13 @@ impl Parser {
     pub(crate) fn advance(&mut self) -> &Token {
         let pos = self.pos;
         if self.pos < self.tokens.len() {
+            match self.tokens[pos].token_type {
+                TokenType::LParen | TokenType::LBracket => self.delim_depth += 1,
+                TokenType::RParen | TokenType::RBracket => {
+                    self.delim_depth = self.delim_depth.saturating_sub(1)
+                }
+                _ => {}
+            }
             self.pos += 1;
         }
         &self.tokens[pos]
