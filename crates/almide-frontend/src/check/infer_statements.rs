@@ -52,6 +52,11 @@ impl Checker {
             ast::Stmt::GuardLet { .. } => self.check_stmt_guard_let(stmt),
             ast::Stmt::Expr { expr, .. } => {
                 let t = self.infer_expr(expr);
+                // #1123: a discarded Result in statement position propagates
+                // implicitly today (ADR-0008 removes this) — queue for E041.
+                if self.env.auto_unwrap && matches!(expr.kind, ast::ExprKind::Call { .. }) {
+                    self.deferred_implicit_prop_checks.push((t.clone(), expr.span, "of this statement's result", true));
+                }
                 // #662: a discarded expression statement whose type carries an
                 // unconstrained phantom slot (e.g. a bare `result.or_else(r0,
                 // (e) => ok(0))`) is undecidable — re-check post-solve.
@@ -89,7 +94,7 @@ impl Checker {
             // unless this binding is later used as a `match x { ok(_) =>
             // ..., err(_) => ... }` subject — in which case the user
             // wants to inspect the Result directly.
-            let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name))
+            let unwrapped = self.effect_unwrap_rhs_warned(t, value.span, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), self.env.skip_auto_unwrap_for.contains(&sym(name))
                 || Self::rhs_keeps_result_shape(value));
             // #662: an un-annotated binding whose value type carries an
             // unconstrained phantom slot (only an un-exercised branch
@@ -128,7 +133,7 @@ impl Checker {
             let t = resolve_ty(&val_ty, &self.uf);
             // Same rule as Let, including the usage-skip: a `var r =
             // effectCall()` later matched on ok/err keeps the Result.
-            let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name))
+            let unwrapped = self.effect_unwrap_rhs_warned(t, value.span, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), self.env.skip_auto_unwrap_for.contains(&sym(name))
                 || Self::rhs_keeps_result_shape(value));
             // #662: same undecidable-phantom-slot re-check as Let.
             self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
@@ -152,7 +157,7 @@ impl Checker {
     fn check_stmt_assign(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Assign { name, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
-        self.check_stmt_assign_unify(name, &val_ty);
+        self.check_stmt_assign_unify(name, &val_ty, value.span);
         self.check_stmt_assign_immutable(name);
         self.check_stmt_assign_escape(name);
     }
@@ -168,7 +173,7 @@ impl Checker {
     /// mutates) or rebuild a fresh value. Otherwise, unify the assigned
     /// value's type with the variable's declared type. Verbatim text move
     /// out of [`Self::check_stmt_assign`].
-    fn check_stmt_assign_unify(&mut self, name: &Sym, val_ty: &Ty) {
+    fn check_stmt_assign_unify(&mut self, name: &Sym, val_ty: &Ty, value_span: Option<ast::Span>) {
         // A local binding (`lookup_var`) OR a module-level `var`
         // (`top_lets`) — both are valid assignment targets and both carry
         // a concrete declared type to flow into the value.
@@ -230,7 +235,7 @@ impl Checker {
                 // lifted Result[Int, E]; a Result-typed target keeps it.
                 // Only substitute when the unwrap actually fires, so an
                 // unresolved TypeVar RHS keeps flowing through inference.
-                let unwrapped = self.effect_unwrap_rhs(val_resolved.clone(), var_resolved.is_result());
+                let unwrapped = self.effect_unwrap_rhs_warned(val_resolved.clone(), value_span, "of this assignment's value", false, var_resolved.is_result());
                 let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
                 self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
             }

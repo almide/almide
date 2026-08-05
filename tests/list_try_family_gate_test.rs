@@ -1,18 +1,20 @@
-//! #1041: the `list.try_*` family completeness matrix (the API-family rule —
-//! a family is extended by matrix, never point-wise).
+//! #1041 → ADR-0006: the `list.try_*` family is FROZEN at its shipped seven.
 //!
-//! THE RULE: a `try_` twin exists for exactly the TRANSFORMING closure-bearing
-//! core — `map`, `filter`, `flat_map`, `filter_map`, `fold`, `find`, `each` —
-//! each with its callback lifted to `-> Result[_, E]` and the result wrapped
-//! in `Result[_, E]`. Deliberate omissions (each with its reason, so a future
-//! reader can tell a decision from a gap):
-//!   - `any` / `all` / `count`: an erring PREDICATE query is `try_find`'s
-//!     domain — `try_find(xs, p)` answers all three shapes.
-//!   - `sort_by`: an erring key extractor has no meaningful partial order.
+//! The family was a monomorphic workaround for the missing fallibility
+//! polymorphism (Swift's rethrows); ADR-0006 dissolves it — `list.map(xs,
+//! (x) => f(x)!)!` replaces every twin once #1108 lands. Until then this
+//! gate is the freeze guard (D2), inverted from its original completeness
+//! direction:
 //!
-//! Scraped from `stdlib/list.almd` itself (the namespace-gate pattern), so a
-//! new core combinator or a hand-added point-wise `try_` drifts RED here, not
-//! silently.
+//!   - the seven shipped twins stay EXACTLY as they are (the deprecated
+//!     surface must keep working through the window), and
+//!   - NO new `try_` member may appear — a new core combinator does NOT get
+//!     a twin anymore (the polymorphic form will cover it); an eighth twin
+//!     here is the drift this gate now exists to catch.
+//!
+//! At the #1108 landing this file flips once more: the seven become
+//! deprecated (mechanical-rewrite hints, ADR-0006 D3) and are removed the
+//! following minor — then this gate asserts the family is EMPTY.
 
 use std::collections::HashSet;
 
@@ -35,53 +37,35 @@ fn list_surface() -> Vec<String> {
     out
 }
 
-const TRY_CORE: &[&str] = &["map", "filter", "flat_map", "filter_map", "fold", "find", "each"];
-const DELIBERATE_OMISSIONS: &[&str] = &["any", "all", "count", "sort_by"];
+/// The shipped seven — frozen (ADR-0006 D2). Removal happens as ONE act at
+/// the #1108 landing, never member-by-member.
+const FROZEN_TRY_FAMILY: &[&str] =
+    &["try_map", "try_filter", "try_flat_map", "try_filter_map", "try_fold", "try_find", "try_each"];
 
 #[test]
-fn every_transforming_core_has_its_try_twin() {
+fn the_frozen_seven_stay_shipped_through_the_window() {
     let declared: HashSet<String> = list_surface().into_iter().collect();
-    for core in TRY_CORE {
+    for twin in FROZEN_TRY_FAMILY {
         assert!(
-            declared.contains(*core) || *core == "each",
-            "core combinator `list.{core}` disappeared — update the family rule"
-        );
-        assert!(
-            declared.contains(&format!("try_{core}")),
-            "`list.try_{core}` is missing — the try_ family is a MATRIX over \
-             the transforming core; land the twin (with tests) or amend the \
-             rule here with the reason (#1041)"
+            declared.contains(*twin),
+            "`list.{twin}` disappeared — the deprecated family must keep working \
+             until the #1108 polymorphic landing removes ALL seven together \
+             (ADR-0006 D3); a member-by-member removal breaks the window contract"
         );
     }
 }
 
 #[test]
-fn omissions_stay_deliberate_not_accidental_growth() {
-    let declared: HashSet<String> = list_surface().into_iter().collect();
-    for omitted in DELIBERATE_OMISSIONS {
-        assert!(
-            !declared.contains(&format!("try_{omitted}")),
-            "`list.try_{omitted}` appeared, but it is a RECORDED omission \
-             (try_find answers the predicate-query shapes; sort_by has no \
-             erring order) — either remove it or move it into TRY_CORE with \
-             its completeness story (#1041)"
-        );
-    }
-}
-
-#[test]
-fn no_unruled_try_member_exists() {
-    // Every try_-prefixed fn on the surface must be a TRY_CORE twin — a
-    // point-wise addition outside the matrix is the drift this gate exists
-    // to catch.
-    let ruled: HashSet<String> = TRY_CORE.iter().map(|c| format!("try_{c}")).collect();
+fn no_new_try_member_ever_appears() {
+    let frozen: HashSet<&str> = FROZEN_TRY_FAMILY.iter().copied().collect();
     for name in list_surface() {
-        if let Some(rest) = name.strip_prefix("try_") {
+        if name.starts_with("try_") {
             assert!(
-                ruled.contains(&name),
-                "`list.try_{rest}` is outside the family rule — add its core \
-                 to TRY_CORE (with the full twin set) rather than growing the \
-                 family point-wise (#1041)"
+                frozen.contains(name.as_str()),
+                "`list.{name}` is a NEW try_ member — the family is frozen \
+                 (ADR-0006 D2): the fallibility-polymorphic form \
+                 `list.<core>(xs, (x) => f(x)!)!` covers new combinators once \
+                 #1108 lands; do not grow the workaround"
             );
         }
     }

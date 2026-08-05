@@ -189,6 +189,11 @@ pub struct Checker {
     /// defaulted. Without it the value passed `check` and then tripped the
     /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
     pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
+    /// #1123 / ADR-0008 release N: sites where the CURRENT implementation
+    /// inserts implicit propagation (auto-`?`). Post-solve, every site whose
+    /// type resolved to Result gets the E041 deprecation warning with the
+    /// mechanical `!` insertion. (ty, span, position label)
+    pub(crate) deferred_implicit_prop_checks: Vec<(Ty, Option<ast::Span>, &'static str, bool)>,
     /// Annotated `let`/`var` bindings, re-checked post-solve for the numeric
     /// narrowing direction (#867). The solver joins numeric widths
     /// symmetrically — peer sites like list elements and `assert_eq` args
@@ -489,6 +494,7 @@ impl Checker {
             deferred_float_overflow_checks: Vec::new(),
             deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
+            deferred_implicit_prop_checks: Vec::new(),
             deferred_unknown_type_checks: Vec::new(),
             pending_toplet_tys: Vec::new(),
         }
@@ -701,7 +707,14 @@ impl Checker {
     pub(crate) fn constrain_condition(&mut self, cond: &ast::Expr, cond_ty: Ty, keyword: &str) {
         let actual = if self.env.auto_unwrap {
             match resolve_ty(&cond_ty, &self.uf) {
-                Ty::Applied(crate::types::TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
+                Ty::Applied(crate::types::TypeConstructorId::Result, ref args) if args.len() == 2 => {
+                    // #1123: the condition's Result is stripped implicitly.
+                    let mech = matches!(cond.kind, ast::ExprKind::Call { .. });
+                    self.deferred_implicit_prop_checks.push((
+                        cond_ty.clone(), cond.span, "of this condition", mech,
+                    ));
+                    args[0].clone()
+                }
                 _ => cond_ty,
             }
         } else {
@@ -870,6 +883,7 @@ impl Checker {
         self.validate_float_overflow_literals();
         self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
+        self.validate_implicit_propagation();
         self.lint_error_surface(program);
         // Unused import warnings
         for imp in &program.imports {

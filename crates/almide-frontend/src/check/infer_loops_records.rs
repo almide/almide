@@ -230,6 +230,16 @@ impl Checker {
         }
     }
 
+    /// [`Self::effect_unwrap_rhs`] + the #1123 E041 queue: when the strip
+    /// will fire (auto_unwrap, target doesn't keep, t is Result), record the
+    /// site so post-solve emits the deprecation warning with the `!` insert.
+    fn effect_unwrap_rhs_warned(&mut self, t: Ty, span: Option<ast::Span>, what: &'static str, mechanical: bool, target_keeps_result: bool) -> Ty {
+        if self.env.auto_unwrap && !target_keeps_result {
+            self.deferred_implicit_prop_checks.push((t.clone(), span, what, mechanical));
+        }
+        self.effect_unwrap_rhs(t, target_keeps_result)
+    }
+
     fn effect_unwrap_rhs(&self, t: Ty, target_keeps_result: bool) -> Ty {
         if self.env.auto_unwrap && !target_keeps_result {
             match t {

@@ -189,6 +189,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E037 | Equality between incompatible types (Result on one side only, or same container with different params — used to die as rustc E0308 after check passed) | Unwrap the Result side (`!` / `??` / match), or make both operand types identical |
 | E038 | `??` separated from its fallback (line-crossing swallowed the next statement; also the missing-operand form) | Put the fallback on the same line as `??`; multiline = parens with `??` trailing |
 | E039 | (warning) `result.collect`/`collect_map` deprecated — Rust's collect short-circuits, almide's collected ALL errors (opposite strategy, same name) | All-errors: `let (oks, errs) = result.partition(rs)` then branch on `list.is_empty(errs)` |
+| E041 | (warning) Implicit propagation (auto-?) is deprecated — the err returned without a marker in 5 positions | Append `!` (mechanical insertion carried by the warning); interpolated calls by hand |
 | E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.field(v,k)?`, `value.get` → `value.field`), or run `almide fix <file>` |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 

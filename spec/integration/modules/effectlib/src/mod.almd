@@ -1,3 +1,5 @@
+// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
+// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
 // effectlib — test fixtures for cross-module effect fn calls
 effect fn read_config() -> Result[String, String] = {
   ok("config_value")

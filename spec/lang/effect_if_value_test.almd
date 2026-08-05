@@ -1,3 +1,5 @@
+// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
+// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
 // Regression (#717): an effect-fn call inside an `if`/`match` expression that is
 // USED AS A VALUE (bound by `let`) inside an EFFECT FN must lower correctly. The
 // checker lifts an effect-call branch to `Result[T, String]`, so the whole

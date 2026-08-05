@@ -1,4 +1,6 @@
 // @contract: C-192
+// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
+// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
 // An auto-unwrapped effect call INSIDE a string interpolation in call-argument
 // position lowers and runs: the `?`-early-return lifts out of the interpolation
 // part exactly as it lifts out of a plain call argument. `println("a=${fetch()}")`

@@ -35,6 +35,9 @@ impl Checker {
                             self.env.auto_unwrap && matches!(expr.kind, ExprKind::Call { .. });
                         if !auto_unwraps {
                             self.deferred_result_interp_checks.push((t.clone(), expr.span));
+                        } else {
+                            // #1123: the segment's Result is stripped implicitly.
+                            self.deferred_implicit_prop_checks.push((t.clone(), expr.span, "of this interpolated call", false));
                         }
                         // #1115: a segment whose type keeps an undecidable slot
                         // (`"${none}"`, `"${some(none)}"`, `"${ok(none)}"`)
@@ -134,6 +137,18 @@ impl Checker {
         let ExprKind::Match { subject, arms, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_match called on the wrong ExprKind") };
                 let subject_ty = self.infer_expr(subject);
                 let sc = resolve_ty(&subject_ty, &self.uf);
+                // #1123: a match over an effect call whose arms are VALUE
+                // patterns takes the implicit strip (ok/err-pattern arms keep
+                // the Result). Queue for the E041 deprecation.
+                if self.env.auto_unwrap
+                    && matches!(subject.kind, ExprKind::Call { .. })
+                    && !arms.iter().any(|a| matches!(a.pattern,
+                        ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }))
+                {
+                    self.deferred_implicit_prop_checks.push((
+                        subject_ty.clone(), subject.span, "of this match subject", true,
+                    ));
+                }
                 self.check_match_exhaustiveness(&sc, arms);
                 let mut arm_types = Vec::new();
                 // Real (un-substituted) arm types, used to pick the overall match

@@ -10,7 +10,7 @@ fn check_net(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("net 
 fn label(n: Int) -> String = "disk-" + int.to_string(n)
 
 effect fn read_cfg() -> Result[String, String] = {
-  let t = fs.read_text("__definitely_missing__.txt")
+  let t = fs.read_text("__definitely_missing__.txt")!
   ok(t)
 }
 
