@@ -53,3 +53,4 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0006](./0006-fallibility-polymorphic-hofs.md) | One-bit fallibility polymorphism for HOFs; the try_* family is dissolved | Accepted | 2026-08-05 |
 | [0007](./0007-partition-replaces-collect.md) | result.collect is removed; partition is the substance for all-errors collection | Accepted | 2026-08-05 |
 | [0008](./0008-explicit-propagation-only.md) | Propagation is always explicit — auto-? abolished, `!` only, Result is must-use | Accepted | 2026-08-05 |
+| [0009](./0009-fn-type-quadrant-transparency.md) | Function types complete the capability quadrant; fn params are transparent by default | Accepted | 2026-08-06 |
