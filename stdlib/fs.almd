@@ -44,6 +44,24 @@ effect fn exists(path: String) -> Bool = _
 @intrinsic("almide_rt_fs_read_lines")
 effect fn read_lines(path: String) -> Result[List[String], String] = _
 
+// Absence-as-Option content readers (#1106 / ADR-0004 D4): none ⇔ the path
+// does not exist (parents included); err = permission / directory / IO. The
+// family covers exactly the content readers — metadata (stat/file_size/
+// modified_at) and directory ops (list_dir/walk/glob) keep their exists/
+// is_dir predicates, writes create, and remove has rm -f semantics of its
+// own; those omissions are intentional (tests/fs_if_exists_family_gate).
+@intrinsic("almide_rt_fs_read_text_if_exists")
+effect fn read_text_if_exists(path: String) -> Result[Option[String], String] = _
+
+@intrinsic("almide_rt_fs_read_bytes_if_exists")
+effect fn read_bytes_if_exists(path: String) -> Result[Option[List[Int]], String] = _
+
+@intrinsic("almide_rt_fs_read_lines_if_exists")
+effect fn read_lines_if_exists(path: String) -> Result[Option[List[String]], String] = _
+
+@intrinsic("almide_rt_fs_read_bytes_raw_if_exists")
+effect fn read_bytes_raw_if_exists(path: String) -> Result[Option[Bytes], String] = _
+
 @intrinsic("almide_rt_fs_remove")
 effect fn remove(path: String) -> Result[Unit, String] = _
 

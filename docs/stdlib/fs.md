@@ -2,6 +2,20 @@
 
 File system. import fs, effect.
 
+### The `_if_exists` content readers — absence as a value
+
+`read_text_if_exists` / `read_bytes_if_exists` / `read_lines_if_exists` /
+`read_bytes_raw_if_exists` return `Result[Option[T], String]`:
+`ok(none)` when the path (or a parent) does not exist, `ok(some(content))`
+when readable, `err(msg)` for real failures (permission, a directory at the
+path, IO). Race-free — the classification happens inside the one read
+(unlike an `fs.exists` pre-check). Contract C-215; native-only today
+(the wasm render walls honestly).
+
+```almide
+let cfg = fs.read_text_if_exists(path)! ?? "default"
+```
+
 ### `fs.read_text(path: String) -> Result[String, String]`
 
 Read file contents as a UTF-8 string

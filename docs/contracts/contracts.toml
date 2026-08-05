@@ -2689,3 +2689,14 @@ status    = "active"
 evidence  = [
   { path = "spec/stdlib/process_timeout_test.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-215"
+spec      = "ALS-R5"
+title     = "fs content readers: absence is ok(none) via the _if_exists family, classified by the runtime"
+statement = "Each fs content reader (`read_text` / `read_bytes` / `read_lines` / `read_bytes_raw`) has an `_if_exists` twin returning `Result[Option[T], String]` with a three-way behavior matrix: a path that does not exist — a missing PARENT directory included — is `ok(none)` (absence is a value, ADR-0004 D4, the map.get principle); a readable file is `ok(some(content))` with the same content the plain reader returns; every other failure (permission, a directory at the path, IO) is the SAME `err(message)` the plain reader produces. The classification happens in the native runtime on `ErrorKind::NotFound` — it cannot be spelled in Almide, because the String error has already erased the kind (and branching on its text is the E035-linted anti-pattern) and an `fs.exists` pre-check races (TOCTOU). The family is exactly the four content readers, machine-enforced by tests/fs_if_exists_family_gate_test.rs; metadata and directory ops keep their predicate spellings as intentional omissions. The surface is native-only today — the wasm render walls it honestly (the prim floor exposes no errno to classify); the pinned matrix binds the wasm leg on arrival, C-214-style."
+since     = "0.53.7"
+status    = "active"
+evidence  = [
+  { path = "spec/stdlib/fs_if_exists_test.almd", class = "fixture" },
+]

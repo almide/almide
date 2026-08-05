@@ -23,6 +23,40 @@ pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<String>, String> {
     std::fs::read_to_string(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(io_err)
 }
 
+// Absence-as-Option content readers (#1106 / ADR-0004 D4): `Ok(None)` ⇔ the
+// path (or a parent) does not exist; every other failure (permission, a
+// directory at the path, IO) keeps the err path with the same message the
+// plain reader produces. Only the runtime can classify — the String error
+// has already erased ErrorKind, and a `fs.exists` pre-check races (TOCTOU).
+pub fn almide_rt_fs_read_text_if_exists(path: &str) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io_err(e)),
+    }
+}
+pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<Vec<i64>>, String> {
+    match std::fs::read(path) {
+        Ok(b) => Ok(Some(b.into_iter().map(|x| x as i64).collect())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io_err(e)),
+    }
+}
+pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<Vec<String>>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => Ok(Some(s.lines().map(|l| l.to_string()).collect())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io_err(e)),
+    }
+}
+pub fn almide_rt_fs_read_bytes_raw_if_exists(path: &str) -> Result<Option<Vec<u8>>, String> {
+    match std::fs::read(path) {
+        Ok(b) => Ok(Some(b)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io_err(e)),
+    }
+}
+
 // Write
 pub fn almide_rt_fs_write(path: &str, content: &str) -> Result<(), String> {
     std::fs::write(path, content).map_err(io_err)

@@ -326,6 +326,16 @@ expr?.field        // optional chaining (Option[Record] → Option[FieldType])
 `fs.exists`, …) the `!` is a silent no-op. You never need to know whether a
 stdlib effect fn can fail to append it.
 
+### Reading a file that may not exist (ADR-0004 D4)
+
+Absence is a value, not an error — never branch on the error text:
+
+```almide
+let cfg = fs.read_text_if_exists(path)! ?? "default"
+//  ok(none) = absent (missing parents too) / err = permission, IO — real failures
+// family: read_text / read_bytes / read_lines / read_bytes_raw + _if_exists
+```
+
 ### All-errors collection: partition (ADR-0007)
 
 `result.collect` is deprecated (E039). Collect every error with partition:
