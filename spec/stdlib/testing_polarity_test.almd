@@ -1,0 +1,22 @@
+// The assertion family covers BOTH polarities of each 2-way sum type
+// (#1110): assert_some/assert_none over Option, assert_ok/assert_err over
+// Result. Failure paths are probed through assert_throws so a wrong-polarity
+// assert is itself asserted to fail.
+import testing
+
+test "option polarities" {
+  testing.assert_some(some(5))
+  testing.assert_none(none: Option[Int])
+}
+
+test "result polarities" {
+  let good: Result[Int, String] = ok(1)
+  let bad: Result[Int, String] = err("x")
+  testing.assert_ok(good)
+  testing.assert_err(bad)
+}
+
+test "wrong polarity fails" {
+  testing.assert_throws(() => testing.assert_none(some(1)), "assert_none failed")
+  testing.assert_throws(() => testing.assert_err(ok(0): Result[Int, String]), "assert_err failed")
+}

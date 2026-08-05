@@ -33,3 +33,13 @@ fn testing_assert_ok(r: Result[String, String]) -> Unit = {
   let h = prim.handle(r)
   if prim.load32(h + 16) == 0 then () else prim.die(prim.handle("assert_ok failed\n"))
 }
+
+fn testing_assert_none(o: Option[String]) -> Unit = {
+  let h = prim.handle(o)
+  if prim.load32(h + 4) == 0 then () else prim.die(prim.handle("assert_none failed\n"))
+}
+
+fn testing_assert_err(r: Result[String, String]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 16) != 0 then () else prim.die(prim.handle("assert_err failed\n"))
+}
