@@ -115,9 +115,15 @@ stdlib 由来のエラー(E=String)を種類で分岐する公式手段は置か
 2. **事前述語** — `fs.exists(path)` 等でエラー経路に入る前に判定
 3. **variant E** — 分岐が本質的なドメインは自作の E で設計(0003 D1)
 
-将来この決定を見直す場合の一次候補は、エラー構造の追加ではなく **API 形状**
-(「不在」を成功チャネルの Option で返す変種 — `map.get` が err でなく Option を
-返すのと同じ原理)である。ただしそれは本 ADR では決定しない。
+分岐需要が本物である場所は、エラー構造の追加ではなく **API 形状**で個別に受ける:
+「不在」を成功チャネルの Option で返す変種(`map.get` が err でなく Option を返す
+のと同じ原理)。初適用として fs の content-reader family
+(`read_text_if_exists` 等 4 セル)を批准済み — #1106。
+
+```almide
+let cfg = fs.read_text_if_exists(path)! ?? default_config()
+//        none = 不在(正常系) / err = 権限・IO 等の本物の失敗
+```
 
 ## Rationale
 
@@ -180,8 +186,8 @@ not_found 程度に局在しており、そのために全 stdlib メッセー�
 1. **D3 の lint と `??` があっても string-match 分岐が書かれ続ける**と dojo で
    計測された場合 — 「分岐需要は吸収できる」という本 ADR の前提が誤り。
    Alternatives 1(タグ)/ 2(error set)の再評価から議論をやり直す。
-2. **D4 の Option 変種 API が特定モジュールで増殖し始めた場合**(`*_opt` が
-   3 モジュール以上に波及等)— 需要が局在でなく一般だった証拠であり、
+2. **D4 の Option 変種 API が増殖し始めた場合**(`*_if_exists` 系 family が
+   fs 以外の 3 モジュール以上に波及等)— 需要が局在でなく一般だった証拠であり、
    構造導入(Alternatives 2)を再検討する。
 3. **D2 の context 連鎖が実コーパスでほぼ使われない**と計測された場合 — 報告品質の
    問題認識が誤りだった証拠として、D2 を deprecated にする改訂を行う。
