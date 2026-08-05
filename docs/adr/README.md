@@ -48,3 +48,4 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0001](./0001-deterministic-time-units.md) | Deterministic budgets are written in time units | Accepted | 2026-08-01 |
 | [0002](./0002-fallibility-effect-orthogonal.md) | Fallibility and effect are orthogonal axes; `-> T!` marks pure-fallible | Accepted | 2026-08-05 |
 | [0003](./0003-error-type-conversion-at-propagation.md) | Error-type conversion at propagation points — lossy conversion must be spelled | Accepted | 2026-08-05 |
+| [0004](./0004-error-branchability-doctrine.md) | Error branchability — evidence-gated stages from String to tagged errors | Proposed | 2026-08-05 |
