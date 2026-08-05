@@ -91,7 +91,7 @@ let cfg = fs.read_text(path) |> result.map_err((e) => "loading config: ${e}")!
 ```
 
 既知のハザード: `${e}` を書き忘れても型が合いコンパイルが通る(元エラーが黙って
-消滅する — 実測確認済み)。対策は糖衣ではなく診断側で検討する(Falsifier 3)。
+消滅する — 実測確認済み)。対策は糖衣ではなく診断で塞ぐ(D3-(b))。
 
 ```almide
 // 今も書ける正準形:
@@ -104,10 +104,10 @@ let cfg = fs.read_text(path) |> result.context("loading config")!
 //   Error: starting server: loading config: No such file or directory
 ```
 
-### D3. string-match 分岐への lint
+### D3. エラー扱いの lint 2 種(実装: #1105)
 
-err 値由来の String への `string.contains` / 等値比較による分岐に警告を出す。
-Go の失敗パターンを診断で先回りする。実装: #1105。
+**(a) string-match 分岐への警告** — err 値由来の String への `string.contains` /
+等値比較による分岐。Go の失敗パターンを診断で先回りする:
 
 ```
 warning[W0xx]: エラー文字列の本文で分岐しています
@@ -115,6 +115,18 @@ warning[W0xx]: エラー文字列の本文で分岐しています
    |   if string.contains(e, "No such file") then ok(default_config())
    = help: エラーの内容で分岐するなら variant E を定義してください(ADR-0004 D1)。
            内容を見ない fallback なら ?? を検討
+```
+
+**(b) `${e}` 忘れへの警告** — `map_err` に渡したラムダがエラー引数を未使用のとき。
+D2 の正準イディオムの唯一の型で捕まらない書き損じ(元エラーが黙って消滅する —
+実測確認済み)を塞ぐ。`(_) => ...` と書けば意図的な破棄として警告なし:
+
+```
+warning[W0xx]: map_err のラムダがエラー値 `e` を使っていません
+  --> app.almd:5
+   |   result.map_err((e) => "loading config")
+   = help: 元のエラーを残すなら "loading config: ${e}"。
+           意図的に破棄するなら (_) => ... と書いてください
 ```
 
 ### D4. stdlib エラーの内容分岐は提供しない(明示的な非目標)
@@ -204,9 +216,8 @@ not_found 程度に局在しており、そのために全 stdlib メッセー�
 2. **D4 の Option 変種 API が増殖し始めた場合**(`*_if_exists` 系 family が
    fs 以外の 3 モジュール以上に波及等)— 需要が局在でなく一般だった証拠であり、
    構造導入(Alternatives 2)を再検討する。
-3. **`${e}` 忘れ(文脈前置で元エラーが消滅する書き損じ)が dojo / 実コーパスで
-   有意に検出された場合** — イディオム文書化では防げない証拠として、診断
-   (map_err のラムダがエラー引数を未使用のとき警告)か、却下した糖衣
+3. **D3-(b) の警告があってもなお `${e}` 忘れ由来の文脈喪失が dojo / 実コーパスで
+   有意に検出された場合** — 診断では防げない証拠として、却下した糖衣
    (Alternatives 7)を再検討する。
 
 ## References
