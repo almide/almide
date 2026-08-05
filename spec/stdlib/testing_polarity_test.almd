@@ -10,7 +10,7 @@ import testing
 
 test "option polarities" {
   testing.assert_some(some("v"))
-  testing.assert_none(none: Option[String])
+  testing.assert_none((none: Option[String]))
 }
 
 test "result polarities" {
@@ -22,5 +22,5 @@ test "result polarities" {
 
 test "wrong polarity fails" {
   testing.assert_throws(() => testing.assert_none(some(1)), "assert_none failed")
-  testing.assert_throws(() => testing.assert_err(ok(0): Result[Int, String]), "assert_err failed")
+  testing.assert_throws(() => testing.assert_err((ok(0): Result[Int, String])), "assert_err failed")
 }

@@ -7,8 +7,8 @@ type LoadError = | Missing(String) | Broken
 
 test "string form is unchanged" {
   let o: Option[Int] = none
-  assert_eq(option.to_result(o, "gone"), err("gone"): Result[Int, String])
-  assert_eq(option.to_result(some(7), "gone"), ok(7): Result[Int, String])
+  assert_eq(option.to_result(o, "gone"), (err("gone"): Result[Int, String]))
+  assert_eq(option.to_result(some(7), "gone"), (ok(7): Result[Int, String]))
 }
 
 test "custom E flows through" {
@@ -16,6 +16,6 @@ test "custom E flows through" {
   let r: Result[Int, LoadError] = option.to_result(o, Missing("cfg"))
   match r {
     err(Missing(k)) => assert_eq(k, "cfg"),
-    _               => testing.assert_contains("unexpected", "never"),
+    _ => testing.assert_contains("unexpected", "never"),
   }
 }
