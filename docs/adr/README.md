@@ -46,3 +46,4 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | # | Title | Status | Date |
 |---|---|---|---|
 | [0001](./0001-deterministic-time-units.md) | Deterministic budgets are written in time units | Accepted | 2026-08-01 |
+| [0002](./0002-fallibility-effect-orthogonal.md) | Fallibility and effect are orthogonal axes; `-> T!` marks pure-fallible | Accepted | 2026-08-05 |
