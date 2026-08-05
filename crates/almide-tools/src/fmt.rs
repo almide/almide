@@ -540,7 +540,7 @@ fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
     out.push('(');
     comma_sep(out, params, |out, p| {
         // `mut` is semantic (mutable-borrow param) — dropping it
-        // turned every in-place mutator call into E007.
+        // turned every in-place mutator call into E032.
         if p.is_mut { out.push_str("mut "); }
         if is_bare_self_param(p) {
             out.push_str("self");

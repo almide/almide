@@ -174,7 +174,7 @@ impl<'a> Interpreter<'a> {
     /// the two shapes the backends' fixtures pin. Any OTHER lvalue shape (an
     /// index, a nested field) abstains by name: the backends write those back,
     /// and silently dropping the effect would be a wrong third vote. A
-    /// non-lvalue argument cannot reach a checked program (E007 rejects a
+    /// non-lvalue argument cannot reach a checked program (E032 rejects a
     /// temporary to a `mut` param); the fall-through skip is defensive only.
     fn mut_param_lvalues(
         &self,
@@ -210,7 +210,7 @@ impl<'a> Interpreter<'a> {
                         func.name.as_str()
                     )))
                 }
-                // Unreachable in a checked program (E007 forbids a temporary
+                // Unreachable in a checked program (E032 forbids a temporary
                 // to a `mut` param) — defensively skip rather than guess.
                 _ => {}
             }

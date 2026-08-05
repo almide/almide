@@ -599,7 +599,7 @@ impl Checker {
                 format!("operator '!' requires Option or Result type but got {}", resolved.display()),
                 "Use '!' only on Option[T] or Result[T, E] values",
                 "operator !",
-            ));
+            ).with_code("E034"));
             Ty::Unknown
         }
     }
@@ -630,7 +630,7 @@ impl Checker {
                 format!("operator '??' requires Option or Result type but got {}", resolved.display()),
                 "Use '??' only on Option[T] or Result[T, E] values",
                 "operator ??",
-            ));
+            ).with_code("E034"));
             ft.clone()
         };
         self.unify_infer(&inner_ty, &ft);
@@ -655,7 +655,7 @@ impl Checker {
                 format!("operator '?' requires Option or Result type but got {}", resolved.display()),
                 "Use '?' only on Option[T] or Result[T, E] values",
                 "operator ?",
-            ));
+            ).with_code("E034"));
             Ty::Unknown
         }
     }

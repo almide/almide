@@ -1,4 +1,4 @@
-// E007: a UFCS method call must apply the same `mut`-parameter rule as the module
+// E032: a UFCS method call must apply the same `mut`-parameter rule as the module
 // spelling. `xs.push(n)` desugars to `list.push(xs, n)`, whose first parameter is
 // declared `mut`, so an immutable `xs` is rejected either way.
 //

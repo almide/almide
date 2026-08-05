@@ -24,6 +24,9 @@ Use `almide explain <code>` to read these from the CLI.
 | [E029](E029.md) | Unknown type name in an annotation or record literal |
 | [E030](E030.md) | Type has no ordering (sort/min/max over Map/Set/Fn or compound Float) |
 | [E031](E031.md) | Retired range spelling (`..`/`..=` → `..<`/`...`, fix-it + `almide fix`) |
+| [E032](E032.md) | Immutable binding passed to `mut` parameter |
+| [E033](E033.md) | Opaque type constructed outside its defining module |
+| [E034](E034.md) | Error-channel operator on non-Option/Result operand |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E040** (the json.*/value.* alias deprecation window) fired

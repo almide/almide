@@ -93,7 +93,7 @@ impl Checker {
     /// parameter is NOT declared `mut` compiled, and then native propagated the mutation to
     /// the caller while wasm dropped it — a checker-accepted program printing different
     /// numbers on the two targets (#1027). The module spelling of the same body was
-    /// correctly rejected with E007 the whole time.
+    /// correctly rejected with E032 the whole time.
     fn validate_ufcs_mut_args(&mut self, name: &str, object: &ast::Expr, args: &[ast::Expr]) {
         let mut arg_refs: Vec<&ast::Expr> = Vec::with_capacity(args.len() + 1);
         arg_refs.push(object);
@@ -307,7 +307,7 @@ impl Checker {
                     format!("cannot construct opaque type '{}' outside its defining module", name),
                     format!("Use the module's public API to create '{}' values", name),
                     format!("constructor {}()", name),
-                ).with_code("E008"));
+                ).with_code("E033"));
             }
         }
         if arg_tys.len() != 1 {

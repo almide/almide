@@ -683,7 +683,7 @@ impl Checker {
                             format!("cannot pass immutable binding '{}' to `mut` parameter of {}()", name, fn_name),
                             format!("Declare '{}' with `var` instead of `let` to allow mutation", name),
                             format!("call to {}()", fn_name),
-                        ).with_code("E007"));
+                        ).with_code("E032"));
                     }
                 }
                 // A field/element of a mutable place is itself a mutable place: `list.push(box.items, x)` with `var box` (or a `mut box` param) lowers to `&mut box.items`, valid Rust. Walk the member/index chain down to its root identifier.
@@ -695,14 +695,14 @@ impl Checker {
                                 format!("cannot mutate a field of immutable binding '{}' via `mut` parameter of {}()", root, fn_name),
                                 format!("Declare '{}' with `var` instead of `let`", root),
                                 format!("call to {}()", fn_name),
-                            ).with_code("E007"));
+                            ).with_code("E032"));
                         }
                         None => {
                             self.emit(super::err(
                                 format!("cannot pass a temporary expression to `mut` parameter of {}()", fn_name),
                                 "Pass a mutable `var` binding (or a field/element of one)",
                                 format!("call to {}()", fn_name),
-                            ).with_code("E007"));
+                            ).with_code("E032"));
                         }
                     }
                 }
@@ -711,7 +711,7 @@ impl Checker {
                         format!("cannot pass a temporary expression to `mut` parameter of {}()", fn_name),
                         "Pass a mutable `var` binding instead",
                         format!("call to {}()", fn_name),
-                    ).with_code("E007"));
+                    ).with_code("E032"));
                 }
             }
         }
