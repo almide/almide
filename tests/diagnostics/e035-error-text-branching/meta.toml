@@ -1,0 +1,3 @@
+expects_code = "E035"
+expects_error = "branching on the text of an error message"
+hint_substring = "variant error type"

@@ -1,0 +1,6 @@
+// E036: a map_err lambda that never reads its error parameter silently
+// destroys the original error. Interpolate ${e}, or discard with (_).
+effect fn main() -> Unit = {
+  let n = int.parse("42") |> result.map_err((e) => "parse failed: ${e}")
+  println("${n}")
+}

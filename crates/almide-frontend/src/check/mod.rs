@@ -870,6 +870,7 @@ impl Checker {
         self.validate_float_overflow_literals();
         self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
+        self.lint_error_surface(program);
         // Unused import warnings
         for imp in &program.imports {
             let (path, alias, span) = match imp {
@@ -1061,4 +1062,5 @@ pub(crate) fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
 }
 
 include!("post_solve_validation.rs");
+include!("lint_error_surface.rs");
 include!("module_inference.rs");

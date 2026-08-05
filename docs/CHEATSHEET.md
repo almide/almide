@@ -326,6 +326,39 @@ expr?.field        // optional chaining (Option[Record] → Option[FieldType])
 `fs.exists`, …) the `!` is a silent no-op. You never need to know whether a
 stdlib effect fn can fail to append it.
 
+### Error-handling doctrine (ADR-0004)
+
+**Never branch on the text of an error message** (`string.contains(e, …)`,
+`e == "No such file"`) — the text is a report, not an API, and E035 warns.
+When a caller must branch on the failure *kind*, that is the signal to
+define a variant error type and match on its structure:
+
+```almide
+type LoadError = | NotFound(String) | BadValue(String)
+
+match load(p) {
+  ok(v)               => v,
+  err(NotFound(_))    => default_value,     // branch on structure
+  err(BadValue(msg))  => process.exit(1),
+}
+```
+
+For a kind-independent fallback, don't read the error at all: `load(p) ?? default`.
+
+**Adding context to an error** — the canonical spelling (do not invent
+variants; keep `": "` as the separator and `${e}` at the end):
+
+```almide
+let cfg = fs.read_text(path) |> result.map_err((e) => "loading config: ${e}")!
+// chained calls read as the failure's story:
+//   Error: starting server: loading config: No such file or directory
+
+// deliberate replacement is spelled with the discard parameter:
+fs.read_text(path) |> result.map_err((_) => "friendly message")
+// forgetting ${e} with a NAMED parameter warns (E036) — the original error
+// would be silently destroyed
+```
+
 ### Guard (early return / loop break)
 ```
 guard x > 0 else err("must be positive")

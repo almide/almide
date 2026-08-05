@@ -27,6 +27,8 @@ Use `almide explain <code>` to read these from the CLI.
 | [E032](E032.md) | Immutable binding passed to `mut` parameter |
 | [E033](E033.md) | Opaque type constructed outside its defining module |
 | [E034](E034.md) | Error-channel operator on non-Option/Result operand |
+| [E035](E035.md) | (warning) Branching on error message text |
+| [E036](E036.md) | (warning) map_err lambda discards the error value |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E040** (the json.*/value.* alias deprecation window) fired

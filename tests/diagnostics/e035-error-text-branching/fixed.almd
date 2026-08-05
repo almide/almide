@@ -1,0 +1,14 @@
+// E035: branching on the text of an error message — the Go-〜1.12 pattern.
+// The message is a report, not an API; branch on structure instead.
+import fs
+
+effect fn load(path: String) -> Result[String, String] = {
+  match fs.read_text(path) {
+    ok(t)  => ok(t),
+    err(e) => err(e),
+  }
+}
+
+effect fn main() -> Unit = {
+  println(load("/nonexistent") ?? "fallback")
+}
