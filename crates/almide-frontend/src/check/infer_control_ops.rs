@@ -36,6 +36,16 @@ impl Checker {
                         if !auto_unwraps {
                             self.deferred_result_interp_checks.push((t.clone(), expr.span));
                         }
+                        // #1115: a segment whose type keeps an undecidable slot
+                        // (`"${none}"`, `"${some(none)}"`, `"${ok(none)}"`)
+                        // passed check and died at codegen (rustc E0282 or the
+                        // AllTypesConcrete gate), while `"${ok(1)}"` silently
+                        // concretized E — against the never-silently-defaulted
+                        // doctrine. Queue every segment for the post-solve E025
+                        // sweep so all four are the SAME check-time error.
+                        self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                            ty: t, name: None, span: expr.span,
+                        });
                     }
                 }
                 Ty::String
@@ -663,8 +673,27 @@ impl Checker {
                     format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
                     "Unwrap the Result operand first (`!` in an effect fn body, `?? fallback`, \
                      or `match` on ok/err) — or compare two Results",
-                    format!("operator {}", op)));
+                    format!("operator {}", op)).with_code("E037"));
+            } else if same_head_applied_mismatch(&lc, &rc) {
+                // #1116: `unify_infer` stays silent on a concrete mismatch, so
+                // same-head shapes with different params (`Result[Int, String]
+                // == Result[Int, Int]`, `Option[Int] == Option[String]`)
+                // passed check and died as rustc E0308 behind the
+                // codegen-produced-invalid-Rust wall. Both sides fully
+                // concrete + structurally different = can never compare.
+                self.emit(super::err(
+                    format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
+                    "== requires both operands to have the same type — convert one side \
+                     (or compare the payloads after unwrapping)",
+                    format!("operator {}", op)).with_code("E037"));
             }
+            // #1116: `none == none` (both sides `Option[?0]`, never pinned)
+            // passed check and died as rustc E0282. Queue the unified operand
+            // type for the post-solve E025 sweep — same rule as bindings and
+            // interpolation segments.
+            self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                ty: lt.clone(), name: None, span: left.span,
+            });
         }
         // Ordering (< <= > >=) is defined ONLY on scalar orderable
         // types. On a compound operand (Tuple/Option/Result/List/
@@ -806,4 +835,21 @@ impl Checker {
                 Ty::Unknown
     }
 
+}
+
+/// #1116: true when both sides are the SAME outer type constructor
+/// (`Option`/`Result`/`List`/`Map`/`Set`/named) applied to DIFFERENT, fully
+/// concrete arguments — `Result[Int, String]` vs `Result[Int, Int]`. Rigid
+/// generics and unresolved slots (any `TypeVar`/`Unknown`) exclude the pair:
+/// they may still unify, and the undecidable case is the E025 sweep's job.
+fn same_head_applied_mismatch(lc: &Ty, rc: &Ty) -> bool {
+    fn fully_concrete(t: &Ty) -> bool {
+        let hit = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+        !hit(t) && !t.any_child_recursive(&hit)
+    }
+    match (lc, rc) {
+        (Ty::Applied(c1, _), Ty::Applied(c2, _)) =>
+            c1 == c2 && lc != rc && fully_concrete(lc) && fully_concrete(rc),
+        _ => false,
+    }
 }

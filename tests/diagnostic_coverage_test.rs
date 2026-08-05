@@ -183,8 +183,9 @@ fn every_fixture_meta_declares_known_code() {
 /// may only go DOWN. When you add a code to an existing site, lower the
 /// constant. Adding a NEW uncoded error site fails this gate — attach a
 /// code (and its fixture + doc, enforced above) instead.
-/// Baseline measured 2026-08-06 (#1113).
-const UNCODED_ERR_BASELINE: usize = 40;
+/// Baseline measured 2026-08-06 (#1113); lowered to 39 when the eq
+/// "compares" site gained E037 (#1116).
+const UNCODED_ERR_BASELINE: usize = 39;
 
 #[test]
 fn uncoded_error_sites_ratchet() {

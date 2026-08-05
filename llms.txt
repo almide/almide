@@ -186,6 +186,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E034 | Error-channel operator (`!` / `?` / `??`) on a non-Option/Result operand | Drop the operator — a plain value has no error channel; if a fallible call was intended, apply it to that call's Result |
 | E035 | (warning) Branch condition reads error message text (`string.contains(e, …)` / `e == "…"` on an err binding) | Branch on a variant error type or use `??` for a kind-independent fallback; message text is a report, not an API |
 | E036 | (warning) `map_err` lambda never uses its error value — original error silently discarded | Keep the chain: `(e) => "context: ${e}"`; discard deliberately with `(_) => …` |
+| E037 | Equality between incompatible types (Result on one side only, or same container with different params — used to die as rustc E0308 after check passed) | Unwrap the Result side (`!` / `??` / match), or make both operand types identical |
 | E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.field(v,k)?`, `value.get` → `value.field`), or run `almide fix <file>` |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
