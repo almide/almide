@@ -1,6 +1,8 @@
-# Result, Option, Effect — 完全仕様 (DRAFT)
+# Result, Option, Effect — 完全仕様
 
-> 1.0.0 に向けた仕様確定ドラフト。全演算子・全関数形態で辻褄が合うことを保証する。
+> Last updated: 2026-08-06
+> 2026-08-05 の 287 セル実測 matrix(#1122)に基づき全面改訂。設計判断の出典は
+> ADR-0002〜0009。本文はすべて「動くコード」の記述であり、各節に検証テストを明記する。
 
 ## 1. 型
 
@@ -22,107 +24,183 @@ process.exit(n) : Never   // 戻らない関数の戻り値型
 ```
 Never はどの型にも代入可能。guard else, if then, match arm で使える。
 
+### 可謬マーカー `-> T!`(ADR-0002 Phase 1)
+
+fn 宣言の戻り位置に限り、`T!` は `Result[T, String]` の糖衣。可謬性(fallibility)と
+効果(effect)は直交する 2 軸であり、4 象限すべてが綴れる:
+
+```almide
+fn        f() -> Int      // pure ・総
+fn        f() -> Int!     // pure ・可謬(= Result[Int, String])
+effect fn f() -> Int      // effect・総(暗黙 lift、§3)
+effect fn f() -> Int!     // effect・可謬
+```
+
+E は常に String(ADR-0002 D2)。カスタムエラー型は明示の `Result[T, MyError]` で綴る。
+`!` マーカーは fn 宣言の戻り位置**のみ**で合法 — let 注釈などでは parse エラー。
+本体は Result を直接書く(パススルー / ok / err)。`!` 演算子は本体内で伝搬する:
+
+```almide
+fn parse_port(s: String) -> Int! = int.parse(s)     // パススルー
+fn checked(s: String) -> Int! = {
+  let n = int.parse(s)!                              // ! が T! 本体で伝搬
+  guard n > 0 else err("must be positive")
+  ok(n)
+}
+```
+
+テスト: `spec/lang/fallible_marker_test.almd`
+
 ## 2. 演算子
+
+すべての値レベル演算子は名前付き stdlib 関数への脱糖として定義される(ADR-0005)。
+定義表:
+
+```
+x ?? d      ≡  option.unwrap_or_else(x, () => d)   // Option operand
+r ?? d      ≡  result.unwrap_or_else(r, (_) => d)   // Result operand
+r?          ≡  result.to_option(r)
+o?.x        ≡  option.map(o, (v) => v.x)
+```
+
+`!` と effect fn の auto-`?` は制御フロー(早期 return)であり、関数実体を持たない
+(ADR-0005 の明示的な境界)。
 
 ### `expr!` — unwrap with propagation
 
-| 入力型 | 出力型 | Rust 生成 | 制限 |
-|---|---|---|---|
-| `Result[T, E]` | `T` | `(expr)?` | effect fn 内のみ |
-| `Option[T]` | `T` | `(expr).ok_or("none".to_string())?` | effect fn 内のみ |
-| test 内 | `T` | `(expr).unwrap()` | テスト専用 |
+| 入力型 | 出力 | 失敗時 |
+|---|---|---|
+| `Result[T, E]` | `T` | err を囲む関数の失敗チャネルへ伝搬 |
+| `Option[T]` | `T` | `err("none")` へ変換して伝搬(無損失の埋め込み — ADR-0003 D3) |
+| test 内 | `T` | unwrap(panic でテスト失敗) |
 
-effect fn の外で `!` を使うとコンパイルエラー。
+`!` が合法な文脈(**effect fn 専用ではない** — C-211):
+
+1. effect fn の本体
+2. test ブロック
+3. **pure fn で戻り値型が Result / Option / `T!` に解決されるもの**
+
+それ以外の文脈は `E022`。Option/Result でない被演算子(`5!`)は `E034`。
+伝搬点で E は変換されない — 不一致は check エラー(ADR-0003。実装 #1103)。
+E が一致していればカスタムエラー型も構造のまま伝搬し match 可能(ADR-0003 D1)。
+
+```almide
+fn twice(s: String) -> Result[Int, String] = ok(int.parse(s)! * 2)   // pure + !
+```
+
+テスト: `spec/lang/unwrap_operators_test.almd`, `spec/lang/fallible_marker_test.almd`,
+`spec/wasm_cross/pure_bang_propagation.almd`
 
 ### `expr?` — Result → Option 変換
 
-| 入力型 | 出力型 | Rust 生成 |
-|---|---|---|
-| `Result[T, E]` | `Option[T]` | `(expr).ok()` |
-| `Option[T]` | `Option[T]` | identity（変換なし） |
+| 入力型 | 出力型 |
+|---|---|
+| `Result[T, E]` | `Option[T]`(err → none。E は破棄) |
+| `Option[T]` | `Option[T]`(恒等 — 診断なし) |
+
+変換は**外側 1 層のみ**: `Result[Result[T, E], E]?` は `Option[Result[T, E]]`。
+flatten はしない(ネストの平坦化は `result.flatten` / `option.flatten` の領分)。
+Option/Result でない被演算子は `E034`。
 
 ### `expr ?? fallback` — unwrap with fallback
 
-| 入力型 | 出力型 | Rust 生成 |
-|---|---|---|
-| `Result[T, E]` | `T` | `match expr { Ok(v) => v, Err(_) => fallback }` |
-| `Option[T]` | `T` | `match expr { Some(v) => v, None => fallback }` |
+| 入力型 | 出力型 |
+|---|---|
+| `Result[T, E]` | `T`(err で fallback。E は破棄) |
+| `Option[T]` | `T`(none で fallback) |
 
-**型判定ルール**: チェッカーが型主導で確定する — `Option[T]` なら Option、
-`Result[T, E]` なら Result、**それ以外の型はコンパイルエラー**
-(`operator '??' requires Option or Result type but got Int` の形で拒否)。
-v0.26.20 の unwrap 規則統一(#485/#489)で checker と lowering が単一規則を共有する。
+- **遅延評価**: fallback は none / err のときだけ評価される
+  (`o ?? expensive()` は o が some なら expensive() を呼ばない)。
+  定義 `≡ unwrap_or_else`(ADR-0005)の帰結。
+- **fallback の型は unwrap 後の T と check 時に unify される**(不一致は E001 —
+  `n ?? "hello"`、`n ?? some(1)` は check エラー)。
+- **優先順位は最高位(後置族)**: `a ?? 1 + 2` は `(a ?? 1) + 2`。
+  **C 系の `?:`(ほぼ最下位)と逆**なので、算術と混ぜるときは括弧を推奨。
+- **チェーンは右入れ子**: `a ?? b ?? c` は `a ?? (b ?? c)`(AST 実測)。
+  意味は「最初の成功が勝つ」。
+- **行またぎ禁止(E038)**: 文レベルでは fallback は `??` と同じ行に置く。
+  複数行は括弧 + `??` 後置:
+  ```almide
+  let v = (int.parse(s) ??
+    -5)
+  ```
+- Option/Result でない被演算子は `E034`。
 
-旧記述の「`Unknown` のとき Result 扱いになる」は死んだ: `Ty::Unknown` が
-codegen に到達するビルドは AllTypesConcrete ゲートが拒否するため、
-テンプレート選択が Unknown を見ることは構造的にない(#534 矛盾バーンダウン)。
+テスト: `spec/lang/unwrap_operators_test.almd`,
+`tests/diagnostics/e038-qq-line-crossing/`, `tests/diagnostics/e034-off-type-bang/`
+
+### `expr?.field` — optional chaining(Option 専用)
+
+```almide
+fn getx(o: Option[P]) -> Int = o?.x ?? 0    // some(P{x:5}) → 5、none → 0
+```
+
+`Option[レコード]` のフィールドへ安全にアクセスし `Option[フィールド型]` を返す。
+**Option 専用** — Result に付けると専用診断で拒否(Result からは `(r?)?.x` と合成する)。
+
+テスト: `spec/lang/unwrap_operators_test.almd`
 
 ## 3. effect fn
 
-### 宣言
+### 宣言と lift
 
 ```almide
 effect fn read_file(path: String) -> String = fs.read_text(path)!
 ```
 
-ユーザーは `-> T` を書く。コンパイラが暗黙に `Result<T, String>` に変換する。
-
-### Rust 生成ルール
-
-| Almide | Rust |
+| Almide | Rust 生成 |
 |---|---|
-| `effect fn f() -> T` | `fn f() -> Result<T, String>` |
-| `effect fn f() -> Result[T, E]` | `fn f() -> Result<T, E>`（二重包装しない） |
-| `fn f() -> T` | `fn f() -> T`（変換なし） |
+| `effect fn f() -> T` | `fn f() -> Result<T, String>`(暗黙 lift) |
+| `effect fn f() -> Result[T, E]` | `fn f() -> Result<T, E>`(二重包装しない) |
+| `fn f() -> T` | `fn f() -> T`(変換なし) |
 
-### 変換の詳細 (pass_result_propagation)
+### auto-`?` の位置マトリクス(現行実装の実測)
 
-1. 戻り値型を `T` → `Result<T, String>` に変換
-2. body の tail expression を `Ok(...)` で包む
-3. if/match の全分岐を再帰的に包む
-4. 既に `ResultOk` / `ResultErr` の場合は包まない（二重包装防止）
+effect fn 本体では、失敗しうる呼び出しの暗黙伝搬(auto-`?`)が**位置により**効く:
+
+| 暗黙伝搬が効く | 効かない(明示 `!` が必要) |
+|---|---|
+| 文の位置(`fail()` 単独) | 関数の引数(`double(get())` → E005) |
+| 注釈なし let | パイプ段(`get() \|> double` → E005) |
+| if 条件 | record フィールド(→ E001) |
+| match(値パターンの腕のとき) | リスト要素(→ E001) |
+| 文字列補間(呼び出し形) | タプル成分 |
+
+注釈・パターン形状で挙動が変わる点に注意:
+
+```almide
+let r = int.parse(s)                          // 暗黙伝搬(r は Int、err で早期 return)
+let r: Result[Int, String] = int.parse(s)     // 保持(r は Result 値)
+match get() { ok(v) => ..., err(e) => ... }   // Result のまま受ける
+match get() { 42 => ..., _ => ... }           // 伝搬が差し込まれる
+```
+
+> この位置依存の暗黙は **ADR-0008 で廃止決定済み**(伝搬は `!` 全明示へ、警告窓 #1123)。
+> 本節は移行完了まで現行実装を記述する。
+
+### lambda 境界(#489 / #1051)
+
+lambda は囲む fn の効果資格を継承するが、auto-`?` はクロージャ境界を**越えない**:
+effect fn 内の lambda が effect fn を呼んだ結果は明示の Result 値であり、
+lambda 内の `!` は E022(`??` / match で処理するか、呼び出しを lambda の外へ)。
+
+テスト: `spec/lang/result_option_matrix_test.almd`, `spec/stdlib/` の effect 系各種
 
 ## 4. fn main
 
 | Almide | Rust codegen | 備考 |
 |---|---|---|
 | `fn main() = ...` | `fn main()` | 純粋。副作用なし |
-| `effect fn main() -> Unit = ...` | `fn main() -> Result<(), String>` | 自動リフト。Termination trait で動作 |
+| `effect fn main() -> Unit = ...` | `fn main() -> Result<(), String>` | 自動リフト |
 
-### 仕様
-
-- `effect fn main()` は `pass_result_propagation` により戻り値が `Unit` → `Result<(), String>` に自動リフトされる
-- ユーザーが `-> Result[Unit, String]` を明示的に書いても動作するが、不要
-- **main は引数を取らない。** コマンドライン引数は `process.args()` で取得する（Go 方式）
-
-### 未処理エラー時のプログラム終了 — クロスターゲット統一
-
-`main` に未処理の `Err`（auto-`?` 伝搬・`!` で unwrap した `Err`・ネストした effect 伝搬）が
-到達したら、**両ターゲットで `exit code 1` ＋ stderr に `Error: <msg>`**（Display、引用符なし）。
-これは WASI/POSIX の作法（成功=exit0 / 失敗=非ゼロ+stderr）であり、Rust・Go 他の wasi 言語と
-揃える。`??`・`match` で処理済みのエラーは値が両 target 一致。
-
-| target | exit code | stderr | 実装 |
-|---|---|---|---|
-| **native** | `1` | `Error: <msg>` | `effect fn main` を `__almide_main` にリネームし、`Err` を Display で出す `fn main` ラッパ（Rust `Termination` の Debug `"引用符"` は使わない） |
-| **wasm** | `1` | `Error: <msg>` | `__main_runner` が `main` の `Result` tag を検査し、`Err` なら `Error: <msg>\n` を fd 2 + `proc_exit(1)` |
+- **main は引数を取らない。** コマンドライン引数は `process.args()`(Go 方式)
+- 未処理の Err が main に到達したら、**両ターゲットで exit 1 + stderr `Error: <msg>`**
+  (Display、引用符なし)。`!` による Option の none 由来(`err("none")`)も同じ経路で
+  両ターゲット一致(旧記述の「wasm が exit 0 で黙殺する残存乖離」は解消済み — 実測で
+  両ターゲット exit 1 + `Error:` を確認)
 
 テスト: `tests/wasm_runtime_test.rs::unhandled_main_error_terminates_consistently`,
-`successful_main_exits_zero_both_targets`（両者 native==wasm を exit/stderr で検証）。
-
-> **残存乖離**: `!` で **Option の `None`** を unwrap したケース（`list.first([])!`）は wasm がまだ
-> `Err` を main に伝搬できず exit 0 で黙殺する（`Err` Result は上表通り統一済み）。`!`/Option-`None`
-> の wasm 伝搬 lowering の別バグ。[correctness-guarantee-gaps.md §13](../roadmap/active/correctness-guarantee-gaps.md) 参照。
-
-テスト: `spec/lang/result_option_matrix_test.almd`
-
-```almide
-effect fn main() -> Unit = {
-  let args = process.args()
-  let name = list.get(args, 1) ?? "world"
-  println("Hello, ${name}!")
-}
-```
+`spec/lang/result_option_matrix_test.almd`
 
 ## 5. test ブロック
 
@@ -134,12 +212,18 @@ test "name" {
 
 | 属性 | 値 |
 |---|---|
-| `is_effect` | `true`（effect fn の呼び出し可） |
-| `is_test` | `true` |
-| Result 包装 | なし（`-> ()` のまま） |
-| `!` の挙動 | `.unwrap()`（`?` ではなく） |
+| `is_effect` | `true`(effect fn を呼べる) |
+| Result 包装 | なし |
+| effect 呼び出しの結果 | **明示の Result 値**(auto-`?` は test では効かない) |
+| `!` の挙動 | unwrap(失敗は panic でテスト失敗) |
 
-test 内では `!` が `.unwrap()` に展開される。失敗時は panic でテスト失敗。
+test 内で effect fn を呼ぶと結果は Result のまま返る — `!` で unwrap するか、
+`??` / match で処理する(「test では ! 不要」という旧記述は誤り)。
+
+`assert_eq` の失敗出力は現状 Rust debug 形(`left: Ok(1) / right: Err("x")`)。
+almide repr 形(ok/err)への統一は未実施(既知の表示形差)。
+
+テスト: `spec/lang/expr_test.almd` ほか全 `*_test.almd`
 
 ## 6. guard else
 
@@ -147,68 +231,34 @@ test 内では `!` が `.unwrap()` に展開される。失敗時は panic で�
 guard condition else { diverge_expr }
 ```
 
-### 生成ルール
+- 条件は Bool に constrain される
+- `else_expr` の型は **check 時に検査される**(#1118):
+  1. 関数の戻りチャネルと unify(pure は宣言型、effect fn は lift 後の Result も可)
+  2. `Never`(process.exit / panic 系)
+  3. ループ内の `break` / `continue`
+  型不一致(`-> Int` fn での `else "nope"` / `else { println(..) }`)は E001。
+- 定数条件でも else の効果は失われない(`guard false else process.exit(3)` は
+  exit 3 — #1117 で miscompile を修正、`tests/guard_exit_gate_test.rs` が絶対値で固定)
 
-| コンテキスト | else が Unit/Break/Continue | else がそれ以外 |
-|---|---|---|
-| ループ内 | `if !(cond) { break }` or `continue` | `if !(cond) { return else_expr }` |
-| 関数内 | N/A | `if !(cond) { return else_expr }` |
+テスト: `spec/lang/fallible_marker_test.almd`(guard else err)、
+`tests/guard_exit_gate_test.rs`
 
-### else ブロックの型制約
+## 7. match の網羅性
 
-`else_expr` の型は以下のいずれか:
-1. 関数の戻り値型と一致（effect fn なら `Result<T, String>`）
-2. `Never` 型（`process.exit()`, `panic()` 等）
-3. `Unit`（ループ制御: break/continue に変換）
+Result / Option を含む match の腕の欠落(err / none 腕なし)は**ハードエラー E010**
+(警告ではない)。腕追加の hint 付き。
 
-### 解決履歴
+テスト: `tests/diagnostics/`(E010 系 fixture)
 
-- `process.exit()` の戻り値型が `-> !` (never) になったことで guard else での使用は修正済み
-- `Ty::Never` は v0.10.3 で型システムに実装済み(本ファイル末尾の表どおり)。
-  Never はどの型にも代入可能で、guard else / if then / match arm の腕として
-  型チェッカーが正しく受理する — 「型システムに Never が無い」という旧記述は
-  実装前の文章の残骸であり、削除した(#534 矛盾バーンダウン)。
+## 8. エラー値のドクトリン(ADR-0004)
 
-## 7. テストで確認済みの動作
+- エラー値は String に収束する(タグ・error set は導入しない)
+- **エラーメッセージの本文で分岐しない** — `string.contains(e, ...)` / 等値比較の
+  分岐条件は E035 警告。分岐が要るなら variant E を定義して構造で match する
+- `map_err` のラムダがエラー引数を使わないと E036 警告(意図的破棄は `(_) =>`)
+- 文脈前置の正準形: `r |> result.map_err((e) => "context: ${e}")`(区切り `": "`)
+- 全エラー収集は `result.partition`(`result.collect` / `collect_map` は E039 で
+  非推奨 — 削除予定)
+- fs の「不在」は値: `fs.read_text_if_exists(p)! ?? default`(C-215)
 
-```
-✅ effect fn から test 内で直接呼べる（test は is_effect=true）
-✅ test 内で effect fn の結果に ! 不要（auto-unwrap ではなく test 特殊扱い）
-✅ ? で Result → Option 変換
-✅ ?? で Result ok/err の分岐
-✅ ?? で Option some/none の分岐
-✅ ?? で value.field()? (Option) のフォールバック
-✅ guard else { err("msg")! } で早期リターン
-✅ effect fn が暗黙に Result 包装
-```
-
-## 8. 現状と仕様のギャップ
-
-| # | 仕様 | 現状 | ステータス |
-|---|---|---|---|
-| 1 | `??` は Option/Result を正しく判別 | `Ty::Unknown` → Result 扱い | ⚠ 型推論が壊れると誤生成 |
-| 2 | Never 型がある | `Ty::Never` 実装済み (v0.10.3) | ✅ |
-| 3 | effect fn の戻り値変換は暗黙 | pass_result_propagation で変換 | ✅ 動作中 |
-| 4 | test 内の `!` は `.unwrap()` | 実装済み | ✅ |
-| 5 | guard else は Never/戻り値型を受け入れる | Rust codegen レベルで解決 | ⚠ 型チェッカーは未対応 |
-| 6 | auto-unwrap は無効、`!` で明示 | コメントアウト済み | ✅ 意図的 |
-| 7 | `effect fn main()` → `Result<(), String>` | Termination trait で動作 | ✅ |
-| 8 | args は `process.args()` で取得 | `process.args()` 実装済み (v0.10.3) | ✅ |
-| 9 | `?` 演算子のパース | `IdentQ` 廃止、`?` は常に独立トークン (v0.10.3) | ✅ |
-| 10 | test 内で effect fn を `!` で呼ぶ | 不要（test は直接呼べる） | ✅ だが非直感的 |
-
-## 9. 決定が必要な事項
-
-### ~~9.1 `?` のパース~~ → 解決済み (v0.10.3)
-`IdentQ` トークンを廃止。`?` は常に独立した後置演算子。`r?` は空白なしで動作する。
-
-### 9.2 test 内での effect fn 呼び出し
-- 現状: test は `is_effect=true` なので effect fn を直接呼べる。結果の型は T（Result 包装前）
-- 問題: `!` を付けるとエラー（「String に ! は使えない」）
-- 提案: test 内での effect fn 呼び出しは暗黙的に unwrap される仕様を明文化
-
-### ~~9.3 Never 型~~ → 解決済み (v0.10.3)
-`Ty::Never` を追加。bottom type として全ての型と互換。`process.exit()` は `Never` を返す。
-
-### ~~9.4 `effect fn main(args: List[String])`~~ → 解決済み (v0.10.3)
-main は引数を取らない。コマンドライン引数は `process.args()` で取得する（Go 方式）。
+テスト: `tests/diagnostics/e035-*/`, `e036-*/`, `e039-*/`, `spec/stdlib/fs_if_exists_test.almd`
