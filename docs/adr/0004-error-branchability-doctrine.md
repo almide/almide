@@ -19,6 +19,18 @@ almide のエラーは String に収束している: stdlib の E は String 単
 には構造がない。現状の分岐手段は `string.contains(e, "No such file")` 型の
 string-match のみで、これは Go 〜1.12 が10年かけて有害と実証したパターンである。
 
+```almide
+// 今日「なければデフォルト、それ以外は失敗」を書くとこうなる — Go 〜1.12 の再演
+fn load_config(path: String) -> Result[String, String] =
+  match fs.read_text(path) {
+    ok(t)  => ok(t),
+    err(e) =>
+      if string.contains(e, "No such file")   // ✗ メッセージ本文に依存した分岐
+      then ok(default_config())
+      else err(e),
+  }
+```
+
 現時点の緩和要因:
 
 1. `??` が「内容を見ない fallback」を第一級で提供し、分岐需要の大半を吸収している
@@ -65,6 +77,22 @@ spec / CHEATSHEET に一行で明文化する:
 **「エラーの*内容*で分岐したくなったら、それが variant E(ADR-0003 D1 の公式ルート)
 に切り替える合図である。エラー文字列への string-match で分岐してはならない。」**
 
+```almide
+// ✓ 自分の定義域では E を variant で設計する(0003 D1 の公式ルート)
+type ConfigError = | Missing(String) | BadValue(String)
+
+fn get_port(cfg: Map[String, String]) -> Result[Int, ConfigError] = ...
+
+match get_port(cfg) {
+  ok(p)            => p,
+  err(Missing(_))  => 8080,                 // ← 構造で分岐。メッセージ変更に不感
+  err(BadValue(m)) => process.exit(1),
+}
+```
+
+(stdlib 由来のエラー(E=String)は自分では variant 化できない — その圧力点を
+受けるのが Stage 1(D4)である。)
+
 ### D2. context チェーンの正準形(Stage 0・即時)
 
 `result.context(r, "loading config")` を stdlib に置く
@@ -72,11 +100,29 @@ spec / CHEATSHEET に一行で明文化する:
 anyhow が実証した「アプリのエラーに本当に必要なのは型でなく文脈の連鎖」を、
 型システム変更ゼロで取り込む。
 
+```almide
+// 今も書ける正準形:
+let cfg = fs.read_text(path) |> result.map_err((e) => "loading config: ${e}")!
+
+// D2 の糖衣(意味は上と同一):
+let cfg = fs.read_text(path) |> result.context("loading config")!
+
+// 呼び出しが連なると anyhow 流の文脈チェーンになる:
+//   Error: starting server: loading config: No such file or directory
+```
+
 ### D3. string-match 分岐への lint(Stage 0・即時)
 
-err 値由来の String への `string.contains` / 等値比較による分岐に警告を出す:
-「エラー文字列で分岐しています — variant E への切り替えを検討(D1)」。
+err 値由来の String への `string.contains` / 等値比較による分岐に警告を出す。
 Go の失敗パターンを診断で先回りする。
+
+```
+warning[W0xx]: エラー文字列の本文で分岐しています
+  --> app.almd:12
+   |   if string.contains(e, "No such file") then ok(default_config())
+   = help: エラーの内容で分岐するなら variant E を定義してください(ADR-0004 D1)。
+           stdlib のエラーはタグ判定 API を待つか、?? での fallback を検討
+```
 
 ### D4. Stage 1 — 契約付きタグ入り String(条件付き)
 
@@ -90,6 +136,28 @@ errno / HTTP status 系から借りた**閉じた小タクソノミー**(`not_fo
 生の string-match は D3 の lint が塞ぐ。**契約面はタグに移り、詳細文は
 byte 契約から解放される**(Hyrum 凍結の解消)。
 
+```almide
+// スケッチ — API 形状は実装時に設計
+fs.read_text("config.toml")
+// => err("not_found: config.toml")
+//         ^^^^^^^^^ タグ = 契約固定・registry 管理    ^^^ 詳細文 = 自由に改善可
+
+fn load_config(path: String) -> Result[String, String] =
+  match fs.read_text(path) {
+    ok(t)  => ok(t),
+    err(e) =>
+      if error.is(e, "not_found")            // ✓ 契約されたタグへの判定
+      then ok(default_config())
+      else err(e),
+  }
+```
+
+```toml
+# contracts.toml の契約面の移行(概念図)
+# 旧: fs.read_text の err は byte 列 "No such file or directory (os error 2)" に固定
+# 新: fs.read_text の err は tag = "not_found" に固定。詳細文は契約外
+```
+
 ### D5. Stage 2 — error set 型(条件付き・Zig 系統)
 
 **発動条件**: grammar-lab の A/B で「エラー分岐箇所の網羅性検査(X)が MSR を
@@ -101,6 +169,25 @@ S のコスト(新型機構、`-> T!` との整合、wasm byte 一致)が大き�
 証拠なしには動かない。**Stage 1 の実測が X の不在を問題として示さなければ、
 Stage 1 が終点である。**
 
+```almide
+// スケッチ — 構文は実装時に設計。タグは宣言不要、集合は推論
+fn load(path: String) -> Result[Config, #not_found | #parse] = ...
+
+match load(path) {
+  ok(c)           => c,
+  err(#not_found) => default_config(),
+  err(#parse)     => process.exit(1),
+  // ← load に #permission が増えると、この match が非網羅として check エラーに
+  //    なる = 修正必要箇所を機械が炙り出す(X)。Stage 1 ではこれができない
+}
+
+// 上位集合への拡大は無損失 → 暗黙で合成(ADR-0003 D3 に整合):
+fn boot(p: String) -> Result[Config, #not_found | #parse | #permission] =
+  load(p)                          // ✓ map_err 儀式なし
+// 対して nominal enum(Rust 型)は ConfigError → AppError が損失ありの変換に
+// なるため、0003 の下では永遠に明示 map_err を要する — 集合タグだけが両立点
+```
+
 ### D6. 語彙の設計基準は事前学習事前確率(P)
 
 分岐タグの語彙は、事前学習コーパスに大量に存在する標準タクソノミー
@@ -108,6 +195,13 @@ Stage 1 が終点である。**
 (`ConfigLoadFailureKind` 型)は P が低く採らない。**構文・語彙の選択は
 「モデルの事前分布で高確率な形か」で評価する** — 本基準は本 ADR 以降の
 表面設計全般に適用する。
+
+```
+P が高い(事前学習コーパスに大量に存在し、LLM が初見で正しく書ける):
+  not_found  permission_denied  timeout  parse  invalid_input  conflict
+P が低い(このリポジトリでしか通用しない):
+  ConfigLoadFailureKind::MissingKeyInSection  E_CFG_04  AlmideIoFault
+```
 
 ## Rationale
 
