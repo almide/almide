@@ -1,4 +1,7 @@
 // @contract: C-215
+// wasm:skip — the _if_exists NotFound classification is native-only today
+// (C-215: the WASI prim floor exposes no errno to classify; the wasm render
+// walls honestly). Remove this skip when the errno-carrying read prim lands.
 // The fs content-reader if_exists family (#1106 / ADR-0004 D4): absence is a
 // VALUE (ok(none)), not an error — the 3-behavior matrix (absent → ok(none),
 // present → ok(some(content)), directory-at-path → err) over all four

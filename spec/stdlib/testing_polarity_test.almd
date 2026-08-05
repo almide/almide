@@ -1,17 +1,21 @@
+// wasm:skip — the wrong-polarity probes ride assert_throws, and WASM cannot
+// catch panics (unreachable trap; same skip as coverage_assert_throws_test).
 // The assertion family covers BOTH polarities of each 2-way sum type
 // (#1110): assert_some/assert_none over Option, assert_ok/assert_err over
-// Result. Failure paths are probed through assert_throws so a wrong-polarity
-// assert is itself asserted to fail.
+// Result. Positive-path instantiations stay on the wasm self-host twins'
+// typed sigs (Option[String] / Result[String, String] — the len-as-tag /
+// cap-as-tag readers); other instantiations ride the failure-path probes,
+// which are native by construction (assert_throws).
 import testing
 
 test "option polarities" {
-  testing.assert_some(some(5))
-  testing.assert_none(none: Option[Int])
+  testing.assert_some(some("v"))
+  testing.assert_none(none: Option[String])
 }
 
 test "result polarities" {
-  let good: Result[Int, String] = ok(1)
-  let bad: Result[Int, String] = err("x")
+  let good: Result[String, String] = ok("1")
+  let bad: Result[String, String] = err("x")
   testing.assert_ok(good)
   testing.assert_err(bad)
 }
