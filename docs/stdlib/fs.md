@@ -210,7 +210,7 @@ let ts = fs.modified_at("file.txt")
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (26 functions)
+## Signature index (30 functions)
 
 ```
 effect fs.read_text(path: String) -> String
@@ -222,6 +222,10 @@ effect fs.append(path: String, content: String) -> Unit
 effect fs.mkdir_p(path: String) -> Unit
 effect fs.exists(path: String) -> Bool
 effect fs.read_lines(path: String) -> List[String]
+effect fs.read_text_if_exists(path: String) -> Option[String]
+effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]
+effect fs.read_lines_if_exists(path: String) -> Option[List[String]]
+effect fs.read_bytes_raw_if_exists(path: String) -> Option[Bytes]
 effect fs.remove(path: String) -> Unit
 effect fs.list_dir(path: String) -> List[String]
 effect fs.is_dir(path: String) -> Bool
