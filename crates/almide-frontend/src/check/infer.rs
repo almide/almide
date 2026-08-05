@@ -469,6 +469,26 @@ impl Checker {
         concrete: &Ty,
         member_span: Option<crate::ast::Span>,
     ) {
+    // #1120: `.field` on an Option (forgetting the `?`) used to sail through
+    // as Unknown and die at the ConcretizeTypes wall. Suggest the operator
+    // that exists for exactly this: `?.` (ADR-0005 D2).
+    if let Ty::Applied(crate::types::TypeConstructorId::Option, args) = &concrete {
+        let inner_display = args.first().map(|t| t.display()).unwrap_or_else(|| "T".to_string());
+        let mut diag = super::err(
+            format!("field access '.{}' on {} — the value is optional", field, concrete.display()),
+            format!("Use optional chaining: `?.{f}` yields Option[field type] ({inner} may be absent). \
+                     To unwrap first: `?? fallback`, or `match` on some/none.", f = field, inner = inner_display),
+            format!("field access .{}", field),
+        ).with_code("E013");
+        if let (Some(span), Some(obj_src)) = (member_span, object.span.and_then(|s| self.source_slice(s))) {
+            diag = diag.with_try_replace(
+                span.line, span.col, span.end_col,
+                format!("{}?.{}", obj_src, field),
+            );
+        }
+        self.emit(diag);
+        return;
+    }
     // #847: a MISSING field on a closed record used to sail
     // through as Unknown (no diagnostic at all — the failure
     // surfaced as a codegen postcondition ICE, or leaked

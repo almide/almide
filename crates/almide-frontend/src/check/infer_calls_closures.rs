@@ -633,7 +633,11 @@ impl Checker {
             ).with_code("E034"));
             ft.clone()
         };
-        self.unify_infer(&inner_ty, &ft);
+        // #1119: unify_infer stays SILENT on a concrete mismatch, so
+        // `n ?? "hello"` / `n ?? some(1)` (fallback type ≠ unwrapped T)
+        // passed check and died as rustc E0308 behind the codegen wall.
+        // constrain routes the same unification through the reporting solver.
+        self.constrain(inner_ty.clone(), ft, "?? fallback");
         inner_ty
     }
 

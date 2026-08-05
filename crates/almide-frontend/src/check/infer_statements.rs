@@ -15,7 +15,40 @@ impl Checker {
             ast::Stmt::Assign { .. } => self.check_stmt_assign(stmt),
             ast::Stmt::IndexAssign { .. } => self.check_stmt_index_assign(stmt),
             ast::Stmt::FieldAssign { value, .. } => { self.infer_expr(value); }
-            ast::Stmt::Guard { cond, else_, .. } => { self.infer_expr(cond); self.infer_expr(else_); }
+            ast::Stmt::Guard { cond, else_, .. } => {
+                let cty = self.infer_expr(cond);
+                self.constrain(Ty::Bool, cty, "guard condition");
+                let ety = self.infer_expr(else_);
+                // #1118: the else IS the early return when the condition fails,
+                // so its type must fit the fn's return channel — this used to
+                // be unconstrained, and `guard x > 0 else "nope"` in a -> Int
+                // fn passed check then died as rustc E0308 behind the codegen
+                // wall. Exempt: loop control (continue/break), a diverging
+                // Never else (process.exit), and lambda bodies (the lambda's
+                // own return type is not tracked in env.current_ret).
+                let is_loop_ctl = matches!(else_.kind, ast::ExprKind::Break | ast::ExprKind::Continue);
+                if !is_loop_ctl && self.env.lambda_depth == 0 {
+                    if let Some(ret) = self.env.current_ret.clone() {
+                        let er = resolve_ty(&ety, &self.uf);
+                        if er != Ty::Never {
+                            if self.env.can_call_effect && !matches!(ret, Ty::Applied(crate::types::TypeConstructorId::Result, _)) {
+                                // Effect fn with an unlifted return type: the else may
+                                // return through the lifted Result channel (`else err(..)`)
+                                // or with a plain value — constrain_effect_body's rule.
+                                if let Ty::Applied(crate::types::TypeConstructorId::Result, ref args) = er {
+                                    if !args.is_empty() {
+                                        self.constrain(ret, args[0].clone(), "guard else".to_string());
+                                    }
+                                } else if er != Ty::Unit {
+                                    self.constrain(ret, ety, "guard else".to_string());
+                                }
+                            } else {
+                                self.constrain(ret, ety, "guard else".to_string());
+                            }
+                        }
+                    }
+                }
+            }
             ast::Stmt::GuardLet { .. } => self.check_stmt_guard_let(stmt),
             ast::Stmt::Expr { expr, .. } => {
                 let t = self.infer_expr(expr);

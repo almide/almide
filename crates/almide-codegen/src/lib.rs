@@ -397,6 +397,10 @@ fn almide_repr_prelude(vis: &str) -> String {
     // at the impl site, binding this blanket impl to the user struct (E0614:
     // `(**self)` on a non-pointer, or a method-not-found). Qualifying pins each
     // blanket to the real std type so the user's own type keeps its generated impl.
+    // Unit: `()` — the payload of Result[Unit, E] / Option[Unit] interpolation
+    // (#1121: `"${try_each(...)}"` emitted almide_repr(&Ok(())) with no impl,
+    // a rustc E0277 behind the codegen wall).
+    s.push_str("impl AlmideRepr for () { fn almide_repr(&self) -> String { \"()\".to_string() } }\n");
     s.push_str("impl AlmideRepr for std::string::String { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
     s.push_str("impl AlmideRepr for str { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
     // List: `[a, b, c]`, empty `[]`.
