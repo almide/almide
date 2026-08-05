@@ -53,9 +53,9 @@ fn load_config(path: String) -> Result[String, String] =
 ## Decision
 
 **String を既定にして終着点とする。エラー値に機械可読構造(先頭タグ・error set)は
-導入しない。string-match 分岐はドクトリンと lint で封じ、報告品質は context
-チェーンで確保する。stdlib 由来エラーの内容分岐は提供しない — `??` による fallback、
-事前述語、および自作ドメインの variant E で賄う。**
+導入しない。string-match 分岐はドクトリンと lint で封じる。stdlib 由来エラーの
+内容分岐は提供しない — `??` による fallback、事前述語、および自作ドメインの
+variant E で賄う。**(報告品質のための `result.context` は D2 参照 — **審議中**。)
 
 ### D1. ドクトリン行
 
@@ -76,12 +76,13 @@ match get_port(cfg) {
 }
 ```
 
-### D2. context チェーンの正準形
+### D2. context チェーンの正準形 — **審議中**(いったん批准後、同日差し戻し)
 
-`result.context(r, "loading config")` を stdlib に置く
+`result.context(r, "loading config")` を stdlib に置く案
 (`result.map_err((e) => "loading config: ${e}")` の命名にすぎない糖衣)。
 anyhow が実証した「アプリのエラーに本当に必要なのは型でなく文脈の連鎖」を、
-型システム変更ゼロで取り込む。実装: #1104。
+型システム変更ゼロで取り込む — が、採否と設計(eager/lazy、区切り文字、命名、
+「同じことを書く2つ目の綴りを増やすか」)を精査してから決める。#1104 は hold。
 
 ```almide
 // 今も書ける正準形:
@@ -178,8 +179,8 @@ not_found 程度に局在しており、そのために全 stdlib メッセー�
   仕様・契約・実装のどれも新機構を持たない。string-match 流入は D1/D3 が封じる
 - 払うもの: stdlib エラーの種類分岐は公式に不可能のまま。fs 系で本物の需要が
   出た場合は D4 の API 形状(Option 変種)で個別に受ける
-- 実装は #1104(context)と #1105(lint + ドクトリン行)のみ。契約・型システム・
-  stdlib メッセージは無変更
+- 実装は #1105(lint + ドクトリン行)と #1106(fs family)。#1104(context)は
+  D2 の審議が終わるまで hold。契約・型システム・stdlib メッセージは無変更
 
 ## Falsifier
 
