@@ -55,7 +55,8 @@ fn load_config(path: String) -> Result[String, String] =
 **String を既定にして終着点とする。エラー値に機械可読構造(先頭タグ・error set)は
 導入しない。string-match 分岐はドクトリンと lint で封じる。stdlib 由来エラーの
 内容分岐は提供しない — `??` による fallback、事前述語、および自作ドメインの
-variant E で賄う。**(報告品質のための `result.context` は D2 参照 — **審議中**。)
+variant E で賄う。報告品質(context チェーン)は糖衣を設けず、`map_err` イディオムの
+文書化で賄う(D2)。**
 
 ### D1. ドクトリン行
 
@@ -76,13 +77,21 @@ match get_port(cfg) {
 }
 ```
 
-### D2. context チェーンの正準形 — **審議中**(いったん批准後、同日差し戻し)
+### D2. context チェーンは糖衣なし — `map_err` イディオムを正準形として文書化
 
-`result.context(r, "loading config")` を stdlib に置く案
-(`result.map_err((e) => "loading config: ${e}")` の命名にすぎない糖衣)。
-anyhow が実証した「アプリのエラーに本当に必要なのは型でなく文脈の連鎖」を、
-型システム変更ゼロで取り込む — が、採否と設計(eager/lazy、区切り文字、命名、
-「同じことを書く2つ目の綴りを増やすか」)を精査してから決める。#1104 は hold。
+エラーへの文脈前置は、既存の綴りをそのまま正準形とする(糖衣 `result.context` は
+却下 — Alternatives 7):
+
+```almide
+// 正準形(CHEATSHEET に明記): 区切りは ": "、元エラーは ${e} で末尾に残す
+let cfg = fs.read_text(path) |> result.map_err((e) => "loading config: ${e}")!
+
+// 連鎖すると anyhow 流の文脈チェーンになる(v0.53.6 実測):
+//   Error: starting server: loading config: No such file or directory (os error 2)
+```
+
+既知のハザード: `${e}` を書き忘れても型が合いコンパイルが通る(元エラーが黙って
+消滅する — 実測確認済み)。対策は糖衣ではなく診断側で検討する(Falsifier 3)。
 
 ```almide
 // 今も書ける正準形:
@@ -172,6 +181,11 @@ not_found 程度に局在しており、そのために全 stdlib メッセー�
    とし規則では縛らない(タグ自体が却下された今、規則の対象も存在しない)。**却下**。
 6. **何もしない(D1〜D3 も見送り)**: string-match の本番流入(Go 〜1.12 の再演)を
    無防備に待つことになる。**却下**。
+7. **`result.context(r, "msg")` 糖衣**(anyhow / snag の `context` 相当):
+   `${e}` 忘れハザードを自由度ゼロの綴りで封じられる利点はあったが、
+   **同じことを書く 2 つ目の綴りを stdlib に増やさない**ことを優先して**却下**
+   (2026-08-05、いったん批准後に差し戻して最終判断)。イディオムの文書化(D2)と
+   診断側の対策(Falsifier 3)で代替する。#1104 は却下でクローズ。
 
 ## Consequences
 
@@ -179,8 +193,8 @@ not_found 程度に局在しており、そのために全 stdlib メッセー�
   仕様・契約・実装のどれも新機構を持たない。string-match 流入は D1/D3 が封じる
 - 払うもの: stdlib エラーの種類分岐は公式に不可能のまま。fs 系で本物の需要が
   出た場合は D4 の API 形状(Option 変種)で個別に受ける
-- 実装は #1105(lint + ドクトリン行)と #1106(fs family)。#1104(context)は
-  D2 の審議が終わるまで hold。契約・型システム・stdlib メッセージは無変更
+- 実装は #1105(lint + ドクトリン行 + D2 イディオムの文書化)と #1106(fs family)
+  のみ。契約・型システム・stdlib メッセージ・stdlib 表面は無変更
 
 ## Falsifier
 
@@ -190,8 +204,10 @@ not_found 程度に局在しており、そのために全 stdlib メッセー�
 2. **D4 の Option 変種 API が増殖し始めた場合**(`*_if_exists` 系 family が
    fs 以外の 3 モジュール以上に波及等)— 需要が局在でなく一般だった証拠であり、
    構造導入(Alternatives 2)を再検討する。
-3. **D2 の context 連鎖が実コーパスでほぼ使われない**と計測された場合 — 報告品質の
-   問題認識が誤りだった証拠として、D2 を deprecated にする改訂を行う。
+3. **`${e}` 忘れ(文脈前置で元エラーが消滅する書き損じ)が dojo / 実コーパスで
+   有意に検出された場合** — イディオム文書化では防げない証拠として、診断
+   (map_err のラムダがエラー引数を未使用のとき警告)か、却下した糖衣
+   (Alternatives 7)を再検討する。
 
 ## References
 
