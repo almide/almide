@@ -387,6 +387,26 @@ impl Checker {
         field: &almide_base::intern::Sym,
     ) -> Option<Ty> {
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
+            // #1109 / ADR-0007: result.collect & collect_map are deprecated —
+            // partition is the substance for all-errors collection. One release
+            // of warnings, then removal (the E040 window pattern). Checked
+            // before resolution so both the stdlib-sig and bundled-fn paths
+            // carry the warning.
+            if mod_name.as_str() == "result"
+                && matches!(field.as_str(), "collect" | "collect_map")
+            {
+                let mut d = crate::diagnostic::Diagnostic::warning(
+                    format!("result.{} is deprecated and will be removed — all-errors collection is spelled with partition", field),
+                    "let (oks, errs) = result.partition(rs)\n        if list.is_empty(errs) then ok(oks) else err(errs)\n        (Rust's collect short-circuits at the first Err; this one never did — the name is retired to end that ambiguity, ADR-0007)",
+                    format!("call to result.{}", field),
+                ).with_code("E039");
+                d.file = self.source_file.clone();
+                if let Some(sp) = object.span {
+                    d.line = Some(sp.line);
+                    d.col = Some(sp.col);
+                }
+                self.diagnostics.push(d);
+            }
             if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
                 self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
                 return Some(Ty::Fn {

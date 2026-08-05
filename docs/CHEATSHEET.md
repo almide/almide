@@ -326,6 +326,15 @@ expr?.field        // optional chaining (Option[Record] → Option[FieldType])
 `fs.exists`, …) the `!` is a silent no-op. You never need to know whether a
 stdlib effect fn can fail to append it.
 
+### All-errors collection: partition (ADR-0007)
+
+`result.collect` is deprecated (E039). Collect every error with partition:
+
+```almide
+let (oks, errs) = result.partition(results)
+if list.is_empty(errs) then ok(oks) else err(errs)   // Result[List[T], List[E]]
+```
+
 ### Error-handling doctrine (ADR-0004)
 
 **Never branch on the text of an error message** (`string.contains(e, …)`,

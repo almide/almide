@@ -69,7 +69,7 @@ interpreter, no reflection metadata, and no compiled stdlib object code.
 
 ### Where the stdlib went
 
-Almide's stdlib is 958 functions across 41 modules — but they are **self-hosted
+Almide's stdlib is 960 functions across 41 modules — but they are **self-hosted
 in Almide** and linked *on demand*. The compiler scans the lowered program for
 called dispatch names (`string.len`, `map.set`, `list.sort_by`, …) and links only
 the matching self-host sources, iterating to a fixpoint so a linked function's

@@ -16,6 +16,25 @@ impl Checker {
         callee_span_snapshot: Option<ast::Span>,
     ) -> Ty {
         self.arg_spans = args.iter().map(|a| a.span).collect();
+        // #1109 / ADR-0007: result.collect & collect_map are deprecated — one
+        // release of E039 warnings, then removal (the E040 window pattern).
+        if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
+            if mod_name.as_str() == "result"
+                && matches!(field.as_str(), "collect" | "collect_map")
+            {
+                let mut d = crate::diagnostic::Diagnostic::warning(
+                    format!("result.{} is deprecated and will be removed — all-errors collection is spelled with partition", field),
+                    "let (oks, errs) = result.partition(rs)\n        if list.is_empty(errs) then ok(oks) else err(errs)\n        (Rust's collect short-circuits at the first Err; this one never did — the name is retired to end that ambiguity, ADR-0007)",
+                    format!("call to result.{}", field),
+                ).with_code("E039");
+                d.file = self.source_file.clone();
+                if let Some(sp) = object.span {
+                    d.line = Some(sp.line);
+                    d.col = Some(sp.col);
+                }
+                self.diagnostics.push(d);
+            }
+        }
         // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
         let prev = self.callee_span_hint.take();
         self.callee_span_hint = callee_span_snapshot;
