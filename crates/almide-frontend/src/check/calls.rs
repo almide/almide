@@ -620,7 +620,14 @@ impl Checker {
                     let fix = is_clean_fn_name(alias).then(|| alias.to_string());
                     let rich = crate::stdlib::try_snippet_for_alias(module, func);
                     (format!("Did you mean `{}`?", alias), fix, rich)
-                } else if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
+                } else if let Some(suggestion) = almide_base::diagnostic::suggest(
+                    func,
+                    // `__`-prefixed fns are INTERNAL carriers (e.g. the
+                    // fallibility-polymorphic `__try_*` bodies, ADR-0006 D3) —
+                    // never suggest one; `list.try_map` must not hint the
+                    // carrier it was removed in favor of.
+                    module_funcs.iter().copied().filter(|f| !f.starts_with("__")),
+                ) {
                     let full = format!("{}.{}", module, suggestion);
                     (format!("Did you mean `{}`?", full), Some(full), None)
                 } else {

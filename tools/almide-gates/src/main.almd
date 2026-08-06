@@ -43,7 +43,7 @@ effect fn entry_of(root: String, rel: String) -> Entry = {
 // and DROPS any row with an empty date (`[ -z "$date" ] && continue`), so a done/ file
 // missing its `<!-- done: -->` line silently vanishes from the table. Reproduced exactly —
 // a byte-match is the acceptance check, so a "fix" here would be a divergence.
-effect fn entries_of(root: String, files: List[String]) -> List[Entry] = files |> list.try_map((f) => entry_of(root, f))!
+effect fn entries_of(root: String, files: List[String]) -> List[Entry] = files |> list.map((f) => entry_of(root, f)!)!
 
 effect fn plain_section(root: String, sub: String, heading: String) -> String = {
   let files = md_files(root, sub)!

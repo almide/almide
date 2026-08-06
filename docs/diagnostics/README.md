@@ -34,7 +34,7 @@ Use `almide explain <code>` to read these from the CLI.
 | [E039](E039.md) | (warning) result.collect deprecated — use partition |
 | [E041](E041.md) | Implicit propagation removed — the value stays a Result; write `!` |
 | [E042](E042.md) | Statement-position Result discarded (must-use) — `expr!` or `let _ = expr` |
-| [E043](E043.md) | (warning) `list.try_*` deprecated — the core HOF is fallibility-polymorphic |
+| [E043](E043.md) | `list.try_*` removed — the core HOF is fallibility-polymorphic |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

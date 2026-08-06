@@ -268,16 +268,18 @@ else [seed] + iterate(f(seed), f, n - 1)
 // observable). Cost is the bundled-recursion norm (`iterate`'s O(n²) copy
 // shape) — fine at tool scale, self-host later if a hot path appears.
 //
-// FAMILY COMPLETENESS (the API-family rule): a try_ twin exists for exactly
-// the TRANSFORMING closure-bearing core — map, filter, flat_map, filter_map,
-// fold, find, each. Deliberate omissions: `any` / `all` / `count` (an erring
-// PREDICATE query is try_find's domain — `try_find(xs, p)` answers all three
-// shapes), and `sort_by` (an erring key extractor has no meaningful partial
-// order). The executable matrix gate is tests/list_try_family_gate_test.rs.
-fn try_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E] = match list.get(xs, 0) {
+// INTERNAL CARRIERS (ADR-0006 D3, v0.56.0): the public try_ family is
+// REMOVED — the core HOF is fallibility-polymorphic and the checker routes a
+// fallible callback to these __-prefixed bodies (`list.map(xs, (x) => f(x)!)`
+// runs `__try_map(xs, stripped-callback)`). Deliberate omissions unchanged:
+// `any` / `all` / `count` (an erring predicate query is the find-form's
+// domain) and `sort_by` (an erring key extractor has no partial order).
+// The gate tests/list_try_family_gate_test.rs asserts the surface is EMPTY
+// and the seven carriers exist.
+fn __try_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E] = match list.get(xs, 0) {
   none => ok([]),
   some(x) => match f(x) {
-    ok(b) => match try_map(list.drop(xs, 1), f) {
+    ok(b) => match __try_map(list.drop(xs, 1), f) {
       ok(rest) => ok([b] + rest),
       err(e) => err(e),
     },
@@ -285,10 +287,10 @@ fn try_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E]
   },
 }
 
-fn try_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E] = match list.get(xs, 0) {
+fn __try_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E] = match list.get(xs, 0) {
   none => ok([]),
   some(x) => match f(x) {
-    ok(keep) => match try_filter(list.drop(xs, 1), f) {
+    ok(keep) => match __try_filter(list.drop(xs, 1), f) {
       ok(rest) => ok(if keep then [x] + rest
       else rest),
       err(e) => err(e),
@@ -297,10 +299,10 @@ fn try_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A],
   },
 }
 
-fn try_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[List[B], E] = match list.get(xs, 0) {
+fn __try_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[List[B], E] = match list.get(xs, 0) {
   none => ok([]),
   some(x) => match f(x) {
-    ok(bs) => match try_flat_map(list.drop(xs, 1), f) {
+    ok(bs) => match __try_flat_map(list.drop(xs, 1), f) {
       ok(rest) => ok(bs + rest),
       err(e) => err(e),
     },
@@ -308,10 +310,10 @@ fn try_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[
   },
 }
 
-fn try_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E] = match list.get(xs, 0) {
+fn __try_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E] = match list.get(xs, 0) {
   none => ok([]),
   some(x) => match f(x) {
-    ok(kept) => match try_filter_map(list.drop(xs, 1), f) {
+    ok(kept) => match __try_filter_map(list.drop(xs, 1), f) {
       ok(rest) => ok(match kept {
         some(b) => [b] + rest,
         none => rest,
@@ -322,31 +324,31 @@ fn try_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Res
   },
 }
 
-fn try_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E] = match list.get(xs, 0) {
+fn __try_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E] = match list.get(xs, 0) {
   none => ok(init),
   some(x) => match f(init, x) {
-    ok(b) => try_fold(list.drop(xs, 1), b, f),
+    ok(b) => __try_fold(list.drop(xs, 1), b, f),
     err(e) => err(e),
   },
 }
 
 // The first element the (erring) predicate ACCEPTS, `none` when no element
-// matches — or the first err. `try_find(xs, p)` also answers the any/all/
+// matches — or the first err. `__try_find(xs, p)` also answers the any/all/
 // count shapes, which is why those have no try_ twins.
-fn try_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E] = match list.get(xs, 0) {
+fn __try_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E] = match list.get(xs, 0) {
   none => ok(none),
   some(x) => match f(x) {
     ok(true) => ok(some(x)),
-    ok(false) => try_find(list.drop(xs, 1), f),
+    ok(false) => __try_find(list.drop(xs, 1), f),
     err(e) => err(e),
   },
 }
 
 // Run an effectful step per element for its effect, stopping at the first err.
-fn try_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E] = match list.get(xs, 0) {
+fn __try_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E] = match list.get(xs, 0) {
   none => ok(()),
   some(x) => match f(x) {
-    ok(_) => try_each(list.drop(xs, 1), f),
+    ok(_) => __try_each(list.drop(xs, 1), f),
     err(e) => err(e),
   },
 }

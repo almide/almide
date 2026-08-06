@@ -30,9 +30,9 @@ impl Checker {
                 } else {
                     format!("list.{}(xs, (x) => f(x)!)!", core)
                 };
-                let mut d = crate::diagnostic::Diagnostic::warning(
-                    format!("list.{} is deprecated — the core HOF is fallibility-polymorphic (ADR-0006)", field),
-                    format!("{rewrite}\n        The callback's `!` instantiates the fallible form (first-err short-circuit); the try_ family is removed in the next minor (#1108)."),
+                let mut d = crate::diagnostic::Diagnostic::error(
+                    format!("list.{} was removed — the core HOF is fallibility-polymorphic (ADR-0006)", field),
+                    format!("{rewrite}\n        The callback's `!` instantiates the fallible form (first-err short-circuit); the try_ family's one name per combinator is the core name."),
                     format!("call to list.{}", field),
                 ).with_code("E043");
                 d.file = self.source_file.clone();
