@@ -285,16 +285,15 @@ fn assert_cross_target_effect_main(source: &str) {
 
 #[test]
 fn wasm_effect_fn_returns_closure_auto_try_binding() {
-    // P3-WASM regression: an effect fn returning a closure, bound via auto-`?`.
-    // The binding's var type lagged at `Result[Fn, _]` (auto_try runs after
-    // lowering), so `add5(10)` mis-resolved to a Named call `add5` instead of a
-    // Computed call through the local. WASM then trapped on the unresolved call
-    // and Perceus freed the closure before the call. The `!` form always worked;
-    // this guards the `?` form (the common case). Expected: 15.
+    // P3-WASM regression: an effect fn returning a closure, bound then called.
+    // Pre-switch this guarded the auto-`?` binding (the var type lagged at
+    // `Result[Fn, _]` and `add5(10)` mis-resolved); ADR-0008 removed the
+    // implicit form, so the spelled `!` bind is the one remaining shape —
+    // kept as the closure-through-effect-ABI regression. Expected: 15.
     assert_cross_target_effect_main(
         "effect fn make_adder_e(n: Int) -> (Int) -> Int = (x) => x + n\n\
          effect fn main() -> Unit = {\n\
-         \x20 let add5 = make_adder_e(5)\n\
+         \x20 let add5 = make_adder_e(5)!\n\
          \x20 println(int.to_string(add5(10)))\n\
          }\n",
     );
@@ -307,7 +306,7 @@ fn wasm_effect_fn_returns_closure_used_twice() {
     assert_cross_target_effect_main(
         "effect fn make_adder_e(n: Int) -> (Int) -> Int = (x) => x + n\n\
          effect fn main() -> Unit = {\n\
-         \x20 let add = make_adder_e(100)\n\
+         \x20 let add = make_adder_e(100)!\n\
          \x20 println(int.to_string(add(1) + add(2)))\n\
          }\n",
     );
@@ -333,7 +332,7 @@ fn rust_process_exec_forwards_bound_list() {
          \x20   err(_) => \"\",\n\
          \x20 }\n\
          effect fn main() -> Unit = {\n\
-         \x20 let out = run(\"echo\", [\"hello\"])\n\
+         \x20 let out = run(\"echo\", [\"hello\"])!\n\
          \x20 println(out)\n\
          }\n",
     );

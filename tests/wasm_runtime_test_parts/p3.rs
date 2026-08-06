@@ -409,7 +409,7 @@ fn unhandled_main_error_terminates_consistently() {
     if Command::new(almide_bin()).arg("--version").output().is_err() { return; }
     let src = "effect fn boom() -> Result[Int, String] = err(\"kaboom\")\n\
                effect fn main() -> Unit = {\n\
-               \x20 let v = boom()\n\
+               \x20 let v = boom()!\n\
                \x20 println(int.to_string(v))\n\
                }\n";
     let (rc, _, rerr) = run_native_capture(src);
@@ -429,7 +429,7 @@ fn successful_main_exits_zero_both_targets() {
     // as an error and aborted — it must exit 0 with its normal output.
     let src = "effect fn good() -> Result[Int, String] = ok(7)\n\
                effect fn main() -> Unit = {\n\
-               \x20 let v = good()\n\
+               \x20 let v = good()!\n\
                \x20 println(int.to_string(v))\n\
                }\n";
     let (rc, rout, _) = run_native_capture(src);
