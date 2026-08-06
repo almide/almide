@@ -672,8 +672,8 @@ impl Checker {
     /// fn declared `-> T!` — instantiates the fallible twin:
     ///
     /// ```text
-    /// list.map(xs, (x) => f(x)!)   ≡   list.try_map(xs, (x) => f(x))
-    /// list.map(xs, parse)          ≡   list.try_map(xs, parse)   (parse: -> T!)
+    /// list.map(xs, (x) => f(x)!)   ≡   list.__try_map(xs, (x) => f(x))
+    /// list.map(xs, parse)          ≡   list.__try_map(xs, parse)   (parse: -> T!)
     /// ```
     ///
     /// The lambda's `!` is the propagation marker; the twin carries the
@@ -709,9 +709,9 @@ impl Checker {
             }
         }
         if fallible {
-            *field = almide_base::intern::sym(&format!("try_{}", field.as_str()));
-            // The E043 try_-deprecation warning must not fire on this
-            // NORMALIZED spelling — only on user-written try_*.
+            // v0.56.0: the public try_ family is removed; the fallible
+            // instantiation routes to the __-prefixed internal carriers.
+            *field = almide_base::intern::sym(&format!("__try_{}", field.as_str()));
             self.hof_rewritten_calls.insert(object.id);
         }
     }

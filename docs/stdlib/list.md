@@ -475,32 +475,31 @@ list.clear(xs)
 ```
 
 
-## The try_* family — effectful pipelines (#1041)
+## Fallible pipelines — the polymorphic core (ADR-0006)
 
-Each `try_<core>` takes the same callback as its core, lifted to
-`-> Result[_, E]`, returns `Result[_, E]`, and **short-circuits on the first
-err** (elements after it are never evaluated). Inside an effect fn the
-callback's body may call effect fns, so the pipeline keeps the combinator
-shape instead of falling back to `var + for`:
+A callback whose body ends in `!` (or a named `-> T!` fn) instantiates the
+core combinator's FALLIBLE form: the call yields `Result[_, String]` and
+**short-circuits on the first err** (elements after it are never evaluated).
+One name per combinator — the strategy rides the marker:
 
 ```almd
 effect fn read_all(files: List[String]) -> List[Entry] =
-  files |> list.try_map((f) => read_meta(f))!
+  files |> list.map((f) => read_meta(f)!)!
 ```
 
-| fn | callback | returns |
-|---|---|---|
-| `try_map` | `(A) -> Result[B, E]` | `Result[List[B], E]` |
-| `try_filter` | `(A) -> Result[Bool, E]` | `Result[List[A], E]` |
-| `try_flat_map` | `(A) -> Result[List[B], E]` | `Result[List[B], E]` |
-| `try_filter_map` | `(A) -> Result[Option[B], E]` | `Result[List[B], E]` |
-| `try_fold` | `(B, A) -> Result[B, E]` | `Result[B, E]` |
-| `try_find` | `(A) -> Result[Bool, E]` | `Result[Option[A], E]` |
-| `try_each` | `(A) -> Result[Unit, E]` | `Result[Unit, E]` |
+Covers `map` / `filter` / `flat_map` / `filter_map` / `fold` / `find` /
+`each`. The removed `list.try_*` twins (one deprecation window at v0.55.0,
+gone since v0.56.0) rewrite mechanically — E043 carries the exact form:
 
-Deliberate omissions: `try_any` / `try_all` / `try_count` (`try_find` answers
-the predicate-query shapes) and `try_sort_by` (an erring key extractor has no
-meaningful order). The completeness rule is machine-checked by
+```almd
+list.try_map(xs, f)      →  list.map(xs, (x) => f(x)!)!
+list.try_fold(xs, z, f)  →  list.fold(xs, z, (a, x) => f(a, x)!)!
+```
+
+Deliberate omissions unchanged: an erring predicate query is the find-form's
+domain (`any`/`all`/`count` never had twins), and `sort_by` has no meaningful
+order under an erring key extractor. The end state (empty public surface, the
+seven `__try_*` internal carriers present) is machine-checked by
 `tests/list_try_family_gate_test.rs`.
 
 When a callback that never errs leaves `E` unconstrained, annotate the result:
@@ -577,13 +576,13 @@ list.clear(xs: List[A]) -> Unit
 list.bundled_probe(n: Int) -> Int
 list.split_at(xs: List[T], n: Int) -> ()
 list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
-list.try_map(xs: List[A], f: (A) -> Result[B, E]) -> Result[List[B], E]
-list.try_filter(xs: List[A], f: (A) -> Result[Bool, E]) -> Result[List[A], E]
-list.try_flat_map(xs: List[A], f: (A) -> Result[List[B], E]) -> Result[List[B], E]
-list.try_filter_map(xs: List[A], f: (A) -> Result[Option[B], E]) -> Result[List[B], E]
-list.try_fold(xs: List[A], init: B, f: (B, A) -> Result[B, E]) -> Result[B, E]
-list.try_find(xs: List[A], f: (A) -> Result[Bool, E]) -> Result[Option[A], E]
-list.try_each(xs: List[A], f: (A) -> Result[Unit, E]) -> Result[Unit, E]
+list.__try_map(xs: List[A], f: (A) -> Result[B, E]) -> Result[List[B], E]
+list.__try_filter(xs: List[A], f: (A) -> Result[Bool, E]) -> Result[List[A], E]
+list.__try_flat_map(xs: List[A], f: (A) -> Result[List[B], E]) -> Result[List[B], E]
+list.__try_filter_map(xs: List[A], f: (A) -> Result[Option[B], E]) -> Result[List[B], E]
+list.__try_fold(xs: List[A], init: B, f: (B, A) -> Result[B, E]) -> Result[B, E]
+list.__try_find(xs: List[A], f: (A) -> Result[Bool, E]) -> Result[Option[A], E]
+list.__try_each(xs: List[A], f: (A) -> Result[Unit, E]) -> Result[Unit, E]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

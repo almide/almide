@@ -1,24 +1,22 @@
-//! #1041 → ADR-0006: the `list.try_*` family is FROZEN at its shipped seven.
+//! #1041 → ADR-0006: the `list.try_*` family is GONE (v0.56.0) — the core
+//! HOF is fallibility-polymorphic, so the family's meaning lives on ONE name
+//! per combinator (`list.map(xs, (x) => f(x)!)!`).
 //!
-//! The family was a monomorphic workaround for the missing fallibility
-//! polymorphism (Swift's rethrows); ADR-0006 dissolves it — `list.map(xs,
-//! (x) => f(x)!)!` replaces every twin once #1108 lands. Until then this
-//! gate is the freeze guard (D2), inverted from its original completeness
-//! direction:
+//! This gate went through the ADR's three states in order: completeness
+//! matrix (v0.53.6) → freeze at seven (v0.54.0, D2) → EMPTY (this file, D3).
+//! It now asserts BOTH halves of the end state:
 //!
-//!   - the seven shipped twins stay EXACTLY as they are (the deprecated
-//!     surface must keep working through the window), and
-//!   - NO new `try_` member may appear — a new core combinator does NOT get
-//!     a twin anymore (the polymorphic form will cover it); an eighth twin
-//!     here is the drift this gate now exists to catch.
-//!
-//! At the #1108 landing this file flips once more: the seven become
-//! deprecated (mechanical-rewrite hints, ADR-0006 D3) and are removed the
-//! following minor — then this gate asserts the family is EMPTY.
+//!   - the public surface carries NO try_-prefixed fn — a resurrected twin is
+//!     the drift this gate exists to catch (a new combinator's fallible form
+//!     is the polymorphic instantiation, never a named sibling), and
+//!   - the seven `__try_*` INTERNAL CARRIERS exist — the checker's
+//!     fallible-callback normalization routes to them, so a silently deleted
+//!     carrier would break `list.map(xs, (x) => f(x)!)` at a distance.
 
 use std::collections::HashSet;
 
-fn list_surface() -> Vec<String> {
+/// Scrape declarations INCLUDING the `__`-prefixed internals.
+fn list_decls() -> Vec<String> {
     let path = format!("{}/stdlib/list.almd", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path).expect("read stdlib/list.almd");
     let mut out = Vec::new();
@@ -29,7 +27,7 @@ fn list_surface() -> Vec<String> {
         };
         if let Some(name) = rest.split(['(', '[']).next() {
             let name = name.trim();
-            if !name.is_empty() && !name.starts_with("__") {
+            if !name.is_empty() {
                 out.push(name.to_string());
             }
         }
@@ -37,36 +35,33 @@ fn list_surface() -> Vec<String> {
     out
 }
 
-/// The shipped seven — frozen (ADR-0006 D2). Removal happens as ONE act at
-/// the #1108 landing, never member-by-member.
-const FROZEN_TRY_FAMILY: &[&str] =
-    &["try_map", "try_filter", "try_flat_map", "try_filter_map", "try_fold", "try_find", "try_each"];
+/// The carriers the polymorphic normalization targets (ADR-0006 D1).
+const INTERNAL_CARRIERS: &[&str] = &[
+    "__try_map", "__try_filter", "__try_flat_map", "__try_filter_map",
+    "__try_fold", "__try_find", "__try_each",
+];
 
 #[test]
-fn the_frozen_seven_stay_shipped_through_the_window() {
-    let declared: HashSet<String> = list_surface().into_iter().collect();
-    for twin in FROZEN_TRY_FAMILY {
+fn the_public_try_family_is_empty() {
+    for name in list_decls() {
         assert!(
-            declared.contains(*twin),
-            "`list.{twin}` disappeared — the deprecated family must keep working \
-             until the #1108 polymorphic landing removes ALL seven together \
-             (ADR-0006 D3); a member-by-member removal breaks the window contract"
+            !name.starts_with("try_"),
+            "`list.{name}` resurrects the removed try_ family (ADR-0006 D3): \
+             a combinator's fallible form is the polymorphic instantiation \
+             (`list.<core>(xs, (x) => f(x)!)!`), never a named twin"
         );
     }
 }
 
 #[test]
-fn no_new_try_member_ever_appears() {
-    let frozen: HashSet<&str> = FROZEN_TRY_FAMILY.iter().copied().collect();
-    for name in list_surface() {
-        if name.starts_with("try_") {
-            assert!(
-                frozen.contains(name.as_str()),
-                "`list.{name}` is a NEW try_ member — the family is frozen \
-                 (ADR-0006 D2): the fallibility-polymorphic form \
-                 `list.<core>(xs, (x) => f(x)!)!` covers new combinators once \
-                 #1108 lands; do not grow the workaround"
-            );
-        }
+fn the_seven_internal_carriers_exist() {
+    let declared: HashSet<String> = list_decls().into_iter().collect();
+    for carrier in INTERNAL_CARRIERS {
+        assert!(
+            declared.contains(*carrier),
+            "`list.{carrier}` is missing — the fallible-callback normalization \
+             (normalize_fallible_hof_callback) routes `list.map(xs, (x) => f(x)!)` \
+             to this body; deleting it breaks the polymorphic form at a distance"
+        );
     }
 }

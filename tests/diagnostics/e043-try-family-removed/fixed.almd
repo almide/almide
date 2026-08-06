@@ -1,6 +1,6 @@
-// E043: the list.try_* family is deprecated (ADR-0006) — the core HOF is
+// E043: the list.try_* family was REMOVED (ADR-0006 D3) — the core HOF is
 // fallibility-polymorphic: a callback whose body ends in `!` instantiates
-// the fallible form (first-err short-circuit), so the try_ twin is retired.
+// the fallible form (first-err short-circuit); one name per combinator remains.
 fn parse1(s: String) -> Result[Int, String] = int.parse(s)
 
 fn main() -> Unit = {
