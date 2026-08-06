@@ -507,7 +507,7 @@ When a callback that never errs leaves `E` unconstrained, annotate the result:
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (73 functions)
+## Signature index (66 functions)
 
 ```
 list.len(xs: List[A]) -> Int
@@ -576,13 +576,6 @@ list.clear(xs: List[A]) -> Unit
 list.bundled_probe(n: Int) -> Int
 list.split_at(xs: List[T], n: Int) -> ()
 list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
-list.__try_map(xs: List[A], f: (A) -> Result[B, E]) -> Result[List[B], E]
-list.__try_filter(xs: List[A], f: (A) -> Result[Bool, E]) -> Result[List[A], E]
-list.__try_flat_map(xs: List[A], f: (A) -> Result[List[B], E]) -> Result[List[B], E]
-list.__try_filter_map(xs: List[A], f: (A) -> Result[Option[B], E]) -> Result[List[B], E]
-list.__try_fold(xs: List[A], init: B, f: (B, A) -> Result[B, E]) -> Result[B, E]
-list.__try_find(xs: List[A], f: (A) -> Result[Bool, E]) -> Result[Option[A], E]
-list.__try_each(xs: List[A], f: (A) -> Result[Unit, E]) -> Result[Unit, E]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
