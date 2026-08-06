@@ -4,9 +4,9 @@
 // non-empty map is a `map.from_list(…)` computed payload (materialized into the Some slot); an EMPTY
 // `some([:])` walls cleanly (an EmptyMap payload has no computed handle to move — honest wall).
 effect fn main() -> Unit = {
-  let a: Option[Map[String, Int]] = some(["a": 1, "b": 2, "c": -7])
-  let b: Option[Map[String, Int]] = none
-  let d: Option[Map[String, Int]] = some(['k"x': 0, "big": 9223372036854775807])
+  let a: Map[String, Int]? = some(["a": 1, "b": 2, "c": -7])
+  let b: Map[String, Int]? = none
+  let d: Map[String, Int]? = some(['k"x': 0, "big": 9223372036854775807])
   println("${a}")
   println("${b}")
   println("${d}")

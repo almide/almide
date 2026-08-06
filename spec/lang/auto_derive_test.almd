@@ -226,7 +226,7 @@ test "derive Eq: float fields unequal" {
 }
 
 // ── Codec with optional fields ──
-type OptRecord: Codec = { id: Int, nickname: Option[String] }
+type OptRecord: Codec = { id: Int, nickname: String? }
 
 test "derive Codec: optional field present" {
   let r = OptRecord { id: 1, nickname: some("neo") }

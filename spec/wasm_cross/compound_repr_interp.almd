@@ -41,8 +41,8 @@ fn main() -> Unit = {
   // ── Tuple: `(a, b, …)`, heterogeneous ──
   println("tuple=${(1, "two", true)}")
   // ── Option: `some(v)` / `none` ──
-  let os: Option[Int] = some(42)
-  let on: Option[Int] = none
+  let os: Int? = some(42)
+  let on: Int? = none
   println("opt_some=${os}")
   println("opt_none=${on}")
   // ── Result: `ok(v)` / `err(e)` ──
@@ -64,9 +64,9 @@ fn main() -> Unit = {
     "ys": [4, 5]
   ]
   println("map_of_lists=${mv}")
-  let lo: List[Option[Int]] = [some(1), none, some(3)]
+  let lo: List[Int?] = [some(1), none, some(3)]
   println("list_of_opt=${lo}")
-  let deep: List[Map[String, List[Option[Int]]]] = [
+  let deep: List[Map[String, List[Int?]]] = [
     [
       "k": [some(1), none]
     ]

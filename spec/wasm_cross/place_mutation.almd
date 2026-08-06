@@ -35,7 +35,7 @@ effect fn main() -> Unit = {
   // 7. heap reassignment inside an executing branch arm (the if-let shape):
   //    the arm's write must be visible after the merge.
   var out = "none"
-  let ox: Option[Int] = some(5)
+  let ox: Int? = some(5)
   if let v = ox {
     out = int.to_string(v)
   } else {

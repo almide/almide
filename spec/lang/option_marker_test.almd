@@ -1,0 +1,67 @@
+// ADR-0010: `T?` is general Option shorthand — `T?` ≡ `Option[T]` in EVERY
+// type position (unlike `!`, a return-position marker: `?` is a property of
+// the value, `!` of the arrow). Binding is atom-tight and never crosses `->`:
+//   f: (Int) -> Int?      a fn returning Option[Int]
+//   f: ((Int) -> Int)?    an optional fn value (parens required)
+//   (String, Int)?        Option of tuple (a tuple is a parenthesized atom)
+//   (Int?)?               nested Option (`Int??` would lex as the ?? operator)
+//   -> Int?!              Result[Option[Int], String] (? binds first; ! is the
+//                         return marker)
+import testing
+
+// return position
+fn first_even(xs: List[Int]) -> Int? = xs |> list.find((x) => x % 2 == 0)
+
+// parameter position: the shorthand and the longhand are ONE type
+fn or_zero(v: Int?) -> Int = v ?? 0
+
+// fn-type slot: ? binds to the return atom, not the whole fn type
+fn pick(xs: List[Int], f: fn(Int) -> Int?) -> Int = xs |> list.filter_map(f) |> list.first ?? -1
+
+// tuple atom
+fn lookup_pair(k: String) -> (String, Int)? = if k == "a" then some(("a", 1)) else none
+
+// nested via parens
+fn nested() -> (Int?)? = some(some(3))
+
+// composition with the fallibility marker: Result[Option[Int], String]
+fn parse_opt(s: String) -> Int?! = if s == "" then ok(none)
+else match int.parse(s) {
+  ok(n) => ok(some(n)),
+  err(e) => err(e),
+}
+
+// The longhand identity `T?` ≡ `Option[T]` is witnessed at the stdlib
+// boundary: every stdlib signature still spells Option[T] (fmt normalizes
+// THIS file's own spellings, so the longhand cannot appear here — D3).
+test "shorthand unifies with stdlib's Option[T] signatures" {
+  let a: Int? = list.find([1, 2], (x) => x > 1)
+  assert_eq(a ?? 0, 2)
+  assert_eq(or_zero(some(7)), 7)
+  assert_eq(or_zero(none), 0)
+}
+
+test "return-position shorthand behaves as Option" {
+  assert_eq(first_even([1, 3, 4]) ?? -1, 4)
+  assert_eq(first_even([1, 3, 5]) ?? -1, -1)
+}
+
+test "fn-type slot: ? binds to the return atom" {
+  assert_eq(pick([1, 2, 3], (x) => if x > 1 then some(x * 10) else none), 20)
+  assert_eq(pick([1], (_x) => none), -1)
+}
+
+test "tuple and nested atoms" {
+  assert_eq(lookup_pair("a") |> option.map(((s, n)) => "${s}${n}") ?? "-", "a1")
+  assert_eq(lookup_pair("z") |> option.map(((s, n)) => "${s}${n}") ?? "-", "-")
+  assert_eq(nested() |> option.flatten ?? -1, 3)
+}
+
+test "?! composes: ? binds first, ! is the return marker" {
+  assert_eq(parse_opt("42")! ?? -1, 42)
+  assert_eq(parse_opt("")! ?? -1, -1)
+  match parse_opt("zz") {
+    err(e) => testing.assert_contains(e, "invalid digit"),
+    ok(_) => testing.assert_contains("unexpected", "never"),
+  }
+}

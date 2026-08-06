@@ -25,16 +25,16 @@
 // the `Int` cells are the ones with none, and the mixed cells pin that the ORDER of a
 // heap element within the tuple does not select a different path.
 fn main() -> Unit = {
-  let a: Option[(Int, Int)] = none
+  let a: (Int, Int)? = none
   let r_a: (Int, Int) = option.unwrap_or(some(option.unwrap_or(a, (1, 2))), (3, 4))
   println("${r_a}")
-  let b: Option[(String, Int)] = none
+  let b: (String, Int)? = none
   let r_b: (String, Int) = option.unwrap_or(some(option.unwrap_or(b, ("a", 1))), ("b", 2))
   println("${r_b}")
-  let c: Option[(Int, String)] = none
+  let c: (Int, String)? = none
   let r_c: (Int, String) = option.unwrap_or(some(option.unwrap_or(c, (1, "a"))), (2, "b"))
   println("${r_c}")
-  let d: Option[(String, String)] = none
+  let d: (String, String)? = none
   let r_d: (String, String) = option.unwrap_or(some(option.unwrap_or(d, ("a", "b"))), ("c", "d"))
   println("${r_d}")
   // The SOME side of every cell too: the payload the match KEEPS must be the owned one,
@@ -49,7 +49,7 @@ fn main() -> Unit = {
     // and letting it in here would make this fixture fail for a reason that has nothing to
     // do with the tuple-payload family it exists to pin.
     let name0 = "kept" + int.to_string(i)
-    let s: Option[(String, Int)] = some((name0, i))
+    let s: (String, Int)? = some((name0, i))
     let (name, n) = option.unwrap_or(some(option.unwrap_or(s, ("miss", -1))), ("dflt", -2))
     acc = acc + n + string.len(name)
     println("${name} ${int.to_string(n)}")

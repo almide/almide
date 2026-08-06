@@ -3,7 +3,7 @@ test "option.map transforms some" {
 }
 
 test "option.map passes through none" {
-  let r: Option[Int] = option.map(none, (x: Int) => x * 10)
+  let r: Int? = option.map(none, (x: Int) => x * 10)
   assert_eq(r, none)
 }
 
@@ -21,7 +21,7 @@ test "option.unwrap_or" {
 test "option.is_some and is_none" {
   assert_eq(option.is_some(some(1)), true)
   assert_eq(option.is_none(some(1)), false)
-  let n: Option[Int] = none
+  let n: Int? = none
   assert_eq(option.is_some(n), false)
   assert_eq(option.is_none(n), true)
 }
@@ -31,7 +31,7 @@ test "option.to_result some" {
 }
 
 test "option.to_result none" {
-  let n: Option[Int] = none
+  let n: Int? = none
   assert_eq(option.to_result(n, "missing"), err("missing"))
 }
 

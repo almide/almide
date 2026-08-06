@@ -76,7 +76,7 @@ test "variant with tuple payload" {
 // ── Option ──
 test "Option some and none" {
   let x = some(42)
-  let y: Option[Int] = none
+  let y: Int? = none
   assert_eq(x, some(42))
   assert_eq(y, none)
 }
@@ -174,7 +174,7 @@ test "list of records operations" {
 
 test "record with option field" {
   let item = { name: "widget", description: some("A useful widget") }
-  let no_desc: Option[String] = none
+  let no_desc: String? = none
   let item2 = { name: "gadget", description: no_desc }
   assert_eq(item.description, some("A useful widget"))
   assert_eq(item2.description, none)

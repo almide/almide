@@ -2,7 +2,7 @@ fn double(x: Int) -> Int = x * 2
 
 fn is_positive(x: Int) -> Bool = x > 0
 
-fn parse_opt(s: String) -> Option[Int] = if s == "yes" then some(1) else none
+fn parse_opt(s: String) -> Int? = if s == "yes" then some(1) else none
 
 test "function reference in map" {
   let xs = [1, 2, 3]

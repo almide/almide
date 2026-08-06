@@ -5,7 +5,7 @@
 // roundtrips total when a Float value happens to be integral. #658.
 import json
 
-type Ratio: Codec = { num: Float, opt: Option[Float], scaled: Float = 1.5, label: String }
+type Ratio: Codec = { num: Float, opt: Float?, scaled: Float = 1.5, label: String }
 
 fn main() -> Unit = {
   // num / opt / scaled all supplied as integer JSON numbers — widen to Float.

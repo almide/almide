@@ -8,9 +8,9 @@
 // cannot be omitted). #1062 / #1058.
 import json
 
-type Attr: Codec = { stringValue: Option[String] = none, intValue: Option[String] = none }
+type Attr: Codec = { stringValue: String? = none, intValue: String? = none }
 
-type Doc: Codec = { id: String, parent: Option[String], meta: Value, extra: Option[Value], items: List[Value], tags: Option[List[String]] }
+type Doc: Codec = { id: String, parent: String?, meta: Value, extra: Value?, items: List[Value], tags: List[String]? }
 
 fn main() -> Unit = {
   // proto3 oneof via all-Option mirror: exactly one key present.

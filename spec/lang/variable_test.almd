@@ -203,8 +203,8 @@ test "var index assign multiple" {
 }
 
 test "let with option value" {
-  let x: Option[Int] = some(42)
-  let y: Option[Int] = none
+  let x: Int? = some(42)
+  let y: Int? = none
   assert_eq(x, some(42))
   assert_eq(y, none)
 }

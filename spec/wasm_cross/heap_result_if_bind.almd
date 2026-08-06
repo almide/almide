@@ -11,12 +11,12 @@
 effect fn main() -> Unit = {
   let c: Bool = true
   // The café shape: an Option-of-literal `if` inside an `ok(...)` payload.
-  let v: Result[Option[String], String] = ok(if c then some("ΑΒΓ") else some("café"))
+  let v: Result[String?, String] = ok(if c then some("ΑΒΓ") else some("café"))
   match v {
     ok(inner) => println("v = " + (inner ?? "nil")),
     err(e) => println("v err = " + e),
   }
-  let w: Result[Option[String], String] = ok(if not c then some("ΑΒΓ") else some("café"))
+  let w: Result[String?, String] = ok(if not c then some("ΑΒΓ") else some("café"))
   match w {
     ok(inner) => println("w = " + (inner ?? "nil")),
     err(e) => println("w err = " + e),

@@ -21,21 +21,21 @@ import json
 
 type Scalars: Codec = { s: String, i: Int, f: Float, b: Bool }
 
-type Opts: Codec = { s: Option[String], i: Option[Int], f: Option[Float], b: Option[Bool] }
+type Opts: Codec = { s: String?, i: Int?, f: Float?, b: Bool? }
 
 type Inner: Codec = { n: Int }
 
-type Nested: Codec = { one: Inner, many: List[Inner], maybe: Option[Inner] }
+type Nested: Codec = { one: Inner, many: List[Inner], maybe: Inner? }
 
-type Vals: Codec = { v: Value, ov: Option[Value], lv: List[Value], ol: Option[List[Int]] }
+type Vals: Codec = { v: Value, ov: Value?, lv: List[Value], ol: List[Int]? }
 
 type Defaults: Codec = { host: String = "localhost", port: Int = 8080, name: String }
 
 type Aliased: Codec = { trace_id as "traceId": String, count: Int }
 
-type Shape: Codec = | Circle(Float) | Point | Label { text: String, hint: Option[String] }
+type Shape: Codec = | Circle(Float) | Point | Label { text: String, hint: String? }
 
-type Deep: Codec = { lo: List[Option[Int]], ll: List[List[Int]], dp: Option[List[Option[String]]], lc: List[Option[Inner]] }
+type Deep: Codec = { lo: List[Int?], ll: List[List[Int]], dp: List[String?]?, lc: List[Inner?] }
 
 fn enc_scalars(x: Scalars) -> String = json.stringify(Scalars.encode(x))
 

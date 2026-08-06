@@ -5,11 +5,11 @@
 // scalar-tuple Module-call payload must materialize (a fresh owned flat
 // block), never defer to an EMPTY Opaque the program reads as `none`/OOB.
 fn main() -> Unit = {
-  let b: Option[(Int, Int)] = some(option.unwrap_or(some((2, 3)), (2, 4)))
+  let b: (Int, Int)? = some(option.unwrap_or(some((2, 3)), (2, 4)))
   println("${b}")
   let r: Result[(Int, Int), String] = ok(option.unwrap_or(some((2, 3)), (2, 4)))
   let c: (Int, Int) = option.unwrap_or(result.to_option(r), (7, 8))
   println("${c}")
-  let n: Option[(Int, Int)] = some(option.unwrap_or(none, (5, 6)))
+  let n: (Int, Int)? = some(option.unwrap_or(none, (5, 6)))
   println("${n}")
 }

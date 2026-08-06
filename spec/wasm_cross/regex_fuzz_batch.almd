@@ -7,12 +7,12 @@ import regex
 
 fn b2s(b: Bool) -> String = if b then "T" else "F"
 
-fn ostr(o: Option[String]) -> String = match o {
+fn ostr(o: String?) -> String = match o {
   some(s) => s,
   none => "NONE",
 }
 
-fn olist(o: Option[List[String]]) -> String = match o {
+fn olist(o: List[String]?) -> String = match o {
   some(xs) => "[" + string.join(xs, "|") + "]",
   none => "NONE",
 }

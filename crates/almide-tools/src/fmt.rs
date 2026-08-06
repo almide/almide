@@ -220,7 +220,7 @@ fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<
     match te {
         TypeExpr::Simple { name } => insert_type_name_prefix(name.as_str(), used),
         TypeExpr::Generic { name, args } => {
-            if name.as_str() != "!" {
+            if name.as_str() != "!" && name.as_str() != "?" {
                 insert_type_name_prefix(name.as_str(), used);
             }
             for a in args { collect_module_refs_type(a, used); }
@@ -616,6 +616,34 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::Generic { name, args } if name.as_str() == "!" && args.len() == 1 => {
             fmt_type(out, &args[0], depth);
             out.push('!');
+        }
+        // ADR-0010 D3: `T?` is the canonical Option spelling — the pseudo-
+        // generic `?` prints back as written, and a written `Option[T]`
+        // NORMALIZES to the same shorthand. The inner takes parens whenever
+        // the bare rendering would not re-parse under the atom-binding rule:
+        // fn types (`((A) -> B)?`), nested Option (`(Int?)?` — `T??` would
+        // lex as the `??` operator), records/variants. A tuple already
+        // renders parenthesized.
+        TypeExpr::Generic { name, args }
+            if (name.as_str() == "?" || name.as_str() == "Option") && args.len() == 1 =>
+        {
+            let inner = &args[0];
+            let bare_atom = match inner {
+                TypeExpr::Simple { .. } | TypeExpr::Tuple { .. } => true,
+                TypeExpr::Generic { name, args } => {
+                    !((name.as_str() == "?" || name.as_str() == "Option") && args.len() == 1)
+                        && name.as_str() != "!"
+                }
+                _ => false,
+            };
+            if bare_atom {
+                fmt_type(out, inner, depth);
+            } else {
+                out.push('(');
+                fmt_type(out, inner, depth);
+                out.push(')');
+            }
+            out.push('?');
         }
         TypeExpr::Generic { name, args } => {
             out.push_str(name); out.push('[');

@@ -60,7 +60,7 @@ fn stack_new[T]() -> Stack[T] = { items: [], size: 0 }
 
 fn stack_push[T](s: Stack[T], item: T) -> Stack[T] = { items: s.items + [item], size: s.size + 1 }
 
-fn stack_peek[T](s: Stack[T]) -> Option[T] = if s.size == 0 then none
+fn stack_peek[T](s: Stack[T]) -> T? = if s.size == 0 then none
 else list.get(s.items, s.size - 1)
 
 test "generic record type" {
@@ -136,8 +136,8 @@ test "named record type" {
 
 // ── Option and Result ──
 test "Option type" {
-  let x: Option[Int] = some(10)
-  let y: Option[Int] = none
+  let x: Int? = some(10)
+  let y: Int? = none
   assert_eq(x, some(10))
   assert_eq(y, none)
 }
@@ -178,9 +178,9 @@ test "tuple return type" {
 }
 
 // ── Additional type system tests ──
-fn wrap[T](x: T) -> Option[T] = some(x)
+fn wrap[T](x: T) -> T? = some(x)
 
-fn unwrap_or[T](opt: Option[T], default: T) -> T = match opt {
+fn unwrap_or[T](opt: T?, default: T) -> T = match opt {
   some(v) => v,
   none => default,
 }
@@ -225,7 +225,7 @@ test "generic variant type" {
   assert_eq(tree_value(t2), "root")
 }
 
-fn option_chain[A, B](opt: Option[A], f: fn(A) -> Option[B]) -> Option[B] = match opt {
+fn option_chain[A, B](opt: A?, f: fn(A) -> B?) -> B? = match opt {
   some(v) => f(v),
   none => none,
 }
@@ -236,7 +236,7 @@ test "option chaining" {
   assert_eq(result, some(20))
   let result2 = option_chain(x, (n) => if n > 20 then some(n * 2) else none)
   assert_eq(result2, none)
-  let empty: Option[Int] = none
+  let empty: Int? = none
   let result3 = option_chain(empty, (n) => some(n * 2))
   assert_eq(result3, none)
 }

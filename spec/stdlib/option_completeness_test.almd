@@ -4,7 +4,7 @@ test "option.to_list on some with string" {
 }
 
 test "option.to_list on none typed" {
-  let n: Option[String] = none
+  let n: String? = none
   assert_eq(option.to_list(n), [])
 }
 
@@ -18,7 +18,7 @@ test "option.to_result on some returns ok" {
 }
 
 test "option.to_result on none returns err" {
-  let n: Option[String] = none
+  let n: String? = none
   let r = option.to_result(n, "not found")
   assert_eq(r, err("not found"))
 }
@@ -28,7 +28,7 @@ test "option.to_result on some int" {
 }
 
 test "option.filter on none stays none" {
-  let n: Option[Int] = none
+  let n: Int? = none
   assert_eq(option.filter(n, (x) => x > 0), none)
 }
 
@@ -46,20 +46,20 @@ test "option.filter with string predicate" {
 }
 
 test "option.zip first none" {
-  let n: Option[Int] = none
+  let n: Int? = none
   let r = option.zip(n, some("a"))
   assert_eq(option.is_none(r), true)
 }
 
 test "option.zip second none" {
-  let n: Option[String] = none
+  let n: String? = none
   let r = option.zip(some(1), n)
   assert_eq(option.is_none(r), true)
 }
 
 test "option.zip both none" {
-  let a: Option[Int] = none
-  let b: Option[String] = none
+  let a: Int? = none
+  let b: String? = none
   let r = option.zip(a, b)
   assert_eq(option.is_none(r), true)
 }
@@ -74,13 +74,13 @@ test "option.flatten some(some(x))" {
 }
 
 test "option.flatten some(none)" {
-  let v: Option[Option[Int]] = some(none)
+  let v: (Int?)? = some(none)
   let r = option.flatten(v)
   assert_eq(option.is_none(r), true)
 }
 
 test "option.flatten none" {
-  let v: Option[Option[Int]] = none
+  let v: (Int?)? = none
   let r = option.flatten(v)
   assert_eq(option.is_none(r), true)
 }
@@ -117,7 +117,7 @@ test "option.flat_map returns none from predicate" {
 }
 
 test "option.flat_map on none" {
-  let n: Option[Int] = none
+  let n: Int? = none
   let r = option.flat_map(n, (x) => some(x + 1))
   assert_eq(option.is_none(r), true)
 }
@@ -127,7 +127,7 @@ test "option.is_some on some string" {
 }
 
 test "option.is_none on none string" {
-  let n: Option[String] = none
+  let n: String? = none
   assert_eq(option.is_none(n), true)
 }
 
@@ -136,6 +136,6 @@ test "option.unwrap_or with string" {
 }
 
 test "option.unwrap_or none with string default" {
-  let n: Option[String] = none
+  let n: String? = none
   assert_eq(option.unwrap_or(n, "default"), "default")
 }

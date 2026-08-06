@@ -6,7 +6,7 @@
 // direct field and the `List[T]` element path.
 import varlib
 
-type Wrapped: Codec = { id: Int, payload: varlib.Pigment, palette: List[varlib.Pigment], accent: Option[varlib.Pigment] }
+type Wrapped: Codec = { id: Int, payload: varlib.Pigment, palette: List[varlib.Pigment], accent: varlib.Pigment? }
 
 test "cross-module type method called directly: mod.Type.method() (新①)" {
   let p = varlib.Pigment { r: 1, g: 2, b: 3 }

@@ -7,9 +7,9 @@ fn make_ok() -> Result[Int, String] = ok(42)
 
 fn make_err() -> Result[Int, String] = err("bad")
 
-fn make_some() -> Option[Int] = some(10)
+fn make_some() -> Int? = some(10)
 
-fn make_none() -> Option[Int] = none
+fn make_none() -> Int? = none
 
 effect fn effect_ok() -> Int = make_ok()!
 
@@ -41,15 +41,15 @@ test "?? inline Result" {
 }
 
 test "?? inline Option" {
-  let o: Option[String] = none
+  let o: String? = none
   assert_eq(o ?? "default", "default")
 }
 
 // ?? chained
 test "?? chained" {
-  let o1: Option[Int] = none
-  let o2: Option[Int] = none
-  let o3: Option[Int] = some(99)
+  let o1: Int? = none
+  let o2: Int? = none
+  let o3: Int? = some(99)
   assert_eq(o1 ?? o2 ?? o3 ?? 0, 99)
 }
 
@@ -67,12 +67,12 @@ test "? Result err → none" {
 }
 
 test "? Option some → identity" {
-  let o: Option[Int] = some(5)
+  let o: Int? = some(5)
   assert_eq(o?, some(5))
 }
 
 test "? Option none → identity" {
-  let o: Option[Int] = none
+  let o: Int? = none
   assert_eq(o?, none)
 }
 
@@ -85,7 +85,7 @@ test "! Result ok in test" {
 }
 
 test "! Option some in test" {
-  let o: Option[Int] = some(10)
+  let o: Int? = some(10)
   assert_eq(o!, 10)
 }
 
@@ -98,7 +98,7 @@ effect fn unwrap_result_ok() -> Int = {
 }
 
 effect fn unwrap_option_some() -> Int = {
-  let o: Option[Int] = some(10)
+  let o: Int? = some(10)
   o!
 }
 
@@ -196,7 +196,7 @@ test "match on Result" {
 }
 
 test "match on Option" {
-  let o: Option[Int] = some(10)
+  let o: Int? = some(10)
   let v = match o {
     some(n) => n,
     none => 0,
@@ -214,7 +214,7 @@ test "match on Result err" {
 }
 
 test "match on Option none" {
-  let o: Option[String] = none
+  let o: String? = none
   let v = match o {
     some(s) => s,
     none => "empty",
@@ -227,12 +227,12 @@ test "match on Option none" {
 // ═══════════════════════════════════════════════════════════════════
 test "nested: Result inside Option via ??" {
   let r: Result[Int, String] = ok(42)
-  let o: Option[Int] = some(r ?? 0)
+  let o: Int? = some(r ?? 0)
   assert_eq(o ?? -1, 42)
 }
 
 test "nested: Option to Result via match" {
-  let o: Option[Int] = some(5)
+  let o: Int? = some(5)
   let r: Result[Int, String] = match o {
     some(n) => ok(n),
     none => err("missing"),
@@ -241,7 +241,7 @@ test "nested: Option to Result via match" {
 }
 
 effect fn nested_unwrap() -> Int = {
-  let r: Result[Option[Int], String] = ok(some(42))
+  let r: Result[Int?, String] = ok(some(42))
   let o = r!
   o!
 }
@@ -254,17 +254,17 @@ test "nested: unwrap Result then Option" {
 // 10. Edge cases
 // ═══════════════════════════════════════════════════════════════════
 test "?? preserves type: string" {
-  let o: Option[String] = some("hello")
+  let o: String? = some("hello")
   assert_eq(o ?? "", "hello")
 }
 
 test "?? preserves type: list" {
-  let o: Option[List[Int]] = none
+  let o: List[Int]? = none
   assert_eq(o ?? [], [])
 }
 
 test "?? preserves type: bool" {
-  let o: Option[Bool] = some(true)
+  let o: Bool? = some(true)
   assert_eq(o ?? false, true)
 }
 

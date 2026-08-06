@@ -15,7 +15,7 @@ fn pick(o: Outer) -> String = match o {
   Wrap(B(n)) => "B:" + int.to_string(n),
 }
 
-type Hold = | Box(Option[Int])
+type Hold = | Box(Int?)
 
 fn opt(h: Hold) -> Int = match h {
   Box(some(n)) => n,

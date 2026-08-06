@@ -86,12 +86,12 @@ test "protocol on type with nested record field" {
 
 // ── Protocol method that returns Option[Self] ──
 protocol Parseable {
-  fn try_parse(raw: String) -> Option[Self]
+  fn try_parse(raw: String) -> Self?
 }
 
 type Color: Parseable = | Red | Green | Blue
 
-fn Color.try_parse(raw: String) -> Option[Color] = match raw {
+fn Color.try_parse(raw: String) -> Color? = match raw {
   "red" => some(Red),
   "green" => some(Green),
   "blue" => some(Blue),

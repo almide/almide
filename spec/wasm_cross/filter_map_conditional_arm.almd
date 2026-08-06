@@ -8,7 +8,7 @@
 // covered by corpus-wall.) Byte-matches native; cert ACCEPT.
 type EV = { key: String, val: String }
 
-fn lookup(k: String, p: String) -> Option[String] = if string.starts_with(k, p) then some(k) else none
+fn lookup(k: String, p: String) -> String? = if string.starts_with(k, p) then some(k) else none
 
 fn build(keys: List[String], p: String) -> List[EV] = keys |> list.filter_map((k) => {
   let v = lookup(k, p)

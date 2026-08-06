@@ -227,7 +227,7 @@ test "nested option unwrap chain" {
 }
 
 test "list of options" {
-  let xs: List[Option[Int]] = [some(1), none, some(3), none, some(5)]
+  let xs: List[Int?] = [some(1), none, some(3), none, some(5)]
   let present = list.filter_map(xs, (x) => x)
   assert_eq(present, [1, 3, 5])
 }

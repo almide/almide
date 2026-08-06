@@ -5,7 +5,7 @@
 // option codec with a per-element `T.encode`/`T.decode` fn.
 type Color: Codec = { r: Int, g: Int, b: Int }
 
-type Holder: Codec = { accent: Option[Color], name: String }
+type Holder: Codec = { accent: Color?, name: String }
 
 fn roundtrip(h: Holder) -> Result[Holder, String] = Holder.decode(Holder.encode(h))
 

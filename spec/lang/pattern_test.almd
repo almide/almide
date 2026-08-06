@@ -60,7 +60,7 @@ test "match some" {
 }
 
 test "match none" {
-  let x: Option[Int] = none
+  let x: Int? = none
   let result = match x {
     some(v) => v,
     none => -1,
@@ -185,7 +185,7 @@ test "nested option pattern" {
 }
 
 test "nested result in option" {
-  let x: Option[Result[Int, String]] = some(ok(42))
+  let x: Result[Int, String]? = some(ok(42))
   let result = match x {
     some(ok(v)) => v,
     some(err(_)) => -1,
@@ -240,7 +240,7 @@ test "match guard falls through" {
 
 test "match returns option" {
   let x = 5
-  let result: Option[String] = match x {
+  let result: String? = match x {
     1 => some("one"),
     5 => some("five"),
     _ => none,

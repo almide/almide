@@ -42,12 +42,12 @@ effect fn rand_choice_from_list() -> Result[Bool, String] = {
   ok(option.is_some(picked))
 }
 
-effect fn rand_choice_single() -> Result[Option[Int], String] = {
+effect fn rand_choice_single() -> Result[Int?, String] = {
   let picked = random.choice([42])
   ok(picked)
 }
 
-effect fn rand_choice_empty() -> Result[Option[Int], String] = {
+effect fn rand_choice_empty() -> Result[Int?, String] = {
   let xs: List[Int] = []
   let picked = random.choice(xs)
   ok(picked)

@@ -6,7 +6,7 @@ type Shape = | Circle { radius: Int } | Dot
 
 type Pigment: Codec = { r: Int, g: Int, b: Int }
 
-fn parse_tag(s: String) -> Option[String] = if string.starts_with(s, "tag:") then some(string.slice(s, 4, string.len(s)))
+fn parse_tag(s: String) -> String? = if string.starts_with(s, "tag:") then some(string.slice(s, 4, string.len(s)))
 else none
 
 // Test: function reference used within the same module (intra-module)

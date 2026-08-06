@@ -79,12 +79,12 @@ test "guarded match: ok arm" {
 // ── Option analogue: a match with `none` arms must type as Option (not Never).
 // `none` was never collapsed to Never, so this is a guard against regressing
 // the sibling path while fixing the Result path. ──
-fn opt_all_none(x: Int) -> Option[Int] = match x {
+fn opt_all_none(x: Int) -> Int? = match x {
   2 => none,
   _ => none,
 }
 
-fn opt_mixed(x: Int) -> Option[Int] = match x {
+fn opt_mixed(x: Int) -> Int? = match x {
   2 => none,
   _ => some(x * 10),
 }

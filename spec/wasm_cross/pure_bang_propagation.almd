@@ -13,7 +13,7 @@ fn parse_two(a: String, b: String) -> Result[Int, String] = {
   ok(x + y)
 }
 
-fn first_char(s: String) -> Option[String] = {
+fn first_char(s: String) -> String? = {
   let c = string.get(s, 0)!
   some(c)
 }

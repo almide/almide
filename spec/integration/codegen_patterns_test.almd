@@ -16,7 +16,7 @@ test "variant match with all arms" {
 
 // ── Match on option of variant ──
 test "match option of variant" {
-  let x: Option[Msg] = some(Number(99))
+  let x: Msg? = some(Number(99))
   let result = match x {
     some(Number(n)) => n,
     some(_) => -1,
@@ -26,7 +26,7 @@ test "match option of variant" {
 }
 
 test "match option of variant none case" {
-  let x: Option[Msg] = none
+  let x: Msg? = none
   let result = match x {
     some(Number(n)) => n,
     some(_) => -1,
@@ -140,7 +140,7 @@ test "match arms returning lists" {
 
 // ── Nested match with block bodies ──
 test "nested match with blocks" {
-  let x: Option[Result[Int, String]] = some(ok(42))
+  let x: Result[Int, String]? = some(ok(42))
   let result = match x {
     some(inner) => {
       let msg = match inner {

@@ -74,7 +74,7 @@ test "nested record spread" {
 }
 
 // ── Record with option field ──
-type User = { name: String, email: Option[String] }
+type User = { name: String, email: String? }
 
 fn user_display(u: User) -> String = match u.email {
   some(e) => "${u.name} <${e}>",

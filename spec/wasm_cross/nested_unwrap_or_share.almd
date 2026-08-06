@@ -5,28 +5,28 @@
 // a double-free at scope end (__rc_dec trap AFTER correct output — fuzz
 // seed-20260718 index 149's `ok(result.unwrap_or(..))` chain).
 fn main() -> Unit = {
-  let x1: Result[Option[Float], String] = ok(some(-1.0))
-  let y2: Option[Float] = none
-  let v3: Result[Option[Float], String] = ok(result.unwrap_or((if true then x1 else x1), y2))
-  let r5: Option[Float] = option.unwrap_or(result.to_option(v3), none)
+  let x1: Result[Float?, String] = ok(some(-1.0))
+  let y2: Float? = none
+  let v3: Result[Float?, String] = ok(result.unwrap_or((if true then x1 else x1), y2))
+  let r5: Float? = option.unwrap_or(result.to_option(v3), none)
   println("r5 = ${r5}")
-  let o: Option[String] = some("v")
+  let o: String? = some("v")
   let d: String = "fallback"
   println("kept = ${option.unwrap_or(o, d)} default = ${option.unwrap_or(none, d)} d = ${d}")
   let fresh: List[Float] = result.unwrap_or(err("x"), [1.5])
   println("fresh = ${fresh}")
   // option.to_list edition (fuzz index 338): the new list CO-OWNS the payload
   // the Option still owns — un-inc'd it double-freed at scope end.
-  let t: Option[Option[Bool]] = some(some(true))
-  let xs: List[Option[Bool]] = option.to_list(t)
+  let t: (Bool?)? = some(some(true))
+  let xs: List[Bool?] = option.to_list(t)
   println("xs = ${xs}")
-  let g: Option[Bool] = list.get_or(option.to_list(t), 5, none)
+  let g: Bool? = list.get_or(option.to_list(t), 5, none)
   println("g = ${g}")
   // option.or_else kept edition (fuzz index 622), the v1-leg twin: the KEPT
   // payload Dups into the rebuilt some() — the scalar twin raw-copied the
   // handle un-owned, double-freeing it at scope end after correct output.
-  let k: Option[String] = option.or_else(some("kept"), (() => some("alt")))
+  let k: String? = option.or_else(some("kept"), (() => some("alt")))
   println("k = ${k}")
-  let ke: Option[String] = option.or_else(none, (() => some("alt")))
+  let ke: String? = option.or_else(none, (() => some("alt")))
   println("ke = ${ke}")
 }

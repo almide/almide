@@ -4,9 +4,9 @@
 // tagR) then payloadEq else (tagL==tagR). Was both-arms-linearized (silent). Byte-matches native.
 // (some-vs-none / none-vs-none verified separately; this fixture keeps the multi-let-friendly subset.)
 effect fn main() -> Unit = {
-  let a: Option[String] = some("hi")
-  let b: Option[String] = some("hi")
-  let c: Option[String] = some("yo")
+  let a: String? = some("hi")
+  let b: String? = some("hi")
+  let c: String? = some("yo")
   println(if a == b then "T" else "F")
   println(if a == c then "T" else "F")
   println(if a != c then "T" else "F")

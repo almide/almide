@@ -18,6 +18,24 @@ some(v) : Option[T]       // 値あり
 none    : Option[T]       // 値なし
 ```
 
+### Option 糖衣 `T?`(ADR-0010)
+
+`T?` ≡ `Option[T]`。**全型位置**で有効(`!` は戻り位置マーカーだが `?` は値の属性)。
+`?` は直前の型アトム(名前+ジェネリクス、または括弧で閉じた型)に最結合し、
+`->` をまたがない:
+
+```almide
+fn f(v: Int?) -> Int? = v          // 引数・戻りどちらも可
+f: (Int) -> Int?                    // fn 型 slot: Option[Int] を返す fn
+on_tick: ((Int) -> Unit)?           // fn 値そのものが Option — 括弧必須
+pair: (String, Int)?                // Option[タプル]
+nested: (Int?)?                     // 入れ子(`Int??` は ?? にレクスされ不可)
+fn g(s: String) -> Int?!            // Result[Option[Int], String](? が先、! は戻りマーカー)
+```
+
+正準形は `T?`: `almide fmt` は `Option[T]` を `T?` へ正規化する(D3)。
+stdlib ソースは splice-context のため長綴りのまま(境界での単一化証人)。
+
 ### Never (bottom type)
 ```
 process.exit(n) : Never   // 戻らない関数の戻り値型

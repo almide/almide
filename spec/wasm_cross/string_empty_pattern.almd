@@ -7,7 +7,7 @@
 // The WASM runtime previously short-circuited empty patterns to 0; this matrix
 // pins the corrected behaviour byte-for-byte across native and WASM, including
 // multibyte subjects where codepoint-count and byte-length differ.
-fn opt(x: Option[Int]) -> String = match x {
+fn opt(x: Int?) -> String = match x {
   some(v) => int.to_string(v),
   none => "none",
 }

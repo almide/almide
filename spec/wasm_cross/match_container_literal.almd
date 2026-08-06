@@ -7,7 +7,7 @@
 // from native. Now the inner-literal equality is emitted via the shared
 // type-directed `==`, byte-identical on both targets.
 // String literal in Some — the headline case.
-fn cs(c: Option[String]) -> String = match c {
+fn cs(c: String?) -> String = match c {
   some("target") => "T",
   some("other") => "O",
   some(_) => "?",
@@ -15,7 +15,7 @@ fn cs(c: Option[String]) -> String = match c {
 }
 
 // Int literal in Some.
-fn ci(c: Option[Int]) -> String = match c {
+fn ci(c: Int?) -> String = match c {
   some(5) => "FIVE",
   some(9) => "NINE",
   some(_) => "?",
@@ -34,7 +34,7 @@ fn ck(r: Result[Int, Int]) -> String = match r {
 
 // Distilled balanced-parens core: a stack top compared by string literal. The
 // bug made `is_match("(")` true for any non-empty top.
-fn closes(top: Option[String], ch: String) -> Bool = match top {
+fn closes(top: String?, ch: String) -> Bool = match top {
   some("(") => ch == ")",
   some("[") => ch == "]",
   some("{") => ch == "}",

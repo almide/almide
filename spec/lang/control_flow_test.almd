@@ -70,7 +70,7 @@ test "match Option some" {
 }
 
 test "match Option none" {
-  let x: Option[Int] = none
+  let x: Int? = none
   let result = match x {
     some(v) => v,
     none => -1,
@@ -371,7 +371,7 @@ test "match on tuple with wildcard" {
 }
 
 test "nested match" {
-  let x: Option[Result[Int, String]] = some(ok(42))
+  let x: Result[Int, String]? = some(ok(42))
   let result = match x {
     some(inner) => match inner {
       ok(v) => v,

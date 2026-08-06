@@ -3,7 +3,7 @@
 // were keyed by expression SHAPE while `(Int, String)` was keyed by TYPE, so only that
 // one admitted a call-result payload).
 test "some of a str-int tuple call result" {
-  let s0: Option[(String, Int)] = none
+  let s0: (String, Int)? = none
   let r = option.unwrap_or(some(option.unwrap_or(s0, ("a", 1))), ("b", 2))
   let (l, n) = r
   assert_eq(l, "a")
@@ -11,7 +11,7 @@ test "some of a str-int tuple call result" {
 }
 
 test "some of an int-str tuple call result" {
-  let s0: Option[(Int, String)] = none
+  let s0: (Int, String)? = none
   let r = option.unwrap_or(some(option.unwrap_or(s0, (1, "a"))), (2, "b"))
   let (n, l) = r
   assert_eq(n, 1)
@@ -19,7 +19,7 @@ test "some of an int-str tuple call result" {
 }
 
 test "some of a str-str tuple call result" {
-  let s0: Option[(String, String)] = none
+  let s0: (String, String)? = none
   let r = option.unwrap_or(some(option.unwrap_or(s0, ("a", "x"))), ("b", "y"))
   let (p, q) = r
   assert_eq(p + q, "ax")
@@ -40,7 +40,7 @@ test "some of a tuple literal still works for every cell" {
 test "some of a tuple call result under churn" {
   var total = 0
   for i in [1, 2, 3, 4, 5] {
-    let s0: Option[(String, Int)] = none
+    let s0: (String, Int)? = none
     let r = option.unwrap_or(some(option.unwrap_or(s0, ("k", i))), ("z", 0))
     let (_l, n) = r
     total = total + n

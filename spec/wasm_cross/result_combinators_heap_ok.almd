@@ -13,9 +13,9 @@ fn c_flat_map(r: Result[String, String]) -> Result[String, String] = result.flat
 
 fn c_uoe(r: Result[String, String]) -> String = result.unwrap_or_else(r, ((y) => "fb:" + y))
 
-fn c_to_opt(r: Result[String, String]) -> Option[String] = result.to_option(r)
+fn c_to_opt(r: Result[String, String]) -> String? = result.to_option(r)
 
-fn c_to_eopt(r: Result[String, String]) -> Option[String] = result.to_err_option(r)
+fn c_to_eopt(r: Result[String, String]) -> String? = result.to_err_option(r)
 
 fn main() -> Unit = {
   let s: Result[String, String] = ok("abc")

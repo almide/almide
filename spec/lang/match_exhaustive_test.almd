@@ -15,13 +15,13 @@ fn eval(e: Expr) -> Int = match e {
   Add(a, b) => eval(a) + eval(b),
 }
 
-fn classify_option(x: Option[Option[Int]]) -> String = match x {
+fn classify_option(x: (Int?)?) -> String = match x {
   some(some(n)) => "deep: " + int.to_string(n),
   some(none) => "shallow none",
   none => "nothing",
 }
 
-fn classify_result(x: Option[Result[Int, String]]) -> String = match x {
+fn classify_result(x: Result[Int, String]?) -> String = match x {
   some(ok(n)) => "ok: " + int.to_string(n),
   some(err(e)) => "err: " + e,
   none => "none",

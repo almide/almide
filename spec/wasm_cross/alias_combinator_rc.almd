@@ -21,7 +21,7 @@ fn main() -> Unit = {
     none => "oe none",
   })
   // option.flatten — returns the inner cell borrowed out of the outer.
-  let fl: Option[Option[Int]] = some(some(32))
+  let fl: (Int?)? = some(some(32))
   println(match option.flatten(fl) {
     some(v) => "fl ${int.to_string(v)}",
     none => "fl none",

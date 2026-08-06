@@ -5,7 +5,7 @@
 // if g => .. }`), so the guarded-variant case reduces to the already-proven variant-tag dispatch and
 // scalar guard/literal chain. Byte-identical to v0 --target wasm; a guard/literal must select the
 // exact arm (a linearization that ran every arm would silently pick the wrong one).
-fn olabel(x: Option[Int]) -> String = match x {
+fn olabel(x: Int?) -> String = match x {
   some(n) if n > 100 => "big",
   some(n) if n > 0 => "pos",
   some(0) => "zero",

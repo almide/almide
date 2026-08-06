@@ -10,7 +10,7 @@ import testing
 
 test "option polarities" {
   testing.assert_some(some("v"))
-  testing.assert_none((none: Option[String]))
+  testing.assert_none((none: String?))
 }
 
 test "result polarities" {

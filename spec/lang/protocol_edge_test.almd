@@ -147,12 +147,12 @@ test "different types satisfying same protocol independently" {
 
 // ── Protocol with method returning Option ──
 protocol Findable {
-  fn find_by_id(a: Self, id: Int) -> Option[String]
+  fn find_by_id(a: Self, id: Int) -> String?
 }
 
 type Registry: Findable = { names: List[String] }
 
-fn Registry.find_by_id(r: Registry, id: Int) -> Option[String] = list.get(r.names, id)
+fn Registry.find_by_id(r: Registry, id: Int) -> String? = list.get(r.names, id)
 
 test "protocol method returning Option" {
   let reg = Registry { names: ["alice", "bob"] }

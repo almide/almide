@@ -9,7 +9,7 @@
 // while native printed the err (index 888).
 fn main() -> Unit = {
   let r8: Result[Int, String] = ok(7)
-  let m: Result[Option[Int], String] = result.map(r8, ((v) => some(v)))
+  let m: Result[Int?, String] = result.map(r8, ((v) => some(v)))
   println("m = ${m}")
   let acc2: Result[Result[Float, String], String] = ok(float.parse("not-a-float"))
   let r3: Result[Float, String] = result.flatten(acc2)
@@ -18,6 +18,6 @@ fn main() -> Unit = {
 
 test "heap-result map and nested-result ctor stay value-faithful" {
   let r8: Result[Int, String] = ok(7)
-  let m: Result[Option[Int], String] = result.map(r8, ((v) => some(v)))
+  let m: Result[Int?, String] = result.map(r8, ((v) => some(v)))
   assert_eq(m, ok(some(7)))
 }

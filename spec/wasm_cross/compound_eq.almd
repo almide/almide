@@ -13,13 +13,13 @@ type P = { name: String, age: Int }
 
 fn b(x: Bool) -> String = if x then "T" else "F"
 
-fn oi(o: Option[Int]) -> String = if option.is_some(o) then "S" + int.to_string(o ?? -1)
+fn oi(o: Int?) -> String = if option.is_some(o) then "S" + int.to_string(o ?? -1)
 else "N"
 
-fn os(o: Option[String]) -> String = if option.is_some(o) then "S" + (o ?? "?")
+fn os(o: String?) -> String = if option.is_some(o) then "S" + (o ?? "?")
 else "N"
 
-fn oj(o: Option[Int]) -> String = if option.is_some(o) then "S" + int.to_string(o ?? -1)
+fn oj(o: Int?) -> String = if option.is_some(o) then "S" + int.to_string(o ?? -1)
 else "N"
 
 fn main() -> Unit = {

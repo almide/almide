@@ -4,10 +4,10 @@
 //   Result[List[Float], String] → ok([1.5, 100]) / ok([]) / err("<q>")
 //   ${Map[String, Int]} with i64::MIN — the negate-free path (was "-0", another Bug A instance).
 effect fn main() -> Unit = {
-  let a: Option[List[Float]] = some([1.5, 2.0, -3.25])
-  let b: Option[List[Float]] = some([])
-  let c: Option[List[Float]] = none
-  let d: Option[List[Float]] = some([100.0, 0.5, -0.0])
+  let a: List[Float]? = some([1.5, 2.0, -3.25])
+  let b: List[Float]? = some([])
+  let c: List[Float]? = none
+  let d: List[Float]? = some([100.0, 0.5, -0.0])
   println("${a}")
   println("${b}")
   println("${c}")

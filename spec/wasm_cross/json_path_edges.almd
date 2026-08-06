@@ -21,7 +21,7 @@
 // yields the autoviv `{}` (`j.clone()`), not the untouched root and not `null`.
 import json
 
-fn p_get(label: String, o: Option[Value]) -> Unit = {
+fn p_get(label: String, o: Value?) -> Unit = {
   match o {
     some(v) => println(label + ":" + json.stringify(v)),
     none => println(label + ":None"),
