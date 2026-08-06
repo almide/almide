@@ -10,6 +10,6 @@ effect fn main() -> Unit = {
     fail_n("a")
     fail_n("b")
     fail_n("c")
-  }
+  }!
   println("unreachable: " + int.to_string(winner))
 }

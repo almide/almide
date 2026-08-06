@@ -172,29 +172,28 @@ effect fn read_file(path: String) -> String = fs.read_text(path)!
 | `effect fn f() -> Result[T, E]` | `fn f() -> Result<T, E>`(二重包装しない) |
 | `fn f() -> T` | `fn f() -> T`(変換なし) |
 
-### auto-`?` の位置マトリクス(現行実装の実測)
+### 伝搬は全明示(ADR-0008 — auto-`?` は削除済み)
 
-effect fn 本体では、失敗しうる呼び出しの暗黙伝搬(auto-`?`)が**位置により**効く:
+かつて effect fn 本体には位置依存の暗黙伝搬(auto-`?`)があった(5 位置で効き、
+5 位置で効かない・注釈やパターン形状で挙動が反転する)。**0.55 で機構ごと削除**:
+失敗しうる呼び出しは**どの位置でも Result 値**を生み、伝搬したければ `!` を書く。
 
-| 暗黙伝搬が効く | 効かない(明示 `!` が必要) |
+| 書き方 | 意味 |
 |---|---|
-| 文の位置(`fail()` 単独) | 関数の引数(`double(get())` → E005) |
-| 注釈なし let | パイプ段(`get() \|> double` → E005) |
-| if 条件 | record フィールド(→ E001) |
-| match(値パターンの腕のとき) | リスト要素(→ E001) |
-| 文字列補間(呼び出し形) | タプル成分 |
+| `let v = int.parse(s)!` | 伝搬(v は Int、err で早期 return) |
+| `let r: Result[Int, String] = int.parse(s)` | Result 値を保持 |
+| `let _ = fail()` | **意図的破棄** — err は伝搬しない(C-217) |
+| `let v = int.parse(s)` | **E041**(旧・暗黙位置は全てエラー、`!` 挿入 hint 付き) |
+| `fail()`(文の位置) | **E042**(must-use — `!` か `let _ =` の 2 綴りを hint) |
+| `match get() { ok(v) => …, err(e) => … }` | Result は普通の値 — 普通に match |
+| `match get()! { 42 => … }` | 値の層で match(`!` が層を明示) |
 
-注釈・パターン形状で挙動が変わる点に注意:
+`e()?` / `e() ?? fb` は ADR-0005 の普通の値演算(特例則なし):
+`e()?` ≡ Result→Option 変換、`e() ?? fb` ≡ unwrap_or_else。
 
-```almide
-let r = int.parse(s)                          // 暗黙伝搬(r は Int、err で早期 return)
-let r: Result[Int, String] = int.parse(s)     // 保持(r は Result 値)
-match get() { ok(v) => ..., err(e) => ... }   // Result のまま受ける
-match get() { 42 => ..., _ => ... }           // 伝搬が差し込まれる
-```
-
-> この位置依存の暗黙は **ADR-0008 で廃止決定済み**(伝搬は `!` 全明示へ、警告窓 #1123)。
-> 本節は移行完了まで現行実装を記述する。
+回帰テスト: `spec/lang/explicit_propagation_test.almd`(2 ハザードの消滅 +
+`let _` の A/B)、`spec/wasm_cross/let_wildcard_discard.almd`(C-217)、
+`spec/wasm_cross/effect_option_explicit_bang.almd`(C-216)。
 
 ### lambda 境界(#489 / #1051)
 

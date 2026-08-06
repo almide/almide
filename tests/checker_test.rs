@@ -462,8 +462,33 @@ fn check_underscore_prefix_no_warning() {
 
 #[test]
 fn check_effect_block() {
+    // ADR-0008 (#1123 N+1): propagation is explicit — the bind spells `!`.
     has_no_errors(
+        "effect fn read() -> Result[String, String] = ok(\"data\")\neffect fn main() -> Result[Unit, String] = {\n  let data = read()!\n  println(data)\n  ok(())\n}"
+    );
+}
+
+#[test]
+fn check_implicit_propagation_is_an_error() {
+    // ADR-0008 (#1123 N+1): the un-annotated implicit bind is E041 …
+    let errs = errors(
         "effect fn read() -> Result[String, String] = ok(\"data\")\neffect fn main() -> Result[Unit, String] = {\n  let data = read()\n  println(data)\n  ok(())\n}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("implicit propagation")),
+        "expected the E041 implicit-propagation error, got: {errs:?}"
+    );
+    // … a discarded statement-position Result is E042 (must-use) …
+    let errs = errors(
+        "effect fn cleanup() -> Result[Unit, String] = ok(())\neffect fn main() -> Result[Unit, String] = {\n  cleanup()\n  ok(())\n}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("discards a Result")),
+        "expected the E042 must-use error, got: {errs:?}"
+    );
+    // … and `let _ =` is the sanctioned discard (no error).
+    has_no_errors(
+        "effect fn cleanup() -> Result[Unit, String] = ok(())\neffect fn main() -> Result[Unit, String] = {\n  let _ = cleanup()\n  ok(())\n}"
     );
 }
 

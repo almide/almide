@@ -37,7 +37,7 @@ impl Checker {
                             self.deferred_result_interp_checks.push((t.clone(), expr.span));
                         } else {
                             // #1123: the segment's Result is stripped implicitly.
-                            self.deferred_implicit_prop_checks.push((t.clone(), expr.span, "of this interpolated call", false));
+                            self.deferred_implicit_prop_checks.push((t.clone(), expr.span, "of this interpolated call", false, false));
                         }
                         // #1115: a segment whose type keeps an undecidable slot
                         // (`"${none}"`, `"${some(none)}"`, `"${ok(none)}"`)
@@ -146,7 +146,7 @@ impl Checker {
                         ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }))
                 {
                     self.deferred_implicit_prop_checks.push((
-                        subject_ty.clone(), subject.span, "of this match subject", true,
+                        subject_ty.clone(), subject.span, "of this match subject", true, false,
                     ));
                 }
                 self.check_match_exhaustiveness(&sc, arms);

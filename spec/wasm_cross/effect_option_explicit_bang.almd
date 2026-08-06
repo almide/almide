@@ -6,7 +6,6 @@
 // (hit=999) then an rc_dec trap. Four cells: never-err scalar payload, can-err
 // scalar payload, never-err heap (String) payload, and the pure `-> T?!`
 // composition.
-
 // never-err declared-Option effect fn — the raw-Option v1 ABI cell
 effect fn lookup(k: String) -> Int? = if k == "a" then some(42) else none
 
@@ -20,12 +19,11 @@ effect fn parse_pos(k: String) -> Int? = {
 effect fn find_name(k: String) -> String? = if k == "a" then some("yes") else none
 
 // pure ?! composition: Result[Option[Int], String]
-fn parse_opt(s: String) -> Int?! =
-  if s == "" then ok(none)
-  else match int.parse(s) {
-    ok(n) => ok(some(n)),
-    err(e) => err(e),
-  }
+fn parse_opt(s: String) -> Int?! = if s == "" then ok(none)
+else match int.parse(s) {
+  ok(n) => ok(some(n)),
+  err(e) => err(e),
+}
 
 effect fn main() -> Unit = {
   let miss = lookup("missing")!

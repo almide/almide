@@ -39,7 +39,7 @@ effect fn main() -> Unit = {
   let a = fan.any {
     try_c()
     try_d()
-  }
+  }!
   println("any=${a}")
   let (sa, sb) = fan.settle {
     quiet_a()

@@ -32,7 +32,8 @@ Use `almide explain <code>` to read these from the CLI.
 | [E037](E037.md) | Equality between incompatible types |
 | [E038](E038.md) | `??` separated from its fallback |
 | [E039](E039.md) | (warning) result.collect deprecated — use partition |
-| [E041](E041.md) | (warning) Implicit propagation deprecated — write `!` |
+| [E041](E041.md) | Implicit propagation removed — the value stays a Result; write `!` |
+| [E042](E042.md) | Statement-position Result discarded (must-use) — `expr!` or `let _ = expr` |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E040** (the json.*/value.* alias deprecation window) fired

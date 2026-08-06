@@ -189,11 +189,14 @@ pub struct Checker {
     /// defaulted. Without it the value passed `check` and then tripped the
     /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
     pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
-    /// #1123 / ADR-0008 release N: sites where the CURRENT implementation
-    /// inserts implicit propagation (auto-`?`). Post-solve, every site whose
-    /// type resolved to Result gets the E041 deprecation warning with the
-    /// mechanical `!` insertion. (ty, span, position label)
-    pub(crate) deferred_implicit_prop_checks: Vec<(Ty, Option<ast::Span>, &'static str, bool)>,
+    /// #1123 / ADR-0008 N+1: sites where the pre-switch implementation
+    /// inserted implicit propagation (auto-`?`). Post-solve, every site whose
+    /// type resolved to Result is a hard error — E042 (must-use: a discarded
+    /// statement-position Result, the 5th field true) or E041 (implicit
+    /// propagation at every other position class) — with the mechanical `!`
+    /// insertion where the span is a plain call.
+    /// (ty, span, position label, mechanical, must_use)
+    pub(crate) deferred_implicit_prop_checks: Vec<(Ty, Option<ast::Span>, &'static str, bool, bool)>,
     /// Annotated `let`/`var` bindings, re-checked post-solve for the numeric
     /// narrowing direction (#867). The solver joins numeric widths
     /// symmetrically — peer sites like list elements and `assert_eq` args
@@ -711,7 +714,7 @@ impl Checker {
                     // #1123: the condition's Result is stripped implicitly.
                     let mech = matches!(cond.kind, ast::ExprKind::Call { .. });
                     self.deferred_implicit_prop_checks.push((
-                        cond_ty.clone(), cond.span, "of this condition", mech,
+                        cond_ty.clone(), cond.span, "of this condition", mech, false,
                     ));
                     args[0].clone()
                 }

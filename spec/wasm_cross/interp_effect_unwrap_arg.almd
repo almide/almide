@@ -1,6 +1,6 @@
 // @contract: C-192
-// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
-// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
+// ADR-0008 N+1 (#1123): migrated to EXPLICIT propagation — every formerly
+// implicit auto-? site now spells `!`; the behavior under test is unchanged.
 // An auto-unwrapped effect call INSIDE a string interpolation in call-argument
 // position lowers and runs: the `?`-early-return lifts out of the interpolation
 // part exactly as it lifts out of a plain call argument. `println("a=${fetch()}")`
@@ -16,14 +16,14 @@ effect fn count() -> Result[Int, String] = ok(42)
 
 // Two unwraps in one interpolation: the fixpoint lifts them one at a time.
 effect fn run_ok() -> Result[Unit, String] = {
-  println("a=${fetch()} n=${count()}")
+  println("a=${fetch()!} n=${count()!}")
   ok(())
 }
 
 // The err path: the lifted unwrap must PROPAGATE (early-return the err), so
 // nothing after it in the interpolation — or the statement — runs.
 effect fn run_err() -> Result[Unit, String] = {
-  println("never=${boom()}")
+  println("never=${boom()!}")
   ok(())
 }
 

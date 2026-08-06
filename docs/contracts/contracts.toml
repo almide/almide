@@ -2711,3 +2711,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_option_explicit_bang.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-217"
+spec      = "ALS-D6"
+title     = "let _ = f() discards the Result — the err does not propagate"
+statement = "With implicit propagation removed (ADR-0008, the 0.55 switch), `let _ = <Result-typed expr>` is the sanctioned intentional-discard spelling: the Result binds dead, its err does NOT return through the enclosing failure channel, and the fn completes normally — on both targets, byte-identically. Pre-switch the same line auto-?'d and PROPAGATED the err (a fn body's completion depended on a binding whose value was never read); the E041/E042 error pair plus this discard rule replace that: a statement-position Result must be consumed (`!`, `let _ =`, `??`, `?`, or an ok/err match), and only the `let _ =` spelling throws the error away — visibly."
+since     = "0.55.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/let_wildcard_discard.almd", class = "fixture" },
+]

@@ -8,7 +8,7 @@ effect fn main() -> Unit = {
   let args = env.args()
   guard list.len(args) >= 1 else err("usage: md2html <file.md>")
   let path = list.get(args, 0) |> option.unwrap_or("")
-  let content = fs.read_text(path)
+  let content = fs.read_text(path)!
   let html = md_to_html(content)
   println(html)
 }

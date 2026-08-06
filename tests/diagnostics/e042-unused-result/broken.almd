@@ -1,0 +1,9 @@
+// E042: a statement-position Result is must-use — discarding it silently drops
+// the error (ADR-0008 D2). The escapes are `expr!` (propagate) and
+// `let _ = expr` (intentional discard).
+effect fn cleanup(p: String) -> Result[Unit, String] = ok(())
+
+effect fn main() -> Unit = {
+  cleanup("tmp")
+  println("done")
+}

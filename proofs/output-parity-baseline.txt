@@ -206,6 +206,7 @@ spec/wasm_cross/json_string_span.almd
 spec/wasm_cross/json_stringify_pretty.almd
 spec/wasm_cross/json_value.almd
 spec/wasm_cross/let_unwrap_propagation.almd
+spec/wasm_cross/let_wildcard_discard.almd
 spec/wasm_cross/letbound_variant_match.almd
 spec/wasm_cross/list_call_element.almd
 spec/wasm_cross/list_chunk_windows.almd

@@ -138,7 +138,7 @@ When adding or modifying stdlib functions (the stdlib is self-hosted — `stdlib
 
 When modifying codegen:
 - Test ownership: variables used after `for...in` must still work
-- Test effect fn: `fs.read_text()` inside effect fn must compile without manual `?`
+- Test effect fn (ADR-0008): propagation is EXPLICIT — `fs.read_text(p)!` compiles and propagates; a bare `fs.read_text(p)` statement is E042 (must-use), an un-annotated `let x = fs.read_text(p)` is E041; `let _ = f()` discards without propagating
 - Test that generated Rust compiles without warnings
 
 ## Writing Idiomatic Almide

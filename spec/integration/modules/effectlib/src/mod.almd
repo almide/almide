@@ -1,5 +1,5 @@
-// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
-// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
+// ADR-0008 N+1 (#1123): migrated to EXPLICIT propagation — every formerly
+// implicit auto-? site now spells `!`; the behavior under test is unchanged.
 // effectlib — test fixtures for cross-module effect fn calls
 effect fn read_config() -> Result[String, String] = {
   ok("config_value")
@@ -17,7 +17,7 @@ effect fn do_nothing() -> Unit = {
 }
 
 effect fn do_nothing_twice() -> Unit = {
-  do_nothing()
+  do_nothing()!
   do_nothing()
 }
 

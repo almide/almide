@@ -52,11 +52,15 @@ impl Checker {
             ast::Stmt::GuardLet { .. } => self.check_stmt_guard_let(stmt),
             ast::Stmt::Expr { expr, .. } => {
                 let t = self.infer_expr(expr);
-                // #1123: a discarded Result in statement position propagates
-                // implicitly today (ADR-0008 removes this) — queue for E041.
-                if self.env.auto_unwrap && matches!(expr.kind, ast::ExprKind::Call { .. }) {
-                    self.deferred_implicit_prop_checks.push((t.clone(), expr.span, "of this statement's result", true));
-                }
+                // ADR-0008 D2 (#1123 N+1): a discarded Result in statement
+                // position is the must-use error E042 — in EVERY fn kind, not
+                // only the old auto-? contexts. Queue unconditionally;
+                // post-solve keeps only Result-typed sites. The `!` insertion
+                // hint stays mechanical for a plain call.
+                self.deferred_implicit_prop_checks.push((
+                    t.clone(), expr.span, "of this statement's result",
+                    matches!(expr.kind, ast::ExprKind::Call { .. }), true,
+                ));
                 // #662: a discarded expression statement whose type carries an
                 // unconstrained phantom slot (e.g. a bare `result.or_else(r0,
                 // (e) => ok(0))`) is undecidable — re-check post-solve.
@@ -90,11 +94,13 @@ impl Checker {
             declared
         } else {
             let t = resolve_ty(&val_ty, &self.uf);
-            // Auto-unwrap Result in effect fns (but not in test blocks),
-            // unless this binding is later used as a `match x { ok(_) =>
-            // ..., err(_) => ... }` subject — in which case the user
-            // wants to inspect the Result directly.
-            let unwrapped = self.effect_unwrap_rhs_warned(t, value.span, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), self.env.skip_auto_unwrap_for.contains(&sym(name))
+            // ADR-0008 (#1123 N+1): a Result on an un-annotated binding is an
+            // E041 error unless the binding legitimately KEEPS the Result —
+            // matched on ok/err later, a ctor-shaped RHS, or the sanctioned
+            // discard `let _ = f()` (D2's second spelling: the Result binds
+            // dead, nothing propagates, no error).
+            let unwrapped = self.effect_unwrap_rhs_warned(t, value.span, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), name == "_"
+                || self.env.skip_auto_unwrap_for.contains(&sym(name))
                 || Self::rhs_keeps_result_shape(value));
             // #662: an un-annotated binding whose value type carries an
             // unconstrained phantom slot (only an un-exercised branch
@@ -131,9 +137,9 @@ impl Checker {
             declared
         } else {
             let t = resolve_ty(&val_ty, &self.uf);
-            // Same rule as Let, including the usage-skip: a `var r =
-            // effectCall()` later matched on ok/err keeps the Result.
-            let unwrapped = self.effect_unwrap_rhs_warned(t, value.span, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), self.env.skip_auto_unwrap_for.contains(&sym(name))
+            // Same rule as Let, including the usage-skip and the `_` discard.
+            let unwrapped = self.effect_unwrap_rhs_warned(t, value.span, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), name == "_"
+                || self.env.skip_auto_unwrap_for.contains(&sym(name))
                 || Self::rhs_keeps_result_shape(value));
             // #662: same undecidable-phantom-slot re-check as Let.
             self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {

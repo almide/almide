@@ -1,5 +1,5 @@
-// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
-// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
+// ADR-0008 N+1 (#1123): migrated to EXPLICIT propagation — every formerly
+// implicit auto-? site now spells `!`; the behavior under test is unchanged.
 // ============================================================
 // Cross-module Unit-returning effect fn calls
 // ============================================================
@@ -42,8 +42,8 @@ effect fn tail_unit_call() -> Result[Unit, String] = {
 
 // Cross-module Unit-returning calls as statements + tail ok(())
 effect fn stmt_unit_calls() -> Result[Unit, String] = {
-  effectlib.do_nothing()
-  effectlib.do_nothing_twice()
+  effectlib.do_nothing()!
+  effectlib.do_nothing_twice()!
   ok(())
 }
 
