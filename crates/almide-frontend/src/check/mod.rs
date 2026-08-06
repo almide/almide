@@ -197,6 +197,15 @@ pub struct Checker {
     /// insertion where the span is a plain call.
     /// (ty, span, position label, mechanical, must_use)
     pub(crate) deferred_implicit_prop_checks: Vec<(Ty, Option<ast::Span>, &'static str, bool, bool)>,
+    /// ADR-0006 D1 (#1108 Phase 2a): fns DECLARED with the `-> T!` marker.
+    /// Resolution erases the marker into Result[T, String], so the 1-bit
+    /// fallibility of a NAMED callback argument (`list.map(xs, parse)`) is
+    /// recorded here at declaration time.
+    pub(crate) fallible_marker_fns: std::collections::HashSet<Sym>,
+    /// Call sites the fallible-HOF normalization REWROTE (`list.map` →
+    /// `list.try_map`, keyed by the module Ident's ExprId): the try_
+    /// deprecation warning (E043) must fire only on USER-SPELLED try_*.
+    pub(crate) hof_rewritten_calls: std::collections::HashSet<almide_lang::ast::ExprId>,
     /// Annotated `let`/`var` bindings, re-checked post-solve for the numeric
     /// narrowing direction (#867). The solver joins numeric widths
     /// symmetrically — peer sites like list elements and `assert_eq` args
@@ -498,6 +507,8 @@ impl Checker {
             deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
+            fallible_marker_fns: std::collections::HashSet::new(),
+            hof_rewritten_calls: std::collections::HashSet::new(),
             deferred_unknown_type_checks: Vec::new(),
             pending_toplet_tys: Vec::new(),
         }
@@ -840,6 +851,16 @@ impl Checker {
     /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
     /// Skips import table building and declaration registration — inference only.
     pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // ADR-0006 D1 (#1108): record every fn DECLARED `-> T!` before
+        // resolution erases the marker, so a named callback argument's
+        // fallibility bit is known at HOF call sites.
+        for decl in &program.decls {
+            if let ast::Decl::Fn { name, return_type, .. } = decl {
+                if matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!") {
+                    self.fallible_marker_fns.insert(*name);
+                }
+            }
+        }
         // `main` takes NO parameters (#789): the parameter form typechecked but no
         // codegen leg wires the argument — native emitted an uncallable driver
         // ("codegen produced invalid Rust — this is an Almide bug") and the v1 wasm

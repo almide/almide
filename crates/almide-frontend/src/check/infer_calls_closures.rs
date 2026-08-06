@@ -666,6 +666,54 @@ impl Checker {
 
     // ── Extracted inference helpers ──
 
+    /// ADR-0006 D1 (#1108 Phase 2a): the 1-bit fallibility rule for the core
+    /// list HOFs, as a pre-inference checker normalization. A CANONICAL
+    /// fallible callback — a lambda whose whole body is `<expr>!`, or a named
+    /// fn declared `-> T!` — instantiates the fallible twin:
+    ///
+    ///     list.map(xs, (x) => f(x)!)   ≡   list.try_map(xs, (x) => f(x))
+    ///     list.map(xs, parse)          ≡   list.try_map(xs, parse)   (parse: -> T!)
+    ///
+    /// The lambda's `!` is the propagation marker; the twin carries the
+    /// first-err short-circuit, so the marker's residue IS the bare Result
+    /// call. Rewriting BEFORE inference means the lambda body never trips the
+    /// closure-boundary E022 (#489 stays intact for every other `!`-in-lambda),
+    /// and everything downstream — types, lowering, both backends, the interp
+    /// — sees a plain try_* call. A COMPOUND fallible body (`(x) => g(f(x)!)!`)
+    /// is Phase 2b and keeps today's E022.
+    fn normalize_fallible_hof_callback(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) {
+        const FALLIBLE_HOF_CORE: &[&str] =
+            &["map", "filter", "flat_map", "filter_map", "fold", "find", "each"];
+        let ExprKind::Member { object, field } = &mut callee.kind else { return };
+        let ExprKind::Ident { name: mod_name, .. } = &object.kind else { return };
+        if mod_name.as_str() != "list" || !FALLIBLE_HOF_CORE.contains(&field.as_str()) {
+            return;
+        }
+        let mut fallible = false;
+        for a in args.iter_mut() {
+            match &mut a.kind {
+                ExprKind::Lambda { body, .. }
+                    if matches!(body.kind, ExprKind::Unwrap { .. }) =>
+                {
+                    let ExprKind::Unwrap { expr: inner } = &mut body.kind else { unreachable!() };
+                    let mut stripped = (**inner).clone();
+                    std::mem::swap(&mut **body, &mut stripped);
+                    fallible = true;
+                }
+                ExprKind::Ident { name, .. } if self.fallible_marker_fns.contains(name) => {
+                    fallible = true;
+                }
+                _ => {}
+            }
+        }
+        if fallible {
+            *field = almide_base::intern::sym(&format!("try_{}", field.as_str()));
+            // The E043 try_-deprecation warning must not fire on this
+            // NORMALIZED spelling — only on user-written try_*.
+            self.hof_rewritten_calls.insert(object.id);
+        }
+    }
+
     fn infer_call(
         &mut self,
         callee: &mut Box<ast::Expr>,
@@ -673,6 +721,9 @@ impl Checker {
         named_args: &mut Vec<(almide_base::intern::Sym, ast::Expr)>,
         type_args: &Option<Vec<ast::TypeExpr>>,
     ) -> Ty {
+        // ADR-0006 D1 (#1108 Phase 2a): the 1-bit fallibility rule for the
+        // core list HOFs, applied as a pre-inference normalization.
+        self.normalize_fallible_hof_callback(callee, args);
         // Save named arg names, then flatten into positional args temporarily.
         let named_names: Vec<almide_base::intern::Sym> = named_args.iter().map(|(n, _)| *n).collect();
         let named_start = args.len();
@@ -805,6 +856,12 @@ impl Checker {
     }
 
     fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
+        // ADR-0006 D1 (#1108 Phase 2a): the pipe path bypasses `infer_call`,
+        // so the fallible-callback normalization runs here too
+        // (`xs |> list.map((x) => f(x)!)` — args only; `left` is the subject).
+        if let ExprKind::Call { callee, args, .. } = &mut right.kind {
+            self.normalize_fallible_hof_callback(callee, args);
+        }
         let left_ty = self.infer_expr(left);
         // Resolve TypeVars eagerly via UnionFind — earlier pipes in the chain
         // have already been unified (constrain() calls unify_infer immediately),

@@ -1,0 +1,9 @@
+// E043: the list.try_* family is deprecated (ADR-0006) — the core HOF is
+// fallibility-polymorphic: a callback whose body ends in `!` instantiates
+// the fallible form (first-err short-circuit), so the try_ twin is retired.
+fn parse1(s: String) -> Result[Int, String] = int.parse(s)
+
+fn main() -> Unit = {
+  let r = list.try_map(["1", "2"], (s) => parse1(s))
+  println("r=${r ?? []}")
+}

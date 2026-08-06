@@ -177,8 +177,9 @@ items |> list.map((item) => transform(item))
 // ✓ with index: list.enumerate — destructure the pair in the parameter
 cases |> list.enumerate |> list.map(((idx, case)) => "${idx}: ${case}")
 
-// ✓ EFFECTFUL body: list.try_map (short-circuits on the first err) — never var + for
-files |> list.try_map((f) => read_meta(f))!
+// ✓ FALLIBLE body: the callback's `!` instantiates the fallible form
+//   (first-err short-circuit, ADR-0006) — never var + for
+files |> list.map((f) => read_meta(f)!)!
 ```
 
 ### Prefer list.find over var + for search

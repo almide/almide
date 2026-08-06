@@ -387,19 +387,26 @@ impl Checker {
         field: &almide_base::intern::Sym,
     ) -> Option<Ty> {
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
-            // #1109 / ADR-0007: result.collect & collect_map are deprecated —
-            // partition is the substance for all-errors collection. One release
-            // of warnings, then removal (the E040 window pattern). Checked
-            // before resolution so both the stdlib-sig and bundled-fn paths
-            // carry the warning.
-            if mod_name.as_str() == "result"
-                && matches!(field.as_str(), "collect" | "collect_map")
+            // ADR-0006 D3 (#1108): the try_ family is deprecated — the core
+            // HOF is fallibility-polymorphic; the hint IS the mechanical
+            // rewrite. Fires only on USER-SPELLED try_* (the normalization's
+            // own rewrites are excluded by hof_rewritten_calls).
+            if mod_name.as_str() == "list"
+                && matches!(field.as_str(), "try_map" | "try_filter" | "try_flat_map"
+                    | "try_filter_map" | "try_fold" | "try_find" | "try_each")
+                && !self.hof_rewritten_calls.contains(&object.id)
             {
+                let core = field.as_str().trim_start_matches("try_");
+                let rewrite = if core == "fold" {
+                    "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string()
+                } else {
+                    format!("list.{}(xs, (x) => f(x)!)!", core)
+                };
                 let mut d = crate::diagnostic::Diagnostic::warning(
-                    format!("result.{} is deprecated and will be removed — all-errors collection is spelled with partition", field),
-                    "let (oks, errs) = result.partition(rs)\n        if list.is_empty(errs) then ok(oks) else err(errs)\n        (Rust's collect short-circuits at the first Err; this one never did — the name is retired to end that ambiguity, ADR-0007)",
-                    format!("call to result.{}", field),
-                ).with_code("E039");
+                    format!("list.{} is deprecated — the core HOF is fallibility-polymorphic (ADR-0006)", field),
+                    format!("{rewrite}\n        The callback's `!` instantiates the fallible form (first-err short-circuit); the try_ family is removed in the next minor (#1108)."),
+                    format!("call to list.{}", field),
+                ).with_code("E043");
                 d.file = self.source_file.clone();
                 if let Some(sp) = object.span {
                     d.line = Some(sp.line);
