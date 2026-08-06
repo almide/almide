@@ -7,6 +7,6 @@ effect fn effect_map() -> Int = {
 }
 
 effect fn main() -> Unit = {
-  let n = effect_map()
+  let n = effect_map()!
   println(int.to_string(n))
 }
