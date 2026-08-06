@@ -671,8 +671,10 @@ impl Checker {
     /// fallible callback — a lambda whose whole body is `<expr>!`, or a named
     /// fn declared `-> T!` — instantiates the fallible twin:
     ///
-    ///     list.map(xs, (x) => f(x)!)   ≡   list.try_map(xs, (x) => f(x))
-    ///     list.map(xs, parse)          ≡   list.try_map(xs, parse)   (parse: -> T!)
+    /// ```text
+    /// list.map(xs, (x) => f(x)!)   ≡   list.try_map(xs, (x) => f(x))
+    /// list.map(xs, parse)          ≡   list.try_map(xs, parse)   (parse: -> T!)
+    /// ```
     ///
     /// The lambda's `!` is the propagation marker; the twin carries the
     /// first-err short-circuit, so the marker's residue IS the bare Result
