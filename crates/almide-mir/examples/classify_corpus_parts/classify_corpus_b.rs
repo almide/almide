@@ -129,6 +129,25 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                 ))
             || (module == "http" && matches!(func, "request" | "serve"))
             || (module == "testing" && func == "assert_throws")
+            // #1106 / C-215: the _if_exists classification keys on
+            // ErrorKind::NotFound, which the WASI prim floor does not expose
+            // (no errno on prim.read_text_file's error path) — native-only by
+            // design until an errno-carrying read prim lands. The fixture
+            // header (spec/stdlib/fs_if_exists_test.almd) declares the same.
+            || (module == "fs"
+                && matches!(
+                    func,
+                    "read_text_if_exists"
+                        | "read_bytes_if_exists"
+                        | "read_lines_if_exists"
+                        | "read_bytes_raw_if_exists"
+                        // No wasm form exists for the unique-temp creators
+                        // (fs.temp_dir self-hosts, but the mkstemp-style
+                        // unique creation has no WASI prim) — the same
+                        // structural class.
+                        | "create_temp_file"
+                        | "create_temp_dir"
+                ))
     }
     impl almide_ir::visit::IrVisitor for Collector {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {

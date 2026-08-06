@@ -1,0 +1,8 @@
+// E041: implicit propagation (auto-?) is deprecated — ADR-0008 makes `!` the
+// only propagation spelling; the implicit form is removed in the next minor.
+effect fn get() -> Int = 42
+
+effect fn main() -> Unit = {
+  let r = int.parse("7")!
+  println("${r + get()!}")
+}

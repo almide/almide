@@ -1,0 +1,3 @@
+expects_code = "E034"
+expects_error = "operator '!' requires Option or Result type"
+hint_substring = "Option[T] or Result[T, E]"

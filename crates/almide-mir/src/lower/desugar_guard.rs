@@ -37,6 +37,23 @@ pub fn desugar_fn_body_guards(program: &mut almide_ir::IrProgram) {
                     span: span.clone(),
                     def_id,
                 };
+                // #1117: fold a CONSTANT condition at construction. The
+                // optimize-stage const fold has already run by this point, so
+                // an If born here reaches the renderers unfolded — and the
+                // render path LOST the else's effect call (`guard false else
+                // process.exit(3)` exited 0 on run/build/wasm while the
+                // --target rust emission was correct). Folding here means the
+                // renderers only ever see the shapes the source-level If
+                // already proves out.
+                if let IrExprKind::LitBool { value } = cond.kind {
+                    let taken = if value { rewrite_tail_block(cont) } else { else_ };
+                    return IrExpr {
+                        kind: IrExprKind::Block { stmts: before, expr: Some(Box::new(taken)) },
+                        ty,
+                        span,
+                        def_id,
+                    };
+                }
                 let if_expr = IrExpr {
                     kind: IrExprKind::If {
                         cond: Box::new(cond),

@@ -53,3 +53,13 @@ spec/stdlib/list_try_test.almd :: __test_almd_try_find returns ok(some/none) and
 spec/stdlib/list_try_test.almd :: __test_almd_try_flat_map concatenates and short-circuits
 spec/stdlib/list_try_test.almd :: __test_almd_try_fold threads the accumulator and stops at err
 spec/stdlib/list_try_test.almd :: __test_almd_try_map collects ok values
+#
+# (2026-08-06, #1114) option.to_result became an E-GENERIC pure bundled body
+# (ADR-0003 D1's typed-error route needs Option -> Result[T, CustomE]). The
+# custom-E instantiation binds a match over Result[Int, <variant>] whose
+# variant payload sits outside the heap-result ctor zoo — the same
+# feature-frontier family as the Codec-matrix class above. The String
+# instantiation (the overwhelmingly common form) stays IN the wasm corpus and
+# passes; this one cell runs on the native leg. Prune with the same
+# heap-result-arm brick.
+spec/stdlib/option_to_result_generic_test.almd :: __test_almd_custom E flows through

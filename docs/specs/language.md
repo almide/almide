@@ -1,4 +1,4 @@
-> Last updated: 2026-04-17
+> Last updated: 2026-08-06
 
 # Almide Language Specification
 
@@ -971,7 +971,7 @@ match pair {
 
 | Precedence | Operators | Associativity |
 |------------|-----------|---------------|
-| 1 | `.` `()` `[]` `!` `??` `?.` `?` | Left (postfix) |
+| 1 | `.` `()` `[]` `!` `??` `?.` `?` | 後置族。`??` のチェーンは右入れ子(`a ?? b ?? c` = `a ?? (b ?? c)`、意味は「最初の成功が勝つ」) |
 | 2 | `not` `-` (unary) | Right (prefix) |
 | 3 | `^` | Right |
 | 4 | `*` `/` `%` | Left |
@@ -1023,10 +1023,10 @@ Almide uses words, not symbols: `&&` and `||` are rejected with hints.
 
 | Operator | Syntax | Description |
 |----------|--------|-------------|
-| `!` | `expr!` | Unwrap Result/Option; propagate the failure (effect fn, or a pure fn returning Result/Option — C-211) |
-| `??` | `expr ?? fallback` | Unwrap or use fallback value |
+| `!` | `expr!` | Unwrap Result/Option; propagate the failure (effect fn / test / a pure fn whose return resolves to Result, Option, or `T!` — C-211, ADR-0002 Phase 1) |
+| `??` | `expr ?? fallback` | Unwrap or use fallback value. fallback は**遅延評価**(none/err のときだけ)。**最高位に結合**: `a ?? 1 + 2` = `(a ?? 1) + 2` — C 系 `?:`(ほぼ最下位)と逆なので算術と混ぜるときは括弧推奨。fallback は同じ行に置く(行またぎは E038、複数行は括弧 + `??` 後置) |
 | `?` | `expr?` | Convert Result to Option (err becomes none) |
-| `?.` | `expr?.field` | Optional chaining (Option[Record] to Option[FieldType]) |
+| `?.` | `expr?.field` | Optional chaining (Option[Record] to Option[FieldType]) — **Option 専用**。Result には専用診断で拒否(`(r?)?.x` と合成する) |
 
 ```
 let value = map.get(m, "key") ?? "default"

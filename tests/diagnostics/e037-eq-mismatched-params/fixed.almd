@@ -1,0 +1,7 @@
+// E037: == on the same container with different type parameters can never
+// compare — this used to pass check and die as rustc E0308 at codegen.
+fn main() -> Unit = {
+  let a: Option[Int] = some(1)
+  let b: Option[Int] = some(2)
+  println("${a == b}")
+}

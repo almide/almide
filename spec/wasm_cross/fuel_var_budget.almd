@@ -21,8 +21,8 @@ effect fn run_with(ns_lo: Int, ns_hi: Int) -> Int = {
 
 effect fn main() -> Unit = {
   // heavy(1000) = 1002 units = 3006ns under CM-1 v0.3: 3005 cuts, 3006 admits.
-  let under = run_with(3000, 5)
-  let exact = run_with(3000, 6)
+  let under = run_with(3000, 5)!
+  let exact = run_with(3000, 6)!
   println(int.to_string(under))
   println(int.to_string(exact))
   let single = {

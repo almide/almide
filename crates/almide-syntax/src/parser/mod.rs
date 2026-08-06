@@ -39,11 +39,16 @@ pub struct Parser {
     /// consults this set to suppress cascading "undefined function" diagnostics
     /// so LLMs see the real parse error on top instead of 3× E002 repeats.
     pub failed_fn_names: std::collections::HashSet<String>,
+    /// Open `(`/`[` delimiter depth, maintained by `advance()`. Inside a
+    /// delimiter the expression continues across newlines; at depth 0 a
+    /// newline is a statement boundary — the `??` line-crossing guard (#1112)
+    /// keys on this.
+    pub(crate) delim_depth: usize,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new() }
+        Parser { tokens, pos: 0, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0 }
     }
 
     pub(crate) fn next_id(&mut self) -> ExprId {

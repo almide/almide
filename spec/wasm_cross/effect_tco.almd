@@ -1,4 +1,6 @@
 // @contract: C-069
+// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
+// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
 // #557: an effect fn's tail self-recursion must loop-convert to O(1) stack on
 // BOTH targets. The frontend auto-? wraps the tail self-call as Try{Call self}
 // (and ResultPropagation on the wasm arm further wraps it Ok(Try(Call self))),

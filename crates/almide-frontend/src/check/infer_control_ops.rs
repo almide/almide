@@ -35,7 +35,20 @@ impl Checker {
                             self.env.auto_unwrap && matches!(expr.kind, ExprKind::Call { .. });
                         if !auto_unwraps {
                             self.deferred_result_interp_checks.push((t.clone(), expr.span));
+                        } else {
+                            // #1123: the segment's Result is stripped implicitly.
+                            self.deferred_implicit_prop_checks.push((t.clone(), expr.span, "of this interpolated call", false));
                         }
+                        // #1115: a segment whose type keeps an undecidable slot
+                        // (`"${none}"`, `"${some(none)}"`, `"${ok(none)}"`)
+                        // passed check and died at codegen (rustc E0282 or the
+                        // AllTypesConcrete gate), while `"${ok(1)}"` silently
+                        // concretized E — against the never-silently-defaulted
+                        // doctrine. Queue every segment for the post-solve E025
+                        // sweep so all four are the SAME check-time error.
+                        self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                            ty: t, name: None, span: expr.span,
+                        });
                     }
                 }
                 Ty::String
@@ -124,6 +137,18 @@ impl Checker {
         let ExprKind::Match { subject, arms, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_match called on the wrong ExprKind") };
                 let subject_ty = self.infer_expr(subject);
                 let sc = resolve_ty(&subject_ty, &self.uf);
+                // #1123: a match over an effect call whose arms are VALUE
+                // patterns takes the implicit strip (ok/err-pattern arms keep
+                // the Result). Queue for the E041 deprecation.
+                if self.env.auto_unwrap
+                    && matches!(subject.kind, ExprKind::Call { .. })
+                    && !arms.iter().any(|a| matches!(a.pattern,
+                        ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }))
+                {
+                    self.deferred_implicit_prop_checks.push((
+                        subject_ty.clone(), subject.span, "of this match subject", true,
+                    ));
+                }
                 self.check_match_exhaustiveness(&sc, arms);
                 let mut arm_types = Vec::new();
                 // Real (un-substituted) arm types, used to pick the overall match
@@ -663,8 +688,27 @@ impl Checker {
                     format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
                     "Unwrap the Result operand first (`!` in an effect fn body, `?? fallback`, \
                      or `match` on ok/err) — or compare two Results",
-                    format!("operator {}", op)));
+                    format!("operator {}", op)).with_code("E037"));
+            } else if same_head_applied_mismatch(&lc, &rc) {
+                // #1116: `unify_infer` stays silent on a concrete mismatch, so
+                // same-head shapes with different params (`Result[Int, String]
+                // == Result[Int, Int]`, `Option[Int] == Option[String]`)
+                // passed check and died as rustc E0308 behind the
+                // codegen-produced-invalid-Rust wall. Both sides fully
+                // concrete + structurally different = can never compare.
+                self.emit(super::err(
+                    format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
+                    "== requires both operands to have the same type — convert one side \
+                     (or compare the payloads after unwrapping)",
+                    format!("operator {}", op)).with_code("E037"));
             }
+            // #1116: `none == none` (both sides `Option[?0]`, never pinned)
+            // passed check and died as rustc E0282. Queue the unified operand
+            // type for the post-solve E025 sweep — same rule as bindings and
+            // interpolation segments.
+            self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                ty: lt.clone(), name: None, span: left.span,
+            });
         }
         // Ordering (< <= > >=) is defined ONLY on scalar orderable
         // types. On a compound operand (Tuple/Option/Result/List/
@@ -806,4 +850,21 @@ impl Checker {
                 Ty::Unknown
     }
 
+}
+
+/// #1116: true when both sides are the SAME outer type constructor
+/// (`Option`/`Result`/`List`/`Map`/`Set`/named) applied to DIFFERENT, fully
+/// concrete arguments — `Result[Int, String]` vs `Result[Int, Int]`. Rigid
+/// generics and unresolved slots (any `TypeVar`/`Unknown`) exclude the pair:
+/// they may still unify, and the undecidable case is the E025 sweep's job.
+fn same_head_applied_mismatch(lc: &Ty, rc: &Ty) -> bool {
+    fn fully_concrete(t: &Ty) -> bool {
+        let hit = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+        !hit(t) && !t.any_child_recursive(&hit)
+    }
+    match (lc, rc) {
+        (Ty::Applied(c1, _), Ty::Applied(c2, _)) =>
+            c1 == c2 && lc != rc && fully_concrete(lc) && fully_concrete(rc),
+        _ => false,
+    }
 }

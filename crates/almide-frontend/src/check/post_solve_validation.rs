@@ -394,6 +394,44 @@ impl Checker {
     /// meant the payload (the classic shape: a can-err call bound inside a
     /// lambda, then `"${resp}"`). Warning, not error: interpolating the
     /// Result itself is how you debug one.
+    /// #1123 / ADR-0008 release N: every implicit-propagation site whose type
+    /// resolved to Result gets the E041 deprecation warning. The try-replace
+    /// appends `!` at the expression's end — a zero-width insertion, so the
+    /// migration is a mechanical apply (`almide check --json` + span apply).
+    fn validate_implicit_propagation(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_implicit_prop_checks);
+        let mut reported: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+        for (ty, span, what, mechanical) in checks {
+            let resolved = resolve_ty(&ty, &self.uf);
+            if !resolved.is_result() {
+                continue;
+            }
+            let Some(s) = span else { continue };
+            if !reported.insert((s.line, s.col)) {
+                continue;
+            }
+            let mut d = Diagnostic::warning(
+                format!("implicit propagation {} is deprecated — write `!` (ADR-0008)", what),
+                "Today the err returns through the enclosing failure channel without a marker; \
+                 the explicit spelling is `expr!`. The implicit form is removed in the next \
+                 minor (#1123) — after that, this value stays a Result.",
+                "implicit propagation",
+            ).with_code("E041");
+            d.file = self.source_file.clone();
+            d.line = Some(s.line);
+            d.col = Some(s.col);
+            d.end_col = Some(s.end_col);
+            // The insertion is attached only for a PLAIN CALL site — a
+            // compound RHS (pipe chains etc.) has a span that ends inside
+            // the expression, and a blind append corrupts the source
+            // (`x |>! f` — caught by the harness's try-apply gate).
+            if mechanical && s.end_col > s.col {
+                d = d.with_try_replace(s.line, s.end_col, s.end_col, "!");
+            }
+            self.diagnostics.push(d);
+        }
+    }
+
     fn validate_result_interpolations(&mut self) {
         let checks = std::mem::take(&mut self.deferred_result_interp_checks);
         for (ty, span) in checks {

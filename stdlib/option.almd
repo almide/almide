@@ -28,8 +28,15 @@ fn is_some[A](o: Option[A]) -> Bool = _
 @intrinsic("almide_rt_option_is_none")
 fn is_none[A](o: Option[A]) -> Bool = _
 
-@intrinsic("almide_rt_option_to_result")
-fn to_result[A](o: Option[A], msg: String) -> Result[A, String] = _
+// #1114: E-generic (Rust ok_or parity) — a pure bundled body monos per
+// call site on both targets; the String form infers E=String unchanged.
+// The lazy sibling (ok_or_else) is an INTENTIONAL omission: an error value
+// is a pure, cheap construction — effectful defaults use match.
+fn to_result[A, E](o: Option[A], e: E) -> Result[A, E] =
+  match o {
+    some(v) => ok(v),
+    none    => err(e),
+  }
 
 @intrinsic("almide_rt_option_filter")
 fn filter[A](o: Option[A], f: (A) -> Bool) -> Option[A] = _

@@ -1,0 +1,3 @@
+expects_code = "E041"
+expects_error = "implicit propagation of this binding's value is deprecated"
+hint_substring = "expr!"

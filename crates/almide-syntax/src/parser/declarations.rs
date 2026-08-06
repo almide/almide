@@ -517,7 +517,19 @@ impl Parser {
                 return Err(msg);
             }
             self.expect(TokenType::Arrow)?;
-            let return_type = self.parse_type_expr()?;
+            let mut return_type = self.parse_type_expr()?;
+            // ADR-0002 Phase 1 (#1103): `-> T!` marks a pure-fallible return —
+            // sugar for `Result[T, String]`, carried as the pseudo-generic
+            // `!` so the formatter can print the surface spelling back. Legal
+            // ONLY in fn-decl return position (this parse site); the resolver
+            // maps it, and everything downstream sees the plain Result.
+            if self.check(TokenType::Bang) && !self.newline_before_current() {
+                self.advance();
+                return_type = TypeExpr::Generic {
+                    name: crate::intern::sym("!"),
+                    args: vec![return_type],
+                };
+            }
 
             if self.check(TokenType::LBrace) {
                 let tok = self.current();
@@ -541,7 +553,14 @@ impl Parser {
                 let returns_result = matches!(&return_type,
                     TypeExpr::Generic { name, .. } if name == "Result"
                 );
-                if effect && returns_result {
+                // ADR-0002 Phase 1 (#1103): a `-> T!` return gets the SAME
+                // body lift as an effect fn returning Result — a T-typed tail
+                // wraps in ok(...), and `!` propagates (D3: lift ergonomics
+                // are a property of the fallibility axis, not the effect axis).
+                let returns_fallible = matches!(&return_type,
+                    TypeExpr::Generic { name, .. } if name == "!"
+                );
+                if (effect && returns_result) || returns_fallible {
                     body = self.wrap_effect_result_body(body);
                 }
 

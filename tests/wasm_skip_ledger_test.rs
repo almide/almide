@@ -34,6 +34,13 @@ enum SkipReason {
 const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // `@extern` binds a native symbol; there is no wasm equivalent.
     ("spec/integration/extern/extern_test.almd", SkipReason::NativeOnlyApi),
+    // #1106 / C-215: the _if_exists NotFound classification keys on the OS
+    // errno (ErrorKind::NotFound), which the WASI prim floor does not expose;
+    // the temp-dir helper also rides the mkstemp-style unique creators.
+    ("spec/stdlib/fs_if_exists_test.almd", SkipReason::NativeOnlyApi),
+    // #1110: the wrong-polarity probes ride assert_throws — wasm cannot catch
+    // a panic (unreachable trap; the coverage_assert_throws precedent).
+    ("spec/stdlib/testing_polarity_test.almd", SkipReason::NoUnwinding),
     ("spec/integration/extern_c/extern_c_test.almd", SkipReason::NativeOnlyApi),
     // OS sockets and subprocesses: outside the WASI surface the runtime targets.
     ("spec/stdlib/net_test.almd", SkipReason::NativeOnlyApi),

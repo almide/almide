@@ -24,6 +24,14 @@ pub fn almide_rt_test_assert_some<T: std::fmt::Debug>(o: &Option<T>) {
     assert!(o.is_some(), "assert_some failed: got None");
 }
 
+pub fn almide_rt_test_assert_none<T: std::fmt::Debug>(o: &Option<T>) {
+    assert!(o.is_none(), "assert_none failed: got {:?}", o);
+}
+
+pub fn almide_rt_test_assert_err<T: std::fmt::Debug, E: std::fmt::Debug>(r: &Result<T, E>) {
+    assert!(r.is_err(), "assert_err failed: got {:?}", r);
+}
+
 pub fn almide_rt_test_assert_throws(f: std::rc::Rc<dyn Fn()>, expected: &str) {
     // `Rc<dyn Fn>` is neither `FnOnce` nor `UnwindSafe`; wrap it in a fresh
     // closure (FnOnce) and assert unwind-safety — the closure body is expected to

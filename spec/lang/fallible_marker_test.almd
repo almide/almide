@@ -1,0 +1,41 @@
+// ADR-0002 Phase 1 (#1103): `-> T!` marks a pure-fallible return — sugar for
+// `Result[T, String]` (E is String by D2; custom E keeps the explicit
+// Result[T, E] spelling). The quadrant grammar:
+//   fn        f() -> Int      pure ・total
+//   fn        f() -> Int!     pure ・fallible   ← this file
+//   effect fn f() -> Int      effect・total
+//   effect fn f() -> Int!     effect・fallible
+import testing
+
+// pass-through: the body IS the Result — no wrapping ceremony
+fn parse_port(s: String) -> Int! = int.parse(s)
+
+// the E025-cluster case: before T!, `let r = ok(1)` could not pin E and was
+// a check error; the T! return pins E = String
+fn always_ok() -> Int! = ok(1)
+
+// ! propagation (C-211) + guard err + explicit ok — the full fallible body
+fn checked(s: String) -> Int! = {
+  let n = int.parse(s)!
+  guard n > 0 else err("must be positive")
+  ok(n)
+}
+
+test "pass-through body" {
+  assert_eq(parse_port("42") ?? -1, 42)
+  assert_eq(parse_port("xx") ?? -1, -1)
+}
+
+test "ok body pins E to String" {
+  let r: Result[Int, String] = always_ok()
+  assert_eq(r ?? 0, 1)
+}
+
+test "bang propagates and guard raises through the ! channel" {
+  assert_eq(checked("7") ?? -1, 7)
+  assert_eq(checked("-3") ?? -99, -99)
+  match checked("zz") {
+    err(e) => testing.assert_contains(e, "invalid digit"),
+    ok(_) => testing.assert_contains("unexpected", "never"),
+  }
+}

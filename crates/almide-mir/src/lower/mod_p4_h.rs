@@ -312,9 +312,16 @@ fn option_call_name_closure_result_repr(func: &str, arg_tys: &[Ty], result_ty: &
         // to_result_nested_share) rides the same routine as the String payload; the
         // co-own (+1) discipline is exactly the fix for the v0 double-free that
         // fixture pinned.
+        // #1114: to_result is now E-GENERIC (a pure bundled body). The `_h`
+        // twin's sig is the String-message form, so the rename is gated to
+        // E=String instantiations — the only ones whose semantics the twin
+        // implements. A custom-E heap instantiation monos the bundled body
+        // (and walls honestly where the heap-result ctor zoo does not cover
+        // its payload — the walled-real baseline names that frontier).
         "to_result"
             if matches!(arg_tys.first(), Some(Ty::Applied(TC::Option, a))
-                if a.len() == 1 && is_heap_ty(&a[0])) =>
+                if a.len() == 1 && is_heap_ty(&a[0]))
+                && matches!(arg_tys.get(1), Some(Ty::String)) =>
         {
             Some("option.to_result_h".to_string())
         }

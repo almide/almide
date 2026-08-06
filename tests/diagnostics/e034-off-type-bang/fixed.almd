@@ -1,0 +1,6 @@
+// E034: the error-channel operators (! / ? / ??) demand an Option or Result
+// operand. A plain Int has no error channel to unwrap.
+effect fn main() -> Unit = {
+  let n = 5
+  println("${n}")
+}

@@ -599,7 +599,7 @@ impl Checker {
                 format!("operator '!' requires Option or Result type but got {}", resolved.display()),
                 "Use '!' only on Option[T] or Result[T, E] values",
                 "operator !",
-            ));
+            ).with_code("E034"));
             Ty::Unknown
         }
     }
@@ -630,10 +630,14 @@ impl Checker {
                 format!("operator '??' requires Option or Result type but got {}", resolved.display()),
                 "Use '??' only on Option[T] or Result[T, E] values",
                 "operator ??",
-            ));
+            ).with_code("E034"));
             ft.clone()
         };
-        self.unify_infer(&inner_ty, &ft);
+        // #1119: unify_infer stays SILENT on a concrete mismatch, so
+        // `n ?? "hello"` / `n ?? some(1)` (fallback type ≠ unwrapped T)
+        // passed check and died as rustc E0308 behind the codegen wall.
+        // constrain routes the same unification through the reporting solver.
+        self.constrain(inner_ty.clone(), ft, "?? fallback");
         inner_ty
     }
 
@@ -655,7 +659,7 @@ impl Checker {
                 format!("operator '?' requires Option or Result type but got {}", resolved.display()),
                 "Use '?' only on Option[T] or Result[T, E] values",
                 "operator ?",
-            ));
+            ).with_code("E034"));
             Ty::Unknown
         }
     }

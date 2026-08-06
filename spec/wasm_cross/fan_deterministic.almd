@@ -17,21 +17,21 @@ effect fn fail_n(m: String) -> Result[Int, String] = err(m)
 
 effect fn main() -> Unit = {
   // fan.map: maps in list order, auto-unwraps + auto-? in effect context.
-  let doubled = fan.map([1, 2, 3, 4], (x) => dbl(x))
+  let doubled = fan.map([1, 2, 3, 4], (x) => dbl(x))!
   println(int.to_string(list.len(doubled)) + ":" + int.to_string(doubled[0]) + "," + int.to_string(doubled[1]) + "," + int.to_string(doubled[2]) + "," + int.to_string(doubled[3]))
   // fan.map preserves element order (String payloads, captured offset).
   let off = 10
-  let labels = fan.map([off + 1, off + 2], (x) => label(x))
+  let labels = fan.map([off + 1, off + 2], (x) => label(x))!
   println(labels[0] + "|" + labels[1])
   // fan.map over an empty list.
-  let empty = fan.map([], (x: Int) => dbl(x))
+  let empty = fan.map([], (x: Int) => dbl(x))!
   println("empty=" + int.to_string(list.len(empty)))
   // fan.any: FIRST Ok in list order wins (deterministic, NOT wall-clock).
   let first = fan.any {
     fail_n("skip")
     ok_n(7)
     ok_n(99)
-  }
+  }!
   println("any=" + int.to_string(first))
   // fan.settle: a TUPLE of per-arm Results in arm order (T2-4);
   // ok/err payloads preserved.

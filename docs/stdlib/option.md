@@ -110,7 +110,7 @@ option.unwrap_or(o: Option[A], default: A) -> A
 option.unwrap_or_else(o: Option[A], f: () -> A) -> A
 option.is_some(o: Option[A]) -> Bool
 option.is_none(o: Option[A]) -> Bool
-option.to_result(o: Option[A], msg: String) -> Result[A, String]
+option.to_result(o: Option[A], e: E) -> Result[A, E]
 option.filter(o: Option[A], f: (A) -> Bool) -> Option[A]
 option.zip(a: Option[A], b: Option[B]) -> Option[()]
 option.or_else(o: Option[A], f: () -> Option[A]) -> Option[A]

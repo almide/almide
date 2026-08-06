@@ -416,6 +416,13 @@ fn try_fold_binop_int(
         BinOp::MulInt => Some(wrap(a.wrapping_mul(b))),
         BinOp::DivInt if b != 0 => Some(wrap(a / b)),
         BinOp::ModInt if b != 0 => Some(wrap(a % b)),
+        // #1117: the signed lane was missing the comparisons the UInt64 lane
+        // already folds. `guard 1 > 2 else …` reached the mir guard desugar
+        // as an unfolded BinOp cond, sidestepping the const-cond fold there.
+        BinOp::Lt => Some(IrExprKind::LitBool { value: a < b }),
+        BinOp::Lte => Some(IrExprKind::LitBool { value: a <= b }),
+        BinOp::Gt => Some(IrExprKind::LitBool { value: a > b }),
+        BinOp::Gte => Some(IrExprKind::LitBool { value: a >= b }),
         _ => None,
     }
 }

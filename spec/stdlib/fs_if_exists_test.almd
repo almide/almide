@@ -1,0 +1,43 @@
+// @contract: C-215
+// wasm:skip — the _if_exists NotFound classification is native-only today
+// (C-215: the WASI prim floor exposes no errno to classify; the wasm render
+// walls honestly). Remove this skip when the errno-carrying read prim lands.
+// The fs content-reader if_exists family (#1106 / ADR-0004 D4): absence is a
+// VALUE (ok(none)), not an error — the 3-behavior matrix (absent → ok(none),
+// present → ok(some(content)), directory-at-path → err) over all four
+// content readers.
+import fs
+import testing
+
+effect fn tmp() -> String = fs.create_temp_dir("ifexists")!
+
+test "absent paths are ok(none) across the family" {
+  let d = tmp()!
+  let missing = d + "/nope.txt"
+  testing.assert_none(fs.read_text_if_exists(missing)!)
+  testing.assert_none(fs.read_bytes_if_exists(missing)!)
+  testing.assert_none(fs.read_lines_if_exists(missing)!)
+  testing.assert_none(fs.read_bytes_raw_if_exists(missing)!)
+  // missing PARENT directory is also absence, not an error
+  testing.assert_none(fs.read_text_if_exists(d + "/no/such/dir/f.txt")!)
+}
+
+test "present paths are ok(some(content))" {
+  let d = tmp()!
+  let p = d + "/data.txt"
+  fs.write(p, "line1\nline2")!
+  assert_eq(fs.read_text_if_exists(p)! ?? "", "line1\nline2")
+  assert_eq(list.len(fs.read_lines_if_exists(p)! ?? []), 2)
+  assert_eq(list.len(fs.read_bytes_if_exists(p)! ?? []), 11)
+}
+
+test "a directory at the path is a real error" {
+  let d = tmp()!
+  testing.assert_err(fs.read_text_if_exists(d))
+}
+
+test "the ?? default idiom reads naturally" {
+  let d = tmp()!
+  let cfg = fs.read_text_if_exists(d + "/config.toml")! ?? "default = true"
+  testing.assert_contains(cfg, "default")
+}

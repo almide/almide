@@ -1,4 +1,6 @@
 // @contract: C-135
+// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
+// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
 // Declared-Unit effect fn ABI: def and every call site agree on both targets.
 // The four shapes of the #786 class:
 //   1. never-err declared-Unit effect fn (raw/void ABI) — do_nothing

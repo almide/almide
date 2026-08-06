@@ -1,3 +1,5 @@
+> **Deprecated (E039, ADR-0007)**: `result.collect` / `collect_map` are in their removal window — all-errors collection is spelled with `partition`.
+
 # result
 
 Result type operations. auto-imported.

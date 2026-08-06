@@ -220,7 +220,9 @@ fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<
     match te {
         TypeExpr::Simple { name } => insert_type_name_prefix(name.as_str(), used),
         TypeExpr::Generic { name, args } => {
-            insert_type_name_prefix(name.as_str(), used);
+            if name.as_str() != "!" {
+                insert_type_name_prefix(name.as_str(), used);
+            }
             for a in args { collect_module_refs_type(a, used); }
         }
         TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
@@ -540,7 +542,7 @@ fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
     out.push('(');
     comma_sep(out, params, |out, p| {
         // `mut` is semantic (mutable-borrow param) — dropping it
-        // turned every in-place mutator call into E007.
+        // turned every in-place mutator call into E032.
         if p.is_mut { out.push_str("mut "); }
         if is_bare_self_param(p) {
             out.push_str("self");
@@ -609,6 +611,12 @@ fn fmt_decl_protocol(out: &mut String, decl: &Decl, depth: usize) {
 fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
     match ty {
         TypeExpr::Simple { name } => out.push_str(name),
+        // ADR-0002 Phase 1: the pseudo-generic `!` prints back as the surface
+        // spelling `T!` (never `![T]`) — the fmt roundtrip for `-> Int!`.
+        TypeExpr::Generic { name, args } if name.as_str() == "!" && args.len() == 1 => {
+            fmt_type(out, &args[0], depth);
+            out.push('!');
+        }
         TypeExpr::Generic { name, args } => {
             out.push_str(name); out.push('[');
             comma_sep(out, args, |out, a| fmt_type(out, a, depth));

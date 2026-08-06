@@ -102,8 +102,20 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|v0fail
   # observable, same class as wasmtime's preamble above. Without this, every
   # trap fixture that walls the native-verified rung "regressed" the moment
   # the notice went always-on (found re-arming this gate, #978).
-  sed -e '/^note: verified native render walled/d' -e '/^  reason: /d' \
-      "$TMP/v0e" > "$TMP/v0en"
+  # #1123: E041-era deprecation WARNINGS are compiler infrastructure, not a
+  # program observable — the render leg never prints them, so a pinned
+  # trap fixture carrying a warning "regressed" the moment the warning
+  # shipped (same class as the #931 fallback notice below). Strip each
+  # warning block (the warning line through its trailing blank line).
+  awk '
+    /^warning\[/ { skipw=1; next }
+    skipw && /^$/ { skipw=0; next }
+    skipw && (/^Error:/ || /^error\[/ || /^error:/) { skipw=0 }
+    skipw { next }
+    { print }
+  ' "$TMP/v0e" \
+    | sed -e '/^note: verified native render walled/d' -e '/^  reason: /d' \
+    > "$TMP/v0en"
   if [ "$v0rc" -eq "$v1rc" ] && diff -q "$TMP/v0en" "$TMP/v1en" >/dev/null 2>&1; then
     VERDICT=match
   else

@@ -289,10 +289,12 @@ pub fn desugar_offtype_testing_asserts(body: &IrExpr) -> Option<IrExpr> {
                 return;
             }
             let ok_sig = match func.as_str() {
-                "assert_some" => matches!(args.first().map(|a| &a.ty),
+                // #1110: the negative polarities share their positive twin's
+                // typed sig — an off-type instantiation must wall, not misread.
+                "assert_some" | "assert_none" => matches!(args.first().map(|a| &a.ty),
                     Some(Ty::Applied(TypeConstructorId::Option, a))
                         if a.len() == 1 && matches!(a[0], Ty::String)),
-                "assert_ok" => matches!(args.first().map(|a| &a.ty),
+                "assert_ok" | "assert_err" => matches!(args.first().map(|a| &a.ty),
                     Some(Ty::Applied(TypeConstructorId::Result, a))
                         if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String)),
                 _ => return,

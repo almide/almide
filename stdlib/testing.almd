@@ -29,3 +29,11 @@ fn assert_some[A](opt: Option[A]) -> Unit = _
 @intrinsic("almide_rt_test_assert_ok")
 @borrow_ref(result)
 fn assert_ok[A, B](result: Result[A, B]) -> Unit = _
+
+@intrinsic("almide_rt_test_assert_none")
+@borrow_ref(opt)
+fn assert_none[A](opt: Option[A]) -> Unit = _
+
+@intrinsic("almide_rt_test_assert_err")
+@borrow_ref(result)
+fn assert_err[A, B](result: Result[A, B]) -> Unit = _

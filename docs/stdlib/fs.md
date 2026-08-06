@@ -2,6 +2,20 @@
 
 File system. import fs, effect.
 
+### The `_if_exists` content readers — absence as a value
+
+`read_text_if_exists` / `read_bytes_if_exists` / `read_lines_if_exists` /
+`read_bytes_raw_if_exists` return `Result[Option[T], String]`:
+`ok(none)` when the path (or a parent) does not exist, `ok(some(content))`
+when readable, `err(msg)` for real failures (permission, a directory at the
+path, IO). Race-free — the classification happens inside the one read
+(unlike an `fs.exists` pre-check). Contract C-215; native-only today
+(the wasm render walls honestly).
+
+```almide
+let cfg = fs.read_text_if_exists(path)! ?? "default"
+```
+
 ### `fs.read_text(path: String) -> Result[String, String]`
 
 Read file contents as a UTF-8 string
@@ -196,7 +210,7 @@ let ts = fs.modified_at("file.txt")
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (26 functions)
+## Signature index (30 functions)
 
 ```
 effect fs.read_text(path: String) -> String
@@ -208,6 +222,10 @@ effect fs.append(path: String, content: String) -> Unit
 effect fs.mkdir_p(path: String) -> Unit
 effect fs.exists(path: String) -> Bool
 effect fs.read_lines(path: String) -> List[String]
+effect fs.read_text_if_exists(path: String) -> Option[String]
+effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]
+effect fs.read_lines_if_exists(path: String) -> Option[List[String]]
+effect fs.read_bytes_raw_if_exists(path: String) -> Option[Bytes]
 effect fs.remove(path: String) -> Unit
 effect fs.list_dir(path: String) -> List[String]
 effect fs.is_dir(path: String) -> Bool

@@ -1,0 +1,7 @@
+// E038: a ?? whose fallback starts on the next line silently swallows the
+// following statement as the fallback expression.
+effect fn main() -> Unit = {
+  let v = int.parse("x")??
+  -5
+  println("${v}")
+}

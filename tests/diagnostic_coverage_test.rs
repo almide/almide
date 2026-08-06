@@ -29,7 +29,12 @@ const SOFT_GATE: bool = false;
 /// fixture harness can't express (E420 is cross-module visibility,
 /// which requires an `import` graph). Keep this list short — each
 /// entry is a gap the harness can't cover today.
-const FIXTURE_ALLOWLIST: &[&str] = &["E420"];
+const FIXTURE_ALLOWLIST: &[&str] = &[
+    "E420",
+    // E033 (opaque-type construction outside its defining module) needs a
+    // two-module import graph the single-file harness can't express.
+    "E033",
+];
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -168,5 +173,65 @@ fn every_fixture_meta_declares_known_code() {
     }
     if !orphans.is_empty() {
         panic!("fixtures declare unknown codes:\n  {}", orphans.join("\n  "));
+    }
+}
+
+
+/// Ratchet: the number of `super::err(` construction sites WITHOUT a
+/// `.with_code(...)` attached. Every user-facing error should carry a
+/// stable E-code (the `--explain` / dojo-feedback surface); this count
+/// may only go DOWN. When you add a code to an existing site, lower the
+/// constant. Adding a NEW uncoded error site fails this gate — attach a
+/// code (and its fixture + doc, enforced above) instead.
+/// Baseline measured 2026-08-06 (#1113); lowered to 39 when the eq
+/// "compares" site gained E037 (#1116).
+const UNCODED_ERR_BASELINE: usize = 39;
+
+#[test]
+fn uncoded_error_sites_ratchet() {
+    let root = repo_root().join("crates");
+    let mut uncoded = 0usize;
+    let mut by_file: BTreeMap<String, usize> = BTreeMap::new();
+    fn walk(dir: &Path, f: &mut impl FnMut(&Path, &str)) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().map_or(false, |n| n == "target") { continue; }
+                walk(&path, f);
+            } else if path.extension().map_or(false, |e| e == "rs") {
+                if let Ok(text) = std::fs::read_to_string(&path) { f(&path, &text); }
+            }
+        }
+    }
+    walk(&root, &mut |path, text| {
+        let mut i = 0usize;
+        while let Some(j) = text[i..].find("super::err(") {
+            let j = i + j;
+            let window = &text[j..(j + 600).min(text.len())];
+            let seg = match window.find("));") {
+                Some(end) => &window[..end + 3],
+                None => window,
+            };
+            if !seg.contains(".with_code(") {
+                uncoded += 1;
+                *by_file.entry(path.display().to_string()).or_default() += 1;
+            }
+            i = j + "super::err(".len();
+        }
+    });
+    for (file, n) in &by_file {
+        eprintln!("uncoded err sites: {:3}  {}", n, file);
+    }
+    assert!(
+        uncoded <= UNCODED_ERR_BASELINE,
+        "uncoded diagnostic sites grew: {} > baseline {} — attach .with_code (+ fixture + doc) to new errors",
+        uncoded, UNCODED_ERR_BASELINE
+    );
+    if uncoded < UNCODED_ERR_BASELINE {
+        eprintln!(
+            "NOTE: uncoded sites = {} < baseline {} — lower UNCODED_ERR_BASELINE to lock in the progress",
+            uncoded, UNCODED_ERR_BASELINE
+        );
     }
 }

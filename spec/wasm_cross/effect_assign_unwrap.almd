@@ -1,4 +1,6 @@
 // @contract: C-064
+// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
+// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
 // #485: the effect-fn auto-unwrap rule is identical across binding positions
 // (let / var / plain assign / index assign) and type-directed (a Result-typed
 // target keeps the Result). This matrix pins the rule byte-for-byte across

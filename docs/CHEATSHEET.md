@@ -78,8 +78,28 @@ A bare prefix (`0x` with no digits) is a compile error, never a silent `0`.
 ## Functions
 ```
 fn name(x: Type, y: Type) -> RetType = expr
+fn name(x: Type) -> Int!                             // pure-fallible: sugar for Result[Int, String]
 effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
 ```
+
+### Pure-fallible marker `-> T!` (ADR-0002 Phase 1)
+
+`-> T!` declares a pure fn that can fail: the return IS `Result[T, String]`.
+The body writes the Result directly — pass a fallible call through, or build
+it with ok/err; `!` propagates inside (no effect fn needed):
+
+```almide
+fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through
+fn checked(s: String) -> Int! = {
+  let n = int.parse(s)!                              // ! propagates in a T! body
+  guard n > 0 else err("must be positive")
+  ok(n)
+}
+```
+
+`!` is legal ONLY in return position of a fn declaration. E is always String —
+a custom error type keeps the explicit `Result[T, MyError]` spelling
+(ADR-0003/0004: branch on structure, not message text).
 
 ### Visibility (optional prefix before fn/type)
 - `fn f()` — public (default)
@@ -325,6 +345,58 @@ expr?.field        // optional chaining (Option[Record] → Option[FieldType])
 `!` on an effect CALL always compiles: if the fn never fails (`random.int`,
 `fs.exists`, …) the `!` is a silent no-op. You never need to know whether a
 stdlib effect fn can fail to append it.
+
+### Reading a file that may not exist (ADR-0004 D4)
+
+Absence is a value, not an error — never branch on the error text:
+
+```almide
+let cfg = fs.read_text_if_exists(path)! ?? "default"
+//  ok(none) = absent (missing parents too) / err = permission, IO — real failures
+// family: read_text / read_bytes / read_lines / read_bytes_raw + _if_exists
+```
+
+### All-errors collection: partition (ADR-0007)
+
+`result.collect` is deprecated (E039). Collect every error with partition:
+
+```almide
+let (oks, errs) = result.partition(results)
+if list.is_empty(errs) then ok(oks) else err(errs)   // Result[List[T], List[E]]
+```
+
+### Error-handling doctrine (ADR-0004)
+
+**Never branch on the text of an error message** (`string.contains(e, …)`,
+`e == "No such file"`) — the text is a report, not an API, and E035 warns.
+When a caller must branch on the failure *kind*, that is the signal to
+define a variant error type and match on its structure:
+
+```almide
+type LoadError = | NotFound(String) | BadValue(String)
+
+match load(p) {
+  ok(v)               => v,
+  err(NotFound(_))    => default_value,     // branch on structure
+  err(BadValue(msg))  => process.exit(1),
+}
+```
+
+For a kind-independent fallback, don't read the error at all: `load(p) ?? default`.
+
+**Adding context to an error** — the canonical spelling (do not invent
+variants; keep `": "` as the separator and `${e}` at the end):
+
+```almide
+let cfg = fs.read_text(path) |> result.map_err((e) => "loading config: ${e}")!
+// chained calls read as the failure's story:
+//   Error: starting server: loading config: No such file or directory
+
+// deliberate replacement is spelled with the discard parameter:
+fs.read_text(path) |> result.map_err((_) => "friendly message")
+// forgetting ${e} with a NAMED parameter warns (E036) — the original error
+// would be silently destroyed
+```
 
 ### Guard (early return / loop break)
 ```
