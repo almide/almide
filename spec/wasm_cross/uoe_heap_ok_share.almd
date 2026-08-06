@@ -5,19 +5,26 @@
 // unwrapped list read as `[]` after the temp's drop (fuzz seed-20260718 index
 // 590). The option unwrap_or_else arm carried this share discipline already;
 // this is its result-side twin.
+// The collect producer was removed (ADR-0007); a local gather keeps the
+// heap-Ok Result temp the share discipline guards.
+fn gather(xs: List[Result[Float, String]]) -> Result[List[Float], List[String]] = {
+  let (oks, errs) = result.partition(xs)
+  if list.is_empty(errs) then ok(oks) else err(errs)
+}
+
 fn main() -> Unit = {
   let n3: Result[Float, String] = ok(1.5)
   let a4: Result[Float, String] = ok(0.0)
-  let r6: List[Float] = result.unwrap_or_else(result.collect([n3, a4, a4]), ((e) => [-0.0]))
+  let r6: List[Float] = result.unwrap_or_else(gather([n3, a4, a4]), ((e) => [-0.0]))
   println("r6 = ${r6}")
   let bad: Result[Float, String] = err("x")
-  let r7: List[Float] = result.unwrap_or_else(result.collect([n3, bad]), ((e) => [9.0]))
+  let r7: List[Float] = result.unwrap_or_else(gather([n3, bad]), ((e) => [9.0]))
   println("r7 = ${r7}")
 }
 
-test "unwrap_or_else over a collected list keeps the payload alive" {
+test "unwrap_or_else over a gathered list keeps the payload alive" {
   let n3: Result[Float, String] = ok(1.5)
   let a4: Result[Float, String] = ok(0.0)
-  let r6: List[Float] = result.unwrap_or_else(result.collect([n3, a4]), ((e) => [-0.0]))
+  let r6: List[Float] = result.unwrap_or_else(gather([n3, a4]), ((e) => [-0.0]))
   assert_eq(r6, [1.5, 0.0])
 }

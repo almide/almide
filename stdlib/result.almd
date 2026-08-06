@@ -3,10 +3,12 @@
 // Migrated from `@inline_rust("({r}).map({f})")`-style templates to
 // `@intrinsic` + `runtime/rs/src/result.rs` wrappers. Result-level
 // value mutators (`map` / `map_err` / `and_then` / `unwrap_or_else`
-// etc.) consume the Result; `is_ok` / `is_err` borrow it. List-taking
-// fns (`collect`, `partition`, `collect_map`) consume their List arg
-// to match the `Vec<T>`-taking runtime signature, same pattern as
-// list.fold / list.map.
+// etc.) consume the Result; `is_ok` / `is_err` borrow it. The list-taking
+// `partition` consumes its List arg to match the `Vec<T>`-taking runtime
+// signature, same pattern as list.fold / list.map. (`collect` /
+// `collect_map` were REMOVED — ADR-0007: partition is the substance; the
+// old collect's name promised Rust's first-err short-circuit and did the
+// opposite.)
 
 @intrinsic("almide_rt_result_map")
 @consume(r)
@@ -44,17 +46,9 @@ fn to_option[A, E](r: Result[A, E]) -> Option[A] = _
 @consume(r)
 fn to_err_option[A, E](r: Result[A, E]) -> Option[E] = _
 
-@intrinsic("almide_rt_result_collect")
-@consume(rs)
-fn collect[T, E](rs: List[Result[T, E]]) -> Result[List[T], List[E]] = _
-
 @intrinsic("almide_rt_result_partition")
 @consume(rs)
 fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
-
-@intrinsic("almide_rt_result_collect_map")
-@consume(xs)
-fn collect_map[T, U, E](xs: List[T], f: (T) -> Result[U, E]) -> Result[List[U], List[E]] = _
 
 // ── Symmetry fills (mirrors option.*) ──
 //

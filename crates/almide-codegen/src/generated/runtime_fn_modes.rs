@@ -605,8 +605,6 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_random_int" => &[false, false],
         "almide_rt_random_shuffle" => &[false],
         "almide_rt_result_and_then" => &[false, false],
-        "almide_rt_result_collect" => &[false],
-        "almide_rt_result_collect_map" => &[false, false],
         "almide_rt_result_err" => &[false],
         "almide_rt_result_flat_map" => &[false, false],
         "almide_rt_result_flatten" => &[false],

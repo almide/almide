@@ -378,7 +378,7 @@ let cfg = fs.read_text_if_exists(path)! ?? "default"
 
 ### All-errors collection: partition (ADR-0007)
 
-`result.collect` is deprecated (E039). Collect every error with partition:
+`result.collect` / `collect_map` are REMOVED (ADR-0007 — the name promised Rust's first-err short-circuit and did the opposite). Collect every error with partition:
 
 ```almide
 let (oks, errs) = result.partition(results)

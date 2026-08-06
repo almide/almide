@@ -102,7 +102,7 @@ result.collect_map([1, 2, 3], fn(x) => if x > 0 then ok(x) else err("neg"))
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (17 functions)
+## Signature index (15 functions)
 
 ```
 result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]
@@ -114,9 +114,7 @@ result.is_ok(r: Result[A, E]) -> Bool
 result.is_err(r: Result[A, E]) -> Bool
 result.to_option(r: Result[A, E]) -> Option[A]
 result.to_err_option(r: Result[A, E]) -> Option[E]
-result.collect(rs: List[Result[T, E]]) -> Result[List[T], List[E]]
 result.partition(rs: List[Result[T, E]]) -> ()
-result.collect_map(xs: List[T], f: (T) -> Result[U, E]) -> Result[List[U], List[E]]
 result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]
 result.to_list(r: Result[A, E]) -> List[A]
 result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(), E]
