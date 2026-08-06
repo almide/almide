@@ -268,8 +268,12 @@ fn fmt_while() {
 
 #[test]
 fn fmt_generic_type() {
+    // ADR-0010 D3: Option normalizes to the `?` shorthand even as a generic
+    // argument; the enclosing generic keeps its bracket shape.
     let out = roundtrip("fn f(x: List[Option[Int]]) -> List[Option[Int]] = x");
-    assert!(out.contains("List[Option[Int]]"));
+    assert!(out.contains("List[Int?]"), "{out}");
+    let out = roundtrip("fn f(x: Map[String, List[Int]]) -> Map[String, List[Int]] = x");
+    assert!(out.contains("Map[String, List[Int]]"), "{out}");
 }
 
 // ---- Fn type ----
@@ -360,6 +364,51 @@ fn fmt_record_type_comments_survive_defaults_and_aliases() {
 fn fmt_record_type_without_comments_stays_single_line() {
     let out = roundtrip("module app\ntype Point = {\n  x: Int,\n  y: Int,\n}");
     assert!(out.contains("type Point = { x: Int, y: Int }"), "{out}");
+}
+
+// ---- ADR-0010: `T?` Option shorthand ----
+
+// The shorthand round-trips in every type position, and a written
+// `Option[T]` NORMALIZES to it (D3: fmt owns the one canonical spelling).
+#[test]
+fn fmt_option_shorthand_roundtrips_and_normalizes() {
+    let out = roundtrip("module app\nfn f(v: Int?) -> Int? = v");
+    assert!(out.contains("fn f(v: Int?) -> Int? ="), "{out}");
+    let out = roundtrip("module app\nfn f(v: Option[Int]) -> Option[Int] = v");
+    assert!(out.contains("fn f(v: Int?) -> Int? ="), "normalization: {out}");
+    let out = roundtrip("module app\nfn f(xs: List[Option[Int]]) -> List[Int?] = xs");
+    assert!(out.contains("fn f(xs: List[Int?]) -> List[Int?] ="), "{out}");
+}
+
+// The normalized output must re-parse under the atom-binding rule: fn types
+// and nested Option take parens; a tuple is already a parenthesized atom.
+#[test]
+fn fmt_option_shorthand_parenthesizes_non_atoms() {
+    let out = roundtrip("module app\ntype Hooks = { on_tick: Option[(Int) -> Unit] }");
+    assert!(out.contains("on_tick: (fn(Int) -> Unit)?"), "{out}");
+    let out = roundtrip("module app\nfn f() -> Option[Option[Int]] = some(none)");
+    assert!(out.contains("-> (Int?)? ="), "{out}");
+    let out = roundtrip("module app\nfn f() -> Option[(String, Int)] = none");
+    assert!(out.contains("-> (String, Int)? ="), "{out}");
+    // every normalized form reaches a fixpoint
+    for src in [
+        "module app\ntype Hooks = { on_tick: Option[(Int) -> Unit] }",
+        "module app\nfn f() -> Option[Option[Int]] = some(none)",
+        "module app\nfn f() -> Option[(String, Int)] = none",
+    ] {
+        let once = roundtrip(src);
+        assert_eq!(roundtrip(&once), once, "not idempotent for {src}");
+    }
+}
+
+// `?` binds to the type atom, never across `->` (D2): a fn-type slot keeps
+// its Option RETURN unparenthesized, and `?!` layers Result over Option.
+#[test]
+fn fmt_option_shorthand_atom_binding() {
+    let out = roundtrip("module app\nfn pick(f: (Int) -> Int?) -> Int = 0");
+    assert!(out.contains("f: fn(Int) -> Int?"), "{out}");
+    let out = roundtrip("module app\nfn g(s: String) -> Int?! = ok(none)");
+    assert!(out.contains("-> Int?! ="), "{out}");
 }
 
 // ---- Roundtrip & Idempotency over all spec/ files ----

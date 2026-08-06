@@ -76,8 +76,8 @@ test "option some equality" {
 }
 
 test "option none equality" {
-  let a: Option[Int] = none
-  let b: Option[Int] = none
+  let a: Int? = none
+  let b: Int? = none
   assert_eq(a == b, true)
   assert_eq(some(1) == a, false)
 }

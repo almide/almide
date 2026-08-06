@@ -44,9 +44,9 @@ test "list of int annotation" {
 }
 
 test "option string annotation" {
-  let x: Option[String] = some("hi")
+  let x: String? = some("hi")
   assert_eq(x, some("hi"))
-  let y: Option[String] = none
+  let y: String? = none
   assert_eq(y, none)
 }
 

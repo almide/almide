@@ -373,8 +373,8 @@ impl<'a> Interpreter<'a> {
             }
             IrExprKind::OptionNone => Flow::val(Value::Option(None)),
             // `?` / `!` — short-circuit the enclosing fn on Err/None.
-            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
-                self.eval_try_unwrap(expr, scope)
+            IrExprKind::Try { expr: op } | IrExprKind::Unwrap { expr: op } => {
+                self.eval_try_unwrap(op, &expr.ty, scope)
             }
             // `??` — unwrap with a fallback value.
             IrExprKind::UnwrapOr { expr, fallback } => {
@@ -508,8 +508,20 @@ impl<'a> Interpreter<'a> {
     // ── `?` / `!` / `?.field` ───────────────────────────────────
 
     /// `Try`/`Unwrap` — short-circuit the enclosing fn on Err/None.
-    fn eval_try_unwrap(&mut self, expr: &IrExpr, scope: &Scope) -> Flow {
+    /// `node_ty` is the marker NODE's own type: when it is `Option[...]`, the
+    /// checker resolved this `!` as the effect-RESULT-layer strip on a
+    /// declared-Option effect call (`f(..)! : Option[T]` — #1125, C-216). The
+    /// interp's effect convention returns the raw Option, so the marker is
+    /// the identity there — pass the Option through, do NOT unwrap some/none.
+    fn eval_try_unwrap(&mut self, expr: &IrExpr, node_ty: &Ty, scope: &Scope) -> Flow {
         let v = val!(self.eval_expr(expr, scope));
+        if matches!(node_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1)
+        {
+            if let Value::Option(_) = v {
+                return Flow::val(v);
+            }
+        }
         match v {
             Value::Result(Ok(inner)) => Flow::val(*inner),
             Value::Result(Err(e)) => Flow::Return(Value::Result(Err(e))),

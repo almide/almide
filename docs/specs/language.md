@@ -74,6 +74,7 @@ Selective imports use the syntax `import path.{ Name1, Name2 }`. Aliases use `as
 |------|-------------|
 | `Result[T, E]` | Success `ok(v)` or failure `err(e)` |
 | `Option[T]` | Present `some(v)` or absent `none` |
+| `T?` | Shorthand for `Option[T]`, valid in every type position (ADR-0010). `?` binds to the preceding type atom, never across `->`: `(A) -> B?` returns `Option[B]`; an optional fn value spells `((A) -> B)?`; nested Option spells `(T?)?`. Canonical — `almide fmt` normalizes `Option[T]` to `T?` |
 
 ### 2.4 Composite Types
 

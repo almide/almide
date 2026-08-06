@@ -50,7 +50,7 @@ fn rec(r: Rec) -> String = match r {
 }
 
 // ── Nested: ok(some("x")) — literal two levels deep ───────────────
-fn nested(r: Result[Option[String], String]) -> String = match r {
+fn nested(r: Result[String?, String]) -> String = match r {
   ok(some("hi")) => "OKHI",
   ok(some(_)) => "OKS",
   ok(none) => "OKN",

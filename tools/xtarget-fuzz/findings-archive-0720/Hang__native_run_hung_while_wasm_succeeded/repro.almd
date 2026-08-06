@@ -14,7 +14,7 @@ effect fn checked(n: Int) -> Int = 0
 effect fn fail(msg: String) -> Int = err(msg)!
 
 effect fn main() -> Unit = {
-  let s = sum_to(1000000, 1);
-  let c = checked(2000000);
+  let s = sum_to(1000000, 1)!;
+  let c = checked(2000000)!;
   println("${s} ${c}")
 }

@@ -4,7 +4,7 @@
 // list.get with option.unwrap_or, integer arithmetic.
 //
 //   almide run examples/binary-search.almd
-fn search(xs: List[Int], target: Int, lo: Int, hi: Int) -> Option[Int] = if lo > hi then none
+fn search(xs: List[Int], target: Int, lo: Int, hi: Int) -> Int? = if lo > hi then none
 else {
   let mid = lo + (hi - lo) / 2
   let v = list.get(xs, mid) |> option.unwrap_or(0)
@@ -13,7 +13,7 @@ else {
   else search(xs, target, lo, mid - 1)
 }
 
-fn binary_search(xs: List[Int], target: Int) -> Option[Int] = if list.is_empty(xs) then none
+fn binary_search(xs: List[Int], target: Int) -> Int? = if list.is_empty(xs) then none
 else search(xs, target, 0, list.len(xs) - 1)
 
 effect fn main() -> Unit = {

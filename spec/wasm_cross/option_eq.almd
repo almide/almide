@@ -4,9 +4,9 @@
 // linearized (silent — ran both branches). Byte-matches native. (some-vs-none / none-vs-none also
 // verified; this fixture keeps to the multi-let-friendly subset.)
 effect fn main() -> Unit = {
-  let a: Option[Int] = some(5)
-  let b: Option[Int] = some(5)
-  let c: Option[Int] = some(7)
+  let a: Int? = some(5)
+  let b: Int? = some(5)
+  let c: Int? = some(7)
   println(if a == b then "T" else "F")
   println(if a == c then "T" else "F")
   println(if a != c then "T" else "F")

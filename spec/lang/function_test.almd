@@ -230,7 +230,7 @@ test "generic function with various types" {
   assert_eq(identity_val([1, 2]), [1, 2])
 }
 
-fn map_option[A, B](opt: Option[A], f: fn(A) -> B) -> Option[B] = match opt {
+fn map_option[A, B](opt: A?, f: fn(A) -> B) -> B? = match opt {
   some(v) => some(f(v)),
   none => none,
 }

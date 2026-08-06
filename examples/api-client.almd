@@ -9,7 +9,7 @@ type User = { id: Int, name: String, email: String }
 type Post = { id: Int, title: String, body: String, user_id: Int }
 
 // Convention methods — "method exists = interface satisfied"
-fn User.from_json(v: Value) -> Option[User] = {
+fn User.from_json(v: Value) -> User? = {
   let id = json.get_int(v, "id")
   let name = json.get_string(v, "name")
   let email = json.get_string(v, "email")
@@ -19,7 +19,7 @@ fn User.from_json(v: Value) -> Option[User] = {
   }
 }
 
-fn Post.from_json(v: Value) -> Option[Post] = {
+fn Post.from_json(v: Value) -> Post? = {
   let id = json.get_int(v, "id")
   let title = json.get_string(v, "title")
   let body = json.get_string(v, "body")

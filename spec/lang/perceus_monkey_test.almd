@@ -197,8 +197,8 @@ test "recursive fibonacci with string trace" {
 }
 
 test "option with heap value" {
-  let x: Option[String] = some("hello")
-  let y: Option[String] = none
+  let x: String? = some("hello")
+  let y: String? = none
   let r1 = x ?? "default"
   let r2 = y ?? "default"
   assert_eq(r1, "hello")

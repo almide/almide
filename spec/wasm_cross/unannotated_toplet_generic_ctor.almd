@@ -9,7 +9,7 @@ type Cfg = { name: String }
 
 let MAYBE = some(Cfg { name: "opt" })
 
-let ABSENT: Option[Cfg] = none
+let ABSENT: Cfg? = none
 
 effect fn main() -> Unit = {
   let label = match MAYBE {

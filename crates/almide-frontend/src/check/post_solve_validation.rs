@@ -394,14 +394,20 @@ impl Checker {
     /// meant the payload (the classic shape: a can-err call bound inside a
     /// lambda, then `"${resp}"`). Warning, not error: interpolating the
     /// Result itself is how you debug one.
-    /// #1123 / ADR-0008 release N: every implicit-propagation site whose type
-    /// resolved to Result gets the E041 deprecation warning. The try-replace
-    /// appends `!` at the expression's end — a zero-width insertion, so the
-    /// migration is a mechanical apply (`almide check --json` + span apply).
+    /// #1123 / ADR-0008 N+1: the switch. Every site the pre-switch
+    /// implementation auto-?'d is now a hard error — the value stays a Result:
+    ///   E041 — implicit propagation (un-annotated let/var, condition,
+    ///          value-pattern match subject, interpolation, assignment)
+    ///   E042 — must-use: a statement-position Result silently discarded
+    /// The checker still strips the Result in the TypeMap as RECOVERY (so one
+    /// error does not cascade into downstream mismatches), but a flagged
+    /// program never compiles. The try-replace appends `!` at the
+    /// expression's end — a zero-width insertion, so the migration stays a
+    /// mechanical apply (`almide check --json` + span apply).
     fn validate_implicit_propagation(&mut self) {
         let checks = std::mem::take(&mut self.deferred_implicit_prop_checks);
         let mut reported: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
-        for (ty, span, what, mechanical) in checks {
+        for (ty, span, what, mechanical, must_use) in checks {
             let resolved = resolve_ty(&ty, &self.uf);
             if !resolved.is_result() {
                 continue;
@@ -410,13 +416,23 @@ impl Checker {
             if !reported.insert((s.line, s.col)) {
                 continue;
             }
-            let mut d = Diagnostic::warning(
-                format!("implicit propagation {} is deprecated — write `!` (ADR-0008)", what),
-                "Today the err returns through the enclosing failure channel without a marker; \
-                 the explicit spelling is `expr!`. The implicit form is removed in the next \
-                 minor (#1123) — after that, this value stays a Result.",
-                "implicit propagation",
-            ).with_code("E041");
+            let mut d = if must_use {
+                Diagnostic::error(
+                    "this statement discards a Result — the error would be silently dropped".to_string(),
+                    "Propagate it with `expr!`, or discard it on purpose with `let _ = expr` \
+                     (the explicit-discard spelling, ADR-0008 D2). Matching on ok/err also \
+                     consumes it.",
+                    "unused Result",
+                ).with_code("E042")
+            } else {
+                Diagnostic::error(
+                    format!("implicit propagation {} was removed — this value is a Result (ADR-0008)", what),
+                    "The auto-? of the 0.54 deprecation window (E041) is gone: a fallible \
+                     call yields a Result VALUE in every position. Write `expr!` to \
+                     propagate, or consume the Result as a value (`??`, `?`, match ok/err).",
+                    "implicit propagation",
+                ).with_code("E041")
+            };
             d.file = self.source_file.clone();
             d.line = Some(s.line);
             d.col = Some(s.col);

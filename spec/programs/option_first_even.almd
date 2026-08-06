@@ -1,4 +1,4 @@
-fn first_even(xs: List[Int]) -> Option[Int] = match list.filter(xs, (x) => x % 2 == 0) {
+fn first_even(xs: List[Int]) -> Int? = match list.filter(xs, (x) => x % 2 == 0) {
   [] => none,
   ys => list.get(ys, 0),
 }

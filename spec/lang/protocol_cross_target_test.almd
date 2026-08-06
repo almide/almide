@@ -97,12 +97,12 @@ test "protocol with string stdlib calls" {
 
 // ── Protocol with Option return ──
 protocol Lookup {
-  fn find(a: Self, key: String) -> Option[String]
+  fn find(a: Self, key: String) -> String?
 }
 
 type Dict: Lookup = { entries: List[(String, String)] }
 
-fn Dict.find(d: Dict, key: String) -> Option[String] = list.find(d.entries, (e) => e.0 == key) |> option.map((e) => e.1)
+fn Dict.find(d: Dict, key: String) -> String? = list.find(d.entries, (e) => e.0 == key) |> option.map((e) => e.1)
 
 test "protocol returning Option" {
   let d = Dict { entries: [("name", "alice"), ("age", "30")] }

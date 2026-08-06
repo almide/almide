@@ -46,13 +46,13 @@ effect fn main() -> Unit = {
   var first = true
   var game_over = false
   while not game_over {
-    let input = io.read_line()
+    let input = io.read_line()!
     match int.parse(input) {
       err(msg) => {},
       ok(n) => {
         if n > 0 then {
           if first then {
-            let mines = pick()
+            let mines = pick()!
             adj = grow(mines, n)
             first = false
           } else ()

@@ -31,6 +31,6 @@ effect fn main() -> Unit = {
   let got = fan.any {
     failing()
     okn(88)
-  }
+  }!
   println("unwrap=" + int.to_string(got))
 }

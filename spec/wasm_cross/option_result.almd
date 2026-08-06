@@ -1,10 +1,10 @@
 // @contract: C-035, C-044
-fn safe_div(a: Int, b: Int) -> Option[Int] = if b == 0 then none else some(a / b)
+fn safe_div(a: Int, b: Int) -> Int? = if b == 0 then none else some(a / b)
 
 fn main() -> Unit = {
   // Option basics
   let some_val = some(42)
-  let none_val: Option[Int] = none
+  let none_val: Int? = none
   println(int.to_string(some_val ?? -1))
   println(int.to_string(none_val ?? -1))
   // Option map

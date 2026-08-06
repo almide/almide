@@ -126,7 +126,9 @@ fn lower_bind(
     // binding keeps the Result (auto_try must not insert `?`). Un-annotated
     // binds share the same `Bind.ty` shape when the callee itself declares
     // `-> Result[..]`, so the distinction has to be recorded per VarId.
-    if ty.is_some() && val_ty.is_result() {
+    // ADR-0008 D2 (#1123 N+1): `let _ = f()` is the sanctioned DISCARD — the
+    // Result binds dead, nothing propagates, so it keeps the Result too.
+    if (ty.is_some() || name == "_") && val_ty.is_result() {
         ctx.annotated_result_vars.insert(var);
     }
     IrStmtKind::Bind { var, mutability, ty: val_ty, value: ir_val }

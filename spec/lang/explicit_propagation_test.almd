@@ -1,0 +1,73 @@
+// ADR-0008 N+1 (#1123): the switch's two dead hazards and two re-pinned
+// operator semantics, as regression tests.
+//
+// 1. PATTERN-SHAPE INDEPENDENCE — pre-switch, a value-pattern match over an
+//    effect call auto-stripped its subject while an ok/err match kept it: the
+//    ARM SHAPES changed the subject's runtime value. Post-switch both legal
+//    spellings are explicit about the layer they match.
+// 2. ANNOTATION NON-INVERSION — pre-switch, `let r = f()` stripped and
+//    `let r: Result[..] = f()` kept: an annotation flipped runtime behavior.
+//    Post-switch the un-annotated implicit form is E041; what remains cannot
+//    invert.
+// 3. `let _ = f()` is the sanctioned DISCARD — the err does NOT propagate
+//    (pre-switch it did: this test FAILS on the v0.54 binary, the A/B).
+// 4. `e()?` / `e() ?? fb` are ordinary value operators (ADR-0005), no
+//    special auto-? interplay left to misfire.
+effect fn get() -> Int = 42
+
+effect fn fail_call() -> Result[Int, String] = err("boom")
+
+effect fn ok_call() -> Result[Int, String] = ok(7)
+
+effect fn discard_then_done() -> String = {
+  let _ = fail_call()
+  "done"
+}
+
+effect fn match_value_layer(n: Int) -> Int = {
+  let g = get()!
+  match g {
+    42 => 100 + n,
+    _ => 0 - n,
+  }
+}
+
+effect fn match_result_layer() -> Int = {
+  match ok_call() {
+    ok(v) => v * 10,
+    err(_) => 0 - 1,
+  }
+}
+
+effect fn annotated_keeps() -> Int = {
+  let r: Result[Int, String] = ok_call()
+  match r {
+    ok(v) => v,
+    err(_) => 0 - 1,
+  }
+}
+
+effect fn explicit_unwraps() -> Int = {
+  let v = ok_call()!
+  v
+}
+
+test "let _ discards the err — the fn completes (the N+1 behavioral switch)" {
+  assert_eq(discard_then_done() ?? "failed", "done")
+}
+
+test "match: value layer via !, Result layer via ok/err — no shape-dependent strip" {
+  assert_eq(match_value_layer(1) ?? 0, 101)
+  assert_eq(match_result_layer() ?? 0, 70)
+}
+
+test "annotation does not invert behavior — both spellings are explicit" {
+  assert_eq(annotated_keeps() ?? -9, 7)
+  assert_eq(explicit_unwraps() ?? -9, 7)
+}
+
+test "? and ?? are ordinary value operators on the Result (ADR-0005)" {
+  assert_eq(ok_call()? ?? -1, 7)
+  assert_eq(fail_call()? ?? -1, -1)
+  assert_eq(fail_call() ?? -1, -1)
+}

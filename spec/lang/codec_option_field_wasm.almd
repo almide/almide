@@ -6,7 +6,7 @@
 // explicit-null (None) through an encode → decode → re-encode roundtrip.
 import json
 
-type Rec: Codec = { name: String, nick: Option[String], age: Option[Int] }
+type Rec: Codec = { name: String, nick: String?, age: Int? }
 
 effect fn main() -> Unit = {
   let r1 = Rec { name: "A", nick: some("nn"), age: some(30) }

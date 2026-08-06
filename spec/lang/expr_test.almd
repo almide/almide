@@ -251,8 +251,8 @@ test "equality on tuple" {
 test "equality on option" {
   assert_eq(some(1) == some(1), true)
   assert_eq(some(1) != some(2), true)
-  let x: Option[Int] = none
-  let y: Option[Int] = none
+  let x: Int? = none
+  let y: Int? = none
   assert_eq(x == y, true)
 }
 

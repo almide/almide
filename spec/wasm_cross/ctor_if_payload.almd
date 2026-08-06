@@ -7,7 +7,7 @@
 fn main() -> Unit = {
   let r0: String = "5"
   let b: Bool = true
-  let s: Option[String] = some((if b then r0 else r0))
+  let s: String? = some((if b then r0 else r0))
   let o: Result[String, String] = ok((if b then "yes" else "no"))
   let e: Result[String, String] = err((if b then "bad1" else "bad2"))
   let m: Result[Int, String] = err((if b then "m1" else "m2"))
@@ -19,7 +19,7 @@ fn main() -> Unit = {
 
 test "ctor with an if payload materializes the taken arm" {
   let b: Bool = false
-  let s: Option[String] = some((if b then "t" else "f"))
+  let s: String? = some((if b then "t" else "f"))
   assert_eq(s, some("f"))
   let o: Result[String, String] = ok((if b then "t" else "f"))
   assert_eq(o, ok("f"))

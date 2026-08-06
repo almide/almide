@@ -60,12 +60,12 @@ test "repr heterogeneous tuple" {
 
 // ── Option ──
 test "repr option some" {
-  let o: Option[Int] = some(5)
+  let o: Int? = some(5)
   assert_eq("${o}", "some(5)")
 }
 
 test "repr option none" {
-  let o: Option[Int] = none
+  let o: Int? = none
   assert_eq("${o}", "none")
 }
 

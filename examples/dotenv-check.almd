@@ -9,9 +9,9 @@ effect fn main() -> Unit = {
   guard list.len(args) >= 2 else err("usage: dotenv-check <.env> <.env.example>")
   let env_path = list.get(args, 0) |> option.unwrap_or(".env")
   let example_path = list.get(args, 1) |> option.unwrap_or(".env.example")
-  let env_content = fs.read_text(env_path)
+  let env_content = fs.read_text(env_path)!
   let env_keys = parse_dotenv(env_content)
-  let example_content = fs.read_text(example_path)
+  let example_content = fs.read_text(example_path)!
   let example_keys = parse_dotenv(example_content)
   let missing = map.keys(example_keys) |> list.filter((k) => option.is_none(map.get(env_keys, k)))
   if list.is_empty(missing) then println("All keys present.")

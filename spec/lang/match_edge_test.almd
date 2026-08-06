@@ -63,7 +63,7 @@ test "match guard F" {
 }
 
 // ── Match on Option ──
-fn option_label(x: Option[Int]) -> String = match x {
+fn option_label(x: Int?) -> String = match x {
   some(n) if n > 100 => "big some",
   some(n) if n > 0 => "positive some",
   some(0) => "zero some",

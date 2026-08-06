@@ -51,7 +51,7 @@ test "map.map" {
 }
 
 test "option.or_else" {
-  let a: Option[Int] = none
+  let a: Int? = none
   let b = option.or_else(a, () => some(42))
   assert_eq(b, some(42))
   let c = some(10)
@@ -60,7 +60,7 @@ test "option.or_else" {
 }
 
 test "option.unwrap_or_else" {
-  let a: Option[Int] = none
+  let a: Int? = none
   let b = option.unwrap_or_else(a, () => 99)
   assert_eq(b, 99)
   let c = some(10)

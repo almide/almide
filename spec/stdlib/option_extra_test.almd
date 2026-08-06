@@ -4,12 +4,12 @@ test "option.map with string transform" {
 }
 
 test "option.map none stays none" {
-  let n: Option[String] = none
+  let n: String? = none
   assert_eq(option.map(n, (s) => string.to_upper(s)), none)
 }
 
 test "option.flat_map returns none on none input" {
-  let n: Option[Int] = none
+  let n: Int? = none
   assert_eq(option.flat_map(n, (x) => some(x * 2)), none)
 }
 
@@ -27,7 +27,7 @@ test "option.unwrap_or on some returns value" {
 }
 
 test "option.unwrap_or on none returns default" {
-  let n: Option[String] = none
+  let n: String? = none
   assert_eq(option.unwrap_or(n, "default"), "default")
 }
 
@@ -36,7 +36,7 @@ test "option.is_some on some" {
 }
 
 test "option.is_none on none" {
-  let n: Option[Int] = none
+  let n: Int? = none
   assert_eq(option.is_none(n), true)
 }
 
@@ -49,7 +49,7 @@ test "option.filter removes value when predicate false" {
 }
 
 test "option.filter on none returns none" {
-  let n: Option[Int] = none
+  let n: Int? = none
   assert_eq(option.filter(n, (x) => x > 0), none)
 }
 
@@ -58,7 +58,7 @@ test "option.to_list on some" {
 }
 
 test "option.to_list on none" {
-  let n: Option[Int] = none
+  let n: Int? = none
   assert_eq(option.to_list(n), [])
 }
 

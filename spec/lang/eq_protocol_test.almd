@@ -53,7 +53,7 @@ test "recursive variant types are comparable" {
 }
 
 test "nested containers are comparable" {
-  let a: List[Option[Int]] = [some(1), none, some(3)]
-  let b: List[Option[Int]] = [some(1), none, some(3)]
+  let a: List[Int?] = [some(1), none, some(3)]
+  let b: List[Int?] = [some(1), none, some(3)]
   assert_eq(a == b, true)
 }

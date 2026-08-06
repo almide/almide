@@ -64,6 +64,7 @@ hand-written.
 - Primitives: `Int`, `Float`, `String`, `Bool`, `Unit`, `Path`
 - Collections: `List[T]`, `Map[K, V]`, `Set[T]`
 - Error: `Result[T, E]` (`ok(v)` / `err(e)`), `Option[T]` (`some(v)` / `none`)
+- Option shorthand: `T?` ≡ `Option[T]` in every type position (canonical — `almide fmt` normalizes to it)
 
 ### Integer literals
 ```
@@ -100,6 +101,25 @@ fn checked(s: String) -> Int! = {
 `!` is legal ONLY in return position of a fn declaration. E is always String —
 a custom error type keeps the explicit `Result[T, MyError]` spelling
 (ADR-0003/0004: branch on structure, not message text).
+
+### Option shorthand `T?` (ADR-0010)
+
+`T?` ≡ `Option[T]`, valid in EVERY type position (unlike `!`, which marks the
+arrow). `?` binds to the type atom just before it and never crosses `->`:
+
+```almide
+fn first_even(xs: List[Int]) -> Int? = xs |> list.find((x) => x % 2 == 0)
+fn or_zero(v: Int?) -> Int = v ?? 0            // parameter position
+type Config = { port: Int? }                   // field position
+fn cells(row: List[Int?]) -> Int = ...         // generic-arg position
+f: (Int) -> Int?                               // fn slot: a fn RETURNING Option[Int]
+on_tick: ((Int) -> Unit)?                      // optional fn VALUE needs parens
+pair: (String, Int)?                           // Option of tuple
+nested: (Int?)?                                // nested Option (`Int??` lexes as ??)
+fn parse_opt(s: String) -> Int?!               // Result[Option[Int], String]
+```
+
+`T?` is the canonical spelling: `almide fmt` rewrites `Option[T]` to it.
 
 ### Visibility (optional prefix before fn/type)
 - `fn f()` — public (default)
@@ -358,7 +378,7 @@ let cfg = fs.read_text_if_exists(path)! ?? "default"
 
 ### All-errors collection: partition (ADR-0007)
 
-`result.collect` is deprecated (E039). Collect every error with partition:
+`result.collect` / `collect_map` are REMOVED (ADR-0007 — the name promised Rust's first-err short-circuit and did the opposite). Collect every error with partition:
 
 ```almide
 let (oks, errs) = result.partition(results)

@@ -37,6 +37,6 @@ fn main() -> Unit = {
   // Recursive generic inside containers.
   let forest: List[Tree[Int]] = [Leaf(7), Node(Leaf(8), Leaf(9))]
   println("forest=${forest}")
-  let opt: Option[Tree[String]] = some(Node(Leaf("x"), Leaf("y")))
+  let opt: Tree[String]? = some(Node(Leaf("x"), Leaf("y")))
   println("opt=${opt}")
 }

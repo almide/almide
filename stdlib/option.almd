@@ -50,7 +50,7 @@ fn or_else[A](o: Option[A], f: () -> Option[A]) -> Option[A] = _
 @intrinsic("almide_rt_option_to_list")
 fn to_list[A](o: Option[A]) -> List[A] = _
 
-// ── Symmetry fills (mirrors result.collect / collect_map) ──
+// ── Symmetry fills (option.collect / collect_map — these MATCH Rust's collect, unlike the removed result twins; ADR-0007) ──
 //
 // Pure Almide bodies — short-circuit on the first `none` via
 // `list.fold` + nested match on the accumulator. Contract matches

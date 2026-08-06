@@ -1,0 +1,3 @@
+expects_code = "E042"
+expects_error = "this statement discards a Result"
+hint_substring = "let _ = expr"

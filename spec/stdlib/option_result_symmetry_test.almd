@@ -76,8 +76,8 @@ test "result.filter passes err through" {
 
 // ── Option side ──
 test "option.collect all some → some list" {
-  let opts: List[Option[Int]] = [some(1), some(2), some(3)]
-  let c: Option[List[Int]] = option.collect(opts)
+  let opts: List[Int?] = [some(1), some(2), some(3)]
+  let c: List[Int]? = option.collect(opts)
   match c {
     some(vs) => assert_eq(list.len(vs), 3),
     none => assert_eq(true, false),
@@ -85,14 +85,14 @@ test "option.collect all some → some list" {
 }
 
 test "option.collect short-circuits on first none" {
-  let opts: List[Option[Int]] = [some(1), none, some(3)]
-  let c: Option[List[Int]] = option.collect(opts)
+  let opts: List[Int?] = [some(1), none, some(3)]
+  let c: List[Int]? = option.collect(opts)
   assert_eq(option.is_none(c), true)
 }
 
 test "option.collect empty list → some empty" {
-  let opts: List[Option[Int]] = []
-  let c: Option[List[Int]] = option.collect(opts)
+  let opts: List[Int?] = []
+  let c: List[Int]? = option.collect(opts)
   match c {
     some(vs) => assert_eq(list.len(vs), 0),
     none => assert_eq(true, false),
@@ -100,7 +100,7 @@ test "option.collect empty list → some empty" {
 }
 
 test "option.collect_map all some" {
-  let c: Option[List[Int]] = option.collect_map([1, 2, 3], (x) => some(x * 2))
+  let c: List[Int]? = option.collect_map([1, 2, 3], (x) => some(x * 2))
   match c {
     some(vs) => assert_eq(list.len(vs), 3),
     none => assert_eq(true, false),
@@ -108,6 +108,6 @@ test "option.collect_map all some" {
 }
 
 test "option.collect_map short-circuits on none" {
-  let c: Option[List[Int]] = option.collect_map([1, 2, 3], (x) => if x == 2 then none else some(x))
+  let c: List[Int]? = option.collect_map([1, 2, 3], (x) => if x == 2 then none else some(x))
   assert_eq(option.is_none(c), true)
 }

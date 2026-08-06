@@ -79,7 +79,7 @@ test "pipe with flat_map expanding" {
 }
 
 // ── Pipe on generic user-defined function ──
-fn wrap_all[T](xs: List[T]) -> List[Option[T]] = list.map(xs, (x) => some(x))
+fn wrap_all[T](xs: List[T]) -> List[T?] = list.map(xs, (x) => some(x))
 
 test "pipe with generic user function" {
   let result = [1, 2, 3] |> wrap_all() |> list.filter_map((x) => x)

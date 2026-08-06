@@ -225,22 +225,39 @@ pub fn compute_can_err(fns: &[IrFunction]) -> std::collections::HashSet<String> 
 /// returns `Ok`, so the `!` is a no-op; a CAN-ERR callee's `!` is LEFT untouched (it still walls in
 /// `lower_destructure`/`lower_bind`), so its error is never silently dropped (the blanket strip that did
 /// drop it byte-mismatched safe_div_chain & co. — see the roadmap note).
-/// Strip the frontend's auto-`?` (`Try`) over a call to a DECLARED-OPTION effect fn
+/// Strip the effect-Result layer over a call to a DECLARED-OPTION effect fn
 /// (see [`DECLARED_OPTION_FNS`]): in the v1 model that callee returns the raw Option —
-/// there is no err channel to propagate, so the Try is the identity. A spelled `!`
-/// (Unwrap) keeps its unwrap-the-Option semantics and is untouched.
+/// there is no err channel to propagate, so the propagation node is the identity.
+/// BOTH spellings strip: the frontend's auto-`?` (`Try`) AND the spelled `!`
+/// (`Unwrap`) — the checker resolves `f()!` on a declared-Option effect fn as the
+/// effect-Result strip (the Unwrap's own ty IS the Option), the same identity as
+/// the Try. Leaving the Unwrap in place fed `desugar_effect_unwrap`'s err/ok match
+/// a RAW Option block read as a Result — `hit=999` + the scope-end rc_dec trap,
+/// the #1125 silent-wrong class. The type gate (`expr.ty` is the Option) keeps a
+/// genuine Option-payload unwrap (ty = the payload) out of the strip.
 pub fn strip_declared_option_trys(body: &mut IrExpr) {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
     struct S;
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
-            let strip = matches!(&expr.kind,
-                IrExprKind::Try { expr: inner }
-                if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if DECLARED_OPTION_FNS.with(|s| s.borrow().contains(name.as_str()))));
+            let declared_option_call = |inner: &IrExpr| {
+                matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if DECLARED_OPTION_FNS.with(|s| s.borrow().contains(name.as_str())))
+            };
+            let strip = match &expr.kind {
+                IrExprKind::Try { expr: inner } => declared_option_call(inner),
+                IrExprKind::Unwrap { expr: inner } => {
+                    declared_option_call(inner)
+                        && matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1)
+                }
+                _ => false,
+            };
             if strip {
-                if let IrExprKind::Try { expr: inner } = &expr.kind {
+                if let IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } =
+                    &expr.kind
+                {
                     let mut inner = (**inner).clone();
                     std::mem::swap(expr, &mut inner);
                 }

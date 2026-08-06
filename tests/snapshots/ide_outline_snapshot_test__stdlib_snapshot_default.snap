@@ -217,8 +217,6 @@ fn option.unwrap_or_else[A](o: Option[A], f: fn() -> A) -> A
 fn option.zip[A, B](a: Option[A], b: Option[B]) -> Option[(A, B)]
 
 # @stdlib/result
-fn result.collect[T, E](rs: List[Result[T, E]]) -> Result[List[T], List[E]]
-fn result.collect_map[T, U, E](xs: List[T], f: fn(T) -> Result[U, E]) -> Result[List[U], List[E]]
 fn result.filter[A, E](r: Result[A, E], pred: fn(A) -> Bool, err_val: E) -> Result[A, E]
 fn result.flat_map[A, B, E](r: Result[A, E], f: fn(A) -> Result[B, E]) -> Result[B, E]
 fn result.flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E]

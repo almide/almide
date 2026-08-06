@@ -190,7 +190,7 @@ effect fn main() -> Unit = {
         } else {
           if rev[idx] then { println("Already revealed.") } else if flg[idx] then { println("Unflag first (f r,c) before revealing.") } else {
             if is_first then {
-              let mines = place_mines(cmd.row, cmd.col)
+              let mines = place_mines(cmd.row, cmd.col)!
               adj = build_adjacent(mines)
               is_first = false
             } else ()

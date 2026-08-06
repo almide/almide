@@ -235,7 +235,7 @@ impl Checker {
     /// site so post-solve emits the deprecation warning with the `!` insert.
     fn effect_unwrap_rhs_warned(&mut self, t: Ty, span: Option<ast::Span>, what: &'static str, mechanical: bool, target_keeps_result: bool) -> Ty {
         if self.env.auto_unwrap && !target_keeps_result {
-            self.deferred_implicit_prop_checks.push((t.clone(), span, what, mechanical));
+            self.deferred_implicit_prop_checks.push((t.clone(), span, what, mechanical, false));
         }
         self.effect_unwrap_rhs(t, target_keeps_result)
     }

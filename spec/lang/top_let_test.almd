@@ -94,7 +94,7 @@ type TlCfg = { name: String }
 
 let MAYBE_CFG = some(TlCfg { name: "opt" })
 
-let NO_CFG: Option[TlCfg] = none
+let NO_CFG: TlCfg? = none
 
 test "unannotated option-of-record top-level let match" {
   let label = match MAYBE_CFG {

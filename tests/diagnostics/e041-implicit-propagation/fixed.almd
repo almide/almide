@@ -1,5 +1,5 @@
-// E041: implicit propagation (auto-?) is deprecated — ADR-0008 makes `!` the
-// only propagation spelling; the implicit form is removed in the next minor.
+// E041: implicit propagation (auto-?) was REMOVED — ADR-0008 makes `!` the
+// only propagation spelling; this value stays a Result without it.
 effect fn get() -> Int = 42
 
 effect fn main() -> Unit = {

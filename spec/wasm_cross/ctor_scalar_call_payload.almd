@@ -7,9 +7,9 @@
 // native printed `ok(1e300)`, wasm printed `ok(0)` — a silent wrong value).
 fn main() -> Unit = {
   let a: Result[Int, String] = ok(list.len([1, 2, 3]))
-  let b: Option[Float] = some(math.sqrt(6.25))
+  let b: Float? = some(math.sqrt(6.25))
   let c: Result[Float, String] = ok(option.unwrap_or(some(2.5), 0.1))
-  let d: Option[Int] = some(int.abs(-7))
+  let d: Int? = some(int.abs(-7))
   // The heap-payload sibling through the same ANF route: `ok(float.parse(…))`
   // over a closure-fed String (fuzz index 704: native err("invalid float
   // literal") vs wasm ok(0) before the fix).

@@ -25,7 +25,7 @@ const PROGRAM: &str = r#"import fs
 import env
 
 effect fn main() -> Result[Unit, String] = {
-  let text = fs.read_text("data.csv")
+  let text = fs.read_text("data.csv")!
   println("read: ${string.trim(text)}")
   println("pwd: ${env.get("PWD") ?? "none"}")
   ok(())

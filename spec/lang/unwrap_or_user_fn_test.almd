@@ -12,9 +12,9 @@
 // this file — these tests pin the behavior, and the wall pins the caps ledger.
 // Both the call-ARGUMENT position (`println(f(x) ?? d)`) and the bound position
 // (`let a = f(x) ?? d`) tripped it.
-fn first_char(s: String) -> Option[String] = string.get(s, 0)
+fn first_char(s: String) -> String? = string.get(s, 0)
 
-fn maybe_int(s: String) -> Option[Int] = int.parse(s)?
+fn maybe_int(s: String) -> Int? = int.parse(s)?
 
 // A user fn whose operand is used in the call-argument position — the exact
 // #1079 repro shape.

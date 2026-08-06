@@ -37,7 +37,7 @@ fn main() -> Unit = {
     Point { x: 5, y: 6 }
   ]
   println("points=${pts}")
-  let op: Option[Point] = some(Point { x: 7, y: 8 })
+  let op: Point? = some(Point { x: 7, y: 8 })
   println("opt_rec=${op}")
   let pm: Map[String, Point] = [
     "o": Point { x: 0, y: 0 }

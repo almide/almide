@@ -1,5 +1,5 @@
-// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
-// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
+// ADR-0008 N+1 (#1123): migrated to EXPLICIT propagation — every formerly
+// implicit auto-? site now spells `!`; the behavior under test is unchanged.
 // #485: in an effect fn, the auto-unwrap rule is identical across every
 // binding-shaped position — let, var, plain assign, index assign — and is
 // type-directed: a Result-typed TARGET keeps the Result, everything else
@@ -8,14 +8,14 @@ effect fn step(n: Int) -> Int = n + 1
 
 effect fn plain_assign() -> Int = {
   var x = 0
-  x = step(x)
+  x = step(x)!
   x
 }
 
 effect fn loop_assign() -> Int = {
   var seq = 0
   while seq < 3 {
-    seq = step(seq)
+    seq = step(seq)!
   }
   seq
 }
@@ -42,7 +42,7 @@ effect fn index_assign_unwraps() -> Int = {
 effect fn declared_result() -> Result[Int, String] = ok(7)
 
 effect fn unannotated_unwraps() -> Int = {
-  let v = declared_result()
+  let v = declared_result()!
   v
 }
 

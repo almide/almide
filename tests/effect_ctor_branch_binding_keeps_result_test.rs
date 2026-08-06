@@ -90,16 +90,24 @@ fn constructor_branch_binding_re_yielded_as_the_tail_is_accepted() {
 }
 
 #[test]
-fn call_armed_branch_binding_still_auto_unwraps() {
-    // The #717 short-circuit shape: arms are effect CALLS, so the per-branch
-    // auto-`?` fires and the binding really is the payload. Using it as an Int
-    // must stay ACCEPTED — the guard against over-correcting this fix.
+fn call_armed_branch_binding_spells_its_propagation() {
+    // ADR-0008 (#1123 N+1): the #717 shape spells per-branch `!` now — the
+    // explicit form stays ACCEPTED and the binding really is the payload…
     assert_accepted(
+        "effect fn g(x: Int) -> Result[Int, String] = if x < 0 then err(\"neg\") else ok(x)\n\
+         effect fn f(x: Int) -> Result[Int, String] = {\n\
+         \x20 let v = if x > 10 then g(x)! else g(0 - 1)!\n\
+         \x20 ok(v + 100)\n\
+         }",
+    );
+    // …while the old implicit spelling is the E041 error.
+    assert_rejected(
         "effect fn g(x: Int) -> Result[Int, String] = if x < 0 then err(\"neg\") else ok(x)\n\
          effect fn f(x: Int) -> Result[Int, String] = {\n\
          \x20 let v = if x > 10 then g(x) else g(0 - 1)\n\
          \x20 ok(v + 100)\n\
          }",
+        "implicit propagation",
     );
 }
 

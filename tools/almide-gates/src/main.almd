@@ -46,7 +46,7 @@ effect fn entry_of(root: String, rel: String) -> Entry = {
 effect fn entries_of(root: String, files: List[String]) -> List[Entry] = files |> list.try_map((f) => entry_of(root, f))!
 
 effect fn plain_section(root: String, sub: String, heading: String) -> String = {
-  let files = md_files(root, sub)
+  let files = md_files(root, sub)!
   if list.len(files) == 0 then ""
   else {
     let rows = entries_of(root, files)! |> list.map((e) => "| " + e.link + " | " + e.desc + " |") |> list.join("\n")
@@ -62,7 +62,7 @@ effect fn plain_section(root: String, sub: String, heading: String) -> String = 
 // `list.sort_by` takes a KEY extractor, not a comparator, and there is no `string.compare`,
 // so descending is ascending-then-reverse.
 effect fn done_section(root: String) -> String = {
-  let files = md_files(root, "done")
+  let files = md_files(root, "done")!
   if list.len(files) == 0 then ""
   else {
     let entries = entries_of(root, files)! |> list.filter((e) => e.date != "") |> list.sort_by((e) => e.date + "|" + e.link + "|" + e.desc) |> list.reverse

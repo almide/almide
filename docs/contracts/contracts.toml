@@ -1021,7 +1021,7 @@ evidence  = [
 id        = "C-075"
 spec      = "ALS-I3"
 title     = "lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough"
-statement = "Binding a borrow-rendered param (List &[T] / Map &AlmideMap) to a local converts to the owned type; an effect-fn Option[T] bound to a let and consumed by ?? strips the effect Result first leaving Option[T]; and `!` propagation whose source error type equals the enclosing fn's declared error type carries the custom variant error through `?` unchanged (no Debug stringify). All three compile and run byte-identically on native Rust and wasm32: stdout 'list=[7, 8]' / 'map_len=2' / 'miss=999' / 'hit=42' / 'fetch=item', exit 0."
+statement = "Binding a borrow-rendered param (List &[T] / Map &AlmideMap) to a local converts to the owned type; an effect-fn Option[T] bound to a let (the binding carries the explicit `!` since the E041 migration; C-216 pins explicit == implicit) and consumed by ?? strips the effect Result first leaving Option[T]; and `!` propagation whose source error type equals the enclosing fn's declared error type carries the custom variant error through `?` unchanged (no Debug stringify). All three compile and run byte-identically on native Rust and wasm32: stdout 'list=[7, 8]' / 'map_len=2' / 'miss=999' / 'hit=42' / 'fetch=item', exit 0."
 since     = "0.27.6"
 status    = "active"
 evidence  = [
@@ -2699,4 +2699,26 @@ since     = "0.53.7"
 status    = "active"
 evidence  = [
   { path = "spec/stdlib/fs_if_exists_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-216"
+spec      = "ALS-D6"
+title     = "explicit ! on a declared-Option effect call is the implicit strip's identical twin"
+statement = "On a DECLARED-OPTION effect fn (`effect fn f(..) -> T?`, ABI-lifted to Result[Option[T], String]), the spelled propagation `f(..)!` behaves byte-identically to the implicit auto-? form on both targets: the effect-Result layer strips, leaving Option[T] for the consumer (`??`, match, a later Option-`!`). This holds in every payload class — never-err callee (the v1 wasm ABI returns the raw Option; the marker is the identity), can-err callee (a real Result block; the err/ok match propagates), scalar and heap Some payloads, and the pure `-> T?!` composition. Before 0.54.1 the wasm leg read a raw Option block as a Result for the spelled form only — a wrong value (`hit=999`) followed by an rc_dec trap (#1125), the silent-wrong class that blocked the ADR-0008 N+1 switch: the switch REQUIRES the explicit spelling to be a drop-in for the implicit one everywhere."
+since     = "0.54.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/effect_option_explicit_bang.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-217"
+spec      = "ALS-D6"
+title     = "let _ = f() discards the Result — the err does not propagate"
+statement = "With implicit propagation removed (ADR-0008, the 0.55 switch), `let _ = <Result-typed expr>` is the sanctioned intentional-discard spelling: the Result binds dead, its err does NOT return through the enclosing failure channel, and the fn completes normally — on both targets, byte-identically. Pre-switch the same line auto-?'d and PROPAGATED the err (a fn body's completion depended on a binding whose value was never read); the E041/E042 error pair plus this discard rule replace that: a statement-position Result must be consumed (`!`, `let _ =`, `??`, `?`, or an ok/err match), and only the `let _ =` spelling throws the error away — visibly."
+since     = "0.55.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/let_wildcard_discard.almd", class = "fixture" },
 ]

@@ -23,7 +23,7 @@ test "record field access multiple fields then spread" {
 
 // ── Bug 2: Same Option matched twice ──
 test "option matched twice some" {
-  let x: Option[String] = some("hello")
+  let x: String? = some("hello")
   let a = match x {
     some(s) => s,
     none => "none",
@@ -37,7 +37,7 @@ test "option matched twice some" {
 }
 
 test "option matched twice none" {
-  let x: Option[String] = none
+  let x: String? = none
   let a = match x {
     some(s) => s,
     none => "first",
@@ -51,7 +51,7 @@ test "option matched twice none" {
 }
 
 test "option of int matched twice" {
-  let x: Option[Int] = some(42)
+  let x: Int? = some(42)
   let a = match x {
     some(n) => n,
     none => 0,

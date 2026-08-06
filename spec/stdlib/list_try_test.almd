@@ -55,9 +55,9 @@ test "try_fold threads the accumulator and stops at err" {
 }
 
 test "try_find returns ok(some/none) and propagates err" {
-  let hit: Result[Option[Int], String] = list.try_find([1, 2, 3], (n) => ok(n > 1))
+  let hit: Result[Int?, String] = list.try_find([1, 2, 3], (n) => ok(n > 1))
   assert_eq(hit, ok(some(2)))
-  let miss: Result[Option[Int], String] = list.try_find([1, 2, 3], (n) => ok(n > 9))
+  let miss: Result[Int?, String] = list.try_find([1, 2, 3], (n) => ok(n > 9))
   assert_eq(miss, ok(none))
   assert_eq(list.try_find([1, -2, 3], (n) => if n < 0 then err("neg:${n}")
   else ok(false)), err("neg:-2"))

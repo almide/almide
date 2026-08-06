@@ -462,7 +462,7 @@ impl<'a> Interpreter<'a> {
             "to_option" => Some(self.result_to_option(args)),
             "to_err_option" => Some(self.result_to_err_option(args)),
             "flatten" => Some(self.result_flatten(args)),
-            "collect" => Some(self.result_collect(args)),
+            "partition" => Some(self.result_partition(args)),
             _ => None,
         }
     }
@@ -516,9 +516,9 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    // collect(List[Result[T,E]]) → all ok → ok(List[T]), else err(List[E]) of
-    // EVERY err (the native runtime's partition-style collect).
-    fn result_collect(&mut self, args: &[Value]) -> Flow {
+    // partition(List[Result[T,E]]) → (oks, errs) in list order — the substance
+    // the removed collect wrapped (ADR-0007).
+    fn result_partition(&mut self, args: &[Value]) -> Flow {
         match args.first().and_then(|v| v.as_iter_items()) {
             Some(items) => {
                 let mut oks = Vec::new();
@@ -529,18 +529,14 @@ impl<'a> Interpreter<'a> {
                         Value::Result(Err(e)) => errs.push((*e).clone()),
                         _ => {
                             return Flow::Abort(
-                                "internal: result.collect non-result element".into(),
+                                "internal: result.partition non-result element".into(),
                             )
                         }
                     }
                 }
-                if errs.is_empty() {
-                    Flow::val(Value::Result(Ok(Box::new(Value::list(oks)))))
-                } else {
-                    Flow::val(Value::Result(Err(Box::new(Value::list(errs)))))
-                }
+                Flow::val(Value::Tuple(std::rc::Rc::new(vec![Value::list(oks), Value::list(errs)])))
             }
-            None => Flow::Abort("internal: result.collect on non-list".into()),
+            None => Flow::Abort("internal: result.partition on non-list".into()),
         }
     }
 

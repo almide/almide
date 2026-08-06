@@ -62,7 +62,7 @@ test "deep equality on nested structures" {
 test "equality on Option" {
   assert_eq(some(1) == some(1), true)
   assert_eq(some(1) != some(2), true)
-  let x: Option[Int] = none
+  let x: Int? = none
   assert_eq(x == none, true)
 }
 

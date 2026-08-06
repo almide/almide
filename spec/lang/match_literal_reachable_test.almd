@@ -4,7 +4,7 @@
 // must not shadow each other (no false E014 "unreachable match arm"). These
 // programs must both check clean AND run byte-identically on native and wasm.
 // some(literal) then some(binder): the binder catches every other Int.
-fn ci(o: Option[Int]) -> String = match o {
+fn ci(o: Int?) -> String = match o {
   some(1) => "one",
   some(2) => "two",
   some(x) => "other:" + int.to_string(x),
@@ -13,7 +13,7 @@ fn ci(o: Option[Int]) -> String = match o {
 
 // none BETWEEN the literal and the binder: the outer Some/None space is
 // complete before the binder, yet the binder stays reachable (Int is infinite).
-fn ci_gap(o: Option[Int]) -> String = match o {
+fn ci_gap(o: Int?) -> String = match o {
   some(1) => "one",
   none => "nothing",
   some(x) => "other:" + int.to_string(x),
@@ -27,7 +27,7 @@ fn ck(r: Result[Int, String]) -> String = match r {
 }
 
 // String literals in some().
-fn cs(o: Option[String]) -> String = match o {
+fn cs(o: String?) -> String = match o {
   some("a") => "A",
   some("b") => "B",
   none => "N",

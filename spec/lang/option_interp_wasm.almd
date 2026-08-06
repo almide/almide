@@ -4,28 +4,28 @@
 // (a 2-arm Option match + repr build), routed per element type exactly like the List family; a String
 // element is quoted+escaped like a List[String] element. Byte-identical to v0 --target wasm.
 effect fn main() -> Unit = {
-  let a: Option[Int] = some(42)
-  let b: Option[Int] = some(-7)
-  let c: Option[Int] = none
+  let a: Int? = some(42)
+  let b: Int? = some(-7)
+  let c: Int? = none
   println("${a}")
   println("${b}")
   println("${c}")
   println("val=${a} end")
-  let s: Option[String] = some("hi")
-  let sq: Option[String] = some('a "b" c')
-  let sn: Option[String] = none
+  let s: String? = some("hi")
+  let sq: String? = some('a "b" c')
+  let sn: String? = none
   println("${s}")
   println("${sq}")
   println("${sn}")
-  let fa: Option[Float] = some(3.5)
-  let fb: Option[Float] = some(3.0)
-  let fc: Option[Float] = none
+  let fa: Float? = some(3.5)
+  let fb: Float? = some(3.0)
+  let fc: Float? = none
   println("${fa}")
   println("${fb}")
   println("${fc}")
-  let t: Option[Bool] = some(true)
-  let f: Option[Bool] = some(false)
-  let n: Option[Bool] = none
+  let t: Bool? = some(true)
+  let f: Bool? = some(false)
+  let n: Bool? = none
   println("${t}")
   println("${f}")
   println("${n}")

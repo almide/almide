@@ -149,6 +149,14 @@ pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym
                 let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
                 return Ty::result(inner, Ty::String);
             }
+            // ADR-0010: the pseudo-generic `?` is the Option marker —
+            // `T?` ≡ `Option[T]` in EVERY type position (unlike `!`, which
+            // is a return-position marker: `?` is a property of the value,
+            // `!` of the arrow).
+            if name.as_str() == "?" && args.len() == 1 {
+                let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
+                return Ty::option(inner);
+            }
             let ra: Vec<Ty> = args.iter().map(|a| resolve_type_expr_in(a, known_types, cur_mod)).collect();
             resolve_generic_type_expr(name, ra, known_types, cur_mod)
         },

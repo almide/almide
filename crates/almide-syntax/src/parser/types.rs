@@ -48,6 +48,22 @@ impl Parser {
         self.parse_type_name_suffix(name)
     }
 
+    /// ADR-0010: `T?` marks Option — `?` binds to the just-parsed type ATOM
+    /// (a named type or a parenthesized/tuple type) and never crosses `->`,
+    /// so `(A) -> B?` is a fn returning Option[B] and an optional fn value
+    /// spells `((A) -> B)?`. Carried as the pseudo-generic `?` so the
+    /// formatter prints the surface spelling back; the resolver maps it to
+    /// Option[T]. Nested Option spells `(T?)?` — `T??` lexes as the `??`
+    /// operator token, so a single suffix check is exactly right.
+    fn wrap_option_suffix(&mut self, ty: TypeExpr) -> TypeExpr {
+        if self.check(TokenType::Question) && !self.newline_before_current() {
+            self.advance();
+            TypeExpr::Generic { name: sym("?"), args: vec![ty] }
+        } else {
+            ty
+        }
+    }
+
     /// Parse suffix after a type name (generic args, tuple constructor, inline variant).
     fn parse_type_name_suffix(&mut self, name: Sym) -> Result<TypeExpr, String> {
         if self.check(TokenType::LBracket) {
@@ -56,7 +72,7 @@ impl Parser {
             if self.check(TokenType::Pipe) {
                 return self.try_parse_inline_variant(name, Vec::new());
             }
-            return Ok(TypeExpr::Generic { name, args });
+            return Ok(self.wrap_option_suffix(TypeExpr::Generic { name, args }));
         }
         if self.check(TokenType::LParen) {
             self.advance();
@@ -76,7 +92,7 @@ impl Parser {
         if self.check(TokenType::Pipe) {
             return self.try_parse_inline_variant(name, Vec::new());
         }
-        Ok(TypeExpr::Simple { name })
+        Ok(self.wrap_option_suffix(TypeExpr::Simple { name }))
     }
     fn parse_tuple_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::LParen)?;
@@ -99,7 +115,10 @@ impl Parser {
                 let ret = self.parse_type_expr()?;
                 return Ok(TypeExpr::Fn { params: vec![first], ret: Box::new(ret) });
             }
-            return Ok(first);
+            // ADR-0010: a parenthesized type is an atom, so `?` may follow —
+            // this is how the whole-fn and nested spellings parse:
+            // `((A) -> B)?`, `(Int?)?`.
+            return Ok(self.wrap_option_suffix(first));
         }
         let mut elements = vec![first];
         while self.check(TokenType::Comma) {
@@ -113,7 +132,8 @@ impl Parser {
             let ret = self.parse_type_expr()?;
             return Ok(TypeExpr::Fn { params: elements, ret: Box::new(ret) });
         }
-        Ok(TypeExpr::Tuple { elements })
+        // ADR-0010: a tuple is a parenthesized atom — `(String, Int)?`.
+        Ok(self.wrap_option_suffix(TypeExpr::Tuple { elements }))
     }
     fn parse_variant_type(&mut self) -> Result<TypeExpr, String> {
         let mut cases = Vec::new();

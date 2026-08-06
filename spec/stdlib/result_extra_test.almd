@@ -56,7 +56,7 @@ test "result.to_err_option on err" {
 
 test "result.to_err_option on ok" {
   let r: Result[Int, String] = ok(42)
-  let v: Option[String] = result.to_err_option(r)
+  let v: String? = result.to_err_option(r)
   assert_eq(option.is_none(v), true)
 }
 

@@ -13,7 +13,7 @@ fn main() -> Unit = {
   println("${xs}")
   let s = option.unwrap_or_else(some(string.repeat("ab", 2)), (() => "x"))
   println(s)
-  let nm: Option[Map[String, Bool]] = none
+  let nm: Map[String, Bool]? = none
   println("${option.unwrap_or_else(nm, (() => ["fb": true]))}")
   // Use the unwrapped values AGAIN after other allocations so a freed-then-reused
   // block would show as corruption.

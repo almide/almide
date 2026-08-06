@@ -1,6 +1,6 @@
 // @contract: C-069
-// e041-pin: exercises the DEPRECATED implicit propagation (auto-?) on purpose —
-// keep un-migrated through the ADR-0008 release-N window; rewrite at the N+1 switch (#1123).
+// ADR-0008 N+1 (#1123): migrated to EXPLICIT propagation — every formerly
+// implicit auto-? site now spells `!`; the behavior under test is unchanged.
 // #557: an effect fn's tail self-recursion must loop-convert to O(1) stack on
 // BOTH targets. The frontend auto-? wraps the tail self-call as Try{Call self}
 // (and ResultPropagation on the wasm arm further wraps it Ok(Try(Call self))),
@@ -26,8 +26,8 @@ effect fn carried(n: Int, acc: Int) -> Int = if n < 0 then fail("negative")
 else if n == 0 then acc else carried(n - 1, acc + n)
 
 effect fn main() -> Unit = {
-  let s = sum_to(1000000, 0)
-  let c = checked(2000000)
-  let a = carried(1000, 0)
+  let s = sum_to(1000000, 0)!
+  let c = checked(2000000)!
+  let a = carried(1000, 0)!
   println("${s} ${c} ${a}")
 }

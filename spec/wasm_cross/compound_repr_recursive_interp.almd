@@ -37,7 +37,7 @@ fn main() -> Unit = {
   // Recursive ADT inside containers.
   let forest: List[Tree] = [Leaf(7), Node(Leaf(8), Leaf(9))]
   println("forest=${forest}")
-  let opt_tree: Option[Tree] = some(Node(Leaf(4), Leaf(5)))
+  let opt_tree: Tree? = some(Node(Leaf(4), Leaf(5)))
   println("opt_tree=${opt_tree}")
   // ── Self-recursive record (List indirection makes it native-legal) ──
   let rleaf: RNode = { val: 1, kids: [] }
