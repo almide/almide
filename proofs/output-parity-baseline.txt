@@ -112,6 +112,7 @@ spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/destructure_let_unwrap.almd
 spec/wasm_cross/early_return_control_flow.almd
 spec/wasm_cross/effect_assign_unwrap.almd
+spec/wasm_cross/effect_option_explicit_bang.almd
 spec/wasm_cross/effect_tco.almd
 spec/wasm_cross/effect_tuple_result_tco.almd
 spec/wasm_cross/effect_unwrap_in_loop.almd
