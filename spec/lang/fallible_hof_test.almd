@@ -44,6 +44,14 @@ test "map: pipe spelling" {
   }
 }
 
+// #1127 regression: the pipe-position `??` over a Result-producing call must
+// take the RESULT-shaped unwrap (it lowered an Option-shaped Some/None match
+// — check green, rustc E0308 — until 0.56.1).
+test "map: pipe spelling with ?? fallback" {
+  assert_eq(["1", "2"] |> list.map((s) => parse_pos(s)!) ?? [0], [1, 2])
+  assert_eq(["1", "x"] |> list.map((s) => parse_pos(s)!) ?? [0], [0])
+}
+
 test "filter: fallible predicate" {
   assert_eq(list.filter([1, 20, 3], (n) => is_small(n)!) ?? [], [1, 3])
   match list.filter([1, -2, 3], (n) => is_small(n)!) {

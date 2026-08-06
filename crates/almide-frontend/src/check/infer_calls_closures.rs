@@ -847,14 +847,31 @@ impl Checker {
     /// `ExprKind::UnwrapOr` arm of [`Self::infer_pipe`]. Verbatim text move.
     fn infer_pipe_unwrap_or(&mut self, left: &mut Box<ast::Expr>, inner: &mut Box<ast::Expr>, fallback: &mut Box<ast::Expr>) -> Ty {
         let inner_ty = self.infer_pipe(left, inner);
-        let fb_ty = self.infer_expr(fallback);
-        self.unify_infer(&inner_ty, &fb_ty);
-        // UnwrapOr unwraps Option[T]/Result[T,E] → T
-        match &inner_ty {
-            Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
-            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-            _ => inner_ty,
-        }
+        let ft = self.infer_expr(fallback);
+        let resolved = resolve_ty(&inner_ty, &self.uf);
+        // #1127: annotate the piped operand with its RESOLVED type — the
+        // lowering reads it to pick the Option- vs Result-shaped unwrap
+        // (the pipe-`!` arm above has the same insert for the same reason).
+        // Without it a Result operand was matched as Some/None, a rustc
+        // E0308 behind the codegen wall.
+        self.type_map.insert(inner.id, resolved.clone());
+        // Mirror the DIRECT `??` rule (infer_expr_g3_unwrap_or): unwrap the
+        // payload first, then constrain the FALLBACK against the payload —
+        // the old code unified the fallback with the whole Option/Result.
+        let payload = if let Some(ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
+            ty
+        } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+            ft.clone()
+        } else {
+            self.emit(super::err(
+                format!("operator '??' requires Option or Result type but got {}", resolved.display()),
+                "Use '??' only on Option[T] or Result[T, E] values",
+                "operator ??",
+            ).with_code("E034"));
+            ft.clone()
+        };
+        self.constrain(payload.clone(), ft, "?? fallback");
+        payload
     }
 
     fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {

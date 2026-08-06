@@ -62,6 +62,7 @@ spec/lang/fallible_hof_test.almd :: __test_almd_filter: fallible predicate
 spec/lang/fallible_hof_test.almd :: __test_almd_find: fallible predicate
 spec/lang/fallible_hof_test.almd :: __test_almd_flat_map and filter_map: fallible callbacks
 spec/lang/fallible_hof_test.almd :: __test_almd_map: a named -> T! fn is a fallible callback
+spec/lang/fallible_hof_test.almd :: __test_almd_map: pipe spelling with ?? fallback
 spec/lang/fallible_hof_test.almd :: __test_almd_map: fallible lambda — ok path and first-err short-circuit
 #
 # (2026-08-06, #1114) option.to_result became an E-GENERIC pure bundled body
