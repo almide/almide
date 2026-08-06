@@ -208,7 +208,11 @@ fn uncoded_error_sites_ratchet() {
         let mut i = 0usize;
         while let Some(j) = text[i..].find("super::err(") {
             let j = i + j;
-            let window = &text[j..(j + 600).min(text.len())];
+            // The 600-byte window must not split a multi-byte char (an
+            // em-dash in a diagnostic message sat exactly on the boundary).
+            let mut end = (j + 600).min(text.len());
+            while !text.is_char_boundary(end) { end -= 1; }
+            let window = &text[j..end];
             let seg = match window.find("));") {
                 Some(end) => &window[..end + 3],
                 None => window,

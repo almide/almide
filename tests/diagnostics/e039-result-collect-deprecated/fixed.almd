@@ -1,9 +1,0 @@
-// E039: result.collect is deprecated (ADR-0007) — Rust's collect short-circuits
-// at the first Err, this one collected ALL errors; the name is retired to end
-// that ambiguity. All-errors collection is spelled with partition.
-effect fn main() -> Unit = {
-  let rs: List[Result[Int, String]] = [ok(1), err("x")]
-  let (oks, errs) = result.partition(rs)
-  let all: Result[List[Int], List[String]] = if list.is_empty(errs) then ok(oks) else err(errs)
-  println("${all}")
-}

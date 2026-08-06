@@ -316,10 +316,13 @@ effect fn main() -> Unit =
             status: Status::Works,
         },
         Cell {
-            name: "effect_fn_cross_call_auto_try",
+            // ADR-0008 (#1123 N+1): the cross-module effect call spells its
+            // propagation explicitly — the auto-try this cell used to pin is
+            // E041 now; what it still pins is the cross-boundary effect ABI.
+            name: "effect_fn_cross_call_explicit_bang",
             main: r#"import self as m
 effect fn main() -> Unit = {
-  let x = m.estep(7)
+  let x = m.estep(7)!
   println(int.to_string(x))
 }
 "#,

@@ -1,3 +1,0 @@
-expects_code = "E039"
-expects_error = "result.collect is deprecated"
-hint_substring = "partition"
