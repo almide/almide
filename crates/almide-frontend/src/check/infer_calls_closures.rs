@@ -786,6 +786,23 @@ impl Checker {
         // decided by the callback's SPELLING.
         for a in args.iter() {
             let ExprKind::Ident { name, .. } = &a.kind else { continue };
+            // SHADOWING FIRST. `infer_expr_g2_ident` resolves an identifier
+            // local → top-level `let` → const param → FUNCTION, so a name that
+            // any of those bind is NOT a reference to the fn of that name.
+            // Skipping this check read the function table directly and reported
+            // E006 for a plain local: `let run = take_path_run(line, at)` in
+            // tools/almide-gates, with an unrelated `effect fn run` in a
+            // SIBLING module, made `string.len(run)` "cannot call effect
+            // function 'run' from a pure function". The capability rule must
+            // key on what the identifier RESOLVES to, never on its spelling —
+            // which is the same mistake, inverted, that this check exists to
+            // fix (#1055: a bare `eff` laundering its effect bit).
+            if self.env.lookup_var(name).is_some()
+                || self.env.top_lets.contains_key(&sym(name))
+                || matches!(self.env.types.get(&sym(name)), Some(Ty::ConstParam { .. }))
+            {
+                continue;
+            }
             let Some(sig) = self.env.functions.get(&sym(name)).cloned() else { continue };
             if sig.is_effect {
                 self.check_effect_isolation(name, &sig);
