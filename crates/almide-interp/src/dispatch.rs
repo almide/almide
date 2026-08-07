@@ -672,6 +672,20 @@ pub(crate) fn is_hof(module: &str, func: &str) -> bool {
             | ("list", "zip_with")
             | ("list", "unique_by")
             | ("list", "each")
+            // The `__try_*` carriers (ADR-0006): what the checker instantiates
+            // in place of the plain name above when the callback propagates
+            // with `!`. They take a closure exactly like their siblings, so
+            // they belong on this allowlist — omitting them made the whole
+            // family fall through to `Unsupported`, which silently removed the
+            // third oracle from the DEFAULT way to write a fallible traversal.
+            // Bodies: `hofs.rs::eval_hof_list_try`.
+            | ("list", "__try_map")
+            | ("list", "__try_filter")
+            | ("list", "__try_filter_map")
+            | ("list", "__try_flat_map")
+            | ("list", "__try_find")
+            | ("list", "__try_fold")
+            | ("list", "__try_each")
             | ("map", "map")
             | ("map", "filter")
             | ("map", "fold")

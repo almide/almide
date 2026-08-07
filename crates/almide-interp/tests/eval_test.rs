@@ -930,3 +930,144 @@ fn main() -> Unit = {
 }
 
 
+
+// ── the __try_* carriers (ADR-0006's fallibility-polymorphic HOFs) ──
+//
+// These are what `list.map(xs, (x) => f(x)!)` INSTANTIATES: the checker sees
+// the callback propagate and swaps in the fallible form, whose contract is
+// first-err short-circuit. Every case is written the way a user writes it (the
+// plain HOF name with a `!` inside), so these pin the rewrite as well as the
+// carrier.
+//
+// EVERY expectation below was MEASURED from the native backend first — the
+// interp must MATCH the backends, not be "correct" in the abstract (see
+// crates/almide-interp/CLAUDE.md). That is why the err payload reads
+// `invalid digit found in string`: it is Rust's own `parse::<i64>` message,
+// surfaced verbatim, not a wrapper the interp is free to invent.
+//
+// Each member gets BOTH polarities — a full pass and a first-err — because the
+// short-circuit is the only thing separating these from their plain siblings
+// (CLAUDE.md: extend a family by matrix, never point-wise).
+
+/// The renderers the cases share: a `Result` has no bare `repr`, so each shape
+/// is matched and printed explicitly.
+const SHOW: &str = "\
+fn si(r: Result[List[Int], String]) -> String = match r {
+  ok(xs) => \"ok[\" + list.join(list.map(xs, (n) => int.to_string(n)), \",\") + \"]\",
+  err(e) => \"err:\" + e,
+}
+fn ss(r: Result[List[String], String]) -> String = match r {
+  ok(xs) => \"ok[\" + list.join(xs, \",\") + \"]\",
+  err(e) => \"err:\" + e,
+}
+fn so(r: Result[String?, String]) -> String = match r {
+  ok(o) => \"ok:\" + (o ?? \"<none>\"),
+  err(e) => \"err:\" + e,
+}
+fn sn(r: Result[Int, String]) -> String = match r {
+  ok(n) => \"ok:\" + int.to_string(n),
+  err(e) => \"err:\" + e,
+}
+fn su(r: Result[Unit, String]) -> String = match r {
+  ok(_) => \"ok:unit\",
+  err(e) => \"err:\" + e,
+}
+";
+
+const PARSE_ERR: &str = "err:invalid digit found in string\n";
+
+fn expect_try(body: &str, expected: &str) {
+    expect_out(&format!("{}{}", SHOW, main_print(body)), expected);
+}
+
+#[test]
+fn try_map_ok_and_first_err() {
+    expect_try(
+        "  println(si(list.map([\"1\", \"2\"], (s) => int.parse(s)!)))",
+        "ok[1,2]\n",
+    );
+    expect_try(
+        "  println(si(list.map([\"1\", \"zz\", \"3\"], (s) => int.parse(s)!)))",
+        PARSE_ERR,
+    );
+}
+
+#[test]
+fn try_filter_ok_and_first_err() {
+    expect_try(
+        "  println(ss(list.filter([\"1\", \"2\"], (s) => int.parse(s)! > 1)))",
+        "ok[2]\n",
+    );
+    expect_try(
+        "  println(ss(list.filter([\"1\", \"zz\"], (s) => int.parse(s)! > 1)))",
+        PARSE_ERR,
+    );
+}
+
+#[test]
+fn try_filter_map_ok_and_first_err() {
+    expect_try(
+        "  println(ss(list.filter_map([\"1\", \"2\"], (s) => if int.parse(s)! > 1 then some(s) else none)))",
+        "ok[2]\n",
+    );
+    expect_try(
+        "  println(ss(list.filter_map([\"zz\"], (s) => if int.parse(s)! > 1 then some(s) else none)))",
+        PARSE_ERR,
+    );
+}
+
+#[test]
+fn try_flat_map_ok_and_first_err() {
+    expect_try(
+        "  println(si(list.flat_map([\"1\", \"2\"], (s) => [int.parse(s)!, 0])))",
+        "ok[1,0,2,0]\n",
+    );
+    expect_try(
+        "  println(si(list.flat_map([\"1\", \"zz\"], (s) => [int.parse(s)!, 0])))",
+        PARSE_ERR,
+    );
+}
+
+#[test]
+fn try_find_hit_stops_before_a_later_error() {
+    // The HIT ends the traversal, so the trailing "zz" is NEVER parsed: the
+    // short-circuit is on the find, not only on the failure.
+    expect_try(
+        "  println(so(list.find([\"1\", \"2\", \"zz\"], (s) => int.parse(s)! == 2)))",
+        "ok:2\n",
+    );
+    expect_try(
+        "  println(so(list.find([\"1\"], (s) => int.parse(s)! == 9)))",
+        "ok:<none>\n",
+    );
+    expect_try(
+        "  println(so(list.find([\"zz\", \"1\"], (s) => int.parse(s)! == 1)))",
+        PARSE_ERR,
+    );
+}
+
+#[test]
+fn try_fold_ok_and_first_err() {
+    expect_try(
+        "  println(sn(list.fold([\"1\", \"2\"], 0, (acc, s) => acc + int.parse(s)!)))",
+        "ok:3\n",
+    );
+    expect_try(
+        "  println(sn(list.fold([\"1\", \"zz\"], 0, (acc, s) => acc + int.parse(s)!)))",
+        PARSE_ERR,
+    );
+}
+
+#[test]
+fn try_each_ok_and_first_err() {
+    // `each` is the effect-only member, so the short-circuit is visible as the
+    // MISSING "e3" line: the tail element is never reached.
+    expect_try(
+        "  println(su(list.each([\"1\", \"2\"], (s) => println(\"e\" + int.to_string(int.parse(s)!)))))",
+        "e1\ne2\nok:unit\n",
+    );
+    expect_try(
+        "  println(su(list.each([\"zz\", \"3\"], (s) => println(\"e\" + int.to_string(int.parse(s)!)))))",
+        PARSE_ERR,
+    );
+}

@@ -87,6 +87,30 @@ impl<'a> Interpreter<'a> {
             "zip_with" => self.hof_zip_with(evaled),
             "unique_by" => self.hof_unique_by(evaled),
             "scan" => self.hof_scan(evaled),
+            _ => self.eval_hof_list_try(f, evaled),
+        }
+    }
+
+    /// The `__try_*` carriers (ADR-0006): the fallibility-polymorphic form of
+    /// the HOFs above, instantiated when a callback propagates with `!`. Each
+    /// is its plain sibling plus FIRST-ERR SHORT-CIRCUIT — the callback yields
+    /// `Result[_, E]`, the first `err` becomes the whole call's `err` and stops
+    /// the traversal, and a full pass wraps its result in `ok`.
+    ///
+    /// These are almide-bodied (`stdlib/list.almd`) but cannot reach that body
+    /// here for the same reason the plain HOFs cannot: an interp `Closure` is
+    /// not the `Rc<dyn Fn>` the generic path wants. Without these arms the
+    /// whole family abstained, which silently removed the third oracle from
+    /// the idiom ADR-0006 makes the DEFAULT way to write a fallible traversal.
+    fn eval_hof_list_try(&mut self, f: &str, evaled: &[Value]) -> Flow {
+        match f {
+            "__try_map" => self.hof_try_map(evaled),
+            "__try_filter" => self.hof_try_filter(evaled),
+            "__try_filter_map" => self.hof_try_filter_map(evaled),
+            "__try_flat_map" => self.hof_try_flat_map(evaled),
+            "__try_find" => self.hof_try_find(evaled),
+            "__try_fold" => self.hof_try_fold(evaled),
+            "__try_each" => self.hof_try_each(evaled),
             _ => Flow::Unsupported(format!("HOF list.{}", f)),
         }
     }
@@ -704,3 +728,189 @@ impl<'a> Interpreter<'a> {
 }
 
 include!("hofs_list_ops.rs");
+
+/// The `__try_*` carriers — the fallibility-polymorphic HOF family (ADR-0006).
+///
+/// Every one is `<plain sibling> + first-err short-circuit`. Keeping them in
+/// one block makes the shared shape checkable by eye: unwrap the callback's
+/// `Result`, return its `err` verbatim on the first failure (so the error the
+/// caller sees is the callback's own, NOT a wrapper), and `ok`-wrap on a full
+/// pass. `stdlib/list.almd` is the specification; the recursion there and the
+/// loop here agree because both stop at the first `err`.
+impl<'a> Interpreter<'a> {
+    /// Apply `clo` and split the callback's `Result`: `Ok(payload)` continues,
+    /// `Err(e)` becomes the whole call's `err` (returned through the outer
+    /// `?`-style early exit at each call site).
+    fn try_step(&mut self, clo: &Rc<crate::Closure>, args: Vec<Value>) -> Result<Value, Flow> {
+        let r = match self.apply_closure(clo, args) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        match r {
+            Value::Result(Ok(v)) => Ok(*v),
+            Value::Result(Err(e)) => Err(Flow::val(Value::Result(Err(e)))),
+            // The callback of a `__try_*` is fallible BY CONSTRUCTION — the
+            // checker only instantiates this form when the body propagates.
+            // A non-Result here means the IR reaching the interp disagrees
+            // with that, so abstain rather than invent a polarity.
+            other => Err(Flow::Unsupported(format!(
+                "`__try_*` callback returned {} (expected a Result — the \
+                 fallible HOF form is only instantiated for a propagating \
+                 callback, ADR-0006)",
+                other.type_name()
+            ))),
+        }
+    }
+
+    fn hof_try_map(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            match self.try_step(&clo, vec![item]) {
+                Ok(v) => out.push(v),
+                Err(f) => return f,
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(Value::list(out)))))
+    }
+
+    fn hof_try_filter(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::new();
+        for item in items {
+            match self.try_step(&clo, vec![item.clone()]) {
+                Ok(Value::Bool(true)) => out.push(item),
+                Ok(_) => {}
+                Err(f) => return f,
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(Value::list(out)))))
+    }
+
+    fn hof_try_filter_map(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::new();
+        for item in items {
+            match self.try_step(&clo, vec![item]) {
+                // `f: A -> Result[B?, E]` — the OPTION selects, the RESULT fails.
+                Ok(Value::Option(Some(v))) => out.push(*v),
+                Ok(_) => {}
+                Err(f) => return f,
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(Value::list(out)))))
+    }
+
+    fn hof_try_flat_map(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::new();
+        for item in items {
+            let v = match self.try_step(&clo, vec![item]) {
+                Ok(v) => v,
+                Err(f) => return f,
+            };
+            match v.as_iter_items() {
+                Some(sub) => out.extend(sub),
+                None => {
+                    return Flow::Unsupported(
+                        "`list.__try_flat_map` callback returned a non-list ok payload".into(),
+                    )
+                }
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(Value::list(out)))))
+    }
+
+    fn hof_try_find(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        for item in items {
+            match self.try_step(&clo, vec![item.clone()]) {
+                // A HIT stops the traversal — the predicate is NOT run on the
+                // rest, so a later element that would err is never reached.
+                Ok(Value::Bool(true)) => {
+                    return Flow::val(Value::Result(Ok(Box::new(Value::Option(Some(Box::new(
+                        item,
+                    )))))))
+                }
+                Ok(_) => {}
+                Err(f) => return f,
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(Value::Option(None)))))
+    }
+
+    fn hof_try_fold(&mut self, args: &[Value]) -> Flow {
+        // `__try_fold(receiver, init, (acc, x) => Result[B, E])`
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let mut acc = match args.get(1) {
+            Some(v) => v.clone(),
+            None => return Flow::Abort("internal: __try_fold missing init".into()),
+        };
+        let clo = match Self::recv_closure(args, 2) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        for item in items {
+            match self.try_step(&clo, vec![acc.clone(), item]) {
+                Ok(v) => acc = v,
+                Err(f) => return f,
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(acc))))
+    }
+
+    fn hof_try_each(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        for item in items {
+            if let Err(f) = self.try_step(&clo, vec![item]) {
+                return f;
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
+    }
+}
