@@ -338,3 +338,96 @@ pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>) -> Result<(), S
     err(&format!("Added {} to almide.toml", name));
     Ok(())
 }
+
+/// `almide update [dep]` (#1131): advance a LOCKED git dependency to its
+/// ref's current remote head.
+///
+/// The lock is intentionally sticky — `fetch_all_deps` reuses its commit so
+/// builds reproduce, and `almide add` on an existing dep re-writes the same
+/// pin. That left no sanctioned way FORWARD: `almide clean` clears the cache
+/// (not the lock), and the lock's own header says not to edit it. This is
+/// that path — it rewrites only the named entries, leaving every other pin
+/// byte-identical.
+pub fn update_locked_deps(project: &Project, only: Option<&str>) -> Result<Vec<(String, String, String)>, String> {
+    let lock_path = project.root.join("almide.lock");
+    let mut locked = if lock_path.exists() {
+        parse_lock_file(&lock_path)?
+    } else {
+        Vec::new()
+    };
+    let targets: Vec<&Dependency> = match only {
+        Some(name) => {
+            let found: Vec<&Dependency> =
+                project.dependencies.iter().filter(|d| d.name == name).collect();
+            if found.is_empty() {
+                return Err(format!("Dependency '{}' not found in almide.toml", name));
+            }
+            found
+        }
+        None => project.dependencies.iter().collect(),
+    };
+    let mut changed = Vec::new();
+    for dep in targets {
+        let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+        // A tag pins by definition — advancing it would silently change what
+        // the manifest asked for. Only floating refs (branches, the default
+        // `main`) move.
+        if dep.tag.is_some() {
+            err(&format!("{} is pinned to tag {} — not updated", dep.name, ref_name));
+            continue;
+        }
+        let head = git_remote_head(&dep.git, ref_name)?;
+        let before = locked.iter().find(|l| l.name == dep.name).map(|l| l.commit.clone());
+        if before.as_deref() == Some(head.as_str()) {
+            err(&format!("{} already at {} ({})", dep.name, &head[..head.len().min(12)], ref_name));
+            continue;
+        }
+        // Drop the stale cache dir so the next fetch re-clones at the new head.
+        let cached = cache_dir().join(&dep.name).join(ref_name);
+        let _ = std::fs::remove_dir_all(&cached);
+        match locked.iter_mut().find(|l| l.name == dep.name) {
+            Some(entry) => {
+                entry.git = dep.git.clone();
+                entry.ref_name = ref_name.to_string();
+                entry.commit = head.clone();
+            }
+            None => locked.push(LockedDep {
+                name: dep.name.clone(),
+                git: dep.git.clone(),
+                ref_name: ref_name.to_string(),
+                commit: head.clone(),
+            }),
+        }
+        changed.push((dep.name.clone(), before.unwrap_or_default(), head));
+    }
+    if !changed.is_empty() {
+        write_lock_file(&lock_path, &locked)?;
+    }
+    Ok(changed)
+}
+
+/// The remote's current commit for `ref_name` — read WITHOUT cloning
+/// (`git ls-remote`), so `update` costs one network round-trip per dep.
+fn git_remote_head(git_url: &str, ref_name: &str) -> Result<String, String> {
+    let out = std::process::Command::new("git")
+        .args(["ls-remote", git_url, ref_name])
+        .output()
+        .map_err(|e| format!("git ls-remote failed: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git ls-remote {} {} failed: {}",
+            git_url, ref_name, String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let hash = text
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().next())
+        .unwrap_or_default()
+        .to_string();
+    if hash.is_empty() {
+        return Err(format!("no ref '{}' at {}", ref_name, git_url));
+    }
+    Ok(hash)
+}

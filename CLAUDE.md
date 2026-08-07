@@ -93,6 +93,7 @@ almide fmt --check spec/          # Formatting gate (non-zero on drift)
 almide fmt --no-import-edit stdlib/  # Format WITHOUT touching imports (splice-context sources)
 almide clean                     # Clear dependency cache
 almide add almide/pkg@v0.1.0    # Add dependency (github.com/almide/ default)
+almide update [dep]              # Advance a locked git dep to its ref's remote head (tags never move)
 almide deps                      # List dependencies
 almide dep-path bindgen          # Print cached source dir of a dependency
 almide app.almd --target rust    # Emit Rust source

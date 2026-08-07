@@ -207,6 +207,11 @@ enum Commands {
         #[arg(long, short)]
         output: Option<String>,
     },
+    /// Advance a locked git dependency to its ref's current remote head
+    Update {
+        /// Dependency name (default: every non-tag-pinned dependency)
+        dep: Option<String>,
+    },
     /// Clear dependency cache
     Clean,
     /// Add a dependency
@@ -647,6 +652,32 @@ fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>) {
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 }
 
+/// `dispatch`'s `Commands::Update` arm (#1131): the sanctioned path FORWARD
+/// for a locked git dependency — `add` re-pins the old commit and `clean`
+/// only clears the cache, so before this the sole escape was hand-editing
+/// the lock the file itself says not to edit.
+fn dispatch_update(dep: Option<String>) {
+    if !std::path::Path::new("almide.toml").exists() {
+        err(&format!("No almide.toml found"));
+        std::process::exit(1);
+    }
+    let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    let changed = project_fetch::update_locked_deps(&proj, dep.as_deref())
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    if changed.is_empty() {
+        out(&format!("No dependencies updated"));
+        return;
+    }
+    for (name, before, after) in &changed {
+        let short = |h: &String| h.chars().take(12).collect::<String>();
+        match before.is_empty() {
+            true => out(&format!("{} -> {}", name, short(after))),
+            false => out(&format!("{} {} -> {}", name, short(before), short(after))),
+        }
+    }
+}
+
 /// `dispatch`'s `Commands::Deps` arm. Extracted verbatim.
 fn dispatch_deps() {
     if std::path::Path::new("almide.toml").exists() {
@@ -707,6 +738,7 @@ fn dispatch_rest(command: Commands) {
         }
         Commands::Clean => cli::cmd_clean(),
         Commands::Add { pkg, git, tag } => dispatch_add(pkg, git, tag),
+        Commands::Update { dep } => dispatch_update(dep),
         Commands::Deps => dispatch_deps(),
         Commands::DepPath { name } => dispatch_dep_path(name),
         Commands::Install { spec, tag, branch, name, bin_dir, target } => {
