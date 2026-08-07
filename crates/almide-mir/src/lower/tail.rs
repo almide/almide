@@ -570,7 +570,9 @@ impl LowerCtx {
             | IrExprKind::BinOp { .. }
             | IrExprKind::UnOp { .. }
             | IrExprKind::Try { .. }
-            | IrExprKind::UnwrapOr { .. }
+            // (`UnwrapOr` used to land here — it has its own arm below since
+            // #1134: the `fresh` path can only Alloc{Opaque} for it, which is
+            // the very wall the dedicated rewrite removes.)
             | IrExprKind::ToOption { .. }
             | IrExprKind::OptionalChain { .. }
             // A CAPTURING CLOSURE value returned is a fresh heap env; a RANGE is a fresh value —
@@ -629,6 +631,14 @@ impl LowerCtx {
             // EXECUTES: desugar to a nested heap-result `if` and run only the matched
             // arm; otherwise LINEARIZE to one deferred `Alloc{Opaque}`.
             IrExprKind::Match { .. } => self.lower_tail_heap_match(tail),
+            // #1134: a heap-Ok `??` RETURNED (`fn f() = list.map(xs, (x) =>
+            // g(x)!)! ?? fb` — the polymorphic-HOF idiom's consumer). The
+            // scalar `??` machinery is for scalar payloads and the heap paths
+            // are all bind-position, so this fell to the terminal Opaque wall.
+            // Rewrite LOCALLY (position-aware, unlike a whole-body desugar
+            // which would take the C-149 share shapes away from their own
+            // proven paths) into the match the tail lowering already proves.
+            IrExprKind::UnwrapOr { .. } => self.lower_tail_heap_unwrap_or(tail),
             // `fn apply(g, x) = g(x)` — a heap-result call through a KNOWN funcref (a lifted
             // lambda / a function-typed param bound to a table slot). EXECUTE it via
             // `Op::CallIndirect` and move the fresh owned result out, exactly like the Named /

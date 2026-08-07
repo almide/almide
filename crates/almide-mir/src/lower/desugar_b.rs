@@ -519,21 +519,31 @@ pub fn desugar_tuple_unwrap_or(body: &IrExpr) -> Option<IrExpr> {
                 *changed = true;
                 let p = almide_ir::VarId(*next);
                 *next += 1;
+                let bind = almide_ir::IrPattern::Bind { var: p, ty: e.ty.clone() };
+                let payload = IrExpr {
+                    kind: IrExprKind::Var { id: p },
+                    ty: e.ty.clone(),
+                    span: e.span.clone(),
+                    def_id: e.def_id,
+                };
+                // Result and Option carry the SAME shape under different
+                // constructors — Option's polarity is len-as-tag-opposite, so
+                // the pattern pair must follow the subject's own type.
+                let (hit_pat, miss_pat) = if expr.ty.is_result() {
+                    (
+                        almide_ir::IrPattern::Ok { inner: Box::new(bind) },
+                        almide_ir::IrPattern::Err { inner: Box::new(almide_ir::IrPattern::Wildcard) },
+                    )
+                } else {
+                    (
+                        almide_ir::IrPattern::Some { inner: Box::new(bind) },
+                        almide_ir::IrPattern::None,
+                    )
+                };
                 let arms = vec![
+                    almide_ir::IrMatchArm { pattern: hit_pat, guard: None, body: payload },
                     almide_ir::IrMatchArm {
-                        pattern: almide_ir::IrPattern::Some {
-                            inner: Box::new(almide_ir::IrPattern::Bind { var: p, ty: e.ty.clone() }),
-                        },
-                        guard: None,
-                        body: IrExpr {
-                            kind: IrExprKind::Var { id: p },
-                            ty: e.ty.clone(),
-                            span: e.span.clone(),
-                            def_id: e.def_id,
-                        },
-                    },
-                    almide_ir::IrMatchArm {
-                        pattern: almide_ir::IrPattern::None,
+                        pattern: miss_pat,
                         guard: None,
                         body: fallback.clone(),
                     },
