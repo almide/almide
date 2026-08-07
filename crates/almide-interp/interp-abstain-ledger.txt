@@ -91,6 +91,7 @@ map_wide_int_key  out-of-interp-scope capability: prim.alloc_map
 math_atan_tanh  out-of-interp-scope capability: transcendental `math.atan` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 math_explog  out-of-interp-scope capability: transcendental `math.exp` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 math_log_gamma  out-of-interp-scope capability: transcendental `math.fpow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+math_pow  out-of-interp-scope capability: float `**` (backends use vendored musl-libm pow; interp's platform libm diverges in the last ULP — no oracle match)
 matrix_dims_guard  out-of-interp-scope capability: prim.alloc_list_str
 matrix_dims_guard_overflow  out-of-interp-scope capability: prim.alloc_list_str
 matrix_head_count_domain  out-of-interp-scope capability: prim.alloc_list_str
