@@ -152,6 +152,7 @@ almide fmt                              # src/**/*.almd を整形
 almide fmt app.almd                     # 指定ファイルを整形
 almide fmt --check                      # 差分があれば非ゼロで終了（CI 用）
 almide fmt --dry-run                    # 書き込みせず差分表示
+almide fmt --no-import-edit stdlib/     # import 行を一切触らず整形(splice-context ソース用)
 ```
 
 ---

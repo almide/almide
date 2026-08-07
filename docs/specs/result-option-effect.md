@@ -34,7 +34,8 @@ fn g(s: String) -> Int?!            // Result[Option[Int], String](? が先、! 
 ```
 
 正準形は `T?`: `almide fmt` は `Option[T]` を `T?` へ正規化する(D3)。
-stdlib ソースは splice-context のため長綴りのまま(境界での単一化証人)。
+stdlib も `fmt --no-import-edit` で正規化済み(2026-08-07 — 単一化の証人は
+spec/lang/option_marker_test.almd が担う)。
 
 ### Never (bottom type)
 ```
@@ -42,7 +43,7 @@ process.exit(n) : Never   // 戻らない関数の戻り値型
 ```
 Never はどの型にも代入可能。guard else, if then, match arm で使える。
 
-### 可謬マーカー `-> T!`(ADR-0002 Phase 1)
+### 可謬マーカー `-> T!`(ADR-0002 Phase 1 + 1b)
 
 fn 宣言の戻り位置に限り、`T!` は `Result[T, String]` の糖衣。可謬性(fallibility)と
 効果(effect)は直交する 2 軸であり、4 象限すべてが綴れる:
@@ -56,14 +57,16 @@ effect fn f() -> Int!     // effect・可謬
 
 E は常に String(ADR-0002 D2)。カスタムエラー型は明示の `Result[T, MyError]` で綴る。
 `!` マーカーは fn 宣言の戻り位置**のみ**で合法 — let 注釈などでは parse エラー。
-本体は Result を直接書く(パススルー / ok / err)。`!` 演算子は本体内で伝搬する:
+`!` 演算子は本体内で伝搬し、**値 tail は ok(...) に自動 lift** される
+(Phase 1b — effect fn の lift と同じ人間工学。Result 型の exit は不変):
 
 ```almide
-fn parse_port(s: String) -> Int! = int.parse(s)     // パススルー
+fn parse_port(s: String) -> Int! = int.parse(s)     // パススルー(既に Result)
+fn double_port(s: String) -> Int! = int.parse(s)! * 2  // 値 tail → ok(...) に lift
 fn checked(s: String) -> Int! = {
   let n = int.parse(s)!                              // ! が T! 本体で伝搬
   guard n > 0 else err("must be positive")
-  ok(n)
+  n                                                  // 値 tail lift(ok(n) でも可)
 }
 ```
 

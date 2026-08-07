@@ -86,15 +86,17 @@ effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
 ### Pure-fallible marker `-> T!` (ADR-0002 Phase 1)
 
 `-> T!` declares a pure fn that can fail: the return IS `Result[T, String]`.
-The body writes the Result directly — pass a fallible call through, or build
-it with ok/err; `!` propagates inside (no effect fn needed):
+`!` propagates inside (no effect fn needed), and a VALUE tail lifts into
+`ok(...)` automatically — write the payload, or write the Result explicitly;
+both work:
 
 ```almide
-fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through
+fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through (already a Result)
+fn double_port(s: String) -> Int! = int.parse(s)! * 2  // value tail — lifts into ok(...)
 fn checked(s: String) -> Int! = {
   let n = int.parse(s)!                              // ! propagates in a T! body
   guard n > 0 else err("must be positive")
-  ok(n)
+  n                                                  // value tail lifts (ok(n) also fine)
 }
 ```
 

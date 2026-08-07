@@ -335,7 +335,11 @@ impl Checker {
         self.env.lambda_depth = 0;
         let body_ity = self.infer_expr(body);
         self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
-        if effect.unwrap_or(false) {
+        // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
+        // value-tail acceptance an effect fn's lifted body has — the
+        // lowering wraps the T-typed exits in ok(...).
+        let fallible_marker = matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!");
+        if effect.unwrap_or(false) || fallible_marker {
             self.constrain_effect_body(name, &ret_ty, body_ity);
         } else {
             // Capture the trailing `let` binding name (if any) to specialize

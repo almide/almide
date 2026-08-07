@@ -76,7 +76,7 @@ effect fn add_strings(a: String, b: String) -> Result[Int, String] = {
 
 ### How it works
 
-**Type checker (`infer.rs`):** The `Unwrap` expression extracts the inner type -- `Result[T, E]` becomes `T`, `Option[T]` becomes `T`. The `auto_unwrap` flag (set to `true` in effect fn bodies) also allows `let` bindings to automatically narrow `Result[T, E]` to `T` when no explicit type annotation is given.
+**Type checker (`infer.rs`):** The `Unwrap` expression extracts the inner type -- `Result[T, E]` becomes `T`, `Option[T]` becomes `T`. Implicit narrowing of un-annotated `let` bindings was REMOVED with ADR-0008 (v0.55.0): a fallible call yields a Result VALUE in every position, the formerly-implicit sites are the hard errors E041/E042, and `let _ = f()` is the sanctioned discard (C-217). See docs/specs/result-option-effect.md §3.
 
 **Codegen (`pass_result_propagation.rs`):** The `ResultPropagationPass` translates `!` into `?` (Rust's try operator). For match subjects, Try is **not** inserted -- you match on `ok`/`err` variants directly.
 
@@ -120,7 +120,7 @@ effect fn bad() -> Result[Unit, String] = {
 
 ### Type behavior
 
-Each `fan` expression's Result type is auto-unwrapped: `Result[T, E]` becomes `T`. A single-expression `fan` returns `T`; multiple expressions return a tuple `(T1, T2, ...)`.
+A `fan` ALL-block / `fan.settle` yields its tuple (no Result wrapper — nothing to unwrap). The Result-yielding forms (`fan.any`, the mappers, `fan.race`) follow ADR-0008: the Result is a VALUE, and a binding spells its propagation explicitly (`let v = fan.any { ... }!`). Test: `spec/wasm_cross/fan_any_early_winner.almd` and the fan fixtures migrated at the 0.55 switch.
 
 ```
 effect fn example() -> Result[Unit, String] = {
@@ -179,7 +179,7 @@ test "reads a file" {
 }
 ```
 
-Test functions do not return `Result` -- they return `Unit`. When an effect fn's return type is lifted to `Result` by the codegen, calls to that function inside tests are auto-unwrapped via `.unwrap()` rather than `?`.
+Test functions do not return `Result` -- they return `Unit`. An effect fn called inside a test yields its EXPLICIT Result value: unwrap it with `!` (panics the test on err), or consume it with `??` / an ok/err match. See docs/specs/result-option-effect.md §5.
 
 Test: `spec/lang/effect_fn_test.almd` -- all test blocks call effect functions directly
 
