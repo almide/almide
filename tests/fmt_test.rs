@@ -366,6 +366,43 @@ fn fmt_record_type_without_comments_stays_single_line() {
     assert!(out.contains("type Point = { x: Int, y: Int }"), "{out}");
 }
 
+// ---- #1129: comment ATTACHMENT (not just idempotence) ----
+
+/// The fmt roundtrip gate is blind to this class: a shifted output is itself
+/// a fixpoint. A leading declaration comment must stay on ITS declaration
+/// even when the file's import list changes during formatting (an unused
+/// import removal used to leave a stale `comment_map` slot, so every later
+/// decl read its predecessor's comments — silent doc corruption, #1090's
+/// "the compiler cannot reconstruct a comment" principle).
+#[test]
+fn fmt_keeps_leading_comments_on_their_declaration() {
+    let src = "// header line one\n\
+               // header line two\n\
+               import testing\n\
+               \n\
+               fn alpha() -> Int = 1\n\
+               \n\
+               // label A: belongs to beta\n\
+               fn beta(c: Bool) -> Int = 2\n\
+               \n\
+               // label B: belongs to gamma\n\
+               fn gamma() -> Int = 3\n";
+    let out = roundtrip(src);
+    let lines: Vec<&str> = out.lines().collect();
+    for (comment, decl) in [
+        ("// label A: belongs to beta", "fn beta"),
+        ("// label B: belongs to gamma", "fn gamma"),
+    ] {
+        let ci = lines.iter().position(|l| l.trim() == comment)
+            .unwrap_or_else(|| panic!("comment {comment:?} vanished:\n{out}"));
+        assert!(
+            lines.get(ci + 1).is_some_and(|l| l.trim_start().starts_with(decl)),
+            "{comment:?} no longer sits above {decl:?}:\n{out}"
+        );
+    }
+    assert!(out.starts_with("// header line one"), "file header moved:\n{out}");
+}
+
 // ---- ADR-0010: `T?` Option shorthand ----
 
 // The shorthand round-trips in every type position, and a written

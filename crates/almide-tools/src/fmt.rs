@@ -176,17 +176,47 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
     // Removal consults the token-level SUPERSET, not the AST walk: deleting a
     // live import destroys the program, so recall beats precision here.
     let before_len = program.imports.len();
-    program.imports.retain(|d| match d {
+    // #1129: `comment_map` is walked POSITIONALLY (module?, imports…, decls…),
+    // so dropping an import must drop its comment slot too — otherwise every
+    // later declaration reads its PREDECESSOR's comments and the labels
+    // silently attach to the wrong fn (the one artifact the compiler cannot
+    // reconstruct, #1090's principle).
+    let module_slots = usize::from(matches!(program.decls.first(), Some(Decl::Module { .. })));
+    let mut import_idx = 0usize;
+    let mut dropped_slots: Vec<usize> = Vec::new();
+    program.imports.retain(|d| {
+        let slot = module_slots + import_idx;
+        import_idx += 1;
+        match d {
         Decl::Import { path, alias, .. } => {
             let name = alias.as_ref()
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| path.last().map(|s| s.to_string()).unwrap_or_default());
             if name.starts_with('_') { return true; }
             if path.first().map(|s| s.as_str()) == Some("self") { return true; }
-            used.contains(&name) || token_refs.contains_key(&name)
+            let keep = used.contains(&name) || token_refs.contains_key(&name);
+            if !keep { dropped_slots.push(slot); }
+            keep
         }
         _ => true,
+        }
     });
+    for slot in dropped_slots.into_iter().rev() {
+        if slot < program.comment_map.len() {
+            let carried = program.comment_map.remove(slot);
+            // The dropped import's own leading comments belong to whatever
+            // now occupies that position — prepend, never discard.
+            if !carried.is_empty() {
+                if let Some(next) = program.comment_map.get_mut(slot) {
+                    let mut merged = carried;
+                    merged.extend(std::mem::take(next));
+                    *next = merged;
+                } else {
+                    program.comment_map.push(carried);
+                }
+            }
+        }
+    }
     let removed = before_len - program.imports.len();
     if removed > 0 {
         messages.push(format!("Removed {} unused import(s)", removed));
