@@ -275,6 +275,31 @@ pub fn run_ladder(
                     .into(),
             };
         }
+        // Native SUCCEEDED — but is that termination evidence, or LLVM?
+        // #924, seed 1785908634988319229 index 724 seeded
+        // `spec/wasm_cross/effect_assign_unwrap.almd`'s `var seq = 0` with
+        // `i64::MIN`, making its counting loop run ~9.2e18 times. The loop is
+        // effect-free, so LLVM deletes it and computes the exit value
+        // analytically: native finishes in 3ms. That is NOT lowerable — the
+        // generated cargo project pins `[profile.dev] opt-level = 1` because
+        // mutual tail calls become loops only via LLVM's TCO
+        // (`src/cli/cargo_build.rs`), so there is no unoptimized native leg to
+        // fall back on. The wasm renderer elides nothing, runs the loop, and
+        // times out honestly — and the ladder mints a divergence for a
+        // program that simply does not terminate.
+        //
+        // The reference interpreter is the one optimizer-free judge here, so
+        // it decides: fuel exhaustion on a program this small means
+        // non-termination, and then native's completion is elision, not an
+        // oracle. Abstention (`Unsupported`) deliberately does NOT suppress.
+        if reference.is_some_and(|r| r.exhausts_fuel(source)) {
+            return Outcome::Skipped {
+                reason: "wasm hung on a program the reference interpreter cannot \
+                         terminate either (native completes only because LLVM elides \
+                         the loop) — no termination oracle"
+                    .into(),
+            };
+        }
         return Outcome::Finding(Finding {
             rung: Rung::Run,
             kind: FindingKind::Hang,
