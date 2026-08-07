@@ -455,6 +455,36 @@ impl LowerCtx {
                     self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
                     let payload = self.fresh_value();
                     self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 8 }, dst: Some(payload), args: vec![addr] });
+                    // RELEASE the Result block. The payload is a SCALAR by the
+                    // arm's own guard (`!is_heap_ty(&expr.ty)`), so it cannot
+                    // alias the container — freeing the box cannot free what
+                    // the payload holds, and the load above already happened.
+                    //
+                    // Without this the block leaked once PER EVALUATION. In a
+                    // straight-line body that is one abandoned Result; inside a
+                    // HOF whose lambda unwraps (`list.map(xs, (x) => f(x)!)` in
+                    // a test block, where L9 keeps `!` as unwrap instead of
+                    // instantiating the fallible form) it is one per ELEMENT,
+                    // and the loop lowering's per-iteration balance is broken.
+                    // The kernel-proven ownership checker caught it as the
+                    // witness `i` — an acquire with no matching release.
+                    //
+                    // Which release depends on who owns the block: anything the
+                    // inner lowering registered since `lhh_mark` is this
+                    // sub-expression's own temporary and is released here (so a
+                    // loop iteration stays internally balanced); a block the
+                    // OUTER scope already tracks stays its owner's to free; and
+                    // an untracked block — the common case, since the Result is
+                    // a fresh call result nobody registered — needs the drop
+                    // emitted explicitly or it is simply abandoned.
+                    let split = lhh_mark.min(self.live_heap_handles.len());
+                    let owned_outside = self.live_heap_handles[..split].contains(&block);
+                    let owned_inside = self.live_heap_handles[split..].contains(&block);
+                    self.drop_arm_locals(lhh_mark);
+                    if !owned_outside && !owned_inside {
+                        let op = self.drop_op_for(block);
+                        self.ops.push(op);
+                    }
                     return Some(payload);
                 }
                 self.ops.truncate(ops_mark);

@@ -277,6 +277,13 @@ fn unresolved_import_wall(
 /// cross-module siblings (empty ⇒ the single-file path); each is inferred + `lower_module`d into
 /// `ir.modules` so a cross-module record/variant type reaches `build_record_layouts`. A parse or
 /// type error is a clean WALL (`Err`), never an abort.
+/// `source_to_ir_with` for the certificate pre-flight (test bodies included).
+pub(crate) fn source_to_ir_for_certs(
+    source: &str,
+) -> Result<almide_ir::IrProgram, crate::lower::LowerError> {
+    source_to_ir_with(source, &[])
+}
+
 fn source_to_ir_with(
     source: &str,
     modules: &[(String, almide_lang::ast::Program, bool)],

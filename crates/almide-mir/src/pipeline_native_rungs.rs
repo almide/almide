@@ -371,3 +371,45 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     )
 }
 
+
+/// Every function's ownership certificate, INCLUDING `test` bodies — the
+/// pre-flight view of what `proofs/corpus-wall.sh` hands to the kernel-proven
+/// checker.
+///
+/// `debug_dump_mir` skips test fns, and for a long time nothing else looked at
+/// them locally either: the only thing that checked a test body's ownership was
+/// the Coq-extracted checker in CI, which needs an opam/coqc toolchain most
+/// working copies do not have. A leak reachable ONLY from a test block (the L9
+/// fork keeps `!` as unwrap there, so a HOF callback that unwraps takes a
+/// lowering path ordinary fn bodies never reach) was therefore invisible until
+/// a push went red. This makes that view available in-process.
+///
+/// Returns `(function name, certificate)` pairs; a function outside the
+/// lowering subset contributes nothing (an honest wall is not a certificate).
+pub fn ownership_certificates(source: &str) -> Result<Vec<(String, String)>, LowerError> {
+    let _strict = crate::lower::StrictValuesGuard::set(true);
+    let ir = crate::pipeline::source_to_ir_for_certs(source)?;
+    let globals = std::collections::HashMap::new();
+    let global_inits = std::collections::HashMap::new();
+    let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
+    let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
+    let mut out = Vec::new();
+    for func in &ir.functions {
+        let Ok(all) = crate::lower::lower_function_all_with_globals(
+            func,
+            &globals,
+            &global_inits,
+            &record_layouts,
+            &variant_layouts,
+        ) else {
+            continue;
+        };
+        for f in all {
+            out.push((
+                f.name.to_string(),
+                crate::certificate::ownership_certificate(&f),
+            ));
+        }
+    }
+    Ok(out)
+}
