@@ -7,7 +7,7 @@
 
 ## Active
 
-78 items
+79 items
 
 | Item | Description |
 |------|-------------|
@@ -30,6 +30,7 @@
 | [Deterministic Bounds — legalising a bound on computation under byte-identity](active/deterministic-bounds.md) | Legalising fan.timeout under byte-identity — fuel, deterministic allocation, winner order, effect isolation |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) | Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause |
+| [Execution Inception — as-if 規則を、並行と target の向こうまで完成させる](active/execution-inception.md) | The execution inception: the as-if rule completed across concurrency and targets |
 | [Fan v2 — reference examples](active/fan-v2-examples.md) | Reference examples for the fan v2 surface: every head, edge semantics, diagnostics |
 | [Fan v2 — one execution-policy grammar](active/fan-v2.md) | Fan v2: the execution-policy grammar — heads x forms, thunk-free, typed budgets |
 | [Flight Evidence Gaps — 実地監査所見台帳](active/flight-evidence-gaps.md) | Hands-on internal audit findings (2026-07-03) — the measured distance between DAL-A philosophy and DAL-A evidence, as 7 findings with corrective work items and acceptance criteria |
