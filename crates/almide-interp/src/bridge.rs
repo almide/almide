@@ -524,6 +524,14 @@ fn math_fn(func: &str, args: &[Value]) -> Option<Flow> {
     // SAFE here: `sqrt` is IEEE-754 correctly-rounded (identical on every libm /
     // platform), `abs` is exact, and `pi` / `e` are constants — all match the
     // backends bit-for-bit.
+    //
+    // The float `**` OPERATOR is the same class and abstains in the binop
+    // path (`eval_match.rs`, `BinOp::PowFloat`). It did NOT until #924: the
+    // module path skipped honestly while the operator voted with the platform
+    // libm, so the oracle's third vote was wrong and the nightly fuzzer
+    // reported the 1-ULP disagreement as a finding. Any future transcendental
+    // reachable through an OPERATOR (not just a module fn) has to abstain in
+    // both places.
     if matches!(
         func,
         "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2"

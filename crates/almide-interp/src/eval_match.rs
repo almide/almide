@@ -409,7 +409,24 @@ impl<'a> Interpreter<'a> {
         Some(match op {
             DivFloat => float2(l, r, |a, b| a / b),
             ModFloat => float2(l, r, |a, b| a % b),
-            PowFloat => float2(l, r, |a, b| a.powf(b)),
+            // The float `**` / `^` OPERATOR is the same vendored-musl-libm
+            // transcendental the MODULE path (`math.pow`, bridge.rs) already
+            // abstains on: both backends route it through the vendored pow,
+            // Rust's `f64::powf` calls the PLATFORM libm, and the two differ
+            // in the last ULP. The module path returned `Unsupported`
+            // (an honest skip) while this operator arm silently voted with
+            // the platform result — so the 3-way oracle cast a WRONG third
+            // vote and the nightly fuzzer reported the disagreement as a
+            // finding (seed 1785995202102876112 index 388: interp
+            // "5.340981952686458" vs both targets "5.340981952686457",
+            // #924). Abstain here too — the interp does not vendor the libm.
+            PowFloat => {
+                return Some(Flow::Unsupported(
+                    "float `**` (backends use vendored musl-libm pow; interp's \
+                     platform libm diverges in the last ULP — no oracle match)"
+                        .to_string(),
+                ))
+            }
 
             ConcatStr => match (l, r) {
                 (Value::Str(a), Value::Str(b)) => {
