@@ -698,8 +698,8 @@ impl Checker {
     /// fn declared `-> T!` — instantiates the fallible twin:
     ///
     /// ```text
-    /// list.map(xs, (x) => f(x)!)   ≡   list.__try_map(xs, (x) => f(x))
-    /// list.map(xs, parse)          ≡   list.__try_map(xs, parse)   (parse: -> T!)
+    /// list.map(xs, (x) => f(x)!)   ≡   list.__fallible_map(xs, (x) => f(x))
+    /// list.map(xs, parse)          ≡   list.__fallible_map(xs, parse)   (parse: -> T!)
     /// ```
     ///
     /// The lambda's `!` is the propagation marker; the twin carries the
@@ -761,7 +761,7 @@ impl Checker {
         if fallible {
             // v0.56.0: the public try_ family is removed; the fallible
             // instantiation routes to the __-prefixed internal carriers.
-            *field = almide_base::intern::sym(&format!("__try_{}", field.as_str()));
+            *field = almide_base::intern::sym(&format!("__fallible_{}", field.as_str()));
             self.hof_rewritten_calls.insert(object.id);
         }
     }

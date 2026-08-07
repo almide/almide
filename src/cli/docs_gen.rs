@@ -262,7 +262,7 @@ fn check_stdlib_fn_count() -> Vec<String> {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         let iface = almide::interface::extract(&ir, m, Some(&source_text));
         // `__`-prefixed fns are INTERNAL carriers (the fallibility-polymorphic
-        // `__try_*` bodies, ADR-0006 D3) — the public claim counts the public
+        // `__fallible_*` bodies, ADR-0006 D3) — the public claim counts the public
         // surface only, matching the doc index generator's filter.
         total += iface.functions.iter().filter(|f| !f.name.starts_with("__")).count();
     }

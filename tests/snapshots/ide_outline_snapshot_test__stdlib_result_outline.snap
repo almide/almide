@@ -1,6 +1,5 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
-assertion_line: 54
 expression: "run_outline(&[\"@stdlib/result\"])"
 ---
 fn result.filter[A, E](r: Result[A, E], pred: fn(A) -> Bool, err_val: E) -> Result[A, E]

@@ -623,7 +623,7 @@ impl Checker {
                 } else if let Some(suggestion) = almide_base::diagnostic::suggest(
                     func,
                     // `__`-prefixed fns are INTERNAL carriers (e.g. the
-                    // fallibility-polymorphic `__try_*` bodies, ADR-0006 D3) —
+                    // fallibility-polymorphic `__fallible_*` bodies, ADR-0006 D3) —
                     // never suggest one; `list.try_map` must not hint the
                     // carrier it was removed in favor of.
                     module_funcs.iter().copied().filter(|f| !f.starts_with("__")),

@@ -931,7 +931,7 @@ fn main() -> Unit = {
 
 
 
-// ── the __try_* carriers (ADR-0006's fallibility-polymorphic HOFs) ──
+// ── the __fallible_* carriers (ADR-0006's fallibility-polymorphic HOFs) ──
 //
 // These are what `list.map(xs, (x) => f(x)!)` INSTANTIATES: the checker sees
 // the callback propagate and swaps in the fallible form, whose contract is

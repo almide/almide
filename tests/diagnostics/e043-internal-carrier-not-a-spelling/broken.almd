@@ -1,4 +1,4 @@
-// E043: the `__try_*` carriers are the INTERNAL form the checker instantiates
+// E043: the `__fallible_*` carriers are the INTERNAL form the checker instantiates
 // when a callback propagates — they are not a spelling source may name.
 //
 // Deleting the public `list.try_map` in 0.56.0 removed one name but left the
@@ -9,6 +9,6 @@
 fn parse1(s: String) -> Result[Int, String] = int.parse(s)
 
 fn main() -> Unit = {
-  let r = list.__try_map(["1", "2"], (s) => parse1(s))
+  let r = list.__fallible_map(["1", "2"], (s) => parse1(s))
   println("r=${r ?? []}")
 }

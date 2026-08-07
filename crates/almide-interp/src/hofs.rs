@@ -91,7 +91,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    /// The `__try_*` carriers (ADR-0006): the fallibility-polymorphic form of
+    /// The `__fallible_*` carriers (ADR-0006): the fallibility-polymorphic form of
     /// the HOFs above, instantiated when a callback propagates with `!`. Each
     /// is its plain sibling plus FIRST-ERR SHORT-CIRCUIT — the callback yields
     /// `Result[_, E]`, the first `err` becomes the whole call's `err` and stops
@@ -104,13 +104,13 @@ impl<'a> Interpreter<'a> {
     /// the idiom ADR-0006 makes the DEFAULT way to write a fallible traversal.
     fn eval_hof_list_try(&mut self, f: &str, evaled: &[Value]) -> Flow {
         match f {
-            "__try_map" => self.hof_try_map(evaled),
-            "__try_filter" => self.hof_try_filter(evaled),
-            "__try_filter_map" => self.hof_try_filter_map(evaled),
-            "__try_flat_map" => self.hof_try_flat_map(evaled),
-            "__try_find" => self.hof_try_find(evaled),
-            "__try_fold" => self.hof_try_fold(evaled),
-            "__try_each" => self.hof_try_each(evaled),
+            "__fallible_map" => self.hof_try_map(evaled),
+            "__fallible_filter" => self.hof_try_filter(evaled),
+            "__fallible_filter_map" => self.hof_try_filter_map(evaled),
+            "__fallible_flat_map" => self.hof_try_flat_map(evaled),
+            "__fallible_find" => self.hof_try_find(evaled),
+            "__fallible_fold" => self.hof_try_fold(evaled),
+            "__fallible_each" => self.hof_try_each(evaled),
             _ => Flow::Unsupported(format!("HOF list.{}", f)),
         }
     }
@@ -729,7 +729,7 @@ impl<'a> Interpreter<'a> {
 
 include!("hofs_list_ops.rs");
 
-/// The `__try_*` carriers — the fallibility-polymorphic HOF family (ADR-0006).
+/// The `__fallible_*` carriers — the fallibility-polymorphic HOF family (ADR-0006).
 ///
 /// Every one is `<plain sibling> + first-err short-circuit`. Keeping them in
 /// one block makes the shared shape checkable by eye: unwrap the callback's
@@ -749,12 +749,12 @@ impl<'a> Interpreter<'a> {
         match r {
             Value::Result(Ok(v)) => Ok(*v),
             Value::Result(Err(e)) => Err(Flow::val(Value::Result(Err(e)))),
-            // The callback of a `__try_*` is fallible BY CONSTRUCTION — the
+            // The callback of a `__fallible_*` is fallible BY CONSTRUCTION — the
             // checker only instantiates this form when the body propagates.
             // A non-Result here means the IR reaching the interp disagrees
             // with that, so abstain rather than invent a polarity.
             other => Err(Flow::Unsupported(format!(
-                "`__try_*` callback returned {} (expected a Result — the \
+                "`__fallible_*` callback returned {} (expected a Result — the \
                  fallible HOF form is only instantiated for a propagating \
                  callback, ADR-0006)",
                 other.type_name()
@@ -841,7 +841,7 @@ impl<'a> Interpreter<'a> {
                 Some(sub) => out.extend(sub),
                 None => {
                     return Flow::Unsupported(
-                        "`list.__try_flat_map` callback returned a non-list ok payload".into(),
+                        "`list.__fallible_flat_map` callback returned a non-list ok payload".into(),
                     )
                 }
             }
@@ -875,14 +875,14 @@ impl<'a> Interpreter<'a> {
     }
 
     fn hof_try_fold(&mut self, args: &[Value]) -> Flow {
-        // `__try_fold(receiver, init, (acc, x) => Result[B, E])`
+        // `__fallible_fold(receiver, init, (acc, x) => Result[B, E])`
         let items = match Self::recv_items(args) {
             Ok(i) => i,
             Err(f) => return f,
         };
         let mut acc = match args.get(1) {
             Some(v) => v.clone(),
-            None => return Flow::Abort("internal: __try_fold missing init".into()),
+            None => return Flow::Abort("internal: __fallible_fold missing init".into()),
         };
         let clo = match Self::recv_closure(args, 2) {
             Ok(c) => c,

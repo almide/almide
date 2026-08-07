@@ -696,16 +696,23 @@ impl Checker {
     ///   - `list.try_map` … — the seven PUBLIC names deleted in 0.56.0. The
     ///     core HOF is fallibility-polymorphic, so the callback's `!` selects
     ///     the fallible form and one name per combinator is enough.
-    ///   - `list.__try_map` … — the seven INTERNAL carriers those names left
-    ///     behind. Deleting the public spelling but leaving the carrier
+    ///   - `list.__fallible_map` … — the seven INTERNAL carriers those names
+    ///     left behind. Deleting the public spelling but leaving the carrier
     ///     reachable did not remove the second spelling, it RENAMED it: a
-    ///     user (or a model that read stdlib/list.almd) could write
-    ///     `list.__try_map(xs, f)` and it compiled, ran, and warned about
-    ///     nothing. For a language whose metric is modification survival
-    ///     rate, two working spellings where one is undocumented is worse
-    ///     than the deprecated name was — the writer cannot tell which is
-    ///     blessed. The carrier stays as the desugar TARGET; it is simply no
-    ///     longer something source may name.
+    ///     user (or a model that read stdlib/list.almd) could write the
+    ///     carrier and it compiled, ran, and warned about nothing — while the
+    ///     IDE outline offered it by name. For a language whose metric is
+    ///     modification survival rate, two working spellings where one is
+    ///     undocumented is worse than the deprecated name was: the writer
+    ///     cannot tell which is blessed. The carrier stays as the desugar
+    ///     TARGET; it is simply no longer something source may name.
+    ///
+    ///     The carriers were themselves called `__try_*` until they were
+    ///     renamed to `__fallible_*`: `try` is the loan-word this ADR
+    ///     rejected (its lenders disagree — Rust's `try_fold` short-circuits,
+    ///     Swift/Zig's `try` propagates, which is almide's `!`), so keeping
+    ///     it as the internal name contradicted the reason for deleting it.
+    ///     `fallible` is ADR-0006's own word for the form.
     ///
     /// Fires only on a USER-SPELLED name: the normalization's own rewrites
     /// are registered in `hof_rewritten_calls` and skipped.
@@ -720,7 +727,7 @@ impl Checker {
             return;
         }
         let name = field.as_str();
-        let (core, internal) = match name.strip_prefix("__try_") {
+        let (core, internal) = match name.strip_prefix("__fallible_") {
             Some(core) => (core, true),
             None => match name.strip_prefix("try_") {
                 Some(core) => (core, false),
@@ -745,7 +752,7 @@ impl Checker {
                 ),
                 format!(
                     "{rewrite}\n        \
-                     `__try_{core}` is what the checker instantiates FOR you when the callback \
+                     `__fallible_{core}` is what the checker instantiates FOR you when the callback \
                      propagates; writing it by hand is the second spelling `try_{core}`'s \
                      removal was meant to end."
                 ),

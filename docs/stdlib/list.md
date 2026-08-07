@@ -499,11 +499,11 @@ list.try_fold(xs, z, f)  →  list.fold(xs, z, (a, x) => f(a, x)!)!
 Deliberate omissions unchanged: an erring predicate query is the find-form's
 domain (`any`/`all`/`count` never had twins), and `sort_by` has no meaningful
 order under an erring key extractor. The end state (empty public surface, the
-seven `__try_*` internal carriers present) is machine-checked by
-`tests/list_try_family_gate_test.rs`.
+seven `__fallible_*` internal carriers present and un-nameable from source) is
+machine-checked by `tests/list_fallible_family_gate_test.rs`.
 
 When a callback that never errs leaves `E` unconstrained, annotate the result:
-`let evens: Result[List[Int], String] = list.try_filter(xs, (n) => ok(n % 2 == 0))`.
+`let evens: Result[List[Int], String] = list.filter(xs, (n) => ok(n % 2 == 0)!)`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 

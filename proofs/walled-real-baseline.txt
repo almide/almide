@@ -46,13 +46,6 @@ spec/stdlib/codec_field_matrix_test.almd :: __test_almd_variant record case: Opt
 # and run via the native fallback. These entries are the honest wasm frontier
 # for bundled generic HOFs, to be pruned when the defunctionalization brick
 # admits bundled closure params (the same brick list.iterate waits on).
-spec/stdlib/list_try_test.almd :: __test_almd_try_each runs to completion or stops at the first err
-spec/stdlib/list_try_test.almd :: __test_almd_try_filter keeps by an erring predicate
-spec/stdlib/list_try_test.almd :: __test_almd_try_filter_map keeps ok(some), drops ok(none), stops at err
-spec/stdlib/list_try_test.almd :: __test_almd_try_find returns ok(some/none) and propagates err
-spec/stdlib/list_try_test.almd :: __test_almd_try_flat_map concatenates and short-circuits
-spec/stdlib/list_try_test.almd :: __test_almd_try_fold threads the accumulator and stops at err
-spec/stdlib/list_try_test.almd :: __test_almd_try_map collects ok values
 # (2026-08-06, #1108) The fallibility-polymorphic core HOFs route their
 # fallible instantiation through the SAME bundled-generic twin bodies, so the
 # new spec file's test fns sit on the identical closure-lifting frontier as

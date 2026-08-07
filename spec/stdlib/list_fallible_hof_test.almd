@@ -1,0 +1,51 @@
+// #1041 → ADR-0006 D3: the cases the fallibility-polymorphic HOF family needs
+// that `spec/lang/fallible_hof_test.almd` does not already cover.
+//
+// This file used to pin the seven `__fallible_*` carriers by CALLING THEM BY
+// NAME — possible only because the carriers were reachable from source, the
+// very door E043 now closes. With that door shut, everything here that
+// exercised a carrier directly became a duplicate of the lang-level file,
+// which already covers all seven combinators through the blessed spelling in
+// both polarities. What survives is the residue: three shapes that file lacks.
+//
+// Why the cases are top-level fns: inside a `test` block the callback's `!`
+// does NOT instantiate the fallible form (the L9 fork — `!` still propagates
+// there), so the blessed spelling is only available in ordinary fn bodies.
+// That fork is also why the old file called carriers directly; it was not
+// laziness, it was the only route a test block had.
+//
+// Elsewhere: the empty-surface + carriers-exist end state is
+// `tests/list_fallible_family_gate_test.rs`; the reference interpreter's own
+// implementation of all seven is `crates/almide-interp/tests/eval_test.rs`.
+local fn add(acc: Int, n: Int) -> Result[Int, String] = ok(acc + n)
+
+local fn sum_from(xs: List[Int], init: Int) -> Result[Int, String] = list.fold(xs, init, (acc, n) => add(acc, n)!)
+
+local fn first_hit(xs: List[Int]) -> Result[Int?, String] = list.find(xs, (n) => ok(n > 9)!)
+
+test "fallible fold over an EMPTY list yields ok(init), not err" {
+  // The traversal never runs, so there is no callback to fail — the identity
+  // case the short-circuit must not swallow.
+  let none_in: List[Int] = []
+  assert_eq(sum_from(none_in, 42), ok(42))
+  assert_eq(sum_from([1, 2, 3], 0), ok(6))
+}
+
+test "fallible find with NO match yields ok(none), not err" {
+  // `ok(none)` and `err(..)` are different answers: nothing matched is a
+  // successful search, and only a failing predicate is a failure.
+  assert_eq(first_hit([1, 2, 3]), ok(none))
+  assert_eq(first_hit([1, 20, 3]), ok(some(20)))
+}
+
+// The motivating shape of #1041: inside an effect fn, an effectful body in the
+// callback produces the Result the family consumes — no `var + for`.
+local effect fn parse_all(xs: List[String]) -> Result[List[Int], String] = xs |> list.map((s) => int.parse(s)!)
+
+test "the effect-fn pipeline shape (#1041's motivating case)" {
+  assert_eq(parse_all(["10", "20"]), ok([10, 20]))
+  match parse_all(["10", "x"]) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "invalid digit found in string"),
+  }
+}

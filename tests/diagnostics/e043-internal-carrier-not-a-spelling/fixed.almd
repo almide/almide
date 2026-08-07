@@ -1,4 +1,4 @@
-// E043: the `__try_*` carriers are the INTERNAL form the checker instantiates
+// E043: the `__fallible_*` carriers are the INTERNAL form the checker instantiates
 // when a callback propagates — they are not a spelling source may name.
 //
 // The fix is the SAME source the public try_* removal points at: write the
