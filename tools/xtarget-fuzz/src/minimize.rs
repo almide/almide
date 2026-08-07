@@ -21,37 +21,58 @@ use std::path::Path;
 use almide::ast::{Decl, Expr, ExprKind, Program};
 use almide::fmt::format_program;
 
-use crate::oracle::{run_ladder, FindingKind, Outcome, Toolchain};
+use crate::oracle::{run_ladder, Finding, FindingKind, Outcome, ReferenceOracle, Toolchain};
 
 /// Cap on minimization rounds, so a stubborn input cannot stall the
 /// campaign. Each round is one full statement+expression sweep.
 const MAX_ROUNDS: u32 = 8;
 
+/// The minimized program AND the evidence *it* produced.
+///
+/// The two must travel together. The artifact writer used to pair the
+/// minimized `repro.almd` with the evidence of the PRE-minimization
+/// program, so `native.out` / `wasm.out` described a program the triager
+/// could not see — the six-line output of an original next to a two-line
+/// repro. Reading it top-to-bottom leads to conclusions about the repro
+/// that its own run does not support. Minimization re-runs the ladder on
+/// every accepted candidate anyway; keeping the last one costs nothing
+/// and makes the three files one consistent observation.
+pub struct Minimized {
+    pub source: String,
+    /// `None` only when nothing shrank — then the caller's own finding
+    /// already describes this exact source.
+    pub finding: Option<Finding>,
+}
+
 /// Minimize `source` (which triggers `target_kind`) to a smaller program
-/// that still triggers the same kind. Returns the minimized source. If
-/// nothing shrinks, returns the original.
+/// that still triggers the same kind. If nothing shrinks, returns the
+/// original with no evidence (the caller's is already correct for it).
 pub fn minimize(
     tc: &Toolchain,
     source: &str,
     target_kind: FindingKind,
     work_dir: &Path,
-) -> String {
+    reference: Option<&dyn ReferenceOracle>,
+) -> Minimized {
     // Parse once; if the source does not parse (shouldn't happen for a
     // finding past the check rung, except fmt-instability), return as-is.
     let Some(mut program) = parse(source) else {
-        return source.to_string();
+        return Minimized { source: source.to_string(), finding: None };
     };
 
     let mut best = format_program(&program);
+    let mut best_finding = None;
 
     for _ in 0..MAX_ROUNDS {
         let before = best.clone();
 
         // Pass 1: try removing each top-level statement.
-        program = shrink_statements(tc, program, target_kind, work_dir, &mut best);
+        program =
+            shrink_statements(tc, program, target_kind, work_dir, reference, &mut best, &mut best_finding);
 
         // Pass 2: try simplifying expressions to minimal leaves.
-        program = shrink_expressions(tc, program, target_kind, work_dir, &mut best);
+        program =
+            shrink_expressions(tc, program, target_kind, work_dir, reference, &mut best, &mut best_finding);
 
         // Fixed point: no change this round ⇒ done.
         if best == before {
@@ -59,7 +80,7 @@ pub fn minimize(
         }
     }
 
-    best
+    Minimized { source: best, finding: best_finding }
 }
 
 /// Try deleting each top-level statement of every `fn` body; keep a
@@ -69,7 +90,9 @@ fn shrink_statements(
     mut program: Program,
     target_kind: FindingKind,
     work_dir: &Path,
+    reference: Option<&dyn ReferenceOracle>,
     best: &mut String,
+    best_finding: &mut Option<Finding>,
 ) -> Program {
     // We repeatedly attempt to remove a statement at a given (fn, index)
     // position. After a successful removal, indices shift, so we restart
@@ -84,9 +107,10 @@ fn shrink_statements(
                 continue;
             }
             let src = format_program(&candidate);
-            if reproduces(tc, &src, target_kind, work_dir) {
+            if let Some(f) = reproduces(tc, &src, target_kind, work_dir, reference) {
                 program = candidate;
                 *best = src;
+                *best_finding = Some(f);
                 removed_any = true;
                 break; // restart scan with the smaller program
             }
@@ -106,7 +130,9 @@ fn shrink_expressions(
     mut program: Program,
     target_kind: FindingKind,
     work_dir: &Path,
+    reference: Option<&dyn ReferenceOracle>,
     best: &mut String,
+    best_finding: &mut Option<Finding>,
 ) -> Program {
     loop {
         let count = count_simplifiable(&program);
@@ -118,9 +144,10 @@ fn shrink_expressions(
                 continue;
             }
             let src = format_program(&candidate);
-            if reproduces(tc, &src, target_kind, work_dir) {
+            if let Some(f) = reproduces(tc, &src, target_kind, work_dir, reference) {
                 program = candidate;
                 *best = src;
+                *best_finding = Some(f);
                 simplified_any = true;
                 break;
             }
@@ -133,17 +160,29 @@ fn shrink_expressions(
     program
 }
 
-/// Does `src` still trigger `target_kind` at the ladder? Generator
-/// rejects and clean runs both count as "no longer reproduces".
-fn reproduces(tc: &Toolchain, src: &str, target_kind: FindingKind, work_dir: &Path) -> bool {
+/// Does `src` still trigger `target_kind` at the ladder? Returns THIS
+/// candidate's own finding (evidence included) so an accepted shrink can
+/// carry its evidence forward. Generator rejects and clean runs both
+/// count as "no longer reproduces".
+fn reproduces(
+    tc: &Toolchain,
+    src: &str,
+    target_kind: FindingKind,
+    work_dir: &Path,
+    reference: Option<&dyn ReferenceOracle>,
+) -> Option<Finding> {
     let file = work_dir.join("min_candidate.almd");
     let wasm = work_dir.join("min_candidate.wasm");
-    if std::fs::write(&file, src).is_err() {
-        return false;
-    }
-    match run_ladder(tc, src, &file, &wasm, None) {
-        Outcome::Finding(f) => f.kind == target_kind,
-        _ => false,
+    std::fs::write(&file, src).ok()?;
+    // The reference oracle MUST be the same one the campaign ran with.
+    // Passing `None` here silently disabled minimization for every finding
+    // the interpreter rung produces (`both targets disagree with reference
+    // interpreter`): without that rung a native==wasm candidate yields no
+    // finding at all, so no shrink is ever accepted and the artifact keeps
+    // the full unshrunk mutant.
+    match run_ladder(tc, src, &file, &wasm, reference) {
+        Outcome::Finding(f) if f.kind == target_kind => Some(f),
+        _ => None,
     }
 }
 
