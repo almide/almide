@@ -570,9 +570,9 @@ impl LowerCtx {
             | IrExprKind::BinOp { .. }
             | IrExprKind::UnOp { .. }
             | IrExprKind::Try { .. }
-            // (`UnwrapOr` used to land here — it has its own arm below since
-            // #1134: the `fresh` path can only Alloc{Opaque} for it, which is
-            // the very wall the dedicated rewrite removes.)
+            // (`UnwrapOr` used to land here unconditionally — since #1134 it
+            // has its own arm below, which routes the RESULT polarity to a
+            // match and hands the OPTION polarity straight back here.)
             | IrExprKind::ToOption { .. }
             | IrExprKind::OptionalChain { .. }
             // A CAPTURING CLOSURE value returned is a fresh heap env; a RANGE is a fresh value —

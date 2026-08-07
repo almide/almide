@@ -768,6 +768,17 @@ impl LowerCtx {
     fn lower_tail_heap_unwrap_or(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         use almide_ir::{IrMatchArm, IrPattern, VarId};
         let IrExprKind::UnwrapOr { expr, fallback } = &tail.kind else { unreachable!() };
+        // ONLY the Result polarity was walled. A tail-position OPTION `??`
+        // already lowers through `lower_call_args` → `option.unwrap_or_str`,
+        // a proven executable path — rewriting it into a match takes a
+        // working shape off that path for nothing, which is the same
+        // over-reach that made the first (whole-body) version of this fix
+        // regress the C-149 share shapes. Pinned by
+        // `heap_unwrap_or_tail_position_executes`, which asserts the
+        // `option.unwrap_or_str` route survives.
+        if !expr.ty.is_result() {
+            return self.lower_tail_heap_fresh(tail);
+        }
         let payload_ty = tail.ty.clone();
         let p = VarId(crate::lower::max_var_id(tail) + 1);
         let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
