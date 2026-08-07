@@ -19,29 +19,7 @@ impl Checker {
         // ADR-0006 D3 (#1108): user-spelled try_* is deprecated (the
         // fallibility-polymorphic core covers it) — same site as E039.
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
-            if mod_name.as_str() == "list"
-                && matches!(field.as_str(), "try_map" | "try_filter" | "try_flat_map"
-                    | "try_filter_map" | "try_fold" | "try_find" | "try_each")
-                && !self.hof_rewritten_calls.contains(&object.id)
-            {
-                let core = field.as_str().trim_start_matches("try_");
-                let rewrite = if core == "fold" {
-                    "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string()
-                } else {
-                    format!("list.{}(xs, (x) => f(x)!)!", core)
-                };
-                let mut d = crate::diagnostic::Diagnostic::error(
-                    format!("list.{} was removed — the core HOF is fallibility-polymorphic (ADR-0006)", field),
-                    format!("{rewrite}\n        The callback's `!` instantiates the fallible form (first-err short-circuit); the try_ family's one name per combinator is the core name."),
-                    format!("call to list.{}", field),
-                ).with_code("E043");
-                d.file = self.source_file.clone();
-                if let Some(sp) = object.span {
-                    d.line = Some(sp.line);
-                    d.col = Some(sp.col);
-                }
-                self.diagnostics.push(d);
-            }
+            self.reject_dead_try_spelling(mod_name, field, object.id, object.span);
         }
         // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
         let prev = self.callee_span_hint.take();

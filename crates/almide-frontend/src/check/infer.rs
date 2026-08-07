@@ -387,33 +387,7 @@ impl Checker {
         field: &almide_base::intern::Sym,
     ) -> Option<Ty> {
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
-            // ADR-0006 D3 (#1108): the try_ family is deprecated — the core
-            // HOF is fallibility-polymorphic; the hint IS the mechanical
-            // rewrite. Fires only on USER-SPELLED try_* (the normalization's
-            // own rewrites are excluded by hof_rewritten_calls).
-            if mod_name.as_str() == "list"
-                && matches!(field.as_str(), "try_map" | "try_filter" | "try_flat_map"
-                    | "try_filter_map" | "try_fold" | "try_find" | "try_each")
-                && !self.hof_rewritten_calls.contains(&object.id)
-            {
-                let core = field.as_str().trim_start_matches("try_");
-                let rewrite = if core == "fold" {
-                    "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string()
-                } else {
-                    format!("list.{}(xs, (x) => f(x)!)!", core)
-                };
-                let mut d = crate::diagnostic::Diagnostic::error(
-                    format!("list.{} was removed — the core HOF is fallibility-polymorphic (ADR-0006)", field),
-                    format!("{rewrite}\n        The callback's `!` instantiates the fallible form (first-err short-circuit); the try_ family's one name per combinator is the core name."),
-                    format!("call to list.{}", field),
-                ).with_code("E043");
-                d.file = self.source_file.clone();
-                if let Some(sp) = object.span {
-                    d.line = Some(sp.line);
-                    d.col = Some(sp.col);
-                }
-                self.diagnostics.push(d);
-            }
+            self.reject_dead_try_spelling(mod_name, field, object.id, object.span);
             if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
                 self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
                 return Some(Ty::Fn {
@@ -713,3 +687,88 @@ include!("infer_calls_closures.rs");
 include!("infer_statements.rs");
 include!("infer_ident_collection.rs");
 include!("infer_loops_records.rs");
+
+impl Checker {
+    /// ADR-0006 D3 (#1108): reject a DEAD HOF spelling at the call site.
+    ///
+    /// Two families land here, and the distinction is the whole point:
+    ///
+    ///   - `list.try_map` … — the seven PUBLIC names deleted in 0.56.0. The
+    ///     core HOF is fallibility-polymorphic, so the callback's `!` selects
+    ///     the fallible form and one name per combinator is enough.
+    ///   - `list.__try_map` … — the seven INTERNAL carriers those names left
+    ///     behind. Deleting the public spelling but leaving the carrier
+    ///     reachable did not remove the second spelling, it RENAMED it: a
+    ///     user (or a model that read stdlib/list.almd) could write
+    ///     `list.__try_map(xs, f)` and it compiled, ran, and warned about
+    ///     nothing. For a language whose metric is modification survival
+    ///     rate, two working spellings where one is undocumented is worse
+    ///     than the deprecated name was — the writer cannot tell which is
+    ///     blessed. The carrier stays as the desugar TARGET; it is simply no
+    ///     longer something source may name.
+    ///
+    /// Fires only on a USER-SPELLED name: the normalization's own rewrites
+    /// are registered in `hof_rewritten_calls` and skipped.
+    pub(crate) fn reject_dead_try_spelling(
+        &mut self,
+        mod_name: &almide_base::intern::Sym,
+        field: &almide_base::intern::Sym,
+        object_id: almide_lang::ast::ExprId,
+        object_span: Option<almide_lang::ast::Span>,
+    ) {
+        if mod_name.as_str() != "list" || self.hof_rewritten_calls.contains(&object_id) {
+            return;
+        }
+        let name = field.as_str();
+        let (core, internal) = match name.strip_prefix("__try_") {
+            Some(core) => (core, true),
+            None => match name.strip_prefix("try_") {
+                Some(core) => (core, false),
+                None => return,
+            },
+        };
+        if !matches!(
+            core,
+            "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each"
+        ) {
+            return;
+        }
+        let rewrite = if core == "fold" {
+            "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string()
+        } else {
+            format!("list.{}(xs, (x) => f(x)!)!", core)
+        };
+        let (msg, hint) = if internal {
+            (
+                format!(
+                    "list.{name} is an internal carrier, not a spelling — source may not name it (ADR-0006)"
+                ),
+                format!(
+                    "{rewrite}\n        \
+                     `__try_{core}` is what the checker instantiates FOR you when the callback \
+                     propagates; writing it by hand is the second spelling `try_{core}`'s \
+                     removal was meant to end."
+                ),
+            )
+        } else {
+            (
+                format!(
+                    "list.{name} was removed — the core HOF is fallibility-polymorphic (ADR-0006)"
+                ),
+                format!(
+                    "{rewrite}\n        \
+                     The callback's `!` instantiates the fallible form (first-err short-circuit); \
+                     the try_ family's one name per combinator is the core name."
+                ),
+            )
+        };
+        let mut d = crate::diagnostic::Diagnostic::error(msg, hint, format!("call to list.{name}"))
+            .with_code("E043");
+        d.file = self.source_file.clone();
+        if let Some(sp) = object_span {
+            d.line = Some(sp.line);
+            d.col = Some(sp.col);
+        }
+        self.diagnostics.push(d);
+    }
+}
