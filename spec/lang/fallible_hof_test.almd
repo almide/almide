@@ -44,6 +44,19 @@ test "map: pipe spelling" {
   }
 }
 
+// The 1-bit rule rides the DECLARATION MARKER, not the resolved type
+// (ADR-0006/ADR-0010-D4): the same body declared `-> Result[Int, String]`
+// stays a map-of-results callback, declared `-> Int!` it instantiates the
+// first-err form. This divergence is the SEMANTICS — it is why a blanket
+// fmt rewrite Result[T, String] → T! is permanently rejected.
+fn parse_long(s: String) -> Result[Int, String] = int.parse(s)
+
+test "the marker, not the type, carries the callback bit" {
+  assert_eq(list.map(["1", "x"], parse_long), [ok(1), err("invalid digit found in string")])
+  assert_eq(list.map(["1", "x"], parse_pos) ?? [], [])
+  assert_eq(list.map(["1", "2"], parse_pos) ?? [], [1, 2])
+}
+
 // #1127 regression: the pipe-position `??` over a Result-producing call must
 // take the RESULT-shaped unwrap (it lowered an Option-shaped Some/None match
 // — check green, rustc E0308 — until 0.56.1).

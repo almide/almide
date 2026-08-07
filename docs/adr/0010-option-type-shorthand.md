@@ -51,9 +51,16 @@ fn parse_opt(s: String) -> Int?!   // = Result[Option[Int], String]  ? が先、
 するため、v0.53.5 の one-name-one-meaning 路線で 1 形に潰す。入れ子・fn 型・
 レコード型の inner は再パース可能になるよう括弧を付けて出力する。
 
-**D4(スコープ外の明示)**: `Result[T, String] → T!` の fmt 正規化は本 ADR に
-**含めない**。`!` 付き署名は本体の解釈(ok 自動包み・`!` 伝搬)と連動するため、
-綴りのみの置換であることを A/B で証明してから別途 1 問で裁定する。
+**D4(2026-08-07 更新: 恒久却下)**: `Result[T, String] → T!` の fmt 正規化は
+**恒久的に行わない** — 保留(証明待ち)から却下へ。実測証明: #1108 の 1-bit
+規則により callback bit は**宣言マーカー**に乗るため、同一本体でも
+`list.map(xs, f)` の意味が f の綴りで分岐する(長綴り = map-of-results
+`[ok(1), err(…)]` / `T!` = first-err 打ち切り)。機械置換は全 map-of-results を
+first-err に化けさせる。この分岐は仕様であり
+spec/lang/fallible_hof_test.almd の「the marker, not the type, carries the
+callback bit」がピンする。つまり 0.55 以降、2綴りは「1 型 2 記法」ではなく
+**書き手が戦略を選ぶ2つの宣言**である(T? には HOF bit が無いので同種の
+問題は起きない — T? 正規化の健全性は不変)。
 
 ## Rationale
 
