@@ -149,6 +149,24 @@ impl Checker {
         };
         let tys = MismatchTys { expected, arg: arg_ty, expected_resolved, arg_resolved };
         let hint = self.call_arg_mismatch_hint(fn_name, tys, float_sibling);
+        // #1108 Phase 2b: a FALLIBLE callback into a plain fn-typed slot —
+        // the one shape the bit does not yet flow through (2b-iii). Name the
+        // two working spellings instead of the generic "fix the type".
+        let hint = match (expected_resolved, arg_resolved) {
+            (Ty::Fn { ret: er, .. }, Ty::Fn { ret: ar, .. })
+                if !er.is_result() && ar.is_result() =>
+            {
+                format!(
+                    "The callback is FALLIBLE (`(A) -> Result[..]`) but the slot is total. \
+                     Either declare the slot fallible — `{}: (A) -> B!` — and consume the \
+                     Result in the HOF body, or handle the error inside the lambda \
+                     (`?? fallback` / match). The core list HOFs accept fallible callbacks \
+                     natively; plain-slot transparency for user HOFs is #1108 Phase 2b-iii.",
+                    param_name
+                )
+            }
+            _ => hint,
+        };
         let mut diag = super::err(
             format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
             hint,

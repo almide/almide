@@ -432,6 +432,25 @@ fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                 }, body_ty, span);
             }
             ctx.pop_scope();
+            // ADR-0006 D1 (#1108 Phase 2b): a FALLIBLE lambda — the checker
+            // typed it `(A) -> Result[T, String]` while its body's value
+            // exits are still T — gets the same value-tail ok(...) lift a
+            // `-> T!` fn body gets. Type-driven: Result-typed exits pass
+            // through, so a pass-through / explicit-ok body is untouched.
+            if let Ty::Fn { ret, .. } = &ty {
+                if ret.is_result() {
+                    // An OPTION operand's `!` maps none → err("none") (L4).
+                    // Inside a fn body the codegen's ok_or template does this;
+                    // a CLOSURE body lacks that context on every backend, so
+                    // desugar it here: `e!` (e: Option[T]) becomes
+                    // `option.to_result(e, "none")!` — a plain Result unwrap
+                    // all three consumers already handle.
+                    convert_option_unwraps_to_result(&mut ir_body);
+                    if !ir_body.ty.is_result() {
+                        ir_body = crate::lower::wrap_fallible_value_tail(ir_body);
+                    }
+                }
+            }
             let lambda_id = Some(ctx.next_lambda_id());
             ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body), lambda_id }, ty, span)
         }
@@ -1600,4 +1619,47 @@ fn lower_fan_race_map_fold(
     stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: for_e }, span });
 
     (stmts, okv, valv, winner_ty)
+}
+
+/// L4 (#1108 Phase 2b): inside a FALLIBLE lambda body, rewrite every
+/// Option-operand `Unwrap` into `option.to_result(e, "none")!` so the
+/// closure's propagation stays a plain Result unwrap on every backend
+/// (the fn-body ok_or template has no closure equivalent).
+fn convert_option_unwraps_to_result(body: &mut IrExpr) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct Rw;
+    impl IrMutVisitor for Rw {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Unwrap { expr: inner } = &mut e.kind else { return };
+            if !inner.ty.is_option() {
+                return;
+            }
+            let inner_ty = inner.ty.clone();
+            let payload_ty = inner_ty.option_inner().unwrap_or(Ty::Unknown);
+            let span = inner.span.clone();
+            let opt = std::mem::replace(
+                &mut **inner,
+                IrExpr { kind: IrExprKind::OptionNone, ty: inner_ty, span: span.clone(), def_id: None },
+            );
+            **inner = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("option"),
+                        func: sym("to_result"),
+                        def_id: None,
+                    },
+                    args: vec![
+                        opt,
+                        IrExpr { kind: IrExprKind::LitStr { value: "none".into() }, ty: Ty::String, span: span.clone(), def_id: None },
+                    ],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::result(payload_ty, Ty::String),
+                span,
+                def_id: None,
+            };
+        }
+    }
+    Rw.visit_expr_mut(body);
 }

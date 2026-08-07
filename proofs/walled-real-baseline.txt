@@ -58,13 +58,23 @@ spec/stdlib/list_try_test.almd :: __test_almd_try_map collects ok values
 # new spec file's test fns sit on the identical closure-lifting frontier as
 # the list_try_test entries above — pruned by the same defunctionalization
 # brick. Not a regression: same lowering gap, new witnesses.
-spec/lang/fallible_hof_test.almd :: __test_almd_filter: fallible predicate
-spec/lang/fallible_hof_test.almd :: __test_almd_find: fallible predicate
-spec/lang/fallible_hof_test.almd :: __test_almd_flat_map and filter_map: fallible callbacks
-spec/lang/fallible_hof_test.almd :: __test_almd_map: a named -> T! fn is a fallible callback
-spec/lang/fallible_hof_test.almd :: __test_almd_map: pipe spelling with ?? fallback
+# (2026-08-07, #1108 Phase 2b + L9) The polymorphic-HOF and fallible-lambda
+# behavior moved from test blocks into top-level helper fns (L9: test blocks
+# keep the pre-#1108 world), and the L-battery landed — the helpers sit on the
+# same bundled-generic closure-lifting frontier as the twins; pruned by the
+# same defunctionalization brick.
 spec/lang/fallible_hof_test.almd :: __test_almd_the marker, not the type, carries the callback bit
-spec/lang/fallible_hof_test.almd :: __test_almd_map: fallible lambda — ok path and first-err short-circuit
+# (2026-08-07, #1130) The branch-lift clone-scope regression: its driver is a
+# tail-recursive effect fn over a heap accumulator, the shape the v1 renderer
+# hands to the native leg.
+spec/lang/branch_lift_clone_test.almd :: __test_almd_a lifted in-loop branch clones what it reuses
+spec/lang/fallible_hof_test.almd :: find_cells
+spec/lang/fallible_hof_test.almd :: fm_cells
+spec/lang/fallible_hof_test.almd :: m_pipe_qq
+spec/lang/fallible_hof_test.almd :: marker_cells
+spec/lang/fallible_lambda_test.almd :: use_first_class
+spec/lang/fallible_lambda_test.almd :: use_guarded
+spec/lang/fallible_lambda_test.almd :: use_option_operand
 #
 # (2026-08-06, #1114) option.to_result became an E-GENERIC pure bundled body
 # (ADR-0003 D1's typed-error route needs Option -> Result[T, CustomE]). The

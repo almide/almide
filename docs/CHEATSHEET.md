@@ -100,7 +100,11 @@ fn checked(s: String) -> Int! = {
 }
 ```
 
-`!` is legal ONLY in return position of a fn declaration. E is always String —
+A LAMBDA whose body uses `!` becomes a fallible closure `(A) -> Result[T, String]`
+(first-class; a fallible callback to a core list HOF takes the first-err form;
+fn-type slots spell it `(A) -> B!`). In test blocks a lambda's `!` stays plain
+unwrap. `!` the RETURN MARKER is legal ONLY in return position of a fn
+declaration and in fn-type slots. E is always String —
 a custom error type keeps the explicit `Result[T, MyError]` spelling
 (ADR-0003/0004: branch on structure, not message text).
 

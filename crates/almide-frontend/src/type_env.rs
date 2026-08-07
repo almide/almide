@@ -25,6 +25,14 @@ pub struct TypeEnv {
     pub scopes: Vec<std::collections::HashMap<Sym, Ty>>,
     /// Current function's return type
     pub current_ret: Option<Ty>,
+    /// ADR-0006 D1 (#1108 Phase 2b): the INNERMOST lambda's provisional
+    /// failure channel — `Result[fresh, String]`. A `!` in the lambda body
+    /// propagates into THIS channel (never across the closure boundary,
+    /// #489 unchanged); if the body uses it, the lambda infers fallible.
+    pub lambda_ret: Option<Ty>,
+    /// Whether the innermost lambda's channel was actually used — the
+    /// usage-driven fallibility bit (L2).
+    pub lambda_prop_used: bool,
     /// Whether auto-unwrapping of Result is enabled (effect fn bodies)
     pub auto_unwrap: bool,
     /// Whether effect functions may be called from this context
@@ -165,6 +173,8 @@ impl TypeEnv {
             functions: std::collections::HashMap::new(),
             scopes: vec![std::collections::HashMap::new()],
             current_ret: None,
+            lambda_ret: None,
+            lambda_prop_used: false,
             auto_unwrap: false,
             can_call_effect: false,
             metered_region: None,

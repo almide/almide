@@ -527,6 +527,14 @@ impl Checker {
         let saved_auto_unwrap = self.env.auto_unwrap;
         self.env.auto_unwrap = false;
         self.env.lambda_depth += 1;
+        // ADR-0006 D1 (#1108 Phase 2b): every lambda carries a PROVISIONAL
+        // failure channel; a `!` in the body propagates into it (see
+        // check_unwrap_propagation_context) and marks the lambda fallible.
+        let saved_lambda_ret = self.env.lambda_ret.take();
+        let saved_prop_used = self.env.lambda_prop_used;
+        let channel_ok = self.fresh_var();
+        self.env.lambda_ret = Some(Ty::result(channel_ok.clone(), Ty::String));
+        self.env.lambda_prop_used = false;
         // Expected-type hint from the enclosing call (#653): when this
         // lambda is an argument whose parameter slot is a `Fn`, the
         // caller pins each UNANNOTATED param to the expected element
@@ -565,10 +573,28 @@ impl Checker {
             ty
         }).collect();
         let ret_ty = self.infer_expr(body);
+        let became_fallible = self.env.lambda_prop_used;
+        let channel = self.env.lambda_ret.take();
+        self.env.lambda_ret = saved_lambda_ret;
+        self.env.lambda_prop_used = saved_prop_used;
         self.env.lambda_depth -= 1;
         self.env.auto_unwrap = saved_auto_unwrap;
         self.env.current_ret = saved_ret;
         self.env.pop_scope();
+        // Usage-driven fallibility (L2): a lambda whose body used its channel
+        // infers as `(A) -> Result[T, String]` — a Result-typed body unifies
+        // whole, a VALUE body pins the channel's ok side (the lowering wraps
+        // that value tail in ok(...), the Phase 1b machinery).
+        if became_fallible {
+            let chan_ty = channel.unwrap_or_else(|| Ty::result(channel_ok.clone(), Ty::String));
+            let body_resolved = resolve_ty(&ret_ty, &self.uf);
+            if body_resolved.is_result() {
+                self.constrain(chan_ty.clone(), ret_ty, "fallible lambda body");
+            } else if body_resolved != Ty::Never {
+                self.constrain(channel_ok, ret_ty, "fallible lambda body");
+            }
+            return Ty::Fn { params: param_tys, ret: Box::new(chan_ty) };
+        }
         Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
     }
 
@@ -684,6 +710,12 @@ impl Checker {
     /// — sees a plain try_* call. A COMPOUND fallible body (`(x) => g(f(x)!)!`)
     /// is Phase 2b and keeps today's E022.
     fn normalize_fallible_hof_callback(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) {
+        // L9 (2026-08-07): inside a TEST block a lambda's `!` is plain
+        // unwrap — no fallibility bit, no first-err dispatch. The test world
+        // keeps its pre-#1108 semantics wholesale.
+        if self.env.in_test_block {
+            return;
+        }
         const FALLIBLE_HOF_CORE: &[&str] =
             &["map", "filter", "flat_map", "filter_map", "fold", "find", "each"];
         let ExprKind::Member { object, field } = &mut callee.kind else { return };
@@ -691,9 +723,18 @@ impl Checker {
         if mod_name.as_str() != "list" || !FALLIBLE_HOF_CORE.contains(&field.as_str()) {
             return;
         }
+        fn contains_unwrap(e: &mut ast::Expr) -> bool {
+            let mut found = false;
+            ast::visit_expr_mut(e, &mut |c| {
+                if matches!(c.kind, ExprKind::Unwrap { .. }) { found = true; }
+            });
+            found
+        }
         let mut fallible = false;
         for a in args.iter_mut() {
             match &mut a.kind {
+                // CANONICAL tail form `(x) => f(x)!`: strip the marker — the
+                // residue IS the twin's Result-returning callback (proven path).
                 ExprKind::Lambda { body, .. }
                     if matches!(body.kind, ExprKind::Unwrap { .. }) =>
                 {
@@ -701,6 +742,15 @@ impl Checker {
                     let mut stripped = (**inner).clone();
                     std::mem::swap(&mut **body, &mut stripped);
                     fallible = true;
+                }
+                // COMPOUND fallible body (`(x) => g(f(x)!)!` etc., 2b-i): no
+                // surgery — the lambda infers as a real fallible closure
+                // `(A) -> Result[B, String]` (its own channel + value-tail
+                // lift), which is exactly the twin's callback type.
+                ExprKind::Lambda { body, .. } => {
+                    if contains_unwrap(body) {
+                        fallible = true;
+                    }
                 }
                 ExprKind::Ident { name, .. } if self.fallible_marker_fns.contains(name) => {
                     fallible = true;
@@ -799,9 +849,45 @@ impl Checker {
                 }
             }
         }
-        // Inside a lambda within an effect fn the call site *looks* effectful,
-        // but `?` cannot propagate out of the closure (#489) — point there
-        // specifically; otherwise the fn needs a propagation-capable signature.
+        // ADR-0006 D1 (#1108 Phase 2b): inside a LAMBDA, `!` propagates into
+        // the lambda's OWN provisional channel (`Result[fresh, String]`) —
+        // never across the closure boundary (#489 unchanged). Accepting here
+        // marks the lambda fallible (usage-driven, L2); the lambda then
+        // infers as `(A) -> Result[T, String]`.
+        if self.env.lambda_depth > 0 {
+            if let Some(chan) = self.env.lambda_ret.clone() {
+                let op = resolve_ty(operand, &self.uf);
+                match (&chan, &op) {
+                    (
+                        Ty::Applied(TypeConstructorId::Result, ra),
+                        Ty::Applied(TypeConstructorId::Result, oa),
+                    ) if ra.len() == 2 && oa.len() == 2 => {
+                        // E is String by the channel's construction (ADR-0002
+                        // D2, L3): a custom-E operand fails this unification.
+                        self.unify_infer(&ra[1], &oa[1]);
+                        self.env.lambda_prop_used = true;
+                        return;
+                    }
+                    // Option operand: none maps to err("none") (L4).
+                    (
+                        Ty::Applied(TypeConstructorId::Result, _),
+                        Ty::Applied(TypeConstructorId::Option, _),
+                    ) => {
+                        self.env.lambda_prop_used = true;
+                        return;
+                    }
+                    (
+                        Ty::Applied(TypeConstructorId::Result, _),
+                        Ty::Unknown | Ty::TypeVar(_),
+                    ) => {
+                        self.env.lambda_prop_used = true;
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Off-type operands (and a missing channel) still reject.
         let hint = if self.env.lambda_depth > 0 {
             "`!` cannot propagate an error out of a lambda; use `??` for a fallback value or move the call out of the closure"
         } else {

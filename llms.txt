@@ -25,7 +25,10 @@ concise on purpose. Follow the link map for depth.
   `?` binds to the preceding type atom, never across `->`: `(A) -> B?` is a fn
   returning `Option[B]`, an optional fn value spells `((A) -> B)?`, nested
   Option spells `(T?)?`. Errors are spelled `Result[T, E]`, or `-> T!` for the
-  pure-fallible `Result[T, String]` return. No `null`, no `throw`, no
+  pure-fallible `Result[T, String]` return (value tails lift into ok(...)).
+  A lambda whose body uses `!` is a fallible closure `(A) -> Result[T, String]`
+  — first-class, and as a core list-HOF callback it takes the first-err form;
+  fn-type slots spell it `(A) -> B!`. In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
   exceptions.
 - Effectful functions are written `effect fn f() -> T`. Pure functions
   cannot call effect functions (checked, emits E006).

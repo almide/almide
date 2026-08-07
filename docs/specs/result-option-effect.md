@@ -198,13 +198,27 @@ effect fn read_file(path: String) -> String = fs.read_text(path)!
 `let _` の A/B)、`spec/wasm_cross/let_wildcard_discard.almd`(C-217)、
 `spec/wasm_cross/effect_option_explicit_bang.almd`(C-216)。
 
-### lambda 境界(#489 / #1051)
+### lambda の可謬性(ADR-0006 D1 / ADR-0009 — #1108 Phase 2b)
 
-lambda は囲む fn の効果資格を継承するが、auto-`?` はクロージャ境界を**越えない**:
-effect fn 内の lambda が effect fn を呼んだ結果は明示の Result 値であり、
-lambda 内の `!` は E022(`??` / match で処理するか、呼び出しを lambda の外へ)。
+lambda は「ミニ可謬 fn」— 本体の `!` は **lambda 自身の失敗チャネル**
+(`Result[T, String]`)に落ち、クロージャ境界は越えない(#489 の不変条件は保存)。
+使用駆動で可謬性が推論される(L1〜L9、2026-08-07 批准):
 
-テスト: `spec/lang/result_option_matrix_test.almd`, `spec/stdlib/` の effect 系各種
+```almide
+let g = (x) => int.parse(x)! * 2      // g: (String) -> Result[Int, String] — 第一級
+g("21") ?? -1                          // 呼べば Result 値、普通に消費
+list.map(xs, (s) => halve(parse(s)!)!) // 複合可謬 callback → first-err 形(L6)
+fn retry(op: (Int) -> Int!) -> Int! = op(1)!   // fn 型 slot の `!`(L7/L8)
+```
+
+- E は String 固定(L3)・Option operand の none は err("none")(L4)・値 tail は
+  ok(...) に lift(L5)
+- **test ブロック内は例外**: lambda の `!` は unwrap のまま、HOF dispatch も
+  総形のまま(L9 — test 世界は pre-#1108 意味論を丸ごと保持)
+- 素の `(A) -> B` slot への bit 透過(user HOF)は未実装 — E005 が
+  2 つの解決綴りを名指しする targeted hint を運ぶ(Phase 2b-iii)
+
+テスト: `spec/lang/fallible_lambda_test.almd`(L1〜L9 のピン)
 
 ## 4. fn main
 

@@ -48,6 +48,19 @@ impl Parser {
         self.parse_type_name_suffix(name)
     }
 
+    /// ADR-0009 D1 (#1108 Phase 2b): a fn TYPE's return may carry the
+    /// fallibility marker — `(A) -> B!` ≡ `(A) -> Result[B, String]`. Same
+    /// pseudo-generic carrier as the declaration-position marker; `?` binds
+    /// first (`-> B?!` = Result[Option[B], String]), matching the decl rule.
+    fn wrap_fallible_ret_suffix(&mut self, ret: TypeExpr) -> TypeExpr {
+        if self.check(TokenType::Bang) && !self.newline_before_current() {
+            self.advance();
+            TypeExpr::Generic { name: sym("!"), args: vec![ret] }
+        } else {
+            ret
+        }
+    }
+
     /// ADR-0010: `T?` marks Option — `?` binds to the just-parsed type ATOM
     /// (a named type or a parenthesized/tuple type) and never crosses `->`,
     /// so `(A) -> B?` is a fn returning Option[B] and an optional fn value
@@ -102,6 +115,7 @@ impl Parser {
             if self.check(TokenType::Arrow) {
                 self.advance();
                 let ret = self.parse_type_expr()?;
+                let ret = self.wrap_fallible_ret_suffix(ret);
                 return Ok(TypeExpr::Fn { params: vec![], ret: Box::new(ret) });
             }
             return Ok(TypeExpr::Simple { name: sym("Unit") });
@@ -113,6 +127,7 @@ impl Parser {
             if self.check(TokenType::Arrow) {
                 self.advance();
                 let ret = self.parse_type_expr()?;
+                let ret = self.wrap_fallible_ret_suffix(ret);
                 return Ok(TypeExpr::Fn { params: vec![first], ret: Box::new(ret) });
             }
             // ADR-0010: a parenthesized type is an atom, so `?` may follow —
@@ -130,6 +145,7 @@ impl Parser {
         if self.check(TokenType::Arrow) {
             self.advance();
             let ret = self.parse_type_expr()?;
+            let ret = self.wrap_fallible_ret_suffix(ret);
             return Ok(TypeExpr::Fn { params: elements, ret: Box::new(ret) });
         }
         // ADR-0010: a tuple is a parenthesized atom — `(String, Int)?`.
@@ -315,6 +331,7 @@ impl Parser {
         self.expect(TokenType::RParen)?;
         self.expect(TokenType::Arrow)?;
         let ret = self.parse_type_expr()?;
+        let ret = self.wrap_fallible_ret_suffix(ret);
         Ok(TypeExpr::Fn { params, ret: Box::new(ret) })
     }
     pub(crate) fn parse_type_args(&mut self) -> Result<Vec<TypeExpr>, String> {

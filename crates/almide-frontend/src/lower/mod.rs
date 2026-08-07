@@ -535,7 +535,7 @@ include!("test_lowering.rs");
 /// T-typed exit wraps in `ResultOk` at `Result[T, String]`. Runs in the
 /// FRONTEND lowering so all three IR consumers (codegen, mir, interp) see
 /// the same lifted body.
-fn wrap_fallible_value_tail(body: IrExpr) -> IrExpr {
+pub(crate) fn wrap_fallible_value_tail(body: IrExpr) -> IrExpr {
     let ty = body.ty.clone();
     let span = body.span.clone();
     match body.kind {
