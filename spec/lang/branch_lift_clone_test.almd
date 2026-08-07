@@ -1,0 +1,34 @@
+// #1130: the TCO clone exemption is FUNCTION-SCOPED.
+//
+// TailCallOpt marks a rewritten loop's heap params `tco_owned` — it takes
+// over their clone/move decisions (the O(n²) accumulator fix). The mark is a
+// VarId set, and `branch_lift` lifts an in-loop let-bound heap branch into a
+// helper whose params ARE the enclosing fn's vars — so the helper inherited
+// the exemption WITHOUT the compensating clone plan and its bare moves came
+// out as a rustc E0382 ("use of moved value") behind the codegen wall:
+// `almide check` green, `almide run` red. Found migrating almide-dojo.
+//
+// The shape: a tail-recursive driver whose match-over-effect-call CONSUMES a
+// String param and whose err arm REUSES it.
+type R = { task: String, model: String, ok: Bool }
+
+effect fn run_task(task: String, model: String) -> Result[R, String] = if task == "bad" then err("boom")
+else ok(R { task: task, model: model, ok: true })
+
+effect fn go(tasks: List[String], model: String, acc: List[R]) -> List[R] = match list.first(tasks) {
+  none => acc,
+  some(t) => {
+    let next = match run_task(t, model) {
+      ok(r) => acc + [r],
+      err(_) => acc + [
+        R { task: t, model: model, ok: false }
+      ],
+    }
+    go(list.drop(tasks, 1), model, next)!
+  },
+}
+
+test "a lifted in-loop branch clones what it reuses" {
+  let out = go(["a", "bad"], "m1", [])
+  assert_eq(list.len(out ?? []), 2)
+}

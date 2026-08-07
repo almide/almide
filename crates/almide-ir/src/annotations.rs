@@ -104,6 +104,15 @@ pub struct CodegenAnnotations {
     /// bare move: a wrong decision here is a LOUD E0382/E0505 codegen bug,
     /// never a silent wrong value.
     pub tco_owned_params: HashSet<VarId>,
+    /// The functions TailCallOpt actually rewrote into loops — the SCOPE of
+    /// `tco_owned_params`. The exemption is a promise about the rewritten
+    /// body ("every consuming read there is Clone-wrapped or a deliberate
+    /// per-path-final move"), and a VarId can appear in ANOTHER function:
+    /// `branch_lift` lifts an in-loop branch into a helper whose params are
+    /// the enclosing fn's free vars, so the helper inherited the exemption
+    /// without the compensating plan and its bare moves became a rustc
+    /// E0382 (#1130). Consulted per function by CloneInsertion.
+    pub tco_rewritten_fns: HashSet<almide_base::intern::Sym>,
 }
 
 impl CodegenAnnotations {

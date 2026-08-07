@@ -32,13 +32,29 @@ impl NanoPass for CloneInsertionPass {
 
         let always_marks = program.codegen_annotations.always_clone_vars.clone();
         let tco_owned = program.codegen_annotations.tco_owned_params.clone();
+        let tco_fns = program.codegen_annotations.tco_rewritten_fns.clone();
         let (always, eligible) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks, &tco_owned);
+        // #1130: the TCO exemption holds ONLY inside the body TailCallOpt
+        // rewrote. A VarId can live in another function too — `branch_lift`
+        // lifts an in-loop branch into a helper whose params ARE the
+        // enclosing fn's vars — and there the compensating clone plan does
+        // not exist, so its bare moves were a rustc E0382. Everything else
+        // gets the ordinary last-use analysis.
+        let no_exempt: HashSet<VarId> = HashSet::new();
+        let (always_plain, eligible_plain) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks, &no_exempt);
         let mut remaining = build_remaining(&eligible, &syntactic);
+        let mut remaining_plain = build_remaining(&eligible_plain, &syntactic);
 
         for func in &mut program.functions {
             // Reset remaining for each function (vars are function-scoped)
-            reset_remaining(&mut remaining, &eligible, &syntactic);
-            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false });
+            let tco_here = tco_fns.contains(&func.name);
+            let (a, e, r) = if tco_here {
+                (&always, &eligible, &mut remaining)
+            } else {
+                (&always_plain, &eligible_plain, &mut remaining_plain)
+            };
+            reset_remaining(r, e, &syntactic);
+            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false });
         }
         for tl in &mut program.top_lets {
             reset_remaining(&mut remaining, &eligible, &syntactic);
@@ -50,11 +66,18 @@ impl NanoPass for CloneInsertionPass {
             let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
             let module_syntactic = compute_syntactic_counts_module(module);
             let (m_always, m_eligible) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks, &tco_owned);
+            let (m_always_plain, m_eligible_plain) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks, &no_exempt);
             let mut m_remaining = build_remaining(&m_eligible, &module_syntactic);
+            let mut m_remaining_plain = build_remaining(&m_eligible_plain, &module_syntactic);
 
             for func in module.functions.iter_mut() {
-                reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
-                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false });
+                let (a, e, r) = if tco_fns.contains(&func.name) {
+                    (&m_always, &m_eligible, &mut m_remaining)
+                } else {
+                    (&m_always_plain, &m_eligible_plain, &mut m_remaining_plain)
+                };
+                reset_remaining(r, e, &module_syntactic);
+                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false });
             }
             for tl in module.top_lets.iter_mut() {
                 reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
