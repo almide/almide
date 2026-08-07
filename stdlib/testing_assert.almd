@@ -11,20 +11,15 @@
 // OFF-SIGNATURE call site is rewritten to the unlinkable `_x` name by the lowering
 // (`desugar_offtype_testing_asserts`), so a different instantiation walls honestly
 // instead of misreading a block.
+fn testing_assert_gt(a: Int, b: Int) -> Unit = if a > b then () else prim.die(prim.handle("assert_gt failed\n"))
 
-fn testing_assert_gt(a: Int, b: Int) -> Unit =
-  if a > b then () else prim.die(prim.handle("assert_gt failed\n"))
+fn testing_assert_lt(a: Int, b: Int) -> Unit = if a < b then () else prim.die(prim.handle("assert_lt failed\n"))
 
-fn testing_assert_lt(a: Int, b: Int) -> Unit =
-  if a < b then () else prim.die(prim.handle("assert_lt failed\n"))
+fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit = if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
 
-fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit =
-  if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
+fn testing_assert_contains(haystack: String, needle: String) -> Unit = if string.contains(haystack, needle) then () else prim.die(prim.handle("assert_contains failed\n"))
 
-fn testing_assert_contains(haystack: String, needle: String) -> Unit =
-  if string.contains(haystack, needle) then () else prim.die(prim.handle("assert_contains failed\n"))
-
-fn testing_assert_some(o: Option[String]) -> Unit = {
+fn testing_assert_some(o: String?) -> Unit = {
   let h = prim.handle(o)
   if prim.load32(h + 4) != 0 then () else prim.die(prim.handle("assert_some failed: got None\n"))
 }
@@ -34,7 +29,7 @@ fn testing_assert_ok(r: Result[String, String]) -> Unit = {
   if prim.load32(h + 16) == 0 then () else prim.die(prim.handle("assert_ok failed\n"))
 }
 
-fn testing_assert_none(o: Option[String]) -> Unit = {
+fn testing_assert_none(o: String?) -> Unit = {
   let h = prim.handle(o)
   if prim.load32(h + 4) == 0 then () else prim.die(prim.handle("assert_none failed\n"))
 }

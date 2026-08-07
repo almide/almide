@@ -2,7 +2,6 @@
 // sized integer modules (v1 registry source; the native bodies live in each module's
 // own bundled file). Negative literals are built as `0 - N` and i64::MIN as two steps
 // so no token exceeds the i64 literal range. Pure scalar.
-
 fn int_min_value() -> Int = {
   let a = 0 - 9223372036854775807
   a - 1

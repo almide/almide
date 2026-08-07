@@ -16,7 +16,9 @@ effect fn io_read_all() -> String = {
   while n > 0 {
     let chunk = prim.read_n_bytes(4096)
     n = list.len(chunk)
-    for v in chunk { bytes.push(buf, v) }
+    for v in chunk {
+      bytes.push(buf, v)
+    }
   }
   bytes.to_string_lossy(buf)
 }

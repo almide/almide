@@ -10,32 +10,29 @@
 // stays where the lowering supports it; list_get's body is a heap-result-if whose arms
 // are those calls (the call-arm path moves each owned Option out). The element load lives
 // in __opt_some_at, called ONLY from the in-bounds branch, so there is no OOB read.
+fn __opt_none_int() -> Int? = none
 
-fn __opt_none_int() -> Option[Int] = None
+fn __opt_some_at(h: Int, i: Int) -> Int? = some(prim.load64(h + 12 + i * 8))
 
-fn __opt_some_at(h: Int, i: Int) -> Option[Int] = Some(prim.load64(h + 12 + i * 8))
-
-fn list_get(xs: List[Int], i: Int) -> Option[Int] = {
+fn list_get(xs: List[Int], i: Int) -> Int? = {
   let h = prim.handle(xs)
-  let len = prim.load32(h + 4)              // element count at LIST_LEN_OFFSET(4)
+  let len = prim.load32(h + 4)
+  // element count at LIST_LEN_OFFSET(4)
   if i < 0 then __opt_none_int()
-  else if i >= len then __opt_none_int()
-  else __opt_some_at(h, i)
+  else if i >= len then __opt_none_int() else __opt_some_at(h, i)
 }
 
 // `list.first` — Some(element 0) for a non-empty list, else None. Reuses the same
 // 0-or-1-element-list Option helpers (the materialization machinery generalizes).
-fn list_first(xs: List[Int]) -> Option[Int] = {
+fn list_first(xs: List[Int]) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  if len <= 0 then __opt_none_int()
-  else __opt_some_at(h, 0)
+  if len <= 0 then __opt_none_int() else __opt_some_at(h, 0)
 }
 
 // `list.last` — Some(element len-1) for a non-empty list, else None.
-fn list_last(xs: List[Int]) -> Option[Int] = {
+fn list_last(xs: List[Int]) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  if len <= 0 then __opt_none_int()
-  else __opt_some_at(h, len - 1)
+  if len <= 0 then __opt_none_int() else __opt_some_at(h, len - 1)
 }

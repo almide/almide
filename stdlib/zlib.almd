@@ -2,9 +2,7 @@
 //
 // Supports zlib (with header), deflate (raw), and gzip formats.
 // Requires `import zlib`.
-
 // ── Zlib (with header) ──
-
 @intrinsic("almide_rt_zlib_compress")
 effect fn compress(data: Bytes) -> Result[Bytes, String] = _
 
@@ -15,7 +13,6 @@ effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
 
 // ── Deflate (raw, no header — used by Minecraft protocol) ──
-
 @intrinsic("almide_rt_zlib_deflate")
 effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
 
@@ -26,7 +23,6 @@ effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
 
 // ── Gzip ──
-
 @intrinsic("almide_rt_zlib_gzip")
 effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 

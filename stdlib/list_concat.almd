@@ -11,7 +11,6 @@
 // handles that a copy would alias (double-free on drop). That needs an rc-incrementing,
 // recursively-dropped variant; until then a `List[String] + …` stays deferred (the lowering
 // gates __list_concat to scalar-element lists).
-
 // GEOMETRIC capacity for a concat RESULT (churn-friendliness, C-131): pad the block to the
 // next power of two >= n (floor 4) and PATCH len down (the filtermap over-allocate/patch-len
 // precedent). Successive append-accumulator concats (`xs = xs + [e]` in a loop) then request
@@ -21,13 +20,11 @@
 // smaller freed block, and the doubling workload OOM'd at 4GB (loop_buffer_churn, #696).
 fn __lc_cap(n: Int, c: Int) -> Int = if c >= n then c else __lc_cap(n, c * 2)
 
-
-fn __lc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    prim.store64(dst + i * 8, prim.load64(src + i * 8))
-    __lc_copy(dst, src, n, i + 1)
-  }
+fn __lc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store64(dst + i * 8, prim.load64(src + i * 8))
+  __lc_copy(dst, src, n, i + 1)
+}
 
 fn __list_concat(a: List[Int], b: List[Int]) -> List[Int] = {
   let ha = prim.handle(a)
@@ -49,14 +46,13 @@ fn __list_concat(a: List[Int], b: List[Int]) -> List[Int] = {
 // `List[Value] + …`, `List[(k,v)] + …` (the heap-loop-carried append accumulators). The raw rc_inc is
 // cert-INVISIBLE (a Prim), so the per-element leak-safety is the differential/leak-loop's burden; the
 // list BLOCK's `i(id)m` is the proven part. Self-hosted (reuses $rc_inc), so §4.1 holds.
-fn __lc_copy_rc(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let e = prim.load64(src + i * 8)
-    prim.rc_inc(e)
-    prim.store64(dst + i * 8, e)
-    __lc_copy_rc(dst, src, n, i + 1)
-  }
+fn __lc_copy_rc(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let e = prim.load64(src + i * 8)
+  prim.rc_inc(e)
+  prim.store64(dst + i * 8, e)
+  __lc_copy_rc(dst, src, n, i + 1)
+}
 
 fn __list_concat_rc(a: List[Int], b: List[Int]) -> List[Int] = {
   let ha = prim.handle(a)

@@ -17,7 +17,7 @@ fn len[A](xs: List[A]) -> Int = _
 fn length[A](xs: List[A]) -> Int = _
 
 @intrinsic("almide_rt_list_get")
-fn get[A](xs: List[A], i: Int) -> Option[A] = _
+fn get[A](xs: List[A], i: Int) -> A? = _
 
 @intrinsic("almide_rt_list_get_or")
 fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
@@ -67,10 +67,10 @@ fn tail[A](xs: List[A]) -> List[A] = list.drop(xs, 1)
 fn unique[A](xs: List[A]) -> List[A] = _
 
 @intrinsic("almide_rt_list_index_of")
-fn index_of[A](xs: List[A], x: A) -> Option[Int] = _
+fn index_of[A](xs: List[A], x: A) -> Int? = _
 
 @intrinsic("almide_rt_list_last")
-fn last[A](xs: List[A]) -> Option[A] = _
+fn last[A](xs: List[A]) -> A? = _
 
 @intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
@@ -82,16 +82,16 @@ fn sum(xs: List[Int]) -> Int = _
 fn product(xs: List[Int]) -> Int = _
 
 @intrinsic("almide_rt_list_first")
-fn first[A](xs: List[A]) -> Option[A] = _
+fn first[A](xs: List[A]) -> A? = _
 
 @intrinsic("almide_rt_list_is_empty")
 fn is_empty[A](xs: List[A]) -> Bool = _
 
 @intrinsic("almide_rt_list_min")
-fn min[A](xs: List[A]) -> Option[A] = _
+fn min[A](xs: List[A]) -> A? = _
 
 @intrinsic("almide_rt_list_max")
-fn max[A](xs: List[A]) -> Option[A] = _
+fn max[A](xs: List[A]) -> A? = _
 
 @intrinsic("almide_rt_list_join")
 fn join(xs: List[String], sep: String) -> String = _
@@ -110,7 +110,7 @@ fn filter[A](xs: List[A], f: fn(A) -> Bool) -> List[A] = _
 
 @intrinsic("almide_rt_list_find")
 @consume(xs)
-fn find[A](xs: List[A], f: fn(A) -> Bool) -> Option[A] = _
+fn find[A](xs: List[A], f: fn(A) -> Bool) -> A? = _
 
 @intrinsic("almide_rt_list_any")
 fn any[A](xs: List[A], f: fn(A) -> Bool) -> Bool = _
@@ -127,7 +127,7 @@ fn flat_map[A, B](xs: List[A], f: fn(A) -> List[B]) -> List[B] = _
 
 @intrinsic("almide_rt_list_filter_map")
 @consume(xs)
-fn filter_map[A, B](xs: List[A], f: fn(A) -> Option[B]) -> List[B] = _
+fn filter_map[A, B](xs: List[A], f: fn(A) -> B?) -> List[B] = _
 
 @intrinsic("almide_rt_list_fold")
 @consume(xs)
@@ -152,7 +152,7 @@ fn partition[A](xs: List[A], f: fn(A) -> Bool) -> (List[A], List[A]) = _
 
 @intrinsic("almide_rt_list_reduce")
 @consume(xs)
-fn reduce[A](xs: List[A], f: fn(A, A) -> A) -> Option[A] = _
+fn reduce[A](xs: List[A], f: fn(A, A) -> A) -> A? = _
 
 @intrinsic("almide_rt_list_group_by")
 @consume(xs)
@@ -160,7 +160,7 @@ fn group_by[A, B](xs: List[A], f: fn(A) -> B) -> Map[B, List[A]] = _
 
 @intrinsic("almide_rt_list_find_index")
 @consume(xs)
-fn find_index[A](xs: List[A], f: fn(A) -> Bool) -> Option[Int] = _
+fn find_index[A](xs: List[A], f: fn(A) -> Bool) -> Int? = _
 
 @intrinsic("almide_rt_list_update")
 @consume(xs)
@@ -224,7 +224,7 @@ fn shuffle[A](xs: List[A]) -> List[A] = _
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 @intrinsic("almide_rt_list_binary_search")
-fn binary_search(xs: List[Int], target: Int) -> Option[Int] = _
+fn binary_search(xs: List[Int], target: Int) -> Int? = _
 
 // ── mutable (in-place) ──
 @intrinsic("almide_rt_list_push")
@@ -237,7 +237,7 @@ fn push[A](mut xs: List[A], x: A) -> Unit = _
 fn with_capacity[A](cap: Int) -> List[A] = _
 
 @intrinsic("almide_rt_list_pop")
-fn pop[A](mut xs: List[A]) -> Option[A] = _
+fn pop[A](mut xs: List[A]) -> A? = _
 
 @intrinsic("almide_rt_list_clear")
 fn clear[A](mut xs: List[A]) -> Unit = _
@@ -310,7 +310,7 @@ fn __try_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Resul
   },
 }
 
-fn __try_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E] = match list.get(xs, 0) {
+fn __try_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[B?, E]) -> Result[List[B], E] = match list.get(xs, 0) {
   none => ok([]),
   some(x) => match f(x) {
     ok(kept) => match __try_filter_map(list.drop(xs, 1), f) {
@@ -335,7 +335,7 @@ fn __try_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Res
 // The first element the (erring) predicate ACCEPTS, `none` when no element
 // matches — or the first err. `__try_find(xs, p)` also answers the any/all/
 // count shapes, which is why those have no try_ twins.
-fn __try_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E] = match list.get(xs, 0) {
+fn __try_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[A?, E] = match list.get(xs, 0) {
   none => ok(none),
   some(x) => match f(x) {
     ok(true) => ok(some(x)),

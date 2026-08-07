@@ -14,9 +14,7 @@
 // fusion-preserving reorder is needed — the fused form is still a
 // plain `CallTarget::Module { module: "matrix", func: "fma" }`, which
 // the bundled `@inline_rust` path dispatches directly.
-
 // ── construction + metadata ──
-
 @intrinsic("almide_rt_matrix_zeros")
 fn zeros(rows: Int, cols: Int) -> Matrix = _
 
@@ -97,26 +95,11 @@ fn append_rows(base: Matrix, extra: Matrix) -> Matrix = _
 // `gamma_offs`: [attn_norm, q_norm, k_norm, ffn_norm] f32 offsets.
 // `weight_offs`: [q, k, v, o, gate, up, down] Q1_0 block offsets.
 @intrinsic("almide_rt_matrix_qwen3_block_q1_0_kv")
-fn qwen3_block_q1_0_kv(
-  h: Matrix,
-  k_cache: Matrix,
-  v_cache: Matrix,
-  w: Bytes,
-  gamma_offs: List[Int],
-  weight_offs: List[Int],
-  start_pos: Int,
-  n_q_heads: Int,
-  n_kv_heads: Int,
-  head_dim: Int,
-  ffn_hidden: Int,
-  rope_theta: Float,
-  eps: Float,
-) -> (Matrix, Matrix, Matrix) = _
+fn qwen3_block_q1_0_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = _
 
 // ── f32 bytes-resident path (L2-2) ──
 // Weights are consumed straight from the source GGUF buffer — no decoded
 // Matrix, no model record, no per-call deep clones.
-
 // y = x @ W^T with W f32 row-major (out, in) at `w_offset` in `w_bytes`.
 @intrinsic("almide_rt_matrix_linear_f32_row_no_bias")
 fn linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
@@ -136,24 +119,9 @@ fn rope_rotate_neox_at(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float
 // `gamma_offs`: [attn_norm, q_norm, k_norm, ffn_norm] f32 byte offsets.
 // `weight_offs`: [q, k, v, o, gate, up, down] f32 byte offsets.
 @intrinsic("almide_rt_matrix_qwen3_block_f32_kv")
-fn qwen3_block_f32_kv(
-  h: Matrix,
-  k_cache: Matrix,
-  v_cache: Matrix,
-  w: Bytes,
-  gamma_offs: List[Int],
-  weight_offs: List[Int],
-  start_pos: Int,
-  n_q_heads: Int,
-  n_kv_heads: Int,
-  head_dim: Int,
-  ffn_hidden: Int,
-  rope_theta: Float,
-  eps: Float,
-) -> (Matrix, Matrix, Matrix) = _
+fn qwen3_block_f32_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = _
 
 // ── Q8_0 bytes-resident path: 4x less DRAM traffic than f32 ──
-
 @intrinsic("almide_rt_matrix_linear_q8_0_row_no_bias")
 fn linear_q8_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
 
@@ -163,21 +131,7 @@ fn select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) 
 // Qwen3 layer over Q8_0 weights (norm gammas stay f32). Same contract as
 // qwen3_block_f32_kv.
 @intrinsic("almide_rt_matrix_qwen3_block_q8_0_kv")
-fn qwen3_block_q8_0_kv(
-  h: Matrix,
-  k_cache: Matrix,
-  v_cache: Matrix,
-  w: Bytes,
-  gamma_offs: List[Int],
-  weight_offs: List[Int],
-  start_pos: Int,
-  n_q_heads: Int,
-  n_kv_heads: Int,
-  head_dim: Int,
-  ffn_hidden: Int,
-  rope_theta: Float,
-  eps: Float,
-) -> (Matrix, Matrix, Matrix) = _
+fn qwen3_block_q8_0_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = _
 
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
@@ -192,7 +146,6 @@ fn rows(m: Matrix) -> Int = _
 fn cols(m: Matrix) -> Int = _
 
 // ── elementwise arithmetic ──
-
 @intrinsic("almide_rt_matrix_add")
 fn add(a: Matrix, b: Matrix) -> Matrix = _
 
@@ -221,10 +174,9 @@ fn neg(m: Matrix) -> Matrix = _
 fn pow(m: Matrix, exp: Float) -> Matrix = _
 
 @intrinsic("almide_rt_matrix_map")
-fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
+fn map(m: Matrix, f: fn(Float) -> Float) -> Matrix = _
 
 // ── bytes serialisation ──
-
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
 fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
@@ -241,7 +193,6 @@ fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix =
 fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
 // ── neural-network primitives (row-wise) ──
-
 @intrinsic("almide_rt_matrix_broadcast_add_row")
 fn broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix = _
 
@@ -277,22 +228,14 @@ fn gelu(m: Matrix) -> Matrix = _
 // stdlib — build script lifts this into the codegen FusionRule registry,
 // and the same declaration will translate 1:1 into an egg Rewrite<L, N>
 // when the MLIR/egg arc lands (roadmap: active/mlir-backend-adoption.md).
-@rewrite(
-  name = "gemm_bias_scale_gelu",
-  from = "matrix.gelu(matrix.scale(matrix.add(matrix.mul(?a, ?b), ?bias), ?alpha))",
-  to = "matrix.fused_gemm_bias_scale_gelu(?a, ?b, ?bias, ?alpha)"
-)
+@rewrite(name="gemm_bias_scale_gelu", from="matrix.gelu(matrix.scale(matrix.add(matrix.mul(?a, ?b), ?bias), ?alpha))", to="matrix.fused_gemm_bias_scale_gelu(?a, ?b, ?bias, ?alpha)")
 @intrinsic("almide_rt_matrix_fused_gemm_bias_scale_gelu")
 fn fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) -> Matrix = _
 
 // Fusion target: `softmax_rows(scale(mul(Q, Kt), s))` — scaled-dot-product
 // attention numerator. One cblas_dgemm (alpha=s, beta=0) plus in-place
 // row softmax (stable max-subtract + vvexp + normalize).
-@rewrite(
-  name = "attention_weights",
-  from = "matrix.softmax_rows(matrix.scale(matrix.mul(?q, ?kt), ?scale))",
-  to = "matrix.attention_weights(?q, ?kt, ?scale)"
-)
+@rewrite(name="attention_weights", from="matrix.softmax_rows(matrix.scale(matrix.mul(?q, ?kt), ?scale))", to="matrix.attention_weights(?q, ?kt, ?scale)")
 @intrinsic("almide_rt_matrix_attention_weights")
 fn attention_weights(q: Matrix, kt: Matrix, scale: Float) -> Matrix = _
 
@@ -301,11 +244,7 @@ fn attention_weights(q: Matrix, kt: Matrix, scale: Float) -> Matrix = _
 // Produces `(softmax_rows(s · Q @ Kt)) @ V` without ever materialising
 // the post-scale or post-softmax matrix as a heap object — both stages
 // reuse the same flat buffer.
-@rewrite(
-  name = "scaled_dot_product_attention",
-  from = "matrix.mul(matrix.attention_weights(?q, ?kt, ?scale), ?v)",
-  to = "matrix.scaled_dot_product_attention(?q, ?kt, ?v, ?scale)"
-)
+@rewrite(name="scaled_dot_product_attention", from="matrix.mul(matrix.attention_weights(?q, ?kt, ?scale), ?v)", to="matrix.scaled_dot_product_attention(?q, ?kt, ?v, ?scale)")
 @intrinsic("almide_rt_matrix_scaled_dot_product_attention")
 fn scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, scale: Float) -> Matrix = _
 
@@ -313,11 +252,7 @@ fn scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, scale: Float) 
 // cblas_dgemm(transB=Trans) with the output row-seeded from bias plus
 // an in-place GELU sweep. Skips one r×n_out allocation and one pass
 // over the output.
-@rewrite(
-  name = "linear_row_gelu",
-  from = "matrix.gelu(matrix.linear_row(?x, ?w, ?bias))",
-  to = "matrix.linear_row_gelu(?x, ?w, ?bias)"
-)
+@rewrite(name="linear_row_gelu", from="matrix.gelu(matrix.linear_row(?x, ?w, ?bias))", to="matrix.linear_row_gelu(?x, ?w, ?bias)")
 @intrinsic("almide_rt_matrix_linear_row_gelu")
 fn linear_row_gelu(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
 
@@ -325,11 +260,7 @@ fn linear_row_gelu(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
 // pre-norm residual block first sub-layer. Computes per-row normalize
 // into a fresh buffer then drives cblas_dgemm with that buffer, skipping
 // burn's `linear_row` dispatch on the Small path.
-@rewrite(
-  name = "pre_norm_linear",
-  from = "matrix.linear_row(matrix.layer_norm_rows(?x, ?gamma, ?beta, ?eps), ?w, ?bias)",
-  to = "matrix.pre_norm_linear(?x, ?gamma, ?beta, ?eps, ?w, ?bias)"
-)
+@rewrite(name="pre_norm_linear", from="matrix.linear_row(matrix.layer_norm_rows(?x, ?gamma, ?beta, ?eps), ?w, ?bias)", to="matrix.pre_norm_linear(?x, ?gamma, ?beta, ?eps, ?w, ?bias)")
 @intrinsic("almide_rt_matrix_pre_norm_linear")
 fn pre_norm_linear(x: Matrix, gamma: List[Float], beta: List[Float], eps: Float, weight: Matrix, bias: List[Float]) -> Matrix = _
 
@@ -367,7 +298,6 @@ fn conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride:
 fn gather_rows(m: Matrix, indices: List[Int]) -> Matrix = _
 
 // ── row-vector dot products ──
-
 @intrinsic("almide_rt_matrix_row_dot")
 fn dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 
@@ -383,7 +313,6 @@ fn row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 // silently mixing — passing a `Matrix[Float32]` to a fn expecting
 // bare `Matrix` (= `Matrix[Float]` default) now surfaces as a checker
 // error instead of runtime storage churn.
-
 @intrinsic("almide_rt_matrix_zeros_f32")
 fn zeros_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
 
@@ -406,15 +335,7 @@ fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Mat
 // mirror fusions exist since either operand may carry the scale. The
 // runtime has a `FUSED_ALPHA_MAX=512` crossover above which it reverts
 // to scale+mul; both rules still fire and let the runtime decide.
-@rewrite(
-  name = "mul_scaled_rhs",
-  from = "matrix.mul(?a, matrix.scale(?b, ?s))",
-  to = "matrix.mul_scaled(?a, ?s, ?b)"
-)
-@rewrite(
-  name = "mul_scaled_lhs",
-  from = "matrix.mul(matrix.scale(?a, ?s), ?b)",
-  to = "matrix.mul_scaled(?a, ?s, ?b)"
-)
+@rewrite(name="mul_scaled_rhs", from="matrix.mul(?a, matrix.scale(?b, ?s))", to="matrix.mul_scaled(?a, ?s, ?b)")
+@rewrite(name="mul_scaled_lhs", from="matrix.mul(matrix.scale(?a, ?s), ?b)", to="matrix.mul_scaled(?a, ?s, ?b)")
 @intrinsic("almide_rt_matrix_mul_scaled")
 fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _

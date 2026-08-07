@@ -3,19 +3,15 @@
 // single bytes 48..=57; any non-digit ASCII byte fails, and any multibyte char has a
 // lead/continuation byte >= 0x80 (outside 48..57) so it fails too — so a BYTE scan over
 // [48,57] is exactly equivalent to the codepoint `is_ascii_digit` check. Empty → false.
-
-fn __isdig(addr: Int, end: Int) -> Bool =
-  if addr >= end then true
-  else {
-    let b = prim.load8(addr)
-    if b < 48 then false
-    else if b > 57 then false
-    else __isdig(addr + 1, end)
-  }
+fn __isdig(addr: Int, end: Int) -> Bool = if addr >= end then true
+else {
+  let b = prim.load8(addr)
+  if b < 48 then false
+  else if b > 57 then false else __isdig(addr + 1, end)
+}
 
 fn string_is_digit(s: String) -> Bool = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
-  if blen == 0 then false
-  else __isdig(h + 12, h + 12 + blen)
+  if blen == 0 then false else __isdig(h + 12, h + 12 + blen)
 }

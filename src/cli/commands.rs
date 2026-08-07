@@ -806,7 +806,7 @@ pub enum FmtMode {
     DryRun,
 }
 
-pub fn cmd_fmt(files: &[String], mode: FmtMode) {
+pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
     // Load dependency info from almide.toml (if present)
     let (dep_names, dep_submodules) = load_dep_info_for_fmt();
     // `--check` is a gate: a file that differs, and a file that cannot even be parsed,
@@ -827,10 +827,14 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode) {
             unreadable = true;
             continue;
         }
-        // Auto-manage imports: add missing, remove unused
-        let import_changes = fmt::auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
-        for msg in &import_changes {
-            err(&format!("{}: {}", file, msg));
+        // Auto-manage imports: add missing, remove unused. `--no-import-edit`
+        // keeps the import list byte-for-byte — the stdlib's splice-context
+        // sources would be corrupted by an inserted import line.
+        if !no_import_edit {
+            let import_changes = fmt::auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
+            for msg in &import_changes {
+                err(&format!("{}: {}", file, msg));
+            }
         }
         let formatted = fmt::format_program(&program);
         match mode {

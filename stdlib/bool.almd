@@ -9,5 +9,4 @@
 // `bool.to_string` (registered in `self_host_runtime()`, renamed bool_to_string →
 // bool.to_string). It is NOT a frontend-bundled module (absent from BUNDLED_MODULES),
 // so `bool` stays an internal v1 self-host module name — user source never sees it.
-
 fn bool_to_string(b: Bool) -> String = if b then "true" else "false"

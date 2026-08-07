@@ -11,21 +11,18 @@
 // SAME re-render `list_to_string_f` (`__ltsf_fill_elem`) does per List[Float] element,
 // here as a single-value formatter so a record/tuple Float field byte-matches v0.
 // Result is a fresh owned String; the trailing ".0" case re-allocates at the exact width.
-
 // Does the `n`-byte string at `src` end in ".0"? (n >= 2 and last two bytes are '.' '0'.)
 // NB: `and` does not lower in v1's if-conditions, so this is a NESTED if (the documented idiom).
-fn __ftsc_ends_dot0(src: Int, n: Int) -> Bool =
-  if n < 2 then false
-  else if prim.load8(src + n - 2) != 46 then false      // not '.'
-  else prim.load8(src + n - 1) == 48                    // last byte is '0'
+fn __ftsc_ends_dot0(src: Int, n: Int) -> Bool = if n < 2 then false
+else if prim.load8(src + n - 2) != 46 then false else prim.load8(src + n - 1) == 48
 
+// last byte is '0'
 // Copy `n` bytes from `src` to `dst`; return the address past the last byte.
-fn __ftsc_bcopy(src: Int, dst: Int, n: Int) -> Int =
-  if n <= 0 then dst
-  else {
-    prim.store8(dst, prim.load8(src))
-    __ftsc_bcopy(src + 1, dst + 1, n - 1)
-  }
+fn __ftsc_bcopy(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then dst
+else {
+  prim.store8(dst, prim.load8(src))
+  __ftsc_bcopy(src + 1, dst + 1, n - 1)
+}
 
 fn float_to_string_compound(x: Float) -> String = {
   let s = float.to_string(x)

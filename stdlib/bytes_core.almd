@@ -2,14 +2,12 @@
 // same [rc][len@4][cap@8][data@12] layout as a String, only typed Bytes), so the reads/writes
 // are the proven prim byte ops. from_string copies a String's bytes into a fresh Bytes; len/
 // is_empty read the header; get_or reads a byte (0..255) or a default. Source borrowed.
-
-fn __bytecopy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let b = prim.load8(src + i)
-    prim.store8(dst + i, b)
-    __bytecopy(dst, src, n, i + 1)
-  }
+fn __bytecopy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __bytecopy(dst, src, n, i + 1)
+}
 
 fn bytes_from_string(s: String) -> Bytes = {
   let sh = prim.handle(s)
@@ -40,9 +38,11 @@ fn bytes_get_or(b: Bytes, i: Int, default: Int) -> Int = {
 }
 
 // Fill n bytes at p with zero (bytes.new returns a zeroed block; alloc_bytes leaves it raw).
-fn __zerofill(p: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else { prim.store8(p + i, 0); __zerofill(p, n, i + 1) }
+fn __zerofill(p: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(p + i, 0)
+  __zerofill(p, n, i + 1)
+}
 
 // bytes.new(len) -> a fresh zero-filled Bytes of max(0, len) bytes.
 fn bytes_new(len: Int) -> Bytes = {
@@ -66,14 +66,13 @@ fn bytes_concat(a: Bytes, b: Bytes) -> Bytes = {
 }
 
 // Copy n bytes from src into dst in REVERSE order (dst[n-1-i] = src[i]).
-fn __revcopy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let byte = prim.load8(src + i)
-    let pos = dst + (n - 1 - i)
-    prim.store8(pos, byte)
-    __revcopy(dst, src, n, i + 1)
-  }
+fn __revcopy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let byte = prim.load8(src + i)
+  let pos = dst + (n - 1 - i)
+  prim.store8(pos, byte)
+  __revcopy(dst, src, n, i + 1)
+}
 
 // bytes.reverse(b) -> a fresh Bytes with the bytes reversed.
 fn bytes_reverse(b: Bytes) -> Bytes = {
@@ -84,13 +83,12 @@ fn bytes_reverse(b: Bytes) -> Bytes = {
 }
 
 // Copy the blen-byte block at src into dst n times back-to-back.
-fn __repcopy(dst: Int, src: Int, blen: Int, n: Int, k: Int) -> Int =
-  if k >= n then 0
-  else {
-    let off = dst + k * blen
-    let _x = __bytecopy(off, src, blen, 0)
-    __repcopy(dst, src, blen, n, k + 1)
-  }
+fn __repcopy(dst: Int, src: Int, blen: Int, n: Int, k: Int) -> Int = if k >= n then 0
+else {
+  let off = dst + k * blen
+  let _x = __bytecopy(off, src, blen, 0)
+  __repcopy(dst, src, blen, n, k + 1)
+}
 
 // bytes.repeat(b, count) -> b repeated max(0, count) times.
 fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
@@ -102,13 +100,13 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
 }
 
 // Are the n bytes at pa equal to the n bytes at pb? (Lazy recursion: only the taken arm runs.)
-fn __byteq(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
-  if i >= n then true
-  else {
-    let x = prim.load8(pa + i)
-    let y = prim.load8(pb + i)
-    if x == y then __byteq(pa, pb, n, i + 1) else false
-  }
+fn __byteq(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
+else {
+  let x = prim.load8(pa + i)
+  let y = prim.load8(pb + i)
+  if x == y then __byteq(pa, pb, n, i + 1)
+  else false
+}
 
 // bytes.starts_with(b, prefix) -> does b begin with prefix?
 fn bytes_starts_with(b: Bytes, prefix: Bytes) -> Bool = {
@@ -116,7 +114,8 @@ fn bytes_starts_with(b: Bytes, prefix: Bytes) -> Bool = {
   let pn = prim.load32(prim.handle(prefix) + 4)
   let pb = prim.handle(b) + 12
   let pp = prim.handle(prefix) + 12
-  if pn > bn then false else __byteq(pb, pp, pn, 0)
+  if pn > bn then false
+  else __byteq(pb, pp, pn, 0)
 }
 
 // bytes.ends_with(b, suffix) -> does b end with suffix?
@@ -125,15 +124,18 @@ fn bytes_ends_with(b: Bytes, suffix: Bytes) -> Bool = {
   let sn = prim.load32(prim.handle(suffix) + 4)
   let pb = prim.handle(b) + 12 + (bn - sn)
   let ps = prim.handle(suffix) + 12
-  if sn > bn then false else __byteq(pb, ps, sn, 0)
+  if sn > bn then false
+  else __byteq(pb, ps, sn, 0)
 }
 
 // bytes.slice(b, start, end) -> the [start, end) byte range (v0 clamps each index to
 // [0, len] with negative wrapping to len; a start >= end yields an empty Bytes).
 fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
   let len = prim.load32(prim.handle(b) + 4)
-  let s = if start < 0 then len else (if start > len then len else start)
-  let e0 = if end < 0 then len else (if end > len then len else end)
+  let s = if start < 0 then len
+  else (if start > len then len else start)
+  let e0 = if end < 0 then len
+  else (if end > len then len else end)
   let e = if e0 > s then e0 else s
   let m = e - s
   let out = prim.alloc_bytes(m)
@@ -144,17 +146,19 @@ fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
 }
 
 // Lexicographic byte comparison: -1 if a < b, 0 if equal, 1 if a > b (a prefix is the smaller).
-fn __bytecmp(pa: Int, pb: Int, na: Int, nb: Int, i: Int) -> Int =
-  if i >= na then (if i >= nb then 0 else 0 - 1)
+fn __bytecmp(pa: Int, pb: Int, na: Int, nb: Int, i: Int) -> Int = if i >= na then (if i >= nb then 0 else 0 - 1)
+else {
+  if i >= nb then 1
   else {
-    if i >= nb then 1
+    let x = prim.load8(pa + i)
+    let y = prim.load8(pb + i)
+    if x < y then 0 - 1
     else {
-      let x = prim.load8(pa + i)
-      let y = prim.load8(pb + i)
-      if x < y then 0 - 1
-      else { if x > y then 1 else __bytecmp(pa, pb, na, nb, i + 1) }
+      if x > y then 1
+      else __bytecmp(pa, pb, na, nb, i + 1)
     }
   }
+}
 
 // bytes.cmp(a, b) -> -1 / 0 / 1 (lexicographic).
 fn bytes_cmp(a: Bytes, b: Bytes) -> Int = {
@@ -166,7 +170,10 @@ fn bytes_cmp(a: Bytes, b: Bytes) -> Int = {
 }
 
 // Store `val` into the byte at address `p`; returns 0 so it can sit in a value position.
-fn __set_byte(p: Int, val: Int) -> Int = { prim.store8(p, val); 0 }
+fn __set_byte(p: Int, val: Int) -> Int = {
+  prim.store8(p, val)
+  0
+}
 
 // bytes.set(b, i, val) -> a fresh copy of b with byte i set to val (out-of-range i = no change).
 fn bytes_set(b: Bytes, i: Int, val: Int) -> Bytes = {
@@ -175,7 +182,8 @@ fn bytes_set(b: Bytes, i: Int, val: Int) -> Bytes = {
   let dst = prim.handle(out) + 12
   let _x = __bytecopy(dst, prim.handle(b) + 12, n, 0)
   let pos = dst + i
-  let _y = if i >= 0 then (if i < n then __set_byte(pos, val) else 0) else 0
+  let _y = if i >= 0 then (if i < n then __set_byte(pos, val) else 0)
+  else 0
   out
 }
 
@@ -192,9 +200,11 @@ fn bytes_append(b: Bytes, val: Int) -> Bytes = {
 }
 
 // Fill n bytes at p with val.
-fn __fillval(p: Int, n: Int, val: Int, i: Int) -> Int =
-  if i >= n then 0
-  else { prim.store8(p + i, val); __fillval(p, n, val, i + 1) }
+fn __fillval(p: Int, n: Int, val: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(p + i, val)
+  __fillval(p, n, val, i + 1)
+}
 
 // bytes.pad_left(b, target_len, val) -> b prefixed with `val` bytes up to target_len (no-op if longer).
 fn bytes_pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = {
@@ -221,13 +231,12 @@ fn bytes_pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = {
 }
 
 // Copy n i64 list slots (at src, 8-byte stride) into n single bytes at dst (low byte each).
-fn __fl_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let v = prim.load64(src + i * 8)
-    prim.store8(dst + i, v)
-    __fl_copy(dst, src, n, i + 1)
-  }
+fn __fl_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let v = prim.load64(src + i * 8)
+  prim.store8(dst + i, v)
+  __fl_copy(dst, src, n, i + 1)
+}
 
 // bytes.from_list(xs) -> a Bytes whose i-th byte is the low byte of xs[i].
 fn bytes_from_list(xs: List[Int]) -> Bytes = {
@@ -239,13 +248,12 @@ fn bytes_from_list(xs: List[Int]) -> Bytes = {
 }
 
 // Copy n bytes (at src) into n i64 list slots at dst (zero-extended, 8-byte stride).
-fn __tl_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let byte = prim.load8(src + i)
-    prim.store64(dst + i * 8, byte)
-    __tl_copy(dst, src, n, i + 1)
-  }
+fn __tl_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let byte = prim.load8(src + i)
+  prim.store64(dst + i * 8, byte)
+  __tl_copy(dst, src, n, i + 1)
+}
 
 // bytes.to_list(b) -> a List[Int] whose i-th element is b[i] (0..255).
 fn bytes_to_list(b: Bytes) -> List[Int] = {
@@ -256,12 +264,12 @@ fn bytes_to_list(b: Bytes) -> List[Int] = {
 }
 
 // Is the pn-byte pattern at pp found in the bn-byte haystack at pb, scanning from position i?
-fn __contains_at(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Bool =
-  if i + pn > bn then false
-  else {
-    let eq = __byteq(pb + i, pp, pn, 0)
-    if eq then true else __contains_at(pb, pp, bn, pn, i + 1)
-  }
+fn __contains_at(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Bool = if i + pn > bn then false
+else {
+  let eq = __byteq(pb + i, pp, pn, 0)
+  if eq then true
+  else __contains_at(pb, pp, bn, pn, i + 1)
+}
 
 // bytes.contains(b, pat) -> does b contain pat as a contiguous sub-sequence? (empty pat = true)
 fn bytes_contains(b: Bytes, pat: Bytes) -> Bool = {
@@ -270,19 +278,21 @@ fn bytes_contains(b: Bytes, pat: Bytes) -> Bool = {
   let pb = prim.handle(b) + 12
   let pp = prim.handle(pat) + 12
   if pn == 0 then true
-  else { if pn > bn then false else __contains_at(pb, pp, bn, pn, 0) }
+  else {
+    if pn > bn then false
+    else __contains_at(pb, pp, bn, pn, 0)
+  }
 }
 
 // XOR n bytes of pa with pb into dst.
-fn __xorcopy(dst: Int, pa: Int, pb: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let x = prim.load8(pa + i)
-    let y = prim.load8(pb + i)
-    let z = prim.bxor(x, y)
-    prim.store8(dst + i, z)
-    __xorcopy(dst, pa, pb, n, i + 1)
-  }
+fn __xorcopy(dst: Int, pa: Int, pb: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let x = prim.load8(pa + i)
+  let y = prim.load8(pb + i)
+  let z = prim.bxor(x, y)
+  prim.store8(dst + i, z)
+  __xorcopy(dst, pa, pb, n, i + 1)
+}
 
 // bytes.xor(a, b) -> a fresh Bytes of min(len a, len b) bytes, each a[i] XOR b[i].
 fn bytes_xor(a: Bytes, b: Bytes) -> Bytes = {
@@ -299,7 +309,8 @@ fn bytes_xor(a: Bytes, b: Bytes) -> Bytes = {
 // bytes.insert(b, pos, val) -> a fresh copy of b with `val` inserted at clamped position pos.
 fn bytes_insert(b: Bytes, pos: Int, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
-  let p = if pos < 0 then 0 else (if pos > n then n else pos)
+  let p = if pos < 0 then 0
+  else (if pos > n then n else pos)
   let out = prim.alloc_bytes(n + 1)
   let dst = prim.handle(out) + 12
   let src = prim.handle(b) + 12
@@ -315,7 +326,8 @@ fn bytes_insert(b: Bytes, pos: Int, val: Int) -> Bytes = {
 // bytes.remove_at(b, pos) -> a fresh copy of b with byte pos removed (out-of-range pos = clone).
 fn bytes_remove_at(b: Bytes, pos: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
-  let valid = if pos >= 0 then (if pos < n then 1 else 0) else 0
+  let valid = if pos >= 0 then (if pos < n then 1 else 0)
+  else 0
   let outlen = n - valid
   let out = prim.alloc_bytes(outlen)
   let dst = prim.handle(out) + 12
@@ -331,6 +343,7 @@ fn bytes_remove_at(b: Bytes, pos: Int) -> Bytes = {
 
 // Sign-extend a 16-bit / 32-bit unsigned value into a signed Int.
 fn __sext16(u: Int) -> Int = if u >= 32768 then u - 65536 else u
+
 fn __sext32(u: Int) -> Int = if u >= 2147483648 then u - 4294967296 else u
 
 // bytes.read_u16_be(b, pos) -> the unsigned big-endian u16 at pos (0 if out of range).
@@ -410,7 +423,10 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
 fn bytes_read_u8(b: Bytes, pos: Int) -> Int = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
-  if pos < 0 then 0 else { if pos < n then prim.load8(h + 12 + pos) else 0 }
+  if pos < 0 then 0
+  else {
+    if pos < n then prim.load8(h + 12 + pos) else 0
+  }
 }
 
 // bytes indexing `buf[i]` — the CHECKED element read: a negative / past-len index
@@ -434,7 +450,10 @@ fn __byte_nonzero(addr: Int) -> Bool = {
 fn bytes_read_bool(b: Bytes, pos: Int) -> Bool = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
-  if pos < 0 then false else { if pos < n then __byte_nonzero(h + 12 + pos) else false }
+  if pos < 0 then false
+  else {
+    if pos < n then __byte_nonzero(h + 12 + pos) else false
+  }
 }
 
 // bytes.read_u16_le(b, pos) -> the unsigned little-endian u16 at pos (0 if out of range).
@@ -661,30 +680,31 @@ fn bytes_read_f64_le(b: Bytes, pos: Int) -> Float = {
 
 // Option[Int] materialization helpers (the 0-or-1-element-list layout: Some(x)=len1 data[0]=x,
 // None=len0). Built in TAIL position so the lowering materializes them (Init::OptSome/OptNone).
-fn __byte_none() -> Option[Int] = None
-fn __byte_some_at(h: Int, i: Int) -> Option[Int] = Some(prim.load8(h + 12 + i))
-fn __byte_some_idx(i: Int) -> Option[Int] = Some(i)
+fn __byte_none() -> Int? = none
+
+fn __byte_some_at(h: Int, i: Int) -> Int? = some(prim.load8(h + 12 + i))
+
+fn __byte_some_idx(i: Int) -> Int? = some(i)
 
 // bytes.get(b, i) -> Some(byte i) for an in-bounds index, else None.
-fn bytes_get(b: Bytes, i: Int) -> Option[Int] = {
+fn bytes_get(b: Bytes, i: Int) -> Int? = {
   let h = prim.handle(b)
   let len = prim.load32(h + 4)
   if i < 0 then __byte_none()
-  else if i >= len then __byte_none()
-  else __byte_some_at(h, i)
+  else if i >= len then __byte_none() else __byte_some_at(h, i)
 }
 
 // First position >= i where the pn-byte pattern at pp matches the haystack at pb, or -1. The
 // empty-pattern (pn=0) case naturally returns 0 (__byteq of 0 bytes is true); pn>bn returns -1.
-fn __b_idx_find(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Int =
-  if i + pn > bn then -1
-  else {
-    let eq = __byteq(pb + i, pp, pn, 0)
-    if eq then i else __b_idx_find(pb, pp, bn, pn, i + 1)
-  }
+fn __b_idx_find(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Int = if i + pn > bn then -1
+else {
+  let eq = __byteq(pb + i, pp, pn, 0)
+  if eq then i
+  else __b_idx_find(pb, pp, bn, pn, i + 1)
+}
 
 // bytes.index_of(b, pat) -> Some(first index of pat in b), or None (empty pat = Some(0)).
-fn bytes_index_of(b: Bytes, pat: Bytes) -> Option[Int] = {
+fn bytes_index_of(b: Bytes, pat: Bytes) -> Int? = {
   let bn = prim.load32(prim.handle(b) + 4)
   let pn = prim.load32(prim.handle(pat) + 4)
   let pb = prim.handle(b) + 12
@@ -707,46 +727,37 @@ fn bytes_eof(b: Bytes, pos: Int) -> Bool = {
 // table. A continuation byte is 0x80..=0xBF. The lead byte fixes the width AND a tighter range on
 // the SECOND byte that rejects overlong encodings, UTF-16 surrogates (U+D800..U+DFFF) and
 // codepoints > U+10FFFF; every later byte is a plain continuation. A truncated tail is invalid.
-
 // Is x a UTF-8 continuation byte (0x80..=0xBF)?
-fn __cont(x: Int) -> Bool =
-  if x < 128 then false
-  else if x < 192 then true
-  else false
+fn __cont(x: Int) -> Bool = if x < 128 then false
+else if x < 192 then true else false
 
 // Is lo <= x <= hi?
-fn __inrange(x: Int, lo: Int, hi: Int) -> Bool =
-  if x < lo then false
-  else if x > hi then false
-  else true
+fn __inrange(x: Int, lo: Int, hi: Int) -> Bool = if x < lo then false
+else if x > hi then false else true
 
 // Sequence byte width from a multibyte lead (b0 in 0xC2..=0xF4): 0xC2..0xDF=2, 0xE0..0xEF=3, else 4.
-fn __width(b0: Int) -> Int =
-  if b0 < 224 then 2
-  else if b0 < 240 then 3
-  else 4
+fn __width(b0: Int) -> Int = if b0 < 224 then 2
+else if b0 < 240 then 3 else 4
 
 // The 2nd byte's low bound: 0xE0 -> 0xA0 (no overlong 3-byte), 0xF0 -> 0x90 (no overlong 4-byte).
-fn __b1lo(b0: Int, w: Int) -> Int =
-  if w == 2 then 128
-  else if w == 3 then (if b0 == 224 then 160 else 128)
-  else (if b0 == 240 then 144 else 128)
+fn __b1lo(b0: Int, w: Int) -> Int = if w == 2 then 128
+else if w == 3 then (if b0 == 224 then 160 else 128)
+else (if b0 == 240 then 144 else 128)
 
 // The 2nd byte's high bound: 0xED -> 0x9F (no surrogate), 0xF4 -> 0x8F (no codepoint > U+10FFFF).
-fn __b1hi(b0: Int, w: Int) -> Int =
-  if w == 2 then 191
-  else if w == 3 then (if b0 == 237 then 159 else 191)
-  else (if b0 == 244 then 143 else 191)
+fn __b1hi(b0: Int, w: Int) -> Int = if w == 2 then 191
+else if w == 3 then (if b0 == 237 then 159 else 191)
+else (if b0 == 244 then 143 else 191)
 
 // Are bytes [i..w) at `pos` all continuation bytes? (the 2nd byte has its own tighter range; the
 // 3rd/4th are plain continuations — checked here from i=2.)
-fn __rest_cont(h: Int, pos: Int, w: Int, i: Int) -> Bool =
-  if i >= w then true
-  else {
-    let b = prim.load8(h + pos + i)
-    let c = __cont(b)
-    if c then __rest_cont(h, pos, w, i + 1) else false
-  }
+fn __rest_cont(h: Int, pos: Int, w: Int, i: Int) -> Bool = if i >= w then true
+else {
+  let b = prim.load8(h + pos + i)
+  let c = __cont(b)
+  if c then __rest_cont(h, pos, w, i + 1)
+  else false
+}
 
 // Is the w-byte sequence at `pos` well-formed? The 2nd byte must be in its lead-specific range,
 // every later byte a plain continuation.
@@ -755,7 +766,8 @@ fn __seq_ok(h: Int, pos: Int, b0: Int, w: Int) -> Bool = {
   let lo = __b1lo(b0, w)
   let hi = __b1hi(b0, w)
   let r1 = __inrange(b1, lo, hi)
-  if r1 then __rest_cont(h, pos, w, 2) else false
+  if r1 then __rest_cont(h, pos, w, 2)
+  else false
 }
 
 // Validate the codepoint starting at `pos`; return the next offset, or -1 if invalid/truncated.
@@ -772,18 +784,17 @@ fn __utf8_step(h: Int, n: Int, pos: Int) -> Int = {
       let okall = __seq_ok(h, pos, b0, w)
       if okall then pos + w else 0 - 1
     }
-  }
-  else 0 - 1
+  } else 0 - 1
 }
 
 // Walk every codepoint from `pos`; valid iff each step advances (lazy: stops at the first error).
 // The recursive call sits in the THEN-arm (the proven __byteq_at recursion shape).
-fn __utf8_valid(h: Int, n: Int, pos: Int) -> Bool =
-  if pos >= n then true
-  else {
-    let nxt = __utf8_step(h, n, pos)
-    if nxt >= 0 then __utf8_valid(h, n, nxt) else false
-  }
+fn __utf8_valid(h: Int, n: Int, pos: Int) -> Bool = if pos >= n then true
+else {
+  let nxt = __utf8_step(h, n, pos)
+  if nxt >= 0 then __utf8_valid(h, n, nxt)
+  else false
+}
 
 fn bytes_is_valid_utf8(b: Bytes) -> Bool = {
   let dh = prim.handle(b) + 12
@@ -854,38 +865,34 @@ fn bytes_read_f32_be(b: Bytes, pos: Int) -> Float = {
 // "incomplete utf-8 byte sequence from index {valid_up_to}" tail-truncation form),
 // prefixed "invalid UTF-8: " (the native wrapper). The walk reuses the validation
 // table above; the diag result packs valid_up_to*4 + code (0=incomplete, 1..3=len).
+fn __u2s_seq(h: Int, n: Int, pos: Int, b0: Int, w: Int, j: Int) -> Int = if j >= w then 0 - 1
+else if pos + j >= n then pos * 4
+else {
+  let bj = prim.load8(h + pos + j)
+  let lo = if j == 1 then __b1lo(b0, w) else 128
+  let hi = if j == 1 then __b1hi(b0, w) else 191
+  if __inrange(bj, lo, hi) then __u2s_seq(h, n, pos, b0, w, j + 1)
+  else pos * 4 + j
+}
 
-fn __u2s_seq(h: Int, n: Int, pos: Int, b0: Int, w: Int, j: Int) -> Int =
-  if j >= w then 0 - 1
-  else if pos + j >= n then pos * 4
-  else {
-    let bj = prim.load8(h + pos + j)
-    let lo = if j == 1 then __b1lo(b0, w) else 128
-    let hi = if j == 1 then __b1hi(b0, w) else 191
-    if __inrange(bj, lo, hi) then __u2s_seq(h, n, pos, b0, w, j + 1)
-    else pos * 4 + j
-  }
+fn __u2s_walk(h: Int, n: Int, pos: Int) -> Int = if pos >= n then 0 - 1
+else {
+  let b0 = prim.load8(h + pos)
+  if b0 < 128 then __u2s_walk(h, n, pos + 1)
+  else if b0 < 194 then pos * 4 + 1
+  else if b0 < 245 then {
+    let w = __width(b0)
+    let r = __u2s_seq(h, n, pos, b0, w, 1)
+    if r < 0 then __u2s_walk(h, n, pos + w)
+    else r
+  } else pos * 4 + 1
+}
 
-fn __u2s_walk(h: Int, n: Int, pos: Int) -> Int =
-  if pos >= n then 0 - 1
-  else {
-    let b0 = prim.load8(h + pos)
-    if b0 < 128 then __u2s_walk(h, n, pos + 1)
-    else if b0 < 194 then pos * 4 + 1
-    else if b0 < 245 then {
-      let w = __width(b0)
-      let r = __u2s_seq(h, n, pos, b0, w, 1)
-      if r < 0 then __u2s_walk(h, n, pos + w) else r
-    }
-    else pos * 4 + 1
-  }
-
-fn __u2s_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    prim.store8(dst + i, prim.load8(src + i))
-    __u2s_copy(dst, src, n, i + 1)
-  }
+fn __u2s_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __u2s_copy(dst, src, n, i + 1)
+}
 
 fn bytes_to_string(b: Bytes) -> Result[String, String] = {
   let h0 = prim.handle(b)
@@ -905,15 +912,14 @@ fn bytes_to_string(b: Bytes) -> Result[String, String] = {
 
 // ── bytes.map_each ── every byte through `f` (once, in order), the result truncated
 // to u8 (native: `f(*x as i64) as u8`).
-fn __bme_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let v = f(prim.load8(sh + i))
-    prim.store8(dh + i, prim.band(v, 255))
-    __bme_fill(dh, sh, f, n, i + 1)
-  }
+fn __bme_fill(dh: Int, sh: Int, f: fn(Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let v = f(prim.load8(sh + i))
+  prim.store8(dh + i, prim.band(v, 255))
+  __bme_fill(dh, sh, f, n, i + 1)
+}
 
-fn bytes_map_each(b: Bytes, f: (Int) -> Int) -> Bytes = {
+fn bytes_map_each(b: Bytes, f: fn(Int) -> Int) -> Bytes = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
   let out = prim.alloc_bytes(n)
@@ -928,4 +934,5 @@ fn bytes_map_each(b: Bytes, f: (Int) -> Int) -> Bytes = {
 // trivial implementation satisfies the observable contract: the checkpoint is
 // OPAQUE (never printed) and post-restore results are identical by construction.
 fn bytes_heap_save() -> Int = 0
+
 fn bytes_heap_restore(cp: Int) -> Unit = ()

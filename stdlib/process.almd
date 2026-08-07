@@ -41,7 +41,7 @@ effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) 
 fn pid() -> Int = _
 
 @intrinsic("almide_rt_process_env")
-fn env(key: String) -> Option[String] = _
+fn env(key: String) -> String? = _
 
 @intrinsic("almide_rt_process_spawn")
 effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _

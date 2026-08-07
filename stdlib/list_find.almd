@@ -5,36 +5,38 @@
 // same as list.max/min) — the heap-result-if does NOT handle a block-with-statements arm, so
 // the per-element load+predicate lives in its own `__find_step` whose tail IS that `if`. The
 // predicate f is invoked via CallIndirect. List[Int]; source borrowed.
+fn __find_none() -> Int? = none
 
-fn __find_none() -> Option[Int] = None
-fn __find_some(x: Int) -> Option[Int] = Some(x)
+fn __find_some(x: Int) -> Int? = some(x)
 
-fn __find_step(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Option[Int] = {
+fn __find_step(sh: Int, f: fn(Int) -> Bool, n: Int, i: Int) -> Int? = {
   let x = prim.load64(sh + 12 + i * 8)
   let h = f(x)
-  if h then __find_some(x) else __find_scan(sh, f, n, i + 1)
+  if h then __find_some(x)
+  else __find_scan(sh, f, n, i + 1)
 }
 
-fn __find_scan(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Option[Int] =
-  if i >= n then __find_none() else __find_step(sh, f, n, i)
+fn __find_scan(sh: Int, f: fn(Int) -> Bool, n: Int, i: Int) -> Int? = if i >= n then __find_none()
+else __find_step(sh, f, n, i)
 
-fn list_find(xs: List[Int], f: (Int) -> Bool) -> Option[Int] = {
+fn list_find(xs: List[Int], f: fn(Int) -> Bool) -> Int? = {
   let n = list.len(xs)
   __find_scan(prim.handle(xs), f, n, 0)
 }
 
 // find_index: the same scan, but the Some payload is the INDEX i (not the element). Reuses
 // __find_none / __find_some (Some of an Int — here the index) and the split-helper shape.
-fn __fi_step(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Option[Int] = {
+fn __fi_step(sh: Int, f: fn(Int) -> Bool, n: Int, i: Int) -> Int? = {
   let x = prim.load64(sh + 12 + i * 8)
   let h = f(x)
-  if h then __find_some(i) else __fi_scan(sh, f, n, i + 1)
+  if h then __find_some(i)
+  else __fi_scan(sh, f, n, i + 1)
 }
 
-fn __fi_scan(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Option[Int] =
-  if i >= n then __find_none() else __fi_step(sh, f, n, i)
+fn __fi_scan(sh: Int, f: fn(Int) -> Bool, n: Int, i: Int) -> Int? = if i >= n then __find_none()
+else __fi_step(sh, f, n, i)
 
-fn list_find_index(xs: List[Int], f: (Int) -> Bool) -> Option[Int] = {
+fn list_find_index(xs: List[Int], f: fn(Int) -> Bool) -> Int? = {
   let n = list.len(xs)
   __fi_scan(prim.handle(xs), f, n, 0)
 }

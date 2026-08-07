@@ -2,13 +2,12 @@
 // (v0's format!). A 3-way byte concat over the prim floor. The 12-byte separator "\ncaused by: " is
 // written byte-by-byte (an INTERNAL string literal used only via prim.handle is DCE'd to len 0, so
 // the bytes are materialized directly). Both inputs borrowed; result a fresh owned String.
-fn __echain_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let b = prim.load8(src + i)
-    prim.store8(dst + i, b)
-    __echain_copy(dst, src, n, i + 1)
-  }
+fn __echain_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __echain_copy(dst, src, n, i + 1)
+}
 
 // Write "\ncaused by: " (10,99,97,117,115,101,100,32,98,121,58,32) at `d`.
 fn __echain_sep(d: Int) -> Int = {
@@ -57,7 +56,7 @@ fn __ectx_err(ch: Int, clen: Int, msg_h: Int) -> Result[Int, String] = {
   prim.store8(d1 + 1, 32)
   let d2 = d1 + 2
   let _3 = __echain_copy(d2, msg_h + 12, mlen, 0)
-  Err(out)
+  err(out)
 }
 
 fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = {
@@ -66,5 +65,6 @@ fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = {
   let v = prim.load64(h + 12)
   let ch = prim.handle(ctx)
   let clen = prim.load32(ch + 4)
-  if len == 0 then Ok(v) else __ectx_err(ch, clen, v)
+  if len == 0 then ok(v)
+  else __ectx_err(ch, clen, v)
 }

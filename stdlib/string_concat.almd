@@ -2,13 +2,11 @@
 // to __str_concat. Allocates a fresh String of byte-len(a)+byte-len(b) and byte-copies both
 // halves (both are valid UTF-8, so the result is valid UTF-8 — string.len decodes codepoints
 // from it). len@4 is the BYTE length; data at handle+12. Pure (prim memory ops, no Stdout).
-
-fn __sc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    prim.store8(dst + i, prim.load8(src + i))
-    __sc_copy(dst, src, n, i + 1)
-  }
+fn __sc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __sc_copy(dst, src, n, i + 1)
+}
 
 fn __str_concat(a: String, b: String) -> String = {
   let ha = prim.handle(a)

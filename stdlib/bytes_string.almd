@@ -6,13 +6,11 @@
 // bytes — a DOCUMENTED edge (the value path for valid text is exact, like string.trim's ASCII-only
 // whitespace). Source Bytes is BORROWED (no refcount change). All bounds use a scalar-if effective
 // length (never a heap-result if), so only ONE alloc path lowers.
-
-fn __bs_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    prim.store8(dst + i, prim.load8(src + i))
-    __bs_copy(dst, src, n, i + 1)
-  }
+fn __bs_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __bs_copy(dst, src, n, i + 1)
+}
 
 // bytes.to_string_lossy(b): the whole data region decoded as UTF-8.
 fn bytes_to_string_lossy(b: Bytes) -> String = {
@@ -51,7 +49,8 @@ fn bytes_read_string_be(b: Bytes, pos: Int) -> String = {
   let blen = prim.load32(h + 4)
   let hdr_ok = pos + 4 <= blen
   let slen = if hdr_ok then __bs_be32(h + 12 + pos) else 0
-  let n = if hdr_ok then (if pos + 4 + slen > blen then 0 else slen) else 0
+  let n = if hdr_ok then (if pos + 4 + slen > blen then 0 else slen)
+  else 0
   let out = prim.alloc_str(n)
   let _x = __bs_copy(prim.handle(out) + 12, h + 12 + pos + 4, n, 0)
   out

@@ -3,15 +3,13 @@
 // index_of returns Option[Int] (the first match's index, or None). The source is borrowed (each
 // element read via prim.load_str). __str_eq/__str_eq_bytes are duplicated from set_str.almd; the
 // runtime linker DEDUPS functions by name, so co-linking both modules keeps one copy.
-
-fn __str_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
-  if i >= n then true
-  else {
-    let ca = prim.load8(pa + i)
-    let cb = prim.load8(pb + i)
-    if ca == cb then __str_eq_bytes(pa, pb, n, i + 1)
-    else false
-  }
+fn __str_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
+else {
+  let ca = prim.load8(pa + i)
+  let cb = prim.load8(pb + i)
+  if ca == cb then __str_eq_bytes(pa, pb, n, i + 1)
+  else false
+}
 
 fn __str_eq(a: String, b: String) -> Bool = {
   let ha = prim.handle(a)
@@ -23,14 +21,13 @@ fn __str_eq(a: String, b: String) -> Bool = {
 }
 
 // First index of x among the first `len` elements at block-handle h, or -1 if absent.
-fn __list_str_index(h: Int, len: Int, x: String, i: Int) -> Int =
-  if i >= len then 0 - 1
-  else {
-    let e = prim.load_str(h + 12 + i * 8)
-    let eq = __str_eq(e, x)
-    if eq then i
-    else __list_str_index(h, len, x, i + 1)
-  }
+fn __list_str_index(h: Int, len: Int, x: String, i: Int) -> Int = if i >= len then 0 - 1
+else {
+  let e = prim.load_str(h + 12 + i * 8)
+  let eq = __str_eq(e, x)
+  if eq then i
+  else __list_str_index(h, len, x, i + 1)
+}
 
 fn list_contains_str(xs: List[String], x: String) -> Bool = {
   let h = prim.handle(xs)
@@ -40,44 +37,43 @@ fn list_contains_str(xs: List[String], x: String) -> Bool = {
 }
 
 // Each Option arm is built in a HELPER TAIL (the materialized-Option layout).
-fn __lis_none() -> Option[Int] = None
-fn __lis_some(i: Int) -> Option[Int] = Some(i)
+fn __lis_none() -> Int? = none
 
-fn list_index_of_str(xs: List[String], x: String) -> Option[Int] = {
+fn __lis_some(i: Int) -> Int? = some(i)
+
+fn list_index_of_str(xs: List[String], x: String) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   let idx = __list_str_index(h, len, x, 0)
-  if idx < 0 then __lis_none()
-  else __lis_some(idx)
+  if idx < 0 then __lis_none() else __lis_some(idx)
 }
 
 // ── Higher-order list.all/any/count over a List[String] (the predicate takes a String element by
 // handle, heap-arg closure ABI; reads only, no allocation). Sum the predicate's 0/1 into a hit
 // count: any = count>0, all = count==len, count = the hit count itself. Pure predicate = v0-match.
-fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int =
-  if i >= n then acc
-  else {
-    let x = prim.load_str(h + 12 + i * 8)
-    let hit = f(x)
-    if hit then __list_str_count_hits(h, f, n, i + 1, acc + 1)
-    else __list_str_count_hits(h, f, n, i + 1, acc)
-  }
+fn __list_str_count_hits(h: Int, f: fn(String) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let x = prim.load_str(h + 12 + i * 8)
+  let hit = f(x)
+  if hit then __list_str_count_hits(h, f, n, i + 1, acc + 1)
+  else __list_str_count_hits(h, f, n, i + 1, acc)
+}
 
-fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
+fn list_any_str(xs: List[String], f: fn(String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   let hits = __list_str_count_hits(h, f, n, 0, 0)
   hits > 0
 }
 
-fn list_all_str(xs: List[String], f: (String) -> Bool) -> Bool = {
+fn list_all_str(xs: List[String], f: fn(String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   let hits = __list_str_count_hits(h, f, n, 0, 0)
   hits >= n
 }
 
-fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
+fn list_count_str(xs: List[String], f: fn(String) -> Bool) -> Int = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __list_str_count_hits(h, f, n, 0, 0)
@@ -85,15 +81,14 @@ fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
 
 // list.fold over a List[String] — f : (Acc, String) -> Acc (Int accumulator), a 2-arity closure
 // with a String element second arg (heap-widened). Left fold in element order. Read-only.
-fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int =
-  if i >= n then acc
-  else {
-    let x = prim.load_str(h + 12 + i * 8)
-    let nacc = f(acc, x)
-    __list_str_fold_loop(h, f, n, i + 1, nacc)
-  }
+fn __list_str_fold_loop(h: Int, f: fn(Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let x = prim.load_str(h + 12 + i * 8)
+  let nacc = f(acc, x)
+  __list_str_fold_loop(h, f, n, i + 1, nacc)
+}
 
-fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = {
+fn list_fold_str(xs: List[String], init: Int, f: fn(Int, String) -> Int) -> Int = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __list_str_fold_loop(h, f, n, 0, init)
@@ -102,25 +97,26 @@ fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = 
 // list.find over a List[String] — the FIRST element satisfying the predicate, as Some(a fresh DEEP
 // COPY), or None (a materialized Option[String]). The element is read as a BORROW; the copy is the
 // owned Some payload (no double-free with the list). Each Option arm is a helper TAIL.
-fn __lfs_none() -> Option[String] = None
-fn __lfs_some(x: String) -> Option[String] = {
+fn __lfs_none() -> String? = none
+
+fn __lfs_some(x: String) -> String? = {
   let copy = string.repeat(x, 1)
-  Some(copy)
+  some(copy)
 }
+
 // Split so the lets live in a function BODY and the heap-result `if` is its TAIL (a block with lets
 // as a heap-result-if's else arm does not lower — mirror list_get_str's flat helper-tail shape).
-fn __list_find_str_at(h: Int, f: (String) -> Bool, n: Int, i: Int) -> Option[String] = {
+fn __list_find_str_at(h: Int, f: fn(String) -> Bool, n: Int, i: Int) -> String? = {
   let x = prim.load_str(h + 12 + i * 8)
   let hit = f(x)
   if hit then __lfs_some(x)
   else __list_find_str_loop(h, f, n, i + 1)
 }
 
-fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> Option[String] =
-  if i >= n then __lfs_none()
-  else __list_find_str_at(h, f, n, i)
+fn __list_find_str_loop(h: Int, f: fn(String) -> Bool, n: Int, i: Int) -> String? = if i >= n then __lfs_none()
+else __list_find_str_at(h, f, n, i)
 
-fn list_find_str(xs: List[String], f: (String) -> Bool) -> Option[String] = {
+fn list_find_str(xs: List[String], f: fn(String) -> Bool) -> String? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __list_find_str_loop(h, f, n, 0)
@@ -130,16 +126,14 @@ fn list_find_str(xs: List[String], f: (String) -> Bool) -> Option[String] = {
 // all later duplicates (v0's `if !r.contains(x) r.push(x)`), first-occurrence order. Membership is
 // byte equality against the RESULT so far; each kept element is a fresh DEEP COPY (the copy is made
 // AND consumed within one branch — no cross-arm conditional consume).
-
 // Is string x already among the first `count` elements of the result block dh?
-fn __dh_has_str(dh: Int, count: Int, x: String, i: Int) -> Bool =
-  if i >= count then false
-  else {
-    let e = prim.load_str(dh + 12 + i * 8)
-    let eq = __str_eq(e, x)
-    if eq then true
-    else __dh_has_str(dh, count, x, i + 1)
-  }
+fn __dh_has_str(dh: Int, count: Int, x: String, i: Int) -> Bool = if i >= count then false
+else {
+  let e = prim.load_str(dh + 12 + i * 8)
+  let eq = __str_eq(e, x)
+  if eq then true
+  else __dh_has_str(dh, count, x, i + 1)
+}
 
 fn __unique_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
   let cur = prim.load_str(sh + 12 + i * 8)
@@ -152,9 +146,8 @@ fn __unique_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
   }
 }
 
-fn __unique_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int =
-  if i >= n then di
-  else __unique_str_step(sh, dh, n, i, di)
+fn __unique_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = if i >= n then di
+else __unique_str_step(sh, dh, n, i, di)
 
 fn list_unique_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
@@ -169,12 +162,11 @@ fn list_unique_str(xs: List[String]) -> List[String] = {
 // list.dedup over a List[String] — drop CONSECUTIVE duplicates (v0's `if r.last() != x then push`).
 // For consecutive-dedup, comparing cur to the immediately PRECEDING SOURCE element (i-1) yields the
 // same result as comparing to the last-kept. Element 0 is always kept; kept elements are deep-copied.
-fn __dedup_str_isdup(sh: Int, i: Int, cur: String) -> Bool =
-  if i <= 0 then false
-  else {
-    let prev = prim.load_str(sh + 12 + (i - 1) * 8)
-    __str_eq(prev, cur)
-  }
+fn __dedup_str_isdup(sh: Int, i: Int, cur: String) -> Bool = if i <= 0 then false
+else {
+  let prev = prim.load_str(sh + 12 + (i - 1) * 8)
+  __str_eq(prev, cur)
+}
 
 fn __dedup_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
   let cur = prim.load_str(sh + 12 + i * 8)
@@ -187,9 +179,8 @@ fn __dedup_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
   }
 }
 
-fn __dedup_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int =
-  if i >= n then di
-  else __dedup_str_step(sh, dh, n, i, di)
+fn __dedup_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = if i >= n then di
+else __dedup_str_step(sh, dh, n, i, di)
 
 fn list_dedup_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
@@ -217,9 +208,8 @@ fn __intersperse_step(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, 
   }
 }
 
-fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, di: Int) -> Int =
-  if i >= n then di
-  else __intersperse_step(sh, oh, sep, n, last, i, di)
+fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, di: Int) -> Int = if i >= n then di
+else __intersperse_step(sh, oh, sep, n, last, i, di)
 
 fn list_intersperse_str(xs: List[String], sep: String) -> List[String] = {
   let h = prim.handle(xs)

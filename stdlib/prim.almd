@@ -8,7 +8,6 @@
 //
 // (The @intrinsic symbol is a v0-codegen placeholder; v1 recognizes these by the
 // `prim` module name, not the symbol, and emits Op::Prim.)
-
 // Reinterpret a heap handle (any heap value: String / List / Map pointer) as an Int
 // address — the bridge that lets all address math be ordinary Int arithmetic. Generic
 // over the heap type `A` so list/map self-host fns can take a handle too; UNSAFE (a
@@ -43,14 +42,19 @@ fn store64(addr: Int, val: Int) -> Unit = _
 // Bitwise i64 ops (the int.band/bor/bxor/bshl/bshr floor). Pure scalar arithmetic.
 @intrinsic("almide_rt_prim_band")
 fn band(a: Int, b: Int) -> Int = _
+
 @intrinsic("almide_rt_prim_bor")
 fn bor(a: Int, b: Int) -> Int = _
+
 @intrinsic("almide_rt_prim_bxor")
 fn bxor(a: Int, b: Int) -> Int = _
+
 @intrinsic("almide_rt_prim_bshl")
 fn bshl(n: Int, bits: Int) -> Int = _
+
 @intrinsic("almide_rt_prim_bshr")
 fn bshr(n: Int, bits: Int) -> Int = _
+
 // LOGICAL (zero-filling) shift right — the value is shifted as a u64 (i64.shr_u).
 @intrinsic("almide_rt_prim_bshr_u")
 fn bshr_u(n: Int, bits: Int) -> Int = _
@@ -165,6 +169,7 @@ fn load_handle[A](addr: Int) -> A = _
 // the differential test's burden, not the cert. Contained to the Value drop/copy routines.
 @intrinsic("almide_rt_prim_rc_dec")
 fn rc_dec(addr: Int) -> Unit = _
+
 @intrinsic("almide_rt_prim_rc_inc")
 fn rc_inc(addr: Int) -> Unit = _
 
@@ -204,7 +209,7 @@ fn args_get_list_full() -> List[String] = _
 // render emits the $env_get preamble routine. No native runtime impl — the native target
 // uses env.get's own @intrinsic.
 @intrinsic("almide_rt_prim_env_get")
-fn env_get(name: String) -> Option[String] = _
+fn env_get(name: String) -> String? = _
 
 // The path_open + fd_read WASI host calls, packaged as ONE high-level HEAP-RESULT prim —
 // the FS-READ sandbox exit (reaches Capability::FsRead). Opens the file at `path` (relative
@@ -290,6 +295,7 @@ fn path_exists(path: String) -> Bool = _
 // just changes hats. The bytes_rawptr bridge's address arithmetic runs on Int.
 @intrinsic("almide_rt_prim_ptr_to_int")
 fn ptr_to_int(p: RawPtr) -> Int = _
+
 @intrinsic("almide_rt_prim_int_to_ptr")
 fn int_to_ptr(a: Int) -> RawPtr = _
 
@@ -340,68 +346,96 @@ fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
 // lets `float.*` / `math.*` (sqrt/floor/min/…) be self-hosted in Almide.
 @intrinsic("almide_rt_prim_fabs")
 fn fabs(x: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fsqrt")
 fn fsqrt(x: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_ffloor")
 fn ffloor(x: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fceil")
 fn fceil(x: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fneg")
 fn fneg(x: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fadd")
 fn fadd(a: Float, b: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fsub")
 fn fsub(a: Float, b: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fmul")
 fn fmul(a: Float, b: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fdiv")
 fn fdiv(a: Float, b: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fmin")
 fn fmin(a: Float, b: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fmax")
 fn fmax(a: Float, b: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_fcopysign")
 fn fcopysign(a: Float, b: Float) -> Float = _
+
 @intrinsic("almide_rt_prim_flt")
 fn flt(a: Float, b: Float) -> Bool = _
+
 @intrinsic("almide_rt_prim_fle")
 fn fle(a: Float, b: Float) -> Bool = _
+
 @intrinsic("almide_rt_prim_fgt")
 fn fgt(a: Float, b: Float) -> Bool = _
+
 @intrinsic("almide_rt_prim_fge")
 fn fge(a: Float, b: Float) -> Bool = _
+
 @intrinsic("almide_rt_prim_feq")
 fn feq(a: Float, b: Float) -> Bool = _
+
 @intrinsic("almide_rt_prim_fne")
 fn fne(a: Float, b: Float) -> Bool = _
+
 @intrinsic("almide_rt_prim_f2i")
 fn f2i(x: Float) -> Int = _
+
 @intrinsic("almide_rt_prim_i2f")
 fn i2f(x: Int) -> Float = _
+
 // Raw f64↔i64 BIT reinterpret (identity in the i64-uniform model — the value IS the bits).
 @intrinsic("almide_rt_prim_fbits")
 fn fbits(x: Float) -> Int = _
+
 @intrinsic("almide_rt_prim_ffrombits")
 fn ffrombits(b: Int) -> Float = _
+
 // f32 narrow/widen: a Float32 value is its 32-bit pattern in the low half of the i64 slot.
 @intrinsic("almide_rt_prim_f2f32")
 fn f2f32(x: Float) -> Float32 = _
+
 @intrinsic("almide_rt_prim_f32_2f")
 fn f32_2f(x: Float32) -> Float = _
+
 // `bits_to_f32(bits)` = `f32::from_bits(bits as u32) as f64` — the same widen on a raw 32-bit pattern.
 @intrinsic("almide_rt_prim_bits_to_f32")
 fn bits_to_f32(bits: Int) -> Float = _
+
 // i64 → f32 directly (single rounding) — `n as f32`.
 @intrinsic("almide_rt_prim_i2f32")
 fn i2f32(x: Int) -> Float32 = _
+
 // Float32 → its 32-bit pattern as Int (identity reinterpret — the f32 bits ARE the low 32).
 @intrinsic("almide_rt_prim_f32bits")
 fn f32bits(x: Float32) -> Int = _
+
 // Abort: write the message bytes at String-block address `s` to STDERR and
 // exit(1) — the self-host arm of the §13 termination convention (math.pow
 // negative exponent, int.rotate nonpositive width). Never returns.
 @intrinsic("almide_rt_prim_die")
 fn die(s: Int) -> Unit = _
+
 // Generic-typed sibling of alloc_map_skv — the SAME 2n-slot map block, typed for
 // any key/value pair (map_ivh's Map[Int,String], map_hval's Map[String,List[Int]]).
 @intrinsic("almide_rt_prim_alloc_map_kv")

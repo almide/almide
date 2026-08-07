@@ -18,20 +18,20 @@ fn __cls_rd6(a: Int) -> Int = __cls_h1(prim.load8(a)) * 1048576 + __cls_h1(prim.
 
 fn __cls_find(th: Int, lo: Int, hi: Int, cp: Int) -> Int = if lo >= hi then lo - 1
 else {
-  let mid = (lo + hi) / 2;
-  let s = __cls_rd6(th + mid * 12);
+  let mid = (lo + hi) / 2
+  let s = __cls_rd6(th + mid * 12)
   if s <= cp then __cls_find(th, mid + 1, hi, cp)
   else __cls_find(th, lo, mid, cp)
 }
 
 fn __cls_in(t: String, n: Int, cp: Int) -> Bool = {
-  let th = prim.handle(t) + 12;
-  let i = __cls_find(th, 0, n, cp);
+  let th = prim.handle(t) + 12
+  let i = __cls_find(th, 0, n, cp)
   if i < 0 then false else cp <= __cls_rd6(th + i * 12 + 6)
 }
 
 fn __cls_cp(addr: Int) -> (Int, Int) = {
-  let b0 = prim.load8(addr);
+  let b0 = prim.load8(addr)
   if b0 < 128 then (b0, 1)
   else if b0 < 224 then ((b0 - 192) * 64 + (prim.load8(addr + 1) - 128), 2)
   else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(addr + 1) - 128) * 64 + (prim.load8(addr + 2) - 128), 3) else ((b0 - 240) * 262144 + (prim.load8(addr + 1) - 128) * 4096 + (prim.load8(addr + 2) - 128) * 64 + (prim.load8(addr + 3) - 128), 4)
@@ -50,22 +50,22 @@ fn __num_table() -> String = "0000300000390000B20000B30000B90000B90000BC0000BE00
 
 fn __is_alnum_scan(addr: Int, end: Int, at: String, nt: String) -> Bool = if addr >= end then true
 else {
-  let (cp, w) = __cls_cp(addr);
+  let (cp, w) = __cls_cp(addr)
   if __cls_in(at, 761, cp) then __is_alnum_scan(addr + w, end, at, nt)
   else if __cls_in(nt, 146, cp) then __is_alnum_scan(addr + w, end, at, nt)
   else false
 }
 
 fn string_is_alphanumeric_uni(s: String) -> Bool = {
-  let h = prim.handle(s);
-  let blen = prim.load32(h + 4);
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
   if blen == 0 then false
   else __is_alnum_scan(h + 12, h + 12 + blen, __alpha_table(), __num_table())
 }
 
 fn __is_alpha_scan(addr: Int, end: Int, t: String) -> Bool = if addr >= end then true
 else {
-  let (cp, w) = __cls_cp(addr);
+  let (cp, w) = __cls_cp(addr)
   if __cls_in(t, 761, cp) then __is_alpha_scan(addr + w, end, t)
   else false
 }
@@ -74,15 +74,15 @@ else {
 // 2-state return: 0 = ok so far but no alphabetic seen, 1 = ok with alphabetic seen,
 // 2 = violated (an alphabetic cp outside the case table).
 fn string_is_alpha(s: String) -> Bool = {
-  let h = prim.handle(s);
-  let blen = prim.load32(h + 4);
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
   if blen == 0 then false
   else __is_alpha_scan(h + 12, h + 12 + blen, __alpha_table())
 }
 
 fn __is_case_scan(addr: Int, end: Int, at: String, ct: String, cn: Int, seen: Int) -> Int = if addr >= end then seen
 else {
-  let (cp, w) = __cls_cp(addr);
+  let (cp, w) = __cls_cp(addr)
   if __cls_in(at, 761, cp) then {
     if __cls_in(ct, cn, cp) then __is_case_scan(addr + w, end, at, ct, cn, 1)
     else 2
@@ -90,15 +90,15 @@ else {
 }
 
 fn string_is_upper(s: String) -> Bool = {
-  let h = prim.handle(s);
-  let blen = prim.load32(h + 4);
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
   if blen == 0 then false
   else __is_case_scan(h + 12, h + 12 + blen, __alpha_table(), __upper_table(), 660, 0) == 1
 }
 
 fn string_is_lower(s: String) -> Bool = {
-  let h = prim.handle(s);
-  let blen = prim.load32(h + 4);
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
   if blen == 0 then false
   else __is_case_scan(h + 12, h + 12 + blen, __alpha_table(), __lower_table(), 677, 0) == 1
 }

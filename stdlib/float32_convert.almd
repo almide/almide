@@ -7,7 +7,6 @@
 //
 // `float32.to_string` is omitted — it needs `float.to_string` (decimal formatting / Ryu), not yet
 // self-hosted.
-
 fn float32_to_int8(x: Float32) -> Int8 = {
   let f = float.from_float32(x)
   float.to_int8(f)

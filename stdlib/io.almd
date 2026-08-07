@@ -7,7 +7,6 @@
 // `Result`. Almide has no surface-level `impure` keyword, so those
 // fns stay as plain `fn` (matching the existing TOML contract where
 // the sole difference was an omitted effect-context check).
-
 @intrinsic("almide_rt_io_read_line")
 effect fn read_line() -> String = _
 

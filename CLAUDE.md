@@ -89,6 +89,8 @@ almide compile parser             # Module interface (by name)
 almide compile app.almd --json    # Module interface (JSON)
 almide check app.almd             # Type check only
 almide fmt app.almd               # Format source
+almide fmt --check spec/          # Formatting gate (non-zero on drift)
+almide fmt --no-import-edit stdlib/  # Format WITHOUT touching imports (splice-context sources)
 almide clean                     # Clear dependency cache
 almide add almide/pkg@v0.1.0    # Add dependency (github.com/almide/ default)
 almide deps                      # List dependencies

@@ -5,7 +5,6 @@
 // ...), so there's no reason to keep inline `{ts} + {n} * 86400`
 // templates around. `from_unix` / `to_unix` are identity conversions
 // and stay as pure Almide bodies.
-
 @intrinsic("almide_rt_datetime_add_days")
 fn add_days(ts: Int, n: Int) -> Int = _
 

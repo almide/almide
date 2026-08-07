@@ -6,13 +6,11 @@
 // (rc_dec each value slot + the block; the raw keys carry no ownership).
 // Equality is ORDER-INDEPENDENT: same length and every (k, v) of `a` has a
 // byte-equal value under the same key in `b` (v0's HashMap semantics).
-
 fn map_new_ivh() -> Map[Int, String] = prim.alloc_map_kv(0)
 
-fn __ivh_find(h: Int, n: Int, k: Int, i: Int) -> Int =
-  if i >= n then 0 - 1
-  else if prim.load64(h + 12 + i * 8) == k then i
-  else __ivh_find(h, n, k, i + 1)
+fn __ivh_find(h: Int, n: Int, k: Int, i: Int) -> Int = if i >= n then 0 - 1
+else if prim.load64(h + 12 + i * 8) == k then i
+else __ivh_find(h, n, k, i + 1)
 
 // Store a fresh OWNED copy of `s` into the value slot (the map must own its
 // values; the caller's `s` is a borrow).
@@ -25,29 +23,26 @@ fn __ivh_store_val(addr: Int, s: String) -> Int = {
 // Copy every entry from sh to rh: keys raw; the matched key's value is REPLACED
 // with a fresh copy of `v`, every other value handle is SHARED (rc_inc — the new
 // map co-owns it; both maps' drops rc_dec it once each).
-fn __ivh_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: Int, v: String, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let kk = prim.load64(sh + 12 + i * 8)
-    prim.store64(rh + 12 + i * 8, kk)
-    if kk == k then {
-      let _s = __ivh_store_val(rh + 12 + (rn + i) * 8, v)
-      ()
-    }
-    else {
-      let old = prim.load64(sh + 12 + (n + i) * 8)
-      prim.rc_inc(old)
-      prim.store64(rh + 12 + (rn + i) * 8, old)
-    }
-    __ivh_set_copy(sh, rh, n, rn, k, v, i + 1)
+fn __ivh_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: Int, v: String, i: Int) -> Int = if i >= n then 0
+else {
+  let kk = prim.load64(sh + 12 + i * 8)
+  prim.store64(rh + 12 + i * 8, kk)
+  if kk == k then {
+    let _s = __ivh_store_val(rh + 12 + (rn + i) * 8, v)
+    ()
+  } else {
+    let old = prim.load64(sh + 12 + (n + i) * 8)
+    prim.rc_inc(old)
+    prim.store64(rh + 12 + (rn + i) * 8, old)
   }
+  __ivh_set_copy(sh, rh, n, rn, k, v, i + 1)
+}
 
-fn __ivh_set_append(rh: Int, rn: Int, idx: Int, k: Int, v: String) -> Int =
-  if idx >= 0 then 0
-  else {
-    prim.store64(rh + 12 + (rn - 1) * 8, k)
-    __ivh_store_val(rh + 12 + (rn + rn - 1) * 8, v)
-  }
+fn __ivh_set_append(rh: Int, rn: Int, idx: Int, k: Int, v: String) -> Int = if idx >= 0 then 0
+else {
+  prim.store64(rh + 12 + (rn - 1) * 8, k)
+  __ivh_store_val(rh + 12 + (rn + rn - 1) * 8, v)
+}
 
 fn map_set_ivh(m: Map[Int, String], k: Int, v: String) -> Map[Int, String] = {
   let sh = prim.handle(m)
@@ -62,18 +57,18 @@ fn map_set_ivh(m: Map[Int, String], k: Int, v: String) -> Map[Int, String] = {
   r
 }
 
-fn __ivh_eq_at(ah: Int, an: Int, bh: Int, bn: Int, i: Int) -> Bool =
-  if i >= an then true
+fn __ivh_eq_at(ah: Int, an: Int, bh: Int, bn: Int, i: Int) -> Bool = if i >= an then true
+else {
+  let k = prim.load64(ah + 12 + i * 8)
+  let j = __ivh_find(bh, bn, k, 0)
+  if j < 0 then false
   else {
-    let k = prim.load64(ah + 12 + i * 8)
-    let j = __ivh_find(bh, bn, k, 0)
-    if j < 0 then false
-    else {
-      let va = prim.load_str(ah + 12 + (an + i) * 8)
-      let vb = prim.load_str(bh + 12 + (bn + j) * 8)
-      if va == vb then __ivh_eq_at(ah, an, bh, bn, i + 1) else false
-    }
+    let va = prim.load_str(ah + 12 + (an + i) * 8)
+    let vb = prim.load_str(bh + 12 + (bn + j) * 8)
+    if va == vb then __ivh_eq_at(ah, an, bh, bn, i + 1)
+    else false
   }
+}
 
 fn map_eq_ivh(a: Map[Int, String], b: Map[Int, String]) -> Bool = {
   let ah = prim.handle(a)
@@ -84,35 +79,32 @@ fn map_eq_ivh(a: Map[Int, String], b: Map[Int, String]) -> Bool = {
   else __ivh_eq_at(ah, an, bh, bn, 0)
 }
 
-fn __ivh_drop_vals(h: Int, n: Int, i: Int) -> Unit =
-  if i >= n then ()
-  else {
-    prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))
-    __ivh_drop_vals(h, n, i + 1)
-  }
+fn __ivh_drop_vals(h: Int, n: Int, i: Int) -> Unit = if i >= n then ()
+else {
+  prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))
+  __ivh_drop_vals(h, n, i + 1)
+}
 
 fn __drop_map_ivh(m: Map[Int, String]) -> Unit = {
   let h = prim.handle(m)
-  if prim.load32(h + 0) == 1 then __ivh_drop_vals(h, prim.load32(h + 4), 0) else ()
+  if prim.load32(h + 0) == 1 then __ivh_drop_vals(h, prim.load32(h + 4), 0)
+  else ()
   prim.rc_dec(h)
 }
-
 
 // v0's `map.from_list` over (Int, String) pairs — duplicate key keeps FIRST position
 // with LAST value (map_set_ivh's replace-in-place gives exactly that). Recursion over
 // the pairs list; each step's map is a fresh block (the previous is dropped by scope).
-fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -> Map[Int, String] =
-  if i >= list.len(pairs) then m
-  else match list.get(pairs, i) {
-    some(p) => {
-      let (k, v) = p
-      __ivh_from_list_at(pairs, i + 1, map_set_ivh(m, k, v))
-    },
-    none => m,
-  }
+fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -> Map[Int, String] = if i >= list.len(pairs) then m
+else match list.get(pairs, i) {
+  some(p) => {
+    let (k, v) = p
+    __ivh_from_list_at(pairs, i + 1, map_set_ivh(m, k, v))
+  },
+  none => m,
+}
 
-fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] =
-  __ivh_from_list_at(pairs, 0, map_new_ivh())
+fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] = __ivh_from_list_at(pairs, 0, map_new_ivh())
 
 // `${Map[Int, String]}` display — v0's `[10: "x", 20: "y"]` (insertion order, raw int
 // keys, QUOTED + escaped String values; empty map → `[:]`). Escaping via the
@@ -120,22 +112,21 @@ fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] =
 // repr escapes exactly: \\, \", \n, \r, \t.
 fn __ivt_quote(s: String) -> String = {
   let a = string.replace(s, "\\", "\\\\")
-  let b = string.replace(a, "\"", "\\\"")
+  let b = string.replace(a, '"', '\\"')
   let c = string.replace(b, "\n", "\\n")
   let d = string.replace(c, "\r", "\\r")
   let e = string.replace(d, "\t", "\\t")
-  "\"" + e + "\""
+  '"' + e + '"'
 }
 
-fn __ivt_at(h: Int, n: Int, i: Int, acc: String) -> String =
-  if i >= n then acc
-  else {
-    let k = prim.load64(h + 12 + i * 8)
-    let v = prim.load_str(h + 12 + (n + i) * 8)
-    let piece = int.to_string(k) + ": " + __ivt_quote(v)
-    let acc2 = if i == 0 then acc + piece else acc + ", " + piece
-    __ivt_at(h, n, i + 1, acc2)
-  }
+fn __ivt_at(h: Int, n: Int, i: Int, acc: String) -> String = if i >= n then acc
+else {
+  let k = prim.load64(h + 12 + i * 8)
+  let v = prim.load_str(h + 12 + (n + i) * 8)
+  let piece = int.to_string(k) + ": " + __ivt_quote(v)
+  let acc2 = if i == 0 then acc + piece else acc + ", " + piece
+  __ivt_at(h, n, i + 1, acc2)
+}
 
 fn map_to_string_ivh(m: Map[Int, String]) -> String = {
   let h = prim.handle(m)
@@ -151,7 +142,7 @@ fn map_len_ivh(m: Map[Int, String]) -> Int = prim.load32(prim.handle(m) + 4)
 // payload SHARES the value String (the Some-ctor Dup acquires a ref; the option's
 // drop releases it — the map keeps its own), a miss is none. Serves Bool keys too
 // (the router widens admission — a Bool key is the same raw i64 slot, 0/1).
-fn map_get_ivh(m: Map[Int, String], k: Int) -> Option[String] = {
+fn map_get_ivh(m: Map[Int, String], k: Int) -> String? = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
   let idx = __ivh_find(h, n, k, 0)

@@ -3,17 +3,15 @@
 // f: (Acc, Int) -> Acc invoked via $closure_fn2. Builds a fresh List[Int] (prim.alloc_list),
 // storing the new acc at slot i each step (like map, but threading the accumulator). List[
 // Int]/Int accumulator; source borrowed; result owned rc=1.
+fn __scan_fill(dh: Int, sh: Int, f: fn(Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then 0
+else {
+  let x = prim.load64(sh + 12 + i * 8)
+  let nacc = f(acc, x)
+  prim.store64(dh + 12 + i * 8, nacc)
+  __scan_fill(dh, sh, f, n, i + 1, nacc)
+}
 
-fn __scan_fill(dh: Int, sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
-  if i >= n then 0
-  else {
-    let x = prim.load64(sh + 12 + i * 8)
-    let nacc = f(acc, x)
-    prim.store64(dh + 12 + i * 8, nacc)
-    __scan_fill(dh, sh, f, n, i + 1, nacc)
-  }
-
-fn list_scan(xs: List[Int], init: Int, f: (Int, Int) -> Int) -> List[Int] = {
+fn list_scan(xs: List[Int], init: Int, f: fn(Int, Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
   let _x = __scan_fill(prim.handle(buf), prim.handle(xs), f, n, 0, init)
@@ -26,17 +24,16 @@ fn list_scan(xs: List[Int], init: Int, f: (Int, Int) -> Int) -> List[Int] = {
 // index 259). Each intermediate is f's fresh owned String MOVED into its slot
 // (the list_map_str discipline); the next step BORROWS it back from the dest
 // slot (load_str) so no handle is used after its move.
-fn __scan_str_fill(dh: Int, sh: Int, f: (String, Int) -> String, n: Int, i: Int, acc: String) -> Int =
-  if i >= n then 0
-  else {
-    let x = prim.load64(sh + 12 + i * 8)
-    let nacc = f(acc, x)
-    prim.store_str(dh + 12 + i * 8, nacc)
-    let nb = prim.load_str(dh + 12 + i * 8)
-    __scan_str_fill(dh, sh, f, n, i + 1, nb)
-  }
+fn __scan_str_fill(dh: Int, sh: Int, f: fn(String, Int) -> String, n: Int, i: Int, acc: String) -> Int = if i >= n then 0
+else {
+  let x = prim.load64(sh + 12 + i * 8)
+  let nacc = f(acc, x)
+  prim.store_str(dh + 12 + i * 8, nacc)
+  let nb = prim.load_str(dh + 12 + i * 8)
+  __scan_str_fill(dh, sh, f, n, i + 1, nb)
+}
 
-fn list_scan_str(xs: List[Int], init: String, f: (String, Int) -> String) -> List[String] = {
+fn list_scan_str(xs: List[Int], init: String, f: fn(String, Int) -> String) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
   let _x = __scan_str_fill(prim.handle(buf), prim.handle(xs), f, n, 0, init)

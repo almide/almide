@@ -11,12 +11,11 @@ fn bytes_as_ptr(b: Bytes) -> RawPtr = prim.int_to_ptr(prim.handle(b) + 12)
 
 fn bytes_as_mut_ptr(b: Bytes) -> RawPtr = prim.int_to_ptr(prim.handle(b) + 12)
 
-fn __brp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    prim.store8(dst + i, prim.load8(src + i))
-    __brp_copy(dst, src, n, i + 1)
-  }
+fn __brp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __brp_copy(dst, src, n, i + 1)
+}
 
 fn bytes_from_raw_ptr(p: RawPtr, n: Int) -> Bytes = {
   let src = prim.ptr_to_int(p)

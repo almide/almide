@@ -3,13 +3,11 @@
 // bits>=64); v = a & mask; n = n % bits; left/right shift the masked value as a u64 (logical
 // shr via prim.bshr_u), OR them, re-mask. Byte-exact with v0 for bits>0 (the bits<=0 error
 // path is not replicated). Pure scalar — cert untouched.
-
-fn __rotate_mask(bits: Int) -> Int =
-  if bits >= 64 then 0 - 1
-  else {
-    let p = prim.bshl(1, bits)
-    p - 1
-  }
+fn __rotate_mask(bits: Int) -> Int = if bits >= 64 then 0 - 1
+else {
+  let p = prim.bshl(1, bits)
+  p - 1
+}
 
 fn int_rotate_left(a: Int, n: Int, bits: Int) -> Int = {
   // §13 termination convention: a nonpositive width has no rotation — abort

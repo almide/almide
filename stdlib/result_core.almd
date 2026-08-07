@@ -3,7 +3,6 @@
 // build it): Ok = len 0 (the value sits in slot 0 but is not owned/freed), Err = len 1 (owns the
 // message String, freed by DropListStr). So the discriminant is just the header `len` field:
 // is_ok ⇔ len == 0, is_err ⇔ len != 0. Reads only — `r` is borrowed, no allocation.
-
 fn result_is_ok(r: Result[Int, String]) -> Bool = {
   let len = prim.load32(prim.handle(r) + 4)
   len == 0
@@ -27,11 +26,11 @@ fn result_unwrap_or(r: Result[Int, String], default: Int) -> Int = {
 // result.to_option(r) -> Some(value) for Ok, None for Err — the Result→Option bridge. Reads the
 // len-tag, then BUILDS a fresh Option[Int] (Some materializes the scalar slot-0 value, None the
 // empty Option) over v1's own Option machinery. `r` is borrowed; the Option is freshly owned.
-fn result_to_option(r: Result[Int, String]) -> Option[Int] = {
+fn result_to_option(r: Result[Int, String]) -> Int? = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
   let v = prim.load64(h + 12)
-  if len == 0 then Some(v) else None
+  if len == 0 then some(v) else none
 }
 
 // result.to_list(r) -> [value] for Ok, [] for Err — the Result→List bridge. A 1- or 0-element
@@ -61,13 +60,15 @@ fn result_to_list(r: Result[Int, String]) -> List[Int] = {
 // String] (value.as_string's 1-slot DynListStr, payload handle @12, Ok/Err tag in slot-0 high bits).
 fn __rzip_ok(av: Int, bv: Int) -> Result[(Int, Int), String] = {
   let t = (av, bv)
-  Ok(t)
+  ok(t)
 }
+
 fn __rzip_err(msg_h: Int) -> Result[(Int, Int), String] = {
   let s = prim.load_str(msg_h + 12)
   let copy = string.repeat(s, 1)
-  Err(copy)
+  err(copy)
 }
+
 fn result_zip(a: Result[Int, String], b: Result[Int, String]) -> Result[(Int, Int), String] = {
   let ah = prim.handle(a)
   let alen = prim.load32(ah + 4)
@@ -76,8 +77,7 @@ fn result_zip(a: Result[Int, String], b: Result[Int, String]) -> Result[(Int, In
   let blen = prim.load32(bh + 4)
   let bv = prim.load64(bh + 12)
   if alen >= 1 then __rzip_err(ah)
-  else if blen >= 1 then __rzip_err(bh)
-  else __rzip_ok(av, bv)
+  else if blen >= 1 then __rzip_err(bh) else __rzip_ok(av, bv)
 }
 
 // ── heap-Ok (cap-as-tag) twins ── a HEAP-Ok Result is the 1-slot block whose len@4 is

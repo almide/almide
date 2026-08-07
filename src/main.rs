@@ -181,12 +181,17 @@ enum Commands {
     Fmt {
         /// Files to format (default: src/**/*.almd)
         files: Vec<String>,
-        /// Check formatting without writing
+        /// Check formatting without writing (exit non-zero on drift)
         #[arg(long)]
         check: bool,
-        /// Check formatting without writing
+        /// Print the formatted text to stdout without writing
         #[arg(long)]
         dry_run: bool,
+        /// Keep the import list byte-for-byte (no auto-insert of missing
+        /// imports, no removal of unused ones) — for splice-context sources
+        /// like the stdlib, where an added import corrupts the splice
+        #[arg(long)]
+        no_import_edit: bool,
     },
     /// Compile source to .almdi (module interface + IR artifact)
     Compile {
@@ -590,7 +595,7 @@ fn dispatch_ide(cmd: IdeCommand) {
 /// `parse_file` as-is and report "Is a directory", which the always-zero exit then
 /// swallowed, so a CI job pointed at a tree silently checked nothing (#919). With no
 /// argument at all the `src/` sweep is unchanged.
-fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool) {
+fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool, no_import_edit: bool) {
     let mode = match (check, dry_run) {
         (true, _) => cli::FmtMode::Check,
         (false, true) => cli::FmtMode::DryRun,
@@ -618,7 +623,7 @@ fn dispatch_fmt(files: Vec<String>, check: bool, dry_run: bool) {
         }
         expanded
     };
-    cli::cmd_fmt(&fmt_files, mode);
+    cli::cmd_fmt(&fmt_files, mode, no_import_edit);
 }
 
 /// `dispatch`'s `Commands::Add` arm. Extracted verbatim.
@@ -696,7 +701,7 @@ fn dispatch_rest(command: Commands) {
             print_error_explanation(&code);
         }
         Commands::Ide { cmd } => dispatch_ide(cmd),
-        Commands::Fmt { files, check, dry_run } => dispatch_fmt(files, check, dry_run),
+        Commands::Fmt { files, check, dry_run, no_import_edit } => dispatch_fmt(files, check, dry_run, no_import_edit),
         Commands::Compile { module, json, dry_run, output } => {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }

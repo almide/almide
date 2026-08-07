@@ -2,22 +2,32 @@
 //
 // See `int8.almd` for the routing rationale (dimensional pivot via
 // canonical `int`).
-
 fn to_int8(x: UInt8) -> Int8 = int.to_int8(int.from_uint8(x))
+
 fn to_int16(x: UInt8) -> Int16 = int.to_int16(int.from_uint8(x))
+
 fn to_int32(x: UInt8) -> Int32 = int.to_int32(int.from_uint8(x))
+
 fn to_int64(x: UInt8) -> Int64 = int.to_int64(int.from_uint8(x))
+
 fn to_uint16(x: UInt8) -> UInt16 = int.to_uint16(int.from_uint8(x))
+
 fn to_uint32(x: UInt8) -> UInt32 = int.to_uint32(int.from_uint8(x))
+
 fn to_uint64(x: UInt8) -> UInt64 = int.to_uint64(int.from_uint8(x))
+
 fn to_float32(x: UInt8) -> Float32 = int.to_float32(int.from_uint8(x))
+
 fn to_float64(x: UInt8) -> Float64 = int.to_float64(int.from_uint8(x))
+
 fn to_string(x: UInt8) -> String = int.to_string(int.from_uint8(x))
 
 // ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
-fn to_int8_checked(x: UInt8) -> Option[Int8] = int.to_int8_checked(int.from_uint8(x))
+fn to_int8_checked(x: UInt8) -> Int8? = int.to_int8_checked(int.from_uint8(x))
+
 fn to_int8_saturating(x: UInt8) -> Int8 = int.to_int8_saturating(int.from_uint8(x))
 
 // ── Bounds ──
 fn min_value() -> UInt8 = int.to_uint8(0)
+
 fn max_value() -> UInt8 = int.to_uint8(255)

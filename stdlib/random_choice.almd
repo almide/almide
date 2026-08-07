@@ -17,14 +17,12 @@ fn __rc_rand(min: Int, max: Int) -> Int = {
   if span <= 0 then min else min + (rpos % span)
 }
 
-fn random_choice(xs: List[Int]) -> Option[Int] = {
+fn random_choice(xs: List[Int]) -> Int? = {
   let n = list.len(xs)
-  if n == 0 then none
-  else list.get(xs, __rc_rand(0, n - 1))
+  if n == 0 then none else list.get(xs, __rc_rand(0, n - 1))
 }
 
-fn random_choice_str(xs: List[String]) -> Option[String] = {
+fn random_choice_str(xs: List[String]) -> String? = {
   let n = list.len(xs)
-  if n == 0 then none
-  else list.get(xs, __rc_rand(0, n - 1))
+  if n == 0 then none else list.get(xs, __rc_rand(0, n - 1))
 }

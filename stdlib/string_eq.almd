@@ -13,7 +13,6 @@ fn string_eq(a: String, b: String) -> Bool = {
 // Byte-wise tail recursion over the two data regions (da/db are data addresses, n the byte
 // length). Pure scalar (Int address arithmetic + load8 compare), so it lowers in the v1
 // subset; `da`/`db` are raw addresses, not owned handles, so there is no ownership event.
-fn __streq_at(da: Int, db: Int, i: Int, n: Int) -> Bool =
-  if i >= n then true
-  else if prim.load8(da + i) == prim.load8(db + i) then __streq_at(da, db, i + 1, n)
-  else false
+fn __streq_at(da: Int, db: Int, i: Int, n: Int) -> Bool = if i >= n then true
+else if prim.load8(da + i) == prim.load8(db + i) then __streq_at(da, db, i + 1, n)
+else false

@@ -11,10 +11,15 @@
 // frontend error AND would REJECT at the gate. A PLAIN `fn` (NOT `effect fn`, like print_str) so
 // the bare Unit return is not effect-monad/Result wrapped — `io.print` callers expect Unit.
 fn io_print(s: String) -> Unit = {
-  let h = prim.handle(s)        // i64 address of the [rc][len][cap][bytes] block
-  let len = prim.load32(h + 4)  // header len (LIST_LEN_OFFSET)
-  let data = h + 12             // byte start (LIST_HEADER)
-  prim.store32(8, data)         // iovec = { the string bytes, len }
+  let h = prim.handle(s)
+  // i64 address of the [rc][len][cap][bytes] block
+  let len = prim.load32(h + 4)
+  // header len (LIST_LEN_OFFSET)
+  let data = h + 12
+  // byte start (LIST_HEADER)
+  prim.store32(8, data)
+  // iovec = { the string bytes, len }
   prim.store32(12, len)
-  let _w0 = prim.fd_write(1, 8, 1, 0)  // fd_write(stdout, iovec@8, count 1, nwritten@0)
+  let _w0 = prim.fd_write(1, 8, 1, 0)
+  // fd_write(stdout, iovec@8, count 1, nwritten@0)
 }

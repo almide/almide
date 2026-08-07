@@ -9,13 +9,7 @@
 // looked like a borrow but was really an `ArgTransform::Direct`
 // signal (runtime string → owned); the bundled path writes the
 // owned form directly so no special-case stripping is needed.
-
-type FileStat = {
-  size: Int,
-  is_dir: Bool,
-  is_file: Bool,
-  modified: Int,
-}
+type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 
 @intrinsic("almide_rt_fs_read_text")
 effect fn read_text(path: String) -> Result[String, String] = _
@@ -51,16 +45,16 @@ effect fn read_lines(path: String) -> Result[List[String], String] = _
 // is_dir predicates, writes create, and remove has rm -f semantics of its
 // own; those omissions are intentional (tests/fs_if_exists_family_gate).
 @intrinsic("almide_rt_fs_read_text_if_exists")
-effect fn read_text_if_exists(path: String) -> Result[Option[String], String] = _
+effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
 
 @intrinsic("almide_rt_fs_read_bytes_if_exists")
-effect fn read_bytes_if_exists(path: String) -> Result[Option[List[Int]], String] = _
+effect fn read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = _
 
 @intrinsic("almide_rt_fs_read_lines_if_exists")
-effect fn read_lines_if_exists(path: String) -> Result[Option[List[String]], String] = _
+effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = _
 
 @intrinsic("almide_rt_fs_read_bytes_raw_if_exists")
-effect fn read_bytes_raw_if_exists(path: String) -> Result[Option[Bytes], String] = _
+effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 
 @intrinsic("almide_rt_fs_remove")
 effect fn remove(path: String) -> Result[Unit, String] = _

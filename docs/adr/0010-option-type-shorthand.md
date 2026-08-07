@@ -83,10 +83,11 @@ fn parse_opt(s: String) -> Int?!   // = Result[Option[Int], String]  ? が先、
 **払うもの**:
 - 文法表面の追加(型アトム後置 `?`)とその教育コスト。
 - 一回きりの正規化 diff(spec/ + examples/ = fmt gate の対象範囲)。
-- **stdlib は長綴りのまま据え置き**: fmt の import 自動挿入が splice-context を
-  壊すため batch-fmt 禁止(実測: 277/284 ファイルに diff、うち 203 に import 挿入)。
-  fmt が no-import-splice モードを得るまで移行しない。据え置きは無害を超えて有用 —
-  stdlib 署名の `Option[T]` が短綴りとの単一化を全コーパスで常時実証する境界証人になる。
+- **stdlib も移行済み(2026-08-07 追記)**: `almide fmt --no-import-edit` が
+  据え置きの前提だった splice-context ハザード(import 自動挿入)を解いたため、
+  stdlib 258 ファイルを batch 正規化(import 行の増減ゼロを機械確認)。
+  旧・据え置き根拠だった「長綴りの境界証人」役は spec の単一化テスト
+  (fallible_marker / option_marker)へ引き継ぎ。
 
 ## Falsifier
 

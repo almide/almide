@@ -3,7 +3,6 @@
 // Migrated mechanically from `stdlib/defs/random.toml` (4 fns). All
 // are `effect` (non-deterministic); the runtime impls stay in
 // `runtime/rs/src/random.rs`.
-
 @intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
@@ -11,7 +10,7 @@ effect fn int(min: Int, max: Int) -> Int = _
 effect fn float() -> Float = _
 
 @intrinsic("almide_rt_random_choice")
-effect fn choice[T](xs: List[T]) -> Option[T] = _
+effect fn choice[T](xs: List[T]) -> T? = _
 
 @intrinsic("almide_rt_random_shuffle")
 @consume(xs)
