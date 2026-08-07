@@ -359,7 +359,7 @@ impl Checker {
         }
     }
     /// Effect isolation: pure fn cannot call effect fn. Verbatim text move out of [`Self::check_named_call_with_type_args`].
-    fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
+    pub(crate) fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
         if sig.is_effect && !self.env.can_call_effect {
             let (msg, hint) = match self.env.metered_region {
                 // Inside a metered region the caller usually IS an effect fn —

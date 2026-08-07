@@ -1,0 +1,28 @@
+// ADR-0009 D2 (#1055 / #1135 クラスタ1): capability は callback の綴りに
+//依存しない。EFFECT fn を callback VALUE として渡すと、その effect ビットは
+// 呼び出し式へ流れる — bare 参照でも lambda 包みでも同じ判定になる。
+//
+// 修正前: `fn pure(xs) = list.map(xs, eff)` が pure fn から通り、effect が
+// 実行された(洗浄)。lambda 包み `(x) => eff(x)` は正しく E006 だったので、
+// 同じプログラムが綴りだけで健全/不健全に分かれていた。負の側は
+// tests/diagnostics/e006-effect-fn-as-callback/ がピンする。
+effect fn double_eff(n: Int) -> Result[Int, String] = ok(n * 2)
+
+fn pure_total(n: Int) -> Int = n + 1
+
+// EFFECT fn からは bare 参照が合法(資格を持つ文脈)
+effect fn effect_caller(xs: List[Int]) -> Int = {
+  let rs = list.map(xs, double_eff)
+  list.len(rs)
+}
+
+// PURE fn は総 callback なら当然に合法 — 締めすぎていないことの証人
+fn pure_caller(xs: List[Int]) -> List[Int] = list.map(xs, pure_total)
+
+test "an effect callback is legal from an effect context" {
+  assert_eq(effect_caller([1, 2, 3]) ?? -1, 3)
+}
+
+test "a total callback stays legal from a pure context" {
+  assert_eq(pure_caller([1, 2]), [2, 3])
+}

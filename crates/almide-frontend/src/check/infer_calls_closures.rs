@@ -776,6 +776,21 @@ impl Checker {
         // ADR-0006 D1 (#1108 Phase 2a): the 1-bit fallibility rule for the
         // core list HOFs, applied as a pre-inference normalization.
         self.normalize_fallible_hof_callback(callee, args);
+        // ADR-0009 D2 (#1055 / #1135 cluster 1): an EFFECT fn passed as a
+        // callback VALUE carries its effect bit to this call site.
+        // `check_effect_isolation` fires on a CALL, so a bare reference
+        // laundered the capability: `fn pure_caller(xs) = list.map(xs, eff)`
+        // — `eff` an effect fn declared `-> Result[T, E]` — passed check from
+        // a PURE fn and ran its effects, while `list.map(xs, (x) => eff(x))`
+        // was correctly E006. Same program, same effects, opposite verdicts,
+        // decided by the callback's SPELLING.
+        for a in args.iter() {
+            let ExprKind::Ident { name, .. } = &a.kind else { continue };
+            let Some(sig) = self.env.functions.get(&sym(name)).cloned() else { continue };
+            if sig.is_effect {
+                self.check_effect_isolation(name, &sig);
+            }
+        }
         // Save named arg names, then flatten into positional args temporarily.
         let named_names: Vec<almide_base::intern::Sym> = named_args.iter().map(|(n, _)| *n).collect();
         let named_start = args.len();
