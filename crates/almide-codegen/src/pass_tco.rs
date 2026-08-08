@@ -46,6 +46,9 @@ impl NanoPass for TailCallOptPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // MUTUAL tail-call SCCs first (#1043): a rewritten member becomes a thin
+        // wrapper with no self-call, so the per-fn walk below never re-enters it.
+        run_mutual_tco(&mut program);
         // Collect: TCO'd function name → param positions whose borrow annotation
         // was forced back to Own by the loop rewrite (i.e. NOT in the
         // Bytes-borrow-preserved set). External call sites targeting these
@@ -741,3 +744,4 @@ fn scan_non_tail_stmt(stmt: &IrStmt, fn_name: &str) -> (bool, bool) {
 
 
 include!("pass_tco_loop_rewrite.rs");
+include!("pass_tco_mutual.rs");

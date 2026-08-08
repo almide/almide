@@ -160,6 +160,42 @@ fn divzero_abort_matches_v0() {
 }
 
 #[test]
+fn v0_mutual_tail_recursion_survives_opt_level_0() {
+    // #1043: the v0 codegen leg's mutual-SCC dispatcher, exercised at the
+    // configuration that regressed — TRUE rustc opt-level 0, where LLVM's
+    // sibling-call opt is absent and 1M plain calls overflow the stack. The
+    // emitted source is compiled DIRECTLY here: `almide run`'s generated
+    // manifest pins `[profile.dev] opt-level = 1`, so a CARGO_PROFILE_* env
+    // knob on the run path never reaches opt 0 (measured: the knob-based
+    // spelling of this test stayed green with the pass disabled).
+    let src = "fn ping(n: Int, acc: Int) -> Int = if n == 0 then acc else pong(n - 1, acc + 1)\n\nfn pong(n: Int, acc: Int) -> Int = if n == 0 then acc else ping(n - 1, acc + 2)\n\nfn main() -> Unit = println(int.to_string(ping(1000000, 0)))\n";
+    let dir = scratch("v0_mutual_opt0");
+    let file = dir.join("prog.almd");
+    std::fs::write(&file, src).unwrap();
+    let emitted = Command::new(almide())
+        .args([file.to_str().unwrap(), "--target", "rust"])
+        .output()
+        .expect("almide emit");
+    assert!(emitted.status.success(), "emit failed: {}", String::from_utf8_lossy(&emitted.stderr));
+    let rust = String::from_utf8_lossy(&emitted.stdout).into_owned();
+    assert!(
+        rust.contains("__mutual_tco"),
+        "the mutual-SCC dispatcher is missing from the v0 emission"
+    );
+    let rs = dir.join("prog.rs");
+    let bin = dir.join("prog_bin");
+    std::fs::write(&rs, &rust).unwrap();
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021", "-C", "opt-level=0", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()])
+        .output()
+        .expect("rustc");
+    assert!(rc.status.success(), "rustc rejected the emission:\n{}", String::from_utf8_lossy(&rc.stderr));
+    let out = Command::new(&bin).output().expect("run");
+    assert_eq!(out.status.code(), Some(0), "opt-0 run failed (stack overflow?): {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "1500000\n");
+}
+
+#[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
         ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  println(int.to_string(list.len(xs)))\n}\n"),
