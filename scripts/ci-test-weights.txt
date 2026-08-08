@@ -1,18 +1,31 @@
 # Measured test-target durations (seconds) — used ONLY to balance the CI shards
 # (scripts/ci-test-shard.sh). A target missing here still RUNS; it just gets the
 # default weight, so a stale file costs balance, never coverage. Coverage is
-# gated separately (the shard job asserts the union is the whole target set).
+# gated separately (`shard-coverage` asserts the shards' union is the whole set).
 #
-# Measured 2026-08-08 on an M-series laptop. CI runners are ~1.5x slower but the
-# packing only needs the RATIOS. Refresh when the shard job's balance report
-# shows one shard consistently trailing.
-wasm_runtime_test            268
-native_v1_differential_test  134
-examples_parity_test          68
-fmt_test                      47
-wasm_gc_test                  32
-codegen_snapshot_test         32
-diagnostic_test               31
-crossmod_matrix_test          28
-semantic_laws_test            26
-wasm_dispatch_coverage_test   25
+# EVERY line below is measured, not estimated. The first version of this file
+# carried five hand-picked numbers and let the other ~100 targets fall to the
+# default, which is why the first sharded CI run came out 853/927/1046/709
+# instead of the even split the local numbers predicted: the critical shard held
+# two ~180s targets the file called 5s. Guessing which targets matter is the
+# thing that failed; this is the whole profile.
+#
+# Captured 2026-08-08 from one `cargo test --workspace` on an M-series laptop
+# (Running/finished-in pairs). CI runners are slower, but packing needs only the
+# RATIOS. Targets under 5s are omitted — they are within the default's noise.
+# Refresh by rerunning that command when the shard job's balance report drifts.
+wasm_runtime_test                276
+native_v1_differential_test      138
+examples_parity_test             35
+crossmod_matrix_test             29
+semantic_laws_test               27
+charge_probe_test                26
+almide_mir                       25
+wasm_dispatch_coverage_test      24
+bridge_test                      19
+almide_egg_lab                   19
+fmt_test                         17
+fuzz_test                        15
+io_read_all_test                 13
+eval_test                        9
+diagnostic_harness_test          7
