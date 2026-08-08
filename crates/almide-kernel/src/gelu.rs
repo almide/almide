@@ -56,22 +56,20 @@ fn gelu_wasm(data: &[f64], out: &mut [f64]) {
     let half = f64x2_splat(0.5);
     let one = f64x2_splat(1.0);
     let two = f64x2_splat(2.0);
-    let n = data.len();
-    let chunks = n / 2;
-    for ci in 0..chunks {
-        let off = ci * 2;
-        let x = unsafe { v128_load(data.as_ptr().add(off) as *const v128) };
+    use crate::simd_wasm::{load_f64x2, store_f64x2};
+    let (dv, d_tail) = data.as_chunks::<2>();
+    let (ov, o_tail) = out.as_chunks_mut::<2>();
+    for (dw, ow) in dv.iter().zip(ov) {
+        let x = load_f64x2(dw);
         let x3 = f64x2_mul(f64x2_mul(x, x), x);
         let inner = f64x2_mul(k, f64x2_add(x, f64x2_mul(c, x3)));
         let e = exp_pd_wasm(f64x2_mul(two, inner));
         let t = f64x2_sub(one, f64x2_div(two, f64x2_add(e, one)));
-        let r = f64x2_mul(f64x2_mul(half, x), f64x2_add(one, t));
-        unsafe { v128_store(out.as_mut_ptr().add(off) as *mut v128, r) };
+        store_f64x2(ow, f64x2_mul(f64x2_mul(half, x), f64x2_add(one, t)));
     }
-    for i in (chunks * 2)..n {
-        let x = data[i];
+    for (x, o) in d_tail.iter().zip(o_tail) {
         let inner = K * (x + 0.044715 * x * x * x);
-        out[i] = 0.5 * x * (1.0 + inner.tanh());
+        *o = 0.5 * x * (1.0 + inner.tanh());
     }
 }
 

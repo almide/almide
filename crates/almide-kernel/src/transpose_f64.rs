@@ -81,31 +81,38 @@ unsafe fn transpose_8x8_f64_avx(input: &[f64; 64]) -> [f64; 64] {
 pub fn transpose_matrix_f64(input: &[f64], rows: usize, cols: usize, out: &mut [f64]) {
     assert_eq!(input.len(), rows * cols);
     assert_eq!(out.len(), rows * cols);
-    let rt = rows / 8 * 8;
+    let rt = rows / 8 * 8; // tiled extent (multiple of 8)
     let ct = cols / 8 * 8;
-    let mut tile = [0.0f64; 64];
-    let mut ti = 0;
-    while ti < rt {
-        let mut tj = 0;
-        while tj < ct {
-            for r in 0..8 {
-                let base = (ti + r) * cols + tj;
-                tile[r * 8..r * 8 + 8].copy_from_slice(&input[base..base + 8]);
-            }
-            let t = transpose_8x8_f64(&tile);
-            for r in 0..8 {
-                let base = (tj + r) * rows + ti;
-                out[base..base + 8].copy_from_slice(&t[r * 8..r * 8 + 8]);
-            }
-            tj += 8;
+    for ti in (0..rt).step_by(8) {
+        for tj in (0..ct).step_by(8) {
+            transpose_tile_f64(input, rows, cols, out, ti, tj);
         }
-        ti += 8;
     }
+    transpose_edges_f64(input, rows, cols, out, rt, ct);
+}
+
+/// Gather the 8x8 tile whose top-left corner is `(ti, tj)`, run it through the
+/// SIMD kernel, and scatter the result into its transposed position.
+fn transpose_tile_f64(input: &[f64], rows: usize, cols: usize, out: &mut [f64], ti: usize, tj: usize) {
+    let mut tile = [0.0f64; 64];
+    for r in 0..8 {
+        let base = (ti + r) * cols + tj;
+        tile[r * 8..r * 8 + 8].copy_from_slice(&input[base..base + 8]);
+    }
+    let t = transpose_8x8_f64(&tile);
+    for r in 0..8 {
+        let base = (tj + r) * rows + ti;
+        out[base..base + 8].copy_from_slice(&t[r * 8..r * 8 + 8]);
+    }
+}
+
+/// The (i, j) cells no full 8x8 tile covered: the bottom `rows % 8` rows in
+/// full, plus the right `cols % 8` columns of every tiled row.
+fn transpose_edges_f64(input: &[f64], rows: usize, cols: usize, out: &mut [f64], rt: usize, ct: usize) {
     for i in 0..rows {
-        for j in 0..cols {
-            if i >= rt || j >= ct {
-                out[j * rows + i] = input[i * cols + j];
-            }
+        let first_col = if i < rt { ct } else { 0 };
+        for j in first_col..cols {
+            out[j * rows + i] = input[i * cols + j];
         }
     }
 }

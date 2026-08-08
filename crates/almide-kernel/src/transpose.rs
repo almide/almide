@@ -68,31 +68,30 @@ fn transpose_4x4(
 
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 fn transpose_8x8_simd128(input: &[f32; 64]) -> [f32; 64] {
-    use std::arch::wasm32::*;
-    let p = input.as_ptr();
-    // each row = left half (cols 0-3) + right half (cols 4-7)
-    // SAFETY: 64 f32 in, all offsets < 64.
-    let ld = |off: usize| unsafe { v128_load(p.add(off) as *const v128) };
-    let (l0, r0) = (ld(0), ld(4));
-    let (l1, r1) = (ld(8), ld(12));
-    let (l2, r2) = (ld(16), ld(20));
-    let (l3, r3) = (ld(24), ld(28));
-    let (l4, r4) = (ld(32), ld(36));
-    let (l5, r5) = (ld(40), ld(44));
-    let (l6, r6) = (ld(48), ld(52));
-    let (l7, r7) = (ld(56), ld(60));
+    use crate::simd_wasm::{load_f32x4, store_f32x4};
+    // 64 f32 = exactly 16 four-lane windows: window `2r` is row `r`'s left half
+    // (cols 0-3) and window `2r + 1` its right half (cols 4-7).
+    let (w, _) = input.as_chunks::<4>();
+    let ld = |half: usize| load_f32x4(&w[half]);
+    let (l0, r0) = (ld(0), ld(1));
+    let (l1, r1) = (ld(2), ld(3));
+    let (l2, r2) = (ld(4), ld(5));
+    let (l3, r3) = (ld(6), ld(7));
+    let (l4, r4) = (ld(8), ld(9));
+    let (l5, r5) = (ld(10), ld(11));
+    let (l6, r6) = (ld(12), ld(13));
+    let (l7, r7) = (ld(14), ld(15));
     let a = transpose_4x4(l0, l1, l2, l3); // top-left  → out rows 0-3, left
     let b = transpose_4x4(l4, l5, l6, l7); // bot-left  → out rows 0-3, right
     let c = transpose_4x4(r0, r1, r2, r3); // top-right → out rows 4-7, left
     let d = transpose_4x4(r4, r5, r6, r7); // bot-right → out rows 4-7, right
     let mut out = [0.0f32; 64];
-    let q = out.as_mut_ptr();
-    let st = |off: usize, v: v128| unsafe { v128_store(q.add(off) as *mut v128, v) };
+    let (ow, _) = out.as_chunks_mut::<4>();
     for j in 0..4 {
-        st(j * 8, a[j]);
-        st(j * 8 + 4, b[j]);
-        st((j + 4) * 8, c[j]);
-        st((j + 4) * 8 + 4, d[j]);
+        store_f32x4(&mut ow[j * 2], a[j]);
+        store_f32x4(&mut ow[j * 2 + 1], b[j]);
+        store_f32x4(&mut ow[(j + 4) * 2], c[j]);
+        store_f32x4(&mut ow[(j + 4) * 2 + 1], d[j]);
     }
     out
 }
@@ -199,30 +198,36 @@ pub fn transpose_matrix(input: &[f32], rows: usize, cols: usize, out: &mut [f32]
     assert_eq!(out.len(), rows * cols);
     let rt = rows / 8 * 8; // tiled extent (multiple of 8)
     let ct = cols / 8 * 8;
-    let mut tile = [0.0f32; 64];
-    let mut ti = 0;
-    while ti < rt {
-        let mut tj = 0;
-        while tj < ct {
-            for r in 0..8 {
-                let base = (ti + r) * cols + tj;
-                tile[r * 8..r * 8 + 8].copy_from_slice(&input[base..base + 8]);
-            }
-            let t = transpose_8x8(&tile);
-            for r in 0..8 {
-                let base = (tj + r) * rows + ti;
-                out[base..base + 8].copy_from_slice(&t[r * 8..r * 8 + 8]);
-            }
-            tj += 8;
+    for ti in (0..rt).step_by(8) {
+        for tj in (0..ct).step_by(8) {
+            transpose_tile(input, rows, cols, out, ti, tj);
         }
-        ti += 8;
     }
-    // ragged edges: any (i, j) not covered by a full tile
+    transpose_edges(input, rows, cols, out, rt, ct);
+}
+
+/// Gather the 8x8 tile whose top-left corner is `(ti, tj)`, run it through the
+/// SIMD kernel, and scatter the result into its transposed position.
+fn transpose_tile(input: &[f32], rows: usize, cols: usize, out: &mut [f32], ti: usize, tj: usize) {
+    let mut tile = [0.0f32; 64];
+    for r in 0..8 {
+        let base = (ti + r) * cols + tj;
+        tile[r * 8..r * 8 + 8].copy_from_slice(&input[base..base + 8]);
+    }
+    let t = transpose_8x8(&tile);
+    for r in 0..8 {
+        let base = (tj + r) * rows + ti;
+        out[base..base + 8].copy_from_slice(&t[r * 8..r * 8 + 8]);
+    }
+}
+
+/// The (i, j) cells no full 8x8 tile covered: the bottom `rows % 8` rows in
+/// full, plus the right `cols % 8` columns of every tiled row.
+fn transpose_edges(input: &[f32], rows: usize, cols: usize, out: &mut [f32], rt: usize, ct: usize) {
     for i in 0..rows {
-        for j in 0..cols {
-            if i >= rt || j >= ct {
-                out[j * rows + i] = input[i * cols + j];
-            }
+        let first_col = if i < rt { ct } else { 0 };
+        for j in first_col..cols {
+            out[j * rows + i] = input[i * cols + j];
         }
     }
 }

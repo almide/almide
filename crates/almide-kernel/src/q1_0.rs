@@ -51,6 +51,8 @@ pub fn q1_0_dot_simd128(x: &[f32; 128], sign: &[u8; 16], scale: f32) -> f32 {
     let lane_bit = i32x4(1, 2, 4, 8);
     let signbit = i32x4_splat(0x8000_0000u32 as i32);
     let mut acc = f32x4_splat(0.0);
+    // 128 f32 = exactly 32 four-lane windows; the cast is proved by the type.
+    let (lanes, _) = x.as_chunks::<4>();
     for blk in 0..32 {
         let bit_base = blk * 4;
         let byte = sign[bit_base / 8];
@@ -59,8 +61,7 @@ pub fn q1_0_dot_simd128(x: &[f32; 128], sign: &[u8; 16], scale: f32) -> f32 {
         let sel = v128_and(b, lane_bit);
         let is_set = i32x4_eq(sel, lane_bit); // all-ones where bit set
         let flip = v128_and(is_set, signbit); // 0x80000000 where set
-        // SAFETY: blk in 0..32, blk*4 in 0..128, x has 128 elems.
-        let xv = unsafe { v128_load(x.as_ptr().add(blk * 4) as *const v128) };
+        let xv = crate::simd_wasm::load_f32x4(&lanes[blk]);
         let signed = v128_xor(xv, flip);
         acc = f32x4_add(acc, signed);
     }

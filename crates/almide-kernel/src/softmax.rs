@@ -68,31 +68,36 @@ unsafe fn softmax_row_avx(row: &[f64], o: &mut [f64]) {
 fn softmax_row_wasm(row: &[f64], o: &mut [f64]) {
     use crate::silu::exp_pd_wasm;
     use std::arch::wasm32::*;
-    let cols = row.len();
+    use crate::simd_wasm::{load_f64x2, store_f64x2};
     let max = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let vmax = f64x2_splat(max);
     let mut vsum = f64x2_splat(0.0);
-    let chunks = cols / 2;
-    for c in 0..chunks {
-        let x = unsafe { v128_load(row.as_ptr().add(c * 2) as *const v128) };
-        let e = exp_pd_wasm(f64x2_sub(x, vmax));
-        unsafe { v128_store(o.as_mut_ptr().add(c * 2) as *mut v128, e) };
-        vsum = f64x2_add(vsum, e);
+    let (rv, r_tail) = row.as_chunks::<2>();
+    // The ragged lane (`cols % 2`, so at most one element) is summed apart and
+    // folded in after the vector lanes — the same order the indexed form used.
+    let mut tail_sum = 0.0;
+    {
+        let (ov, o_tail) = o.as_chunks_mut::<2>();
+        for (rw, ow) in rv.iter().zip(ov) {
+            let e = exp_pd_wasm(f64x2_sub(load_f64x2(rw), vmax));
+            store_f64x2(ow, e);
+            vsum = f64x2_add(vsum, e);
+        }
+        for (x, out) in r_tail.iter().zip(o_tail) {
+            let e = (x - max).exp();
+            *out = e;
+            tail_sum += e;
+        }
     }
-    let mut sum = f64x2_extract_lane::<0>(vsum) + f64x2_extract_lane::<1>(vsum);
-    for j in (chunks * 2)..cols {
-        let e = (row[j] - max).exp();
-        o[j] = e;
-        sum += e;
-    }
+    let sum = f64x2_extract_lane::<0>(vsum) + f64x2_extract_lane::<1>(vsum) + tail_sum;
     let inv = 1.0 / sum;
     let vinv = f64x2_splat(inv);
-    for c in 0..chunks {
-        let e = unsafe { v128_load(o.as_ptr().add(c * 2) as *const v128) };
-        unsafe { v128_store(o.as_mut_ptr().add(c * 2) as *mut v128, f64x2_mul(e, vinv)) };
+    let (ov, o_tail) = o.as_chunks_mut::<2>();
+    for ow in ov {
+        store_f64x2(ow, f64x2_mul(load_f64x2(ow), vinv));
     }
-    for j in (chunks * 2)..cols {
-        o[j] *= inv;
+    for out in o_tail {
+        *out *= inv;
     }
 }
 

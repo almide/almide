@@ -111,23 +111,21 @@ pub(crate) fn exp_pd_wasm(x: std::arch::wasm32::v128) -> std::arch::wasm32::v128
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 fn silu_mul_wasm(a: &[f64], b: &[f64], out: &mut [f64]) {
     use std::arch::wasm32::*;
+    use crate::simd_wasm::{load_f64x2, store_f64x2};
     let one = f64x2_splat(1.0);
-    let n = a.len();
-    let chunks = n / 2;
-    for c in 0..chunks {
-        let off = c * 2;
-        // SAFETY: off+2 <= n.
-        let x = unsafe { v128_load(a.as_ptr().add(off) as *const v128) };
-        let bv = unsafe { v128_load(b.as_ptr().add(off) as *const v128) };
+    let (av, a_tail) = a.as_chunks::<2>();
+    let (bv_all, b_tail) = b.as_chunks::<2>();
+    let (ov, o_tail) = out.as_chunks_mut::<2>();
+    for ((aw, bw), ow) in av.iter().zip(bv_all).zip(ov) {
+        let x = load_f64x2(aw);
+        let bv = load_f64x2(bw);
         let e = exp_pd_wasm(f64x2_neg(x));
         let sig = f64x2_div(one, f64x2_add(one, e));
-        let r = f64x2_mul(f64x2_mul(x, sig), bv);
-        unsafe { v128_store(out.as_mut_ptr().add(off) as *mut v128, r) };
+        store_f64x2(ow, f64x2_mul(f64x2_mul(x, sig), bv));
     }
-    for i in (chunks * 2)..n {
-        let x = a[i];
+    for ((x, bi), o) in a_tail.iter().zip(b_tail).zip(o_tail) {
         let sig = 1.0 / (1.0 + (-x).exp());
-        out[i] = x * sig * b[i];
+        *o = x * sig * bi;
     }
 }
 

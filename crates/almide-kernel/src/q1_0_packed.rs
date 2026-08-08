@@ -82,6 +82,8 @@ fn q1_0_block_dot_packed_wasm(x: &[f64], sign: &[u8], scale: f64) -> f64 {
     use std::arch::wasm32::*;
     let negzero = f64::from_bits(0x8000_0000_0000_0000);
     let mut acc = f64x2_splat(0.0);
+    // 128 f64 = exactly 64 two-lane windows; the cast is proved by the type.
+    let (lanes, _) = x.as_chunks::<2>();
     for g in 0..64 {
         let bit_base = g * 2;
         let byte = sign[bit_base / 8];
@@ -90,8 +92,7 @@ fn q1_0_block_dot_packed_wasm(x: &[f64], sign: &[u8], scale: f64) -> f64 {
             if two & 1 != 0 { negzero } else { 0.0 },
             if two & 2 != 0 { negzero } else { 0.0 },
         );
-        // SAFETY: g in 0..64, g*2 in 0..128, x has 128 elems.
-        let xv = unsafe { v128_load(x.as_ptr().add(g * 2) as *const v128) };
+        let xv = crate::simd_wasm::load_f64x2(&lanes[g]);
         acc = f64x2_add(acc, v128_xor(xv, mask));
     }
     (f64x2_extract_lane::<0>(acc) + f64x2_extract_lane::<1>(acc)) * scale
