@@ -125,7 +125,6 @@ impl LowerCtx {
         arms: &[IrMatchArm],
         result_ty: &Ty,
     ) -> Option<ValueId> {
-        use crate::PrimKind;
         if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
             return None;
         }
@@ -144,56 +143,13 @@ impl LowerCtx {
         // remember to UNWRAP one level: the dispatch handle becomes the payload's slot-1
         // handle (a BORROW — the subject keeps owning it; loaded only after the subject
         // materializes, so no wrong-ctor garbage read is possible: there IS no other ctor).
-        let mut layout = layout;
-        let mut stripped: Vec<IrMatchArm>;
-        let mut arms: &[IrMatchArm] = arms;
-        let mut unwrap_single = false;
-        // Guard-clause flattening of the former 6-deep nested-if (no `else` anywhere: any
-        // unmet condition falls through to the code after this block, unchanged, exactly as
-        // the original fell out of the if-pyramid — `break` exits the labeled block and
-        // resumes there). `case`'s borrow of the OLD `layout` still ends before `layout =
-        // inner_layout` reassigns it (its last use, inside `all_nested`, is unchanged and
-        // stays textually before the reassignment). No behavior change — see
-        // docs/roadmap/active/code-health-codopsy.md.
-        'single_ctor_strip: {
-            if layout.cases.len() != 1 {
-                break 'single_ctor_strip;
-            }
-            let case = &layout.cases[0];
-            if case.fields.len() != 1 {
-                break 'single_ctor_strip;
-            }
-            let all_nested = arms.iter().all(|a| matches!(&a.pattern,
-                IrPattern::Constructor { name, args }
-                    if *name == case.ctor && args.len() == 1
-                        && matches!(args[0], IrPattern::Constructor { .. })));
-            if !all_nested {
-                break 'single_ctor_strip;
-            }
-            let inner_ty = case.fields[0].1.clone();
-            let Some(inner_name) = self.custom_variant_type_name(&inner_ty) else {
-                break 'single_ctor_strip;
-            };
-            let Some(inner_layout) = self.variant_layouts.by_type.get(&inner_name).cloned()
-            else {
-                break 'single_ctor_strip;
-            };
-            stripped = Vec::with_capacity(arms.len());
-            for a in arms {
-                let IrPattern::Constructor { args, .. } = &a.pattern else {
-                    unreachable!("gated above")
-                };
-                stripped.push(IrMatchArm {
-                    pattern: args[0].clone(),
-                    guard: a.guard.clone(),
-                    body: a.body.clone(),
-                });
-            }
-            layout = inner_layout;
-            arms = &stripped;
-            unwrap_single = true;
-        }
-        let plans = self.parse_variant_arms(&layout, arms)?;
+        let stripped = self.strip_single_ctor_outer(&layout, arms);
+        let unwrap_single = stripped.is_some();
+        let (layout, arms) = match &stripped {
+            Some((inner_layout, inner_arms)) => (inner_layout, &inner_arms[..]),
+            None => (&layout, arms),
+        };
+        let plans = self.parse_variant_arms(layout, arms)?;
         // A SINGLE-arm HEAP-result match (a 1-ctor newtype `unbox`, `match b { B(x) => x }`) that
         // returned the arm value DIRECTLY to `func.ret` would double-move (the arm's move-out
         // `Consume` + the ret's move — the `amm`/`aamdm` net-−1 the proven checker REJECTS). A
@@ -211,84 +167,115 @@ impl LowerCtx {
         let ops_mark = self.ops.len();
         let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
-        // Materialize/borrow the subject → a Handle (the variant block pointer).
-        let subj = match self
-            .lower_call_args(std::slice::from_ref(subject))
-            .ok()
-            .and_then(|a| a.into_iter().next())
-        {
-            Some(CallArg::Handle(v)) => v,
-            _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                return None;
-            }
-        };
-        // A DEFERRED-Opaque subject is an EMPTY block: reading its tag would take a wrong
-        // arm silently (the record-ctor mt2 miscompile) — decline (the tail walls honestly).
-        if self.deferred_opaque_binds.contains(&subj) {
-            self.ops.truncate(ops_mark);
-            self.lifted.truncate(lifted_mark);
-            self.live_heap_handles.truncate(lhh_mark);
+        let Some(subj) = self.materialize_variant_subject(subject, result_ty) else {
+            self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
             return None;
-        }
-        // A HEAP result over an OWNED subject temp would overlap the owned-subject borrow with the
-        // arm's heap move-out (the cert rejects it). Subject-drop-before-arms is ADT brick 4b —
-        // for now WALL it (a borrowed param/var subject, the recursive-to_string case, proceeds).
-        if is_heap_ty(result_ty) && self.live_heap_handles.contains(&subj) {
-            self.ops.truncate(ops_mark);
-            self.lifted.truncate(lifted_mark);
-            self.live_heap_handles.truncate(lhh_mark);
-            return None;
-        }
-        // Read the tag from slot 0, then emit the per-arm if-chain.
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
-        // The depth-2 single-outer unwrap: the dispatch handle becomes the payload's
-        // slot-1 handle (BORROWED — the subject owns it; freed by the subject's own
-        // recursive drop, so param_values keeps it un-dropped here).
-        let h = if unwrap_single {
-            let payload = self.load_at_offset(
-                h,
-                layout::slot_offset(1) as i64,
-                PrimKind::LoadHandle,
-            );
-            self.param_values.insert(payload);
-            let ph = self.fresh_value();
-            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![payload] });
-            ph
-        } else {
-            h
         };
-        // Rung-5 variants slab: the tag is slot 0 of the subject block — the
-        // TARGET-NEUTRAL `ListGetScalar` reads it on both legs. The depth-2
-        // unwrap (`h` re-pointed at the payload block) keeps the raw load: its
-        // container is the borrowed payload, not `subj`.
-        let tag = if unwrap_single {
-            self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 })
-        } else {
-            let idx = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: idx, value: 0 });
-            let t = self.fresh_value();
-            self.ops.push(Op::ListGetScalar { dst: t, list: subj, idx });
-            t
-        };
+        let (h, tag) = self.variant_dispatch_handle_and_tag(subj, unwrap_single);
         let emitted = if sole_ctor_heap {
             let (kind, body) = &plans[0];
             self.emit_single_ctor_heap_arm(h, tag, VariantArm { kind, body }, result_ty, subj)
         } else {
             self.emit_variant_arm_chain(h, tag, &plans, result_ty, subj)
         };
-        match emitted {
-            Some(dst) => Some(dst),
-            None => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                None
-            }
+        if emitted.is_none() {
+            self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
         }
+        emitted
+    }
+
+    /// The DEPTH-2 single-outer strip of [`Self::try_lower_custom_variant_match`]:
+    /// `match o { Wrap(A(n)) => …, Wrap(B(m)) => … }` (the `pick` shape). The one
+    /// outer ctor ALWAYS matches, so the match IS the inner dispatch over the
+    /// payload — hand back the INNER layout plus arms whose patterns are the inner
+    /// patterns. `None` leaves the caller on the un-stripped path (every early exit
+    /// of the former labeled block).
+    fn strip_single_ctor_outer(
+        &self,
+        layout: &VariantLayout,
+        arms: &[IrMatchArm],
+    ) -> Option<(VariantLayout, Vec<IrMatchArm>)> {
+        let [case] = &layout.cases[..] else { return None };
+        if case.fields.len() != 1 {
+            return None;
+        }
+        let all_nested = arms.iter().all(|a| matches!(&a.pattern,
+            IrPattern::Constructor { name, args }
+                if *name == case.ctor && args.len() == 1
+                    && matches!(args[0], IrPattern::Constructor { .. })));
+        if !all_nested {
+            return None;
+        }
+        let inner_name = self.custom_variant_type_name(&case.fields[0].1)?;
+        let inner_layout = self.variant_layouts.by_type.get(&inner_name).cloned()?;
+        let stripped = arms
+            .iter()
+            .map(|a| {
+                let IrPattern::Constructor { args, .. } = &a.pattern else {
+                    unreachable!("gated by all_nested")
+                };
+                IrMatchArm {
+                    pattern: args[0].clone(),
+                    guard: a.guard.clone(),
+                    body: a.body.clone(),
+                }
+            })
+            .collect();
+        Some((inner_layout, stripped))
+    }
+
+    /// Materialize/borrow a variant `match` subject to a Handle, declining the two
+    /// shapes the tag dispatch cannot serve:
+    ///
+    /// * a DEFERRED-Opaque subject is an EMPTY block — reading its tag would take a
+    ///   wrong arm silently (the record-ctor mt2 miscompile);
+    /// * a HEAP result over an OWNED subject temp would overlap the owned-subject
+    ///   borrow with the arm's heap move-out (the cert rejects it). Subject-drop-
+    ///   before-arms is ADT brick 4b — for now decline (a borrowed param/var
+    ///   subject, the recursive-`to_string` case, proceeds).
+    ///
+    /// The caller owns the rollback: this may have emitted ops before declining.
+    fn materialize_variant_subject(&mut self, subject: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arg = self.lower_call_args(std::slice::from_ref(subject)).ok()?.into_iter().next()?;
+        let CallArg::Handle(subj) = arg else { return None };
+        if self.deferred_opaque_binds.contains(&subj) {
+            return None;
+        }
+        if is_heap_ty(result_ty) && self.live_heap_handles.contains(&subj) {
+            return None;
+        }
+        Some(subj)
+    }
+
+    /// The dispatch handle and slot-0 tag of a variant `match` subject.
+    ///
+    /// Rung-5 variants slab: the tag is slot 0 of the subject block — the
+    /// TARGET-NEUTRAL `ListGetScalar` reads it on both legs. Under the depth-2
+    /// single-outer unwrap the handle is re-pointed at the payload's slot-1 block
+    /// (BORROWED — the subject owns it; freed by the subject's own recursive drop,
+    /// so `param_values` keeps it un-dropped here) and the tag keeps the raw load:
+    /// its container is that borrowed payload, not `subj`.
+    fn variant_dispatch_handle_and_tag(
+        &mut self,
+        subj: ValueId,
+        unwrap_single: bool,
+    ) -> (ValueId, ValueId) {
+        use crate::PrimKind;
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        if !unwrap_single {
+            let idx = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: idx, value: 0 });
+            let tag = self.fresh_value();
+            self.ops.push(Op::ListGetScalar { dst: tag, list: subj, idx });
+            return (h, tag);
+        }
+        let payload = self.load_at_offset(h, layout::slot_offset(1) as i64, PrimKind::LoadHandle);
+        self.param_values.insert(payload);
+        let ph = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![payload] });
+        let tag = self.load_at_offset(ph, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
+        (ph, tag)
     }
 
     /// Route a SOLE-constructor HEAP-result arm through an IfThen `dst` (one ret move) with an
