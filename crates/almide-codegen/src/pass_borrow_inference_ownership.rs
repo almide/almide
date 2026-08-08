@@ -57,19 +57,26 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         // ── IterChain: source consumed if consume=true ──
         IrExprKind::IterChain { .. } => check_needs_ownership_iter_chain(expr, var, needs),
 
-        // ── Safe reads (no ownership needed) ──
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            // Indexing borrows — safe
-            check_needs_ownership(object, var, needs);
-            check_needs_ownership(index, var, needs);
+        // ── Safe reads: indexing and field access BORROW, and a non-concat
+        // binop (comparison, arithmetic) reads its operands. Recurse only. ──
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::Try { expr: e } | IrExprKind::Unwrap { expr: e }
+        | IrExprKind::ToOption { expr: e } | IrExprKind::Clone { expr: e }
+        | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => {
+            check_needs_ownership(e, var, needs)
         }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            check_needs_ownership(object, var, needs);
+        IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::Range { start: a, end: b, .. } => {
+            check_needs_ownership(a, var, needs);
+            check_needs_ownership(b, var, needs);
         }
-        IrExprKind::BinOp { left, right, .. } => {
-            // Non-concat binop: comparison, arithmetic — safe reads
-            check_needs_ownership(left, var, needs);
-            check_needs_ownership(right, var, needs);
+        IrExprKind::Fan { exprs: xs } | IrExprKind::RustMacro { args: xs, .. } => {
+            check_needs_ownership_elements(xs, var, needs)
         }
 
         // ── Control flow: recurse ──
@@ -79,30 +86,12 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             check_needs_ownership(cond, var, needs);
             for s in body { check_needs_ownership_stmt(s, var, needs); }
         }
-
-        // ── Wrappers: recurse ──
-        IrExprKind::UnOp { operand, .. } => check_needs_ownership(operand, var, needs),
-        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } => {
-            check_needs_ownership(expr, var, needs);
-        }
         // Both the unwrapped value and the `??` fallback flow OUT as the result,
         // so a param used as either ESCAPES and needs ownership — else the
         // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
         // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
         // the If/Match/Option-wrapping escaping-child handling above.
         IrExprKind::UnwrapOr { expr, fallback } => check_needs_ownership_unwrap_or(expr, fallback, var, needs),
-        IrExprKind::OptionalChain { expr, .. } => check_needs_ownership(expr, var, needs),
-        IrExprKind::Range { start, end, .. } => {
-            check_needs_ownership(start, var, needs);
-            check_needs_ownership(end, var, needs);
-        }
-        IrExprKind::Fan { exprs } => check_needs_ownership_elements(exprs, var, needs),
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { check_needs_ownership(a, var, needs); }
-        }
         // RuntimeCall: lowered form of `@intrinsic` / bundled Module call.
         // Its borrow signature lives in SIGS_SNAPSHOT keyed by the mangled
         // symbol. If the arg slot is Own, the call consumes that arg and
@@ -615,48 +604,62 @@ fn uses_var_match_arms(arms: &[IrMatchArm], var: VarId) -> bool {
     })
 }
 
+/// Grouped by CHILD SHAPE: apart from `Var` itself, a node uses `var` exactly
+/// when one of its children does.
 fn uses_var(expr: &IrExpr, var: VarId) -> bool {
+    let uses = |e: &IrExpr| uses_var(e, var);
     match &expr.kind {
         IrExprKind::Var { id } => *id == var,
-        IrExprKind::Block { stmts, expr } => uses_var_block(stmts, expr, var),
-        IrExprKind::If { cond, then, else_ } => uses_var(cond, var) || uses_var(then, var) || uses_var(else_, var),
+
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::ToVec { expr: e } => uses(e),
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => uses(a) || uses(b),
+
+        // ── Three children ──
+        IrExprKind::If { cond, then, else_ } => uses(cond) || uses(then) || uses(else_),
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } | IrExprKind::RustMacro { args: xs, .. }
+        | IrExprKind::RuntimeCall { args: xs, .. } => xs.iter().any(uses),
+
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } => fields.iter().any(|(_, v)| uses(v)),
+        IrExprKind::SpreadRecord { base, fields } => {
+            uses(base) || fields.iter().any(|(_, v)| uses(v))
+        }
+
+        // ── Shapes with their own traversal ──
         IrExprKind::Call { args, target, .. } => call_uses_var(target, args, var),
-        IrExprKind::BinOp { left, right, .. } => uses_var(left, var) || uses_var(right, var),
-        IrExprKind::UnOp { operand, .. } => uses_var(operand, var),
-        IrExprKind::Lambda { body, .. } => uses_var(body, var),
-        IrExprKind::Match { subject, arms } => uses_var(subject, var) || uses_var_match_arms(arms, var),
-        IrExprKind::ForIn { iterable, body, .. } => {
-            uses_var(iterable, var) || body.iter().any(|s| stmt_uses_var(s, var))
+        IrExprKind::Block { stmts, expr } => uses_var_block(stmts, expr, var),
+        IrExprKind::Match { subject, arms } => uses(subject) || uses_var_match_arms(arms, var),
+        IrExprKind::ForIn { iterable: lead, body, .. }
+        | IrExprKind::While { cond: lead, body } => {
+            uses(lead) || body.iter().any(|s| stmt_uses_var(s, var))
         }
-        IrExprKind::While { cond, body } => {
-            uses_var(cond, var) || body.iter().any(|s| stmt_uses_var(s, var))
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => uses_var(object, var),
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            uses_var(object, var) || uses_var(index, var)
+        IrExprKind::MapLiteral { entries } => {
+            entries.iter().any(|(k, v)| uses(k) || uses(v))
         }
         IrExprKind::StringInterp { parts } => parts.iter().any(|p| {
-            matches!(p, IrStringPart::Expr { expr } if uses_var(expr, var))
+            matches!(p, IrStringPart::Expr { expr } if uses(expr))
         }),
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } => uses_var(expr, var),
-        IrExprKind::UnwrapOr { expr, fallback } => uses_var(expr, var) || uses_var(fallback, var),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => elements.iter().any(|e| uses_var(e, var)),
-        IrExprKind::Record { fields, .. } => fields.iter().any(|(_, v)| uses_var(v, var)),
-        IrExprKind::SpreadRecord { base, fields } => {
-            uses_var(base, var) || fields.iter().any(|(_, v)| uses_var(v, var))
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            iter_chain_uses_var(source, steps, collector, var)
         }
-        IrExprKind::IterChain { source, steps, collector, .. } => iter_chain_uses_var(source, steps, collector, var),
-        IrExprKind::RustMacro { args, .. } => args.iter().any(|a| uses_var(a, var)),
-        IrExprKind::RuntimeCall { args, .. } => args.iter().any(|a| uses_var(a, var)),
-        IrExprKind::Range { start, end, .. } => uses_var(start, var) || uses_var(end, var),
-        IrExprKind::MapLiteral { entries } => entries.iter().any(|(k, v)| uses_var(k, var) || uses_var(v, var)),
         _ => false,
     }
 }
