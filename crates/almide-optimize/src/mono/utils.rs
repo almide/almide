@@ -87,9 +87,10 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
             let parts: Vec<String> = elems.iter().map(mangle_ty).collect();
             format!("Tup{}_{}", elems.len(), parts.join("_"))
         }
-        Ty::Fn { params, ret } => {
+        Ty::Fn { params, ret, is_effect } => {
             let ps: Vec<String> = params.iter().map(mangle_ty).collect();
-            format!("Fn{}_{}_to_{}", params.len(), ps.join("_"), mangle_ty(ret))
+            let eff = if *is_effect { "Eff" } else { "" };
+            format!("{eff}Fn{}_{}_to_{}", params.len(), ps.join("_"), mangle_ty(ret))
         }
         // A mono key's ONE invariant is that two DIFFERENT types never share it: the
         // key decides whether two call sites reuse one specialization, so a collision
@@ -223,11 +224,11 @@ mod tests {
         let b = bounds(&["F"]);
         let to_bool = module_mono_suffix(
             &b,
-            &bind(&[("F", Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) })]),
+            &bind(&[("F", Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Bool) })]),
         );
         let to_string = module_mono_suffix(
             &b,
-            &bind(&[("F", Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::String) })]),
+            &bind(&[("F", Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::String) })]),
         );
         assert_ne!(to_bool, to_string);
     }

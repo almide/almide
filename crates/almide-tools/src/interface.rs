@@ -478,7 +478,7 @@ fn resolve_ty_aggregate(ty: &Ty, records: &RecordLookup, variants: &VariantLooku
     Some(match ty {
         Ty::Tuple(elements) => TypeRef::Tuple { elements: each(elements) },
         Ty::Named(name, args) => TypeRef::Named { name: name.to_string(), args: each(args) },
-        Ty::Fn { params, ret } => TypeRef::Fn {
+        Ty::Fn { is_effect: _, params, ret } => TypeRef::Fn {
             params: each(params),
             ret: Box::new(resolve_ty(ret, records, variants)),
         },

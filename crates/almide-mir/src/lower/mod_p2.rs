@@ -405,7 +405,7 @@ pub fn rewrite_fan_map_pure(body: &mut IrExpr) {
             let IrExprKind::Lambda { params, body, lambda_id } = &args[1].kind else { return };
             let Some(new_body) = strip_ok(body) else { return };
             let new_lambda_ty = match &args[1].ty {
-                Ty::Fn { params: ps, ret } => Ty::Fn { params: ps.clone(), ret: Box::new(new_tail_ty(ret)) },
+                Ty::Fn { is_effect: _, params: ps, ret } => Ty::Fn { is_effect: false, params: ps.clone(), ret: Box::new(new_tail_ty(ret)) },
                 other => other.clone(),
             };
             let new_lambda = IrExpr {

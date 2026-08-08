@@ -16,6 +16,22 @@ impl Parser {
             self.advance();
             return Ok(TypeExpr::ConstLit { value });
         }
+        // `effect (A) -> B` / `effect fn(A) -> B` (#1055): an EFFECT-typed fn
+        // slot. The prefix wraps whichever fn-type spelling follows; a lambda
+        // checked against it gets effect-fn body ergonomics.
+        if self.check(TokenType::Effect) {
+            self.advance();
+            let inner = self.parse_type_expr_inner()?;
+            return match inner {
+                TypeExpr::Fn { params, ret, .. } => {
+                    Ok(TypeExpr::Fn { params, ret, is_effect: true })
+                }
+                other => Err(format!(
+                    "`effect` in type position must prefix a fn type — \
+                     `effect (A) -> B` or `effect fn(A) -> B` — got {other:?}"
+                )),
+            };
+        }
         if self.check(TokenType::Pipe) { return self.parse_variant_type(); }
         if self.check(TokenType::LBrace) { return self.parse_record_type(); }
         if self.check(TokenType::Fn) { return self.parse_fn_type(); }
@@ -116,7 +132,7 @@ impl Parser {
                 self.advance();
                 let ret = self.parse_type_expr()?;
                 let ret = self.wrap_fallible_ret_suffix(ret);
-                return Ok(TypeExpr::Fn { params: vec![], ret: Box::new(ret) });
+                return Ok(TypeExpr::Fn { params: vec![], ret: Box::new(ret), is_effect: false });
             }
             return Ok(TypeExpr::Simple { name: sym("Unit") });
         }
@@ -128,7 +144,7 @@ impl Parser {
                 self.advance();
                 let ret = self.parse_type_expr()?;
                 let ret = self.wrap_fallible_ret_suffix(ret);
-                return Ok(TypeExpr::Fn { params: vec![first], ret: Box::new(ret) });
+                return Ok(TypeExpr::Fn { params: vec![first], ret: Box::new(ret), is_effect: false });
             }
             // ADR-0010: a parenthesized type is an atom, so `?` may follow —
             // this is how the whole-fn and nested spellings parse:
@@ -146,7 +162,7 @@ impl Parser {
             self.advance();
             let ret = self.parse_type_expr()?;
             let ret = self.wrap_fallible_ret_suffix(ret);
-            return Ok(TypeExpr::Fn { params: elements, ret: Box::new(ret) });
+            return Ok(TypeExpr::Fn { params: elements, ret: Box::new(ret), is_effect: false });
         }
         // ADR-0010: a tuple is a parenthesized atom — `(String, Int)?`.
         Ok(self.wrap_option_suffix(TypeExpr::Tuple { elements }))
@@ -345,7 +361,7 @@ impl Parser {
         self.expect(TokenType::Arrow)?;
         let ret = self.parse_type_expr()?;
         let ret = self.wrap_fallible_ret_suffix(ret);
-        Ok(TypeExpr::Fn { params, ret: Box::new(ret) })
+        Ok(TypeExpr::Fn { params, ret: Box::new(ret), is_effect: false })
     }
     pub(crate) fn parse_type_args(&mut self) -> Result<Vec<TypeExpr>, String> {
         self.expect(TokenType::LBracket)?;

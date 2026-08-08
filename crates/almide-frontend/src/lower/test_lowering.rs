@@ -111,7 +111,7 @@ fn lower_where_call_response(ctx: &mut LowerCtx, target: &[Sym], params: &[ast::
             body.ty = sig_ret_ty.clone();
         }
     }
-    let ty = Ty::Fn { params: sig_param_tys, ret: Box::new(sig_ret_ty) };
+    let ty = Ty::Fn { is_effect: false, params: sig_param_tys, ret: Box::new(sig_ret_ty) };
     ir_val.ty = ty.clone();
     let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
     ctx.var_table.entries[var.0 as usize].ty = ty.clone();
@@ -133,13 +133,13 @@ fn resolve_target_fn_type(ctx: &LowerCtx, target: &[Sym]) -> Option<Ty> {
     }
     // Check environment functions
     if let Some(sig) = ctx.env.functions.get(&name) {
-        return Some(Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
+        return Some(Ty::Fn { is_effect: sig.is_effect, params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
     }
     // For module.func, check module functions
     if target.len() == 2 {
         let qual = sym(&format!("{}.{}", target[0], target[1]));
         if let Some(sig) = ctx.env.functions.get(&qual) {
-            return Some(Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
+            return Some(Ty::Fn { is_effect: sig.is_effect, params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
         }
     }
     None
@@ -149,7 +149,7 @@ fn resolve_target_fn_type(ctx: &LowerCtx, target: &[Sym]) -> Option<Ty> {
 fn erase_typevars(ty: &Ty) -> Ty {
     match ty {
         Ty::TypeVar(_) => Ty::Unknown,
-        Ty::Fn { params, ret } => Ty::Fn {
+        Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
             params: params.iter().map(erase_typevars).collect(),
             ret: Box::new(erase_typevars(ret)),
         },

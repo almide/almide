@@ -139,7 +139,7 @@ impl Checker {
             }
             (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() =>
                 a.iter().zip(b.iter()).all(|(x, y)| self.unify_infer(x, y)),
-            (Ty::Fn { params: ap, ret: ar }, Ty::Fn { params: bp, ret: br }) if ap.len() == bp.len() =>
+            (Ty::Fn { is_effect: _, params: ap, ret: ar }, Ty::Fn { is_effect: _, params: bp, ret: br }) if ap.len() == bp.len() =>
                 ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) && self.unify_infer(ar, br),
             _ => return None,
         })

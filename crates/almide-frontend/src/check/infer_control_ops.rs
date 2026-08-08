@@ -886,6 +886,7 @@ impl Checker {
                     Ty::Fn {
                         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                         ret: Box::new(sig.ret.clone()),
+                        is_effect: sig.is_effect,
                     }
                 }
                 else {

@@ -164,9 +164,9 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
         let value_ty = Ty::Named("Value".into(), vec![]);
         use almide_lang::types::constructor::TypeConstructorId;
         let fn_ref_ty = if is_encode {
-            Ty::Fn { params: vec![elem_ty], ret: Box::new(value_ty) }
+            Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(value_ty) }
         } else {
-            Ty::Fn {
+            Ty::Fn { is_effect: false, 
                 params: vec![value_ty],
                 ret: Box::new(Ty::Applied(
                     TypeConstructorId::Result,
@@ -210,9 +210,9 @@ fn rewrite_call_option_codec(name: Sym, type_name: String, args: Vec<IrExpr>, ty
     let value_ty = Ty::Named("Value".into(), vec![]);
     use almide_lang::types::constructor::TypeConstructorId;
     let fn_ref_ty = if is_encode {
-        Ty::Fn { params: vec![elem_ty], ret: Box::new(value_ty) }
+        Ty::Fn { is_effect: false, params: vec![elem_ty], ret: Box::new(value_ty) }
     } else {
-        Ty::Fn {
+        Ty::Fn { is_effect: false, 
             params: vec![value_ty],
             ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![elem_ty, Ty::String])),
         }

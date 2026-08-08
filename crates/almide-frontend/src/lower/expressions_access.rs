@@ -96,7 +96,7 @@ fn lower_module_member(
     // A module fn used as a first-class value (`list.map(xs, string.len)`)
     // lowers to a wrapper lambda `(x) => string.len(x)`, so user code needs no
     // manual eta expansion.
-    if let Ty::Fn { params, ret } = ty {
+    if let Ty::Fn { is_effect: _, params, ret } = ty {
         let resolved_mod_for_fn = ctx.env.import_table.resolve(&mod_name)
             .map(|s| s.to_string())
             .unwrap_or_else(|| mod_name.to_string());
@@ -174,7 +174,7 @@ fn lower_expr_compose(ctx: &mut LowerCtx, expr: &ast::Expr, _ty: Ty, span: Optio
             let ir_right = lower_expr(ctx, right);
             // Extract types: left is Fn[A] -> B, right is Fn[B] -> C
             let (param_ty, mid_ty) = match &ir_left.ty {
-                Ty::Fn { params, ret } => (
+                Ty::Fn { is_effect: _, params, ret } => (
                     params.first().cloned().unwrap_or(Ty::Unknown),
                     *ret.clone(),
                 ),
@@ -199,7 +199,7 @@ fn lower_expr_compose(ctx: &mut LowerCtx, expr: &ast::Expr, _ty: Ty, span: Optio
             }, ret_ty.clone(), span.clone());
             ctx.pop_scope();
             let lambda_id = Some(ctx.next_lambda_id());
-            let lambda_ty = Ty::Fn { params: vec![param_ty.clone()], ret: Box::new(ret_ty) };
+            let lambda_ty = Ty::Fn { is_effect: false, params: vec![param_ty.clone()], ret: Box::new(ret_ty) };
             ctx.mk(IrExprKind::Lambda {
                 params: vec![(param_var, param_ty)],
                 body: Box::new(g_call),
@@ -594,7 +594,7 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                     } else { ty }
                 } else { ty };
                 ctx.mk(IrExprKind::Var { id: var_id }, resolved, span)
-            } else if let Ty::Fn { params: param_tys, ret } = &ty {
+            } else if let Ty::Fn { is_effect: _, params: param_tys, ret } = &ty {
                 // Function/top-let used as a value → eta-expand to lambda
                 // so borrow insertion handles param types correctly (e.g. String → &str).
                 // Use the type (not env.functions) to detect: module-scoped functions
