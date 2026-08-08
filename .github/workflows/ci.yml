@@ -84,10 +84,67 @@ jobs:
   # Target tests — all run on every develop/main PR
   # ═══════════════════════════════════════════════
 
-  test-rust:
-    name: Test Rust
+  shard-coverage:
+    # THE GATE that makes sharding safe. A partition that drops a target does
+    # not fail — it goes GREEN, faster, with less tested. That failure mode is
+    # invisible by construction, so it gets its own job: assert the four shards'
+    # union is exactly the full target set, with nothing missing and nothing run
+    # twice. Cheap (no tests run, just enumeration) and it gates the same commit
+    # the shards run on.
+    name: Test shards cover every target
     needs: build
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Union of shards == full target set
+        run: |
+          set -euo pipefail
+          bash scripts/ci-test-shard.sh --list-all | sort > /tmp/all.txt
+          : > /tmp/union.txt
+          for i in 0 1 2 3; do
+            bash scripts/ci-test-shard.sh --list "$i" 4 >> /tmp/union.txt
+          done
+          sort /tmp/union.txt > /tmp/union_sorted.txt
+          dupes=$(sort /tmp/union.txt | uniq -d | wc -l | tr -d ' ')
+          if [ "$dupes" -ne 0 ]; then
+            echo "SHARD GATE FAIL: $dupes target(s) assigned to more than one shard:" >&2
+            sort /tmp/union.txt | uniq -d >&2
+            exit 1
+          fi
+          if ! diff -u /tmp/all.txt /tmp/union_sorted.txt; then
+            echo "SHARD GATE FAIL: the shards' union is not the full target set — a" >&2
+            echo "target above with '-' is enumerated but NEVER RUN (a green build" >&2
+            echo "that tests less), one with '+' is run twice." >&2
+            exit 1
+          fi
+          echo "shard coverage OK: $(wc -l < /tmp/all.txt | tr -d ' ') target(s), each in exactly one shard"
+      - name: Balance report (informational — imbalance costs time, not coverage)
+        run: |
+          for i in 0 1 2 3; do
+            printf '  shard %s: %s target(s)\n' "$i" "$(bash scripts/ci-test-shard.sh --list "$i" 4 | wc -l | tr -d ' ')"
+          done
+
+  test-rust:
+    # SHARDED (4 ways). The suite's 30 minutes are TEST EXECUTION, not
+    # compilation — 29 of them are `finished in` time — so caching cannot touch
+    # it, and neither can a bigger runner: nearly every test shells out to
+    # `almide`, and each `almide` compile takes a GLOBAL exclusive flock on the
+    # shared build dir (src/cli/run.rs::BuildDirLock), which serializes the whole
+    # suite inside one machine. Separate JOBS each get their own build dir and
+    # therefore their own lock — that is where the parallelism comes from.
+    #
+    # 4, not more: the load is extremely skewed (the top 4 targets are half the
+    # total) and `wasm_runtime_test` alone is ~270s, so past 4 shards the
+    # longest target IS the floor and extra jobs buy nothing.
+    name: Test Rust (shard ${{ matrix.shard }}/4)
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
 
@@ -163,11 +220,14 @@ jobs:
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
           ALMIDE_EXPECT_TOOLS: "1"
-        # --workspace: a bare `cargo test` at the root tests only the ROOT
-        # package — the member crates' suites (almide-interp's abstain-ledger
-        # gate, frontend/codegen/tools unit tests) silently never ran in CI.
-        # Trust Spine covers almide-mir; this covers everything.
-        run: cargo test --workspace
+        # The script enumerates every workspace test target from cargo's own
+        # JSON (root package AND member crates — a bare `cargo test` at the root
+        # tests only the root, and the members' suites silently never ran in CI
+        # before `--workspace`), packs them heaviest-first into balanced shards,
+        # and runs this shard's share. `shard-coverage` below proves the four
+        # shards' union is the whole set, so a partition bug reads as a RED
+        # build rather than a fast green one.
+        run: bash scripts/ci-test-shard.sh --run ${{ matrix.shard }} 4
 
       - name: Generated runtime registry matches committed sources (regenerate and diff)
         # crates/almide-codegen/src/generated/{rust_runtime,runtime_fn_modes}.rs

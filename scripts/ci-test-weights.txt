@@ -1,0 +1,18 @@
+# Measured test-target durations (seconds) — used ONLY to balance the CI shards
+# (scripts/ci-test-shard.sh). A target missing here still RUNS; it just gets the
+# default weight, so a stale file costs balance, never coverage. Coverage is
+# gated separately (the shard job asserts the union is the whole target set).
+#
+# Measured 2026-08-08 on an M-series laptop. CI runners are ~1.5x slower but the
+# packing only needs the RATIOS. Refresh when the shard job's balance report
+# shows one shard consistently trailing.
+wasm_runtime_test            268
+native_v1_differential_test  134
+examples_parity_test          68
+fmt_test                      47
+wasm_gc_test                  32
+codegen_snapshot_test         32
+diagnostic_test               31
+crossmod_matrix_test          28
+semantic_laws_test            26
+wasm_dispatch_coverage_test   25
