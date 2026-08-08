@@ -628,6 +628,13 @@ fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
 /// manages its own memory). In `test_mode`, promote `test "…"` fns to a synthesized
 /// runner `main`. Returns the FINAL linked `IrProgram` the rest of the pipeline
 /// (globals, layouts, MIR lowering) continues from.
+/// One conditional drop/repr routine: its source text is spliced into the
+/// re-lower only when the program actually reaches it. An unneeded routine
+/// contributes the empty string, so the concatenation below stays a flat list.
+fn gated(needed: bool, src: &'static str) -> &'static str {
+    if needed { src } else { "" }
+}
+
 fn build_ir_with_drops(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
@@ -674,49 +681,28 @@ fn build_ir_with_drops(
     let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
     // First-class function values need the UNIFORM closure-block release
     // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
-    let closure_drop =
-        if crate::lower::program_uses_closures(&ir) { crate::lower::CLOSURE_DROP_SRC } else { "" };
+    let closure_drop = gated(crate::lower::program_uses_closures(&ir), crate::lower::CLOSURE_DROP_SRC);
     // A `List[<Fn>]` LITERAL (`[(x)=>x+1, (x)=>x*2]`) routes its scope-end drop to the
     // generated `$__drop_list_closure` (per-element `$__drop_closure` — required, not a
     // blind rc_dec, since a captured heap slot would otherwise leak). Needs
     // `CLOSURE_DROP_SRC` in scope, which `program_uses_closures` already guarantees
     // whenever a closure LIST exists (the list's elements are Lambda exprs).
-    let list_closure_drop = if crate::lower::program_uses_closure_list(&ir) {
-        crate::lower::LIST_CLOSURE_DROP_SRC
-    } else {
-        ""
-    };
+    let list_closure_drop = gated(crate::lower::program_uses_closure_list(&ir), crate::lower::LIST_CLOSURE_DROP_SRC);
     // A `Map[String, <Fn>]` (the closure-valued map — mclo class) routes its scope-end
     // drop to `$__drop_map_mclo` (per-value `$__drop_closure` over the split layout).
     // Needs `CLOSURE_DROP_SRC` in scope, which `program_uses_closures` guarantees
     // whenever a closure-valued map exists (its values are Fn-typed exprs).
-    let map_mclo_drop = if crate::lower::program_uses_map_closure(&ir) {
-        crate::lower::MAP_MCLO_DROP_SRC
-    } else {
-        ""
-    };
+    let map_mclo_drop = gated(crate::lower::program_uses_map_closure(&ir), crate::lower::MAP_MCLO_DROP_SRC);
     // A `List[(String, <Fn>)]` pairs literal (the closure-valued map's from_list
     // input) routes its scope-end drop to `$__drop_list_str_clo` (per-tuple: key
     // rc_dec + `$__drop_closure` on the value slot).
-    let list_str_clo_drop = if crate::lower::program_uses_str_clo_pairs(&ir) {
-        crate::lower::LIST_STR_CLO_DROP_SRC
-    } else {
-        ""
-    };
+    let list_str_clo_drop = gated(crate::lower::program_uses_str_clo_pairs(&ir), crate::lower::LIST_STR_CLO_DROP_SRC);
     // An `Option[(String, String)]` (the if-merged `some((s1, s2))` ctor) routes
     // its scope-end drop to `$__drop_opt_str_str`.
-    let opt_str_str_drop = if crate::lower::program_uses_opt_str_str(&ir) {
-        crate::lower::OPT_STR_STR_DROP_SRC
-    } else {
-        ""
-    };
+    let opt_str_str_drop = gated(crate::lower::program_uses_opt_str_str(&ir), crate::lower::OPT_STR_STR_DROP_SRC);
     // A `List[Option/Result]` literal with owned-handle-slot elements routes its drop to the
     // generated `$__drop_list_lenlist` (the shared `lenlist_elem_class` decides both sides).
-    let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(&ir) {
-        crate::lower::LENLIST_DROP_SRC
-    } else {
-        ""
-    };
+    let lenlist_drop = gated(crate::lower::program_uses_lenlist_elem_lists(&ir), crate::lower::LENLIST_DROP_SRC);
     // `__drop_list_str` (a `List[String]` record OR variant ctor field, OR a closure's
     // nested-heap capture — `CLOSURE_DROP_SRC`'s `__drop_closure_loop` unconditionally
     // references it once ANY closure exists, since a capture's concrete type isn't known
@@ -726,32 +712,17 @@ fn build_ir_with_drops(
     // the record and variant drop generators, so it is emitted ONCE here rather than by
     // either generator inline (two independent copies would be a duplicate-fn compile
     // error).
-    let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&all_type_decls)
-        || crate::lower::program_uses_anon_list_str_record(&ir, &all_type_decls)
-        || crate::lower::program_uses_closures(&ir)
-    {
-        crate::lower::LIST_STR_DROP_SRC
-    } else {
-        ""
-    };
+    let list_str_drop = gated(crate::lower::program_uses_list_str_drop_field(&all_type_decls) || crate::lower::program_uses_anon_list_str_record(&ir, &all_type_decls) || crate::lower::program_uses_closures(&ir), crate::lower::LIST_STR_DROP_SRC);
     // `Result[List[Int], List[String]]` (result.collect) routes its drop to the
     // TAG-AWARE `$__drop_res_ilsl` (Err → recursive string free; Ok → flat).
-    let res_ilsl_drop = if crate::lower::program_uses_res_intlist_strlist(&ir) {
-        crate::lower::RES_ILSL_DROP_SRC
-    } else {
-        ""
-    };
+    let res_ilsl_drop = gated(crate::lower::program_uses_res_intlist_strlist(&ir), crate::lower::RES_ILSL_DROP_SRC);
     // An `Option[(String, <scalar>)]` (map.find's result, or a plain `some((s, n))` ctor)
     // routes its drop to the TAG-AWARE `$__drop_opt_str_int` (Some → recursive String-slot
     // free; None → nothing) — a blind flat `rc_dec` of the Option's payload slot would only
     // free the TUPLE's own refcount, leaking its String. Type-driven gate (#840): the old
     // `map.find` name-heuristic missed the literal-ctor producer and left the routed call
     // dangling in the WAT.
-    let opt_str_int_drop = if crate::lower::program_uses_opt_str_scalar(&ir) {
-        crate::lower::OPT_STR_INT_DROP_SRC
-    } else {
-        ""
-    };
+    let opt_str_int_drop = gated(crate::lower::program_uses_opt_str_scalar(&ir), crate::lower::OPT_STR_INT_DROP_SRC);
     let drops = format!(
         "{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
