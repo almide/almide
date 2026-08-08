@@ -497,16 +497,16 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, v: &mut Verifier
     }
 
     // And/Or require Bool
-    if matches!(op, BinOp::And | BinOp::Or) {
-        if !ty_matches(lt, &Ty::Bool) || !ty_matches(rt, &Ty::Bool) {
-            v.err(
-                format!(
-                    "{:?} expects Bool operands, got {} and {}",
-                    op, lt.display(), rt.display()
-                ),
-                span,
-            );
-        }
+    if matches!(op, BinOp::And | BinOp::Or)
+        && (!ty_matches(lt, &Ty::Bool) || !ty_matches(rt, &Ty::Bool))
+    {
+        v.err(
+            format!(
+                "{:?} expects Bool operands, got {} and {}",
+                op, lt.display(), rt.display()
+            ),
+            span,
+        );
     }
 }
 
