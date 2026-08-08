@@ -25,47 +25,39 @@
 ### ユーザーへの影響
 
 - パフォーマンス: 不要な clone が挿入される可能性（正確性優先の設計）
-- 最適化: borrow inference (`pass_borrow_inference*.rs`) と alias COW
-  (`pass_alias_cow.rs`) が clone を削減する（既存コードの動作は変わらない）
+- 最適化: borrow inference (`pass_borrow_inference*.rs`) が clone を削減する
+  （既存コードの動作は変わらない）。v1 spine 側の別名解析は
+  `crates/almide-mir/src/alias_safety.rs`
 
 ---
 
-## 2. Auto-`?` 挿入 (Rust target)
+## 2. エラー伝播 — **隠さない**（auto-`?` は廃止済み）
 
-### 何が起きるか
-
-`effect fn` 内で `Result[T, E]` を返す関数を呼ぶと、生成 Rust コードに自動で `?` が付与される。
+かつてここには auto-`?` 挿入（`effect fn` 内の可謬呼び出しに `?` が暗黙に付く）が
+記載されていた。**ADR-0008 で廃止済み**。伝搬は綴り一本 — 後置 `!` だけが `?` に落ちる。
 
 ```almide
-effect fn load() -> Result[String, String] = {
-  let text = fs.read_text("file.txt")  // auto-? ここで挿入
-  ok(text)
+effect fn load() -> String = {
+  let text = fs.read_text("file.txt")   // E041 — Result 値のまま、伝搬しない
+  let text = fs.read_text("file.txt")!  // これが `?` に落ちる
+  text
 }
 ```
 
-生成 Rust:
-```rust
-fn load() -> Result<String, String> {
-    let text = almide_rt_fs_read_text("file.txt")?;  // ? が自動挿入
-    Ok(text)
-}
-```
+`!` を書かない可謬呼び出しは Result **値**であって制御フローではない:
 
-### 条件
-
-- `auto_try == true` — `effect fn` 内かつ test block でない場合
-- 呼び出し先の関数が `is_effect == true` または `Result` を返す
-
-### 条件外
-
-- `test` block 内 — `auto_try = false` で `.unwrap()` に変換
-- `fan { }` 内 — spawn closure は `?` なし、`join().unwrap()?` で外側に伝播
-- `pure fn` 内 — そもそも effect fn を呼べない (E006)
+- 型注釈のない束縛 → **E041**（`let x = f()`）
+- 文の位置で捨てる → **E042**（must-use。`f()!` か `let _ = f()`）
+- `list.try_*` の綴り → **E043**（コールバックの `!` が戦略）
 
 ### ファイル
 
-- `crates/almide-codegen/src/pass_result_propagation.rs` — `Try { expr }` 挿入パス
-- 詳細仕様: [specs/effect-fn-call-semantics.md](./specs/effect-fn-call-semantics.md)
+- `crates/almide-frontend/src/lower/auto_try.rs` — 名前は履歴的。現在は
+  `!` マーカー駆動の `Try` 挿入で、暗黙挿入は行わない
+- `crates/almide-codegen/src/pass_result_propagation.rs` — 署名 lift と
+  呼び出し位置の `Try` 反映
+- 詳細仕様: [specs/effect-fn-call-semantics.md](./specs/effect-fn-call-semantics.md)、
+  [ADR-0008](./adr/0008-explicit-propagation-only.md)
 
 ---
 

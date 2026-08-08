@@ -31,7 +31,6 @@ Use `almide explain <code>` to read these from the CLI.
 | [E036](E036.md) | (warning) map_err lambda discards the error value |
 | [E037](E037.md) | Equality between incompatible types |
 | [E038](E038.md) | `??` separated from its fallback |
-| [E039](E039.md) | (warning) result.collect deprecated — use partition |
 | [E041](E041.md) | Implicit propagation removed — the value stays a Result; write `!` |
 | [E042](E042.md) | Statement-position Result discarded (must-use) — `expr!` or `let _ = expr` |
 | [E043](E043.md) | `list.try_*` removed, and `list.__fallible_*` is not a spelling — the core HOF is fallibility-polymorphic |
