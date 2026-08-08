@@ -514,6 +514,17 @@ jobs:
   # and to wasm32-wasip1 and asserts byte-identical output.
   # ═══════════════════════════════════════════════
 
+  # SPLIT FROM ONE JOB (#1138). The two determinism scripts share nothing but a
+  # harness build and never read each other's output, yet they ran back-to-back
+  # in one job: 316s + 476s = 792s, which made this the critical path of CI once
+  # the test job was sharded (#1136, #1137). As two jobs they overlap and the
+  # pair costs the slower one.
+  #
+  # The harness build is NOT the duplication worth chasing here — measured at
+  # 52s native against ~476s of fixture loop, so ~7% of the job. The loop over
+  # spec/wasm_cross is the weight, and partitioning it is the next step in #1138
+  # (which needs a coverage gate reconciling both the fixture set and the
+  # `walled` tally before it can land).
   wasm-host-determinism:
     name: WASM host-arch determinism
     if: github.server_url == 'https://github.com'
@@ -568,10 +579,73 @@ jobs:
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
-
       - name: Host-arch codegen determinism (wasm32-wasip1 vs native, byte-identical)
         run: scripts/check-host-determinism.sh
 
+  wasm-browser-determinism:
+    # BRANCH PROTECTION: this job's name is a NEW required check on develop.
+    # Adding or renaming a job silently changes the required set — the shard
+    # rename in #1136 left a PR blocked forever on a `Test Rust` check that
+    # could no longer report. Update
+    # repos/almide/almide/branches/develop/protection/required_status_checks
+    # in the same change.
+    name: WASM browser-ABI determinism
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1, wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/wasmgen-harness/target
+            tools/wasmgen-harness-uu/target
+          # Keyed on the LIVE wasm emitter (almide-mir's v1 renderer) — the old
+          # key hashed crates/almide-codegen/src/emit_wasm/**, deleted with the
+          # v0 retirement, so that component silently hashed nothing (#992).
+          # DISTINCT from the host job's key: both jobs cache the same paths, and
+          # two jobs saving one key makes the second save fail as a duplicate. The
+          # browser leg is also the only one that populates wasmgen-harness-uu, so a
+          # shared entry would be written by whichever job finished first.
+          key: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
+          restore-keys: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          # Pinned + cached + retried. On a cache hit the tarball is already here,
+          # so the per-IP-rate-limited release download runs at most once per key.
+          # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
+          # "not a tar archive". Bump VERSION and the cache key together.
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
       - name: Browser-ABI determinism (wasm32-unknown-unknown via node, no panic + byte-identical)
         run: scripts/check-browser-determinism.sh
 
