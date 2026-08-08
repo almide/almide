@@ -415,67 +415,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // outer `&` wrap on already-borrowed bindings.
     let (ref_params, ref_mut_params) = collect_ref_params(func);
 
-    // Error type that the enclosing fn's `?`/auto-? propagates into. A fn
-    // declared `Result[_, E]` propagates into `E`; an effect fn declared with
-    // a non-Result type is auto-wrapped to `Result<_, String>`, so it
-    // propagates into `String`. A plain fn with no Result return propagates
-    // into nothing (None). The Unwrap renderer uses this to skip the Debug
-    // `map_err` coercion when the source error type already matches.
-    let fn_err_ty = if let Some((_, err_ty)) = func.ret_ty.inner2() {
-        Some(err_ty.clone())
-    } else if func.is_effect && !func.is_test {
-        Some(almide_lang::types::Ty::String)
-    } else {
-        None
-    };
+    let fn_ctx = fn_render_context(ctx, func, ref_params, ref_mut_params);
 
-    // Set effect fn context for auto-? insertion
-    let fn_ctx = RenderContext {
-        templates: ctx.templates,
-        var_table: ctx.var_table,
-        indent: ctx.indent,
-        target: ctx.target,
-        auto_unwrap: func.is_effect && !func.is_test,
-        is_test: func.is_test,
-        ann: ctx.ann.clone(),
-        type_aliases: ctx.type_aliases.clone(),
-        generic_types: ctx.generic_types.clone(),
-        minimal_generic_bounds: ctx.minimal_generic_bounds,
-        repr_c: ctx.repr_c,
-        ref_params,
-        ref_mut_params,
-        repr_named_types: ctx.repr_named_types.clone(),
-        fn_err_ty,
-    };
-
-    // Dispatch-only fns (body is Hole): `@inline_rust` / `@intrinsic`
-    // templates are inlined at call sites. No Rust fn emitted.
-    // Package fns with `@inline_rust` + real fallback body: emit the body
-    // so same-module calls (tests, internal) have a callable function.
-    let has_codegen_attr = func.attrs.iter().any(|a|
-        matches!(a.name.as_str(), "inline_rust" | "intrinsic"));
-    let body_is_dispatch_only = matches!(func.body.kind, IrExprKind::Hole | IrExprKind::Todo { .. })
-        || matches!(&func.body.kind, IrExprKind::ResultOk { expr } if matches!(expr.kind, IrExprKind::Hole | IrExprKind::Todo { .. }));
-    if matches!(ctx.target, Target::Rust) && has_codegen_attr && body_is_dispatch_only {
-        return String::new();
-    }
-
-    // Extern fn dispatch:
-    //   @extern(rust, "mod", "fn") → native module call (render_native_call)
-    //   @extern(wasm, "env", "fn") → WASM host import (future)
-    //   @extern(rs, "mod", "fn")   → template-based rendering (legacy)
-    //   @extern(c, "lib", "fn")    → C FFI with extern "C" block
-    if !func.extern_attrs.is_empty() {
-        if let Some(rendered) = try_render_extern_fn(ctx, func) {
-            return rendered;
-        }
-    }
-
-    // Export fn: render body normally, then wrap with #[no_mangle] pub extern "C"
-    if !func.export_attrs.is_empty() {
-        if let Some(rendered) = try_render_export_fn(ctx, func) {
-            return rendered;
-        }
+    if let Some(rendered) = render_fn_by_attrs(ctx, func) {
+        return rendered;
     }
 
     let params_str = render_fn_params_str(&fn_ctx, func);
@@ -485,21 +428,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // Build generics string for functions
     let fn_generics = render_fn_generics_str(ctx, &fn_ctx, func);
 
-    // `effect fn main` is renamed to `__almide_main` and given a thin `fn main`
-    // wrapper (below) that reports an unhandled `Err` via Display (`Error: <msg>`)
-    // and exits 1 — instead of Rust's default `Termination`, which prints the
-    // Debug form (`Error: "<msg>"`, with quotes). This keeps the error format an
-    // intentional Almide decision and lets the WASM target match it byte-for-byte.
-    let is_rust_effect_main = matches!(ctx.target, Target::Rust)
-        && func.name.as_str() == "main" && func.is_effect && !func.is_test;
-    // A plain (non-effect) `fn main` also needs the wrapper when there are
-    // abortable lazy top-lets to force at startup (wasm-eager parity).
-    let is_rust_plain_main_with_forces = matches!(ctx.target, Target::Rust)
-        && func.name.as_str() == "main" && !func.is_effect && !func.is_test
-        && ctx.ann.global_init_order.iter().any(|v| matches!(
-            ctx.ann.globals.get(v).map(|i| i.storage),
-            Some(almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true })
-        ));
+    let (is_rust_effect_main, is_rust_plain_main_with_forces) = main_wrapper_kinds(ctx, func);
 
     let safe_name = render_fn_safe_name(ctx, func, &fn_generics, is_rust_effect_main, is_rust_plain_main_with_forces);
 
@@ -515,16 +444,119 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
 
     let fn_code = wrap_main_fn_code(fn_code, ctx, is_rust_effect_main, is_rust_plain_main_with_forces);
 
-    // Prepend doc comment if present
-    if let Some(ref doc) = func.doc {
-        let doc_lines: String = doc.lines()
-            .map(|line| if line.is_empty() { "///".to_string() } else { format!("/// {}", line) })
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!("{}\n{}", doc_lines, fn_code)
-    } else {
-        fn_code
+    prepend_doc_comment(func.doc.as_deref(), fn_code)
+}
+
+/// The per-function [`RenderContext`]: the parent's, plus this fn's auto-`?`
+/// mode, its reference-param sets and the error type its `?` propagates into.
+///
+/// A fn declared `Result[_, E]` propagates into `E`; an effect fn declared with
+/// a non-Result type is auto-wrapped to `Result<_, String>`, so it propagates
+/// into `String`. A plain fn with no Result return propagates into nothing. The
+/// Unwrap renderer uses this to skip the Debug `map_err` coercion when the
+/// source error type already matches.
+fn fn_render_context<'a>(
+    ctx: &RenderContext<'a>,
+    func: &IrFunction,
+    ref_params: std::collections::HashSet<VarId>,
+    ref_mut_params: std::collections::HashSet<VarId>,
+) -> RenderContext<'a> {
+    let fn_err_ty = match func.ret_ty.inner2() {
+        Some((_, err_ty)) => Some(err_ty.clone()),
+        None if func.is_effect && !func.is_test => Some(almide_lang::types::Ty::String),
+        None => None,
+    };
+    RenderContext {
+        templates: ctx.templates,
+        var_table: ctx.var_table,
+        indent: ctx.indent,
+        target: ctx.target,
+        auto_unwrap: func.is_effect && !func.is_test,
+        is_test: func.is_test,
+        ann: ctx.ann.clone(),
+        type_aliases: ctx.type_aliases.clone(),
+        generic_types: ctx.generic_types.clone(),
+        minimal_generic_bounds: ctx.minimal_generic_bounds,
+        repr_c: ctx.repr_c,
+        ref_params,
+        ref_mut_params,
+        repr_named_types: ctx.repr_named_types.clone(),
+        fn_err_ty,
     }
+}
+
+/// The renderings an ATTRIBUTE decides outright, before any body is walked:
+///
+/// * Dispatch-only fns (body is Hole): `@inline_rust` / `@intrinsic` templates
+///   are inlined at call sites, so no Rust fn is emitted. A package fn with
+///   `@inline_rust` AND a real fallback body still renders normally, so
+///   same-module calls (tests, internal) have a callable function.
+/// * `@extern(rust, "mod", "fn")` → native module call (`render_native_call`);
+///   `@extern(wasm, "env", "fn")` → WASM host import (future);
+///   `@extern(rs, …)` → template-based rendering (legacy);
+///   `@extern(c, "lib", "fn")` → C FFI with an `extern "C"` block.
+/// * `@export` → render the body normally, then wrap with
+///   `#[no_mangle] pub extern "C"`.
+///
+/// `None` leaves the fn to the ordinary rendering path.
+fn render_fn_by_attrs(ctx: &RenderContext, func: &IrFunction) -> Option<String> {
+    let has_codegen_attr =
+        func.attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "intrinsic"));
+    let body_is_dispatch_only = matches!(func.body.kind, IrExprKind::Hole | IrExprKind::Todo { .. })
+        || matches!(&func.body.kind, IrExprKind::ResultOk { expr }
+            if matches!(expr.kind, IrExprKind::Hole | IrExprKind::Todo { .. }));
+    if matches!(ctx.target, Target::Rust) && has_codegen_attr && body_is_dispatch_only {
+        return Some(String::new());
+    }
+    if !func.extern_attrs.is_empty() {
+        if let Some(rendered) = try_render_extern_fn(ctx, func) {
+            return Some(rendered);
+        }
+    }
+    if !func.export_attrs.is_empty() {
+        return try_render_export_fn(ctx, func);
+    }
+    None
+}
+
+/// `(is_rust_effect_main, is_rust_plain_main_with_forces)` — whether this fn
+/// needs one of the two `fn main` wrappers.
+///
+/// `effect fn main` is renamed to `__almide_main` and given a thin `fn main`
+/// wrapper that reports an unhandled `Err` via Display (`Error: <msg>`) and
+/// exits 1 — instead of Rust's default `Termination`, which prints the Debug
+/// form (`Error: "<msg>"`, with quotes). This keeps the error format an
+/// intentional Almide decision and lets the WASM target match it byte-for-byte.
+///
+/// A plain (non-effect) `fn main` also needs the wrapper when there are
+/// abortable lazy top-lets to force at startup (wasm-eager parity).
+fn main_wrapper_kinds(ctx: &RenderContext, func: &IrFunction) -> (bool, bool) {
+    let is_rust_main = matches!(ctx.target, Target::Rust)
+        && func.name.as_str() == "main"
+        && !func.is_test;
+    let plain_main_forces = || {
+        ctx.ann.global_init_order.iter().any(|v| {
+            matches!(
+                ctx.ann.globals.get(v).map(|i| i.storage),
+                Some(almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true })
+            )
+        })
+    };
+    (
+        is_rust_main && func.is_effect,
+        is_rust_main && !func.is_effect && plain_main_forces(),
+    )
+}
+
+/// Prefix `code` with `doc` rendered as `///` lines, if there is one.
+fn prepend_doc_comment(doc: Option<&str>, code: String) -> String {
+    let Some(doc) = doc else { return code };
+    let doc_lines: String = doc
+        .lines()
+        .map(|line| if line.is_empty() { "///".to_string() } else { format!("/// {}", line) })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{}\n{}", doc_lines, code)
 }
 
 /// Whether an expression contains an integer `/` or `%` anywhere — the ops that

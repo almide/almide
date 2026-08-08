@@ -126,7 +126,37 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
             outside(base) && fields.iter().all(|(_, v)| outside(v))
         }
 
-        // ── Shapes with their own traversal ──
+        // Shapes with their own traversal — see [`refs_are_outside_loop_nested`].
+        IrExprKind::Call { .. } | IrExprKind::Block { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::Match { .. }
+        | IrExprKind::Lambda { .. } => refs_are_outside_loop_nested(expr, loop_defined),
+
+        // Leaf nodes and nodes whose inner refs aren't tracked here: treated as
+        // "all refs outside loop" (true). Listed explicitly so a new IrExprKind
+        // is a compile error, not a silent always-true default.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::FnRef { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
+        | IrExprKind::Break | IrExprKind::Continue | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::EmptyMap
+        | IrExprKind::OptionNone
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. } | IrExprKind::Hole
+        | IrExprKind::Todo { .. } => true,
+    }
+}
+
+/// The [`refs_are_outside_loop`] shapes that do not fall out of a plain child
+/// walk: a call's target and args, a block's statements and tail, a map/interp
+/// literal's parts, a match's subject/guards/bodies, and a lambda (whose params
+/// are LOCAL, so they are NOT loop-defined for its body — remove them before
+/// checking the body's free variables).
+fn refs_are_outside_loop_nested(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
+    let outside = |e: &IrExpr| refs_are_outside_loop(e, loop_defined);
+    match &expr.kind {
         IrExprKind::Call { target, args, .. } => {
             let target_ok = match target {
                 CallTarget::Method { object, .. } => outside(object),
@@ -161,22 +191,7 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
             }
             refs_are_outside_loop(body, &extended)
         }
-
-        // Leaf nodes and nodes whose inner refs aren't tracked here: treated as
-        // "all refs outside loop" (true). Listed explicitly so a new IrExprKind
-        // is a compile error, not a silent always-true default.
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-        | IrExprKind::Unit | IrExprKind::FnRef { .. } | IrExprKind::Fan { .. }
-        | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
-        | IrExprKind::Break | IrExprKind::Continue | IrExprKind::TailCall { .. }
-        | IrExprKind::RuntimeCall { .. } | IrExprKind::EmptyMap
-        | IrExprKind::OptionNone
-        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
-        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
-        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-        | IrExprKind::IterChain { .. } | IrExprKind::Hole
-        | IrExprKind::Todo { .. } => true,
+        _ => unreachable!("dispatched by refs_are_outside_loop's own arm list"),
     }
 }
 
