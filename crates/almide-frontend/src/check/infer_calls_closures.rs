@@ -839,85 +839,13 @@ impl Checker {
         if self.env.auto_unwrap || self.env.in_test_block {
             return;
         }
-        // #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates
-        // `!` exactly like an effect fn body — Result propagation is pure
-        // control flow (the derived Codec decoders have always lowered this
-        // way; every peer with hand-written codecs has the same operator: Rust
-        // `?`, Zig `try`). The closure-boundary rule is unchanged (#489):
-        // inside a lambda `!` cannot propagate out, whatever the fn returns.
-        if self.env.lambda_depth == 0 {
-            if let Some(ret) = self.env.current_ret.clone() {
-                let ret = resolve_ty(&ret, &self.uf);
-                let op = resolve_ty(operand, &self.uf);
-                match (&ret, &op) {
-                    // A Result operand's error type must BE the fn's error type
-                    // (the lowered `?` converts nothing) — unify, so a mismatch
-                    // is a check-time error, never generated-Rust E0308.
-                    (
-                        Ty::Applied(TypeConstructorId::Result, ra),
-                        Ty::Applied(TypeConstructorId::Result, oa),
-                    ) if ra.len() == 2 && oa.len() == 2 => {
-                        self.unify_infer(&ra[1], &oa[1]);
-                        return;
-                    }
-                    // Option operand in a Result fn: none becomes the same
-                    // manufactured error the effect-fn lowering already emits.
-                    (
-                        Ty::Applied(TypeConstructorId::Result, _),
-                        Ty::Applied(TypeConstructorId::Option, _),
-                    ) => return,
-                    // Option operand in an Option fn: none propagates as none.
-                    (
-                        Ty::Applied(TypeConstructorId::Option, _),
-                        Ty::Applied(TypeConstructorId::Option, _),
-                    ) => return,
-                    // Error-recovery parity with the unwrap typing rule.
-                    (
-                        Ty::Applied(TypeConstructorId::Result, _)
-                        | Ty::Applied(TypeConstructorId::Option, _),
-                        Ty::Unknown | Ty::TypeVar(_),
-                    ) => return,
-                    _ => {}
-                }
-            }
-        }
-        // ADR-0006 D1 (#1108 Phase 2b): inside a LAMBDA, `!` propagates into
-        // the lambda's OWN provisional channel (`Result[fresh, String]`) —
-        // never across the closure boundary (#489 unchanged). Accepting here
-        // marks the lambda fallible (usage-driven, L2); the lambda then
-        // infers as `(A) -> Result[T, String]`.
-        if self.env.lambda_depth > 0 {
-            if let Some(chan) = self.env.lambda_ret.clone() {
-                let op = resolve_ty(operand, &self.uf);
-                match (&chan, &op) {
-                    (
-                        Ty::Applied(TypeConstructorId::Result, ra),
-                        Ty::Applied(TypeConstructorId::Result, oa),
-                    ) if ra.len() == 2 && oa.len() == 2 => {
-                        // E is String by the channel's construction (ADR-0002
-                        // D2, L3): a custom-E operand fails this unification.
-                        self.unify_infer(&ra[1], &oa[1]);
-                        self.env.lambda_prop_used = true;
-                        return;
-                    }
-                    // Option operand: none maps to err("none") (L4).
-                    (
-                        Ty::Applied(TypeConstructorId::Result, _),
-                        Ty::Applied(TypeConstructorId::Option, _),
-                    ) => {
-                        self.env.lambda_prop_used = true;
-                        return;
-                    }
-                    (
-                        Ty::Applied(TypeConstructorId::Result, _),
-                        Ty::Unknown | Ty::TypeVar(_),
-                    ) => {
-                        self.env.lambda_prop_used = true;
-                        return;
-                    }
-                    _ => {}
-                }
-            }
+        let accepted = if self.env.lambda_depth == 0 {
+            self.accept_declared_channel_prop(operand)
+        } else {
+            self.accept_lambda_channel_prop(operand)
+        };
+        if accepted {
+            return;
         }
         // Off-type operands (and a missing channel) still reject.
         let hint = if self.env.lambda_depth > 0 {
@@ -930,6 +858,78 @@ impl Checker {
             hint,
             "operator !",
         ).with_code("E022"));
+    }
+
+    /// #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates
+    /// `!` exactly like an effect fn body — Result propagation is pure control
+    /// flow (the derived Codec decoders have always lowered this way; every
+    /// peer with hand-written codecs has the same operator: Rust `?`, Zig
+    /// `try`). Returns whether the declared return type accepts this operand.
+    fn accept_declared_channel_prop(&mut self, operand: &Ty) -> bool {
+        let Some(ret) = self.env.current_ret.clone() else { return false };
+        let ret = resolve_ty(&ret, &self.uf);
+        let op = resolve_ty(operand, &self.uf);
+        match (&ret, &op) {
+            // A Result operand's error type must BE the fn's error type (the
+            // lowered `?` converts nothing) — unify, so a mismatch is a
+            // check-time error, never generated-Rust E0308.
+            (
+                Ty::Applied(TypeConstructorId::Result, ra),
+                Ty::Applied(TypeConstructorId::Result, oa),
+            ) if ra.len() == 2 && oa.len() == 2 => {
+                self.unify_infer(&ra[1], &oa[1]);
+                true
+            }
+            // Option operand in a Result fn: none becomes the same manufactured
+            // error the effect-fn lowering already emits. Option operand in an
+            // Option fn: none propagates as none.
+            (
+                Ty::Applied(TypeConstructorId::Result, _),
+                Ty::Applied(TypeConstructorId::Option, _),
+            )
+            | (
+                Ty::Applied(TypeConstructorId::Option, _),
+                Ty::Applied(TypeConstructorId::Option, _),
+            ) => true,
+            // Error-recovery parity with the unwrap typing rule.
+            (
+                Ty::Applied(TypeConstructorId::Result, _)
+                | Ty::Applied(TypeConstructorId::Option, _),
+                Ty::Unknown | Ty::TypeVar(_),
+            ) => true,
+            _ => false,
+        }
+    }
+
+    /// ADR-0006 D1 (#1108 Phase 2b): inside a LAMBDA, `!` propagates into the
+    /// lambda's OWN provisional channel (`Result[fresh, String]`) — never
+    /// across the closure boundary (#489 unchanged). Accepting here marks the
+    /// lambda fallible (usage-driven, L2); the lambda then infers as
+    /// `(A) -> Result[T, String]`.
+    fn accept_lambda_channel_prop(&mut self, operand: &Ty) -> bool {
+        let Some(chan) = self.env.lambda_ret.clone() else { return false };
+        let op = resolve_ty(operand, &self.uf);
+        let accepted = match (&chan, &op) {
+            (
+                Ty::Applied(TypeConstructorId::Result, ra),
+                Ty::Applied(TypeConstructorId::Result, oa),
+            ) if ra.len() == 2 && oa.len() == 2 => {
+                // E is String by the channel's construction (ADR-0002 D2, L3):
+                // a custom-E operand fails this unification.
+                self.unify_infer(&ra[1], &oa[1]);
+                true
+            }
+            // Option operand: none maps to err("none") (L4).
+            (
+                Ty::Applied(TypeConstructorId::Result, _),
+                Ty::Applied(TypeConstructorId::Option, _) | Ty::Unknown | Ty::TypeVar(_),
+            ) => true,
+            _ => false,
+        };
+        if accepted {
+            self.env.lambda_prop_used = true;
+        }
+        accepted
     }
 
     fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {

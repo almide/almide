@@ -124,7 +124,16 @@ impl ErrorSurfaceLint {
                 }
             }
 
-            // ── Shapes with their own traversal order ──
+            _ => self.walk_children_nested(expr, err_binds),
+        }
+    }
+
+    /// The [`Self::walk_children`] arms whose children are not a plain list of
+    /// sub-expressions — literals with parts, keyed containers, calls, and the
+    /// nodes that carry statement bodies.
+    fn walk_children_nested(&mut self, expr: &ast::Expr, err_binds: &[Sym]) {
+        use ast::ExprKind as EK;
+        match &expr.kind {
             EK::InterpolatedString { parts } => self.walk_interpolation(parts, err_binds),
             EK::MapLiteral { entries } => {
                 for (k, v) in entries {
@@ -379,7 +388,17 @@ fn expr_uses_ident(expr: &ast::Expr, name: Sym) -> bool {
         EK::List { elements: xs } | EK::Tuple { elements: xs } | EK::Fan { exprs: xs }
         | EK::FanRace { arms: xs, .. } | EK::FanSettle { arms: xs } => xs.iter().any(uses),
 
-        // ── Shapes with their own traversal ──
+        _ => expr_uses_ident_nested(expr, name),
+    }
+}
+
+/// The [`expr_uses_ident`] arms whose children are not a plain list of
+/// sub-expressions — literals with parts, keyed containers, calls, and the
+/// nodes that carry statement bodies.
+fn expr_uses_ident_nested(expr: &ast::Expr, name: Sym) -> bool {
+    use ast::ExprKind as EK;
+    let uses = |e: &ast::Expr| expr_uses_ident(e, name);
+    match &expr.kind {
         EK::InterpolatedString { parts } => parts.iter().any(|p| match p {
             ast::StringPart::Expr { expr } => uses(expr),
             _ => false,
