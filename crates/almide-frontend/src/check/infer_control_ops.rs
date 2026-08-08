@@ -4,6 +4,63 @@
 // of `infer.rs` (via `include!`) to keep each file under the 1000-line
 // ceiling; imports come from `infer.rs` (this file is textually inlined).
 
+/// What [`Checker::infer_match_arms`] learned about a match's arms.
+///
+/// `types` are the JOIN types (an `err(..)` arm reads as `Never`, and in an
+/// effect fn a `Result[T, E]` arm reads as `T`); `real_types` are the
+/// un-substituted ones, which recover a concrete type when every arm is
+/// `Never`; `peers` is the #880 peer set — (arm type, span, body is
+/// literal-only) — which match arms join by exactly like list elements and
+/// `if` branches.
+#[derive(Default)]
+struct MatchArmTypes {
+    types: Vec<Ty>,
+    real_types: Vec<Ty>,
+    peers: Vec<(Ty, Option<ast::Span>, bool)>,
+}
+
+/// The two operands of a time-typed binop as the S3 matrix reads them: each
+/// side's canonical type (`lc`/`rc`), its still-unsolved type (`lt`/`rt`), and
+/// its clock name (`None` when that side is not a time type).
+struct TimeOperands<'a> {
+    lc: &'a Ty,
+    rc: &'a Ty,
+    lt: &'a Ty,
+    rt: &'a Ty,
+    l: Option<&'static str>,
+    r: Option<&'static str>,
+}
+
+impl TimeOperands<'_> {
+    /// The canonical type of whichever side IS a time — the result type every
+    /// error arm reports, so the caller keeps inferring against something real.
+    fn time_side(&self) -> &Ty {
+        if self.l.is_some() { self.lc } else { self.rc }
+    }
+}
+
+/// The clock name of a time type (`Compute`, `Duration`, …), or `None` for
+/// anything outside the ADR-0001 time family.
+fn time_clock_of(t: &Ty) -> Option<&'static str> {
+    let Ty::Named(n, args) = t else { return None };
+    let is_time = args.is_empty()
+        && almide_lang::time_units::TIME_MODULES
+            .iter()
+            .any(|(_, ty)| *ty == n.as_str());
+    is_time.then(|| n.as_str())
+}
+
+/// The constructor module for a clock (`Compute` → `compute`), used by the
+/// "wrap it" hints.
+fn time_module_of(clock_name: &str) -> &'static str {
+    almide_lang::time_units::TIME_MODULES
+        .iter()
+        .find(|(_, ty)| *ty == clock_name)
+        .map(|(m, _)| *m)
+        .unwrap_or("compute")
+}
+
+
 impl Checker {
     pub(super) fn infer_expr_inner_g2(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
         if let Some(ty) = self.infer_expr_g2_literal(expr) { return Some(ty); }
@@ -135,101 +192,119 @@ impl Checker {
 impl Checker {
     fn infer_expr_g2_match(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Match { subject, arms, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_match called on the wrong ExprKind") };
-                let subject_ty = self.infer_expr(subject);
-                let sc = resolve_ty(&subject_ty, &self.uf);
-                // #1123: a match over an effect call whose arms are VALUE
-                // patterns takes the implicit strip (ok/err-pattern arms keep
-                // the Result). Queue for the E041 deprecation.
-                if self.env.auto_unwrap
-                    && matches!(subject.kind, ExprKind::Call { .. })
-                    && !arms.iter().any(|a| matches!(a.pattern,
-                        ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }))
-                {
-                    self.deferred_implicit_prop_checks.push((
-                        subject_ty.clone(), subject.span, "of this match subject", true, false,
-                    ));
-                }
-                self.check_match_exhaustiveness(&sc, arms);
-                let mut arm_types = Vec::new();
-                // Real (un-substituted) arm types, used to pick the overall match
-                // result type. An `err(..)` arm produces a genuine `Result[T, E]`
-                // value — it is NOT divergent — so even when every arm is `err`,
-                // the match still has a concrete Result type (not `Never`).
-                let mut arm_real_types = Vec::new();
-                // #880 peer set: (arm type, arm span, arm body is literal-only).
-                // Match arms join exactly like list elements and `if` branches.
-                let mut arm_peers: Vec<(Ty, Option<ast::Span>, bool)> = Vec::new();
-                // If ANY arm is an explicit `ok(..)`/`err(..)` ctor, this match PRODUCES a Result (it
-                // re-wraps — base64 decode's `match bs { ok(b) => ok(string.from_bytes(b)), err(e) =>
-                // err(e) }`), so NO arm is auto-unwrapped: every arm keeps its Result type and the
-                // match types as Result, not its OK type. (Auto-unwrapping only the effect-call arms
-                // while a ctor arm stayed Result mismatched — `Result[(String,Int),String]` vs
-                // `(String,Int)` in toml parse_key_part; mistyping the whole match as the OK type
-                // walled the v1 MIR / mis-rewrapped native — base64 decode.) The pure auto-unwrap case
-                // (no ctor arm, just effect-call/value arms unifying to T) is unchanged.
-                let arms_have_result_ctor = arms.iter().any(|a|
-                    matches!(&a.body.kind, ExprKind::Ok { .. } | ExprKind::Err { .. }));
-                for arm in arms.iter_mut() {
-                    self.env.push_scope();
-                    let sub_c = resolve_ty(&subject_ty, &self.uf);
-                    self.bind_pattern(&arm.pattern, &sub_c);
-                    if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
-                    let arm_ty = self.infer_expr(&mut arm.body);
-                    arm_real_types.push(arm_ty.clone());
-                    // err() in a match arm is an early return — unify as Never
-                    // so it doesn't constrain sibling arm types.
-                    let arm_ty = if matches!(&arm.body.kind, ExprKind::Err { .. }) {
-                        Ty::Never
-                    } else if self.env.auto_unwrap && !arms_have_result_ctor {
-                        // In effect fn bodies, auto-unwrap Result[T, E] → T so match arms mixing
-                        // effect fn calls (Result) with pure expressions (T) unify correctly. Skipped
-                        // when an arm is an explicit ok/err ctor (see arms_have_result_ctor above):
-                        // then the match re-wraps a Result and ALL arms keep it.
-                        let resolved = resolve_ty(&arm_ty, &self.uf);
-                        match resolved {
-                            Ty::Applied(TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
-                            _ => arm_ty,
-                        }
-                    } else {
-                        arm_ty
-                    };
-                    arm_peers.push((arm_ty.clone(), arm.body.span, super::is_literal_numeric_ast(&arm.body)));
-                    arm_types.push(arm_ty);
-                    self.env.pop_scope();
-                }
-                // Unify all arm types with each other (not with a shared result var
-                // that can be contaminated by external constraints)
-                if let Some(first) = arm_types.first().cloned() {
-                    for aty in &arm_types[1..] {
-                        self.constrain(first.clone(), aty.clone(), "match arm");
-                    }
-                    // #880: a sized arm wins the join over canonical peers, the
-                    // same rule the `if` arms and list elements follow. Checked
-                    // before the `Never` recovery below because a numeric-scalar
-                    // join and a `Never`/Result arm set are disjoint cases.
-                    if let Some(joined) = self.join_sized_peers(&arm_peers, "match arm") {
-                        return joined;
-                    }
-                    // The overall match type is the first non-`Never` arm type.
-                    // `Never` arms (every `err(..)` arm) carry no useful result
-                    // type but they DO produce a Result value, so when they are
-                    // the only arms we recover the concrete type from the real
-                    // (un-substituted) arm types — preferring an `err` arm's
-                    // `Result[T, E]` so the match types as Result, never `Never`.
-                    if matches!(first, Ty::Never) {
-                        arm_types.iter()
-                            .find(|t| !matches!(t, Ty::Never))
-                            .cloned()
-                            .or_else(|| arm_real_types.iter()
-                                .find(|t| !matches!(resolve_ty(t, &self.uf), Ty::Never))
-                                .cloned())
-                            .unwrap_or(first)
-                    } else {
-                        first
-                    }
-                } else {
-                    Ty::Unit
-                }
+        let subject_ty = self.infer_expr(subject);
+        let sc = resolve_ty(&subject_ty, &self.uf);
+        self.queue_match_implicit_prop(subject, &subject_ty, arms);
+        self.check_match_exhaustiveness(&sc, arms);
+        let inferred = self.infer_match_arms(&subject_ty, arms);
+        self.join_match_arms(inferred)
+    }
+
+    /// #1123: a match over an effect call whose arms are VALUE patterns takes
+    /// the implicit strip (ok/err-pattern arms keep the Result). Queue for the
+    /// E041 deprecation.
+    fn queue_match_implicit_prop(
+        &mut self,
+        subject: &ast::Expr,
+        subject_ty: &Ty,
+        arms: &[ast::MatchArm],
+    ) {
+        let value_patterns_only = !arms
+            .iter()
+            .any(|a| matches!(a.pattern, ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }));
+        if self.env.auto_unwrap
+            && matches!(subject.kind, ExprKind::Call { .. })
+            && value_patterns_only
+        {
+            self.deferred_implicit_prop_checks.push((
+                subject_ty.clone(), subject.span, "of this match subject", true, false,
+            ));
+        }
+    }
+
+    /// Infer every arm in its own scope, with the subject's pattern bindings
+    /// visible to that arm's guard and body.
+    fn infer_match_arms(&mut self, subject_ty: &Ty, arms: &mut [ast::MatchArm]) -> MatchArmTypes {
+        // If ANY arm is an explicit `ok(..)`/`err(..)` ctor, this match PRODUCES a Result (it
+        // re-wraps — base64 decode's `match bs { ok(b) => ok(string.from_bytes(b)), err(e) =>
+        // err(e) }`), so NO arm is auto-unwrapped: every arm keeps its Result type and the
+        // match types as Result, not its OK type. (Auto-unwrapping only the effect-call arms
+        // while a ctor arm stayed Result mismatched — `Result[(String,Int),String]` vs
+        // `(String,Int)` in toml parse_key_part; mistyping the whole match as the OK type
+        // walled the v1 MIR / mis-rewrapped native — base64 decode.) The pure auto-unwrap case
+        // (no ctor arm, just effect-call/value arms unifying to T) is unchanged.
+        let arms_have_result_ctor = arms
+            .iter()
+            .any(|a| matches!(&a.body.kind, ExprKind::Ok { .. } | ExprKind::Err { .. }));
+        let mut out = MatchArmTypes::default();
+        for arm in arms.iter_mut() {
+            self.env.push_scope();
+            let sub_c = resolve_ty(subject_ty, &self.uf);
+            self.bind_pattern(&arm.pattern, &sub_c);
+            if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
+            let arm_ty = self.infer_expr(&mut arm.body);
+            out.real_types.push(arm_ty.clone());
+            let arm_ty = self.match_arm_join_ty(arm, arm_ty, arms_have_result_ctor);
+            out.peers.push((arm_ty.clone(), arm.body.span, super::is_literal_numeric_ast(&arm.body)));
+            out.types.push(arm_ty);
+            self.env.pop_scope();
+        }
+        out
+    }
+
+    /// The type an arm contributes to the JOIN, which is not always the type it
+    /// infers to: `err()` in a match arm is an early return, so it joins as
+    /// `Never` and does not constrain its siblings. In effect fn bodies an arm's
+    /// `Result[T, E]` auto-unwraps to `T` so arms mixing effect calls with pure
+    /// expressions unify — skipped when an arm is an explicit ok/err ctor, since
+    /// then the match re-wraps and ALL arms keep the Result.
+    fn match_arm_join_ty(&mut self, arm: &ast::MatchArm, arm_ty: Ty, has_result_ctor: bool) -> Ty {
+        if matches!(&arm.body.kind, ExprKind::Err { .. }) {
+            return Ty::Never;
+        }
+        if !self.env.auto_unwrap || has_result_ctor {
+            return arm_ty;
+        }
+        match resolve_ty(&arm_ty, &self.uf) {
+            Ty::Applied(TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
+            _ => arm_ty,
+        }
+    }
+
+    /// Unify the arm types with each other (not with a shared result var that
+    /// external constraints could contaminate) and pick the match's own type.
+    fn join_match_arms(&mut self, inferred: MatchArmTypes) -> Ty {
+        let MatchArmTypes { types, real_types, peers } = inferred;
+        let Some(first) = types.first().cloned() else { return Ty::Unit };
+        for aty in &types[1..] {
+            self.constrain(first.clone(), aty.clone(), "match arm");
+        }
+        // #880: a sized arm wins the join over canonical peers, the same rule
+        // the `if` arms and list elements follow. Checked before the `Never`
+        // recovery below because a numeric-scalar join and a `Never`/Result arm
+        // set are disjoint cases.
+        if let Some(joined) = self.join_sized_peers(&peers, "match arm") {
+            return joined;
+        }
+        if !matches!(first, Ty::Never) {
+            return first;
+        }
+        // The overall match type is the first non-`Never` arm type. `Never`
+        // arms (every `err(..)` arm) carry no useful result type but they DO
+        // produce a Result value, so when they are the only arms we recover the
+        // concrete type from the real (un-substituted) arm types — preferring an
+        // `err` arm's `Result[T, E]` so the match types as Result, never `Never`.
+        types
+            .iter()
+            .find(|t| !matches!(t, Ty::Never))
+            .cloned()
+            .or_else(|| {
+                real_types
+                    .iter()
+                    .find(|t| !matches!(resolve_ty(t, &self.uf), Ty::Never))
+                    .cloned()
+            })
+            .unwrap_or(first)
     }
 
     fn infer_expr_g2_if_let(&mut self, expr: &mut ast::Expr) -> Ty {
@@ -431,109 +506,128 @@ impl Checker {
     /// error: `T * T` (the Go #64420 silent-10⁹ class), clock mixing, bare
     /// Int join, and the intentionally omitted `/` (S7).
     fn infer_time_binop(&mut self, op: &str, lc: &Ty, rc: &Ty, lt: &Ty, rt: &Ty) -> Option<Ty> {
-        let clock = |t: &Ty| match t {
-            Ty::Named(n, args)
-                if args.is_empty()
-                    && almide_lang::time_units::TIME_MODULES
-                        .iter()
-                        .any(|(_, ty)| *ty == n.as_str()) =>
-            {
-                Some(n.as_str())
-            }
+        let sides = TimeOperands {
+            lc,
+            rc,
+            lt,
+            rt,
+            l: time_clock_of(lc),
+            r: time_clock_of(rc),
+        };
+        if sides.l.is_none() && sides.r.is_none() {
+            return None;
+        }
+        match op {
+            "/" | "%" | "^" => Some(self.time_binop_undefined(op, &sides)),
+            "*" => Some(self.time_binop_scale(&sides)),
+            "+" | "-" => Some(self.time_binop_additive(op, &sides)),
+            "==" | "!=" | "<" | ">" | "<=" | ">=" => Some(self.time_binop_compare(op, &sides)),
             _ => None,
-        };
-        let module_of = |clock_name: &str| {
-            almide_lang::time_units::TIME_MODULES
-                .iter()
-                .find(|(_, ty)| *ty == clock_name)
-                .map(|(m, _)| *m)
-                .unwrap_or("compute")
-        };
-        let l = clock(lc);
-        let r = clock(rc);
-        if l.is_none() && r.is_none() {
-            return None;
         }
-        let is_cmp = matches!(op, "==" | "!=" | "<" | ">" | "<=" | ">=");
-        if !is_cmp && !matches!(op, "+" | "-" | "*" | "/" | "%" | "^") {
-            return None;
-        }
-        let mix_err = |s: &mut Self, verb: &str| {
-            s.emit(super::err(
-                format!("cannot {verb} Compute and Duration"),
-                "The two clocks have no bridge (ADR-0001): a deterministic budget is \
-                 Compute, a wall-clock deadline is Duration — there is no conversion",
-                format!("operator {op}")));
+    }
+
+    /// `/`, `%`, `^` on a time type: never defined. `/` is intentionally
+    /// omitted (ADR-0001 S7); the others were never in the matrix.
+    fn time_binop_undefined(&mut self, op: &str, sides: &TimeOperands) -> Ty {
+        let hint = if op == "/" {
+            "Division is intentionally omitted (ADR-0001 S7) — divide the Int \
+             before constructing, or scale with `*`"
+        } else {
+            "The time algebra is `T + T`, `T - T` (0-saturating), `T * Int`, \
+             and comparisons — nothing else"
         };
-        match (op, l, r) {
-            ("/" | "%" | "^", _, _) => {
-                let hint = if op == "/" {
-                    "Division is intentionally omitted (ADR-0001 S7) — divide the Int \
-                     before constructing, or scale with `*`"
-                } else {
-                    "The time algebra is `T + T`, `T - T` (0-saturating), `T * Int`, \
-                     and comparisons — nothing else"
-                };
-                self.emit(super::err(
-                    format!("operator '{op}' is not defined on time types"),
-                    hint,
-                    format!("operator {op}")));
-                Some(if l.is_some() { lc.clone() } else { rc.clone() })
-            }
-            ("*", Some(_), Some(_)) => {
+        self.emit(super::err(
+            format!("operator '{op}' is not defined on time types"),
+            hint,
+            format!("operator {op}")));
+        sides.time_side().clone()
+    }
+
+    /// `T * Int` / `Int * T` scales; `T * T` would be time², which has no
+    /// meaning.
+    fn time_binop_scale(&mut self, sides: &TimeOperands) -> Ty {
+        match (sides.l, sides.r) {
+            (Some(_), Some(_)) => {
                 self.emit(super::err(
                     "cannot multiply two time quantities".to_string(),
                     "time × time has no meaning (the result would be time²) — scale \
                      with an Int: `t * 3`",
                     "operator *".to_string()));
-                Some(lc.clone())
+                sides.lc.clone()
             }
-            ("*", Some(_), None) => {
-                self.constrain(rt.clone(), Ty::Int, "time scale factor");
-                Some(lc.clone())
+            (Some(_), None) => {
+                self.constrain(sides.rt.clone(), Ty::Int, "time scale factor");
+                sides.lc.clone()
             }
-            ("*", None, Some(_)) => {
-                self.constrain(lt.clone(), Ty::Int, "time scale factor");
-                Some(rc.clone())
+            _ => {
+                self.constrain(sides.lt.clone(), Ty::Int, "time scale factor");
+                sides.rc.clone()
             }
-            ("+" | "-", Some(a), Some(b)) => {
+        }
+    }
+
+    /// `T + T` / `T - T` — same clock only. A bare Int operand is a NAMED
+    /// error, never an implicit join.
+    fn time_binop_additive(&mut self, op: &str, sides: &TimeOperands) -> Ty {
+        match (sides.l, sides.r) {
+            (Some(a), Some(b)) => {
                 if a != b {
-                    mix_err(self, if op == "+" { "add" } else { "subtract" });
+                    self.emit_clock_mix(op, if op == "+" { "add" } else { "subtract" });
                 }
-                Some(lc.clone())
+                sides.lc.clone()
             }
-            ("+" | "-", Some(a), None) | ("+" | "-", None, Some(a)) => {
-                let m = module_of(a);
+            (Some(a), None) | (None, Some(a)) => {
                 self.emit(super::err(
                     format!(
                         "operator '{op}' needs two {a} values, found {} and {}",
-                        lc.display(),
-                        rc.display()
+                        sides.lc.display(),
+                        sides.rc.display()
                     ),
-                    format!("A bare number is never a time — wrap it: {m}.ms(n)"),
+                    format!(
+                        "A bare number is never a time — wrap it: {}.ms(n)",
+                        time_module_of(a)
+                    ),
                     format!("operator {op}")));
-                Some(if l.is_some() { lc.clone() } else { rc.clone() })
+                sides.time_side().clone()
             }
-            (_, Some(a), Some(b)) if is_cmp => {
+            (None, None) => sides.lc.clone(),
+        }
+    }
+
+    /// Comparisons — same clock only, and never against a bare Int.
+    fn time_binop_compare(&mut self, op: &str, sides: &TimeOperands) -> Ty {
+        match (sides.l, sides.r) {
+            (Some(a), Some(b)) => {
                 if a != b {
-                    mix_err(self, "compare");
+                    self.emit_clock_mix(op, "compare");
                 }
-                Some(Ty::Bool)
             }
-            (_, Some(a), None) | (_, None, Some(a)) if is_cmp => {
-                let m = module_of(a);
+            (Some(a), None) | (None, Some(a)) => {
                 self.emit(super::err(
                     format!(
                         "cannot compare {} with {} — both sides must be {a}",
-                        lc.display(),
-                        rc.display()
+                        sides.lc.display(),
+                        sides.rc.display()
                     ),
-                    format!("A bare number is never a time — wrap it: {m}.ms(n)"),
+                    format!(
+                        "A bare number is never a time — wrap it: {}.ms(n)",
+                        time_module_of(a)
+                    ),
                     format!("operator {op}")));
-                Some(Ty::Bool)
             }
-            _ => None,
+            (None, None) => {}
         }
+        Ty::Bool
+    }
+
+    /// The two clocks have no bridge (ADR-0001): a deterministic budget is
+    /// Compute, a wall-clock deadline is Duration — there is no conversion.
+    fn emit_clock_mix(&mut self, op: &str, verb: &str) {
+        self.emit(super::err(
+            format!("cannot {verb} Compute and Duration"),
+            "The two clocks have no bridge (ADR-0001): a deterministic budget is \
+             Compute, a wall-clock deadline is Duration — there is no conversion",
+            format!("operator {op}")));
     }
 
     /// E024, binop-operand edition (fuzz seed-20260718 index 114): a bare
