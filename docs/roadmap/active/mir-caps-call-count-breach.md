@@ -83,19 +83,68 @@ MIR>IR <dir>/a_test.almd::merge (mir 3 > ir 2)
 `ConcatList` node). The third MIR op is the defect: a `__str_concat` `Op::CallFn`
 in a function whose source contains no `ConcatStr` node anywhere.
 
-Ruled out so far:
+### Root cause (confirmed 2026-08-08)
 
-- **`record_elided_calls`** (`lower/calls_b.rs:170`) is NOT the injector —
-  instrumenting its `Op::CallFn` push prints nothing for this function.
-- **`lower_interp_compound_wall`** (`lower/calls_p2.rs:592`) pads with
-  `__str_concat` up to `interp_synthetic_call_names`, but the repro has no
-  string interpolation.
-- Not element-type specific: `List[Int]` breaches identically.
-- The whole shape is required. None of these alone breaches: `!` on an indirect
-  call; `!` + concat without the loop; loop + concat with a direct (non-`!`) call.
+`build_append_slot_subst`, `crates/almide-mir/src/lower/mod_p5_b.rs:513-527`.
+Lowering an accumulator loop to the tail-recursive append-slot form synthesizes
+a COPY of the accumulator — the function's own doc comment says so: *"a String
+accumulator copies via `acc + ""`, a list via `acc + []`"*.
 
-Remaining candidates: `lower/calls_p2.rs:158` (the real `try_lower_concat_str`
-emission) reached on a path with no `ConcatStr`, or `lower/mod_p4_h.rs:49,84`.
+```rust
+let (empty, concat_op) = if matches!(list_ty, Ty::String) {
+    (tco_ir(IrExprKind::LitStr { value: String::new() }, Ty::String), BinOp::ConcatStr)
+} else {
+    (tco_ir(IrExprKind::List { elements: vec![] }, list_ty.clone()), BinOp::ConcatList)
+};
+let copy = tco_ir(IrExprKind::BinOp { op: concat_op, left: Var(acc_var), right: empty }, ..);
+```
+
+That `acc + ""` is a **`ConcatStr` node the source never had**.
+`try_lower_concat_str` (`lower/calls_p2.rs:140`) lowers it to a real
+`Op::CallFn { name: "__str_concat" }`, so `mir_calls` gains a call that
+`count_ir_calls` — which walks the SOURCE body — has no node to credit. Hence
+`mir 3 > ir 2`. Measured directly by instrumenting the emitter:
+
+```
+[sc] __str_concat  ty=String
+     left  = Var { id: VarId(7) }
+     right = LitStr { value: "" }
+```
+
+Ruled out on the way: `record_elided_calls` (`lower/calls_b.rs:170` — its push
+prints nothing for this function) and `lower_interp_compound_wall`
+(`lower/calls_p2.rs:592` — the repro has no string interpolation).
+
+### The fix is a decision, not a patch
+
+The injected copy is the same class as `$__mg_take`, which the gate already
+excludes by name, reasoning that it is
+
+> a COMPILER-INJECTED slot accessor … not a lowering of any IR call node: a
+> mutable-global heap assign injects one with no IR counterpart, so counting it
+> would false-breach `mir <= ir`.
+
+But `__str_concat` cannot simply join that filter: a REAL source-level string
+`+` also lowers to `__str_concat`, and the gate credits each source `ConcatStr`
+node as one ir_call precisely so those stay counted. Excluding the name
+wholesale would under-count real calls and weaken the backstop — the opposite
+of its purpose. Three ways out, increasing in intrusiveness:
+
+1. **Name the injected copy distinctly** (`__str_copy` / `__acc_copy`) so the
+   gate excludes it exactly, the way `__mg_take` is excluded. Adds a self-host
+   symbol to link.
+2. **Credit it on the IR side** — teach `count_ir_calls` that a String
+   append-slot accumulator implies one synthetic concat. Emitted program
+   unchanged, but it duplicates the lowering's dispatch rule inside the gate,
+   which is exactly the drift the `__mg_take` comment warns about.
+3. **Copy without a `ConcatStr`** — give the append-slot lowering a dedicated
+   copy operation instead of reusing the `x + ""` identity trick.
+
+(3) is cleanest — the copy is not a concatenation and only looks like one
+because `x + ""` was a convenient identity — but it changes the
+ownership-certified lowering, so it wants its own review rather than a
+drive-by. Whichever is chosen, the acceptance test is the same: restore
+`spec/regression/` and watch `proofs/corpus-wall.sh` hold at 0 breaches.
 
 ## Current state and the way in
 
