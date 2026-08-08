@@ -125,6 +125,15 @@ fn from_ty_structural(ty: &almide_lang::types::Ty) -> Option<DialectType> {
 /// entries, so they share one function and keep only their structural recursion.
 /// A non-scalar returns `None`.
 pub fn scalar_name(ty: &DialectType, rust: bool) -> Option<&'static str> {
+    if let Some(name) = uniform_scalar_name(ty) {
+        return Some(name);
+    }
+    let (rust_name, almide_name) = dual_scalar_names(ty)?;
+    Some(if rust { rust_name } else { almide_name })
+}
+
+/// The scalars whose Rust and Almide spellings are identical.
+fn uniform_scalar_name(ty: &DialectType) -> Option<&'static str> {
     Some(match ty {
         DialectType::I64 => "i64",
         DialectType::F64 => "f64",
@@ -137,12 +146,19 @@ pub fn scalar_name(ty: &DialectType, rust: bool) -> Option<&'static str> {
         DialectType::U32 => "u32",
         DialectType::U64 => "u64",
         DialectType::F32 => "f32",
-        DialectType::Unit => if rust { "()" } else { "unit" },
-        DialectType::String => if rust { "String" } else { "string" },
-        DialectType::Bytes => if rust { "Vec<u8>" } else { "bytes" },
-        DialectType::Matrix => if rust { "Matrix" } else { "matrix" },
-        DialectType::RawPtr => if rust { "*mut u8" } else { "rawptr" },
-        DialectType::Unknown => if rust { "()" } else { "unknown" },
+        _ => return None,
+    })
+}
+
+/// The scalars spelled differently on the two surfaces, as `(rust, almide)`.
+fn dual_scalar_names(ty: &DialectType) -> Option<(&'static str, &'static str)> {
+    Some(match ty {
+        DialectType::Unit => ("()", "unit"),
+        DialectType::String => ("String", "string"),
+        DialectType::Bytes => ("Vec<u8>", "bytes"),
+        DialectType::Matrix => ("Matrix", "matrix"),
+        DialectType::RawPtr => ("*mut u8", "rawptr"),
+        DialectType::Unknown => ("()", "unknown"),
         _ => return None,
     })
 }

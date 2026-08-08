@@ -120,6 +120,74 @@ fn stdlib_module_defines_any(module: &str, fields: Option<&std::collections::Has
     }
 }
 
+/// The `(display_name, path_segments)` of an import `name` still needs — a
+/// Tier-2 stdlib module that actually DEFINES one of the referenced items, a
+/// declared dependency, or a dependency SUBMODULE (`python` →
+/// `bindgen.bindings.python`). `None` means nothing to add for this name.
+fn import_to_add(
+    name: &str,
+    token_refs: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+    dep_set: &std::collections::HashSet<&str>,
+    dep_submodules: &std::collections::HashMap<String, String>,
+) -> Option<(String, Vec<String>)> {
+    if almide_lang::stdlib_info::is_any_stdlib(name) {
+        return stdlib_module_defines_any(name, token_refs.get(name))
+            .then(|| (name.to_string(), vec![name.to_string()]));
+    }
+    if dep_set.contains(name) {
+        return Some((name.to_string(), vec![name.to_string()]));
+    }
+    let full_path = dep_submodules.get(name)?;
+    Some((full_path.clone(), full_path.split('.').map(String::from).collect()))
+}
+
+/// Should this import declaration survive the unused-import sweep?
+///
+/// `_`-prefixed and `self` imports are always kept (they are deliberate), and
+/// liveness consults the token-level SUPERSET as well as the AST walk: deleting
+/// a live import destroys the program, so recall beats precision here.
+fn import_is_live(
+    d: &Decl,
+    used: &std::collections::HashSet<String>,
+    token_refs: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+) -> bool {
+    let Decl::Import { path, alias, .. } = d else { return true };
+    let name = alias
+        .as_ref()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|| path.last().map(|s| s.to_string()).unwrap_or_default());
+    if name.starts_with('_') || path.first().map(|s| s.as_str()) == Some("self") {
+        return true;
+    }
+    used.contains(&name) || token_refs.contains_key(&name)
+}
+
+/// #1129: `comment_map` is walked POSITIONALLY (module?, imports…, decls…), so
+/// dropping an import must drop its comment slot too — otherwise every later
+/// declaration reads its PREDECESSOR's comments and the labels silently attach
+/// to the wrong fn (the one artifact the compiler cannot reconstruct, #1090's
+/// principle). The dropped import's OWN leading comments belong to whatever now
+/// occupies that position — prepend them, never discard.
+fn carry_dropped_comment_slots(comment_map: &mut Vec<Vec<String>>, dropped_slots: Vec<usize>) {
+    for slot in dropped_slots.into_iter().rev() {
+        if slot >= comment_map.len() {
+            continue;
+        }
+        let carried = comment_map.remove(slot);
+        if carried.is_empty() {
+            continue;
+        }
+        match comment_map.get_mut(slot) {
+            Some(next) => {
+                let mut merged = carried;
+                merged.extend(std::mem::take(next));
+                *next = merged;
+            }
+            None => comment_map.push(carried),
+        }
+    }
+}
+
 pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], dep_submodules: &std::collections::HashMap<String, String>) -> Vec<String> {
     use std::collections::HashSet;
     let mut messages = Vec::new();
@@ -148,27 +216,21 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
 
     let dep_set: HashSet<&str> = dep_names.iter().map(|s| s.as_str()).collect();
 
-    // Add missing imports (stdlib Tier 2 + dependencies + dependency submodules)
-    let mut to_add: Vec<(String, Vec<String>)> = Vec::new(); // (display_name, path_segments)
-    for name in &used {
-        if existing.contains(name.as_str()) { continue; }
-        if auto_imported.contains(name.as_str()) || tier1.contains(name.as_str()) { continue; }
-        if almide_lang::stdlib_info::is_any_stdlib(name) {
-            if !stdlib_module_defines_any(name, token_refs.get(name.as_str())) { continue; }
-            to_add.push((name.clone(), vec![name.clone()]));
-        } else if dep_set.contains(name.as_str()) {
-            to_add.push((name.clone(), vec![name.clone()]));
-        } else if let Some(full_path) = dep_submodules.get(name.as_str()) {
-            // Submodule: python → bindgen.bindings.python
-            to_add.push((full_path.clone(), full_path.split('.').map(String::from).collect()));
-        }
-    }
+    let mut to_add: Vec<(String, Vec<String>)> = used
+        .iter()
+        .filter(|name| {
+            !existing.contains(name.as_str())
+                && !auto_imported.contains(name.as_str())
+                && !tier1.contains(name.as_str())
+        })
+        .filter_map(|name| {
+            import_to_add(name, &token_refs, &dep_set, dep_submodules)
+        })
+        .collect();
     to_add.sort_by(|a, b| a.0.cmp(&b.0));
     for (display, segments) in to_add {
         let path: Vec<Sym> = segments.iter().map(|s| almide_base::intern::sym(s)).collect();
-        program.imports.push(Decl::Import {
-            path, names: None, alias: None, span: None,
-        });
+        program.imports.push(Decl::Import { path, names: None, alias: None, span: None });
         messages.push(format!("Added `import {}`", display));
     }
 
@@ -187,36 +249,13 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
     program.imports.retain(|d| {
         let slot = module_slots + import_idx;
         import_idx += 1;
-        match d {
-        Decl::Import { path, alias, .. } => {
-            let name = alias.as_ref()
-                .map(|a| a.to_string())
-                .unwrap_or_else(|| path.last().map(|s| s.to_string()).unwrap_or_default());
-            if name.starts_with('_') { return true; }
-            if path.first().map(|s| s.as_str()) == Some("self") { return true; }
-            let keep = used.contains(&name) || token_refs.contains_key(&name);
-            if !keep { dropped_slots.push(slot); }
-            keep
+        let keep = import_is_live(d, &used, &token_refs);
+        if !keep {
+            dropped_slots.push(slot);
         }
-        _ => true,
-        }
+        keep
     });
-    for slot in dropped_slots.into_iter().rev() {
-        if slot < program.comment_map.len() {
-            let carried = program.comment_map.remove(slot);
-            // The dropped import's own leading comments belong to whatever
-            // now occupies that position — prepend, never discard.
-            if !carried.is_empty() {
-                if let Some(next) = program.comment_map.get_mut(slot) {
-                    let mut merged = carried;
-                    merged.extend(std::mem::take(next));
-                    *next = merged;
-                } else {
-                    program.comment_map.push(carried);
-                }
-            }
-        }
-    }
+    carry_dropped_comment_slots(&mut program.comment_map, dropped_slots);
     let removed = before_len - program.imports.len();
     if removed > 0 {
         messages.push(format!("Removed {} unused import(s)", removed));
@@ -250,25 +289,46 @@ fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<
     match te {
         TypeExpr::Simple { name } => insert_type_name_prefix(name.as_str(), used),
         TypeExpr::Generic { name, args } => {
+            // `!` and `?` are the pseudo-generic effect/Option spellings, not
+            // module-qualified names.
             if name.as_str() != "!" && name.as_str() != "?" {
                 insert_type_name_prefix(name.as_str(), used);
             }
-            for a in args { collect_module_refs_type(a, used); }
+            collect_module_refs_types(args, used);
         }
         TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
-            for f in fields { collect_module_refs_type(&f.ty, used); }
+            collect_module_refs_field_types(fields, used)
         }
         TypeExpr::Fn { params, ret } => {
-            for p in params { collect_module_refs_type(p, used); }
+            collect_module_refs_types(params, used);
             collect_module_refs_type(ret, used);
         }
         TypeExpr::Tuple { elements } | TypeExpr::Union { members: elements } => {
-            for e in elements { collect_module_refs_type(e, used); }
+            collect_module_refs_types(elements, used)
         }
         TypeExpr::Variant { cases } => {
-            for c in cases { collect_module_refs_variant_case(c, used); }
+            for c in cases {
+                collect_module_refs_variant_case(c, used);
+            }
         }
         TypeExpr::ConstLit { .. } => {}
+    }
+}
+
+/// [`collect_module_refs_type`] over a sequence of types.
+fn collect_module_refs_types(tes: &[TypeExpr], used: &mut std::collections::HashSet<String>) {
+    for te in tes {
+        collect_module_refs_type(te, used);
+    }
+}
+
+/// [`collect_module_refs_type`] over a record's field types.
+fn collect_module_refs_field_types(
+    fields: &[FieldType],
+    used: &mut std::collections::HashSet<String>,
+) {
+    for f in fields {
+        collect_module_refs_type(&f.ty, used);
     }
 }
 
@@ -529,6 +589,36 @@ fn is_bare_self_param(p: &Param) -> bool {
     p.name.as_str() == "self" && matches!(&p.ty, TypeExpr::Simple { name } if name.as_str() == "Self")
 }
 
+/// `[vis] type Name[generics][: deriving] = Ty`.
+fn fmt_decl_type(out: &mut String, decl: &Decl, depth: usize) {
+    let Decl::Type { name, ty, deriving, visibility, generics, .. } = decl else { unreachable!() };
+    out.push_str(&ind(depth));
+    fmt_vis(out, visibility);
+    w!(out, "type {name}");
+    maybe_generics(out, generics);
+    if let Some(d) = deriving {
+        if !d.is_empty() {
+            w!(out, ": {}", join_syms(d, ", "));
+        }
+    }
+    out.push_str(" = ");
+    fmt_type(out, ty, depth);
+}
+
+/// `[vis] let|var name[: Ty] = expr`.
+fn fmt_decl_top_let(out: &mut String, decl: &Decl, depth: usize) {
+    let Decl::TopLet { name, ty, value, visibility, mutable, .. } = decl else { unreachable!() };
+    out.push_str(&ind(depth));
+    fmt_vis(out, visibility);
+    w!(out, "{} {name}", if *mutable { "var" } else { "let" });
+    if let Some(te) = ty {
+        out.push_str(": ");
+        fmt_type(out, te, depth);
+    }
+    out.push_str(" = ");
+    fmt_expr(out, value, depth);
+}
+
 fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
     let i = ind(depth);
     match decl {
@@ -539,19 +629,8 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             if let Some(a) = alias { w!(out, " as {a}"); }
         }
         Decl::Strict { mode, .. } => w!(out, "{i}strict \"{mode}\""),
-        Decl::Type { name, ty, deriving, visibility, generics, .. } => {
-            out.push_str(&i); fmt_vis(out, visibility);
-            w!(out, "type {name}");
-            maybe_generics(out, generics);
-            if let Some(d) = deriving { if !d.is_empty() { w!(out, ": {}", join_syms(d, ", ")); } }
-            out.push_str(" = "); fmt_type(out, ty, depth);
-        }
-        Decl::TopLet { name, ty, value, visibility, mutable, .. } => {
-            out.push_str(&i); fmt_vis(out, visibility);
-            w!(out, "{} {name}", if *mutable { "var" } else { "let" });
-            if let Some(te) = ty { out.push_str(": "); fmt_type(out, te, depth); }
-            out.push_str(" = "); fmt_expr(out, value, depth);
-        }
+        Decl::Type { .. } => fmt_decl_type(out, decl, depth),
+        Decl::TopLet { .. } => fmt_decl_top_let(out, decl, depth),
         Decl::Fn { .. } => fmt_decl_fn(out, decl, depth),
         Decl::Test { .. } => fmt_decl_test(out, decl, depth),
         Decl::TestWhereDef { .. } => {} // test where defs don't need formatting (internal)
@@ -638,6 +717,70 @@ fn fmt_decl_protocol(out: &mut String, decl: &Decl, depth: usize) {
     w!(out, "{i}}}");
 }
 
+/// ADR-0010 D3: `T?` is the canonical Option spelling — the pseudo-generic `?`
+/// prints back as written, and a written `Option[T]` NORMALIZES to the same
+/// shorthand. The inner takes parens whenever the bare rendering would not
+/// re-parse under the atom-binding rule: fn types (`((A) -> B)?`), nested Option
+/// (`(Int?)?` — `T??` would lex as the `??` operator), records/variants. A tuple
+/// already renders parenthesized.
+fn fmt_option_shorthand(out: &mut String, inner: &TypeExpr, depth: usize) {
+    let bare_atom = match inner {
+        TypeExpr::Simple { .. } | TypeExpr::Tuple { .. } => true,
+        TypeExpr::Generic { name, args } => {
+            !((name.as_str() == "?" || name.as_str() == "Option") && args.len() == 1)
+                && name.as_str() != "!"
+        }
+        _ => false,
+    };
+    if bare_atom {
+        fmt_type(out, inner, depth);
+    } else {
+        out.push('(');
+        fmt_type(out, inner, depth);
+        out.push(')');
+    }
+    out.push('?');
+}
+
+/// A record (or `..`-open record) type.
+///
+/// A field comment has nowhere to go on one line, so a record that carries one
+/// is emitted multi-line. Records without comments keep the single-line shape,
+/// so existing sources do not churn (#1090).
+fn fmt_record_type(out: &mut String, fields: &[FieldType], open: bool, depth: usize) {
+    if fields.iter().any(|f| !f.comments.is_empty()) {
+        fmt_record_type_multiline(out, fields, open, depth);
+        return;
+    }
+    out.push_str("{ ");
+    comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
+    match (open, fields.is_empty()) {
+        (true, false) => out.push_str(", .. "),
+        (true, true) => out.push_str(".. "),
+        (false, _) => out.push(' '),
+    }
+    out.push('}');
+}
+
+/// A union type's members, `A | B | C`.
+fn fmt_union_members(out: &mut String, members: &[TypeExpr], depth: usize) {
+    for (i, m) in members.iter().enumerate() {
+        if i > 0 {
+            out.push_str(" | ");
+        }
+        fmt_type(out, m, depth);
+    }
+}
+
+/// A variant type's cases, with a LEADING `|` on the first case too — the
+/// declaration style `type T =\n  | A\n  | B` round-trips only if it is emitted.
+fn fmt_variant_cases(out: &mut String, cases: &[VariantCase], depth: usize) {
+    for (i, case) in cases.iter().enumerate() {
+        out.push_str(if i > 0 { " | " } else { "| " });
+        fmt_variant_case(out, case, depth);
+    }
+}
+
 fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
     match ty {
         TypeExpr::Simple { name } => out.push_str(name),
@@ -657,47 +800,15 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::Generic { name, args }
             if (name.as_str() == "?" || name.as_str() == "Option") && args.len() == 1 =>
         {
-            let inner = &args[0];
-            let bare_atom = match inner {
-                TypeExpr::Simple { .. } | TypeExpr::Tuple { .. } => true,
-                TypeExpr::Generic { name, args } => {
-                    !((name.as_str() == "?" || name.as_str() == "Option") && args.len() == 1)
-                        && name.as_str() != "!"
-                }
-                _ => false,
-            };
-            if bare_atom {
-                fmt_type(out, inner, depth);
-            } else {
-                out.push('(');
-                fmt_type(out, inner, depth);
-                out.push(')');
-            }
-            out.push('?');
+            fmt_option_shorthand(out, &args[0], depth)
         }
         TypeExpr::Generic { name, args } => {
             out.push_str(name); out.push('[');
             comma_sep(out, args, |out, a| fmt_type(out, a, depth));
             out.push(']');
         }
-        TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
-            let open = matches!(ty, TypeExpr::OpenRecord { .. });
-            // A field comment has nowhere to go on one line, so a record that
-            // carries one is emitted multi-line. Records without comments keep
-            // the single-line shape, so existing sources do not churn (#1090).
-            if fields.iter().any(|f| !f.comments.is_empty()) {
-                fmt_record_type_multiline(out, fields, open, depth);
-            } else {
-                out.push_str("{ ");
-                comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
-                match (open, fields.is_empty()) {
-                    (true, false) => out.push_str(", .. "),
-                    (true, true) => out.push_str(".. "),
-                    (false, _) => out.push(' '),
-                }
-                out.push('}');
-            }
-        }
+        TypeExpr::Record { fields } => fmt_record_type(out, fields, false, depth),
+        TypeExpr::OpenRecord { fields } => fmt_record_type(out, fields, true, depth),
         TypeExpr::Fn { params, ret } => {
             out.push_str("fn(");
             comma_sep(out, params, |out, p| fmt_type(out, p, depth));
@@ -706,23 +817,11 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::Tuple { elements } => {
             out.push('('); comma_sep(out, elements, |out, e| fmt_type(out, e, depth)); out.push(')');
         }
-        TypeExpr::Union { members } => {
-            for (i, m) in members.iter().enumerate() {
-                if i > 0 { out.push_str(" | "); }
-                fmt_type(out, m, depth);
-            }
-        }
+        TypeExpr::Union { members } => fmt_union_members(out, members, depth),
         TypeExpr::ConstLit { value } => {
             out.push_str(&value.to_string());
         }
-        TypeExpr::Variant { cases } => {
-            for (i, case) in cases.iter().enumerate() {
-                // A leading `|` on the first case too — the declaration style
-                // `type T =\n  | A\n  | B` round-trips only if it is emitted.
-                out.push_str(if i > 0 { " | " } else { "| " });
-                fmt_variant_case(out, case, depth);
-            }
-        }
+        TypeExpr::Variant { cases } => fmt_variant_cases(out, cases, depth),
     }
 }
 

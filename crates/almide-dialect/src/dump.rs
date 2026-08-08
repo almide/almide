@@ -151,6 +151,17 @@ fn dump_op_value(out: &mut String, op: &Operation) -> bool {
             let args_str: Vec<_> = args.iter().map(|a| fmt_val(*a)).collect();
             out.push_str(&format!("almide.intrinsic @{}({})", symbol, args_str.join(", ")));
         }
+        _ => return dump_op_aggregate(out, op) || dump_op_wrapper(out, op),
+    }
+    true
+}
+
+/// Aggregate literals and the projections that read them.
+///
+/// Extracted from `dump_op_value` (name-router split); `false` means "not my
+/// group", so the caller can try the next one.
+fn dump_op_aggregate(out: &mut String, op: &Operation) -> bool {
+    match &op.kind {
         OpKind::ListOp { elements } => {
             let vals: Vec<_> = elements.iter().map(|v| fmt_val(*v)).collect();
             out.push_str(&format!("almide.list [{}]", vals.join(", ")));
@@ -180,6 +191,17 @@ fn dump_op_value(out: &mut String, op: &Operation) -> bool {
         OpKind::MapAccessOp { object, key } => {
             out.push_str(&format!("almide.map_access {}[{}]", fmt_val(*object), fmt_val(*key)));
         }
+        _ => return false,
+    }
+    true
+}
+
+/// The Option/Result wrapper ops and their eliminators.
+///
+/// Extracted from `dump_op_value` (name-router split); `false` means "not my
+/// group".
+fn dump_op_wrapper(out: &mut String, op: &Operation) -> bool {
+    match &op.kind {
         OpKind::ResultOkOp { value } => out.push_str(&format!("almide.ok {}", fmt_val(*value))),
         OpKind::ResultErrOp { value } => out.push_str(&format!("almide.err {}", fmt_val(*value))),
         OpKind::OptionSomeOp { value } => out.push_str(&format!("almide.some {}", fmt_val(*value))),
