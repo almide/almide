@@ -33,6 +33,56 @@ fn render_extern_imports(prog: &MirProgram) -> String {
     decls.into_values().collect()
 }
 
+/// The f64 comparison, negated. No negated f64 instruction exists, so the
+/// comparison is wrapped in `i32.eqz`. A non-float-typed operand local holds the
+/// bits and is reinterpreted.
+fn negated_float_cmp(op: FCmpOp, args: &[ValueId], floats: &BTreeSet<ValueId>) -> String {
+    let operand = |a: usize| {
+        if floats.contains(&args[a]) {
+            format!("(local.get {})", local(args[a]))
+        } else {
+            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
+        }
+    };
+    let instr = match op {
+        FCmpOp::Lt => "f64.lt",
+        FCmpOp::Le => "f64.le",
+        FCmpOp::Gt => "f64.gt",
+        FCmpOp::Ge => "f64.ge",
+        FCmpOp::Eq => "f64.eq",
+        FCmpOp::Ne => "f64.ne",
+    };
+    format!("(i32.eqz ({instr} {} {}))", operand(0), operand(1))
+}
+
+/// The NEGATED comparison a `LoopBreakUnless` can fuse with, when the op right
+/// before it defines exactly that condition. `None` when the shape does not
+/// fuse (a non-comparison producer, or a comparison with no negated twin).
+fn negated_break_test(
+    def: &Op,
+    cond: &ValueId,
+    floats: &BTreeSet<ValueId>,
+) -> Option<String> {
+    match def {
+        Op::IntBinOp { dst, op, a, b } if dst == cond => {
+            let neg = match op {
+                IntOp::Lt => "i64.ge_s",
+                IntOp::Le => "i64.gt_s",
+                IntOp::Gt => "i64.le_s",
+                IntOp::Ge => "i64.lt_s",
+                IntOp::Eq => "i64.ne",
+                IntOp::Ne => "i64.eq",
+                _ => return None,
+            };
+            Some(format!("({neg} (local.get {}) (local.get {}))", local(*a), local(*b)))
+        }
+        Op::Prim { kind: PrimKind::FloatCmp(op), dst: Some(d), args } if d == cond => {
+            Some(negated_float_cmp(*op, args, floats))
+        }
+        _ => None,
+    }
+}
+
 /// Render one MIR function with its signature (params, locals, result).
 /// #806 step 3b planning: a loop condition computed by the IMMEDIATELY
 /// preceding compare whose Bool is used ONLY by the break renders as one
@@ -68,45 +118,9 @@ fn plan_break_fusion(
             if occ.get(cond).copied() != Some(2) {
                 continue;
             }
-            match &func.ops[i - 1] {
-                Op::IntBinOp { dst, op, a, b } if dst == cond => {
-                    let neg = match op {
-                        IntOp::Lt => "i64.ge_s",
-                        IntOp::Le => "i64.gt_s",
-                        IntOp::Gt => "i64.le_s",
-                        IntOp::Ge => "i64.lt_s",
-                        IntOp::Eq => "i64.ne",
-                        IntOp::Ne => "i64.eq",
-                        _ => continue,
-                    };
-                    fused_break.insert(
-                        i,
-                        format!("({neg} (local.get {}) (local.get {}))", local(*a), local(*b)),
-                    );
-                    fused_skip.insert(i - 1);
-                }
-                Op::Prim { kind: PrimKind::FloatCmp(op), dst: Some(d), args } if d == cond => {
-                    let f = |a: usize| {
-                        if floats.contains(&args[a]) {
-                            format!("(local.get {})", local(args[a]))
-                        } else {
-                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
-                        }
-                    };
-                    let instr = match op {
-                        FCmpOp::Lt => "f64.lt",
-                        FCmpOp::Le => "f64.le",
-                        FCmpOp::Gt => "f64.gt",
-                        FCmpOp::Ge => "f64.ge",
-                        FCmpOp::Eq => "f64.eq",
-                        FCmpOp::Ne => "f64.ne",
-                    };
-                    fused_break
-                        .insert(i, format!("(i32.eqz ({instr} {} {}))", f(0), f(1)));
-                    fused_skip.insert(i - 1);
-                }
-                _ => {}
-            }
+            let Some(test) = negated_break_test(&func.ops[i - 1], cond, floats) else { continue };
+            fused_break.insert(i, test);
+            fused_skip.insert(i - 1);
         }
     }
     (occ, fused_break, fused_skip)
