@@ -145,79 +145,17 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
             return rewrite_expr(*inner, true);
         }
 
-        // Recurse into all other nodes
-        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: rewrite_stmts(stmts, inside_fan),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e, inside_fan))),
-        },
-
-        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(rewrite_expr(*cond, inside_fan)),
-            then: Box::new(rewrite_expr(*then, inside_fan)),
-            else_: Box::new(rewrite_expr(*else_, inside_fan)),
-        },
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(rewrite_expr(*subject, inside_fan)),
-            arms: arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(|g| rewrite_expr(g, inside_fan)),
-                body: rewrite_expr(arm.body, inside_fan),
-            }).collect(),
-        },
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_expr(*body, inside_fan)), lambda_id,
-        },
+        // A `Call` is the one remaining node with a rule of its own: its target
+        // may itself hold a fan lambda.
         IrExprKind::Call { target, args, type_args } => IrExprKind::Call {
             target: rewrite_target(target, inside_fan),
             args: args.into_iter().map(|a| rewrite_expr(a, inside_fan)).collect(),
             type_args,
         },
-        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
-            symbol,
-            args: args.into_iter().map(|a| rewrite_expr(a, inside_fan)).collect(),
-        },
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
-            var, var_tuple,
-            iterable: Box::new(rewrite_expr(*iterable, inside_fan)),
-            body: rewrite_stmts(body, inside_fan),
-        },
-        IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(rewrite_expr(*cond, inside_fan)),
-            body: rewrite_stmts(body, inside_fan),
-        },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op, left: Box::new(rewrite_expr(*left, inside_fan)),
-            right: Box::new(rewrite_expr(*right, inside_fan)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(rewrite_expr(*operand, inside_fan)),
-        },
-        IrExprKind::Try { expr: inner } => IrExprKind::Try {
-            expr: Box::new(rewrite_expr(*inner, inside_fan)),
-        },
-        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
-            expr: Box::new(rewrite_expr(*inner, inside_fan)),
-        },
-        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
-            expr: Box::new(rewrite_expr(*inner, inside_fan)),
-        },
-        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(rewrite_expr(*inner, inside_fan)),
-            fallback: Box::new(rewrite_expr(*fallback, inside_fan)),
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| rewrite_expr(e, inside_fan)).collect(),
-        },
-        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| rewrite_expr(e, inside_fan)).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(n, v)| (n, rewrite_expr(v, inside_fan))).collect(),
-        },
-        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(rewrite_expr(*expr, inside_fan)), field,
-        },
-        // Any other kind: recurse into every child (total by construction).
+
+        // Every other node just needs its children rewritten, which
+        // `map_children` does exhaustively — statement bodies included, via
+        // `IrStmt::map_exprs`.
         other => return IrExpr { kind: other, ty, span, def_id: None }
             .map_children(&mut |e| rewrite_expr(e, inside_fan)),
     };
@@ -225,31 +163,6 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
     IrExpr { kind, ty, span, def_id: None }
 }
 
-fn rewrite_stmts(stmts: Vec<IrStmt>, inside_fan: bool) -> Vec<IrStmt> {
-    stmts.into_iter().map(|stmt| {
-        let kind = match stmt.kind {
-            IrStmtKind::Bind { var, mutability, value, ty } => IrStmtKind::Bind {
-                var, mutability, value: rewrite_expr(value, inside_fan), ty,
-            },
-            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern, value: rewrite_expr(value, inside_fan),
-            },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign {
-                var, value: rewrite_expr(value, inside_fan),
-            },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr {
-                expr: rewrite_expr(expr, inside_fan),
-            },
-            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: rewrite_expr(cond, inside_fan),
-                else_: rewrite_expr(else_, inside_fan),
-            },
-            other => return IrStmt { kind: other, ..stmt }
-                .map_exprs(&mut |e| rewrite_expr(e, inside_fan)),
-        };
-        IrStmt { kind, ..stmt }
-    }).collect()
-}
 
 fn rewrite_target(target: CallTarget, inside_fan: bool) -> CallTarget {
     match target {

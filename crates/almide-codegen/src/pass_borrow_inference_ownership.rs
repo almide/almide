@@ -25,6 +25,54 @@ fn check_needs_ownership_flow(expr: &IrExpr, var: VarId, needs: &mut bool) {
     }
 }
 
+/// The positions that CONSUME their operand: collection and record
+/// construction, Result/Option wrapping, a lambda capture, interpolation, and
+/// the loop/iterator sources. A param appearing directly in one of these must be
+/// owned; anything deeper is recursed into normally.
+fn check_needs_ownership_consuming(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    match &expr.kind {
+        IrExprKind::Record { fields, .. } => check_needs_ownership_record(fields, var, needs),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            check_needs_ownership_elements(elements, var, needs)
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            check_needs_ownership_spread_record(base, fields, var, needs)
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                if is_var(k, var) || is_var(v, var) {
+                    *needs = true;
+                    return;
+                }
+            }
+        }
+        IrExprKind::ResultOk { expr: inner } | IrExprKind::ResultErr { expr: inner }
+        | IrExprKind::OptionSome { expr: inner } => {
+            if is_var(inner, var) {
+                *needs = true;
+                return;
+            }
+            check_needs_ownership(inner, var, needs);
+        }
+        // A captured var is moved into the closure.
+        IrExprKind::Lambda { body, .. } => {
+            if uses_var(body, var) {
+                *needs = true;
+            }
+        }
+        IrExprKind::StringInterp { parts } => {
+            check_needs_ownership_string_interp(parts, var, needs)
+        }
+        // ForIn: the iterable is consumed. IterChain: its source is, when
+        // `consume` is set.
+        IrExprKind::ForIn { iterable, body, .. } => {
+            check_needs_ownership_for_in(iterable, body, var, needs)
+        }
+        IrExprKind::IterChain { .. } => check_needs_ownership_iter_chain(expr, var, needs),
+        _ => unreachable!("check_needs_ownership_consuming on a non-consuming kind"),
+    }
+}
+
 /// Check if a parameter variable needs ownership.
 /// Conservative: marks as Owned if used in ANY ownership-requiring position.
 fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
@@ -53,36 +101,13 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         // also borrows it.
         IrExprKind::Call { .. } => check_needs_ownership_call(expr, var, needs),
 
-        // ── Collection construction consumes ──
-        IrExprKind::Record { fields, .. } => check_needs_ownership_record(fields, var, needs),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } =>
-            check_needs_ownership_elements(elements, var, needs),
-        IrExprKind::SpreadRecord { base, fields } =>
-            check_needs_ownership_spread_record(base, fields, var, needs),
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { if is_var(k, var) || is_var(v, var) { *needs = true; return; } }
-        }
-
-        // ── Wrapping in Result/Option/Some ──
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } => {
-            if is_var(expr, var) { *needs = true; return; }
-            check_needs_ownership(expr, var, needs);
-        }
-
-        // ── Lambda capture: captured vars need ownership ──
-        IrExprKind::Lambda { body, .. } => {
-            if uses_var(body, var) { *needs = true; }
-        }
-
-        // ── String interpolation consumes ──
-        IrExprKind::StringInterp { parts } => check_needs_ownership_string_interp(parts, var, needs),
-
-        // ── ForIn: iterable is consumed ──
-        IrExprKind::ForIn { iterable, body, .. } => check_needs_ownership_for_in(iterable, body, var, needs),
-
-        // ── IterChain: source consumed if consume=true ──
-        IrExprKind::IterChain { .. } => check_needs_ownership_iter_chain(expr, var, needs),
+        // ── The consuming positions: construction, wrapping, capture ──
+        IrExprKind::Record { .. } | IrExprKind::List { .. } | IrExprKind::Tuple { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::ForIn { .. }
+        | IrExprKind::IterChain { .. } => check_needs_ownership_consuming(expr, var, needs),
 
         // ── Safe reads: indexing and field access BORROW, and a non-concat
         // binop (comparison, arithmetic) reads its operands. Recurse only. ──
