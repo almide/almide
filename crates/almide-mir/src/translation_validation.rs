@@ -124,6 +124,16 @@ fn wasm_pattern_int_binop(op: crate::IntOp) -> String {
         IntOp::Mod => "i64.rem_s",
         IntOp::DivU => "i64.div_u",
         IntOp::ModU => "i64.rem_u",
+        _ => return wasm_pattern_int_compare(op),
+    };
+    instr.to_string()
+}
+
+/// The comparison and bitwise i64 instructions — the second half of the flat
+/// table, split only to keep each arm list readable.
+fn wasm_pattern_int_compare(op: crate::IntOp) -> String {
+    use crate::IntOp;
+    let instr = match op {
         IntOp::LtU => "i64.lt_u",
         IntOp::LeU => "i64.le_u",
         IntOp::GtU => "i64.gt_u",
@@ -140,7 +150,8 @@ fn wasm_pattern_int_binop(op: crate::IntOp) -> String {
         IntOp::Shl => "i64.shl",
         IntOp::Shr => "i64.shr_s",
         IntOp::ShrU => "i64.shr_u",
-        // A release decrements the refcount cell — realized by `call $rc_dec`.
+        IntOp::Add | IntOp::Sub | IntOp::Mul | IntOp::Div | IntOp::Mod | IntOp::DivU
+        | IntOp::ModU => unreachable!("arithmetic is handled by wasm_pattern_int_binop"),
     };
     instr.to_string()
 }
@@ -152,34 +163,32 @@ fn wasm_pattern_drop(op: &crate::Op) -> String {
     match op {
         Op::Drop { .. } => "call $rc_dec".into(),
         Op::DropListStr { .. } => "call $rc_dec".into(),
+        Op::DropListIntStr { .. } => "call $rc_dec".into(),
+        Op::DropListStrInt { .. } => "call $rc_dec".into(),
+        Op::DropResultStrInt { .. } => "call $rc_dec".into(),
+        Op::DropResultListStrInt { .. } => "call $rc_dec".into(),
+        Op::DropResultListStr { .. } => "call $rc_dec".into(),
+        Op::DropWrapperRec { .. } => "call $rc_dec".into(),
+        _ => wasm_pattern_drop_routine(op),
+    }
+}
+
+/// The drop shapes whose free is a dedicated generated routine rather than the
+/// flat `rc_dec` — the second half of the flat table.
+fn wasm_pattern_drop_routine(op: &crate::Op) -> String {
+    use crate::Op;
+    match op {
         Op::DropValue { .. } => "call $__drop_value".into(),
         Op::DropListValue { .. } => "call $__drop_list_value".into(),
         Op::DropListStrValue { .. } => "call $__drop_list_str_value".into(),
         Op::DropListStrStr { .. } => "call $__drop_list_str_str".into(),
-        // Inline-rendered (per-tuple String-slot rc_dec loop, no helper) — cert-claimed token is the
-        // final list-block `call $rc_dec`.
-        Op::DropListIntStr { .. } => "call $rc_dec".into(),
-        Op::DropListStrInt { .. } => "call $rc_dec".into(),
         Op::DropResultListValue { .. } => "call $__drop_result_lv".into(),
         Op::DropResultValue { .. } => "call $__drop_result_value".into(),
-        // Inline-rendered (no helper) like DropListStr; the cert-claimed token is the
-        // final wrapper `call $rc_dec`.
-        Op::DropResultStrInt { .. } => "call $rc_dec".into(),
-        // Rendered via a value_core helper call (NOT inline) — the cert-claimed token is that call.
         Op::DropResultValueInt { .. } => "call $__drop_value_tuple".into(),
         Op::DropResultListValueInt { .. } => "call $__drop_list_value_tuple".into(),
-        // Inline-rendered (nested loop, no helper) — cert-claimed token is the final wrapper rc_dec.
-        Op::DropResultListStrInt { .. } => "call $rc_dec".into(),
-        // Inline-rendered (Ok-payload list loop, no helper) — cert-claimed token is the final wrapper rc_dec.
-        Op::DropResultListStr { .. } => "call $rc_dec".into(),
         Op::DropListListStr { .. } => "drop_list_list_str".into(),
         Op::DropVariant { ty, .. } => format!("call $__drop_{ty}"),
-        // Inline-rendered (rc==1-gated recurse into the @12 record via `$__drop_<drop_fn>`, then the
-        // wrapper block) — the cert-claimed token is the final wrapper `call $rc_dec`, like DropListStr.
-        Op::DropWrapperRec { .. } => "call $rc_dec".into(),
-        // A copy-on-write: MakeUnique clones a SHARED block before in-place
-        // mutation — realized by `call $list_copy` (in the cow's then-branch).
-        _ => unreachable!("wasm_pattern_drop on a non-drop op"),
+        _ => unreachable!("wasm_pattern_drop_routine on a non-drop op"),
     }
 }
 
