@@ -152,6 +152,17 @@ fn list_call_name_accessors_option_result(func: &str, result_ty: &Ty) -> Option<
     {
         return Some(format!("list.{func}_liststr"));
     }
+    list_accessor_heap_share_name(func, args)
+}
+
+/// The handle-SHARING accessor names of
+/// [`list_call_name_accessors_option_result`]: the element shapes whose Some
+/// payload must alias the list's element rather than deep-copy it. Split at the
+/// record/aggregate seam so neither half outgrows a readable ladder; the ORDER
+/// across the two halves is unchanged (this one runs only after every branch
+/// above declined).
+fn list_accessor_heap_share_name(func: &str, args: &[Ty]) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
     // A RECORD/aggregate element (`list.get(vars, idx)` over `List[EnvVar]`
     // — porta dedup_env): SHARE the element handle exactly like the
     // Value/liststr accessors (the record stays owned by the list; the

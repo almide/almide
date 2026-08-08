@@ -139,6 +139,39 @@ pub(crate) fn rgn_name(n: &str) -> String {
     format!("__rgn_{n}")
 }
 
+/// Does the consumer take `t` EXACTLY once, as its only heap arg? A second heap
+/// arg, a scalar spelling of `t`, or a label makes the window unanalyzable.
+fn consumes_exactly_once(args: &[CallArg], t: &ValueId) -> bool {
+    let mut handles = 0;
+    for a in args {
+        match a {
+            CallArg::Handle(v) if v == t => handles += 1,
+            CallArg::Handle(_) | CallArg::Label(_) => return false,
+            CallArg::Scalar(v) if v == t => return false,
+            CallArg::Scalar(_) | CallArg::Imm(_) => {}
+        }
+    }
+    handles == 1
+}
+
+/// The index of `t`'s drop, searched forward from `from`.
+///
+/// The drop may trail the consumer by a few scalar ops (`total = total +
+/// check(make(d))` puts the add/rebind between). Any intervening op is safe: the
+/// caller's `occ == 3` test proves nothing in between can reference `t`, and the
+/// rewrite places the restore immediately after the consumer — the intervening
+/// ops then run OUTSIDE the region, exactly as they would have with the original
+/// per-object drop.
+fn find_drop_of(ops: &[Op], from: usize, t: &ValueId) -> Option<usize> {
+    const DROP_SCAN: usize = 16;
+    ops.iter()
+        .enumerate()
+        .skip(from)
+        .take(DROP_SCAN)
+        .find(|(_, op)| matches!(op, Op::Drop { v } | Op::DropVariant { v, .. } if v == t))
+        .map(|(j, _)| j)
+}
+
 /// The window rooted at `ops[i]`: `(t, f, g, drop_idx)` — see module doc.
 fn match_region_window(
     ops: &[Op],
@@ -163,29 +196,13 @@ fn match_region_window(
     {
         return None;
     }
-    let Op::CallFn {
-        name: g,
-        args: gargs,
-        result: gres,
-        ..
-    } = &ops[i + 1]
-    else {
+    let Op::CallFn { name: g, args: gargs, result: gres, .. } = &ops[i + 1] else {
         return None;
     };
     if matches!(gres, Some(r) if r.is_heap()) {
         return None;
     }
-    let mut t_handles = 0;
-    for a in gargs {
-        match a {
-            CallArg::Handle(v) if v == t => t_handles += 1,
-            CallArg::Handle(_) => return None,
-            CallArg::Scalar(v) if v == t => return None,
-            CallArg::Scalar(_) | CallArg::Imm(_) => {}
-            CallArg::Label(_) => return None,
-        }
-    }
-    if t_handles != 1 {
+    if !consumes_exactly_once(gargs, t) {
         return None;
     }
     // The drop of `t` may trail the consumer by a few scalar ops (`total =
@@ -194,18 +211,7 @@ fn match_region_window(
     // `t`, and the rewrite places the restore immediately after `g` — the
     // intervening ops then run OUTSIDE the region, exactly as they would
     // have with the original per-object drop.
-    const DROP_SCAN: usize = 16;
-    let mut drop_at = None;
-    for (j, op) in ops.iter().enumerate().skip(i + 2).take(DROP_SCAN) {
-        match op {
-            Op::Drop { v } | Op::DropVariant { v, .. } if v == t => {
-                drop_at = Some(j);
-                break;
-            }
-            _ => {}
-        }
-    }
-    let drop_at = drop_at?;
+    let drop_at = find_drop_of(ops, i + 2, t)?;
     // t is window-local: its def + the Handle arg + the drop, nothing else.
     if occ.get(t).copied() != Some(3) {
         return None;
