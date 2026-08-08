@@ -15,6 +15,25 @@ impl LowerCtx {
                     && !matches!(ts[0], Ty::String)))
     }
 
+    /// The `Option[<leaf>]` Ok type of a `Result[Option[L], String]` plus whether
+    /// that leaf is a String (the alternative being a plain scalar). `None` for
+    /// any other shape — a heap leaf has no flat block form here.
+    fn option_leaf_str_or_scalar<'t>(result_ty: &'t Ty) -> Option<(&'t Ty, bool)> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Result, a) = result_ty else { return None };
+        if a.len() != 2 || !matches!(a[1], Ty::String) {
+            return None;
+        }
+        let ok_ty = &a[0];
+        let Ty::Applied(TypeConstructorId::Option, oa) = ok_ty else { return None };
+        if oa.len() != 1 {
+            return None;
+        }
+        let is_str = matches!(oa[0], Ty::String);
+        let is_scalar = matches!(oa[0], Ty::Int | Ty::Float | Ty::Bool);
+        (is_str || is_scalar).then_some((ok_ty, is_str))
+    }
+
     /// The `(record, Int)` Ok payload of a `Result[(R, Int), String]`, when the
     /// record half is a real aggregate (not a String). `None` for any other
     /// Result shape.
@@ -403,24 +422,7 @@ impl LowerCtx {
         expr: &IrExpr,
         result_ty: &Ty,
     ) -> Option<ValueId> {
-        use almide_lang::types::constructor::TypeConstructorId;
-        let ok_ty = match result_ty {
-            Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2 && matches!(a[1], Ty::String) =>
-            {
-                &a[0]
-            }
-            _ => return None,
-        };
-        let leaf = match ok_ty {
-            Ty::Applied(TypeConstructorId::Option, oa) if oa.len() == 1 => &oa[0],
-            _ => return None,
-        };
-        let is_str = matches!(leaf, Ty::String);
-        let is_scalar = matches!(leaf, Ty::Int | Ty::Float | Ty::Bool);
-        if !is_str && !is_scalar {
-            return None;
-        }
+        let (ok_ty, is_str) = Self::option_leaf_str_or_scalar(result_ty)?;
         let repr = repr_of(result_ty).ok()?;
         match &expr.kind {
             IrExprKind::ResultOk { expr: inner } => {

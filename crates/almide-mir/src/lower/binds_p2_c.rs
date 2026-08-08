@@ -94,6 +94,40 @@ impl LowerCtx {
     /// Extracted from `Self::lower_bind_heap_call_module` (second-round split, cog
     /// reduction): the `faithful`-gated + self-host fn-name read-shape tracking,
     /// verbatim.
+    /// The READ-shapes a FAITHFUL self-host result seeds.
+    ///
+    /// A `List[scalar]` or `List[heap]` result (`string.split`/`chars`/`lines` →
+    /// `List[String]`, or a heap-element list combinator) is a REAL, POPULATED
+    /// nested-ownership block whose slots hold owned element HANDLES — so a
+    /// value-position `xs[i]` over the bound var can LoadHandle element i at
+    /// `$elem_addr` (the heap-element borrow path in
+    /// `try_lower_heap_field_borrow`, gated on `materialized_lists`). Without
+    /// registering it, `parts[i]` fell to the container-grain `Dup` of the WHOLE
+    /// list and a String consumer read the list HEADER bytes. Narrowed to
+    /// `List[heap]` (NOT the broader Option/Result/Map that `is_heap_elem_list_ty`
+    /// also matches) — only a real list is `[i]`-indexable here.
+    ///
+    /// A RECORD/TUPLE result (`list.partition` → (List, List)) seeds the same
+    /// way — without it a `.0`/`.1` projection falls to the container-grain Dup
+    /// and a consumer reads the TUPLE header (`list.len(result.0)` returned the
+    /// tuple's len 2, not the slot list's 5 — the pipe_chain partition
+    /// miscompile, 2026-07-17). READ-shape ONLY: the drop stays the pre-existing
+    /// flat one (re-routing it through `record_masks` here imbalanced the
+    /// ownership cert — the callee's fills are opaque to the caller's witness;
+    /// the Named arm's mask rides a different accounting).
+    fn seed_faithful_read_shape(&mut self, dst: ValueId, ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let list_shape = is_scalar_elem_list_ty(ty)
+            || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && is_heap_ty(&a[0]));
+        if list_shape {
+            self.materialized_lists.insert(dst);
+        }
+        if self.aggregate_field_tys(ty).is_some() {
+            self.materialized_aggregates.insert(dst);
+        }
+    }
+
     fn seed_call_module_heap_read_shape(
         &mut self,
         dst: ValueId,
@@ -102,34 +136,8 @@ impl LowerCtx {
         func: &str,
         faithful: bool,
     ) {
-        if is_scalar_elem_list_ty(ty) && faithful {
-            self.materialized_lists.insert(dst);
-        }
-        // A faithful `List[heap]` result (`string.split`/`chars`/`lines` → `List[String]`,
-        // or a heap-element list combinator) is ALSO a REAL, POPULATED nested-ownership block
-        // whose slots hold owned element HANDLES — so a value-position `xs[i]` over the bound
-        // var can LoadHandle element i at `$elem_addr` (the heap-element borrow path in
-        // `try_lower_heap_field_borrow`, gated on `materialized_lists`). Without registering
-        // it, `parts[i]` fell to the container-grain `Dup` of the WHOLE list → a String
-        // consumer read the list HEADER bytes (the `string.split`-subscript miscompiles).
-        // Narrowed to `List[heap]` (NOT the broader Option/Result/Map that
-        // `is_heap_elem_list_ty` also matches) — only a real list is `[i]`-indexable here.
-        if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                if a.len() == 1 && is_heap_ty(&a[0]))
-            && faithful
-        {
-            self.materialized_lists.insert(dst);
-        }
-        // A self-host returning a RECORD/TUPLE (`list.partition` → (List, List)):
-        // seed the READ-shape — without it a `.0`/`.1` projection falls to the
-        // container-grain Dup and a consumer reads the TUPLE header
-        // (list.len(result.0) returned the tuple's len 2, not the slot list's 5 —
-        // the pipe_chain partition miscompile, 2026-07-17). READ-shape ONLY: the
-        // drop stays the pre-existing flat one (re-routing it through record_masks
-        // here imbalanced the ownership cert — the callee's fills are opaque to
-        // the caller's witness; the Named arm's mask rides a different accounting).
-        if faithful && self.aggregate_field_tys(ty).is_some() {
-            self.materialized_aggregates.insert(dst);
+        if faithful {
+            self.seed_faithful_read_shape(dst, ty);
         }
         // A BORROW result (`prim.load_str` of a list slot — the list still owns it) is NOT
         // added to the scope-end drop set; everything else is a fresh owned value.

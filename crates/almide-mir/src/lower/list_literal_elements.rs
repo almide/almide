@@ -137,7 +137,6 @@ impl LowerCtx {
             ListElemArm::Decline => return None,
             ListElemArm::Fallthrough => {}
         }
-        return Some(Some(self.lower_owned_heap_field(e_ref)?));
         Some(Some(self.lower_owned_heap_field(e_ref)?))
     }
 
