@@ -263,4 +263,4 @@ Almide 1.0 = ALL of:
 | 定期リリース | Rust (6 週), Ruby (年次), TS (3 ヶ月) | 月次/隔月 |
 | tooling > marketing | Gleam (playground, cheatsheets) | WASM playground |
 
-詳細: [docs/research/lang-lessons-*.md](../research/)
+詳細だった `docs/research/lang-lessons-*.md` はツリーから外した（git 履歴に残る）。
