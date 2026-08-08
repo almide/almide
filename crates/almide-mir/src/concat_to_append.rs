@@ -247,92 +247,118 @@ fn match_str_window(ops: &[Op], i: usize, occ: &BTreeMap<ValueId, usize>) -> boo
 /// eliminated — see `match_window`) and the heap-element `__list_concat_rc`
 /// window is RENAMED in place (temp kept — see `match_rc_window`).
 pub fn rewrite_self_append(functions: &mut [MirFunction]) {
-    let mut vals: Vec<ValueId> = Vec::new();
     for f in functions.iter_mut() {
-        if !f.ops.iter().any(|op| matches!(op,
-            Op::CallFn { name, .. } if name == "__list_concat" || name == "__list_concat_rc" || name == "__str_concat"))
-        {
+        if !has_concat_call(&f.ops) {
             continue;
         }
-        let mut occ: BTreeMap<ValueId, usize> = BTreeMap::new();
-        let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
-        for (k, op) in f.ops.iter().enumerate() {
-            vals.clear();
-            crate::render_wasm::op_values(op, &mut vals);
-            for v in &vals {
-                *occ.entry(*v).or_insert(0) += 1;
-            }
-            match op {
-                Op::Alloc { dst, .. } | Op::ConstInt { dst, .. } => {
-                    def_at.insert(*dst, k);
-                }
-                _ => {}
-            }
-        }
-        let mut i = 0;
-        let mut out: Vec<Op> = Vec::with_capacity(f.ops.len());
-        while i < f.ops.len() {
-            // Minimum window = the 4-op head plus the trailing drop.
-            if i + WINDOW_HEAD + 1 <= f.ops.len() {
-                if let Some((e, d, x, drop_at)) = match_window(&f.ops, i, &occ) {
-                    out.push(Op::CallFn {
-                        dst: Some(d),
-                        name: "__list_append1".to_string(),
-                        args: vec![CallArg::Handle(x), CallArg::Scalar(e)],
-                        result: Some(crate::Repr::Ptr {
-                            layout: crate::PLACEHOLDER_LAYOUT,
-                        }),
-                    });
-                    out.push(Op::Drop { v: x });
-                    out.push(Op::SetLocal { local: x, src: d });
-                    // Keep the straight-line ops between the rebind and the
-                    // temp's trailing drop verbatim; only the drop vanishes
-                    // (the temp no longer exists).
-                    for k in i + WINDOW_HEAD..drop_at {
-                        out.push(f.ops[k].clone());
-                    }
-                    i = drop_at + 1;
-                    continue;
-                }
-            }
-            // The string window: rename in place (see match_str_window).
-            if i + 3 <= f.ops.len() && match_str_window(&f.ops, i, &occ) {
-                let Op::CallFn {
-                    dst, args, result, ..
-                } = f.ops[i].clone()
-                else {
-                    unreachable!("match_str_window matched a non-CallFn head")
-                };
-                out.push(Op::CallFn {
-                    dst,
-                    name: "__str_append1".to_string(),
-                    args,
-                    result,
-                });
-                i += 1;
-                continue;
-            }
-            // The heap-element window: rename the callee in place, keep every
-            // other op (drop + rebind + the temp's build and trailing drop).
-            if i + 3 <= f.ops.len() && match_rc_window(&f.ops, i, &occ, &def_at) {
-                let Op::CallFn {
-                    dst, args, result, ..
-                } = f.ops[i].clone()
-                else {
-                    unreachable!("match_rc_window matched a non-CallFn head")
-                };
-                out.push(Op::CallFn {
-                    dst,
-                    name: "__list_append1_rc".to_string(),
-                    args,
-                    result,
-                });
-                i += 1;
-                continue;
-            }
-            out.push(f.ops[i].clone());
-            i += 1;
-        }
-        f.ops = out;
+        let (occ, def_at) = value_census(&f.ops);
+        f.ops = rewrite_ops(&f.ops, &occ, &def_at);
     }
+}
+
+/// Does this function call one of the concat runtime fns this pass rewrites?
+fn has_concat_call(ops: &[Op]) -> bool {
+    ops.iter().any(|op| {
+        matches!(op,
+            Op::CallFn { name, .. }
+                if name == "__list_concat" || name == "__list_concat_rc" || name == "__str_concat")
+    })
+}
+
+/// Per-value occurrence counts (the single-use test every window relies on) and
+/// the op index each value is DEFINED at.
+fn value_census(ops: &[Op]) -> (BTreeMap<ValueId, usize>, BTreeMap<ValueId, usize>) {
+    let mut occ: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut vals: Vec<ValueId> = Vec::new();
+    for (k, op) in ops.iter().enumerate() {
+        vals.clear();
+        crate::render_wasm::op_values(op, &mut vals);
+        for v in &vals {
+            *occ.entry(*v).or_insert(0) += 1;
+        }
+        if let Op::Alloc { dst, .. } | Op::ConstInt { dst, .. } = op {
+            def_at.insert(*dst, k);
+        }
+    }
+    (occ, def_at)
+}
+
+/// Scan the op list left to right, replacing each recognized concat window with
+/// its append form and copying everything else through.
+fn rewrite_ops(
+    ops: &[Op],
+    occ: &BTreeMap<ValueId, usize>,
+    def_at: &BTreeMap<ValueId, usize>,
+) -> Vec<Op> {
+    let mut out: Vec<Op> = Vec::with_capacity(ops.len());
+    let mut i = 0;
+    while i < ops.len() {
+        if let Some(next) = push_list_append_window(ops, i, occ, &mut out) {
+            i = next;
+            continue;
+        }
+        if let Some(next) = push_renamed_window(ops, i, occ, def_at, &mut out) {
+            i = next;
+            continue;
+        }
+        out.push(ops[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// The 4-op list-concat window: emit `__list_append1`, free the old list, rebind
+/// it to the result, then keep the straight-line ops up to the temp's trailing
+/// drop verbatim (only the drop vanishes — the temp no longer exists). Returns
+/// the next index when it fired.
+fn push_list_append_window(
+    ops: &[Op],
+    i: usize,
+    occ: &BTreeMap<ValueId, usize>,
+    out: &mut Vec<Op>,
+) -> Option<usize> {
+    // Minimum window = the 4-op head plus the trailing drop.
+    if i + WINDOW_HEAD + 1 > ops.len() {
+        return None;
+    }
+    let (e, d, x, drop_at) = match_window(ops, i, occ)?;
+    out.push(Op::CallFn {
+        dst: Some(d),
+        name: "__list_append1".to_string(),
+        args: vec![CallArg::Handle(x), CallArg::Scalar(e)],
+        result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+    });
+    out.push(Op::Drop { v: x });
+    out.push(Op::SetLocal { local: x, src: d });
+    for k in i + WINDOW_HEAD..drop_at {
+        out.push(ops[k].clone());
+    }
+    Some(drop_at + 1)
+}
+
+/// The string and heap-element windows: both keep every op and only RENAME the
+/// callee in place (see `match_str_window` / `match_rc_window`).
+fn push_renamed_window(
+    ops: &[Op],
+    i: usize,
+    occ: &BTreeMap<ValueId, usize>,
+    def_at: &BTreeMap<ValueId, usize>,
+    out: &mut Vec<Op>,
+) -> Option<usize> {
+    if i + 3 > ops.len() {
+        return None;
+    }
+    let renamed = if match_str_window(ops, i, occ) {
+        "__str_append1"
+    } else if match_rc_window(ops, i, occ, def_at) {
+        "__list_append1_rc"
+    } else {
+        return None;
+    };
+    let Op::CallFn { dst, args, result, .. } = ops[i].clone() else {
+        unreachable!("a matched window head is always a CallFn")
+    };
+    out.push(Op::CallFn { dst, name: renamed.to_string(), args, result });
+    Some(i + 1)
 }

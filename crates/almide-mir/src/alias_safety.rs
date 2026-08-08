@@ -96,6 +96,23 @@ const TRUSTED_FRESH_ALLOCATORS: &[&str] = &["__list_concat", "__list_concat_rc",
 /// One forward step of the "which values are possibly aliased right now"
 /// dataflow fact, applied in place to `escaped`. See the module doc for the
 /// `SetLocal` reset and the fixpoint argument this relies on.
+/// Every heap `Handle` arg of a call escapes: the callee is opaque and may
+/// `Dup` it past the return.
+fn taint_handle_args(args: &[CallArg], escaped: &mut HashSet<ValueId>) {
+    for a in args {
+        if let CallArg::Handle(id) = a {
+            escaped.insert(*id);
+        }
+    }
+}
+
+/// Taint an optional destination, when the op has one.
+fn taint_opt(dst: Option<ValueId>, escaped: &mut HashSet<ValueId>) {
+    if let Some(d) = dst {
+        escaped.insert(d);
+    }
+}
+
 fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
     match op {
         // Probe charge: no values, no aliases. The dyn charge only READS
@@ -129,31 +146,17 @@ fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
         // result, never `dup`-and-return an argument. `Call`/`CallImport`/
         // `CallIndirect` have no such whitelist (a closure callee especially
         // is UNANALYZABLE — see `Op::CallIndirect`'s own doc comment).
-        Op::CallFn {
-            dst, name, args, ..
-        } => {
-            for a in args {
-                if let CallArg::Handle(id) = a {
-                    escaped.insert(*id);
-                }
-            }
-            if let Some(d) = dst {
-                if !TRUSTED_FRESH_ALLOCATORS.contains(&name.as_str()) {
-                    escaped.insert(*d);
-                }
+        Op::CallFn { dst, name, args, .. } => {
+            taint_handle_args(args, escaped);
+            if !TRUSTED_FRESH_ALLOCATORS.contains(&name.as_str()) {
+                taint_opt(*dst, escaped);
             }
         }
         Op::Call { dst, args, .. }
         | Op::CallImport { dst, args, .. }
         | Op::CallIndirect { dst, args, .. } => {
-            for a in args {
-                if let CallArg::Handle(id) = a {
-                    escaped.insert(*id);
-                }
-            }
-            if let Some(d) = dst {
-                escaped.insert(*d);
-            }
+            taint_handle_args(args, escaped);
+            taint_opt(*dst, escaped);
         }
         // Scalar-element list literals only (see the op's own doc comment) —
         // a heap-typed value cannot legally appear in `elems`, but one that
@@ -172,10 +175,10 @@ fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
         // membership is RESET (not unioned) to `src`'s CURRENT membership —
         // see the module doc's "why a fixpoint" section.
         Op::SetLocal { local, src } => {
-            if escaped.contains(src) {
+            let src_escaped = escaped.contains(src);
+            escaped.remove(local);
+            if src_escaped {
                 escaped.insert(*local);
-            } else {
-                escaped.remove(local);
             }
         }
         // Defines only (no use of an existing value's identity).
