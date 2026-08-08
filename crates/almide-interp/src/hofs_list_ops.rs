@@ -113,10 +113,6 @@ impl<'a> Interpreter<'a> {
         let n = items.len();
         // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
         let count = |i: i64| -> usize { if i < 0 { n } else { (i as usize).min(n) } };
-        // An unsigned index; `None` when out of range (the no-op / default path).
-        let index = |i: i64| -> Option<usize> {
-            if i < 0 { None } else { let u = i as usize; (u < n).then_some(u) }
-        };
         let int_arg = |k: usize| -> Option<i64> {
             match args.get(k) { Some(Value::Int(i)) => Some(*i), _ => None }
         };

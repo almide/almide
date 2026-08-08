@@ -218,6 +218,43 @@ impl Flow {
     }
 }
 
+/// Index named record types by their sorted field-name set, so a record VALUE
+/// can recover the nominal name its repr prints.
+///
+/// A field-name set shared by two distinct record types is ambiguous → drop it
+/// (sentinel-marked in `ambiguous`, which also stops a later decl from
+/// re-adding it), so the repr falls back to anonymous-record rendering rather
+/// than guessing a name.
+fn index_named_records(program: &IrProgram) -> HashMap<Vec<Sym>, (Sym, Vec<Sym>)> {
+    let mut named_records: HashMap<Vec<Sym>, (Sym, Vec<Sym>)> = HashMap::new();
+    let mut ambiguous: HashSet<Vec<Sym>> = HashSet::new();
+    let record_decls = program
+        .type_decls
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    for decl in record_decls {
+        let almide_ir::IrTypeDeclKind::Record { fields } = &decl.kind else { continue };
+        let decl_order: Vec<Sym> = fields.iter().map(|f| f.name).collect();
+        let mut key = decl_order.clone();
+        key.sort();
+        if ambiguous.contains(&key) {
+            continue;
+        }
+        match named_records.get(&key) {
+            // Two record types with identical field-name sets: ambiguous.
+            Some(prev) if prev.0 != decl.name => {
+                named_records.remove(&key);
+                ambiguous.insert(key);
+            }
+            Some(_) => {}
+            None => {
+                named_records.insert(key, (decl.name, decl_order));
+            }
+        }
+    }
+    named_records
+}
+
 impl<'a> Interpreter<'a> {
     pub fn new(program: &'a IrProgram) -> Self {
         let mut fns = HashMap::new();
@@ -248,35 +285,7 @@ impl<'a> Interpreter<'a> {
                 module_fns.insert((m.name, f.name), f);
             }
         }
-
-        // Index named record types by their sorted field-name set. A set shared
-        // by two distinct record types is ambiguous → drop it (sentinel-marked),
-        // so the repr falls back to anonymous-record rendering rather than
-        // guessing a name.
-        let mut named_records: HashMap<Vec<Sym>, (Sym, Vec<Sym>)> = HashMap::new();
-        let mut ambiguous: std::collections::HashSet<Vec<Sym>> = std::collections::HashSet::new();
-        let record_decls = program.type_decls.iter().chain(
-            program.modules.iter().flat_map(|m| m.type_decls.iter()),
-        );
-        for decl in record_decls {
-            if let almide_ir::IrTypeDeclKind::Record { fields } = &decl.kind {
-                let decl_order: Vec<Sym> = fields.iter().map(|f| f.name).collect();
-                let mut key = decl_order.clone();
-                key.sort();
-                if ambiguous.contains(&key) {
-                    continue;
-                }
-                if let Some(prev) = named_records.get(&key) {
-                    // Two record types with identical field-name sets: ambiguous.
-                    if prev.0 != decl.name {
-                        named_records.remove(&key);
-                        ambiguous.insert(key);
-                    }
-                } else {
-                    named_records.insert(key, (decl.name, decl_order));
-                }
-            }
-        }
+        let named_records = index_named_records(program);
 
         Interpreter {
             program,
