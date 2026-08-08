@@ -2734,3 +2734,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_tail_result.almd", class = "fixture" },
 ]
+
+# ── A DIVERGING CALL IN A BRANCH ARM RUNS, AND ITS EXIT CODE IS THE PROCESS'S ──
+[[contract]]
+id        = "C-219"
+spec      = "ALS-T6"
+title     = "a Never-typed call in a branch arm runs on both targets and sets the exit code"
+statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 on wasm while native exited 3 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a type the match forgot to name rather than through an unsupported shape. `Never` now rides with `Unit` in that dispatch: both produce no value by construction, which is the property the arm needs. The CONSTANT-condition form (`guard false else process.exit(3)`) is folded earlier (#1117) into a scalar tail that is outside the value subset, and STRICT value mode walls it honestly rather than deferring it to Const 0 — a wall, not a wrong answer, and tracked separately."
+since     = "0.56.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/guard_else_exit_code.almd", class = "fixture" },
+]
