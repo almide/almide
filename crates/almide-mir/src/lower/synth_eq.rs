@@ -370,6 +370,27 @@ fn named_variant(layouts: &crate::lower::VariantLayouts, ty: &Ty) -> Option<Stri
     layouts.by_type.contains_key(&n).then_some(n)
 }
 
+/// The CallFn count for a `List[E]` field: one call for a variant-element
+/// list-helper, one for an element the module-eq table covers (`list.eq_int` /
+/// `eq_str` / … / `eq_opt_int` / the nested forms), none otherwise.
+fn list_eq_call_count(layouts: &crate::lower::VariantLayouts, es: &[Ty]) -> usize {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    if es.len() != 1 {
+        return 0;
+    }
+    if named_variant(layouts, &es[0]).is_some() {
+        return 1;
+    }
+    let module_eq = match &es[0] {
+        Ty::Int | Ty::String | Ty::Float | Ty::Bool => true,
+        t if crate::lower::is_value_ty(t) => true,
+        Ty::Applied(TC::List, i2) => i2.len() == 1 && matches!(i2[0], Ty::Int | Ty::Float | Ty::String),
+        Ty::Applied(TC::Option, i2) => i2.len() == 1 && matches!(i2[0], Ty::Int | Ty::Bool),
+        _ => false,
+    };
+    usize::from(module_eq)
+}
+
 /// The CallFn count `typed_slot_eq` emits for ONE field compare inside a
 /// generated helper body — mirrors the engine's field arms exactly.
 fn field_eq_call_count(layouts: &crate::lower::VariantLayouts, fty: &Ty) -> usize {
@@ -381,25 +402,7 @@ fn field_eq_call_count(layouts: &crate::lower::VariantLayouts, fty: &Ty) -> usiz
         return 1; // the helper call (self or mutual — both routed by the in-progress set)
     }
     if let Ty::Applied(TC::List, es) = fty {
-        if es.len() == 1 {
-            if named_variant(layouts, &es[0]).is_some() {
-                return 1; // the list-helper call
-            }
-            // the module-eq table (list.eq_int / eq_str / … / eq_opt_int / nested)
-            let inner_mod_eq = match &es[0] {
-                Ty::Int | Ty::String | Ty::Float | Ty::Bool => true,
-                t if crate::lower::is_value_ty(t) => true,
-                Ty::Applied(TC::List, i2) => {
-                    i2.len() == 1 && matches!(i2[0], Ty::Int | Ty::Float | Ty::String)
-                }
-                Ty::Applied(TC::Option, i2) => {
-                    i2.len() == 1 && matches!(i2[0], Ty::Int | Ty::Bool)
-                }
-                _ => false,
-            };
-            return usize::from(inner_mod_eq);
-        }
-        return 0;
+        return list_eq_call_count(layouts, es);
     }
     if let Ty::Applied(TC::Option, oa) = fty {
         if oa.len() == 1 {
