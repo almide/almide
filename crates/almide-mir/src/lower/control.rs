@@ -585,13 +585,17 @@ impl LowerCtx {
                         && matches!(tail.ty, Ty::Unit | Ty::Never)
                         && contains_any_call(tail)
                     {
-                        return Err(LowerError::Unsupported(format!(
-                            "a unit-typed arm tail ({}) with calls reached the \
-                             deferred-value path — the arm would lower to zero \
-                             ops and drop the effect (the #1124 class); this \
-                             tail shape needs its own dispatch arm",
-                            crate::lower::kind_name(other)
-                        )));
+                        return Err(LowerError::at(
+                            tail.span,
+                            format!(
+                                "a unit-typed arm tail ({}) with calls reached \
+                                 the deferred-value path — the arm would lower \
+                                 to zero ops and drop the effect (the #1124 \
+                                 class); this tail shape needs its own \
+                                 dispatch arm",
+                                crate::lower::kind_name(other)
+                            ),
+                        ));
                     }
                     self.record_elided_calls(tail)
                 }
