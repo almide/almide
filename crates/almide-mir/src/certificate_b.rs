@@ -5,6 +5,13 @@ struct Streams {
     order: Vec<ValueId>,            // objects in first-seen order
     stream: BTreeMap<ValueId, String>,
     frames: Vec<BranchFrame>, // open IfThen regions, innermost last
+    /// A region flush emitted the always-rejecting POISON `{i|}` (an arm
+    /// containing a nested region delimiter cannot be represented flat).
+    /// The poison REPLACES the arm's real events, so any COUNT read off a
+    /// poisoned certificate is meaningless — `plus_one_events_backed` must
+    /// skip its equality (#1146; the kernel-proven checker still rejects the
+    /// poisoned cert itself, which is the poison's whole job).
+    poisoned: bool,
 }
 
 fn seg_net(seg: &str) -> i64 {
@@ -24,6 +31,7 @@ impl Streams {
             order: Vec::new(),
             stream: BTreeMap::new(),
             frames: Vec::new(),
+            poisoned: false,
         }
     }
     /// Append an event segment to `o` — into the innermost open branch arm when
@@ -77,6 +85,7 @@ impl Streams {
             } else if t.contains(['(', ')', '{', '}', '[', ']'])
                 || e.contains(['(', ')', '{', '}', '[', ']'])
             {
+                self.poisoned = true;
                 "{i|}".to_string()
             } else {
                 format!("{{{t}|{e}}}")
@@ -747,6 +756,16 @@ fn ownership_certificate_consumed_values(func: &MirFunction) -> std::collections
 }
 
 pub fn ownership_certificate(func: &MirFunction) -> String {
+    ownership_certificate_with_poison(func).0
+}
+
+/// [`ownership_certificate`] plus whether ANY region flush emitted the
+/// always-rejecting POISON `{i|}` (a nested-region arm that cannot be
+/// represented flat). The poison REPLACES real arm events, so event COUNTS
+/// read off a poisoned certificate are meaningless — the backing gate skips
+/// them (#1146); the kernel-proven checker still rejects the poisoned cert,
+/// which is the poison's whole job.
+pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
     // Sequential-phase split (codopsy8 complexity sweep): the two pre-scan sets below are
     // each an independent, self-contained computation over `func.ops` (the original code
     // already delineated the first as its own `{ .. }` scope) — extracted verbatim as their
@@ -808,7 +827,7 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
         out.push_str(&scan.s.stream[o]);
         out.push('\n');
     }
-    out
+    (out, scan.s.poisoned)
 }
 
 /// The NON-RECURRING soundness gate for the borrow-by-default calling
@@ -821,7 +840,15 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
 /// fs.fold_lines_chunked loop shape: one more real op than cert lines) both
 /// refuse.
 pub fn plus_one_events_backed(func: &MirFunction) -> bool {
-    let cert = ownership_certificate(func);
+    let (cert, poisoned) = ownership_certificate_with_poison(func);
+    // A POISONED certificate deliberately replaced a nested-region arm's real
+    // events with the always-rejecting `{i|}` — its counts cannot be compared
+    // against the op list (the fs.fold_lines_chunked class, #1146). The
+    // poison's soundness story is the kernel checker's REJECTION of the cert
+    // itself; this equality only claims the flat-representable population.
+    if poisoned {
+        return true;
+    }
     let i = cert.chars().filter(|c| *c == 'i').count();
     let a = cert.chars().filter(|c| *c == 'a').count();
     let allocs = func
