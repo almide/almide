@@ -392,34 +392,69 @@ pub(crate) fn kind_name(k: &IrExprKind) -> &'static str {
     // Named precisely so the corpus-wall `<other>` buckets break down into the
     // exact expression forms still to admit (an evidence-based roadmap, the same
     // discipline as `call_target_kind`). Unnamed kinds remain `<other>`.
-    match k {
+    //
+    // Three tables, split by role only to keep each arm list readable: leaves and
+    // containers, then the operators and control flow, then the wrappers.
+    kind_name_leaf(k)
+        .or_else(|| kind_name_control(k))
+        .or_else(|| kind_name_wrapper(k))
+        .unwrap_or("<other>")
+}
+
+/// Literals, variables and the container constructors/accessors.
+fn kind_name_leaf(k: &IrExprKind) -> Option<&'static str> {
+    let name = match k {
         IrExprKind::LitInt { .. } => "LitInt",
         IrExprKind::LitFloat { .. } => "LitFloat",
         IrExprKind::LitStr { .. } => "LitStr",
         IrExprKind::LitBool { .. } => "LitBool",
         IrExprKind::Unit => "Unit",
         IrExprKind::Var { .. } => "Var",
+        IrExprKind::FnRef { .. } => "FnRef",
         IrExprKind::List { .. } => "List",
         IrExprKind::Record { .. } => "Record",
+        IrExprKind::SpreadRecord { .. } => "SpreadRecord",
         IrExprKind::Tuple { .. } => "Tuple",
-        IrExprKind::Block { .. } => "Block",
-        IrExprKind::Call { .. } => "Call",
-        IrExprKind::RuntimeCall { .. } => "RuntimeCall",
-        IrExprKind::BinOp { .. } => "BinOp",
-        IrExprKind::UnOp { .. } => "UnOp",
-        IrExprKind::If { .. } => "If",
-        IrExprKind::Match { .. } => "Match",
+        IrExprKind::MapLiteral { .. } => "MapLiteral",
+        IrExprKind::EmptyMap => "EmptyMap",
+        IrExprKind::Range { .. } => "Range",
+        IrExprKind::StringInterp { .. } => "StringInterp",
         IrExprKind::Member { .. } => "Member",
         IrExprKind::TupleIndex { .. } => "TupleIndex",
         IrExprKind::IndexAccess { .. } => "IndexAccess",
         IrExprKind::MapAccess { .. } => "MapAccess",
-        IrExprKind::Range { .. } => "Range",
-        IrExprKind::MapLiteral { .. } => "MapLiteral",
-        IrExprKind::EmptyMap => "EmptyMap",
-        IrExprKind::StringInterp { .. } => "StringInterp",
+        _ => return None,
+    };
+    Some(name)
+}
+
+/// Operators, calls, control flow and the loop forms.
+fn kind_name_control(k: &IrExprKind) -> Option<&'static str> {
+    let name = match k {
+        IrExprKind::BinOp { .. } => "BinOp",
+        IrExprKind::UnOp { .. } => "UnOp",
+        IrExprKind::If { .. } => "If",
+        IrExprKind::Match { .. } => "Match",
+        IrExprKind::Block { .. } => "Block",
+        IrExprKind::Call { .. } => "Call",
+        IrExprKind::TailCall { .. } => "TailCall",
+        IrExprKind::RuntimeCall { .. } => "RuntimeCall",
         IrExprKind::Lambda { .. } => "Lambda",
         IrExprKind::ClosureCreate { .. } => "ClosureCreate",
-        IrExprKind::FnRef { .. } => "FnRef",
+        IrExprKind::ForIn { .. } => "ForIn",
+        IrExprKind::While { .. } => "While",
+        IrExprKind::Fan { .. } => "Fan",
+        IrExprKind::Break => "Break",
+        IrExprKind::Continue => "Continue",
+        IrExprKind::IterChain { .. } => "IterChain",
+        _ => return None,
+    };
+    Some(name)
+}
+
+/// The Result/Option constructors and the ownership wrappers.
+fn kind_name_wrapper(k: &IrExprKind) -> Option<&'static str> {
+    let name = match k {
         IrExprKind::ResultOk { .. } => "ResultOk",
         IrExprKind::ResultErr { .. } => "ResultErr",
         IrExprKind::OptionSome { .. } => "OptionSome",
@@ -427,21 +462,14 @@ pub(crate) fn kind_name(k: &IrExprKind) -> &'static str {
         IrExprKind::Try { .. } => "Try",
         IrExprKind::Unwrap { .. } => "Unwrap",
         IrExprKind::UnwrapOr { .. } => "UnwrapOr",
-        IrExprKind::ForIn { .. } => "ForIn",
-        IrExprKind::While { .. } => "While",
-        IrExprKind::Fan { .. } => "Fan",
-        IrExprKind::Break => "Break",
-        IrExprKind::Continue => "Continue",
-        IrExprKind::TailCall { .. } => "TailCall",
-        IrExprKind::IterChain { .. } => "IterChain",
         IrExprKind::Clone { .. } => "Clone",
         IrExprKind::Deref { .. } => "Deref",
         IrExprKind::Borrow { .. } => "Borrow",
         IrExprKind::ToVec { .. } => "ToVec",
         IrExprKind::BoxNew { .. } => "BoxNew",
-        IrExprKind::SpreadRecord { .. } => "SpreadRecord",
-        _ => "<other>",
-    }
+        _ => return None,
+    };
+    Some(name)
 }
 
 /// BETA-REDUCE a DIRECT lambda application (`(λ(p) => body)(arg)` — the pipe-into-
