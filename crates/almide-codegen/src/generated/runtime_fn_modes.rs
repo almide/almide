@@ -246,6 +246,8 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fs_create_temp_file" => &[false],
         "almide_rt_fs_exists" => &[false],
         "almide_rt_fs_file_size" => &[false],
+        "almide_rt_fs_fold_lines" => &[false, false, false],
+        "almide_rt_fs_for_each_line" => &[false, false],
         "almide_rt_fs_glob" => &[false],
         "almide_rt_fs_is_dir" => &[false],
         "almide_rt_fs_is_file" => &[false],

@@ -2746,3 +2746,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_else_exit_code.almd", class = "fixture" },
 ]
+
+# ── STREAMING LINE WALKERS: O(LONGEST LINE) MEMORY, READ_LINES SEMANTICS ──
+[[contract]]
+id        = "C-220"
+spec      = "ALS-R6"
+title     = "fs streaming line walkers fold/each with read_lines line semantics"
+statement = "The streaming family {`fs.fold_lines`, `fs.for_each_line`} walks a file line-by-line through a buffered reader without materializing a `List[String]` — peak memory is O(longest line), not O(file) (measured: 2.2 GB eager vs 1 MB streaming on a 632 MB input, research/benchmark/perf/README.md). Line semantics byte-match `fs.read_lines`: split on \\n, one trailing \\r stripped per line, no phantom empty line after a trailing newline, a final newline-less line still yielded, and a missing file is the same err(message) the eager reader produces. An empty file folds to `init` with zero callback invocations. One deliberate divergence, inherent to streaming: a mid-file read error surfaces AFTER the callbacks for earlier lines have run — the eager reader fails before yielding anything. The family is exactly these two walkers (tests/fs_streaming_family_gate_test.rs); transforming pipelines belong on fold_lines, the eager List belongs to read_lines, and the ADR-0006 fallible callback forms are the tracked follow-up cell. The surface is native-only today — the callback crosses the runtime boundary, and generic HOF closures are the wasm defunctionalization frontier (#1134); the wasm render walls honestly, and the pinned fixture binds the wasm leg on arrival, C-215-style."
+since     = "0.56.1"
+status    = "active"
+evidence  = [
+  { path = "spec/stdlib/fs_streaming_test.almd", class = "fixture" },
+]

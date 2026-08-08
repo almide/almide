@@ -23,6 +23,51 @@ pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<String>, String> {
     std::fs::read_to_string(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(io_err)
 }
 
+// Streaming line readers: fold/each over a BufReader, never materializing the
+// file — peak memory is O(longest line), not O(file). Line semantics MUST
+// byte-match read_lines' `.lines()`: split on \n, strip one trailing \r, no
+// phantom empty line after a trailing newline, a final \n-less line still
+// yielded. One deliberate divergence from read_lines: a mid-file read error
+// (e.g. invalid UTF-8) surfaces AFTER the callbacks for earlier lines have
+// already run — inherent to streaming.
+pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, String) -> A>) -> Result<A, String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(io_err)?);
+    let mut acc = init;
+    let mut buf = String::new();
+    loop {
+        buf.clear();
+        if reader.read_line(&mut buf).map_err(io_err)? == 0 {
+            return Ok(acc);
+        }
+        if buf.ends_with('\n') {
+            buf.pop();
+            if buf.ends_with('\r') {
+                buf.pop();
+            }
+        }
+        acc = f(acc, buf.clone());
+    }
+}
+pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) -> Result<(), String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(io_err)?);
+    let mut buf = String::new();
+    loop {
+        buf.clear();
+        if reader.read_line(&mut buf).map_err(io_err)? == 0 {
+            return Ok(());
+        }
+        if buf.ends_with('\n') {
+            buf.pop();
+            if buf.ends_with('\r') {
+                buf.pop();
+            }
+        }
+        f(buf.clone());
+    }
+}
+
 // Absence-as-Option content readers (#1106 / ADR-0004 D4): `Ok(None)` ⇔ the
 // path (or a parent) does not exist; every other failure (permission, a
 // directory at the path, IO) keeps the err path with the same message the

@@ -74,10 +74,32 @@ if fs.exists("config.toml") then ...
 
 ### `fs.read_lines(path: String) -> Result[List[String], String]`
 
-Read a file as a list of lines
+Read a file as a list of lines. Materializes the whole file — for large
+inputs use `fs.fold_lines` / `fs.for_each_line` instead (O(longest line)
+memory, not O(file)).
 
 ```almd
 let lines = fs.read_lines("data.csv")
+```
+
+### `fs.fold_lines(path: String, init: A, f: (A, String) -> A) -> Result[A, String]`
+
+Fold over a file's lines without materializing them — line semantics
+byte-match `read_lines` (contract C-220). The default shape for aggregating
+a large file.
+
+```almd
+let total = fs.fold_lines("data.csv", 0, (acc, line) => acc + parse_row(line))!
+```
+
+### `fs.for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String]`
+
+Visit each line of a file in order without materializing the list. The
+callback may mutate captured `var`s.
+
+```almd
+var count = 0
+fs.for_each_line("data.csv", (line) => { count = count + 1 })!
 ```
 
 ### `fs.remove(path: String) -> Result[Unit, String]`
@@ -210,7 +232,7 @@ let ts = fs.modified_at("file.txt")
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (30 functions)
+## Signature index (32 functions)
 
 ```
 effect fs.read_text(path: String) -> String
@@ -222,6 +244,8 @@ effect fs.append(path: String, content: String) -> Unit
 effect fs.mkdir_p(path: String) -> Unit
 effect fs.exists(path: String) -> Bool
 effect fs.read_lines(path: String) -> List[String]
+effect fs.fold_lines(path: String, init: A, f: (A, String) -> A) -> A
+effect fs.for_each_line(path: String, f: (String) -> Unit) -> Unit
 effect fs.read_text_if_exists(path: String) -> Option[String]
 effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]
 effect fs.read_lines_if_exists(path: String) -> Option[List[String]]

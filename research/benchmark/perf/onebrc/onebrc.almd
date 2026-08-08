@@ -7,9 +7,10 @@
 //   almide run onebrc.almd -- gen 1000000 f.txt  # generate only
 //   almide run onebrc.almd -- agg f.txt          # aggregate an existing file only
 //
-// The aggregate phase deliberately uses the current eager fs.read_lines —
-// this benchmark doubles as the measurement of where a streaming line API
-// becomes necessary (peak RSS scales with file size, not station count).
+// The aggregate phase streams via fs.for_each_line (C-220) — peak RSS is
+// O(longest line) regardless of file size. It previously used the eager
+// fs.read_lines; that measurement (RSS ~4x file size, identical in the
+// same-shape Rust ref) is what motivated the streaming family.
 //
 // All temperature math is integer tenths (-99.9..99.9 => -999..999): no float
 // parsing or formatting, so output is byte-identical across implementations.
@@ -78,9 +79,8 @@ effect fn generate(n: Int, path: String) -> Unit = {
 }
 
 effect fn aggregate(path: String) -> String = {
-  let lines = fs.read_lines(path)!
   var stats: Map[String, Stats] = map.new()
-  for line in lines {
+  fs.for_each_line(path, (line) => {
     if string.is_empty(line) then () else {
       let parts = string.split(line, ";")
       let t = parse_tenths(parts[1])
@@ -94,7 +94,7 @@ effect fn aggregate(path: String) -> String = {
         none => map.insert(stats, parts[0], Stats { min: t, max: t, sum: t, count: 1 }),
       }
     }
-  }
+  })!
   let body = map.entries(stats)
     |> list.sort_by(((name, _)) => name)
     |> list.map(((name, s)) =>

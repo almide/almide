@@ -1,0 +1,74 @@
+// @contract: C-220
+// wasm:skip — the streaming line walkers are native-only today: the callback
+// crosses the runtime boundary, and generic HOF closures are the wasm
+// defunctionalization frontier (#1134). The wasm render walls honestly;
+// remove this skip when the wasm leg lands.
+// Streaming line walkers {fold_lines, for_each_line}: line-by-line over a
+// file with O(longest line) memory, line semantics byte-matching read_lines.
+import fs
+import testing
+
+effect fn tmp() -> String = fs.create_temp_dir("streaming")!
+
+test "fold_lines folds every line in order" {
+  let d = tmp()!
+  let p = d + "/data.txt"
+  fs.write(p, "a\nbb\nccc\n")!
+  assert_eq(fs.fold_lines(p, "", (acc, line) => acc + line)!, "abbccc")
+  assert_eq(fs.fold_lines(p, 0, (acc, line) => acc + string.len(line))!, 6)
+}
+
+test "for_each_line visits every line, captured var mutation works" {
+  let d = tmp()!
+  let p = d + "/data.txt"
+  fs.write(p, "x\ny\nz\n")!
+  var seen: List[String] = []
+  fs.for_each_line(p, (line) => { list.push(seen, line) })!
+  assert_eq(seen, ["x", "y", "z"])
+}
+
+test "empty file folds to init with zero callback invocations" {
+  let d = tmp()!
+  let p = d + "/empty.txt"
+  fs.write(p, "")!
+  assert_eq(fs.fold_lines(p, 41, (acc, line) => acc + 1000)!, 41)
+  var calls = 0
+  fs.for_each_line(p, (line) => {
+    calls = calls + 1
+  })!
+  assert_eq(calls, 0)
+}
+
+test "line semantics byte-match read_lines across edge shapes" {
+  let d = tmp()!
+  // trailing newline: no phantom empty line; final \n-less line still yielded;
+  // CRLF strips one \r; interior empty lines survive
+  let shapes = ["a\nb\n", "a\nb", "a\r\nb\r\n", "a\n\nb", ""]
+  for content in shapes {
+    let p = d + "/shape.txt"
+    fs.write(p, content)!
+    let eager = fs.read_lines(p)!
+    let streamed = fs.fold_lines(p, [], (acc, line) => acc + [line])!
+    assert_eq(streamed, eager)
+  }
+}
+
+test "a missing file is the same err as read_lines" {
+  let d = tmp()!
+  let missing = d + "/nope.txt"
+  testing.assert_err(fs.fold_lines(missing, 0, (acc, line) => acc))
+  testing.assert_err(fs.for_each_line(missing, (line) => ()))
+}
+
+test "fold_lines drives a Map accumulator (the aggregation shape)" {
+  let d = tmp()!
+  let p = d + "/kv.txt"
+  fs.write(p, "a;1\nb;2\na;3\n")!
+  let counts = fs.fold_lines(p, map.new(), (acc, line) => {
+    let parts = string.split(line, ";")
+    let key = parts[0]
+    map.set(acc, key, map.get_or(acc, key, 0) + 1)
+  })!
+  assert_eq(map.get(counts, "a"), some(2))
+  assert_eq(map.get(counts, "b"), some(1))
+}

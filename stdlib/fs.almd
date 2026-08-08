@@ -38,6 +38,19 @@ effect fn exists(path: String) -> Bool = _
 @intrinsic("almide_rt_fs_read_lines")
 effect fn read_lines(path: String) -> Result[List[String], String] = _
 
+// Streaming line readers: walk the file line-by-line without materializing a
+// List[String] — peak memory is O(longest line), not O(file). Line semantics
+// byte-match read_lines. The family is exactly {fold_lines, for_each_line}
+// (tests/fs_streaming_family_gate): map/filter over lines are intentional
+// omissions (a transforming pipeline belongs on fold_lines; an eager List
+// belongs to read_lines), and the ADR-0006 fallible callback forms are the
+// tracked follow-up cell, not yet grown.
+@intrinsic("almide_rt_fs_fold_lines")
+effect fn fold_lines[A](path: String, init: A, f: fn(A, String) -> A) -> Result[A, String] = _
+
+@intrinsic("almide_rt_fs_for_each_line")
+effect fn for_each_line(path: String, f: fn(String) -> Unit) -> Result[Unit, String] = _
+
 // Absence-as-Option content readers (#1106 / ADR-0004 D4): none ⇔ the path
 // does not exist (parents included); err = permission / directory / IO. The
 // family covers exactly the content readers — metadata (stat/file_size/

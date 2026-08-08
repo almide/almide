@@ -1,8 +1,9 @@
 // onebrc — handwritten Rust reference, same shape as onebrc/onebrc.almd:
-// same LCG, chunked appends (one open per append, like fs.append), an eager
-// Vec<String> of lines (like fs.read_lines), integer-tenths math, identical
-// output bytes. Streaming-anything is deliberately NOT used here; this ref
-// answers "what does the same program cost in Rust", not "what is optimal".
+// same LCG, chunked appends (one open per append, like fs.append), a
+// streaming BufReader line walk (like fs.for_each_line, C-220),
+// integer-tenths math, identical output bytes. This ref answers "what does
+// the same program cost in Rust", not "what is optimal" — mmap/SIMD/parallel
+// tricks are deliberately absent.
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -81,13 +82,11 @@ fn generate(n: i64, path: &str) {
 }
 
 fn aggregate(path: &str) -> String {
-    let lines: Vec<String> = std::fs::read_to_string(path)
-        .unwrap()
-        .lines()
-        .map(String::from)
-        .collect();
+    use std::io::BufRead;
+    let reader = std::io::BufReader::new(std::fs::File::open(path).unwrap());
     let mut stats: HashMap<String, Stats> = HashMap::new();
-    for line in &lines {
+    for line in reader.lines() {
+        let line = line.unwrap();
         if line.is_empty() {
             continue;
         }

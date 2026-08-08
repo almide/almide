@@ -382,7 +382,25 @@ let cfg = fs.read_text_if_exists(path)! ?? "default"
 // family: read_text / read_bytes / read_lines / read_bytes_raw + _if_exists
 ```
 
-### All-errors collection: partition (ADR-0007)
+### Processing a file line-by-line (large files)
+
+`fs.read_lines` materializes the whole file — fine for small files, a memory
+wall for big ones. Aggregation over a large file is `fs.fold_lines`
+(O(longest line) memory, same line semantics as read_lines):
+
+```almide
+// ✓ aggregate: fold_lines carries the accumulator through
+let stats = fs.fold_lines(path, map.new(), (acc, line) => {
+  let parts = string.split(line, ";")
+  map.set(acc, parts[0], map.get_or(acc, parts[0], 0) + 1)
+})!
+
+// ✓ side-effecting walk: for_each_line (callback may mutate captured vars)
+var count = 0
+fs.for_each_line(path, (line) => { count = count + 1 })!
+
+// ✗ avoid for large files: fs.read_lines(path)! |> list.fold(...)
+```
 
 `result.collect` / `collect_map` are REMOVED (ADR-0007 — the name promised Rust's first-err short-circuit and did the opposite). Collect every error with partition:
 

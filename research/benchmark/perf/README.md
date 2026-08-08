@@ -46,15 +46,22 @@ exists. This directory is the source of the numbers in
   `string.split`, and map updates rather than arithmetic. Temperatures are
   integer tenths end-to-end, so output is byte-identical with no float
   formatting involved. The wasm leg is excluded — `wasmtime run` preopens no
-  directory, so the leg cannot touch files. The row doubles as the measurement
-  of the eager-read memory wall: `fs.read_lines` materializes the whole file
-  as `List[String]`, so aggregate-phase peak RSS tracks file size at ~4×
-  (measured 2026-08-08 on M4 Pro: 505 MB RSS for a 126 MB / 10 M-row file,
-  2.2 GB for 632 MB / 50 M rows — the same-shape Rust reference lands on the
-  same RSS, a streaming `BufReader` variant holds 1 MB flat at every scale).
-  Extrapolated to the official 1 B rows / ~13 GB file, the eager shape needs
-  ~50 GB of RSS; a streaming line API is what makes the full challenge
-  runnable at all.
+  directory, so the leg cannot touch files. This row is the birthplace and the watch
+  of the streaming line family (`fs.for_each_line` / `fs.fold_lines`, C-220).
+  The original eager `fs.read_lines` shape measured RSS ~4× file size
+  (2026-08-08, M4 Pro: 505 MB for a 126 MB / 10 M-row file, 2.2 GB for
+  632 MB / 50 M — identical in the same-shape Rust ref, so the wall was the
+  API's shape, not codegen), extrapolating to ~50 GB on the official
+  1 B-row file. The aggregate phase now streams on both legs: RSS holds at
+  1 MB at every scale. The time ledger (same day, 50 M rows): almide-stream
+  33.4 s vs rust-stream 2.35 s. The callback walk itself is cheap (a trivial
+  fold counts 10 M lines in 0.37 s); the gap is (a) per-line allocation
+  vocabulary — `string.split` ×2 + `strip_prefix` allocate ~6 objects/line
+  where the ref borrows slices — and (b) map ops reached through a closure,
+  which clone the Map per operation (~4.3 s of the 10 M-row run vs 0.8 s for
+  the same in-place inserts in a plain loop). Those two are the current
+  perf-war targets; the wall-clock ratio here is reported, not gated, until
+  they land.
 - The `fft-wasm` row exists because the wasm leg currently collapses on hot
   `data[i] = x` list writes (~3 orders of magnitude at 2^18) — the canonical
   2^22 workload would take hours on that leg. The cliff is the finding; it is
