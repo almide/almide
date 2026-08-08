@@ -313,35 +313,66 @@ pub(crate) fn source_to_ir_for_certs(
     source_to_ir_with(source, &[])
 }
 
+/// A NON-bundled stdlib module contributes nothing to lower: its defs come from
+/// the runtime / self-host registry, not from a carried AST.
+fn skip_stdlib_module(name: &str) -> bool {
+    almide_lang::stdlib_info::is_stdlib_module(name)
+        && !almide_lang::stdlib_info::is_bundled_module(name)
+}
+
+/// Type-check the program, or wall with the error diagnostics.
+fn infer_or_wall(
+    checker: &mut Checker,
+    prog: &mut almide_lang::ast::Program,
+) -> Result<(), LowerError> {
+    let diags = checker.infer_program(prog);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.level == almide_frontend::diagnostic::Level::Error)
+        .map(|d| d.message.clone())
+        .collect();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    Err(LowerError::Unsupported(format!("type errors: {errors:?}")))
+}
+
+/// Parse `source`, or wall with every recorded diagnostic.
+///
+/// `Parser::parse()` is a recovery parser: it can return `Ok` with a partial
+/// `Program` (unparseable top-level items dropped) while still recording the
+/// failures in `.errors` — the CLI's own `parse_file` checks this separately
+/// (main.rs). Skipping the check here would silently compile a TRUNCATED program
+/// instead of walling honestly.
+fn parse_or_wall(source: &str) -> Result<almide_lang::ast::Program, LowerError> {
+    let tokens = Lexer::tokenize(source);
+    let mut parser = Parser::new(tokens);
+    let prog = parser
+        .parse()
+        .map_err(|e| LowerError::Unsupported(format!("parse error: {e:?}")))?;
+    if parser.errors.is_empty() {
+        return Ok(prog);
+    }
+    let messages: Vec<String> = parser.errors.iter().map(|d| d.display()).collect();
+    let nlines = source.lines().count();
+    let head: String = source
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .chars()
+        .take(60)
+        .collect();
+    Err(LowerError::Unsupported(format!(
+        "parse error [{nlines} lines, head {head:?}]: {}",
+        messages.join("\n")
+    )))
+}
+
 fn source_to_ir_with(
     source: &str,
     modules: &[(String, almide_lang::ast::Program, bool)],
 ) -> Result<almide_ir::IrProgram, LowerError> {
-    let tokens = Lexer::tokenize(source);
-    let mut parser = Parser::new(tokens);
-    let mut prog = parser
-        .parse()
-        .map_err(|e| LowerError::Unsupported(format!("parse error: {e:?}")))?;
-    // `Parser::parse()` is a recovery parser: it can return `Ok` with a
-    // partial `Program` (unparseable top-level items dropped) while still
-    // recording the failures in `.errors` — the CLI's own `parse_file`
-    // checks this separately (main.rs). Skipping this check here would
-    // silently compile a truncated program instead of walling honestly.
-    if !parser.errors.is_empty() {
-        let messages: Vec<String> = parser.errors.iter().map(|d| d.display()).collect();
-        let nlines = source.lines().count();
-        let head: String = source
-            .lines()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("")
-            .chars()
-            .take(60)
-            .collect();
-        return Err(LowerError::Unsupported(format!(
-            "parse error [{nlines} lines, head {head:?}]: {}",
-            messages.join("\n")
-        )));
-    }
+    let mut prog = parse_or_wall(source)?;
     // #1052: an import this render was NOT handed a module for can never
     // type-check — every reference through it would surface as "undefined
     // function" and the wall would land in the "type errors" bucket, the one
@@ -364,9 +395,7 @@ fn source_to_ir_with(
     // {…})`) sees the registration seed `Option[Unknown]`, the match payload
     // binding stays Unknown, and the whole program walls.
     for (name, mod_prog, is_self_mod) in modules {
-        if almide_lang::stdlib_info::is_stdlib_module(name)
-            && !almide_lang::stdlib_info::is_bundled_module(name)
-        {
+        if skip_stdlib_module(name) {
             continue;
         }
         let saved_self = checker.env.self_module_name;
@@ -375,15 +404,7 @@ fn source_to_ir_with(
         checker.refresh_module_top_lets(mod_prog, name);
         checker.env.self_module_name = saved_self;
     }
-    let diags = checker.infer_program(&mut prog);
-    let errors: Vec<_> = diags
-        .iter()
-        .filter(|d| d.level == almide_frontend::diagnostic::Level::Error)
-        .map(|d| d.message.clone())
-        .collect();
-    if !errors.is_empty() {
-        return Err(LowerError::Unsupported(format!("type errors: {errors:?}")));
-    }
+    infer_or_wall(&mut checker, &mut prog)?;
     let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
 
     // Lower each resolved sibling MODULE into `ir.modules` — the SAME sequence the real driver runs
@@ -391,9 +412,7 @@ fn source_to_ir_with(
     // stdlib modules carried by `resolve` are skipped (their defs come from the runtime/self-host
     // registry); only real user siblings contribute their type_decls + fns.
     for (name, mod_prog, is_self) in modules {
-        if almide_lang::stdlib_info::is_stdlib_module(name)
-            && !almide_lang::stdlib_info::is_bundled_module(name)
-        {
+        if skip_stdlib_module(name) {
             continue;
         }
         let mut mod_prog = mod_prog.clone();
