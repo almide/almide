@@ -1,3 +1,30 @@
+/// The control-flow half of [`check_needs_ownership`], plus the forms whose
+/// result ESCAPES the expression.
+///
+/// Leaves and nodes that carry no borrowable child use of `var` in this analysis
+/// fall through to the `_` arm: borrow inference is sensitive to which refs are
+/// seen, so an un-handled variant deliberately contributes nothing rather than
+/// being traversed further.
+fn check_needs_ownership_flow(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    match &expr.kind {
+        IrExprKind::If { cond, then, else_ } => check_needs_ownership_if(cond, then, else_, var, needs),
+        IrExprKind::Match { .. } => check_needs_ownership_match(expr, var, needs),
+        IrExprKind::While { cond, body } => {
+            check_needs_ownership(cond, var, needs);
+            for s in body { check_needs_ownership_stmt(s, var, needs); }
+        }
+        // Both the unwrapped value and the `??` fallback flow OUT as the result,
+        // so a param used as either ESCAPES and needs ownership — else the
+        // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
+        // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
+        // the If/Match/Option-wrapping escaping-child handling.
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            check_needs_ownership_unwrap_or(expr, fallback, var, needs)
+        }
+        _ => {}
+    }
+}
+
 /// Check if a parameter variable needs ownership.
 /// Conservative: marks as Owned if used in ANY ownership-requiring position.
 fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
@@ -75,45 +102,25 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             check_needs_ownership(a, var, needs);
             check_needs_ownership(b, var, needs);
         }
-        IrExprKind::Fan { exprs: xs } | IrExprKind::RustMacro { args: xs, .. } => {
-            check_needs_ownership_elements(xs, var, needs)
+        // A `fan` arm's value is moved into the join, so an element that IS the
+        // param consumes it. A macro argument is only READ (`println!("{}", x)`
+        // borrows), so it merely recurses — merging the two made every
+        // macro-arg param Owned and the generated Rust stopped compiling.
+        IrExprKind::Fan { exprs } => check_needs_ownership_elements(exprs, var, needs),
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args {
+                check_needs_ownership(a, var, needs);
+            }
         }
 
-        // ── Control flow: recurse ──
-        IrExprKind::If { cond, then, else_ } => check_needs_ownership_if(cond, then, else_, var, needs),
-        IrExprKind::Match { .. } => check_needs_ownership_match(expr, var, needs),
-        IrExprKind::While { cond, body } => {
-            check_needs_ownership(cond, var, needs);
-            for s in body { check_needs_ownership_stmt(s, var, needs); }
-        }
-        // Both the unwrapped value and the `??` fallback flow OUT as the result,
-        // so a param used as either ESCAPES and needs ownership — else the
-        // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
-        // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
-        // the If/Match/Option-wrapping escaping-child handling above.
-        IrExprKind::UnwrapOr { expr, fallback } => check_needs_ownership_unwrap_or(expr, fallback, var, needs),
         // RuntimeCall: lowered form of `@intrinsic` / bundled Module call.
         // Its borrow signature lives in SIGS_SNAPSHOT keyed by the mangled
         // symbol. If the arg slot is Own, the call consumes that arg and
         // the enclosing var must also be owned.
         IrExprKind::RuntimeCall { .. } => check_needs_ownership_runtime_call(expr, var, needs),
-        // Leaves and nodes that carry no borrowable child use of `var` in this
-        // analysis. Explicit-preserve (not recurse-more): borrow inference is
-        // sensitive to which refs are seen, so every un-handled variant is
-        // listed with the original `=> {}` behaviour, total-by-construction.
-        // `Var { id }` where `id != var` (the `id == var` case is the guarded
-        // arm at the top — a bare self-reference whose ownership is decided by
-        // its enclosing context, e.g. Block tail / arg position).
-        IrExprKind::Var { .. }
-        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-        | IrExprKind::Unit | IrExprKind::FnRef { .. }
-        | IrExprKind::Break | IrExprKind::Continue
-        | IrExprKind::TailCall { .. } | IrExprKind::EmptyMap
-        | IrExprKind::OptionNone | IrExprKind::RcWrap { .. }
-        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
-        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+
+        // ── Control flow, the escaping-result forms, and the leaves ──
+        _ => check_needs_ownership_flow(expr, var, needs),
     }
 }
 
@@ -644,6 +651,16 @@ fn uses_var(expr: &IrExpr, var: VarId) -> bool {
         }
 
         // ── Shapes with their own traversal ──
+        _ => uses_var_nested(expr, var),
+    }
+}
+
+/// The [`uses_var`] arms whose children are not a plain list of
+/// sub-expressions — calls, keyed containers, and the nodes carrying statement
+/// bodies or match arms.
+fn uses_var_nested(expr: &IrExpr, var: VarId) -> bool {
+    let uses = |e: &IrExpr| uses_var(e, var);
+    match &expr.kind {
         IrExprKind::Call { args, target, .. } => call_uses_var(target, args, var),
         IrExprKind::Block { stmts, expr } => uses_var_block(stmts, expr, var),
         IrExprKind::Match { subject, arms } => uses(subject) || uses_var_match_arms(arms, var),

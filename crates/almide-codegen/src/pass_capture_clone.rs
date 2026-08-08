@@ -353,6 +353,31 @@ fn transform_expr_iter_chain(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &
     changed
 }
 
+/// The [`transform_expr`] arms whose children are not a plain list of
+/// sub-expressions: a lambda extends the scope, and the calls, keyed containers
+/// and statement-bearing nodes each have their own order.
+fn transform_expr_scoped(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    match &mut expr.kind {
+        IrExprKind::Lambda { body, params, .. } => {
+            let mut inner_scope = scope_vars.clone();
+            for (v, _) in params.iter() { inner_scope.insert(*v); }
+            transform_expr(body, vt, &inner_scope)
+        }
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
+            transform_call_target(target, vt, scope_vars) | transform_expr_list(args, vt, scope_vars)
+        }
+        IrExprKind::MapLiteral { entries } => transform_expr_kv_pairs(entries, vt, scope_vars),
+        IrExprKind::StringInterp { parts } => transform_string_parts(parts, vt, scope_vars),
+        IrExprKind::Block { .. } => transform_expr_block(expr, vt, scope_vars),
+        IrExprKind::Match { .. } => transform_expr_match(expr, vt, scope_vars),
+        IrExprKind::ForIn { .. } => transform_expr_for_in(expr, vt, scope_vars),
+        IrExprKind::While { .. } => transform_expr_while(expr, vt, scope_vars),
+        IrExprKind::IterChain { .. } => transform_expr_iter_chain(expr, vt, scope_vars),
+        // Every other kind is handled by `transform_expr`'s shape arms.
+        _ => false,
+    }
+}
+
 /// Walk the IR tree. When we find a Lambda that captures clone-worthy outer
 /// variables, wrap it in a block with pre-clone bindings.
 fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
@@ -426,21 +451,7 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         }
 
         // ── Shapes with their own scope or traversal order ──
-        IrExprKind::Lambda { body, params, .. } => {
-            let mut inner_scope = scope_vars.clone();
-            for (v, _) in params.iter() { inner_scope.insert(*v); }
-            transform_expr(body, vt, &inner_scope)
-        }
-        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            transform_call_target(target, vt, scope_vars) | transform_expr_list(args, vt, scope_vars)
-        }
-        IrExprKind::MapLiteral { entries } => transform_expr_kv_pairs(entries, vt, scope_vars),
-        IrExprKind::StringInterp { parts } => transform_string_parts(parts, vt, scope_vars),
-        IrExprKind::Block { .. } => transform_expr_block(expr, vt, scope_vars),
-        IrExprKind::Match { .. } => transform_expr_match(expr, vt, scope_vars),
-        IrExprKind::ForIn { .. } => transform_expr_for_in(expr, vt, scope_vars),
-        IrExprKind::While { .. } => transform_expr_while(expr, vt, scope_vars),
-        IrExprKind::IterChain { .. } => transform_expr_iter_chain(expr, vt, scope_vars),
+        _ => transform_expr_scoped(expr, vt, scope_vars),
     };
 
     // Now check: is this expr itself a Lambda with captured vars that need cloning?
