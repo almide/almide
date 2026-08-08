@@ -569,7 +569,32 @@ impl LowerCtx {
                 // `match … { x => { r = 999 } }` assignment-loss). Recurse so its statements
                 // run as effects and its own tail is dispatched the same way.
                 IrExprKind::Block { .. } => self.lower_branch_arm(None, tail)?,
-                _ => self.record_elided_calls(tail),
+                other => {
+                    // Σ-probe over this seam (#912; instance record: #1124's
+                    // Never call, the Try/Unwrap-Unit drop, the ForIn/While
+                    // drop, the nested-Block statement loss — every dispatch
+                    // arm above exists because THIS fallthrough once ate one).
+                    // A Unit/Never tail has NO value for the merged branch
+                    // result to carry, so "defer it as a value" is a
+                    // contradiction: any call captured below would be an
+                    // EFFECT this arm silently drops. In strict mode a
+                    // call-bearing Unit/Never tail walls here instead of
+                    // building wrong code; a genuinely value-shaped tail
+                    // (scalar/heap) still defers as before.
+                    if crate::lower::strict_values()
+                        && matches!(tail.ty, Ty::Unit | Ty::Never)
+                        && contains_any_call(tail)
+                    {
+                        return Err(LowerError::Unsupported(format!(
+                            "a unit-typed arm tail ({}) with calls reached the \
+                             deferred-value path — the arm would lower to zero \
+                             ops and drop the effect (the #1124 class); this \
+                             tail shape needs its own dispatch arm",
+                            crate::lower::kind_name(other)
+                        )));
+                    }
+                    self.record_elided_calls(tail)
+                }
             }
         }
         self.in_frame -= 1;
@@ -695,4 +720,31 @@ impl LowerCtx {
         })
     }
 }
+/// Does `expr` contain ANY call anywhere inside? The strict-mode Σ-probe over
+/// the deferred-value seam ([`LowerCtx::lower_branch_arm`]'s fallthrough) needs
+/// presence only, not identity: a Unit/Never arm tail carrying one is an effect
+/// about to be silently dropped, never a deferrable value.
+pub(crate) fn contains_any_call(expr: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Finder {
+        found: bool,
+    }
+    impl IrVisitor for Finder {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found {
+                return;
+            }
+            match &e.kind {
+                IrExprKind::Call { .. }
+                | IrExprKind::RuntimeCall { .. }
+                | IrExprKind::RenderedCall { .. } => self.found = true,
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let mut f = Finder { found: false };
+    f.visit_expr(expr);
+    f.found
+}
+
 include!("control_b.rs");
