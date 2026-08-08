@@ -43,6 +43,11 @@ pub fn monomorphize(program: &mut IrProgram) {
     monomorphize_module_fns(program);
     let bound_fns = find_structurally_bounded_fns(&program.functions, &program.type_decls);
     if bound_fns.is_empty() {
+        // Mutual tail-call SCC collapse (#1043) rides monomorphize because
+        // this is the ONE stage every consumer shares — v0 codegen, the v1
+        // native/wasm renders and almide-interp all take this output — so
+        // both exits of this fn must run it.
+        crate::mutual_tco::run_mutual_tco(program);
         return;
     }
 
@@ -128,6 +133,10 @@ pub fn monomorphize(program: &mut IrProgram) {
     // Propagate concrete types: after rewrite, some expressions still have TypeVar
     // types (e.g., `let x = mono_fn(...)` where x.ty was set before mono).
     propagate_concrete_types(program);
+
+    // The generic-program exit of the same #1043 rewrite the early return runs
+    // — post-specialization, so a concrete instance pair can also form an SCC.
+    crate::mutual_tco::run_mutual_tco(program);
 
     // Erase remaining TypeVars in VarTable. After mono + propagation, any
     // surviving TypeVars are from stdlib generic params (e.g., filter_map[A,B]'s

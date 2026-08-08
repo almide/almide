@@ -161,13 +161,15 @@ fn divzero_abort_matches_v0() {
 
 #[test]
 fn v0_mutual_tail_recursion_survives_opt_level_0() {
-    // #1043: the v0 codegen leg's mutual-SCC dispatcher, exercised at the
-    // configuration that regressed — TRUE rustc opt-level 0, where LLVM's
-    // sibling-call opt is absent and 1M plain calls overflow the stack. The
-    // emitted source is compiled DIRECTLY here: `almide run`'s generated
-    // manifest pins `[profile.dev] opt-level = 1`, so a CARGO_PROFILE_* env
-    // knob on the run path never reaches opt 0 (measured: the knob-based
-    // spelling of this test stayed green with the pass disabled).
+    // #1043: the SHARED-IR mutual-SCC dispatcher (almide-optimize's
+    // mutual_tco, run at the monomorphize exit every pipeline takes),
+    // exercised at the configuration that regressed — TRUE rustc opt-level 0,
+    // where LLVM's sibling-call opt is absent and 1M plain calls overflow the
+    // stack. The emitted source is compiled DIRECTLY here: `almide run`'s
+    // generated manifest pins `[profile.dev] opt-level = 1`, so a
+    // CARGO_PROFILE_* env knob on the run path never reaches opt 0 (measured:
+    // the knob-based spelling of this test stayed green with the pass
+    // disabled).
     let src = "fn ping(n: Int, acc: Int) -> Int = if n == 0 then acc else pong(n - 1, acc + 1)\n\nfn pong(n: Int, acc: Int) -> Int = if n == 0 then acc else ping(n - 1, acc + 2)\n\nfn main() -> Unit = println(int.to_string(ping(1000000, 0)))\n";
     let dir = scratch("v0_mutual_opt0");
     let file = dir.join("prog.almd");
