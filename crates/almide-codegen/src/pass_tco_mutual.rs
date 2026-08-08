@@ -110,62 +110,206 @@ fn mt_collect_tail_callees(expr: &IrExpr, out: &mut HashSet<almide_base::intern:
 /// assumed). Returns SCCs in reverse-topological order; only size >= 2 groups
 /// are rewritten (size-1 self-loops belong to `rewrite_to_loop`).
 fn mt_sccs(n: usize, edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
-    #[derive(Clone, Copy)]
-    struct NodeState {
-        index: u32,
-        lowlink: u32,
-        on_stack: bool,
-        visited: bool,
-    }
-    let mut st = vec![NodeState { index: 0, lowlink: 0, on_stack: false, visited: false }; n];
-    let mut counter: u32 = 0;
-    let mut stack: Vec<usize> = Vec::new();
-    let mut sccs: Vec<Vec<usize>> = Vec::new();
+    Tarjan::new(n, edges).run()
+}
 
-    for root in 0..n {
-        if st[root].visited {
-            continue;
+#[derive(Clone, Copy)]
+struct NodeState {
+    index: u32,
+    lowlink: u32,
+    on_stack: bool,
+    visited: bool,
+}
+
+/// Iterative Tarjan state. The recursion is an explicit `work` stack of
+/// `(node, next-edge cursor)` pairs, so a deeply mutually-recursive input
+/// cannot blow the host stack.
+struct Tarjan<'a> {
+    edges: &'a [Vec<usize>],
+    st: Vec<NodeState>,
+    counter: u32,
+    stack: Vec<usize>,
+    sccs: Vec<Vec<usize>>,
+}
+
+impl<'a> Tarjan<'a> {
+    fn new(n: usize, edges: &'a [Vec<usize>]) -> Self {
+        Tarjan {
+            edges,
+            st: vec![NodeState { index: 0, lowlink: 0, on_stack: false, visited: false }; n],
+            counter: 0,
+            stack: Vec::new(),
+            sccs: Vec::new(),
         }
-        // (node, next-edge cursor)
+    }
+
+    fn run(mut self) -> Vec<Vec<usize>> {
+        for root in 0..self.st.len() {
+            if !self.st[root].visited {
+                self.walk_from(root);
+            }
+        }
+        self.sccs
+    }
+
+    /// One depth-first traversal from `root`, driven by the explicit stack.
+    fn walk_from(&mut self, root: usize) {
         let mut work: Vec<(usize, usize)> = vec![(root, 0)];
         while let Some(&mut (v, ref mut cursor)) = work.last_mut() {
             if *cursor == 0 {
-                st[v].visited = true;
-                st[v].index = counter;
-                st[v].lowlink = counter;
-                counter += 1;
-                st[v].on_stack = true;
-                stack.push(v);
+                self.enter(v);
             }
-            if let Some(&w) = edges[v].get(*cursor) {
-                *cursor += 1;
-                if !st[w].visited {
-                    work.push((w, 0));
-                } else if st[w].on_stack {
-                    st[v].lowlink = st[v].lowlink.min(st[w].index);
-                }
-            } else {
-                work.pop();
-                if let Some(&(parent, _)) = work.last() {
-                    let low = st[v].lowlink;
-                    st[parent].lowlink = st[parent].lowlink.min(low);
-                }
-                if st[v].lowlink == st[v].index {
-                    let mut scc = Vec::new();
-                    loop {
-                        let w = stack.pop().expect("tarjan stack underflow");
-                        st[w].on_stack = false;
-                        scc.push(w);
-                        if w == v {
-                            break;
-                        }
+            match self.edges[v].get(*cursor) {
+                Some(&w) => {
+                    *cursor += 1;
+                    if !self.st[w].visited {
+                        work.push((w, 0));
+                    } else if self.st[w].on_stack {
+                        self.st[v].lowlink = self.st[v].lowlink.min(self.st[w].index);
                     }
-                    sccs.push(scc);
+                }
+                None => {
+                    work.pop();
+                    self.close(v, work.last().map(|&(parent, _)| parent));
                 }
             }
         }
     }
-    sccs
+
+    /// First visit of `v`: stamp its index/lowlink and push it.
+    fn enter(&mut self, v: usize) {
+        self.st[v].visited = true;
+        self.st[v].index = self.counter;
+        self.st[v].lowlink = self.counter;
+        self.counter += 1;
+        self.st[v].on_stack = true;
+        self.stack.push(v);
+    }
+
+    /// All of `v`'s edges are walked: propagate its lowlink to the parent, and
+    /// emit an SCC when `v` is its root.
+    fn close(&mut self, v: usize, parent: Option<usize>) {
+        if let Some(parent) = parent {
+            let low = self.st[v].lowlink;
+            self.st[parent].lowlink = self.st[parent].lowlink.min(low);
+        }
+        if self.st[v].lowlink == self.st[v].index {
+            self.pop_scc(v);
+        }
+    }
+
+    /// Pop the component rooted at `v` off the Tarjan stack.
+    fn pop_scc(&mut self, v: usize) {
+        let mut scc = Vec::new();
+        loop {
+            let w = self.stack.pop().expect("tarjan stack underflow");
+            self.st[w].on_stack = false;
+            scc.push(w);
+            if w == v {
+                break;
+            }
+        }
+        self.sccs.push(scc);
+    }
+}
+
+/// Per-member slot vars (dispatcher params, reassigned on every jump) and jump
+/// temps.
+///
+/// The temps are bound before the slot assigns so an arg that reads several
+/// current slots sees their pre-jump values — the simultaneous-assignment
+/// discipline the self-TCO temps exist for. Names carry the member index:
+/// `is_even(n)` / `is_odd(n)` must NOT both render a param `n` (the E0415
+/// duplicate-binder class the egg fusion rename helper exists for).
+type SlotRows = (Vec<Vec<(VarId, Ty)>>, Vec<Vec<(VarId, Ty)>>);
+
+fn alloc_slots_and_temps(
+    functions: &[IrFunction],
+    fis: &[usize],
+    var_table: &mut VarTable,
+    scc_no: usize,
+) -> SlotRows {
+    let mut slots: Vec<Vec<(VarId, Ty)>> = Vec::new();
+    let mut temps: Vec<Vec<(VarId, Ty)>> = Vec::new();
+    for (k, &fi) in fis.iter().enumerate() {
+        let mut srow = Vec::new();
+        let mut trow = Vec::new();
+        for p in &functions[fi].params {
+            let pname = var_table.get(p.var).name;
+            let s = var_table.alloc(
+                almide_base::intern::sym(&format!("__mt{scc_no}_{k}_{}", pname.as_str())),
+                p.ty.clone(),
+                Mutability::Var,
+                None,
+            );
+            let t = var_table.alloc(
+                almide_base::intern::sym(&format!("__mt{scc_no}_tmp_{k}_{}", pname.as_str())),
+                p.ty.clone(),
+                Mutability::Let,
+                None,
+            );
+            srow.push((s, p.ty.clone()));
+            trow.push((t, p.ty.clone()));
+        }
+        slots.push(srow);
+        temps.push(trow);
+    }
+    (slots, temps)
+}
+
+/// `if tag == 0 { arm0 } else if tag == 1 { arm1 } else { armN }` — the last
+/// member rides the final else, so the chain is total without a trap arm.
+fn build_dispatch_chain(mut arm_bodies: Vec<IrExpr>, tag_var: VarId) -> IrExpr {
+    let mut chain = arm_bodies.pop().expect("scc has >= 2 members");
+    for (k, arm) in arm_bodies.into_iter().enumerate().rev() {
+        let cond = IrExpr {
+            kind: IrExprKind::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(mt_var(tag_var, Ty::Int)),
+                right: Box::new(IrExpr {
+                    kind: IrExprKind::LitInt { value: k as i64 },
+                    ty: Ty::Int,
+                    span: None,
+                    def_id: None,
+                }),
+            },
+            ty: Ty::Bool,
+            span: None,
+            def_id: None,
+        };
+        chain = IrExpr {
+            kind: IrExprKind::If { cond: Box::new(cond), then: Box::new(arm), else_: Box::new(chain) },
+            ty: Ty::Unit,
+            span: None,
+            def_id: None,
+        };
+    }
+    chain
+}
+
+/// The dispatcher's signature: the tag, then every member's slots in order.
+fn dispatcher_params(
+    tag_var: VarId,
+    slots: &[Vec<(VarId, Ty)>],
+    var_table: &VarTable,
+) -> Vec<IrParam> {
+    let own = |var: VarId, ty: Ty| IrParam {
+        var,
+        ty,
+        name: var_table.get(var).name,
+        borrow: ParamBorrow::Own,
+        is_mut: false,
+        open_record: None,
+        default: None,
+        attrs: vec![],
+    };
+    let mut params = vec![own(tag_var, Ty::Int)];
+    for row in slots {
+        for (sv, sty) in row {
+            params.push(own(*sv, sty.clone()));
+        }
+    }
+    params
 }
 
 fn mt_scalar_zero(ty: &Ty) -> IrExpr {
@@ -265,31 +409,7 @@ fn rewrite_mutual_scc(
     // discipline the self-TCO temps exist for). Names carry the member index:
     // is_even(n) / is_odd(n) must NOT both render a param `n` (the E0415
     // duplicate-binder class the egg fusion rename helper exists for).
-    let mut slots: Vec<Vec<(VarId, Ty)>> = Vec::new();
-    let mut temps: Vec<Vec<(VarId, Ty)>> = Vec::new();
-    for (k, &fi) in fis.iter().enumerate() {
-        let mut srow = Vec::new();
-        let mut trow = Vec::new();
-        for p in &functions[fi].params {
-            let pname = var_table.get(p.var).name;
-            let s = var_table.alloc(
-                almide_base::intern::sym(&format!("__mt{scc_no}_{k}_{}", pname.as_str())),
-                p.ty.clone(),
-                Mutability::Var,
-                None,
-            );
-            let t = var_table.alloc(
-                almide_base::intern::sym(&format!("__mt{scc_no}_tmp_{k}_{}", pname.as_str())),
-                p.ty.clone(),
-                Mutability::Let,
-                None,
-            );
-            srow.push((s, p.ty.clone()));
-            trow.push((t, p.ty.clone()));
-        }
-        slots.push(srow);
-        temps.push(trow);
-    }
+    let (slots, temps) = alloc_slots_and_temps(functions, fis, var_table, scc_no);
 
     // Each member's body: params → its slots, then tail rewrites.
     let mut arm_bodies: Vec<IrExpr> = Vec::new();
@@ -309,32 +429,7 @@ fn rewrite_mutual_scc(
         ));
     }
 
-    // `if tag == 0 { arm0 } else if tag == 1 { arm1 } else { armN }` — the last
-    // member rides the final else, so the chain is total without a trap arm.
-    let mut chain = arm_bodies.pop().expect("scc has >= 2 members");
-    for (k, arm) in arm_bodies.into_iter().enumerate().rev() {
-        let cond = IrExpr {
-            kind: IrExprKind::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(mt_var(tag_var, Ty::Int)),
-                right: Box::new(IrExpr {
-                    kind: IrExprKind::LitInt { value: k as i64 },
-                    ty: Ty::Int,
-                    span: None,
-                    def_id: None,
-                }),
-            },
-            ty: Ty::Bool,
-            span: None,
-            def_id: None,
-        };
-        chain = IrExpr {
-            kind: IrExprKind::If { cond: Box::new(cond), then: Box::new(arm), else_: Box::new(chain) },
-            ty: Ty::Unit,
-            span: None,
-            def_id: None,
-        };
-    }
+    let chain = build_dispatch_chain(arm_bodies, tag_var);
 
     let while_expr = IrExpr {
         kind: IrExprKind::While {
@@ -376,30 +471,8 @@ fn rewrite_mutual_scc(
         "__mutual_tco_{scc_no}_{}",
         functions[fis[0]].name.as_str()
     ));
-    let mut disp_params: Vec<IrParam> = vec![IrParam {
-        var: tag_var,
-        ty: Ty::Int,
-        name: var_table.get(tag_var).name,
-        borrow: ParamBorrow::Own,
-        is_mut: false,
-        open_record: None,
-        default: None,
-        attrs: vec![],
-    }];
-    for row in &slots {
-        for (sv, sty) in row {
-            disp_params.push(IrParam {
-                var: *sv,
-                ty: sty.clone(),
-                name: var_table.get(*sv).name,
-                borrow: ParamBorrow::Own,
-                is_mut: false,
-                open_record: None,
-                default: None,
-                attrs: vec![],
-            });
-        }
-    }
+    let disp_params = dispatcher_params(tag_var, &slots, var_table);
+
     let dispatcher = IrFunction {
         name: disp_name,
         params: disp_params,
