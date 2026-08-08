@@ -118,6 +118,60 @@ pub(crate) fn as_f64_arg(code: &str, t: NTy) -> Result<String, LowerError> {
 use crate::render_native_op_families::{render_native_meter_op, render_native_result_op, render_native_termination_op, render_native_scalar_op, render_native_float_op};
 use crate::render_native_shims::{shim, shim_rust_name, CUT_RET_MARKER, FUEL_LT0_SHIM, CHARGE_DYN_SHIM, TIMEOUT_SHIM, COUNTER_SHIM, CHARGE_SHIM, BUDGET_SHIM};
 
+/// The Perceus balance is machine-checked on the SAME ops this render erases
+/// Drops from — the certificate that scope-end drop realizes it. A violation is
+/// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
+    let Err(violations) = crate::verify_ownership(func) else { return Ok(()) };
+    if std::env::var_os("ALMIDE_DUMP_VERIFY").is_some() {
+        eprintln!("== verify-stage fn {} ==", func.name);
+        for (i, op) in func.ops.iter().enumerate() {
+            eprintln!("  [{i}] {op:?}");
+        }
+    }
+    Err(wall(format!(
+        "native: ownership verification failed for `{}`: {violations:?}",
+        func.name
+    )))
+}
+
+/// Rung-5 closures slab: the CallIndirect dispatch tables. One dispatcher per
+/// ARITY (user args beyond the env block); the index space is the SAME
+/// name-sorted lambda order `Op::FuncRef` renders (both derive from the
+/// `user_fns` BTreeMap, so def and call site agree by construction). Only an
+/// i64-returning lambda gets an arm — a heap-returning one is reachable only
+/// through a CallIndirect with a heap result, which walls in `render_fn`, so its
+/// missing arm can never be hit; the `_` arm is the §13 controlled halt.
+fn push_closure_dispatch_tables(
+    out: &mut String,
+    user_fns: &BTreeMap<&str, &MirFunction>,
+    fn_rets: &BTreeMap<String, Option<NTy>>,
+) {
+    let mut arities: BTreeMap<usize, Vec<(usize, &str)>> = BTreeMap::new();
+    let lambda_names = user_fns.keys().copied().filter(|n| n.starts_with("__lambda_"));
+    for (idx, name) in lambda_names.enumerate() {
+        if fn_rets.get(name) != Some(&Some(NTy::I64)) {
+            continue;
+        }
+        let arity = user_fns[name].params.len().saturating_sub(1);
+        arities.entry(arity).or_default().push((idx, name));
+    }
+    for (arity, fns) in arities {
+        let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect();
+        let args: String = (0..arity).map(|i| format!(", a{i}")).collect();
+        out.push_str(&format!(
+            "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
+        ));
+        for (idx, name) in fns {
+            out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
+        }
+        out.push_str(
+            "        _ => { eprintln!(\"Error: closure index out of range\"); \
+             std::process::exit(1) }\n    }\n}\n\n",
+        );
+    }
+}
+
 /// Render a whole MIR program to a self-contained Rust source, or WALL.
 pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result<String, LowerError> {
     let user_fns: BTreeMap<&str, &MirFunction> =
@@ -130,20 +184,7 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
     let mut bodies = String::new();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     for func in &prog.functions {
-        // The Perceus balance is machine-checked on the SAME ops this render
-        // erases Drops from — the certificate that scope-end drop realizes it.
-        if let Err(violations) = crate::verify_ownership(func) {
-            if std::env::var_os("ALMIDE_DUMP_VERIFY").is_some() {
-                eprintln!("== verify-stage fn {} ==", func.name);
-                for (i, op) in func.ops.iter().enumerate() {
-                    eprintln!("  [{i}] {op:?}");
-                }
-            }
-            return Err(wall(format!(
-                "native: ownership verification failed for `{}`: {violations:?}",
-                func.name
-            )));
-        }
+        verify_ownership_or_wall(func)?;
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
         fn_rets.insert(func.name.clone(), ret_nty);
@@ -169,35 +210,7 @@ pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result
     // i64-returning lambda gets an arm — a heap-returning one is reachable only
     // through a CallIndirect with a heap result, which walls above, so its
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
-    let lambda_names: Vec<&str> = user_fns
-        .keys()
-        .copied()
-        .filter(|n| n.starts_with("__lambda_"))
-        .collect();
-    if !lambda_names.is_empty() {
-        let mut arities: BTreeMap<usize, Vec<(usize, &str)>> = BTreeMap::new();
-        for (idx, name) in lambda_names.iter().enumerate() {
-            if fn_rets.get(*name) != Some(&Some(NTy::I64)) {
-                continue;
-            }
-            let arity = user_fns[name].params.len().saturating_sub(1);
-            arities.entry(arity).or_default().push((idx, name));
-        }
-        for (arity, fns) in arities {
-            let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect::<String>();
-            let args: String = (0..arity).map(|i| format!(", a{i}")).collect::<String>();
-            out.push_str(&format!(
-                "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
-            ));
-            for (idx, name) in fns {
-                out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
-            }
-            out.push_str(
-                "        _ => { eprintln!(\"Error: closure index out of range\"); \
-                 std::process::exit(1) }\n    }\n}\n\n",
-            );
-        }
-    }
+    push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets);
     Ok(out)
 }
 
