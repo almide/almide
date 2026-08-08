@@ -121,3 +121,21 @@ Contracts: C-061, C-110, C-132, C-136。
   ではないという規律に従い、レーンが入るまでは受理せず E024 とする。
 
 Contracts: C-173。
+
+## ALS-M15 effect fn 型スロット
+
+fn 型は `effect` 前置で**効果スロット**になる: `effect (A) -> B`(または
+`effect fn(A) -> B`)。効果スロットに検査される lambda は effect fn の本体
+規律を得る — effect 呼び出しが許可され、`!` はその lambda 自身の失敗
+チャネルへ伝搬する。スロットの実行時形状は効果キャリア
+`(A) -> Result[B, String]` の**一形**であり、pure な lambda は値 tail が
+`ok(...)` に包まれ、`!` を使う lambda はそのまま — 呼び出し側(HOF)は
+どちらの綴りを受けても同じ形を受け取る。
+
+- 効果スロットは pure lambda と可謬 lambda の**両方**を受理する。
+- effect fn 型の**値**の呼び出しはそれ自体が effect 呼び出しであり、
+  キャリア `Result[B, String]` を生む(pure 文脈からは E006)。
+- `effect` を書いていない素の `(A) -> B` スロットの受理規則は変わらない
+  (可謬 lambda は E005 のまま — 素スロット透過は #1108 2b-iii)。
+- 逸脱(片ターゲットのみ ok-wrap が落ちる・err メッセージが異なる等)は
+  C-221 の fixture が検出する。

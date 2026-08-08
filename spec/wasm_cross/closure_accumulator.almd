@@ -4,7 +4,7 @@
 // to bare producers (concat / Result ctor), now admits a CallIndirect producer: the SAME proven i(id)m
 // loop-carried slot (OwnershipChecker.v check_line_unroll_sound), generalized. This is the lever the
 // self-host list_reduce_str / list_fold over heap accumulators build on. Byte-matches native; leak-free.
-fn accumulate(items: List[String], f: fn(String, String) -> String) -> String = {
+fn accumulate(items: List[String], f: (String, String) -> String) -> String = {
   var acc = "["
   for x in items {
     acc = f(acc, x)
@@ -12,7 +12,7 @@ fn accumulate(items: List[String], f: fn(String, String) -> String) -> String = 
   acc
 }
 
-fn repeat_apply(f: fn(String, String) -> String, n: Int) -> String = {
+fn repeat_apply(f: (String, String) -> String, n: Int) -> String = {
   var acc = "s"
   var i = 0
   while i < n {

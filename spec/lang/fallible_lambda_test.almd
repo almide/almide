@@ -51,9 +51,9 @@ fn use_compound_err() -> String = match list.map(["4", "7", "x"], (s) => halve(p
 }
 
 // L7/L8: an explicit fallible slot — a USER HOF over a fallible callback.
-fn retryer(op: fn(Int) -> Int!, seed: Int) -> Int! = op(seed)!
+fn retryer(op: (Int) -> Int!, seed: Int) -> Int! = op(seed)!
 
-fn twice(op: fn(Int) -> Int!, seed: Int) -> Int! = op(op(seed)!)!
+fn twice(op: (Int) -> Int!, seed: Int) -> Int! = op(op(seed)!)!
 
 fn use_explicit_slot() -> (Int, Int, Int) = {
   let a = retryer((n) => parse1(int.to_string(n))! + 1, 41) ?? -1

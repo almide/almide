@@ -7,11 +7,11 @@
 // `is_heap_ty`, so all of these walled the ENCLOSING function — a lambda outside
 // the liftable subset in a call-argument position refuses the whole render (#954,
 // surfaced by the nightly differential fuzz through `result.unwrap_or_else`).
-fn apply_float(f: fn(Int) -> Float) -> Float = f(1)
+fn apply_float(f: (Int) -> Float) -> Float = f(1)
 
-fn apply_i8(f: fn(Int) -> Int8) -> Int8 = f(1)
+fn apply_i8(f: (Int) -> Int8) -> Int8 = f(1)
 
-fn apply_u32(f: fn(Int) -> UInt32) -> UInt32 = f(1)
+fn apply_u32(f: (Int) -> UInt32) -> UInt32 = f(1)
 
 // A capture the const-folder cannot turn back into a literal — the point is that the
 // value travels through an env SLOT, so a folded literal would prove nothing.

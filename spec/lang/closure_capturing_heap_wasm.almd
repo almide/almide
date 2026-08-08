@@ -7,7 +7,7 @@
 // never touched. Byte-identical to v0 on BOTH targets. (Fn captures — closures
 // capturing closures — are part 2, closure_capturing_fn_wasm.almd: v0's wasm target
 // still traps on those, so they verify against v0 native.)
-fn greeter(name: String) -> fn(String) -> String = (x) => name + ", " + x
+fn greeter(name: String) -> (String) -> String = (x) => name + ", " + x
 
 effect fn main() -> Unit = {
   let hi = greeter("Hello")

@@ -227,13 +227,34 @@ let f = (x) => {
 ```
 
 **Lambdas and effects**: a lambda inherits the enclosing fn's effect
-capability — one rule for every higher-order callee (`list.map`,
-`http.serve`'s handler, …). Inside an `effect fn`, a lambda may call effect
-fns, but their results stay **explicit `Result` values** (auto-`?` never
-crosses a closure boundary): unwrap with `?? fallback` or `match` — `!`
-cannot propagate out of a lambda. In a pure fn the same lambda is an error.
-Exception: metered regions (`fan.bounded` / `fan.race` bodies) are pure by
-design, so effect calls are rejected there even inside an effect fn.
+capability — one rule for every higher-order callee (`list.map`, …). Inside
+an `effect fn`, a lambda may call effect fns, but their results stay
+**explicit `Result` values** (auto-`?` never crosses a closure boundary):
+unwrap with `?? fallback` or `match` — `!` cannot propagate out of a lambda.
+In a pure fn the same lambda is an error. Exception: metered regions
+(`fan.bounded` / `fan.race` bodies) are pure by design, so effect calls are
+rejected there even inside an effect fn.
+
+**Effect fn-typed slots** (`effect (A) -> B`): a HOF can declare that its
+callback runs effects — `effect fn serve(port: Int, f: effect
+(HttpRequest) -> HttpResponse) -> Unit`. A lambda checked against an
+`effect (…) -> …` slot gets full effect-fn body ergonomics: effect calls are
+permitted and `!` propagates (into the handler's own failure channel — a
+failing `http.serve` handler becomes the 500 response). Both spellings are
+accepted uniformly:
+
+```
+http.serve(8080, (req) => {
+  let body = fs.read_text("index.html")!   // ← `!` works: the slot is effect-typed
+  http.response(200, body)
+})!
+```
+
+Calling an effect fn-typed VALUE is itself an effect call (`h(x)!` inside the
+HOF); doing it from a pure fn is E006. A plain `(A) -> B` slot still rejects
+fallible lambdas (E005) — declare the slot `(A) -> B!` or `effect (A) -> B`.
+The bare arrow form is the canonical spelling; `almide fmt` normalizes the
+legacy `fn(A) -> B` to it.
 
 ### Block (last expression is the value)
 ```

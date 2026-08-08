@@ -16,13 +16,15 @@
 // - HTTP client (`get`/`post`/...) take `&str` URLs and bodies —
 //   plain pass-through once `Map` heads get `@borrow_ref(headers)`.
 //
-// `serve` routes through `almide_rt_http_serve` (runtime wrapper) which
-// composes the user callback with `Ok(...)` internally so the bundled
-// `(HttpRequest) -> HttpResponse` signature lines up with the legacy
-// `Fn(...) -> Result<HttpResponse, String>` contract expected by the TCP
-// listener loop.
+// `serve`'s handler slot is EFFECT-typed (#1055): the lambda checked against
+// it gets effect-fn body ergonomics (`!` with propagation, effect calls), and
+// its lowered shape is the effect carrier `Fn(...) -> Result<HttpResponse,
+// String>` — exactly the contract the TCP listener loop has always expected.
+// A handler `Err` becomes the loop's 500 response; a pure handler is
+// Ok-wrapped by the checker's carrier typing, so both spellings arrive
+// uniform.
 @intrinsic("almide_rt_http_serve")
-effect fn serve(port: Int, f: fn(HttpRequest) -> HttpResponse) -> Unit = _
+effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
 
 // ── Response builders ──
 @intrinsic("almide_rt_http_response")

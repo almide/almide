@@ -533,7 +533,7 @@ impl Checker {
         };
         let Some(sig) = self.env.functions.get(&name) else { return };
         let sig_ty = Ty::Fn {
-            is_effect: sig.is_effect,
+            is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */,
             params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
             ret: Box::new(sig.ret.clone()),
         };
