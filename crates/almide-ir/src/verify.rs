@@ -34,9 +34,11 @@ impl std::fmt::Display for IrVerifyError {
 /// The call-target surface a `Verifier` validates against, computed once per
 /// program and shared by every function-, module- and top-let-level verifier.
 struct KnownNames {
-    /// Known function names for CallTarget::Named validation
-    functions: std::collections::HashSet<String>,
-    /// Known module→function mappings for CallTarget::Module validation
+    /// Known module→function mappings for CallTarget::Module validation.
+    ///
+    /// `Named` targets are deliberately NOT collected — see
+    /// [`Verifier::check_call_target`] for why gating them would be a
+    /// false-positive factory.
     module_functions: std::collections::HashMap<String, std::collections::HashSet<String>>,
 }
 
@@ -254,7 +256,6 @@ impl<'a> IrVisitor for Verifier<'a> {
 pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     let mut errors = Vec::new();
     let known = KnownNames {
-        functions: collect_known_functions(program),
         module_functions: collect_known_module_functions(program),
     };
 
@@ -276,21 +277,6 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     }
 
     errors
-}
-
-/// Every free-function name reachable in the program — the main program's own
-/// functions plus every module's.
-fn collect_known_functions(program: &IrProgram) -> std::collections::HashSet<String> {
-    let mut known = std::collections::HashSet::new();
-    for f in &program.functions {
-        known.insert(f.name.to_string());
-    }
-    for m in &program.modules {
-        for f in &m.functions {
-            known.insert(f.name.to_string());
-        }
-    }
-    known
 }
 
 /// module name → the function names a `module.func` call may legally name.
