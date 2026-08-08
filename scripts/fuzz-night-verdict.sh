@@ -47,6 +47,11 @@
 #   several artifacts are downloaded without a `name:`).
 
 set -euo pipefail
+# Byte-order collation, pinned (#1031): the shard walk below is `find | sort`,
+# so an unpinned locale would order the verdict's per-shard rows differently on
+# differently-configured machines — the same drift that made
+# docs/roadmap/README.md churn with no content change.
+export LC_ALL=C
 
 DIR="${1:?usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings>}"
 MINUTES="${2:?minutes-per-shard}"
