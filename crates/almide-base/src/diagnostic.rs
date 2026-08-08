@@ -32,10 +32,9 @@ pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Opt
     let mut best: Option<(&str, usize)> = None;
     for c in candidates {
         let dist = levenshtein(name, c);
-        if dist < threshold && dist > 0 {
-            if best.map_or(true, |(_, d)| dist < d) {
-                best = Some((c, dist));
-            }
+        let closer = best.is_none_or(|(_, d)| dist < d);
+        if dist > 0 && dist < threshold && closer {
+            best = Some((c, dist));
         }
     }
     best.map(|(s, _)| s.to_string())
@@ -237,34 +236,42 @@ impl Diagnostic {
         self
     }
 
-    /// Plain-text display (no color, no source annotation).
-    /// NOTE: Called by almide/playground — do not rename without updating playground.
-    pub fn display(&self) -> String {
+    /// `error[E001]: message` — the first line of every rendering.
+    fn headline(&self) -> String {
         let prefix = match self.level {
             Level::Error => "error",
             Level::Warning => "warning",
         };
         let code_str = self.code.map(|c| format!("[{}]", c)).unwrap_or_default();
-        let mut out = format!("{}{}: {}", prefix, code_str, self.message);
+        format!("{}{}: {}", prefix, code_str, self.message)
+    }
+
+    /// The `  --> file:line:col` / `  at line N` row, or None when the
+    /// diagnostic carries neither a file nor a line.
+    fn location_row(&self) -> Option<String> {
         match (&self.file, self.line) {
             (Some(f), Some(l)) => {
                 let loc = match self.col {
                     Some(c) => format!("{}:{}:{}", f, l, c),
                     None => format!("{}:{}", f, l),
                 };
-                out.push_str(&format!("\n  --> {}", loc));
+                Some(format!("\n  --> {}", loc))
             }
-            (Some(f), None) => out.push_str(&format!("\n  --> {}", f)),
-            (None, Some(l)) => out.push_str(&format!("\n  at line {}", l)),
-            _ => {}
+            (Some(f), None) => Some(format!("\n  --> {}", f)),
+            (None, Some(l)) => Some(format!("\n  at line {}", l)),
+            (None, None) => None,
         }
+    }
+
+    /// The `in` / `here:` / `hint:` / `try:` rows, in render order.
+    /// Each is omitted when its field is absent or empty.
+    fn push_annotation_rows(&self, out: &mut String) {
         if !self.context.is_empty() {
             out.push_str(&format!("\n  in {}", self.context));
         }
-        if let Some(here) = &self.here_snippet {
-            if !here.is_empty() {
-                out.push_str(&format!("\n  here: {}", here));
-            }
+        let here = self.here_snippet.as_deref().unwrap_or("");
+        if !here.is_empty() {
+            out.push_str(&format!("\n  here: {}", here));
         }
         if !self.hint.is_empty() {
             out.push_str(&format!("\n  hint: {}", self.hint));
@@ -275,6 +282,16 @@ impl Diagnostic {
                 out.push_str(&format!("\n      {}", line));
             }
         }
+    }
+
+    /// Plain-text display (no color, no source annotation).
+    /// NOTE: Called by almide/playground — do not rename without updating playground.
+    pub fn display(&self) -> String {
+        let mut out = self.headline();
+        if let Some(row) = self.location_row() {
+            out.push_str(&row);
+        }
+        self.push_annotation_rows(&mut out);
         out
     }
 }
@@ -302,8 +319,7 @@ mod apply_try_tests {
         //            ^            col 4 is `!`, col 5..15 is `user_admin`.
         // Replace just `!` (col 4..5) with `not `.
         let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 4, 5, "not ");
-        let out = d.apply_try_to("if !user_admin then x").unwrap();
-        assert_eq!(out, "if not user_admin then x");
+        assert_eq!(d.apply_try_to("if !user_admin then x").as_deref(), Some("if not user_admin then x"));
     }
 
     #[test]
@@ -311,8 +327,7 @@ mod apply_try_tests {
         // Rename `parseInt` → `int.parse`. `parseInt` starts at col 7 and
         // ends at col 15 (exclusive) in "let x=parseInt(s)".
         let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 7, 15, "int.parse");
-        let out = d.apply_try_to("let x=parseInt(s)").unwrap();
-        assert_eq!(out, "let x=int.parse(s)");
+        assert_eq!(d.apply_try_to("let x=parseInt(s)").as_deref(), Some("let x=int.parse(s)"));
     }
 
     #[test]
@@ -320,8 +335,7 @@ mod apply_try_tests {
         let src = "fn main() -> Int =\n    parseInt(s)\n";
         // Line 2: `    parseInt(s)`. `parseInt` at cols 5..13 exclusive.
         let d = Diagnostic::error("e", "h", "c").with_try_replace(2, 5, 13, "int.parse");
-        let out = d.apply_try_to(src).unwrap();
-        assert_eq!(out, "fn main() -> Int =\n    int.parse(s)\n");
+        assert_eq!(d.apply_try_to(src).as_deref(), Some("fn main() -> Int =\n    int.parse(s)\n"));
     }
 
     #[test]
@@ -329,8 +343,7 @@ mod apply_try_tests {
         // `end_col == col` — insert `snippet` at that column without
         // deleting anything. Useful for "missing import" style fixes.
         let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 1, 1, "import json\n");
-        let out = d.apply_try_to("effect fn main() = ...").unwrap();
-        assert_eq!(out, "import json\neffect fn main() = ...");
+        assert_eq!(d.apply_try_to("effect fn main() = ...").as_deref(), Some("import json\neffect fn main() = ..."));
     }
 
     #[test]
