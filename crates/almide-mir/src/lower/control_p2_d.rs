@@ -11,6 +11,40 @@ pub(crate) struct VariantArm<'a> {
 }
 
 impl LowerCtx {
+    /// The subset of `before` that the just-lowered arm MOVED OUT (no longer live).
+    fn consumed_since(&self, before: &[ValueId]) -> Vec<ValueId> {
+        before.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect()
+    }
+
+    /// RELEASE PARITY across a two-way heap merge (the `lower_heap_result_if_inner`
+    /// discipline, shared by every arm-chain in this module): an OUTER handle one
+    /// side moves out must be released by the OTHER side, else the accounting is
+    /// path-dependent and the branch-grouped cert `{m|}` rejects it. What THEN
+    /// consumed is released at the current tail (which is inside the ELSE); what
+    /// ELSE consumed is released just before `else_marker_at` (the tail of THEN).
+    /// The scalar path emits no ownership events, so both sets stay empty there.
+    fn balance_arm_releases(
+        &mut self,
+        consumed_by_then: &[ValueId],
+        consumed_by_else: &[ValueId],
+        else_marker_at: usize,
+    ) {
+        for x in consumed_by_then {
+            if !consumed_by_else.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op);
+            }
+        }
+        for x in consumed_by_else {
+            if !consumed_by_then.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op);
+            }
+        }
+    }
+}
+
+impl LowerCtx {
 
     fn tuple_refinement_chain(
         &mut self,
@@ -74,29 +108,13 @@ impl LowerCtx {
         // path emits no ownership events, so the parity sets stay empty there.
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
         let then_v = lower_arm(self, &arm.body)?;
-        let consumed_by_then: Vec<ValueId> =
-            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let consumed_by_then = self.consumed_since(&outer);
         let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_v) });
         let live_after_then: Vec<ValueId> = self.live_heap_handles.clone();
         let rest_v = self.tuple_refinement_chain(elems, &arms[1..], result_ty)?;
-        let consumed_by_else: Vec<ValueId> = live_after_then
-            .iter()
-            .copied()
-            .filter(|x| !self.live_heap_handles.contains(x))
-            .collect();
-        for x in &consumed_by_then {
-            if !consumed_by_else.contains(x) {
-                let op = self.drop_op_for(*x);
-                self.ops.push(op);
-            }
-        }
-        for x in &consumed_by_else {
-            if !consumed_by_then.contains(x) {
-                let op = self.drop_op_for(*x);
-                self.ops.insert(else_marker_at, op);
-            }
-        }
+        let consumed_by_else = self.consumed_since(&live_after_then);
+        self.balance_arm_releases(&consumed_by_then, &consumed_by_else, else_marker_at);
         self.ops.push(Op::EndIf { val: Some(rest_v) });
         Some(dst)
     }
@@ -629,29 +647,13 @@ impl LowerCtx {
         // cert `{m|}` rejects it; this keeps the lowering ahead of the checker).
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
         let then_v = self.lower_variant_arm_value(VariantArm { kind, body }, h, result_ty, heap, subj)?;
-        let consumed_by_then: Vec<ValueId> =
-            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let consumed_by_then = self.consumed_since(&outer);
         let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_v) });
         let live_after_then: Vec<ValueId> = self.live_heap_handles.clone();
         let else_v = self.emit_variant_arm_chain(h, tag, rest, result_ty, subj)?;
-        let consumed_by_else: Vec<ValueId> = live_after_then
-            .iter()
-            .copied()
-            .filter(|x| !self.live_heap_handles.contains(x))
-            .collect();
-        for x in &consumed_by_then {
-            if !consumed_by_else.contains(x) {
-                let op = self.drop_op_for(*x);
-                self.ops.push(op); // the rest of the chain releases what this arm moved out
-            }
-        }
-        for x in &consumed_by_else {
-            if !consumed_by_then.contains(x) {
-                let op = self.drop_op_for(*x);
-                self.ops.insert(else_marker_at, op); // this arm releases what the chain moved out
-            }
-        }
+        let consumed_by_else = self.consumed_since(&live_after_then);
+        self.balance_arm_releases(&consumed_by_then, &consumed_by_else, else_marker_at);
         self.ops.push(Op::EndIf { val: Some(else_v) });
         Some(dst)
     }

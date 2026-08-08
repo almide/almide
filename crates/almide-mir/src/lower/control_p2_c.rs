@@ -20,6 +20,24 @@ impl LowerCtx {
     /// Probe the match SUBJECT to a real borrowed/owned block handle via
     /// `lower_call_args`; a non-handle result or a deferred-Opaque bind
     /// declines (rolled back) — the callee would read an empty block.
+    /// Lower one arm body under an active probe: on decline, roll the probe back
+    /// to its marks so the caller's `?` returns `None` with the op stream, the
+    /// lifted set and the live-handle set exactly as they were at entry.
+    fn probe_heap_arm(
+        &mut self,
+        body: &IrExpr,
+        result_ty: &Ty,
+        ops_mark: usize,
+        lifted_mark: usize,
+        lhh_mark: usize,
+    ) -> Option<ValueId> {
+        let v = self.lower_heap_result_arm(body, result_ty);
+        if v.is_none() {
+            self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
+        }
+        v
+    }
+
     fn probe_match_subject(
         &mut self,
         subject: &IrExpr,
@@ -74,44 +92,17 @@ impl LowerCtx {
             self.value_of.insert(var, subj);
         }
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
-        let rest_obj = match self.lower_heap_result_arm(rest_body, result_ty) {
-            Some(v) => v,
-            _ => {
-                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
-                return None;
-            }
-        };
-        let consumed_by_rest: Vec<ValueId> =
-            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let rest_obj =
+            self.probe_heap_arm(rest_body, result_ty, ops_mark, lifted_mark, lhh_mark)?;
+        let consumed_by_rest = self.consumed_since(&outer);
         let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(rest_obj) });
         // ELSE (len == 0): the `[]` arm.
         let live_after_rest: Vec<ValueId> = self.live_heap_handles.clone();
-        let empty_obj = match self.lower_heap_result_arm(empty_body, result_ty) {
-            Some(v) => v,
-            _ => {
-                self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
-                return None;
-            }
-        };
-        let consumed_by_empty: Vec<ValueId> = live_after_rest
-            .iter()
-            .copied()
-            .filter(|x| !self.live_heap_handles.contains(x))
-            .collect();
-        // Release parity across the arms (the lower_heap_result_if_inner discipline).
-        for x in &consumed_by_rest {
-            if !consumed_by_empty.contains(x) {
-                let op = self.drop_op_for(*x);
-                self.ops.push(op);
-            }
-        }
-        for x in &consumed_by_empty {
-            if !consumed_by_rest.contains(x) {
-                let op = self.drop_op_for(*x);
-                self.ops.insert(else_marker_at, op);
-            }
-        }
+        let empty_obj =
+            self.probe_heap_arm(empty_body, result_ty, ops_mark, lifted_mark, lhh_mark)?;
+        let consumed_by_empty = self.consumed_since(&live_after_rest);
+        self.balance_arm_releases(&consumed_by_rest, &consumed_by_empty, else_marker_at);
         self.ops.push(Op::EndIf { val: Some(empty_obj) });
         Some(dst)
     }
@@ -383,44 +374,47 @@ impl LowerCtx {
             return None;
         };
 
-        // Validate every refutable arm up front (no mid-emission decline).
-        for a in &arms[..arms.len() - 1] {
-            let IrPattern::Tuple { elements: pats } = &a.pattern else {
-                rollback(self);
-                return None;
-            };
-            if pats.len() != elems.len() {
-                rollback(self);
-                return None;
-            }
-            for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
-                let ok = match p {
-                    IrPattern::Wildcard => true,
-                    IrPattern::Literal { expr } => {
-                        !is_heap_ty(ty)
-                            && matches!(
-                                expr.kind,
-                                IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. }
-                            )
-                    }
-                    IrPattern::Constructor { .. } => self
-                        .custom_variant_type_name(ty)
-                        .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
-                    _ => false,
-                };
-                if !ok {
-                    rollback(self);
-                    return None;
-                }
-            }
+        // Validate every refutable arm up front (no mid-emission decline) — the
+        // same row subset the UNIT sibling admits, so both share one predicate.
+        if !self.tuple_refinement_rows_valid(&elems, arms) {
+            rollback(self);
+            return None;
         }
-        match self.tuple_refinement_chain(&elems, arms, result_ty) {
-            Some(dst) => Some(dst),
-            None => {
-                self.ops.truncate(ops_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                None
+        let dst = self.tuple_refinement_chain(&elems, arms, result_ty);
+        if dst.is_none() {
+            rollback(self);
+        }
+        dst
+    }
+
+    /// Are every non-default arm's rows within the refinement subset — a
+    /// width-matched tuple pattern whose components are wildcards, scalar
+    /// literals over non-heap elements, or valid nested variant refinements?
+    /// Shared by the value ([`Self::try_lower_tuple_refinement_match`]) and
+    /// UNIT ([`Self::try_lower_tuple_refinement_unit_match`]) entries.
+    fn tuple_refinement_rows_valid(&self, elems: &[(ValueId, Ty)], arms: &[IrMatchArm]) -> bool {
+        arms[..arms.len() - 1].iter().all(|a| {
+            let IrPattern::Tuple { elements: pats } = &a.pattern else { return false };
+            pats.len() == elems.len()
+                && pats
+                    .iter()
+                    .zip(elems.iter())
+                    .all(|(p, (_, ty))| self.tuple_refinement_row_valid(p, ty))
+        })
+    }
+
+    /// One component of a [`Self::tuple_refinement_rows_valid`] row.
+    fn tuple_refinement_row_valid(&self, p: &IrPattern, ty: &Ty) -> bool {
+        match p {
+            IrPattern::Wildcard => true,
+            IrPattern::Literal { expr } => {
+                !is_heap_ty(ty)
+                    && matches!(expr.kind, IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. })
             }
+            IrPattern::Constructor { .. } => self
+                .custom_variant_type_name(ty)
+                .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
+            _ => false,
         }
     }
 
@@ -431,44 +425,6 @@ impl LowerCtx {
     /// (only the taken arm executes — `unit_arm_depth` raised per arm, exactly the
     /// `lower_variant_unit_arm` discipline). Returns `true` iff fully lowered;
     /// rolls back and returns `false` on any decline.
-    /// Are every non-default arm's rows within the unit-refinement subset —
-    /// a width-matched tuple pattern whose components are wildcards, scalar
-    /// literals, or valid nested variant refinements? Verbatim.
-    fn tuple_refinement_rows_valid(&self, elems: &[(ValueId, Ty)], arms: &[IrMatchArm]) -> bool {
-    let mut valid = true;
-    'outer: for a in &arms[..arms.len() - 1] {
-        let IrPattern::Tuple { elements: pats } = &a.pattern else {
-            valid = false;
-            break;
-        };
-        if pats.len() != elems.len() {
-            valid = false;
-            break;
-        }
-        for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
-            let ok = match p {
-                IrPattern::Wildcard => true,
-                IrPattern::Literal { expr } => {
-                    !is_heap_ty(ty)
-                        && matches!(
-                            expr.kind,
-                            IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. }
-                        )
-                }
-                IrPattern::Constructor { .. } => self
-                    .custom_variant_type_name(ty)
-                    .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
-                _ => false,
-            };
-            if !ok {
-                valid = false;
-                break 'outer;
-            }
-        }
-    }
-        valid
-    }
-
     pub(crate) fn try_lower_tuple_refinement_unit_match(
         &mut self,
         subject: &IrExpr,
