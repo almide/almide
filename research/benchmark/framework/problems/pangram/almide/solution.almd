@@ -1,5 +1,0 @@
-fn is_pangram(sentence: String) -> Bool = {
-  let lower = string.to_lower(sentence);
-  let chars = string.chars(lower);
-  list.all(string.chars("abcdefghijklmnopqrstuvwxyz"), (c) => list.contains(chars, c))
-}

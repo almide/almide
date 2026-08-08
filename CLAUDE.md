@@ -276,7 +276,8 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 
 - **This repo** = compiler correctness. `spec/` tests, `cargo test`, grammar-lab experiments, lang-bench.
 - **[almide/almide-dojo](https://github.com/almide/almide-dojo)** = LLM writability. Daily MSR measurement, task bank, malicious-hint detection, diagnostics feedback loop.
-- New MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` are archived.
+- All MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` were removed from this repo (2026-08-08) — the local harness had an empty `results/` since the April 2026 hand-off, so running it would have overwritten Dojo's README number with a locally-measured one. Recover with `git log --diff-filter=D -- research/benchmark/msr/`.
+- Still here and live: `research/benchmark/perf/` (gated by `scripts/check-perf-ratio.sh`), `lang-bench/`, `exercises/` (corpus for `tools/v1_gap_measure.py`), `grammar-lab/`, `spike/`.
 - The bridge: Dojo's PR gate will run a task subset as part of this repo's CI (future).
 
 ## Behavior Contracts
