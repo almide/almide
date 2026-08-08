@@ -403,6 +403,40 @@ fn fmt_keeps_leading_comments_on_their_declaration() {
     assert!(out.starts_with("// header line one"), "file header moved:\n{out}");
 }
 
+/// A comment after a variant type declaration belongs to the NEXT declaration,
+/// not to the variant. Both variant parse paths used to end each case with a
+/// bare `skip_newlines()`, which discards `Comment` tokens — so `parse()` never
+/// recorded the comment and `fmt` printed a file with it deleted.
+///
+/// The formatter is the only thing that reads `comment_map`, so this was silent
+/// source loss on a CI-gated path: `almide fmt --check spec/ examples/` reported
+/// such a file as unformatted, and `almide fmt` "fixed" it by dropping the text.
+/// The leading-`|`-less spelling made it worse by hiding one pass deep — pass 1
+/// inserts the `|`, pass 2 takes the eating path — which also broke the
+/// `format(format(x)) == format(x)` contract in almide-tools/CLAUDE.md.
+#[test]
+fn fmt_keeps_comments_after_variant_declarations() {
+    // Both spellings, and both kinds of following declaration.
+    for src in [
+        "type Aid = | Aid(String)\n\n// c\ntype Bid = | Bid(String)\n\nfn main() -> Unit = println(\"x\")\n",
+        "type Aid = Aid(String)\n\n// c\ntype Bid = Bid(String)\n\nfn main() -> Unit = println(\"x\")\n",
+        "type Color = | Red | Green\n\n// c\nfn main() -> Unit = println(\"x\")\n",
+        "type Color =\n  | Red\n  | Green\n\n// c\nfn main() -> Unit = println(\"x\")\n",
+    ] {
+        let once = roundtrip(src);
+        assert!(once.contains("// c"), "comment deleted by fmt for {src:?}:\n{once}");
+        // …and it must still sit above the declaration it introduces.
+        let lines: Vec<&str> = once.lines().collect();
+        let ci = lines.iter().position(|l| l.trim() == "// c").unwrap();
+        assert!(
+            lines.get(ci + 1).is_some_and(|l| l.starts_with("type Bid") || l.starts_with("fn main")),
+            "comment drifted off its declaration for {src:?}:\n{once}"
+        );
+        // The fixpoint must be reached at pass 1, not pass 2.
+        assert_eq!(roundtrip(&once), once, "not idempotent for {src:?}");
+    }
+}
+
 // ---- ADR-0010: `T?` Option shorthand ----
 
 // The shorthand round-trips in every type position, and a written

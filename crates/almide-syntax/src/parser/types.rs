@@ -177,7 +177,17 @@ impl Parser {
             } else {
                 cases.push(VariantCase::Unit { name: case_name });
             }
-            self.skip_newlines();
+            // Conditional, not a bare `skip_newlines()`: after the LAST case the
+            // next lines belong to the next declaration, and a bare skip eats the
+            // `Comment` tokens (`skip_newlines` discards them) so `parse()`'s
+            // `skip_newlines_collect_comments` finds nothing and the comment is
+            // gone from `comment_map` — the formatter then cannot print what the
+            // parser never recorded. `almide fmt` therefore DELETED any comment
+            // following a leading-`|` variant declaration, and was non-idempotent
+            // for the leading-`|`-less spelling (pass 1 inserts the `|`, pass 2
+            // takes this path and eats the comment). Restoring on a non-`|`
+            // lookahead leaves those tokens for the caller.
+            self.skip_newlines_if_followed_by(TokenType::Pipe);
         }
         Ok(TypeExpr::Variant { cases })
     }
@@ -218,7 +228,10 @@ impl Parser {
                 cases.push(VariantCase::Unit { name: case_name.clone() });
                 simple_names.push(case_name);
             }
-            self.skip_newlines();
+            // Same restore-on-miss rule as `parse_variant_type` — this is the
+            // leading-`|`-less spelling, and its trailing lines belong to the
+            // next declaration once no `|` continues the type.
+            self.skip_newlines_if_followed_by(TokenType::Pipe);
         }
         if all_simple {
             let members = simple_names.into_iter()

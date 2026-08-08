@@ -4,17 +4,14 @@
 // かつては `type T = T(String)` が type alias と解釈されて自己参照ループしていた
 // (同名) / `type T = Wrap(String)` が未定義型参照を吐いていた (異名)。
 // 現在は leading `|` なしでも正しく single-case variant として parse される。
-//
-// PatientId / DrugId / DoseAmount は同名 newtype (以前は無限ループしていた形)、
-// OrderId は異名 newtype (以前は未定義型参照で codegen 崩壊)。
-// 注: この注記が型宣言の直前ではなくここにあるのは、`almide fmt` が
-// 先頭以外のバリアント型宣言に隣接するコメントを削除するため。
+// 同名 newtype (leading | なし — 以前は無限ループしていた形)
 type PatientId = | PatientId(String)
 
 type DrugId = | DrugId(String)
 
 type DoseAmount = | DoseAmount(Float)
 
+// 異名 newtype (leading | なし — 以前は未定義型参照で codegen 崩壊)
 type OrderId = | Oid(String)
 
 fn patient_id_str(id: PatientId) -> String = match id {
