@@ -420,6 +420,19 @@ fn render_native_fn_sig(
         }
         return Ok(String::from("fn main()"));
     }
+    // A param that any `Op::SetLocal` retargets (the MIR tail-recursion loop
+    // reassigns its params each iteration) must render `mut` — without it the
+    // loop body's `v0 = …;` is an E0384 on a plain scalar accumulator
+    // recursion (`count(n - 1, acc + 1)`), a compile error rustc only surfaces
+    // on the run path because every test harness rides the v0 fallback.
+    let reassigned: std::collections::HashSet<ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::SetLocal { local, .. } => Some(*local),
+            _ => None,
+        })
+        .collect();
     let params: Vec<String> = func
         .params
         .iter()
@@ -432,7 +445,8 @@ fn render_native_fn_sig(
                 NTy::F64 => "f64",
                 NTy::Res => "Result<i64, String>",
             };
-            format!("{}: {}", var(p.value), spelled)
+            let mut_prefix = if reassigned.contains(&p.value) { "mut " } else { "" };
+            format!("{mut_prefix}{}: {}", var(p.value), spelled)
         })
         .collect();
     let ret = match func.ret {

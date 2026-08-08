@@ -108,6 +108,13 @@ const CORPUS: &[(&str, &str)] = &[
     //    desugar's abort tail now renders on the native v1 rung ──
     ("eprintln_line", "fn main() -> Unit = {\n  eprintln(\"warn \" + int.to_string(7))\n  println(int.to_string(1))\n}\n"),
     ("assert_abort_tail", "fn main() -> Unit = {\n  println(int.to_string(1))\n  assert(1 == 2)\n  println(int.to_string(2))\n}\n"),
+    // ── The MIR tail-recursion loop reassigns its params, so the rendered
+    //    signature must spell them `mut` — this textbook scalar accumulator
+    //    was an E0384 on the DEFAULT run path in v0.56.0 (every test harness
+    //    rides the v0 fallback, so only the differential corpus can see the
+    //    v1 render's rustc verdict). Depth 1.5M also pins that the loop, not
+    //    LLVM, carries the recursion. ──
+    ("tail_self_accumulator", "fn count(n: Int, acc: Int) -> Int = if n == 0 then acc else count(n - 1, acc + 1)\n\nfn main() -> Unit = println(int.to_string(count(1500000, 0)))\n"),
 ];
 
 #[test]
