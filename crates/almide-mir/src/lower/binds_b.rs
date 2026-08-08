@@ -361,9 +361,8 @@ impl LowerCtx {
     /// caller's `?` exactly as the former inline `?`s did.
     fn lower_str_list_literal_elem(&mut self, elem: &IrExpr, class: &StrListLiteralClass) -> Option<ValueId> {
         let &StrListLiteralClass {
-            elem_str, elem_value, elem_str_value, elem_list_scalar, elem_list_flat,
-            elem_int_str, elem_str_int, ref elem_recdrop, elem_flat_variant,
-            ref elem_rich_variant, ..
+            elem_str_value, elem_list_scalar, elem_int_str, elem_str_int,
+            ref elem_recdrop, elem_flat_variant, ref elem_rich_variant, ..
         } = class;
         let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
         let ev = match &elem.kind {
@@ -423,11 +422,25 @@ impl LowerCtx {
                 self.try_lower_tuple_construct(tup_elems)?
             }
             IrExprKind::Tuple { .. } => self.try_lower_scalar_tuple_construct_for_elem(elem)?,
-            // A heap-returning CALL element — a fresh OWNED value MOVED into the slot. A `Value`
-            // ctor (`value.int(1)`) for a List[Value]; a String-returning call (`string.slice(s,a,b)`
-            // — the dominant yaml `acc + [string.slice(…)]` append) for a List[String]. Module via
-            // the pure-call path (→ a registered CallFn like `string.slice`), Named via CallFn. The
-            // list's recursive drop (DropListValue / DropListStr) frees each at scope end.
+            // The call-, field- and interpolation-shaped elements.
+            _ => self.lower_str_list_literal_call_elem(elem, class)?,
+        };
+        Some(ev)
+    }
+
+    /// The call / field / interpolation elements of
+    /// [`Self::lower_str_list_literal_elem`]. Split at the same seam as
+    /// [`Self::str_list_literal_elem_ctor_lowerable`]'s so the builder and its
+    /// admission predicate keep matching shapes; arm ORDER within the half is
+    /// unchanged (the ctor-guarded `Call` arms must stay before their unguarded
+    /// sibling).
+    fn lower_str_list_literal_call_elem(
+        &mut self,
+        elem: &IrExpr,
+        class: &StrListLiteralClass,
+    ) -> Option<ValueId> {
+        let &StrListLiteralClass { elem_str, elem_value, elem_list_flat, elem_flat_variant, ref elem_rich_variant, .. } = class;
+        let ev = match &elem.kind {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                 if elem_value || elem_str || elem_list_flat =>
             {
@@ -482,6 +495,7 @@ impl LowerCtx {
             }
             // A `${...}` interpolation element → a fresh owned String via the interp concat chain.
             IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts)?,
+            // Anything else the predicate admitted is a concat-shaped String.
             _ => self.try_lower_concat_str(elem)?,
         };
         Some(ev)
