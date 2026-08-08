@@ -309,9 +309,8 @@ impl LowerCtx {
     /// decides a registered-ctor element from a plain aggregate.
     fn str_list_literal_elem_ctor_lowerable(&self, e: &IrExpr, class: &StrListLiteralClass) -> bool {
         let &StrListLiteralClass {
-            elem_str, elem_scalar_aggregate, elem_value, elem_str_value, elem_list_flat,
-            elem_int_str, elem_str_int, ref elem_recdrop, elem_flat_variant,
-            ref elem_rich_variant, ..
+            elem_scalar_aggregate, elem_str_value, elem_int_str, elem_str_int,
+            ref elem_recdrop, elem_flat_variant, ref elem_rich_variant, ..
         } = class;
         match &e.kind {
             IrExprKind::Record { name: Some(n), .. }
@@ -324,6 +323,19 @@ impl LowerCtx {
             IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str || elem_str_int,
             // A FLAT-variant CONSTRUCTOR element (`[CapIO, CapProcess]`) — a Named call whose name is a
             // registered constructor, materialized via `try_lower_variant_ctor` below.
+            _ => self.str_list_literal_elem_call_lowerable(e, class),
+        }
+    }
+
+    /// The CALL- and field-shaped elements of
+    /// [`Self::str_list_literal_elem_ctor_lowerable`]. Split again so neither
+    /// third outgrows a readable arm table; the guarded `Call` arm keeps its
+    /// position before its unguarded sibling.
+    fn str_list_literal_elem_call_lowerable(&self, e: &IrExpr, class: &StrListLiteralClass) -> bool {
+        let &StrListLiteralClass {
+            elem_str, elem_value, elem_list_flat, elem_flat_variant, ref elem_rich_variant, ..
+        } = class;
+        match &e.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
                 if (elem_flat_variant || elem_rich_variant.is_some())
                     && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
@@ -434,6 +446,26 @@ impl LowerCtx {
     /// admission predicate keep matching shapes; arm ORDER within the half is
     /// unchanged (the ctor-guarded `Call` arms must stay before their unguarded
     /// sibling).
+    /// A heap-returning NAMED call element: emit the `CallFn` and take its
+    /// fresh OWNED result, which the caller moves into the list slot.
+    fn lower_named_call_elem(
+        &mut self,
+        name: &str,
+        args: &[IrExpr],
+        elem_ty: &Ty,
+    ) -> Option<ValueId> {
+        let lowered = self.lower_call_args(args).ok()?;
+        let repr = repr_of(elem_ty).ok()?;
+        let obj = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(obj),
+            name: name.to_string(),
+            args: lowered,
+            result: Some(repr),
+        });
+        Some(obj)
+    }
+
     fn lower_str_list_literal_call_elem(
         &mut self,
         elem: &IrExpr,
@@ -449,16 +481,7 @@ impl LowerCtx {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
                 if elem_value || elem_str || elem_list_flat =>
             {
-                let lowered = self.lower_call_args(args).ok()?;
-                let obj = self.fresh_value();
-                let repr = repr_of(&elem.ty).ok()?;
-                self.ops.push(Op::CallFn {
-                    dst: Some(obj),
-                    name: name.as_str().to_string(),
-                    args: lowered,
-                    result: Some(repr),
-                });
-                obj
+                self.lower_named_call_elem(name.as_str(), args, &elem.ty)?
             }
             // A FLAT-variant CONSTRUCTOR element (`CapIO`) — materialize the fresh OWNED tag-block
             // (`try_lower_variant_ctor`, cert `i`) and move it into the slot. The block owns no
