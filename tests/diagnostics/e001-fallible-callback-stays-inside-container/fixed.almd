@@ -1,0 +1,9 @@
+// The fix the hint names: traverse via the core `list` HOFs, which DO accept a
+// fallible callback (the first-err short-circuit comes with it), converting the
+// container on the way in.
+fn parse1(s: String) -> Result[Int, String] = int.parse(s)
+
+fn all_parsed(xs: Set[String]) -> Result[List[Int], String] =
+  list.map(set.to_list(xs), (x) => parse1(x)!)
+
+fn main() -> Unit = println(int.to_string(list.len(all_parsed(set.from_list(["1"])) ?? [])))

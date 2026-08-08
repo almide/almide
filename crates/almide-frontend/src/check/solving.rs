@@ -33,7 +33,19 @@ impl Checker {
         if exp == Ty::Unknown || act == Ty::Unknown {
             return;
         }
-        let hint = Self::hint_with_conversion(mismatch_hint(&c.context), &exp, &act);
+        // #1108 Phase 2b-iii: a fallible callback handed to a container HOF the
+        // name-keyed normalization does not cover. `list.map(xs, (x) => f(x)!)`
+        // is rewritten to the `__fallible_*` twin before inference; `set.map`,
+        // `option.map`, `map.map`, and every user HOF have no twin, so the
+        // callback's Result rides through the container and the mismatch
+        // surfaces here as `Set[Result[..]]` vs `Result[Set[..]]` — under the
+        // generic "fix the expression type", which names neither the cause nor
+        // a way out. Detect the SHAPE (a Result nested one level inside the
+        // actual where the expected has it outside) and say what happened.
+        let hint = match fallible_callback_shape_hint(&exp, &act) {
+            Some(h) => h,
+            None => Self::hint_with_conversion(mismatch_hint(&c.context), &exp, &act),
+        };
         // Context-specific try: snippet for the "Unit leak" failure mode — a
         // statement (assignment / lone `let`) slips into a position expected to
         // produce a value. dojo data shows this is the top E001 pattern for both
@@ -227,6 +239,47 @@ pub(crate) fn is_numeric_scalar(t: &Ty) -> bool {
             | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
             | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
             | Ty::Float32 | Ty::Float64
+    )
+}
+
+/// `Some(hint)` when the mismatch is the Phase 2b-iii shape: the expected type
+/// is `Result[C[T], E]` while the actual is `C[Result[T, E]]` — i.e. a fallible
+/// callback's Result stayed INSIDE the container instead of the whole traversal
+/// becoming fallible.
+///
+/// Only the core `list` HOFs get the fallible form today (a pre-inference
+/// rewrite to the hand-written `__fallible_*` twins, keyed by name in
+/// `infer_calls_closures.rs`). Every other container — and every user-defined
+/// HOF — leaves the bit where the callback put it, which is correct for the
+/// types and useless as a message. Naming the two spellings that DO work is the
+/// difference between a dead end and a five-second fix.
+fn fallible_callback_shape_hint(expected: &Ty, actual: &Ty) -> Option<String> {
+    use crate::types::TypeConstructorId as C;
+    // expected: Result[Container[T], E]
+    let Ty::Applied(C::Result, exp_args) = expected else { return None };
+    let exp_ok = exp_args.first()?;
+    // actual: Container[Result[T, E]] — the SAME container, Result one level in.
+    let (act_ctor, act_args) = match actual {
+        Ty::Applied(c, args) if matches!(c, C::List | C::Set | C::Option) => (c, args),
+        _ => return None,
+    };
+    if !act_args.first()?.is_result() {
+        return None;
+    }
+    // Same container kind on both sides, or this is an unrelated mismatch.
+    match exp_ok {
+        Ty::Applied(c, _) if c == act_ctor => {}
+        _ => return None,
+    }
+    Some(
+        "The callback is FALLIBLE, so its Result stayed INSIDE the container \
+         instead of the traversal itself becoming fallible. Only the core list \
+         HOFs (map / filter / flat_map / filter_map / fold / find / each) accept \
+         a fallible callback natively today. Either traverse via `list.*` — \
+         convert with `set.to_list` first — or handle the error inside the \
+         callback (`?? fallback`, or match on ok/err). Transparency for the \
+         other containers and for user HOFs is #1108 Phase 2b-iii."
+            .to_string(),
     )
 }
 
