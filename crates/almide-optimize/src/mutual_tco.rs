@@ -128,61 +128,94 @@ fn collect_tail_callees(expr: &IrExpr, out: &mut HashSet<almide_base::intern::Sy
 /// assumed). Only size >= 2 groups are rewritten; size-1 self-loops belong to
 /// the per-fn TCO the codegen legs already run.
 fn sccs(n: usize, edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
-    #[derive(Clone, Copy)]
-    struct NodeState {
-        index: u32,
-        lowlink: u32,
-        on_stack: bool,
-        visited: bool,
-    }
-    let mut st = vec![NodeState { index: 0, lowlink: 0, on_stack: false, visited: false }; n];
-    let mut counter: u32 = 0;
-    let mut stack: Vec<usize> = Vec::new();
-    let mut out: Vec<Vec<usize>> = Vec::new();
-
+    let mut t = Tarjan::new(n);
     for root in 0..n {
-        if st[root].visited {
-            continue;
+        if !t.node[root].visited {
+            t.walk(root, edges);
         }
+    }
+    t.out
+}
+
+#[derive(Clone, Copy)]
+struct NodeState {
+    index: u32,
+    lowlink: u32,
+    on_stack: bool,
+    visited: bool,
+}
+
+/// Tarjan's running state: per-node marks, the DFS counter, the component
+/// stack, and the components closed so far.
+struct Tarjan {
+    node: Vec<NodeState>,
+    counter: u32,
+    stack: Vec<usize>,
+    out: Vec<Vec<usize>>,
+}
+
+impl Tarjan {
+    fn new(n: usize) -> Self {
+        Tarjan {
+            node: vec![NodeState { index: 0, lowlink: 0, on_stack: false, visited: false }; n],
+            counter: 0,
+            stack: Vec::new(),
+            out: Vec::new(),
+        }
+    }
+
+    /// One DFS tree, driven by an EXPLICIT stack of `(node, edge cursor)` —
+    /// the input is user code, so no recursion budget is assumed.
+    fn walk(&mut self, root: usize, edges: &[Vec<usize>]) {
         let mut work: Vec<(usize, usize)> = vec![(root, 0)];
         while let Some(&mut (v, ref mut cursor)) = work.last_mut() {
             if *cursor == 0 {
-                st[v].visited = true;
-                st[v].index = counter;
-                st[v].lowlink = counter;
-                counter += 1;
-                st[v].on_stack = true;
-                stack.push(v);
+                self.enter(v);
             }
-            if let Some(&w) = edges[v].get(*cursor) {
-                *cursor += 1;
-                if !st[w].visited {
-                    work.push((w, 0));
-                } else if st[w].on_stack {
-                    st[v].lowlink = st[v].lowlink.min(st[w].index);
-                }
-            } else {
+            let Some(&w) = edges[v].get(*cursor) else {
                 work.pop();
-                if let Some(&(parent, _)) = work.last() {
-                    let low = st[v].lowlink;
-                    st[parent].lowlink = st[parent].lowlink.min(low);
-                }
-                if st[v].lowlink == st[v].index {
-                    let mut scc = Vec::new();
-                    loop {
-                        let w = stack.pop().expect("tarjan stack underflow");
-                        st[w].on_stack = false;
-                        scc.push(w);
-                        if w == v {
-                            break;
-                        }
-                    }
-                    out.push(scc);
-                }
+                self.close(v, work.last().map(|&(parent, _)| parent));
+                continue;
+            };
+            *cursor += 1;
+            if !self.node[w].visited {
+                work.push((w, 0));
+            } else if self.node[w].on_stack {
+                self.node[v].lowlink = self.node[v].lowlink.min(self.node[w].index);
             }
         }
     }
-    out
+
+    /// First visit of `v`: stamp its index/lowlink and push it on the component stack.
+    fn enter(&mut self, v: usize) {
+        self.node[v].visited = true;
+        self.node[v].index = self.counter;
+        self.node[v].lowlink = self.counter;
+        self.counter += 1;
+        self.node[v].on_stack = true;
+        self.stack.push(v);
+    }
+
+    /// `v`'s edges are exhausted: propagate its lowlink to its DFS parent, and
+    /// if `v` is a component root, pop that component off the stack.
+    fn close(&mut self, v: usize, parent: Option<usize>) {
+        if let Some(p) = parent {
+            self.node[p].lowlink = self.node[p].lowlink.min(self.node[v].lowlink);
+        }
+        if self.node[v].lowlink != self.node[v].index {
+            return;
+        }
+        let mut scc = Vec::new();
+        loop {
+            let w = self.stack.pop().expect("tarjan stack underflow");
+            self.node[w].on_stack = false;
+            scc.push(w);
+            if w == v {
+                break;
+            }
+        }
+        self.out.push(scc);
+    }
 }
 
 fn scalar_zero(ty: &Ty) -> IrExpr {
@@ -262,6 +295,90 @@ pub fn run_mutual_tco(program: &mut IrProgram) {
     }
 }
 
+/// The dispatcher's control vars plus the per-member parameter slots and jump
+/// temps — everything the SCC rewrite threads through its phases.
+struct SccFrame {
+    /// Which member's arm runs on the next loop turn.
+    tag: VarId,
+    /// The `while` guard; a base case clears it.
+    running: VarId,
+    /// The value the dispatcher finally returns.
+    result: VarId,
+    /// Member k's dispatcher-param slots, reassigned on every jump.
+    slots: Vec<Vec<(VarId, Ty)>>,
+    /// Member k's jump temps, bound before the slot assigns so an arg that
+    /// reads several current slots sees their pre-jump values — simultaneous
+    /// assignment.
+    temps: Vec<Vec<(VarId, Ty)>>,
+}
+
+impl SccFrame {
+    /// Allocate every var the rewrite needs. Slot/temp names carry the MEMBER
+    /// INDEX: `is_even(n)` and `is_odd(n)` must NOT both render a param `n`
+    /// (the E0415 duplicate-binder class).
+    fn alloc(
+        var_table: &mut VarTable,
+        functions: &[IrFunction],
+        fis: &[usize],
+        ret_ty: &Ty,
+        scc_no: usize,
+    ) -> Self {
+        let mut var = |name: String, ty: Ty, m: Mutability| {
+            var_table.alloc(almide_base::intern::sym(&name), ty, m, None)
+        };
+        let tag = var(format!("__mt_tag_{scc_no}"), Ty::Int, Mutability::Var);
+        let running = var(format!("__mt_running_{scc_no}"), Ty::Bool, Mutability::Var);
+        let result = var(format!("__mt_result_{scc_no}"), ret_ty.clone(), Mutability::Var);
+        let mut slots: Vec<Vec<(VarId, Ty)>> = Vec::new();
+        let mut temps: Vec<Vec<(VarId, Ty)>> = Vec::new();
+        for (k, &fi) in fis.iter().enumerate() {
+            let mut srow = Vec::new();
+            let mut trow = Vec::new();
+            for p in &functions[fi].params {
+                let pname = var_table.get(p.var).name;
+                let s = var_table.alloc(
+                    almide_base::intern::sym(&format!("__mt{scc_no}_{k}_{}", pname.as_str())),
+                    p.ty.clone(),
+                    Mutability::Var,
+                    None,
+                );
+                let t = var_table.alloc(
+                    almide_base::intern::sym(&format!("__mt{scc_no}_tmp_{k}_{}", pname.as_str())),
+                    p.ty.clone(),
+                    Mutability::Let,
+                    None,
+                );
+                srow.push((s, p.ty.clone()));
+                trow.push((t, p.ty.clone()));
+            }
+            slots.push(srow);
+            temps.push(trow);
+        }
+        SccFrame { tag, running, result, slots, temps }
+    }
+
+    /// The dispatcher's signature: the tag, then every member's slots in order.
+    fn dispatcher_params(&self, var_table: &VarTable) -> Vec<IrParam> {
+        let own = |var: VarId, ty: Ty| IrParam {
+            var,
+            ty,
+            name: var_table.get(var).name,
+            borrow: ParamBorrow::Own,
+            is_mut: false,
+            open_record: None,
+            default: None,
+            attrs: vec![],
+        };
+        let mut params = vec![own(self.tag, Ty::Int)];
+        for row in &self.slots {
+            for (sv, sty) in row {
+                params.push(own(*sv, sty.clone()));
+            }
+        }
+        params
+    }
+}
+
 fn rewrite_scc(
     functions: &mut Vec<IrFunction>,
     var_table: &mut VarTable,
@@ -271,79 +388,59 @@ fn rewrite_scc(
 ) {
     let member_idx: HashMap<almide_base::intern::Sym, usize> =
         fis.iter().enumerate().map(|(k, &i)| (functions[i].name, k)).collect();
+    let frame = SccFrame::alloc(var_table, functions, fis, &ret_ty, scc_no);
+    let arm_bodies = member_arm_bodies(functions, fis, &member_idx, &frame);
+    let chain = tag_dispatch_chain(arm_bodies, frame.tag);
+    let disp_name = almide_base::intern::sym(&format!(
+        "__mutual_tco_{scc_no}_{}",
+        functions[fis[0]].name.as_str()
+    ));
+    let dispatcher = IrFunction {
+        name: disp_name,
+        params: frame.dispatcher_params(var_table),
+        ret_ty: ret_ty.clone(),
+        body: dispatcher_body(chain, &frame, &ret_ty),
+        is_effect: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: IrVisibility::Private,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        mutated_params: vec![],
+        module_origin: None,
+    };
+    retarget_members_to_dispatcher(functions, fis, &frame, disp_name, &ret_ty);
+    functions.push(dispatcher);
+}
 
-    let tag_var = var_table.alloc(
-        almide_base::intern::sym(&format!("__mt_tag_{scc_no}")),
-        Ty::Int,
-        Mutability::Var,
-        None,
-    );
-    let running_var = var_table.alloc(
-        almide_base::intern::sym(&format!("__mt_running_{scc_no}")),
-        Ty::Bool,
-        Mutability::Var,
-        None,
-    );
-    let result_var = var_table.alloc(
-        almide_base::intern::sym(&format!("__mt_result_{scc_no}")),
-        ret_ty.clone(),
-        Mutability::Var,
-        None,
-    );
+/// Each member's body with its params substituted by its own slots, then its
+/// tail positions rewritten to jumps / base cases.
+fn member_arm_bodies(
+    functions: &[IrFunction],
+    fis: &[usize],
+    member_idx: &HashMap<almide_base::intern::Sym, usize>,
+    frame: &SccFrame,
+) -> Vec<IrExpr> {
+    fis.iter()
+        .enumerate()
+        .map(|(k, &fi)| {
+            let mut body = functions[fi].body.clone();
+            for (pi, p) in functions[fi].params.iter().enumerate() {
+                let repl = var_expr(frame.slots[k][pi].0, p.ty.clone());
+                body = substitute::substitute_var_in_expr(&body, p.var, &repl);
+            }
+            rewrite_tail(body, member_idx, frame)
+        })
+        .collect()
+}
 
-    // Per-member slot vars (dispatcher params, reassigned on every jump) and
-    // jump temps (bound before the slot assigns so an arg that reads several
-    // current slots sees their pre-jump values — simultaneous assignment).
-    // Names carry the member index: is_even(n) / is_odd(n) must NOT both
-    // render a param `n` (the E0415 duplicate-binder class).
-    let mut slots: Vec<Vec<(VarId, Ty)>> = Vec::new();
-    let mut temps: Vec<Vec<(VarId, Ty)>> = Vec::new();
-    for (k, &fi) in fis.iter().enumerate() {
-        let mut srow = Vec::new();
-        let mut trow = Vec::new();
-        for p in &functions[fi].params {
-            let pname = var_table.get(p.var).name;
-            let s = var_table.alloc(
-                almide_base::intern::sym(&format!("__mt{scc_no}_{k}_{}", pname.as_str())),
-                p.ty.clone(),
-                Mutability::Var,
-                None,
-            );
-            let t = var_table.alloc(
-                almide_base::intern::sym(&format!("__mt{scc_no}_tmp_{k}_{}", pname.as_str())),
-                p.ty.clone(),
-                Mutability::Let,
-                None,
-            );
-            srow.push((s, p.ty.clone()));
-            trow.push((t, p.ty.clone()));
-        }
-        slots.push(srow);
-        temps.push(trow);
-    }
-
-    // Each member's body: params → its slots, then tail rewrites.
-    let mut arm_bodies: Vec<IrExpr> = Vec::new();
-    for (k, &fi) in fis.iter().enumerate() {
-        let mut body = functions[fi].body.clone();
-        for (pi, p) in functions[fi].params.iter().enumerate() {
-            let repl = var_expr(slots[k][pi].0, p.ty.clone());
-            body = substitute::substitute_var_in_expr(&body, p.var, &repl);
-        }
-        arm_bodies.push(rewrite_tail(
-            body,
-            &member_idx,
-            &slots,
-            &temps,
-            tag_var,
-            running_var,
-            result_var,
-        ));
-    }
-
-    // `if tag == 0 { arm0 } else if tag == 1 { arm1 } else { armN }` — the
-    // last member rides the final else, so the chain is total without a trap
-    // arm.
+/// `if tag == 0 { arm0 } else if tag == 1 { arm1 } else { armN }` — the last
+/// member rides the final else, so the chain is total without a trap arm.
+fn tag_dispatch_chain(mut arm_bodies: Vec<IrExpr>, tag_var: VarId) -> IrExpr {
     let mut chain = arm_bodies.pop().expect("scc has >= 2 members");
     for (k, arm) in arm_bodies.into_iter().enumerate().rev() {
         let cond = IrExpr {
@@ -363,99 +460,51 @@ fn rewrite_scc(
             def_id: None,
         };
     }
+    chain
+}
 
+/// `{ var running = true; var result = 0; while running { <chain> }; result }`.
+fn dispatcher_body(chain: IrExpr, frame: &SccFrame, ret_ty: &Ty) -> IrExpr {
     let while_expr = IrExpr {
         kind: IrExprKind::While {
-            cond: Box::new(var_expr(running_var, Ty::Bool)),
+            cond: Box::new(var_expr(frame.running, Ty::Bool)),
             body: vec![IrStmt { kind: IrStmtKind::Expr { expr: chain }, span: None }],
         },
         ty: Ty::Unit,
         span: None,
         def_id: None,
     };
-
-    let disp_body = IrExpr {
+    let bind = |var: VarId, ty: Ty, value: IrExpr| IrStmt {
+        kind: IrStmtKind::Bind { var, mutability: Mutability::Var, ty, value },
+        span: None,
+    };
+    IrExpr {
         kind: IrExprKind::Block {
             stmts: vec![
-                IrStmt {
-                    kind: IrStmtKind::Bind {
-                        var: running_var,
-                        mutability: Mutability::Var,
-                        ty: Ty::Bool,
-                        value: lit_bool(true),
-                    },
-                    span: None,
-                },
-                IrStmt {
-                    kind: IrStmtKind::Bind {
-                        var: result_var,
-                        mutability: Mutability::Var,
-                        ty: ret_ty.clone(),
-                        value: scalar_zero(&ret_ty),
-                    },
-                    span: None,
-                },
+                bind(frame.running, Ty::Bool, lit_bool(true)),
+                bind(frame.result, ret_ty.clone(), scalar_zero(ret_ty)),
                 IrStmt { kind: IrStmtKind::Expr { expr: while_expr }, span: None },
             ],
-            expr: Some(Box::new(var_expr(result_var, ret_ty.clone()))),
+            expr: Some(Box::new(var_expr(frame.result, ret_ty.clone()))),
         },
         ty: ret_ty.clone(),
         span: None,
         def_id: None,
-    };
-
-    let disp_name = almide_base::intern::sym(&format!(
-        "__mutual_tco_{scc_no}_{}",
-        functions[fis[0]].name.as_str()
-    ));
-    let mut disp_params: Vec<IrParam> = vec![IrParam {
-        var: tag_var,
-        ty: Ty::Int,
-        name: var_table.get(tag_var).name,
-        borrow: ParamBorrow::Own,
-        is_mut: false,
-        open_record: None,
-        default: None,
-        attrs: vec![],
-    }];
-    for row in &slots {
-        for (sv, sty) in row {
-            disp_params.push(IrParam {
-                var: *sv,
-                ty: sty.clone(),
-                name: var_table.get(*sv).name,
-                borrow: ParamBorrow::Own,
-                is_mut: false,
-                open_record: None,
-                default: None,
-                attrs: vec![],
-            });
-        }
     }
-    let dispatcher = IrFunction {
-        name: disp_name,
-        params: disp_params,
-        ret_ty: ret_ty.clone(),
-        body: disp_body,
-        is_effect: false,
-        is_test: false,
-        generics: None,
-        extern_attrs: vec![],
-        export_attrs: vec![],
-        attrs: vec![],
-        visibility: IrVisibility::Private,
-        doc: None,
-        blank_lines_before: 0,
-        def_id: None,
-        mutated_params: vec![],
-        module_origin: None,
-    };
+}
 
-    // Members become thin wrappers: own args in own slots, zero-literals in
-    // the others (never read before the entry arm assigns or jumps away).
+/// Members become thin wrappers: own args in own slots, zero-literals in the
+/// others (never read before the entry arm assigns or jumps away).
+fn retarget_members_to_dispatcher(
+    functions: &mut [IrFunction],
+    fis: &[usize],
+    frame: &SccFrame,
+    disp_name: almide_base::intern::Sym,
+    ret_ty: &Ty,
+) {
     for (k, &fi) in fis.iter().enumerate() {
         let mut args: Vec<IrExpr> = vec![lit_int(k as i64)];
-        for (m, row) in slots.iter().enumerate() {
+        for (m, row) in frame.slots.iter().enumerate() {
             for (i, (_sv, sty)) in row.iter().enumerate() {
                 if m == k {
                     let p = &functions[fi].params[i];
@@ -476,8 +525,6 @@ fn rewrite_scc(
             def_id: None,
         };
     }
-
-    functions.push(dispatcher);
 }
 
 /// Rewrite a member body's TAIL positions: an intra-SCC call becomes the
@@ -489,23 +536,19 @@ fn rewrite_scc(
 fn rewrite_tail(
     expr: IrExpr,
     member_idx: &HashMap<almide_base::intern::Sym, usize>,
-    slots: &[Vec<(VarId, Ty)>],
-    temps: &[Vec<(VarId, Ty)>],
-    tag_var: VarId,
-    running_var: VarId,
-    result_var: VarId,
+    frame: &SccFrame,
 ) -> IrExpr {
     match expr.kind {
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if member_idx.contains_key(&name) =>
         {
-            emit_jump(member_idx[&name], args, slots, temps, tag_var)
+            emit_jump(member_idx[&name], args, frame)
         }
         IrExprKind::If { cond, then, else_ } => IrExpr {
             kind: IrExprKind::If {
                 cond,
-                then: Box::new(rewrite_tail(*then, member_idx, slots, temps, tag_var, running_var, result_var)),
-                else_: Box::new(rewrite_tail(*else_, member_idx, slots, temps, tag_var, running_var, result_var)),
+                then: Box::new(rewrite_tail(*then, member_idx, frame)),
+                else_: Box::new(rewrite_tail(*else_, member_idx, frame)),
             },
             ty: Ty::Unit,
             span: expr.span,
@@ -519,7 +562,7 @@ fn rewrite_tail(
                     .map(|arm| IrMatchArm {
                         pattern: arm.pattern,
                         guard: arm.guard,
-                        body: rewrite_tail(arm.body, member_idx, slots, temps, tag_var, running_var, result_var),
+                        body: rewrite_tail(arm.body, member_idx, frame),
                     })
                     .collect(),
             },
@@ -530,7 +573,7 @@ fn rewrite_tail(
         IrExprKind::Block { stmts, expr: Some(tail) } => IrExpr {
             kind: IrExprKind::Block {
                 stmts,
-                expr: Some(Box::new(rewrite_tail(*tail, member_idx, slots, temps, tag_var, running_var, result_var))),
+                expr: Some(Box::new(rewrite_tail(*tail, member_idx, frame))),
             },
             ty: Ty::Unit,
             span: expr.span,
@@ -541,8 +584,8 @@ fn rewrite_tail(
             IrExpr {
                 kind: IrExprKind::Block {
                     stmts: vec![
-                        assign(result_var, base),
-                        assign(running_var, lit_bool(false)),
+                        assign(frame.result, base),
+                        assign(frame.running, lit_bool(false)),
                     ],
                     expr: None,
                 },
@@ -559,16 +602,10 @@ fn rewrite_tail(
 /// The arm then ends; the running loop re-checks and dispatches on the new
 /// tag — no `continue` needed, which is what keeps the dispatcher inside the
 /// scalar-loop subset every backend already executes.
-fn emit_jump(
-    target: usize,
-    args: Vec<IrExpr>,
-    slots: &[Vec<(VarId, Ty)>],
-    temps: &[Vec<(VarId, Ty)>],
-    tag_var: VarId,
-) -> IrExpr {
+fn emit_jump(target: usize, args: Vec<IrExpr>, frame: &SccFrame) -> IrExpr {
     let mut stmts: Vec<IrStmt> = Vec::new();
     for (i, arg) in args.into_iter().enumerate() {
-        let (tv, tty) = &temps[target][i];
+        let (tv, tty) = &frame.temps[target][i];
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {
                 var: *tv,
@@ -579,11 +616,11 @@ fn emit_jump(
             span: None,
         });
     }
-    for (i, (sv, sty)) in slots[target].iter().enumerate() {
-        let (tv, _) = &temps[target][i];
+    for (i, (sv, sty)) in frame.slots[target].iter().enumerate() {
+        let (tv, _) = &frame.temps[target][i];
         stmts.push(assign(*sv, var_expr(*tv, sty.clone())));
     }
-    stmts.push(assign(tag_var, lit_int(target as i64)));
+    stmts.push(assign(frame.tag, lit_int(target as i64)));
     IrExpr {
         kind: IrExprKind::Block { stmts, expr: None },
         ty: Ty::Unit,
