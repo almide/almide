@@ -397,41 +397,48 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
         use almide_ir::{IrExprKind, IrStmtKind, IrStringPart};
         let mut i = 0;
         while i < stmts.len() {
-            let mut hoisted: Vec<almide_ir::IrStmt> = Vec::new();
-            if let IrStmtKind::Bind { value, .. } = &mut stmts[i].kind {
-                if let IrExprKind::StringInterp { parts } = &mut value.kind {
-                    let mut earlier_pure = true;
-                    // Guard-clause flattening: a non-Block part still needs the
-                    // `is_pure_operand` update before continuing (moved into the `else`
-                    // below); a Block part still unconditionally `break`s after the hoist
-                    // check, exactly as the original nested-if did. No behavior change.
-                    for part in parts.iter_mut() {
-                        let IrStringPart::Expr { expr } = part else { continue };
-                        let IrExprKind::Block { stmts: inner, expr: Some(tail) } = &mut expr.kind
-                        else {
-                            if !is_pure_operand(expr) {
-                                earlier_pure = false;
-                            }
-                            continue;
-                        };
-                        if earlier_pure && !inner.is_empty() {
-                            hoisted = std::mem::take(inner);
-                            let t = (**tail).clone();
-                            *expr = t;
-                        }
-                        break;
-                    }
-                }
-            }
+            let hoisted = take_first_block_part(&mut stmts[i]);
             if hoisted.is_empty() {
                 i += 1;
-            } else {
-                for (k, s) in hoisted.into_iter().enumerate() {
-                    stmts.insert(i + k, s);
-                }
-                // Re-examine the same bind: another block part may remain.
+                continue;
             }
+            for (k, s) in hoisted.into_iter().enumerate() {
+                stmts.insert(i + k, s);
+            }
+            // Re-examine the same bind: another block part may remain.
         }
+    }
+
+    /// Take the statements of the FIRST block-shaped interpolation part of a
+    /// `let` bind, leaving that part as its own tail expression. Empty when the
+    /// statement is not that shape, or when an EARLIER part is impure (moving
+    /// the block's statements before it would reorder the evaluation).
+    ///
+    /// A non-Block part only updates the purity flag; a Block part ends the scan
+    /// either way, so at most one hoist happens per call — the caller re-runs on
+    /// the same statement to find the next.
+    fn take_first_block_part(stmt: &mut almide_ir::IrStmt) -> Vec<almide_ir::IrStmt> {
+        use almide_ir::{IrExprKind, IrStmtKind, IrStringPart};
+        let IrStmtKind::Bind { value, .. } = &mut stmt.kind else { return Vec::new() };
+        let IrExprKind::StringInterp { parts } = &mut value.kind else { return Vec::new() };
+        let mut earlier_pure = true;
+        for part in parts.iter_mut() {
+            let IrStringPart::Expr { expr } = part else { continue };
+            let IrExprKind::Block { stmts: inner, expr: Some(tail) } = &mut expr.kind else {
+                if !is_pure_operand(expr) {
+                    earlier_pure = false;
+                }
+                continue;
+            };
+            if !earlier_pure || inner.is_empty() {
+                return Vec::new();
+            }
+            let hoisted = std::mem::take(inner);
+            let t = (**tail).clone();
+            *expr = t;
+            return hoisted;
+        }
+        Vec::new()
     }
     struct S2;
     impl IrMutVisitor for S2 {
