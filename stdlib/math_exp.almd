@@ -47,10 +47,10 @@ fn __exp_main(x: Float, hx: Int, sign: Int) -> Float = {
   let ln2lo = prim.ffrombits(4461442080421002358)
   let invln2 = prim.ffrombits(4609176140021203710)
   // tiny: 1 + x
-  if hx > 1071001650 then {
-    // |x| > 0.5 ln2
+  if hx > 1071001154 then {
+    // |x| > 0.5 ln2 (hx of 0x3FD62E42)
     let half = if sign == 0 then 0.5 else 0.0 - 0.5
-    let k = if hx >= 1072889522 then prim.f2i(invln2 * x + half) else 1 - sign - sign
+    let k = if hx >= 1072734898 then prim.f2i(invln2 * x + half) else 1 - sign - sign
     let dk = prim.i2f(k)
     let hi = x - dk * ln2hi
     let lo = dk * ln2lo
@@ -65,8 +65,8 @@ fn math_exp(x: Float) -> Float = {
   let u32 = prim.band(prim.bshr(bits, 32), 4294967295)
   let sign = prim.bshr(u32, 31)
   let hx = prim.band(u32, 2147483647)
-  if hx >= 1082531627 then {
-    // |x| >= 708.39...
+  if hx >= 1082532651 then {
+    // |x| >= 708.39... (hx of 0x4086232B)
     let isnan = prim.fne(x, x)
     let ovf = prim.ffrombits(4649454530587146735)
     // 709.782712893383973096

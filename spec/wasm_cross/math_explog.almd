@@ -42,6 +42,23 @@ fn main() -> Unit = {
   // underflow -> 0
   pe(-0.0001)
   pe(0.0001)
+  // Reduction-band probes (fuzz seed 424245 index 112): the transcription's
+  // three bare-decimal hx gates were wrong — 0.5ln2 gate +496, 1.5ln2 gate
+  // +154624, |x|>=708.39 gate -1024 — so x in the mis-gated bands took a
+  // different k reduction and rounded a different last ulp. The ffrombits
+  // constants were all exact; only the bare thresholds drifted. Pin every
+  // band, both signs. exp(0.1)=1.1051709... is the fuzzer's live hit.
+  pe(0.34658)
+  pe(-0.34658)
+  pe(1.05)
+  pe(1.1051709180756477)
+  pe(1.15)
+  pe(1.18)
+  pe(-1.05)
+  pe(-1.1051709180756477)
+  pe(-1.15)
+  pe(708.0)
+  pe(-708.0)
   // log (natural)
   pl(1.0)
   pl(2.718281828459045)
