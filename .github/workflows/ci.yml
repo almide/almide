@@ -229,6 +229,64 @@ jobs:
         # build rather than a fast green one.
         run: bash scripts/ci-test-shard.sh --run ${{ matrix.shard }} 4
 
+  almide-gates:
+    # BRANCH PROTECTION: this job's name is a REQUIRED CHECK on develop. Renaming
+    # a job silently un-requires it — the old name never reports again and the
+    # PR blocks forever waiting for a check that cannot arrive (which is exactly
+    # what the shard rename did to `Test Rust`). Rename here ⟹ update
+    # repos/almide/almide/branches/develop/protection/required_status_checks in
+    # the same change.
+    #
+    # The steps that do NOT depend on the shard split, lifted OUT of it.
+    #
+    # `test-rust` is a 4-way matrix, so every step in it runs FOUR TIMES. These
+    # six run the built compiler over fixed inputs — the same work, the same
+    # result, four times over — which cost the critical shard ~150s of pure
+    # duplication and would not shrink by adding shards. Sharding parallelises
+    # `cargo test`; anything else sharing that job just gets copied.
+    #
+    # The registry regen is the one step here that needs cargo (it rebuilds
+    # almide-codegen to diff the generated sources); the rest need only the
+    # downloaded binary, which is why this job installs wasmtime/wasm-opt but
+    # skips the heavy cargo cache the shards restore.
+    name: Almide gates (compiler-driven, shard-independent)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache wasmtime tarball
+        id: wasmtime-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/wasmtime.tar.xz
+          key: wasmtime-v27.0.0-x86_64-linux
+
+      - name: Install wasmtime
+        run: |
+          if [ ! -f /tmp/wasmtime.tar.xz ]; then
+            curl -sSL -o /tmp/wasmtime.tar.xz \
+              https://github.com/bytecodealliance/wasmtime/releases/download/v27.0.0/wasmtime-v27.0.0-x86_64-linux.tar.xz
+          fi
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v27.0.0-x86_64-linux/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Install wasm-opt (binaryen)
+        run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
+
       - name: Generated runtime registry matches committed sources (regenerate and diff)
         # crates/almide-codegen/src/generated/{rust_runtime,runtime_fn_modes}.rs
         # are committed, but build.rs regenerates them from runtime/rs/src by
