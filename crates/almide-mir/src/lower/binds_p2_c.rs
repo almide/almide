@@ -254,45 +254,8 @@ impl LowerCtx {
     /// reduction): the second half of the mutually-exclusive `if/else if` chain, verbatim
     /// (only reached when the first half's chain did not match).
     fn seed_call_module_heap_drop_route_b(&mut self, dst: ValueId, ty: &Ty) {
-        // Guard-clause flattening (codopsy7 max-depth sweep, same rationale as `_a` above).
-        if crate::lower::is_map_msv_ty(ty) {
-            // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
-            // last-ref inner map's String slots (a flat rc_dec would leak them).
-            self.variant_drop_handles.insert(dst, "map_msv".to_string());
-            return;
-        }
-        if crate::lower::is_map_msb_ty(ty) {
-            // `Map[String, Map[String, <scalar>]]` — `$__drop_map_msb` key-sweeps each
-            // last-ref inner map (the skv split layout owns no heap values).
-            self.variant_drop_handles.insert(dst, "map_msb".to_string());
-            return;
-        }
-        if crate::lower::is_map_mlo_ty(ty) {
-            // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
-            // last-ref value list's Option slots (a flat rc_dec would leak them).
-            self.variant_drop_handles.insert(dst, "map_mlo".to_string());
-            return;
-        }
-        if let Some(rname) = (match ty {
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                if a.len() == 1 =>
-            {
-                self.record_or_anon_drop_type_name(&a[0])
-            }
-            _ => None,
-        }) {
-            // A `List[<recursive-drop record>]` result (`list.unique` over a
-            // String-field record via the `__krec_*` twins): route to the generated
-            // `$__drop_list_<R>` (emitted for EVERY recursive-drop record) — the
-            // flat per-slot dec freed each element block but LEAKED its String
-            // fields (the krec-unique residue).
-            self.variant_drop_handles.insert(dst, format!("list_{rname}"));
-            return;
-        }
-        if crate::lower::is_lenlist_list_ty(ty) {
-            // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
-            // flat DropListStr would leak each element's owned payload slots.
-            self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+        if let Some(route) = self.nested_result_drop_route(ty) {
+            self.variant_drop_handles.insert(dst, route);
             return;
         }
         if crate::lower::is_opt_list_str_ty(ty) {
@@ -302,20 +265,58 @@ impl LowerCtx {
             self.list_list_str_lists.insert(dst);
             return;
         }
-        if matches!(ty,
+        // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
+        // rc_decs exactly the n deep-copied key Strings (scalar value slots
+        // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
+        // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
+        let map_str_scalar = matches!(ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
-                if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
-        {
-            // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
-            // rc_decs exactly the n deep-copied key Strings (scalar value slots
-            // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
-            // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
-            self.heap_elem_lists.insert(dst);
-            return;
-        }
-        if is_heap_elem_list_ty(ty) {
+                if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]));
+        if map_str_scalar || is_heap_elem_list_ty(ty) {
             self.heap_elem_lists.insert(dst);
         }
+    }
+
+    /// The named `$__drop_*` route a NESTED-container self-host result needs,
+    /// because a flat rc_dec would leak its inner blocks. `None` leaves the value
+    /// to the caller's flat / element-sweep routes.
+    ///
+    /// * `map_msv` — `Map[String, Map[String, String]]`: sweeps each last-ref
+    ///   inner map's String slots.
+    /// * `map_msb` — `Map[String, Map[String, <scalar>]]`: key-sweeps each
+    ///   last-ref inner map (the skv split layout owns no heap values).
+    /// * `map_mlo` — `Map[String, List[Option[Int]]]`: sweeps each last-ref value
+    ///   list's Option slots.
+    /// * `list_<R>` — `List[<recursive-drop record>]` (`list.unique` over a
+    ///   String-field record via the `__krec_*` twins): the generated
+    ///   `$__drop_list_<R>`, emitted for EVERY recursive-drop record. The flat
+    ///   per-slot dec freed each element block but LEAKED its String fields (the
+    ///   krec-unique residue).
+    /// * `list_lenlist` — `List[Result[_, String]]` / `List[Option[String]]`: the
+    ///   len-loop drop; the flat DropListStr would leak each element's owned
+    ///   payload slots.
+    fn nested_result_drop_route(&self, ty: &Ty) -> Option<String> {
+        if crate::lower::is_map_msv_ty(ty) {
+            return Some("map_msv".to_string());
+        }
+        if crate::lower::is_map_msb_ty(ty) {
+            return Some("map_msb".to_string());
+        }
+        if crate::lower::is_map_mlo_ty(ty) {
+            return Some("map_mlo".to_string());
+        }
+        let elem_record = match ty {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 =>
+            {
+                self.record_or_anon_drop_type_name(&a[0])
+            }
+            _ => None,
+        };
+        if let Some(rname) = elem_record {
+            return Some(format!("list_{rname}"));
+        }
+        crate::lower::is_lenlist_list_ty(ty).then(|| "list_lenlist".to_string())
     }
 
     /// Extracted from `Self::lower_bind_heap` (pattern-2 uniform-arm split, cog reduction):
