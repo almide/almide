@@ -1,6 +1,6 @@
 // @contract: C-041
 // Memory stress tests — catch layout bugs, buffer overflows, heap corruption.
-fn count_matches(xs: List[Int], expected: fn(Int) -> Int, n: Int) -> Int = {
+fn count_matches(xs: List[Int], expected: (Int) -> Int, n: Int) -> Int = {
   var pass = 0
   for i in 0..<n {
     pass = if xs[i] == expected(i) then pass + 1 else pass

@@ -133,13 +133,13 @@ fn resolve_target_fn_type(ctx: &LowerCtx, target: &[Sym]) -> Option<Ty> {
     }
     // Check environment functions
     if let Some(sig) = ctx.env.functions.get(&name) {
-        return Some(Ty::Fn { is_effect: sig.is_effect, params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
+        return Some(Ty::Fn { is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */, params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
     }
     // For module.func, check module functions
     if target.len() == 2 {
         let qual = sym(&format!("{}.{}", target[0], target[1]));
         if let Some(sig) = ctx.env.functions.get(&qual) {
-            return Some(Ty::Fn { is_effect: sig.is_effect, params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
+            return Some(Ty::Fn { is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */, params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
         }
     }
     None

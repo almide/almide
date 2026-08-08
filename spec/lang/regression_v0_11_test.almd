@@ -12,7 +12,7 @@ test "variant eq" {
 
 type Tree[T] = | Leaf(T) | Node(Tree[T], Tree[T])
 
-fn tree_fold[T, U](t: Tree[T], leaf: fn(T) -> U, merge: fn(U, U) -> U) -> U = match t {
+fn tree_fold[T, U](t: Tree[T], leaf: (T) -> U, merge: (U, U) -> U) -> U = match t {
   Leaf(v) => leaf(v),
   Node(l, r) => merge(tree_fold(l, leaf, merge), tree_fold(r, leaf, merge)),
 }
@@ -93,7 +93,7 @@ test "empty for" {
   assert_eq(n, 99)
 }
 
-fn zip_with[A, B, C](xs: List[A], ys: List[B], f: fn(A, B) -> C) -> List[C] = list.zip(xs, ys) |> list.map((p) => {
+fn zip_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] = list.zip(xs, ys) |> list.map((p) => {
   let (a, b) = p
   f(a, b)
 })

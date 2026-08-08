@@ -393,7 +393,7 @@ impl Checker {
                 return Some(Ty::Fn {
                     params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                     ret: Box::new(sig.ret.clone()),
-                    is_effect: sig.is_effect,
+                    is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */,
                 });
             }
             let resolved_mod_name = self.env.import_table.resolve(mod_name)
@@ -406,7 +406,7 @@ impl Checker {
                 return Some(Ty::Fn {
                     params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                     ret: Box::new(sig.ret.clone()),
-                    is_effect: sig.is_effect,
+                    is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */,
                 });
             }
             // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.

@@ -810,8 +810,12 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::Record { fields } => fmt_record_type(out, fields, false, depth),
         TypeExpr::OpenRecord { fields } => fmt_record_type(out, fields, true, depth),
         TypeExpr::Fn { params, ret, is_effect } => {
+            // The MODERN fn-type spelling is the bare arrow form `(A) -> B`
+            // (`effect (A) -> B` for effect slots); the parser still accepts
+            // the legacy `fn(A) -> B` / `Fn(A) -> B`, and this normalizes
+            // them away (#1055 review).
             if *is_effect { out.push_str("effect "); }
-            out.push_str("fn(");
+            out.push('(');
             comma_sep(out, params, |out, p| fmt_type(out, p, depth));
             out.push_str(") -> "); fmt_type(out, ret, depth);
         }

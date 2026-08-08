@@ -1,4 +1,4 @@
-type Handler = { run: fn(String) -> String, name: String }
+type Handler = { run: (String) -> String, name: String }
 
 fn make_handler(n: String) -> Handler = { run: (x) => n + ":" + x, name: n }
 
@@ -18,7 +18,7 @@ test "list of record with fn" {
   assert_eq(list.len(handlers), 2)
 }
 
-type DataSource = { fetch: fn(String) -> Result[List[String], String], name: String }
+type DataSource = { fetch: (String) -> Result[List[String], String], name: String }
 
 fn mock_source(rows: List[String]) -> DataSource = { fetch: (_) => ok(rows), name: "mock" }
 

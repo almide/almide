@@ -204,7 +204,7 @@ let blob = http.request_bytes("POST", url, body, headers)!
 ## Signature index (26 functions)
 
 ```
-effect http.serve(port: Int, f: (HttpRequest) -> HttpResponse) -> Unit
+effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit
 http.response(status: Int, body: String) -> HttpResponse
 http.json(status: Int, body: String) -> HttpResponse
 http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse

@@ -20,7 +20,7 @@ fn A.name(a: A) -> String = int.to_string(a.x)
 fn names[T: Labelled](xs: List[T]) -> List[String] = list.map(xs, (e) => e.name())
 
 // A USER-defined HOF gets the same pinning (not just stdlib).
-fn apply_all[T](xs: List[T], f: fn(T) -> String) -> List[String] = list.map(xs, f)
+fn apply_all[T](xs: List[T], f: (T) -> String) -> List[String] = list.map(xs, f)
 
 fn labels[T: Labelled](xs: List[T]) -> List[String] = apply_all(xs, (e) => e.name())
 

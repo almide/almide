@@ -456,7 +456,7 @@ fn fmt_option_shorthand_roundtrips_and_normalizes() {
 #[test]
 fn fmt_option_shorthand_parenthesizes_non_atoms() {
     let out = roundtrip("module app\ntype Hooks = { on_tick: Option[(Int) -> Unit] }");
-    assert!(out.contains("on_tick: (fn(Int) -> Unit)?"), "{out}");
+    assert!(out.contains("on_tick: ((Int) -> Unit)?"), "{out}");
     let out = roundtrip("module app\nfn f() -> Option[Option[Int]] = some(none)");
     assert!(out.contains("-> (Int?)? ="), "{out}");
     let out = roundtrip("module app\nfn f() -> Option[(String, Int)] = none");
@@ -477,7 +477,7 @@ fn fmt_option_shorthand_parenthesizes_non_atoms() {
 #[test]
 fn fmt_option_shorthand_atom_binding() {
     let out = roundtrip("module app\nfn pick(f: (Int) -> Int?) -> Int = 0");
-    assert!(out.contains("f: fn(Int) -> Int?"), "{out}");
+    assert!(out.contains("f: (Int) -> Int?"), "{out}");
     let out = roundtrip("module app\nfn g(s: String) -> Int?! = ok(none)");
     assert!(out.contains("-> Int?! ="), "{out}");
 }
