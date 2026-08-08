@@ -237,7 +237,12 @@ fn run_interp_capture(source: &str) -> InterpLeg {
         Err(_) => return InterpLeg::Skip("interp evaluation panicked".to_string()),
     };
     match &outcome.status {
-        RunStatus::Ok | RunStatus::Aborted => InterpLeg::Ran(
+        // `Exited(n)` RAN — it is an explicit `process.exit(n)`, a real
+        // observable outcome the backends reproduce exactly, so it casts a
+        // vote like Ok and Aborted. Folding it into a skip would have hidden
+        // #1124's fixture from the third judge, which is the one that catches
+        // a bug both backends share.
+        RunStatus::Ok | RunStatus::Aborted | RunStatus::Exited(_) => InterpLeg::Ran(
             outcome.exit_code(),
             outcome.stdout.trim().to_string(),
             outcome.stderr.trim().to_string(),

@@ -84,7 +84,14 @@ impl ReferenceOracle for InterpOracle {
             // clean native/wasm runs, and abort stderr text is not part of
             // the cross-target byte contract at this rung.
             RunStatus::Ok => Some(out.stdout),
-            RunStatus::Aborted | RunStatus::Unsupported(_) | RunStatus::FuelExhausted => None,
+            // `Exited(n)` is an explicit `process.exit(n)` — a deliberate
+            // non-zero exit, not a clean run, so it abstains from the stdout
+            // vote exactly like `Aborted` (this rung compares the stdout of
+            // CLEAN runs; the exit code is the ladder's own comparison).
+            RunStatus::Aborted
+            | RunStatus::Exited(_)
+            | RunStatus::Unsupported(_)
+            | RunStatus::FuelExhausted => None,
         }
     }
 
