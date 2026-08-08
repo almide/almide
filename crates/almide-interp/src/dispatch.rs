@@ -96,28 +96,7 @@ impl<'a> Interpreter<'a> {
         // 2. Variant constructor (Unit / Tuple). Record-variant ctors arrive
         //    as `Record` nodes, handled in eval. Look up in the registry.
         if let Some((ty_name, kind)) = self.variant_ctor(name) {
-            return match kind {
-                CtorKind::Unit => Flow::val(Value::Variant {
-                    ty: Some(ty_name),
-                    ctor: name,
-                    payload: VariantPayload::Unit,
-                }),
-                CtorKind::Tuple => {
-                    let mut evaled = Vec::with_capacity(args.len());
-                    for a in args {
-                        evaled.push(val!(self.eval_expr(a, scope)));
-                    }
-                    Flow::val(Value::Variant {
-                        ty: Some(ty_name),
-                        ctor: name,
-                        payload: VariantPayload::Tuple(evaled),
-                    })
-                }
-                CtorKind::Record => {
-                    // Should not arrive as a Named call, but handle defensively.
-                    Flow::Unsupported(format!("record-variant ctor call {}", n))
-                }
-            };
+            return self.eval_variant_ctor_call(ty_name, name, kind, args, scope);
         }
 
         // 2b. The stdlib's only BUNDLED variant type (bytes.Endian): its decl
@@ -135,36 +114,75 @@ impl<'a> Interpreter<'a> {
 
         // 3. A user / stdlib free function lowered into the program.
         if let Some(func) = self.fns.get(&name).copied() {
-            // #1022: mut-parameter copy-in/copy-out. The backends' lowering
-            // returns each `mut` param's final buffer and writes it back at
-            // EVERY call position (C-132) — the interp mirrors that by keeping
-            // the callee frame alive and assigning each recorded caller lvalue
-            // from the param's final value. Recorded BEFORE evaluation, while
-            // the argument is still an expression with a binding identity.
-            let writebacks = match self.mut_param_lvalues(func, args) {
-                Ok(wb) => wb,
-                Err(flow) => return flow,
-            };
-            let mut evaled = Vec::with_capacity(args.len());
-            for a in args {
-                evaled.push(val!(self.eval_expr(a, scope)));
-            }
-            let root = self.root_scope();
-            let (flow, frame) = self.call_function_keeping_frame(func, evaled, &root);
-            // Copy-out only on a normal return — an abort/abstain never
-            // half-writes state the backends would not have written either.
-            if matches!(flow, Flow::Value(_)) {
-                for (idx, lv) in writebacks {
-                    let Some(final_v) = frame.get(func.params[idx].var) else { continue };
-                    if let Err(e) = self.write_mut_lvalue(lv, final_v, scope) {
-                        return e;
-                    }
-                }
-            }
-            return flow;
+            return self.eval_lowered_fn_call(func, args, scope);
         }
 
         Flow::Unsupported(format!("named call `{}`", n))
+    }
+
+    /// Step 2 of [`Self::eval_named_call`]: build the variant value a Unit- or
+    /// Tuple-payload constructor names.
+    fn eval_variant_ctor_call(
+        &mut self,
+        ty_name: Sym,
+        ctor: Sym,
+        kind: CtorKind,
+        args: &[IrExpr],
+        scope: &Scope,
+    ) -> Flow {
+        let payload = match kind {
+            CtorKind::Unit => VariantPayload::Unit,
+            CtorKind::Tuple => {
+                let mut evaled = Vec::with_capacity(args.len());
+                for a in args {
+                    evaled.push(val!(self.eval_expr(a, scope)));
+                }
+                VariantPayload::Tuple(evaled)
+            }
+            CtorKind::Record => {
+                // Should not arrive as a Named call, but handle defensively.
+                return Flow::Unsupported(format!("record-variant ctor call {}", ctor));
+            }
+        };
+        Flow::val(Value::Variant { ty: Some(ty_name), ctor, payload })
+    }
+
+    /// Step 3 of [`Self::eval_named_call`]: call a lowered Almide function.
+    ///
+    /// #1022: mut-parameter copy-in/copy-out. The backends' lowering returns
+    /// each `mut` param's final buffer and writes it back at EVERY call
+    /// position (C-132) — the interp mirrors that by keeping the callee frame
+    /// alive and assigning each recorded caller lvalue from the param's final
+    /// value. Recorded BEFORE evaluation, while the argument is still an
+    /// expression with a binding identity.
+    fn eval_lowered_fn_call(
+        &mut self,
+        func: &'a almide_ir::IrFunction,
+        args: &[IrExpr],
+        scope: &Scope,
+    ) -> Flow {
+        let writebacks = match self.mut_param_lvalues(func, args) {
+            Ok(wb) => wb,
+            Err(flow) => return flow,
+        };
+        let mut evaled = Vec::with_capacity(args.len());
+        for a in args {
+            evaled.push(val!(self.eval_expr(a, scope)));
+        }
+        let root = self.root_scope();
+        let (flow, frame) = self.call_function_keeping_frame(func, evaled, &root);
+        // Copy-out only on a normal return — an abort/abstain never
+        // half-writes state the backends would not have written either.
+        if !matches!(flow, Flow::Value(_)) {
+            return flow;
+        }
+        for (idx, lv) in writebacks {
+            let Some(final_v) = frame.get(func.params[idx].var) else { continue };
+            if let Err(e) = self.write_mut_lvalue(lv, final_v, scope) {
+                return e;
+            }
+        }
+        flow
     }
 
     /// The caller-side lvalues of a call's `mut`-parameter arguments — the
@@ -496,60 +514,52 @@ impl<'a> Interpreter<'a> {
             return result;
         }
 
-        // An almide-bodied stdlib fn lowered into the program (pre-ir_link it
-        // lives under program.modules; some helpers are top-level fns).
-        //
+        let Some((func_def, gate_mut)) = self.resolve_lowered_body(module, func) else {
+            return Flow::Unsupported(format!("{}.{}", module, func));
+        };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)
         // cannot run here. A mut-param callee must abstain rather than
         // silently drop the write-back (a wrong third vote).
-        let mut_param_gate = |func_def: &almide_ir::IrFunction| -> Option<Flow> {
-            func_def.params.iter().any(|p| p.is_mut).then(|| {
-                Flow::Unsupported(format!(
-                    "module call `{}.{}` with a `mut` parameter through the \
-                     eager dispatch path (no caller lvalue to copy out — #1022)",
-                    module.as_str(),
-                    func.as_str()
-                ))
-            })
-        };
-        if let Some(func_def) = self.module_fns.get(&(module, func)).copied() {
-            // Only interpret if it has a real (non-Hole) body.
-            if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
-                if let Some(flow) = mut_param_gate(func_def) {
-                    return flow;
-                }
-                let root = self.root_scope();
-                return self.call_function(func_def, args, &root);
-            }
+        if gate_mut && func_def.params.iter().any(|p| p.is_mut) {
+            return Flow::Unsupported(format!(
+                "module call `{}.{}` with a `mut` parameter through the \
+                 eager dispatch path (no caller lvalue to copy out — #1022)",
+                module.as_str(),
+                func.as_str()
+            ));
         }
-        // A top-level fn named exactly `func` (some stdlib helpers flatten).
-        if let Some(func_def) = self.fns.get(&func).copied() {
-            if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
-                if let Some(flow) = mut_param_gate(func_def) {
-                    return flow;
-                }
-                let root = self.root_scope();
-                return self.call_function(func_def, args, &root);
-            }
-        }
+        let root = self.root_scope();
+        self.call_function(func_def, args, &root)
+    }
 
-        // The self-hosted stdlib body from the shared registry (stdlib_pool):
-        // the SAME source the wasm leg links for this call name, lowered once and
-        // layered into `self.fns` at construction. Consulted LAST so the
-        // interp-native surfaces above keep their vote provenance; what the body
-        // itself cannot evaluate (a heap/effect prim outside the scalar floor)
-        // abstains from inside with that prim named — a skip, never a guess.
-        if let Some(impl_name) = crate::stdlib_pool::impl_fn(module, func) {
-            if let Some(func_def) = self.fns.get(&impl_name).copied() {
-                if !matches!(func_def.body.kind, almide_ir::IrExprKind::Hole) {
-                    let root = self.root_scope();
-                    return self.call_function(func_def, args, &root);
-                }
-            }
+    /// The lowered Almide body `module.func` resolves to, paired with whether
+    /// the eager-dispatch `mut`-parameter gate applies to it.
+    ///
+    /// Three sources in order: the module's own fn table; a top-level fn named
+    /// exactly `func` (some stdlib helpers flatten); and LAST the self-hosted
+    /// stdlib body from the shared registry (stdlib_pool) — the SAME source the
+    /// wasm leg links for this call name, lowered once and layered into
+    /// `self.fns` at construction. Consulted last so the interp-native surfaces
+    /// above keep their vote provenance; what a pool body itself cannot
+    /// evaluate (a heap/effect prim outside the scalar floor) abstains from
+    /// inside with that prim named — a skip, never a guess — so the mut gate
+    /// does not apply to it.
+    ///
+    /// A `Hole` body is an intrinsic stub, not an interpretable definition:
+    /// each source skips it and falls through to the next.
+    fn resolve_lowered_body(&self, module: Sym, func: Sym) -> Option<(&'a almide_ir::IrFunction, bool)> {
+        fn bodied(d: &&almide_ir::IrFunction) -> bool {
+            !matches!(d.body.kind, almide_ir::IrExprKind::Hole)
         }
-
-        Flow::Unsupported(format!("{}.{}", module, func))
+        if let Some(d) = self.module_fns.get(&(module, func)).copied().filter(bodied) {
+            return Some((d, true));
+        }
+        if let Some(d) = self.fns.get(&func).copied().filter(bodied) {
+            return Some((d, true));
+        }
+        let impl_name = crate::stdlib_pool::impl_fn(module, func)?;
+        self.fns.get(&impl_name).copied().filter(bodied).map(|d| (d, false))
     }
 
     // ── FnRef ───────────────────────────────────────────────────
