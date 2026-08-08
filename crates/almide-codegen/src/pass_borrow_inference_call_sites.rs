@@ -287,45 +287,10 @@ fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
 
     let kind = match expr.kind {
         IrExprKind::Call { target, args, type_args } => {
-            let args: Vec<IrExpr> = args.into_iter().map(|a| hoist_expr(a, vt)).collect();
-            let target = match target {
-                CallTarget::Method { object, method } =>
-                    CallTarget::Method { object: Box::new(hoist_expr(*object, vt)), method },
-                CallTarget::Computed { callee } =>
-                    CallTarget::Computed { callee: Box::new(hoist_expr(*callee, vt)) },
-                other => other,
-            };
-            return hoist_call_if_needed(target, args, type_args, ty, span, vt);
+            return hoist_call(target, args, type_args, ty, span, vt)
         }
         IrExprKind::RuntimeCall { symbol, args } => {
-            let args: Vec<IrExpr> = args.into_iter().map(|a| hoist_expr(a, vt)).collect();
-            // Check for &mut conflict
-            let mut_var = args.iter().find_map(find_mut_borrow_var);
-            if let Some(mut_id) = mut_var {
-                let mut hoisted_stmts: Vec<IrStmt> = Vec::new();
-                let new_args: Vec<IrExpr> = args.into_iter().map(|arg| {
-                    if find_mut_borrow_var(&arg).is_some() {
-                        arg // keep the &mut arg as-is
-                    } else if uses_var(&arg, mut_id) {
-                        hoist_one_arg(arg, &mut hoisted_stmts, vt)
-                    } else {
-                        arg
-                    }
-                }).collect();
-                if !hoisted_stmts.is_empty() {
-                    let call = IrExpr {
-                        kind: IrExprKind::RuntimeCall { symbol, args: new_args },
-                        ty: ty.clone(), span, def_id: None,
-                    };
-                    return IrExpr {
-                        kind: IrExprKind::Block { stmts: hoisted_stmts, expr: Some(Box::new(call)) },
-                        ty, span, def_id: None,
-                    };
-                }
-                IrExprKind::RuntimeCall { symbol, args: new_args }
-            } else {
-                IrExprKind::RuntimeCall { symbol, args }
-            }
+            return hoist_runtime_call(symbol, args, ty, span, vt)
         }
 
         // Recurse into all compound expressions
@@ -399,6 +364,73 @@ fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
     };
 
     IrExpr { kind, ty, span, def_id: None }
+}
+
+/// A `Call` site: hoist its args and its Method/Computed target first, then let
+/// [`hoist_call_if_needed`] decide whether an `&mut` conflict forces a hoist.
+fn hoist_call(
+    target: CallTarget,
+    args: Vec<IrExpr>,
+    type_args: Vec<almide_lang::types::Ty>,
+    ty: almide_lang::types::Ty,
+    span: Option<almide_base::span::Span>,
+    vt: &mut VarTable,
+) -> IrExpr {
+    let args: Vec<IrExpr> = args.into_iter().map(|a| hoist_expr(a, vt)).collect();
+    let target = match target {
+        CallTarget::Method { object, method } => {
+            CallTarget::Method { object: Box::new(hoist_expr(*object, vt)), method }
+        }
+        CallTarget::Computed { callee } => {
+            CallTarget::Computed { callee: Box::new(hoist_expr(*callee, vt)) }
+        }
+        other => other,
+    };
+    hoist_call_if_needed(target, args, type_args, ty, span, vt)
+}
+
+/// A `RuntimeCall` site: the [`hoist_call_if_needed`] rule, applied to the
+/// symbol form. Every arg that READS the `&mut`-borrowed var is hoisted to a
+/// preceding let so the borrow no longer overlaps; the `&mut` arg itself stays.
+fn hoist_runtime_call(
+    symbol: almide_base::intern::Sym,
+    args: Vec<IrExpr>,
+    ty: almide_lang::types::Ty,
+    span: Option<almide_base::span::Span>,
+    vt: &mut VarTable,
+) -> IrExpr {
+    let args: Vec<IrExpr> = args.into_iter().map(|a| hoist_expr(a, vt)).collect();
+    let Some(mut_id) = args.iter().find_map(find_mut_borrow_var) else {
+        return IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span, def_id: None };
+    };
+    let mut hoisted_stmts: Vec<IrStmt> = Vec::new();
+    let new_args: Vec<IrExpr> = args
+        .into_iter()
+        .map(|arg| {
+            if find_mut_borrow_var(&arg).is_some() {
+                arg // keep the &mut arg as-is
+            } else if uses_var(&arg, mut_id) {
+                hoist_one_arg(arg, &mut hoisted_stmts, vt)
+            } else {
+                arg
+            }
+        })
+        .collect();
+    let call = IrExpr {
+        kind: IrExprKind::RuntimeCall { symbol, args: new_args },
+        ty: ty.clone(),
+        span,
+        def_id: None,
+    };
+    if hoisted_stmts.is_empty() {
+        return call;
+    }
+    IrExpr {
+        kind: IrExprKind::Block { stmts: hoisted_stmts, expr: Some(Box::new(call)) },
+        ty,
+        span,
+        def_id: None,
+    }
 }
 
 fn hoist_call_if_needed(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<almide_lang::types::Ty>,

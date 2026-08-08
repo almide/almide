@@ -515,11 +515,6 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
         IrExprKind::ForIn { var, var_tuple, iterable, body } => insert_clones_for_in(var, var_tuple, *iterable, body, ctx),
         IrExprKind::While { cond, body } => insert_clones_while(*cond, body, ctx),
 
-        // ── Lambda: body recurses normally ─────────────────────────
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(insert_clones_live(*body, ctx)), lambda_id,
-        },
-
         IrExprKind::Call { target, args, type_args } => insert_clones_call(target, args, type_args, ctx),
         IrExprKind::RuntimeCall { symbol, args } => {
             let args = insert_clones_runtime_call(args, ctx);
@@ -529,39 +524,12 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
         IrExprKind::IndexAccess { object, index } => return insert_clones_index_access(*object, *index, ty, span, ctx),
         IrExprKind::MapAccess { object, key } => return insert_clones_map_access(*object, *key, ty, span, ctx),
 
-        // ── Simple recursion cases ─────────────────────────────────
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op,
-            left: Box::new(insert_clones_live(*left, ctx)),
-            right: Box::new(insert_clones_live(*right, ctx)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(insert_clones_live(*operand, ctx)),
-        },
         IrExprKind::Member { object, field } => return insert_clones_member(*object, field, ty, span, ctx),
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: insert_clones_live(expr, ctx) },
-                other => other,
-            }).collect(),
-        },
-        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(insert_clones_live(*expr, ctx)),
-            fallback: Box::new(insert_clones_live(*fallback, ctx)),
-        },
         IrExprKind::SpreadRecord { base, fields } => {
             // Fields are evaluated before the spread base in Rust struct literals
             let new_fields: Vec<_> = fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, ctx))).collect();
             let new_base = insert_clones_live(*base, ctx);
             IrExprKind::SpreadRecord { base: Box::new(new_base), fields: new_fields }
-        },
-        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(insert_clones_live(*start, ctx)),
-            end: Box::new(insert_clones_live(*end, ctx)),
-            inclusive,
-        },
-        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (insert_clones_live(k, ctx), insert_clones_live(v, ctx))).collect(),
         },
         IrExprKind::Borrow { expr, as_str, mutable } => {
             let mut inner = insert_clones_live(*expr, ctx);
@@ -571,12 +539,11 @@ fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
             }
             IrExprKind::Borrow { expr: Box::new(inner), as_str, mutable }
         },
-        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew {
-            expr: Box::new(insert_clones_live(*expr, ctx)),
-        },
         // Default: recurse into every child through the exhaustive `map_children`
         // chokepoint. Every node whose clone insertion is just "recurse into the
-        // children, left to right" lands here — `map_children` visits them in
+        // children, left to right" lands here — BinOp/UnOp/Lambda/StringInterp/
+        // UnwrapOr/Range/MapLiteral/BoxNew included: their former hand-written
+        // arms were byte-for-byte what `map_children` does for the same kind — `map_children` visits them in
         // exactly that order, which is what the liveness countdown needs — so no
         // un-listed node kind (`IterChain`/`RcWrap`/`TailCall`/future variants)
         // silently drops its subtree — that was the DIV2-sibling
