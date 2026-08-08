@@ -41,8 +41,8 @@ impl Checker {
                 let resolved_left = resolve_ty(&left_ty, &self.uf);
                 let resolved_right = resolve_ty(&right_ty, &self.uf);
                 match (&resolved_left, &resolved_right) {
-                    (Ty::Fn { params: a_params, .. }, Ty::Fn { ret: c_ret, .. }) => {
-                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone() }
+                    (Ty::Fn { params: a_params, is_effect: a_eff, .. }, Ty::Fn { ret: c_ret, is_effect: c_eff, .. }) => {
+                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone(), is_effect: *a_eff || *c_eff }
                     }
                     _ => Ty::Unknown,
                 }
@@ -406,6 +406,7 @@ impl Checker {
             Ty::Fn {
                 params: vec![elem],
                 ret: Box::new(Ty::result(winner.clone(), Ty::String)),
+                is_effect: false,
             },
             "fan.race mapper",
         );
@@ -593,9 +594,9 @@ impl Checker {
             } else if body_resolved != Ty::Never {
                 self.constrain(channel_ok, ret_ty, "fallible lambda body");
             }
-            return Ty::Fn { params: param_tys, ret: Box::new(chan_ty) };
+            return Ty::Fn { params: param_tys, ret: Box::new(chan_ty), is_effect: false };
         }
-        Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
+        Ty::Fn { params: param_tys, ret: Box::new(ret_ty), is_effect: false }
     }
 
     /// `expr!` — unwrap with propagation (Option[T] → T, Result[T,E] → T).
@@ -1021,13 +1022,13 @@ impl Checker {
                         }
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
-                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                         ret
                     }
                     _ => {
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
-                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                         ret
                     }
                 }
@@ -1045,13 +1046,13 @@ impl Checker {
                 }
                 let ct = self.infer_expr(right);
                 let ret = self.fresh_var();
-                self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                 ret
             }
             _ => {
                 let rt = self.infer_expr(right);
                 let ret = self.fresh_var();
-                self.constrain(rt, Ty::Fn { params: vec![left_ty], ret: Box::new(ret.clone()) }, "pipe call");
+                self.constrain(rt, Ty::Fn { params: vec![left_ty], ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                 ret
             }
         }

@@ -501,7 +501,7 @@ impl Checker {
                 let mut r = response.clone();
                 let ret_ty = self.infer_expr(&mut r);
                 let ret_resolved = resolve_ty(&ret_ty, &self.uf);
-                let fn_ty = Ty::Fn { params: param_tys, ret: Box::new(ret_resolved) };
+                let fn_ty = Ty::Fn { is_effect: false, params: param_tys, ret: Box::new(ret_resolved) };
                 let override_name = format!("__where_{}", target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"));
                 self.env.define_var(&override_name, fn_ty);
             }
@@ -533,6 +533,7 @@ impl Checker {
         };
         let Some(sig) = self.env.functions.get(&name) else { return };
         let sig_ty = Ty::Fn {
+            is_effect: sig.is_effect,
             params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
             ret: Box::new(sig.ret.clone()),
         };

@@ -44,7 +44,14 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
         {
             unify(&args[0], &Ty::Float, bindings)
         }
-        (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
+        (
+            Ty::Fn { params: p1, ret: r1, is_effect: _ },
+            Ty::Fn { params: p2, ret: r2, is_effect: _ },
+        ) => {
+            // Effect-AGNOSTIC on purpose (#1055): unification is inference
+            // plumbing, and failing it on an effect mismatch would break
+            // every legal call/pipe of an effect fn VALUE (the caller-side
+            // policy is E006's, the slot-side policy the call-arg check's).
             unify_fn(p1, r1, p2, r2, bindings)
         }
         (Ty::Tuple(a), Ty::Tuple(b)) => {

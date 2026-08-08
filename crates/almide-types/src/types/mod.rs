@@ -72,7 +72,15 @@ pub enum Ty {
     Record { fields: Vec<(Sym, Ty)> },
     OpenRecord { fields: Vec<(Sym, Ty)> },
     Variant { name: Sym, cases: Vec<VariantCase> },
-    Fn { params: Vec<Ty>, ret: Box<Ty> },
+    Fn {
+        params: Vec<Ty>,
+        ret: Box<Ty>,
+        /// An `effect (A) -> B` slot (#1055): a lambda checked against it gets
+        /// effect-fn body ergonomics and lowers to a Result-returning closure.
+        /// Serde-defaulted so every pre-existing serialized IR stays readable.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_effect: bool,
+    },
     Tuple(Vec<Ty>),
     Named(Sym, Vec<Ty>),
     /// Inline union type (e.g., Int | String). Members are sorted and deduplicated.
@@ -183,9 +191,10 @@ impl Ty {
                 format!("{{ {}, .. }}", fs.join(", "))
             }
             Ty::Variant { name, .. } => name.to_string(),
-            Ty::Fn { params, ret } => {
+            Ty::Fn { params, ret, is_effect } => {
                 let ps: Vec<_> = params.iter().map(|t| t.display()).collect();
-                format!("fn({}) -> {}", ps.join(", "), ret.display())
+                let prefix = if *is_effect { "effect " } else { "" };
+                format!("{prefix}fn({}) -> {}", ps.join(", "), ret.display())
             }
             Ty::Tuple(tys) => {
                 let ts: Vec<_> = tys.iter().map(|t| t.display()).collect();
@@ -317,7 +326,7 @@ impl Ty {
             Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. } => true,
             Ty::Tuple(elems) => elems.iter().any(Self::has_unresolved_deep),
             Ty::Applied(_, args) => args.iter().any(Self::has_unresolved_deep),
-            Ty::Fn { params, ret } => {
+            Ty::Fn { params, ret, is_effect: _ } => {
                 params.iter().any(Self::has_unresolved_deep) || ret.has_unresolved_deep()
             }
             Ty::Record { fields } => fields.iter().any(|(_, t)| t.has_unresolved_deep()),
@@ -429,7 +438,7 @@ impl Ty {
             }
 
             // Function type
-            Ty::Fn { params, ret } => {
+            Ty::Fn { params, ret, is_effect: _ } => {
                 let mut children: Vec<&Ty> = params.iter().collect();
                 children.push(ret.as_ref());
                 children
@@ -477,9 +486,10 @@ impl Ty {
                 fields: fields.iter().map(|(n, t)| (*n, f(t))).collect(),
             },
 
-            Ty::Fn { params, ret } => Ty::Fn {
+            Ty::Fn { params, ret, is_effect } => Ty::Fn {
                 params: params.iter().map(f).collect(),
                 ret: Box::new(f(ret)),
+                is_effect: *is_effect,
             },
 
             Ty::Variant { name, cases } => Ty::Variant {
@@ -525,9 +535,10 @@ impl Ty {
                 fields: fields.iter().map(|(n, t)| (*n, f(t))).collect(),
             },
 
-            Ty::Fn { params, ret } => Ty::Fn {
+            Ty::Fn { params, ret, is_effect } => Ty::Fn {
                 params: params.iter().map(|t| f(t)).collect(),
                 ret: Box::new(f(ret)),
+                is_effect: *is_effect,
             },
 
             Ty::Variant { name, cases } => Ty::Variant {

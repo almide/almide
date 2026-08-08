@@ -72,7 +72,15 @@ impl Ty {
             (Ty::Variant { name: a, .. }, Ty::Variant { name: b, .. }) => names_match(*a, *b),
             (Ty::Named(a, _), Ty::Variant { name: b, .. }) => names_match(*a, *b),
             (Ty::Variant { name: a, .. }, Ty::Named(b, _)) => names_match(*a, *b),
-            (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
+            (
+                Ty::Fn { params: p1, ret: r1, is_effect: _ },
+                Ty::Fn { params: p2, ret: r2, is_effect: _ },
+            ) => {
+                // Effect-AGNOSTIC on purpose (#1055): structural compatibility
+                // is shared plumbing; the effect-slot policy (an effect slot
+                // accepts pure, a pure slot rejects effect-requiring lambdas)
+                // is enforced at the call-argument check where the diagnostic
+                // can name the slot.
                 p1.len() == p2.len()
                     && p1.iter().zip(p2.iter()).all(|(a, b)| a.compatible(b))
                     && r1.compatible(r2)

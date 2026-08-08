@@ -299,7 +299,7 @@ fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<
         TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
             collect_module_refs_field_types(fields, used)
         }
-        TypeExpr::Fn { params, ret } => {
+        TypeExpr::Fn { params, ret, is_effect: _ } => {
             collect_module_refs_types(params, used);
             collect_module_refs_type(ret, used);
         }
@@ -809,7 +809,8 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         }
         TypeExpr::Record { fields } => fmt_record_type(out, fields, false, depth),
         TypeExpr::OpenRecord { fields } => fmt_record_type(out, fields, true, depth),
-        TypeExpr::Fn { params, ret } => {
+        TypeExpr::Fn { params, ret, is_effect } => {
+            if *is_effect { out.push_str("effect "); }
             out.push_str("fn(");
             comma_sep(out, params, |out, p| fmt_type(out, p, depth));
             out.push_str(") -> "); fmt_type(out, ret, depth);

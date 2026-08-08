@@ -52,7 +52,7 @@ pub enum TypeExpr {
     Generic { name: Sym, args: Vec<TypeExpr> },
     Record { fields: Vec<FieldType> },
     OpenRecord { fields: Vec<FieldType> },
-    Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr> },
+    Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr>, is_effect: bool },
     Tuple { elements: Vec<TypeExpr> },
     Variant { cases: Vec<VariantCase> },
     Union { members: Vec<TypeExpr> },
