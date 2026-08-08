@@ -54,9 +54,16 @@ impl NanoPass for TailCallOptPass {
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
         let almide_ir::annotations::CodegenAnnotations { infer_binding_tys, tco_owned_params, tco_rewritten_fns, always_clone_vars, .. } = codegen_annotations;
-        run_tco(functions, var_table, &mut reverted, infer_binding_tys, tco_owned_params, tco_rewritten_fns, always_clone_vars);
+        let mut run = TcoRun {
+            reverted: &mut reverted,
+            infer_bindings: infer_binding_tys,
+            tco_owned_params,
+            tco_rewritten_fns,
+            always_clone_vars,
+        };
+        run_tco(functions, var_table, &mut run);
         for module in modules.iter_mut() {
-            run_tco(&mut module.functions, var_table, &mut reverted, infer_binding_tys, tco_owned_params, tco_rewritten_fns, always_clone_vars);
+            run_tco(&mut module.functions, var_table, &mut run);
         }
         if !reverted.is_empty() {
             strip_borrows_at_tco_calls(&mut program, &reverted);
@@ -65,21 +72,31 @@ impl NanoPass for TailCallOptPass {
     }
 }
 
-fn run_tco(
-    functions: &mut [IrFunction],
-    var_table: &mut VarTable,
-    reverted: &mut HashMap<almide_base::intern::Sym, HashSet<usize>>,
-    infer_bindings: &mut std::collections::BTreeSet<VarId>,
-    tco_owned_params: &mut HashSet<VarId>,
-    tco_rewritten_fns: &mut HashSet<almide_base::intern::Sym>,
-    always_clone_vars: &HashSet<VarId>,
-) {
+/// The state one TCO sweep accumulates across every function it rewrites: the
+/// reverted-borrow map the caller uses to fix external call sites, the three
+/// codegen-annotation sets the rewrite feeds, and the read-only always-clone set.
+struct TcoRun<'a> {
+    reverted: &'a mut HashMap<almide_base::intern::Sym, HashSet<usize>>,
+    infer_bindings: &'a mut std::collections::BTreeSet<VarId>,
+    tco_owned_params: &'a mut HashSet<VarId>,
+    tco_rewritten_fns: &'a mut HashSet<almide_base::intern::Sym>,
+    always_clone_vars: &'a HashSet<VarId>,
+}
+
+fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable, run: &mut TcoRun<'_>) {
     for func in functions.iter_mut() {
         if is_tco_candidate(func) {
             let fn_name = func.name.clone();
-            let reverted_here = rewrite_to_loop(func, var_table, infer_bindings, tco_owned_params, tco_rewritten_fns, always_clone_vars);
+            let reverted_here = rewrite_to_loop(
+                func,
+                var_table,
+                run.infer_bindings,
+                run.tco_owned_params,
+                run.tco_rewritten_fns,
+                run.always_clone_vars,
+            );
             if !reverted_here.is_empty() {
-                reverted.insert(fn_name, reverted_here);
+                run.reverted.insert(fn_name, reverted_here);
             }
         } else if is_binary_rec_candidate(func) {
             rewrite_binary_rec(func, var_table);
@@ -147,9 +164,7 @@ fn rewrite_binary_rec(func: &mut IrFunction, var_table: &mut VarTable) {
 
     // Extract step from right_call: self(n - step) → step value
     // left_call: self(n - 1), right_call: self(n - 2) typically
-    let step = extract_subtraction_const(&right_call, param.var);
-
-    if step.is_none() {
+    let Some(step_val) = extract_subtraction_const(&right_call, param.var) else {
         // Restore original
         func.body.kind = IrExprKind::If {
             cond: Box::new(cond),
@@ -160,8 +175,7 @@ fn rewrite_binary_rec(func: &mut IrFunction, var_table: &mut VarTable) {
             }),
         };
         return;
-    }
-    let step_val = step.unwrap();
+    };
 
     // Create: var n_var = n; var acc = 0;
     let n_var = var_table.alloc(
@@ -274,21 +288,19 @@ fn rewrite_binary_rec(func: &mut IrFunction, var_table: &mut VarTable) {
     };
 }
 
+/// The `k` of a self-call `self(param - k)`; `None` for any other argument shape.
 fn extract_subtraction_const(call_expr: &IrExpr, param_var: VarId) -> Option<i64> {
-    if let IrExprKind::Call { args, .. } = &call_expr.kind {
-        if let Some(arg) = args.first() {
-            if let IrExprKind::BinOp { op: almide_ir::BinOp::SubInt, left, right } = &arg.kind {
-                if let IrExprKind::Var { id } = &left.kind {
-                    if *id == param_var {
-                        if let IrExprKind::LitInt { value: n } = &right.kind {
-                            return Some(*n);
-                        }
-                    }
-                }
-            }
-        }
+    let IrExprKind::Call { args, .. } = &call_expr.kind else { return None };
+    let IrExprKind::BinOp { op: almide_ir::BinOp::SubInt, left, right } = &args.first()?.kind
+    else {
+        return None;
+    };
+    let IrExprKind::Var { id } = &left.kind else { return None };
+    if *id != param_var {
+        return None;
     }
-    None
+    let IrExprKind::LitInt { value: n } = &right.kind else { return None };
+    Some(*n)
 }
 
 fn substitute_var(expr: &mut IrExpr, from: VarId, to: VarId) {
