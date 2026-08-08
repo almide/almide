@@ -1,0 +1,122 @@
+// onebrc — One Billion Row Challenge (scaled), file-I/O + aggregation benchmark.
+// Generates a deterministic measurements file (station;temp, one decimal),
+// then computes min/mean/max per station, output sorted by station name.
+//
+// Usage:
+//   almide run onebrc.almd -- 1000000          # gen -> aggregate -> print -> delete
+//   almide run onebrc.almd -- gen 1000000 f.txt  # generate only
+//   almide run onebrc.almd -- agg f.txt          # aggregate an existing file only
+//
+// The aggregate phase deliberately uses the current eager fs.read_lines —
+// this benchmark doubles as the measurement of where a streaming line API
+// becomes necessary (peak RSS scales with file size, not station count).
+//
+// All temperature math is integer tenths (-99.9..99.9 => -999..999): no float
+// parsing or formatting, so output is byte-identical across implementations.
+
+import env
+import fs
+import int
+
+let IM = 139968
+let IA = 3877
+let IC = 29573
+let CHUNK_LINES = 65536
+
+let STATIONS = [
+  "Abha", "Accra", "Adelaide", "Amsterdam", "Anchorage", "Athens", "Auckland",
+  "Baghdad", "Bangkok", "Barcelona", "Beijing", "Berlin", "Bogota", "Boston",
+  "Brisbane", "Cairo", "Calgary", "Chicago", "Copenhagen", "Dallas", "Denver",
+  "Dubai", "Dublin", "Helsinki", "Houston", "Jakarta", "Karachi", "Kingston",
+  "Lagos", "Lima", "Lisbon", "London", "Madrid", "Melbourne", "Mexico City",
+  "Miami", "Moscow", "Mumbai", "Nairobi", "Oslo", "Paris", "Perth", "Prague",
+  "Rome", "Seattle", "Seoul", "Singapore", "Stockholm", "Sydney", "Tokyo",
+]
+
+type Stats = { min: Int, max: Int, sum: Int, count: Int }
+
+fn fmt_tenths(t: Int) -> String =
+  if t < 0 then "-" + fmt_tenths(0 - t)
+  else "${t / 10}.${t % 10}"
+
+fn parse_int(s: String) -> Int = match int.parse(s) { ok(v) => v, err(_) => 0 }
+
+fn parse_tenths(s: String) -> Int =
+  match string.strip_prefix(s, "-") {
+    some(rest) => 0 - parse_tenths(rest),
+    none => {
+      let parts = string.split(s, ".")
+      parse_int(parts[0]) * 10 + parse_int(parts[1])
+    },
+  }
+
+// Truncating division with both operands made non-negative first, so the
+// mean is impl-independent (no reliance on a host language's negative-division
+// rounding).
+fn mean_tenths(sum: Int, count: Int) -> Int =
+  if sum < 0 then 0 - ((0 - sum) / count) else sum / count
+
+effect fn generate(n: Int, path: String) -> Unit = {
+  fs.write(path, "")!
+  let names = STATIONS
+  let n_stations = list.len(names)
+  var seed = 42
+  var chunk: List[String] = []
+  for _ in 0..<n {
+    seed = (seed * IA + IC) % IM
+    let station = names[seed % n_stations]
+    seed = (seed * IA + IC) % IM
+    let t = (seed % 1999) - 999
+    list.push(chunk, "${station};${fmt_tenths(t)}")
+    if list.len(chunk) == CHUNK_LINES then {
+      fs.append(path, string.join(chunk, "\n") + "\n")!
+      list.clear(chunk)
+    } else ()
+  }
+  if list.len(chunk) > 0 then fs.append(path, string.join(chunk, "\n") + "\n")!
+  else ()
+}
+
+effect fn aggregate(path: String) -> String = {
+  let lines = fs.read_lines(path)!
+  var stats: Map[String, Stats] = map.new()
+  for line in lines {
+    if string.is_empty(line) then () else {
+      let parts = string.split(line, ";")
+      let t = parse_tenths(parts[1])
+      match map.get(stats, parts[0]) {
+        some(s) => map.insert(stats, parts[0], Stats {
+          min: if t < s.min then t else s.min,
+          max: if t > s.max then t else s.max,
+          sum: s.sum + t,
+          count: s.count + 1,
+        }),
+        none => map.insert(stats, parts[0], Stats { min: t, max: t, sum: t, count: 1 }),
+      }
+    }
+  }
+  let body = map.entries(stats)
+    |> list.sort_by(((name, _)) => name)
+    |> list.map(((name, s)) =>
+      "${name}=${fmt_tenths(s.min)}/${fmt_tenths(mean_tenths(s.sum, s.count))}/${fmt_tenths(s.max)}")
+    |> string.join(", ")
+  "{" + body + "}"
+}
+
+fn arg_or(args: List[String], i: Int, default: String) -> String =
+  list.get(args, i) ?? default
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  match arg_or(args, 0, "") {
+    "gen" => generate(parse_int(arg_or(args, 1, "1000")), arg_or(args, 2, "onebrc_data.txt"))!,
+    "agg" => println(aggregate(arg_or(args, 1, "onebrc_data.txt"))!),
+    first => {
+      let n = match int.parse(first) { ok(v) => v, err(_) => 1000 }
+      let path = fs.temp_dir()! + "/almide_onebrc_${n}.txt"
+      generate(n, path)!
+      println(aggregate(path)!)
+      fs.remove(path)!
+    },
+  }
+}

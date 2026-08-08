@@ -1,6 +1,7 @@
 # Perf Suite — Native & WASM Runtime Scoreboard (#917)
 
-Seven Computer-Language-Benchmarks-Game-style programs, run on every leg the
+Eight benchmark programs — seven Computer-Language-Benchmarks-Game-style
+kernels plus a scaled One Billion Row Challenge — run on every leg the
 compiler ships, against handwritten Rust references where a fair reference
 exists. This directory is the source of the numbers in
 [docs/project/BENCHMARKS.md](../../../docs/project/BENCHMARKS.md) — nothing is published that
@@ -40,6 +41,20 @@ exists. This directory is the source of the numbers in
 - `fannkuchredux`, `binarytrees`, `mandelbrot` use `fan` parallelism, so a
   scalar Rust reference would be a lie — they run Almide-native vs Almide-wasm
   only.
+- `onebrc` is a scaled One Billion Row Challenge (`station;temp` lines →
+  sorted per-station min/mean/max): the one row whose hot loop is file I/O,
+  `string.split`, and map updates rather than arithmetic. Temperatures are
+  integer tenths end-to-end, so output is byte-identical with no float
+  formatting involved. The wasm leg is excluded — `wasmtime run` preopens no
+  directory, so the leg cannot touch files. The row doubles as the measurement
+  of the eager-read memory wall: `fs.read_lines` materializes the whole file
+  as `List[String]`, so aggregate-phase peak RSS tracks file size at ~4×
+  (measured 2026-08-08 on M4 Pro: 505 MB RSS for a 126 MB / 10 M-row file,
+  2.2 GB for 632 MB / 50 M rows — the same-shape Rust reference lands on the
+  same RSS, a streaming `BufReader` variant holds 1 MB flat at every scale).
+  Extrapolated to the official 1 B rows / ~13 GB file, the eager shape needs
+  ~50 GB of RSS; a streaming line API is what makes the full challenge
+  runnable at all.
 - The `fft-wasm` row exists because the wasm leg currently collapses on hot
   `data[i] = x` list writes (~3 orders of magnitude at 2^18) — the canonical
   2^22 workload would take hours on that leg. The cliff is the finding; it is
