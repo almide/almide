@@ -344,9 +344,11 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
         &x.data,
         x_rows,
         n_in,
-        w_bytes,
-        w_offset.max(0) as usize,
-        out_cols,
+        almide_kernel::q1_0_packed::PackedWeights {
+            bytes: w_bytes,
+            offset: w_offset.max(0) as usize,
+            rows: out_cols,
+        },
         &mut out,
     );
     mk(x_rows, out_cols, out)
