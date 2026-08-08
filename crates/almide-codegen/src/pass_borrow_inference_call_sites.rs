@@ -122,32 +122,55 @@ fn rewrite_calls_runtime_call(symbol: Sym, args: Vec<IrExpr>, sigs: &HashMap<Str
     IrExprKind::RuntimeCall { symbol, args }
 }
 
+/// Annotate every call in the tree with its callee's borrow signature.
+///
+/// Only the kinds that need something OTHER than "rewrite every child" get an
+/// arm: the two call forms, the statement-bearing nodes (whose bodies go
+/// through [`rewrite_calls_stmt`], which deliberately skips the list-peephole
+/// statements), and the nodes this rewriter treats as opaque. Everything else
+/// rides `map_children` — the single wildcard-free traversal, so a new
+/// `IrExprKind` cannot silently skip its calls.
 fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
+    let rebuild = |kind| IrExpr { kind, ty: ty.clone(), span, def_id: None };
 
     let kind = match expr.kind {
-        IrExprKind::Call { target, args, type_args } => rewrite_calls_call(target, args, type_args, sigs, mod_scope),
+        IrExprKind::Call { target, args, type_args } => {
+            rewrite_calls_call(target, args, type_args, sigs, mod_scope)
+        }
+        // RuntimeCall: lowered form of an `@intrinsic` / bundled Module call.
+        // Its borrow signature lives in the snapshot keyed by mangled symbol.
+        IrExprKind::RuntimeCall { symbol, args } => {
+            rewrite_calls_runtime_call(symbol, args, sigs, mod_scope)
+        }
 
+        // ── Opaque to this rewriter ──
+        //
+        // A `TailCall` is already committed, an `RcWrap` is a closure-value
+        // box, and `InlineRust` args are rendered verbatim by the template —
+        // annotating inside any of them would change code the walker no longer
+        // owns.
+        kind @ (IrExprKind::TailCall { .. }
+        | IrExprKind::RcWrap { .. }
+        | IrExprKind::InlineRust { .. }) => kind,
+        // IterChain: only the source is a call site the walker still renders;
+        // the steps and collector are already-lowered iterator adaptors.
+        IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
+            source: Box::new(rewrite_calls(*source, sigs, mod_scope)),
+            consume,
+            steps,
+            collector,
+        },
+
+        // ── Statement-bearing nodes: bodies go through `rewrite_calls_stmt` ──
         IrExprKind::Block { stmts, expr } => IrExprKind::Block {
             stmts: stmts.into_iter().map(|s| rewrite_calls_stmt(s, sigs, mod_scope)).collect(),
             expr: expr.map(|e| Box::new(rewrite_calls(*e, sigs, mod_scope))),
         },
-        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(rewrite_calls(*cond, sigs, mod_scope)),
-            then: Box::new(rewrite_calls(*then, sigs, mod_scope)),
-            else_: Box::new(rewrite_calls(*else_, sigs, mod_scope)),
-        },
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(rewrite_calls(*subject, sigs, mod_scope)),
-            arms: arms.into_iter().map(|a| IrMatchArm {
-                pattern: a.pattern,
-                guard: a.guard.map(|g| rewrite_calls(g, sigs, mod_scope)),
-                body: rewrite_calls(a.body, sigs, mod_scope),
-            }).collect(),
-        },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
-            var, var_tuple,
+            var,
+            var_tuple,
             iterable: Box::new(rewrite_calls(*iterable, sigs, mod_scope)),
             body: body.into_iter().map(|s| rewrite_calls_stmt(s, sigs, mod_scope)).collect(),
         },
@@ -155,108 +178,14 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
             cond: Box::new(rewrite_calls(*cond, sigs, mod_scope)),
             body: body.into_iter().map(|s| rewrite_calls_stmt(s, sigs, mod_scope)).collect(),
         },
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_calls(*body, sigs, mod_scope)), lambda_id,
-        },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op, left: Box::new(rewrite_calls(*left, sigs, mod_scope)), right: Box::new(rewrite_calls(*right, sigs, mod_scope)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(rewrite_calls(*operand, sigs, mod_scope)),
-        },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)),
-            fallback: Box::new(rewrite_calls(*fallback, sigs, mod_scope)),
-        },
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_calls(expr, sigs, mod_scope) },
-                other => other,
-            }).collect(),
-        },
-        IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| rewrite_calls(e, sigs, mod_scope)).collect(),
-        },
-        IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
-            source: Box::new(rewrite_calls(*source, sigs, mod_scope)),
-            consume, steps, collector,
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name,
-            fields: fields.into_iter()
-                .map(|(k, v)| (k, rewrite_calls(v, sigs, mod_scope))).collect(),
-        },
-        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
-            base: Box::new(rewrite_calls(*base, sigs, mod_scope)),
-            fields: fields.into_iter()
-                .map(|(k, v)| (k, rewrite_calls(v, sigs, mod_scope))).collect(),
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter()
-                .map(|e| rewrite_calls(e, sigs, mod_scope)).collect(),
-        },
-        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter()
-                .map(|e| rewrite_calls(e, sigs, mod_scope)).collect(),
-        },
-        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter()
-                .map(|(k, v)| (rewrite_calls(k, sigs, mod_scope), rewrite_calls(v, sigs, mod_scope))).collect(),
-        },
-        IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(rewrite_calls(*object, sigs, mod_scope)), field,
-        },
-        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
-            object: Box::new(rewrite_calls(*object, sigs, mod_scope)), index,
-        },
-        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)), field,
-        },
-        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
-            object: Box::new(rewrite_calls(*object, sigs, mod_scope)),
-            index: Box::new(rewrite_calls(*index, sigs, mod_scope)),
-        },
-        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
-            object: Box::new(rewrite_calls(*object, sigs, mod_scope)),
-            key: Box::new(rewrite_calls(*key, sigs, mod_scope)),
-        },
-        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(rewrite_calls(*start, sigs, mod_scope)),
-            end: Box::new(rewrite_calls(*end, sigs, mod_scope)),
-            inclusive,
-        },
-        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow {
-            expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)), as_str, mutable,
-        },
-        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
-        IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
-            name, args: args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect(),
-        },
-        IrExprKind::RuntimeCall { symbol, args } => rewrite_calls_runtime_call(symbol, args, sigs, mod_scope),
-        // Explicit-preserve: leaves + nodes this call-rewriter intentionally
-        // does NOT descend into (TailCall / RcWrap / InlineRust args are left
-        // untouched, matching the original `other => other`). Listed explicitly
-        // so a new IrExprKind variant is a compile error here.
-        kind @ (IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
-            | IrExprKind::Break | IrExprKind::Continue | IrExprKind::TailCall { .. }
-            | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RcWrap { .. }
-            | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
-            | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-            | IrExprKind::Hole | IrExprKind::Todo { .. }) => kind,
+
+        // ── Everything else: rewrite every child ──
+        kind => {
+            return rebuild(kind).map_children(&mut |e| rewrite_calls(e, sigs, mod_scope));
+        }
     };
 
-    IrExpr { kind, ty, span, def_id: None }
+    rebuild(kind)
 }
 
 fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> IrStmt {
