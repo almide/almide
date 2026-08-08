@@ -139,8 +139,34 @@ impl Checker {
             }
             (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() =>
                 a.iter().zip(b.iter()).all(|(x, y)| self.unify_infer(x, y)),
-            (Ty::Fn { is_effect: _, params: ap, ret: ar }, Ty::Fn { is_effect: _, params: bp, ret: br }) if ap.len() == bp.len() =>
-                ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) && self.unify_infer(ar, br),
+            (Ty::Fn { is_effect: ae, params: ap, ret: ar }, Ty::Fn { is_effect: be, params: bp, ret: br }) if ap.len() == bp.len() => {
+                if !ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) {
+                    return Some(false);
+                }
+                // #1055 carrier acceptance, tried BEFORE the plain ret unify so
+                // a failed attempt cannot contaminate the bindings (#547): an
+                // `effect (A) -> B` slot's return B matches a fallible
+                // counterpart's `Result[B, String]` — the effect carrier IS
+                // Result[_, String]. Fires only when exactly one side carries
+                // the effect bit, so peer joins of ordinary fns are untouched.
+                let carrier_ok = |me: &mut Self, slot_ret: &Ty, other_ret: &Ty| -> bool {
+                    match resolve_ty(other_ret, &me.uf) {
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, args)
+                            if args.len() == 2 && matches!(resolve_ty(&args[1], &me.uf), Ty::String) =>
+                        {
+                            me.unify_infer(slot_ret, &args[0])
+                        }
+                        _ => false,
+                    }
+                };
+                if *ae && !*be && carrier_ok(self, ar, br) {
+                    return Some(true);
+                }
+                if *be && !*ae && carrier_ok(self, br, ar) {
+                    return Some(true);
+                }
+                self.unify_infer(ar, br)
+            }
             _ => return None,
         })
     }
