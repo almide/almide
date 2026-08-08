@@ -19,7 +19,13 @@ fn effect_unwrap_admitted(
     if a.len() != 2 || !matches!(a[1], Ty::String) {
         return false;
     }
-    let ok = &a[0];
+    ok_payload_drop_proven(&a[0], layouts) || result_recursive_drop_proven(result_ty)
+}
+
+/// The Ok payloads of [`effect_unwrap_admitted`] whose drop the match-lowering
+/// reaches from the payload TYPE alone.
+fn ok_payload_drop_proven(ok: &Ty, layouts: &crate::lower::VariantLayouts) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
     // scalar / Unit Ok — result_heap_err_bind (the Ok side frees nothing; only Err-String drops).
     if !is_heap_ty(ok) {
         return true;
@@ -52,11 +58,14 @@ fn effect_unwrap_admitted(
     if matches!(ok, Ty::Record { .. }) {
         return true;
     }
-    if matches!(ok, Ty::Named(..)) && !layouts.field_is_variant(ok) {
-        return true;
-    }
-    // List[Value] Ok + the (String,Int)/(Value,Int)/(List[String],Int)/(List[Value],Int) tuple-Ok
-    // shapes — each has a dedicated RECURSIVE result-drop the match-lowering routes to soundly.
+    matches!(ok, Ty::Named(..)) && !layouts.field_is_variant(ok)
+}
+
+/// The [`effect_unwrap_admitted`] shapes keyed on the WHOLE `Result`: `List[Value]`
+/// Ok plus the (String,Int)/(Value,Int)/(List[String],Int)/(List[Value],Int)
+/// tuple-Ok shapes — each has a dedicated RECURSIVE result-drop the match-lowering
+/// routes to soundly.
+fn result_recursive_drop_proven(result_ty: &Ty) -> bool {
     is_result_listval_ty(result_ty)
         || is_str_int_result_ty(result_ty)
         || is_value_int_result_ty(result_ty)
@@ -291,6 +300,234 @@ pub fn desugar_unwrap_rewrap_identity(body: &IrExpr) -> Option<IrExpr> {
     })
 }
 
+/// Which binding form a `let … = e!` statement uses — both early-return the
+/// `Err(E)` and bind/destructure the `Ok(T)`.
+enum LetUnwrapTarget {
+    Single { var: VarId, ty: Ty },
+    Destructure { pattern: almide_ir::IrPattern },
+}
+
+/// The first `let v = e!` (Bind-of-Unwrap) or destructure `let (a, b) = e!` in
+/// `stmts`, as `(index, target, unwrapped-expr)`.
+///
+/// `!` (Unwrap) and `?` (Try) both propagate the `Err(E)` in an effect fn — the
+/// SAME early-return this desugar builds — so both are accepted; the derive-
+/// generated field binds arrive as `Try` (`let _e0 = value.as_int(..)?`). A
+/// DESTRUCTURE may additionally arrive with the `!`/`?` already stripped to a
+/// bare Result-typed value (keyed on the TYPE), so all three spellings are
+/// handled and a destructure-let-unwrap never reaches lowering as a
+/// Result-destructured-as-a-tuple.
+fn find_let_unwrap_target(stmts: &[IrStmt]) -> Option<(usize, LetUnwrapTarget, IrExpr)> {
+    stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
+        IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
+                Some((i, LetUnwrapTarget::Single { var: *var, ty: ty.clone() }, (**expr).clone()))
+            }
+            _ => None,
+        },
+        IrStmtKind::BindDestructure { pattern, value } => {
+            let inner = match &value.kind {
+                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => Some((**expr).clone()),
+                _ if value.ty.is_result() => Some(value.clone()),
+                _ => None,
+            }?;
+            Some((i, LetUnwrapTarget::Destructure { pattern: pattern.clone() }, inner))
+        }
+        _ => None,
+    })
+}
+
+/// Build an `IrExpr` carrying `body`'s span and def_id — every node
+/// [`desugar_let_unwrap`] and its helpers synthesize.
+fn mk_at(body: &IrExpr, kind: IrExprKind, ty: Ty) -> IrExpr {
+    IrExpr { kind, ty, span: body.span.clone(), def_id: body.def_id }
+}
+
+/// Is `var` read by neither `rest` nor `tail`?
+fn var_unread_after(var: VarId, rest: &[IrStmt], tail: &Option<Box<IrExpr>>) -> bool {
+    let reads_stmt = rest.iter().any(|s| {
+        let mut f = false;
+        almide_ir::visit::walk_stmt(&mut VarUse { var, found: &mut f }, s);
+        f
+    });
+    let reads_tail = tail.as_deref().is_some_and(|tl| {
+        let mut f = false;
+        almide_ir::visit::IrVisitor::visit_expr(&mut VarUse { var, found: &mut f }, tl);
+        f
+    });
+    !reads_stmt && !reads_tail
+}
+
+/// The ok-arm pattern and continuation statements of [`desugar_let_unwrap`]:
+/// `ok(<bind>) => { <rest> }`.
+///
+/// A UNIT Ok payload bound to a NEVER-READ var (`let _ = fs.write(p, s)!` — the
+/// frontend gives `_` a real VarId) normalizes to the Wildcard arm (exactly the
+/// bare-stmt `!` shape), so the statement result-match parser dispatches it
+/// instead of declining on a Unit-typed bind. A genuinely-read var keeps its bind.
+///
+/// A destructure becomes `ok($p2) => { let (a,b) = $p2; <rest> }` — the
+/// hand-written direct-match form that already lowers (a Result destructured
+/// directly as a tuple otherwise silently miscompiled: the wrapper @12/@16 was
+/// read as the tuple fields).
+fn let_unwrap_ok_binding(
+    body: &IrExpr,
+    target: LetUnwrapTarget,
+    rest: &[IrStmt],
+    tail: &Option<Box<IrExpr>>,
+    ok_ty: &Ty,
+) -> (almide_ir::IrPattern, Vec<IrStmt>) {
+    match target {
+        LetUnwrapTarget::Single { var, ty }
+            if matches!(ty, Ty::Unit) && var_unread_after(var, rest, tail) =>
+        {
+            (almide_ir::IrPattern::Wildcard, rest.to_vec())
+        }
+        LetUnwrapTarget::Single { var, ty } => {
+            (almide_ir::IrPattern::Bind { var, ty }, rest.to_vec())
+        }
+        LetUnwrapTarget::Destructure { pattern } => {
+            let p2 = VarId(max_var_id(body) + 2);
+            let destr = IrStmt {
+                kind: IrStmtKind::BindDestructure {
+                    pattern,
+                    value: mk_at(body, IrExprKind::Var { id: p2 }, ok_ty.clone()),
+                },
+                span: body.span.clone(),
+            };
+            let mut cs = vec![destr];
+            cs.extend(rest.iter().cloned());
+            (almide_ir::IrPattern::Bind { var: p2, ty: ok_ty.clone() }, cs)
+        }
+    }
+}
+
+/// SHORT-CIRCUIT a NEVER-ERR LIFTED callee (`e.log_info()!` inside
+/// `assert_eq(e.log_info()!, "started")` — `Event.log_info`'s body never builds
+/// `err(...)`, so its v1 result is the RAW payload, not a real Result block).
+/// Such a call never takes the Err arm, so the sound, byte-matching lowering is a
+/// PLAIN bind of the raw call result, mirroring `rewrite_never_err_effect_match`
+/// (mod_p2.rs)'s post-hoc pre-pass rewrite over an ALREADY-EXISTING match.
+///
+/// That pre-pass runs once, early, in `inline_mutual_tail_recursion` — but a `!`
+/// nested in a CALL-ARGUMENT position only becomes a `let v = f()!` shape via
+/// `desugar_callarg_unwrap` (desugar_branch.rs), and [`desugar_let_unwrap`] (the
+/// one that turns THAT into the err/ok match, called from `desugar_heap_branches`'s
+/// fixpoint) runs LATER, per-function, inside the main lowering loop — too late for
+/// the pre-pass to ever see or rewrite the match it builds. Doing the SAME
+/// short-circuit at construction time (instead of ever building the doomed match —
+/// the match-lowering wall would reject it: a never-err call's `.ty` is the lifted
+/// `Result[T,String]` but its ACTUAL v1 value is raw `T`, so reading it as a Result
+/// handle is honestly unsupported) closes that timing gap.
+///
+/// `ok_arm.pattern` is always `Bind` or `Wildcard` here (never `Destructure`'s
+/// nested form — that already reduces to a `Bind` of the tuple payload); Wildcard
+/// mints a fresh var PAST the caller's already-minted ids so it never collides.
+///
+/// A callee name reaches here EITHER already-resolved (`CallTarget::Named`) OR
+/// still as an UNRESOLVED UFCS method call (`CallTarget::Method{method,..}` —
+/// `e.log_info()!` nested inside a call-arg `!`: `desugar_method_calls` (the OUTER
+/// `lower_body_into` chain step that resolves Method → Named) never reaches into an
+/// `Unwrap`-wrapped call-argument position, so by the time `desugar_callarg_unwrap`
+/// + [`desugar_let_unwrap`] lift/match it, the subject is STILL `Method`.
+/// `NEVER_ERR_LIFTED_FNS` is keyed by the DECLARED fn's OWN name, `Event.log_info`
+/// for an `effect fn Event.log_info(..)` UFCS definition, which is EXACTLY the
+/// `Sym` a `CallTarget::Method{method}` carries — so checking `method.as_str()`
+/// against the SAME set is sound without needing method resolution to have run.
+fn never_err_short_circuit(
+    body: &IrExpr,
+    inner: &IrExpr,
+    ok_arm: &almide_ir::IrMatchArm,
+    before: &[IrStmt],
+    ok_ty: &Ty,
+) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    if !matches!(&inner.ty, Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2) {
+        return None;
+    }
+    let callee = match &inner.kind {
+        IrExprKind::Call { target: CallTarget::Named { name }, .. } => *name,
+        IrExprKind::Call { target: CallTarget::Method { method, .. }, .. } => *method,
+        _ => return None,
+    };
+    let never_err = crate::lower::NEVER_ERR_LIFTED_FNS
+        .with(|s| s.borrow().contains(callee.as_str()))
+        && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(callee.as_str()));
+    if !never_err {
+        return None;
+    }
+    let almide_ir::IrPattern::Ok { inner: ok_inner } = &ok_arm.pattern else { return None };
+    let var = match &**ok_inner {
+        almide_ir::IrPattern::Bind { var, .. } => *var,
+        almide_ir::IrPattern::Wildcard => VarId(max_var_id(body) + 3),
+        _ => return None,
+    };
+    let bind_stmt = IrStmt {
+        kind: IrStmtKind::Bind {
+            var,
+            mutability: almide_ir::Mutability::Let,
+            ty: ok_ty.clone(),
+            value: mk_at(body, inner.kind.clone(), ok_ty.clone()),
+        },
+        span: body.span.clone(),
+    };
+    let mut new_stmts = before.to_vec();
+    new_stmts.push(bind_stmt);
+    Some(mk_at(
+        body,
+        IrExprKind::Block { stmts: new_stmts, expr: Some(Box::new(ok_arm.body.clone())) },
+        body.ty.clone(),
+    ))
+}
+
+/// The `err($x) => err(<payload>)` arm's payload — the propagated error IS the
+/// function result.
+///
+/// Sound only when the propagated err TYPE is the fn's err type; v0 coerces a
+/// mismatch at the `?` site (walker/expressions.rs): List[String] → String joins
+/// ", " (`result.collect_map(..)!` in a String-err effect fn), any other mismatch
+/// Debug-formats. Mirror the join here (an executable `list.join` call the
+/// self-host registry links); decline the Debug class (`None`) so it walls honestly
+/// instead of type-punning the err payload into the fn's err repr.
+fn let_unwrap_err_payload(
+    body: &IrExpr,
+    fresh: VarId,
+    err_ty: &Ty,
+    result_ty: &Ty,
+) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let fn_err = match result_ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[1].clone(),
+        // A lifted effect fn's synthetic Result errs String.
+        _ => Ty::String,
+    };
+    let err_var = mk_at(body, IrExprKind::Var { id: fresh }, err_ty.clone());
+    if *err_ty == fn_err {
+        return Some(err_var);
+    }
+    let list_str_err = matches!(err_ty,
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
+    if !list_str_err || !matches!(fn_err, Ty::String) {
+        return None;
+    }
+    Some(mk_at(
+        body,
+        IrExprKind::Call {
+            target: almide_ir::CallTarget::Module {
+                module: almide_lang::intern::sym("list"),
+                func: almide_lang::intern::sym("join"),
+                def_id: None,
+            },
+            args: vec![
+                err_var,
+                mk_at(body, IrExprKind::LitStr { value: ", ".into() }, Ty::String),
+            ],
+            type_args: vec![],
+        },
+        Ty::String,
+    ))
+}
+
 /// `{ …; let v = e!; rest }` — an unwrap-`!` bound to a let (an EFFECT-fn early-return on Err) →
 /// `{ …; match e { ok(v) => { rest }, err($x) => err($x) } }`. The `!` IS exactly this: evaluate `e`,
 /// bind the Ok payload to `v` and continue, else return the Err from the enclosing fn. Pushing the
@@ -303,39 +540,7 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };
-    // A single-var `let v = e!` (Bind-of-Unwrap) OR a destructure `let (a, b) = e!` (BindDestructure
-    // whose VALUE is Result-typed — the `!` lowers to a bare Result-typed Call here, not a kept Unwrap
-    // node, so key on the TYPE). Both early-return the `Err(E)` and bind/destructure the `Ok(T)`.
-    enum Target {
-        Single { var: VarId, ty: Ty },
-        Destructure { pattern: almide_ir::IrPattern },
-    }
-    let (i, target, inner) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
-        IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
-            // `!` (Unwrap) and `?` (Try) both propagate the `Err(E)` in an effect fn — the SAME
-            // early-return this desugar builds. The derive-generated field binds arrive as `Try`
-            // (`let _e0 = value.as_int(..)?`) — handle both so they lower to the match, not a
-            // heap-result Try left for `lower_call_args` to wall.
-            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
-                Some((i, Target::Single { var: *var, ty: ty.clone() }, (**expr).clone()))
-            }
-            _ => None,
-        },
-        IrStmtKind::BindDestructure { pattern, value } => {
-            // `let (a,b) = e!` / `let (a,b) = e?`. The `!`/`?` is EITHER kept as an `Unwrap`/`Try`
-            // node (inner = its Result expr) OR already stripped to a bare Result-typed value (inner
-            // = the value) — handle all three so a destructure-let-unwrap never reaches lowering as a
-            // Result-destructured-as-a-tuple. The derived variant decode's `let (_tag, _payload) =
-            // value.tagged_variant(v)?` is exactly the kept-`Try` case.
-            let inner = match &value.kind {
-                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => Some((**expr).clone()),
-                _ if value.ty.is_result() => Some(value.clone()),
-                _ => None,
-            }?;
-            Some((i, Target::Destructure { pattern: pattern.clone() }, inner))
-        }
-        _ => None,
-    })?;
+    let (i, target, inner) = find_let_unwrap_target(stmts)?;
     // The unwrapped expr must be a `Result[T, E]` — `!` early-returns its `Err(E)`, binds `Ok(T)`.
     let (ok_ty, err_ty) = match &inner.ty {
         Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => (a[0].clone(), a[1].clone()),
@@ -349,49 +554,9 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
         span: body.span.clone(),
         def_id: body.def_id,
     };
-    // ok(<bind>) => { <rest> }. A destructure becomes `ok($p2) => { let (a,b) = $p2; <rest> }` — the
-    // hand-written direct-match form that already lowers (a Result destructured directly as a tuple
-    // otherwise silently miscompiled: the wrapper @12/@16 was read as the tuple fields).
-    let (ok_pattern, cont_stmts): (almide_ir::IrPattern, Vec<IrStmt>) = match target {
-        // A UNIT Ok payload bound to a NEVER-READ var (`let _ = fs.write(p, s)!` — the
-        // frontend gives `_` a real VarId): normalize to the Wildcard arm (exactly the
-        // bare-stmt `!` shape), so the statement result-match parser dispatches it
-        // instead of declining on a Unit-typed bind. A genuinely-read var keeps its bind.
-        Target::Single { var, ty }
-            if matches!(ty, Ty::Unit)
-                && !stmts[i + 1..].iter().any(|s| {
-                    let mut f = false;
-                    almide_ir::visit::walk_stmt(&mut VarUse { var, found: &mut f }, s);
-                    f
-                })
-                && !tail.as_deref().is_some_and(|tl| {
-                    let mut f = false;
-                    almide_ir::visit::IrVisitor::visit_expr(
-                        &mut VarUse { var, found: &mut f },
-                        tl,
-                    );
-                    f
-                }) =>
-        {
-            (almide_ir::IrPattern::Wildcard, stmts[i + 1..].to_vec())
-        }
-        Target::Single { var, ty } => {
-            (almide_ir::IrPattern::Bind { var, ty }, stmts[i + 1..].to_vec())
-        }
-        Target::Destructure { pattern } => {
-            let p2 = VarId(max_var_id(body) + 2);
-            let destr = IrStmt {
-                kind: IrStmtKind::BindDestructure {
-                    pattern,
-                    value: mk(IrExprKind::Var { id: p2 }, ok_ty.clone()),
-                },
-                span: body.span.clone(),
-            };
-            let mut cs = vec![destr];
-            cs.extend(stmts[i + 1..].iter().cloned());
-            (almide_ir::IrPattern::Bind { var: p2, ty: ok_ty.clone() }, cs)
-        }
-    };
+    let rest = &stmts[i + 1..];
+    let (ok_pattern, cont_stmts) =
+        let_unwrap_ok_binding(body, target, rest, tail, &ok_ty);
     let cont = mk(
         IrExprKind::Block { stmts: cont_stmts, expr: tail.clone() },
         result_ty.clone(),
@@ -426,44 +591,8 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
     // name, `Event.log_info` for a `effect fn Event.log_info(..)` UFCS definition, which is
     // EXACTLY the `Sym` a `CallTarget::Method{method}` carries — so checking `method.as_str()`
     // against the SAME set is sound without needing method resolution to have run first).
-    let never_err_callee = match &inner.kind {
-        IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(*name),
-        IrExprKind::Call { target: CallTarget::Method { method, .. }, .. } => Some(*method),
-        _ => None,
-    };
-    let is_never_err_lifted_call = matches!(&inner.ty,
-        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2)
-        && never_err_callee.is_some_and(|name| {
-            crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
-                && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
-        });
-    if is_never_err_lifted_call {
-        let short_var = match &ok_arm.pattern {
-            almide_ir::IrPattern::Ok { inner: ok_inner } => match &**ok_inner {
-                almide_ir::IrPattern::Bind { var, .. } => Some(*var),
-                almide_ir::IrPattern::Wildcard => Some(VarId(max_var_id(body) + 3)),
-                _ => None,
-            },
-            _ => None,
-        };
-        if let Some(var) = short_var {
-            let raw_call = mk(inner.kind.clone(), ok_ty.clone());
-            let bind_stmt = IrStmt {
-                kind: IrStmtKind::Bind {
-                    var,
-                    mutability: almide_ir::Mutability::Let,
-                    ty: ok_ty,
-                    value: raw_call,
-                },
-                span: body.span.clone(),
-            };
-            let mut new_stmts = stmts[..i].to_vec();
-            new_stmts.push(bind_stmt);
-            return Some(mk(
-                IrExprKind::Block { stmts: new_stmts, expr: Some(Box::new(ok_arm.body.clone())) },
-                result_ty,
-            ));
-        }
+    if let Some(short) = never_err_short_circuit(body, &inner, &ok_arm, &stmts[..i], &ok_ty) {
+        return Some(short);
     }
     // err($x) => err($x)  (the propagated error IS the function result). Sound only when
     // the propagated err TYPE is the fn's err type; v0 coerces a mismatch at the `?` site
@@ -471,36 +600,7 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
     // in a String-err effect fn), any other mismatch Debug-formats. Mirror the join here
     // (an executable list.join call the self-host registry links); decline the Debug class
     // so it walls honestly instead of type-punning the err payload into the fn's err repr.
-    let fn_err = match &result_ty {
-        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[1].clone(),
-        // A lifted effect fn's synthetic Result errs String.
-        _ => Ty::String,
-    };
-    let err_var = mk(IrExprKind::Var { id: fresh }, err_ty.clone());
-    let err_payload = if err_ty == fn_err {
-        err_var
-    } else if matches!(&err_ty,
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String))
-        && matches!(fn_err, Ty::String)
-    {
-        mk(
-            IrExprKind::Call {
-                target: almide_ir::CallTarget::Module {
-                    module: almide_lang::intern::sym("list"),
-                    func: almide_lang::intern::sym("join"),
-                    def_id: None,
-                },
-                args: vec![
-                    err_var,
-                    mk(IrExprKind::LitStr { value: ", ".into() }, Ty::String),
-                ],
-                type_args: vec![],
-            },
-            Ty::String,
-        )
-    } else {
-        return None;
-    };
+    let err_payload = let_unwrap_err_payload(body, fresh, &err_ty, &result_ty)?;
     let err_body = mk(IrExprKind::ResultErr { expr: Box::new(err_payload) }, result_ty.clone());
     let err_arm = almide_ir::IrMatchArm {
         pattern: almide_ir::IrPattern::Err {
