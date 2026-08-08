@@ -525,7 +525,18 @@ impl LowerCtx {
                 // to absorb that). Double-run safety: a call-bearing arm never
                 // reaches the linearization (lower_branch walls it), so this arm
                 // only executes under a REAL branch (try_lower_unit_if).
-                IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit) => {
+                // `Ty::Never` rides with `Ty::Unit` here (#1124). A diverging
+                // call — `process.exit(code)`, the only `-> Never` in the
+                // stdlib — produces no value BY CONSTRUCTION, exactly like a
+                // Unit effect call, but it is not Unit-typed. Matching only on
+                // Unit sent it to the deferred-value path below, which records
+                // the call as a caps marker and EMITS NOTHING: the arm lowered
+                // to zero ops and returned Ok, so `guard n > 99 else
+                // process.exit(3)` built clean and exited 0 on wasm while
+                // native exited 3. A silently wrong exit code, not a wall —
+                // the class the strict-value mode exists to prevent, reached
+                // through a type the match forgot to name.
+                IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit | Ty::Never) => {
                     self.lower_stmt_expr(tail)?
                 }
                 // A Unit arm-tail effect call wrapped in `Try`/`Unwrap` (the auto-`?` of an

@@ -1,0 +1,23 @@
+// @contract: C-219
+// A DIVERGING call in a branch arm runs on both targets, and its exit code is
+// the process's.
+//
+// `process.exit(code)` is the stdlib's only `-> Never`. The arm-tail dispatch
+// in `lower_branch_arm` executed a `Call` only when its type was `Ty::Unit`, so
+// a `Never` call fell through to the deferred-value path — which records the
+// call as a capability marker and EMITS NOTHING. The arm lowered to zero ops
+// and reported success, so this program built clean and exited 0 on wasm while
+// native exited 3 (#1124).
+//
+// That is the silent-wrong class, reached through a type the match forgot to
+// name rather than through an unsupported shape: no wall, no diagnostic, just a
+// different answer. The condition here is RUNTIME-valued on purpose — a
+// constant condition is folded earlier (#1117) and takes a different path.
+import process
+
+effect fn main() -> Unit = {
+  println("before-guard")
+  let n = list.len(process.args())
+  guard n > 99 else process.exit(3)
+  println("unreachable")
+}
