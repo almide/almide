@@ -509,6 +509,41 @@ impl LowerCtx {
     /// slot-0 HANDLE BORROW (`param_values`, not a second owner — `lower_heap_result_arm`
     /// Dups any borrowed payload it re-wraps), arms via `lower_heap_result_arm` with the
     /// release-parity sweep.
+    /// Release parity across the two arms (the `lower_heap_result_if_inner`
+    /// discipline): whatever only ONE arm consumed must be dropped in the other,
+    /// so both arms leave the same live set. The none-arm drops are INSERTED at
+    /// the `Else` marker so they land inside that arm.
+    fn equalize_arm_releases(
+        &mut self,
+        consumed_by_some: &[ValueId],
+        consumed_by_none: &[ValueId],
+        else_marker_at: usize,
+    ) {
+        for x in consumed_by_some.iter().filter(|x| !consumed_by_none.contains(x)) {
+            let op = self.drop_op_for(*x);
+            self.ops.push(op);
+        }
+        for x in consumed_by_none.iter().filter(|x| !consumed_by_some.contains(x)) {
+            let op = self.drop_op_for(*x);
+            self.ops.insert(else_marker_at, op);
+        }
+    }
+
+    /// Roll every op, lift and live handle the attempt pushed back to its mark,
+    /// so a declining `None` leaves the lowerer exactly as it found it. Returns
+    /// `None` so a caller can `return self.rollback_match(..)` in one line.
+    fn rollback_match(
+        &mut self,
+        ops_mark: usize,
+        lifted_mark: usize,
+        lhh_mark: usize,
+    ) -> Option<ValueId> {
+        self.ops.truncate(ops_mark);
+        self.lifted.truncate(lifted_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+        None
+    }
+
     pub(crate) fn try_lower_option_match_value(
         &mut self,
         subject: &IrExpr,
@@ -545,12 +580,7 @@ impl LowerCtx {
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
         let some_obj = match self.lower_heap_result_arm(some_body, result_ty) {
             Some(v) => v,
-            _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                return None;
-            }
+            _ => return self.rollback_match(ops_mark, lifted_mark, lhh_mark),
         };
         let consumed_by_some: Vec<ValueId> =
             outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
@@ -560,31 +590,14 @@ impl LowerCtx {
         let live_after_some: Vec<ValueId> = self.live_heap_handles.clone();
         let none_obj = match self.lower_heap_result_arm(none_body, result_ty) {
             Some(v) => v,
-            _ => {
-                self.ops.truncate(ops_mark);
-                self.lifted.truncate(lifted_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                return None;
-            }
+            _ => return self.rollback_match(ops_mark, lifted_mark, lhh_mark),
         };
         let consumed_by_none: Vec<ValueId> = live_after_some
             .iter()
             .copied()
             .filter(|x| !self.live_heap_handles.contains(x))
             .collect();
-        // Release parity across the arms (the lower_heap_result_if_inner discipline).
-        for x in &consumed_by_some {
-            if !consumed_by_none.contains(x) {
-                let op = self.drop_op_for(*x);
-                self.ops.push(op);
-            }
-        }
-        for x in &consumed_by_none {
-            if !consumed_by_some.contains(x) {
-                let op = self.drop_op_for(*x);
-                self.ops.insert(else_marker_at, op);
-            }
-        }
+        self.equalize_arm_releases(&consumed_by_some, &consumed_by_none, else_marker_at);
         self.ops.push(Op::EndIf { val: Some(none_obj) });
         Some(dst)
     }
@@ -601,33 +614,29 @@ fn classify_heap_option_arms(
     for arm in arms {
         match &arm.pattern {
             IrPattern::Some { inner } => {
-                let bind = match inner.as_ref() {
-                    IrPattern::Bind { var, .. } => Some(*var),
-                    IrPattern::Wildcard => None,
-                    _ => return None,
-                };
-                if some_arm.is_some() {
-                    return None;
+                let bind = some_payload_bind(inner)?;
+                if some_arm.replace((&arm.body, bind)).is_some() {
+                    return None; // two some-arms — outside the two-arm shape
                 }
-                some_arm = Some((&arm.body, bind));
             }
-            IrPattern::None => {
-                if none_arm.is_some() {
+            // A bare `_` stands in for the none arm (there is nothing else left).
+            IrPattern::None | IrPattern::Wildcard => {
+                if none_arm.replace(&arm.body).is_some() {
                     return None;
                 }
-                none_arm = Some(&arm.body);
-            }
-            IrPattern::Wildcard => {
-                if none_arm.is_some() {
-                    return None;
-                }
-                none_arm = Some(&arm.body);
             }
             _ => return None,
         }
     }
-    match (some_arm, none_arm) {
-        (Some(s), Some(n)) => Some((s, n)),
+    Some((some_arm?, none_arm?))
+}
+
+/// The `some(<pat>)` payload binder: a `Bind` names it, a `_` discards it, and
+/// any deeper pattern is outside this shape.
+fn some_payload_bind(inner: &IrPattern) -> Option<Option<VarId>> {
+    match inner {
+        IrPattern::Bind { var, .. } => Some(Some(*var)),
+        IrPattern::Wildcard => Some(None),
         _ => None,
     }
 }
