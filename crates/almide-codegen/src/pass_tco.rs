@@ -637,6 +637,16 @@ fn non_tail_self_call(expr: &IrExpr, fn_name: &str) -> bool {
         }
 
         // ── Shapes with their own traversal ──
+        _ => non_tail_self_call_nested(expr, fn_name),
+    }
+}
+
+/// The [`non_tail_self_call`] arms whose children are not a plain list of
+/// sub-expressions — calls, keyed containers, and the nodes carrying statement
+/// bodies or match arms.
+fn non_tail_self_call_nested(expr: &IrExpr, fn_name: &str) -> bool {
+    let has = |e: &IrExpr| non_tail_self_call(e, fn_name);
+    match &expr.kind {
         IrExprKind::Call { target, args, .. } => {
             let target_has = match target {
                 CallTarget::Computed { callee } => has(callee),
@@ -666,6 +676,8 @@ fn non_tail_self_call(expr: &IrExpr, fn_name: &str) -> bool {
         | IrExprKind::While { cond: lead, body } => {
             has(lead) || body.iter().any(|stmt| scan_non_tail_stmt(stmt, fn_name).0)
         }
+        // Every other kind is answered by `non_tail_self_call` itself.
+        _ => false,
     }
 }
 
