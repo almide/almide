@@ -558,41 +558,11 @@ fn count_ir_calls(
 /// If a future lowering re-introduces an unbacked param `+1`, this equality breaks
 /// and the corpus gate fails — making the class structurally impossible to ship.
 fn plus_one_events_backed(mir: &MirFunction) -> bool {
-    let cert = ownership_certificate(mir);
-    let i = cert.chars().filter(|c| *c == 'i').count();
-    let a = cert.chars().filter(|c| *c == 'a').count();
-    // A rung-4 `ListLit` is alloc-class (the `Alloc{DynList}` it replaced) — it
-    // backs its `i` exactly like an Alloc.
-    let allocs = mir
-        .ops
-        .iter()
-        .filter(|o| matches!(o, Op::Alloc { .. } | Op::ListLit { .. }))
-        .count();
-    let heap_results = mir
-        .ops
-        .iter()
-        .filter(|o| match o {
-            Op::Call { dst: Some(_), result: Some(r), .. }
-            | Op::CallFn { dst: Some(_), result: Some(r), .. }
-            // A heap-returning CallIndirect (a closure that moves out a fresh owned value)
-            // backs an `i` exactly like a heap-returning CallFn — keep the gate consistent.
-            | Op::CallIndirect { dst: Some(_), result: Some(r), .. } => r.is_heap(),
-            _ => false,
-        })
-        .count();
-    let dups = mir
-        .ops
-        .iter()
-        .filter(|o| matches!(o, Op::Dup { .. }))
-        .count();
-    // A branch-merge dst's `i` (a RELEASED merge's moved-in reference, or a
-    // slot-FEEDER merge's routed `i` — see ownership_certificate) is backed by
-    // the arm value's real producer: the merge is a reference changing hands
-    // (the wasm merge local.set), not a synthetic +1. The certificate module
-    // itself counts the merges it credits so the two stay in lockstep by
-    // construction.
-    let merge_credits = almide_mir::certificate::merge_dst_i_credits(mir);
-    i == allocs + heap_results + merge_credits && a == dups
+    // Shared with the LOWERING EXIT since #1146 — the lowering now walls an
+    // imbalanced certificate itself, so this classifier check is the
+    // belt-and-suspenders assertion that the wall is total (a breach here
+    // means a fn escaped the exit gate).
+    almide_mir::certificate::plus_one_events_backed(mir)
 }
 
 /// Outcome of driving one `.almd` source through the frontend to linked IR.

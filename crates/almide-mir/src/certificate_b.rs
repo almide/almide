@@ -810,3 +810,36 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
     }
     out
 }
+
+/// The NON-RECURRING soundness gate for the borrow-by-default calling
+/// convention, shared by the corpus classifier AND the lowering exit (#1146):
+/// EVERY `+1` event in the ownership certificate must be BACKED by a real
+/// runtime op — an `i` by an `Alloc`/`ListLit`, a heap-result call, or a
+/// credited branch merge; an `a` by a `Dup` — and every such op must have its
+/// cert line. A strict EQUALITY, so an unbacked synthetic `+1` (the
+/// gate-blind use-after-free class) AND a backed-but-uncertified op (the
+/// fs.fold_lines_chunked loop shape: one more real op than cert lines) both
+/// refuse.
+pub fn plus_one_events_backed(func: &MirFunction) -> bool {
+    let cert = ownership_certificate(func);
+    let i = cert.chars().filter(|c| *c == 'i').count();
+    let a = cert.chars().filter(|c| *c == 'a').count();
+    let allocs = func
+        .ops
+        .iter()
+        .filter(|o| matches!(o, crate::Op::Alloc { .. } | crate::Op::ListLit { .. }))
+        .count();
+    let heap_results = func
+        .ops
+        .iter()
+        .filter(|o| match o {
+            crate::Op::Call { dst: Some(_), result: Some(r), .. }
+            | crate::Op::CallFn { dst: Some(_), result: Some(r), .. }
+            | crate::Op::CallIndirect { dst: Some(_), result: Some(r), .. } => r.is_heap(),
+            _ => false,
+        })
+        .count();
+    let dups = func.ops.iter().filter(|o| matches!(o, crate::Op::Dup { .. })).count();
+    let merge_credits = merge_dst_i_credits(func);
+    i == allocs + heap_results + merge_credits && a == dups
+}
