@@ -166,7 +166,8 @@ pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym
         ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord {
             fields: fields.iter().map(|f| (sym(&f.name), resolve_type_expr_in(&f.ty, known_types, cur_mod))).collect(),
         },
-        ast::TypeExpr::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
+        ast::TypeExpr::Fn { is_effect, params, ret } => Ty::Fn {
+            is_effect: *is_effect,
             params: params.iter().map(|p| resolve_type_expr_in(p, known_types, cur_mod)).collect(),
             ret: Box::new(resolve_type_expr_in(ret, known_types, cur_mod)),
         },

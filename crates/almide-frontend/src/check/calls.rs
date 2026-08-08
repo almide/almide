@@ -148,7 +148,16 @@ impl Checker {
             } else { None };
             let prev_hint = self.lambda_arg_hint.take();
             self.lambda_arg_hint = pinned;
+            // #1055: a lambda landing in an `effect (…) -> …` slot is checked
+            // with effect-fn body ergonomics (the flag is consumed by the
+            // lambda inference and reset around every other arg).
+            let prev_slot_effect = self.lambda_slot_effect;
+            self.lambda_slot_effect = is_lambda_arg(a)
+                && call_sig.as_ref().and_then(|sig| sig.params.get(i)).is_some_and(
+                    |(_, pty)| matches!(pty, Ty::Fn { is_effect: true, .. }),
+                );
             let aty = self.infer_expr(a);
+            self.lambda_slot_effect = prev_slot_effect;
             self.lambda_arg_hint = prev_hint;
             self.enqueue_ctor_arg_unresolved(a, &aty);
             self.pin_arg_literal_context(callee, call_sig, i, a);
@@ -581,10 +590,23 @@ impl Checker {
             return Some(Ty::Named(type_name, generic_args));
         }
         let ty = self.env.lookup_var(name).cloned()?;
-        if let Ty::Fn { is_effect: _, params, ret } = &ty {
+        if let Ty::Fn { is_effect, params, ret } = &ty {
             arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
                 self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
             });
+            // #1055: calling an `effect (A) -> B` VALUE is an effect call —
+            // it needs the effect permission and yields the effect carrier
+            // `Result[B, String]`, so `h(x)!` propagates exactly like a
+            // named effect-fn call.
+            if *is_effect {
+                if !self.env.can_call_effect {
+                    self.emit(super::err(
+                        format!("cannot call effect function value `{}` from a pure context", name),
+                        "Mark the enclosing function as `effect fn`".to_string(),
+                        format!("call to {}()", name)).with_code("E006"));
+                }
+                return Some(Ty::result(ret.as_ref().clone(), Ty::String));
+            }
             return Some(ret.as_ref().clone());
         }
         // #558: `n(args)` where `n` is a NON-function local — the call position makes this an error. Previously this returned the var's own type unchecked, so the program passed `check` and then ICE'd in the wasm emitter (`call target not in func_map`) / leaked a raw rustc E0425 natively.

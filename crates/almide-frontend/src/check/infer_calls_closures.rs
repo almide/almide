@@ -536,6 +536,16 @@ impl Checker {
         let channel_ok = self.fresh_var();
         self.env.lambda_ret = Some(Ty::result(channel_ok.clone(), Ty::String));
         self.env.lambda_prop_used = false;
+        // #1055: a lambda in an `effect (…) -> …` slot is an effect-fn body —
+        // effect calls are permitted (the slot's owner runs the handler under
+        // its own effect context) and the lambda ALWAYS types as the carrier
+        // `(A) -> Result[B, String]`, so a pure value tail gets the same
+        // ok(...) wrap the fallible machinery already emits (Phase 1b).
+        let slot_effect = std::mem::take(&mut self.lambda_slot_effect);
+        let saved_can_call_effect = self.env.can_call_effect;
+        if slot_effect {
+            self.env.can_call_effect = true;
+        }
         // Expected-type hint from the enclosing call (#653): when this
         // lambda is an argument whose parameter slot is a `Fn`, the
         // caller pins each UNANNOTATED param to the expected element
@@ -574,7 +584,8 @@ impl Checker {
             ty
         }).collect();
         let ret_ty = self.infer_expr(body);
-        let became_fallible = self.env.lambda_prop_used;
+        self.env.can_call_effect = saved_can_call_effect;
+        let became_fallible = self.env.lambda_prop_used || slot_effect;
         let channel = self.env.lambda_ret.take();
         self.env.lambda_ret = saved_lambda_ret;
         self.env.lambda_prop_used = saved_prop_used;
