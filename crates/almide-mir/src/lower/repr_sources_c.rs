@@ -2,6 +2,15 @@
 /// The NAMED-RECORD half of [`generate_variant_repr_sources`]: `__repr_rec_<R>` +
 /// the `__repr_list_rec_<R>` element loops, appended to `out`. Verbatim text move.
 /// The record type a field names directly, when it is one of `rec_names`.
+/// The emit gates every repr generator consults: which type names the program
+/// declares, which VARIANT names are emittable, and which RECORD names are.
+/// Bundled so each generator stays inside the parameter budget.
+struct ReprGates<'a> {
+    names: &'a std::collections::HashSet<String>,
+    emittable: &'a std::collections::HashSet<String>,
+    rec_emittable: &'a std::collections::HashSet<String>,
+}
+
 fn record_field_of(ty: &Ty, rec_names: &std::collections::HashSet<String>) -> Option<String> {
     match ty {
         Ty::Named(n, _) if rec_names.contains(n.as_str()) => Some(n.as_str().to_string()),
@@ -42,10 +51,11 @@ fn generate_record_repr_sources_into(
     emittable: &std::collections::HashSet<String>,
 ) {
     let rec_emittable = emittable_record_names(type_decls, names, emittable);
-    generate_named_record_reprs(out, type_decls, interp_anon_recs, interp_containers, names, emittable, &rec_emittable);
-    generate_container_interp_reprs(out, type_decls, interp_anon_recs, interp_containers, names, emittable, &rec_emittable);
-    generate_anon_record_reprs(out, type_decls, interp_anon_recs, interp_containers, names, emittable, &rec_emittable);
-    generate_tuple_container_reprs(out, type_decls, interp_anon_recs, interp_containers, names, emittable, &rec_emittable);
+    let gates = ReprGates { names, emittable, rec_emittable: &rec_emittable };
+    generate_named_record_reprs(out, type_decls, interp_anon_recs, interp_containers, &gates);
+    generate_container_interp_reprs(out, type_decls, interp_anon_recs, interp_containers, &gates);
+    generate_anon_record_reprs(out, type_decls, interp_anon_recs, interp_containers, &gates);
+    generate_tuple_container_reprs(out, type_decls, interp_anon_recs, interp_containers, &gates);
 }
 
 /// The records whose repr can actually be emitted, by fixpoint.
@@ -142,10 +152,9 @@ fn generate_named_record_reprs(
     type_decls: &[almide_ir::IrTypeDecl],
     interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
     interp_containers: &InterpReprContainers,
-    names: &std::collections::HashSet<String>,
-    emittable: &std::collections::HashSet<String>,
-    rec_emittable: &std::collections::HashSet<String>,
+    gates: &ReprGates,
 ) {
+    let ReprGates { names, emittable, rec_emittable } = gates;
     use almide_ir::IrTypeDeclKind;
     let _ = (type_decls, interp_anon_recs, interp_containers, names, emittable, rec_emittable);
     let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
@@ -323,10 +332,9 @@ fn generate_container_interp_reprs(
     type_decls: &[almide_ir::IrTypeDecl],
     interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
     interp_containers: &InterpReprContainers,
-    names: &std::collections::HashSet<String>,
-    emittable: &std::collections::HashSet<String>,
-    rec_emittable: &std::collections::HashSet<String>,
+    gates: &ReprGates,
 ) {
+    let ReprGates { names, emittable, rec_emittable } = gates;
     use almide_ir::IrTypeDeclKind;
     let _ = (type_decls, interp_anon_recs, interp_containers, names, emittable, rec_emittable);
     let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
@@ -458,10 +466,9 @@ fn generate_anon_record_reprs(
     type_decls: &[almide_ir::IrTypeDecl],
     interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
     interp_containers: &InterpReprContainers,
-    names: &std::collections::HashSet<String>,
-    emittable: &std::collections::HashSet<String>,
-    rec_emittable: &std::collections::HashSet<String>,
+    gates: &ReprGates,
 ) {
+    let ReprGates { names, emittable, rec_emittable } = gates;
     use almide_ir::IrTypeDeclKind;
     let _ = (type_decls, interp_anon_recs, interp_containers, names, emittable, rec_emittable);
     let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
@@ -478,7 +485,22 @@ fn generate_anon_record_reprs(
         })
         .collect();
     let rec_names = declared_record_names(type_decls);
-    let _ = (&record_decls, &rec_names);
+    let _ = (&record_decls, &rec_names);    generate_anon_and_tuple_interp_reprs(out, type_decls, interp_anon_recs, interp_containers, gates);
+}
+
+/// The anonymous-record, tuple-container and bare-`Value` interp reprs. Split
+/// out of [`generate_container_interp_reprs`] so neither half outgrows a
+/// readable section list; the emit ORDER across the two halves is unchanged.
+fn generate_anon_and_tuple_interp_reprs(
+    out: &mut String,
+    type_decls: &[almide_ir::IrTypeDecl],
+    interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    interp_containers: &InterpReprContainers,
+    gates: &ReprGates,
+) {
+    use almide_ir::IrTypeDeclKind;
+    let ReprGates { names, emittable, .. } = gates;
+    let _ = (type_decls, names);
     // ── ANONYMOUS-record reprs (`__repr_anonrec_<hash>`) ──
     // v0 renders an anon record `{ apple: 2, mango: 3, zebra: 1 }` with fields SORTED BY
     // NAME while the v1 BLOCK lays fields in SOURCE order — so each generated body reads
@@ -615,10 +637,9 @@ fn generate_tuple_container_reprs(
     type_decls: &[almide_ir::IrTypeDecl],
     interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
     interp_containers: &InterpReprContainers,
-    names: &std::collections::HashSet<String>,
-    emittable: &std::collections::HashSet<String>,
-    rec_emittable: &std::collections::HashSet<String>,
+    gates: &ReprGates,
 ) {
+    let ReprGates { names, emittable, rec_emittable } = gates;
     use almide_ir::IrTypeDeclKind;
     let _ = (type_decls, interp_anon_recs, interp_containers, names, emittable, rec_emittable);
     let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
