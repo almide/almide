@@ -184,75 +184,57 @@ pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
 /// The flow/call half of [`op_values`] — Pure, the call family, lists,
 /// arithmetic, prims and the control markers. Split from the data half
 /// (alloc/const/dup/drop) purely along op families; arm bodies verbatim.
-fn op_values_flow(op: &Op, out: &mut Vec<ValueId>) {
-    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
-        for a in args {
-            match a {
-                CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
-                CallArg::Imm(_) | CallArg::Label(_) => {}
-            }
+/// Push an optional destination value, if the op has one.
+fn push_opt(out: &mut Vec<ValueId>, v: Option<ValueId>) {
+    if let Some(v) = v {
+        out.push(v);
+    }
+}
+
+/// A call's args: an immediate and a label name no MIR value.
+fn push_call_arg_values(args: &[CallArg], out: &mut Vec<ValueId>) {
+    for a in args {
+        match a {
+            CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
+            CallArg::Imm(_) | CallArg::Label(_) => {}
         }
-    };
+    }
+}
+
+fn op_values_flow(op: &Op, out: &mut Vec<ValueId>) {
     match op {
         Op::Pure { dst, uses } => {
             out.push(*dst);
             out.extend(uses.iter().copied());
         }
         Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
-            if let Some(d) = dst {
-                out.push(*d);
-            }
-            args_vals(args, out);
+            push_opt(out, *dst);
+            push_call_arg_values(args, out);
         }
         Op::CallIndirect { dst, table_idx, args, .. } => {
-            if let Some(d) = dst {
-                out.push(*d);
-            }
+            push_opt(out, *dst);
             out.push(*table_idx);
-            args_vals(args, out);
+            push_call_arg_values(args, out);
         }
         Op::ListLit { dst, elems } => {
             out.push(*dst);
             out.extend(elems.iter().copied());
         }
-        Op::ListGetScalar { dst, list, idx } => {
-            out.push(*dst);
-            out.push(*list);
-            out.push(*idx);
-        }
-        Op::ListSetScalar { list, idx, val } => {
-            out.push(*list);
-            out.push(*idx);
-            out.push(*val);
-        }
-        Op::IntBinOp { dst, a, b, .. } => {
-            out.push(*dst);
-            out.push(*a);
-            out.push(*b);
-        }
         Op::Prim { dst, args, .. } => {
-            if let Some(d) = dst {
-                out.push(*d);
-            }
+            push_opt(out, *dst);
             out.extend(args.iter().copied());
         }
+        Op::ListGetScalar { dst: a, list: b, idx: c }
+        | Op::IntBinOp { dst: a, a: b, b: c, .. }
+        | Op::ListSetScalar { list: a, idx: b, val: c } => out.extend([*a, *b, *c]),
+        Op::SetLocal { local: a, src: b } => out.extend([*a, *b]),
         Op::IfThen { cond, dst } => {
             out.push(*cond);
-            if let Some(d) = dst {
-                out.push(*d);
-            }
+            push_opt(out, *dst);
         }
-        Op::Else { val } | Op::EndIf { val } => {
-            if let Some(v) = val {
-                out.push(*v);
-            }
-        }
+        Op::Else { val } | Op::EndIf { val } => push_opt(out, *val),
         Op::LoopBreakUnless { cond } => out.push(*cond),
         Op::LoopStart | Op::LoopEnd => {}
-        Op::SetLocal { local, src } => {
-            out.push(*local);
-            out.push(*src);
-        }
         // The data half's families — handled by the caller; listed (not `_`)
         // so a NEW Op variant still breaks the build until it joins one half
         // (the exhaustiveness the occurrence walk depends on).

@@ -718,9 +718,11 @@ fn render_native_drop_op(
                         "native: DropListStr of a borrowed param — MIR call-mode violation",
                     ))
                 }
-                other => return Err(wall(format!(
+                other => {
+                    return Err(wall(format!(
                     "native: DropListStr of a non-list value ({other:?}) — outside the rung subset"
-                ))),
+                )))
+                }
             }
         }
         _ => return Ok(false),

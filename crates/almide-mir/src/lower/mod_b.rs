@@ -538,6 +538,38 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     struct S {
         changed: bool,
     }
+/// `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0 wasm
+/// form: prefix + message, then halt). The message expr is evaluated only on
+/// the abort path, like the computed assert message. `None` when the call is
+/// not that shape.
+fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
+    if name != "panic" || args.len() != 1 || !matches!(args[0].ty, Ty::String) {
+        return None;
+    }
+    let msg = args[0].clone();
+        let text = match &msg.kind {
+        IrExprKind::LitStr { value } => {
+            die_expr(&format!("PANIC: {value}"))
+        }
+        _ => die_on(IrExpr {
+            kind: IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatStr,
+                left: Box::new(IrExpr {
+                    kind: IrExprKind::LitStr { value: "PANIC: ".to_string() },
+                    ty: Ty::String,
+                    span: None,
+                    def_id: None,
+                }),
+                right: Box::new(msg),
+            },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        }),
+        };
+    Some(text)
+}
+
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
@@ -554,32 +586,7 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
             else {
                 return;
             };
-            // `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0
-            // wasm form: prefix + message, then halt). The message expr is evaluated
-            // only here (the abort path), like the computed assert message.
-            if name.as_str() == "panic" && args.len() == 1 && matches!(args[0].ty, Ty::String)
-            {
-                let msg = args[0].clone();
-                let text = match &msg.kind {
-                    IrExprKind::LitStr { value } => {
-                        die_expr(&format!("PANIC: {value}"))
-                    }
-                    _ => die_on(IrExpr {
-                        kind: IrExprKind::BinOp {
-                            op: almide_ir::BinOp::ConcatStr,
-                            left: Box::new(IrExpr {
-                                kind: IrExprKind::LitStr { value: "PANIC: ".to_string() },
-                                ty: Ty::String,
-                                span: None,
-                                def_id: None,
-                            }),
-                            right: Box::new(msg),
-                        },
-                        ty: Ty::String,
-                        span: None,
-                        def_id: None,
-                    }),
-                };
+            if let Some(text) = panic_die_expr(name.as_str(), args) {
                 *e = text;
                 self.changed = true;
                 return;
