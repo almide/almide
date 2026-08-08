@@ -131,11 +131,32 @@ fn sized_suffix(name: &str) -> Option<(usize, bool)> {
 /// one — that is what the stdlib spells, and rejecting the other shapes keeps an
 /// unrecognized name an honest `None` (an abstain) rather than a guess.
 fn enc_of(suffix: &str) -> Option<Enc> {
-    let (kind, big_endian) = match suffix.rsplit_once('_') {
+    let (kind, big_endian) = split_order_suffix(suffix);
+    let (float, width) = scalar_kind(kind)?;
+    // A float is only ever f32/f64, and a single byte has no order to pick.
+    if float && width < 4 {
+        return None;
+    }
+    match (width, big_endian) {
+        (1, None) => Some(Enc { width: 1, big_endian: false, float }),
+        (_, Some(big_endian)) => Some(Enc { width, big_endian, float }),
+        _ => None,
+    }
+}
+
+/// Peel a trailing `_le` / `_be` off a name-encoded suffix. `None` order means
+/// the name carried no suffix at all — legal only for a 1-byte scalar.
+fn split_order_suffix(suffix: &str) -> (&str, Option<bool>) {
+    match suffix.rsplit_once('_') {
         Some((k, "le")) => (k, Some(false)),
         Some((k, "be")) => (k, Some(true)),
         _ => (suffix, None),
-    };
+    }
+}
+
+/// `u8` / `i16` / `f64` → `(is float, byte width)`. Anything else is an
+/// unrecognized name and abstains.
+fn scalar_kind(kind: &str) -> Option<(bool, usize)> {
     let (tag, digits) = kind.split_at_checked(1)?;
     let float = match tag {
         "u" | "i" => false,
@@ -149,15 +170,7 @@ fn enc_of(suffix: &str) -> Option<Enc> {
         64 => 8,
         _ => return None,
     };
-    // A float is only ever f32/f64, and a single byte has no order to pick.
-    if float && width < 4 {
-        return None;
-    }
-    match (width, big_endian) {
-        (1, None) => Some(Enc { width: 1, big_endian: false, float }),
-        (_, Some(big_endian)) => Some(Enc { width, big_endian, float }),
-        _ => None,
-    }
+    Some((float, width))
 }
 
 /// Classify a `bytes` function as a byte-level writer, from its NAME alone.
@@ -168,39 +181,47 @@ fn enc_of(suffix: &str) -> Option<Enc> {
 pub(crate) fn bytes_write_op(func: &str) -> Option<BytesWrite> {
     // The sized-type surface FIRST: `set_uint16` also starts with `set_`, and
     // `uint16` is not a name-encoded suffix, so order matters only for clarity.
-    if let Some(rest) = func.strip_prefix("write_") {
-        if let Some((width, float)) = sized_suffix(rest) {
-            return Some(BytesWrite::AppendSized { width, float });
-        }
+    sized_write_op(func)
+        .or_else(|| named_write_op(func))
+        .or_else(|| encoded_write_op(func))
+}
+
+/// The `Endian`-parameterized sized surface: `write_uint16` / `set_float32`,
+/// whose byte order arrives as a runtime argument rather than in the name.
+fn sized_write_op(func: &str) -> Option<BytesWrite> {
+    if let Some((width, float)) = func.strip_prefix("write_").and_then(sized_suffix) {
+        return Some(BytesWrite::AppendSized { width, float });
     }
-    if let Some(rest) = func.strip_prefix("set_") {
-        if let Some((width, float)) = sized_suffix(rest) {
-            return Some(BytesWrite::SetSized { width, float });
-        }
-    }
-    match func {
+    let (width, float) = func.strip_prefix("set_").and_then(sized_suffix)?;
+    Some(BytesWrite::SetSized { width, float })
+}
+
+/// The buffer ops named outright rather than by scalar encoding.
+fn named_write_op(func: &str) -> Option<BytesWrite> {
+    let op = match func {
         // `almide_rt_bytes_set_at`: `if (i as usize) < b.len() { b[i] = val as u8 }`
         // — a 1-byte `Set`, bound-identical to `set_u8`'s `p + 1 <= b.len()`.
-        "set_at" => return Some(BytesWrite::Set(Enc { width: 1, big_endian: false, float: false })),
-        "write_bool" => return Some(BytesWrite::WriteBool),
-        "write_string_be" => return Some(BytesWrite::WriteStringBe),
-        "fill" => return Some(BytesWrite::Fill),
-        "copy_from" => return Some(BytesWrite::CopyFrom),
-        "copy_within" => return Some(BytesWrite::CopyWithin),
-        _ => {}
-    }
-    if let Some(s) = func.strip_prefix("append_") {
+        "set_at" => BytesWrite::Set(Enc { width: 1, big_endian: false, float: false }),
+        "write_bool" => BytesWrite::WriteBool,
+        "write_string_be" => BytesWrite::WriteStringBe,
+        "fill" => BytesWrite::Fill,
+        "copy_from" => BytesWrite::CopyFrom,
+        "copy_within" => BytesWrite::CopyWithin,
+        _ => return None,
+    };
+    Some(op)
+}
+
+/// The name-encoded scalar surface: the order rides in the name (`append_u32_be`).
+///
+/// `write_u8` / `write_u32_be` / `write_i64_be` / `write_f64_be` are appends
+/// too — the serialization cursor's big-endian twins of `append_*`.
+fn encoded_write_op(func: &str) -> Option<BytesWrite> {
+    if let Some(s) = func.strip_prefix("append_").or_else(|| func.strip_prefix("write_")) {
         return enc_of(s).map(BytesWrite::Append);
     }
-    // `write_u8` / `write_u32_be` / `write_i64_be` / `write_f64_be` are appends
-    // too — the serialization cursor's big-endian twins of `append_*`.
-    if let Some(s) = func.strip_prefix("write_") {
-        return enc_of(s).map(BytesWrite::Append);
-    }
-    if let Some(s) = func.strip_prefix("set_") {
-        return enc_of(s).map(BytesWrite::Set);
-    }
-    None
+    let s = func.strip_prefix("set_")?;
+    enc_of(s).map(BytesWrite::Set)
 }
 
 /// The scalar's bytes, in `enc`'s order. Mirrors the native `as`-cast +
@@ -390,12 +411,15 @@ fn splice(xs: &mut [Value], pos: i64, src: &[u8]) {
     }
 }
 
+/// The name-encoded and sized scalar writes: `(value)` appends, `(offset,
+/// value)` splices. The named buffer ops delegate to
+/// [`apply_named_bytes_write`].
 fn apply_bytes_write(op: BytesWrite, xs: &mut Vec<Value>, rest: Vec<Value>) -> Option<Value> {
     let mut it = rest.into_iter();
     match op {
         BytesWrite::Append(enc) => {
             let src = encode(enc, &it.next()?)?;
-            xs.extend(src.into_iter().map(|b| Value::Int(b as i64)));
+            append_bytes(xs, &src);
         }
         BytesWrite::Set(enc) => {
             let Value::Int(pos) = it.next()? else { return None };
@@ -407,7 +431,7 @@ fn apply_bytes_write(op: BytesWrite, xs: &mut Vec<Value>, rest: Vec<Value>) -> O
             let value = it.next()?;
             let big_endian = endian_is_big(&it.next()?)?;
             let src = encode(Enc { width, big_endian, float }, &value)?;
-            xs.extend(src.into_iter().map(|b| Value::Int(b as i64)));
+            append_bytes(xs, &src);
         }
         // `set_uint16(b, offset, value, endian)`.
         BytesWrite::SetSized { width, float } => {
@@ -417,6 +441,27 @@ fn apply_bytes_write(op: BytesWrite, xs: &mut Vec<Value>, rest: Vec<Value>) -> O
             let src = encode(Enc { width, big_endian, float }, &value)?;
             splice(xs, pos, &src);
         }
+        named @ (BytesWrite::WriteBool
+        | BytesWrite::WriteStringBe
+        | BytesWrite::Fill
+        | BytesWrite::CopyFrom
+        | BytesWrite::CopyWithin) => return apply_named_bytes_write(named, xs, &mut it),
+    }
+    Some(Value::Unit)
+}
+
+/// Push `src`'s octets onto the buffer, widened to the interp's `List[Int]`.
+fn append_bytes(xs: &mut Vec<Value>, src: &[u8]) {
+    xs.extend(src.iter().map(|b| Value::Int(*b as i64)));
+}
+
+/// The buffer ops named outright rather than by scalar encoding.
+fn apply_named_bytes_write(
+    op: BytesWrite,
+    xs: &mut Vec<Value>,
+    it: &mut std::vec::IntoIter<Value>,
+) -> Option<Value> {
+    match op {
         // `almide_rt_bytes_write_bool`: `b.push(if val { 1 } else { 0 })`.
         BytesWrite::WriteBool => {
             let Value::Bool(v) = it.next()? else { return None };
@@ -427,56 +472,60 @@ fn apply_bytes_write(op: BytesWrite, xs: &mut Vec<Value>, rest: Vec<Value>) -> O
         BytesWrite::WriteStringBe => {
             let Value::Str(s) = it.next()? else { return None };
             let sb = s.as_bytes();
-            for b in (sb.len() as u32).to_be_bytes() {
-                xs.push(Value::Int(b as i64));
-            }
-            xs.extend(sb.iter().map(|b| Value::Int(*b as i64)));
+            append_bytes(xs, &(sb.len() as u32).to_be_bytes());
+            append_bytes(xs, sb);
         }
         // `almide_rt_bytes_fill`: overwrite every existing byte in place. An
         // EMPTY buffer stays empty — fill never grows it.
         BytesWrite::Fill => {
             let Value::Int(v) = it.next()? else { return None };
             let v = Value::Int((v as u8) as i64);
-            for slot in xs.iter_mut() {
-                *slot = v.clone();
-            }
+            xs.fill(v);
         }
-        // `almide_rt_bytes_copy_from`: both offsets must be strictly inside
-        // their buffers, then `len` is clamped to whichever tail is shorter.
-        BytesWrite::CopyFrom => {
-            let Value::List(src) = it.next()? else { return None };
-            let Value::Int(dst_off) = it.next()? else { return None };
-            let Value::Int(src_off) = it.next()? else { return None };
-            let Value::Int(len) = it.next()? else { return None };
-            let src = raw(&src)?;
-            let (d, s) = (dst_off as usize, src_off as usize);
-            if d >= xs.len() || s >= src.len() {
-                return Some(Value::Unit);
-            }
-            let n = (len as usize).min(xs.len() - d).min(src.len() - s);
-            for i in 0..n {
-                xs[d + i] = Value::Int(src[s + i] as i64);
-            }
-        }
-        // `almide_rt_bytes_copy_within`: `src_end` clamps to the length, and the
-        // whole move is a no-op unless the source range is non-empty AND the
-        // destination window fits.
-        BytesWrite::CopyWithin => {
-            let Value::Int(src_start) = it.next()? else { return None };
-            let Value::Int(src_end) = it.next()? else { return None };
-            let Value::Int(dst) = it.next()? else { return None };
-            let cur = raw(xs)?;
-            let (s, d) = (src_start as usize, dst as usize);
-            let e = (src_end as usize).min(cur.len());
-            if s < e && d.checked_add(e - s).is_none_or(|end| end > cur.len()) {
-                return Some(Value::Unit);
-            }
-            if s < e {
-                for i in 0..(e - s) {
-                    xs[d + i] = Value::Int(cur[s + i] as i64);
-                }
-            }
-        }
+        BytesWrite::CopyFrom => return bytes_copy_from(xs, it),
+        BytesWrite::CopyWithin => return bytes_copy_within(xs, it),
+        _ => return None,
+    }
+    Some(Value::Unit)
+}
+
+/// `almide_rt_bytes_copy_from`: both offsets must be strictly inside their
+/// buffers, then `len` is clamped to whichever tail is shorter.
+fn bytes_copy_from(xs: &mut [Value], it: &mut std::vec::IntoIter<Value>) -> Option<Value> {
+    let Value::List(src) = it.next()? else { return None };
+    let Value::Int(dst_off) = it.next()? else { return None };
+    let Value::Int(src_off) = it.next()? else { return None };
+    let Value::Int(len) = it.next()? else { return None };
+    let src = raw(&src)?;
+    let (d, s) = (dst_off as usize, src_off as usize);
+    if d >= xs.len() || s >= src.len() {
+        return Some(Value::Unit);
+    }
+    let n = (len as usize).min(xs.len() - d).min(src.len() - s);
+    for i in 0..n {
+        xs[d + i] = Value::Int(src[s + i] as i64);
+    }
+    Some(Value::Unit)
+}
+
+/// `almide_rt_bytes_copy_within`: `src_end` clamps to the length, and the whole
+/// move is a no-op unless the source range is non-empty AND the destination
+/// window fits.
+fn bytes_copy_within(xs: &mut [Value], it: &mut std::vec::IntoIter<Value>) -> Option<Value> {
+    let Value::Int(src_start) = it.next()? else { return None };
+    let Value::Int(src_end) = it.next()? else { return None };
+    let Value::Int(dst) = it.next()? else { return None };
+    let cur = raw(xs)?;
+    let (s, d) = (src_start as usize, dst as usize);
+    let e = (src_end as usize).min(cur.len());
+    if s >= e {
+        return Some(Value::Unit);
+    }
+    if d.checked_add(e - s).is_none_or(|end| end > cur.len()) {
+        return Some(Value::Unit);
+    }
+    for i in 0..(e - s) {
+        xs[d + i] = Value::Int(cur[s + i] as i64);
     }
     Some(Value::Unit)
 }
