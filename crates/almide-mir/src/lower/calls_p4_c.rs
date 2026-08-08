@@ -582,6 +582,14 @@ impl LowerCtx {
             self.variant_drop_handles.insert(dst, "map_mclo".to_string());
             return;
         }
+        self.seed_call_arg_map_drop_route(dst, ty);
+    }
+
+    /// The Map- and record-shaped arg-temp drop routes of
+    /// [`Self::seed_call_arg_heap_drop_route`]. Split at the named-value seam so
+    /// neither half outgrows a readable guard ladder; the ORDER across the two
+    /// halves is unchanged (this one runs only after every guard above declined).
+    fn seed_call_arg_map_drop_route(&mut self, dst: ValueId, ty: &Ty) {
         if let Some(hname) = self.map_named_value_drop(ty) {
             self.variant_drop_handles.insert(dst, hname);
             return;
