@@ -476,45 +476,14 @@ impl LowerCtx {
         }
     }
 
-    /// Lower ONE branch arm into the flat op stream with a PER-ARM SCOPE FRAME:
-    /// snapshot the live-handle count, lower the arm, then DROP every handle the arm
-    /// added (so the arm is internally balanced, and vacuous when the other arm runs).
-    /// The arm's result is DISCARDED (Unit/statement) or a SCALAR the caller merges
-    /// into one `Const`; a heap result is walled. See [`Self::lower_branch`].
-    ///
-    /// For a `match` arm, `pattern` is `Some((pat, subject))` — the pattern's bound
-    /// variables are introduced at the START of the frame (so they drop with the arm):
-    /// a HEAP payload aliases the whole SUBJECT (`Op::Dup` — container-grain, like a
-    /// field extraction; element/payload-PRECISE identity needs the layout brick),
-    /// a SCALAR payload is a `Const`. See [`Self::bind_pattern`].
-    pub(crate) fn lower_branch_arm(
-        &mut self,
-        pattern: Option<(&IrPattern, Option<ValueId>)>,
-        body: &IrExpr,
-    ) -> Result<(), LowerError> {
-        let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
-            IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
-            _ => (&[], Some(body)),
-        };
-        let mark = self.live_heap_handles.len();
-        if let Some((pat, subject)) = pattern {
-            self.bind_pattern(pat, subject)?;
-        }
-        // Inside the arm, a HEAP reassignment is DEFERRED, not rebound: a post-branch
-        // read must not dereference a handle this arm dropped (the `in_frame` discipline
-        // in `lower_stmt`). The accumulator keeps its still-live handle — memory-safe.
-        self.in_frame += 1;
-        for stmt in stmts {
-            self.lower_stmt(stmt)?;
-        }
-        if let Some(tail) = tail {
-            // The arm's tail VALUE never escapes the arm — the branch RESULT is one
-            // fresh `Alloc{Opaque}` the CALLER emits (a heap result) or a `Const` (a
-            // scalar). So a Unit-call tail is lowered as an EFFECT (`println`, so its
-            // Stdout reaches the witness); a nested branch recurses (its own arms get
-            // per-arm frames); ANY OTHER tail — scalar or HEAP — is a deferred value
-            // whose calls we capture as effect markers (its content, like every
-            // `Opaque`, is carried by the merged result, not modelled per-arm).
+    /// The arm's TAIL. Its value never escapes the arm — the branch RESULT is one
+    /// fresh `Alloc{Opaque}` the CALLER emits (a heap result) or a `Const` (a
+    /// scalar). So a Unit-call tail is lowered as an EFFECT (`println`, so its
+    /// Stdout reaches the witness); a nested branch recurses (its own arms get
+    /// per-arm frames); ANY OTHER tail — scalar or HEAP — is a deferred value
+    /// whose calls we capture as effect markers (its content, like every
+    /// `Opaque`, is carried by the merged result, not modelled per-arm).
+    fn lower_branch_arm_tail(&mut self, tail: &IrExpr) -> Result<(), LowerError> {
             match &tail.kind {
                 // Route through the STATEMENT dispatcher, not lower_effect_call
                 // directly: an in-place mutator tail (`if c then { list.push(out,
@@ -599,7 +568,43 @@ impl LowerCtx {
                     }
                     self.record_elided_calls(tail)
                 }
-            }
+        }
+        Ok(())
+    }
+
+    /// Lower ONE branch arm into the flat op stream with a PER-ARM SCOPE FRAME:
+    /// snapshot the live-handle count, lower the arm, then DROP every handle the arm
+    /// added (so the arm is internally balanced, and vacuous when the other arm runs).
+    /// The arm's result is DISCARDED (Unit/statement) or a SCALAR the caller merges
+    /// into one `Const`; a heap result is walled. See [`Self::lower_branch`].
+    ///
+    /// For a `match` arm, `pattern` is `Some((pat, subject))` — the pattern's bound
+    /// variables are introduced at the START of the frame (so they drop with the arm):
+    /// a HEAP payload aliases the whole SUBJECT (`Op::Dup` — container-grain, like a
+    /// field extraction; element/payload-PRECISE identity needs the layout brick),
+    /// a SCALAR payload is a `Const`. See [`Self::bind_pattern`].
+    pub(crate) fn lower_branch_arm(
+        &mut self,
+        pattern: Option<(&IrPattern, Option<ValueId>)>,
+        body: &IrExpr,
+    ) -> Result<(), LowerError> {
+        let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
+            IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+            _ => (&[], Some(body)),
+        };
+        let mark = self.live_heap_handles.len();
+        if let Some((pat, subject)) = pattern {
+            self.bind_pattern(pat, subject)?;
+        }
+        // Inside the arm, a HEAP reassignment is DEFERRED, not rebound: a post-branch
+        // read must not dereference a handle this arm dropped (the `in_frame` discipline
+        // in `lower_stmt`). The accumulator keeps its still-live handle — memory-safe.
+        self.in_frame += 1;
+        for stmt in stmts {
+            self.lower_stmt(stmt)?;
+        }
+        if let Some(tail) = tail {
+            self.lower_branch_arm_tail(tail)?;
         }
         self.in_frame -= 1;
         self.drop_arm_locals(mark);
