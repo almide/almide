@@ -154,70 +154,94 @@ impl Parser {
     // ── Top-level Declarations ────────────────────────────────────
 
     pub(crate) fn parse_top_decl(&mut self) -> Result<Decl, String> {
-        if self.check(TokenType::At) {
-            let (extern_attrs, export_attrs, attrs) = self.collect_fn_attrs()?;
-            return self.parse_fn_decl_with_attrs(extern_attrs, export_attrs, attrs);
-        }
-        if self.check(TokenType::Type) {
-            return self.parse_type_decl();
-        }
-        if self.check(TokenType::Protocol) {
-            return self.parse_protocol_decl();
-        }
-        if self.check(TokenType::Let) {
-            return self.parse_top_let(Visibility::Public, false);
-        }
-        if self.check(TokenType::Var) {
-            return self.parse_top_let(Visibility::Public, true);
+        if let Some(decl) = self.parse_keyword_top_decl() {
+            return decl;
         }
         if self.check(TokenType::Fn) || self.check(TokenType::Pub)
             || self.check(TokenType::Effect)
             || self.check(TokenType::Local) || self.check(TokenType::Mod)
         {
-            if self.check(TokenType::Pub)
-                && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Let)
-            {
+            return self.parse_qualified_top_decl();
+        }
+        Err(self.top_decl_error())
+    }
+
+    /// The declarations a SINGLE leading keyword selects outright. `None` means
+    /// the head is not one of them, so the caller tries the qualified forms.
+    fn parse_keyword_top_decl(&mut self) -> Option<Result<Decl, String>> {
+        if self.check(TokenType::At) {
+            return Some(
+                self.collect_fn_attrs()
+                    .and_then(|(e, x, a)| self.parse_fn_decl_with_attrs(e, x, a)),
+            );
+        }
+        if self.check(TokenType::Type) {
+            return Some(self.parse_type_decl());
+        }
+        if self.check(TokenType::Protocol) {
+            return Some(self.parse_protocol_decl());
+        }
+        if self.check(TokenType::Let) {
+            return Some(self.parse_top_let(Visibility::Public, false));
+        }
+        if self.check(TokenType::Var) {
+            return Some(self.parse_top_let(Visibility::Public, true));
+        }
+        if self.check(TokenType::Strict) {
+            return Some(self.parse_strict_decl());
+        }
+        if self.check(TokenType::Test) {
+            return Some(self.parse_test_decl());
+        }
+        None
+    }
+
+    /// The heads that can introduce more than one declaration form:
+    /// `pub let|var`, `local|mod test|type|let|var`, and otherwise a `fn`.
+    fn parse_qualified_top_decl(&mut self) -> Result<Decl, String> {
+        if self.check(TokenType::Pub) {
+            let after_pub = self.peek_at(1).map(|t| &t.token_type);
+            if after_pub == Some(&TokenType::Let) {
                 self.advance();
                 return self.parse_top_let(Visibility::Public, false);
             }
-            if self.check(TokenType::Pub)
-                && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Var)
-            {
+            if after_pub == Some(&TokenType::Var) {
                 self.advance();
                 return self.parse_top_let(Visibility::Public, true);
             }
-            if self.check(TokenType::Local) || self.check(TokenType::Mod) {
-                // local test where { ... } / mod test where { ... }
-                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Test) {
-                    return self.parse_test_where_def();
-                }
-                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
-                    return self.parse_type_decl();
-                }
-                let peek1 = self.peek_at(1).map(|t| &t.token_type);
-                if peek1 == Some(&TokenType::Let) || peek1 == Some(&TokenType::Var) {
-                    let vis = self.parse_visibility();
-                    let is_var = self.check(TokenType::Var);
-                    return self.parse_top_let(vis, is_var);
-                }
+        }
+        if self.check(TokenType::Local) || self.check(TokenType::Mod) {
+            // local test where { ... } / mod test where { ... }
+            let peek1 = self.peek_at(1).map(|t| &t.token_type);
+            if peek1 == Some(&TokenType::Test) {
+                return self.parse_test_where_def();
             }
-            return self.parse_fn_decl();
+            if peek1 == Some(&TokenType::Type) {
+                return self.parse_type_decl();
+            }
+            if peek1 == Some(&TokenType::Let) || peek1 == Some(&TokenType::Var) {
+                let vis = self.parse_visibility();
+                let is_var = self.check(TokenType::Var);
+                return self.parse_top_let(vis, is_var);
+            }
         }
-        if self.check(TokenType::Strict) {
-            return self.parse_strict_decl();
-        }
-        if self.check(TokenType::Test) {
-            return self.parse_test_decl();
-        }
+        self.parse_fn_decl()
+    }
+
+    /// The "not a declaration" diagnostic, with the top-level hint table's
+    /// suggestion when it has one.
+    fn top_decl_error(&mut self) -> String {
         let tok = self.current();
+        let (line, col, token_type, value) =
+            (tok.line, tok.col, tok.token_type.clone(), tok.value.clone());
         if let Some(result) = self.check_hint(None, super::hints::HintScope::TopLevel) {
             let msg = result.message.as_deref().unwrap_or("Unexpected token at top level");
-            return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
+            return format!("{} at line {}:{}\n  Hint: {}", msg, line, col, result.hint);
         }
-        Err(format!(
+        format!(
             "Expected top-level declaration (fn, effect fn, type, let, var, protocol, test) at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
-        ))
+            line, col, token_type, value
+        )
     }
 
     fn parse_top_let(&mut self, visibility: Visibility, mutable: bool) -> Result<Decl, String> {
@@ -478,157 +502,6 @@ impl Parser {
         Ok(ProtocolMethod { name, params, return_type, effect })
     }
 
-    pub(crate) fn parse_fn_decl(&mut self) -> Result<Decl, String> {
-        let span = self.current_span();
-        if self.check(TokenType::Pub) { self.advance(); }
-        let visibility = self.parse_visibility();
-        let mut effect = false;
-        if self.check(TokenType::Effect) { self.advance(); effect = true; }
-        self.expect(TokenType::Fn)?;
-        let name = self.expect_any_fn_name()?;
-        // Once the fn name is known, any later parse error in this decl is a
-        // cascading source — record the name so the checker can suppress
-        // downstream "undefined function 'name'" noise from call sites.
-        let recorded_name = name.clone();
-        let mut failed = true;
-        let result = (|| -> Result<Decl, String> {
-            let generics = self.try_parse_generic_params()?;
-            let open_fn = self.current().clone();
-            self.expect(TokenType::LParen)?;
-            let params = self.parse_param_list()?;
-            self.expect_closing(TokenType::RParen, open_fn.line, open_fn.col, "function parameters")?;
-            // #1072: `fn main() {` is the first-contact spelling of every
-            // writer coming from Rust/Go/TS, and `fn f() = ...` of one who
-            // already learned the '=' rule. The parser knows the decl, the
-            // name, and the full distance to legal — teach the complete form
-            // in one hint instead of a bare "Expected Arrow" that costs two
-            // failures to climb.
-            if self.check(TokenType::LBrace) || self.check(TokenType::Eq) {
-                let tok = self.current();
-                let kw = if effect { "effect fn " } else { "fn " };
-                let (parens, ret) = if name == "main" { ("()", "Unit") } else { ("(...)", "Type") };
-                let mut msg = format!(
-                    "Missing return type at line {}:{}\n  Hint: every fn declares its return type and takes '=' before its body:\n        {kw}{name}{parens} -> {ret} = {{ ... }}",
-                    tok.line, tok.col
-                );
-                if name == "main" && !effect {
-                    msg.push_str("\n        a main that performs IO (fs, http, ...) should be:  effect fn main() -> Unit = { ... }");
-                }
-                return Err(msg);
-            }
-            self.expect(TokenType::Arrow)?;
-            let mut return_type = self.parse_type_expr()?;
-            // ADR-0002 Phase 1 (#1103): `-> T!` marks a pure-fallible return —
-            // sugar for `Result[T, String]`, carried as the pseudo-generic
-            // `!` so the formatter can print the surface spelling back. Legal
-            // ONLY in fn-decl return position (this parse site); the resolver
-            // maps it, and everything downstream sees the plain Result.
-            if self.check(TokenType::Bang) && !self.newline_before_current() {
-                self.advance();
-                return_type = TypeExpr::Generic {
-                    name: crate::intern::sym("!"),
-                    args: vec![return_type],
-                };
-            }
-
-            if self.check(TokenType::LBrace) {
-                let tok = self.current();
-                return Err(format!(
-                    "Missing '=' before function body at line {}:{}\n  Hint: Almide requires '=' before the body. Write: fn {}(...) -> Type = {{ ... }}",
-                    tok.line, tok.col, name
-                ));
-            }
-
-            let body = if self.check(TokenType::Eq) {
-                self.advance();
-                self.skip_newlines();
-                let mut body = if self.check(TokenType::Let) || self.check(TokenType::Var)
-                    || self.check(TokenType::Guard)
-                {
-                    self.parse_braceless_block()?
-                } else {
-                    self.parse_expr()?
-                };
-
-                let returns_result = matches!(&return_type,
-                    TypeExpr::Generic { name, .. } if name == "Result"
-                );
-                // ADR-0002 Phase 1 (#1103): a `-> T!` return gets the SAME
-                // body lift as an effect fn returning Result — a T-typed tail
-                // wraps in ok(...), and `!` propagates (D3: lift ergonomics
-                // are a property of the fallibility axis, not the effect axis).
-                let returns_fallible = matches!(&return_type,
-                    TypeExpr::Generic { name, .. } if name == "!"
-                );
-                if (effect && returns_result) || returns_fallible {
-                    body = self.wrap_effect_result_body(body);
-                }
-
-                Some(body)
-            } else {
-                None
-            };
-
-            Ok(Decl::Fn {
-                name: name.clone(),
-                effect: if effect { Some(true) } else { None },
-                visibility,
-                extern_attrs: Vec::new(),
-                export_attrs: Vec::new(),
-                attrs: Vec::new(),
-                generics, params, return_type, body,
-                span: Some(span),
-            })
-        })();
-        if result.is_ok() { failed = false; }
-        if failed {
-            self.failed_fn_names.insert(recorded_name.to_string());
-        }
-        result
-    }
-
-    fn wrap_effect_result_body(&mut self, body: Expr) -> Expr {
-        if let ExprKind::Block { ref stmts, ref expr } = body.kind {
-            let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
-                let last_non_comment = stmts.iter().rposition(|s| !matches!(s, Stmt::Comment { .. }));
-                if let Some(idx) = last_non_comment {
-                    if let Stmt::Expr { expr: last_expr, .. } = &stmts[idx] {
-                        let mut remaining = stmts[..idx].to_vec();
-                        remaining.extend_from_slice(&stmts[idx+1..]);
-                        (remaining, Some(Box::new(last_expr.clone())))
-                    } else {
-                        (stmts.clone(), None)
-                    }
-                } else {
-                    (stmts.clone(), None)
-                }
-            } else {
-                (stmts.clone(), expr.clone())
-            };
-            let needs_ok = match &effective_expr {
-                None => true,
-                Some(e) => matches!(e.kind, ExprKind::Unit),
-            };
-            if needs_ok {
-                let mut new_stmts = effective_stmts;
-                if let Some(trailing) = effective_expr {
-                    new_stmts.push(Stmt::Expr { expr: *trailing, span: None });
-                }
-                return Expr::new(self.next_id(), None, ExprKind::Block {
-                    stmts: new_stmts,
-                    expr: Some(Box::new(Expr::new(self.next_id(), None, ExprKind::Ok {
-                        expr: Box::new(Expr::new(self.next_id(), None, ExprKind::Unit)),
-                    }))),
-                });
-            } else if expr.is_none() {
-                return Expr::new(self.next_id(), None, ExprKind::Block {
-                    stmts: effective_stmts, expr: effective_expr,
-                });
-            }
-        }
-        body
-    }
-
     fn parse_strict_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         self.expect(TokenType::Strict)?;
@@ -637,7 +510,7 @@ impl Parser {
     }
 
     fn parse_test_where_def(&mut self) -> Result<Decl, String> {
-        use crate::ast::{TestWhereScope, TestWhere};
+        use crate::ast::TestWhereScope;
         let span = self.current_span();
         let scope = if self.check(TokenType::Local) { self.advance(); TestWhereScope::Local }
             else { self.advance(); TestWhereScope::Module }; // Mod
@@ -702,7 +575,6 @@ impl Parser {
     }
 
     fn parse_single_test_where(&mut self) -> Result<crate::ast::TestWhere, String> {
-        use crate::ast::TestWhere;
         // Table-driven [...] is handled in parse_test_where_clauses directly
         // where "case name" [...] — standalone case (outside table)
         if self.current().token_type == TokenType::String {
@@ -767,7 +639,7 @@ impl Parser {
         }
     }
 
-    fn parse_visibility(&mut self) -> Visibility {
+    pub(super) fn parse_visibility(&mut self) -> Visibility {
         if self.check(TokenType::Local) { self.advance(); Visibility::Local }
         else if self.check(TokenType::Mod) { self.advance(); Visibility::Mod }
         else { Visibility::Public }
@@ -777,44 +649,13 @@ impl Parser {
         let mut params = Vec::new();
         if self.check(TokenType::RParen) { return Ok(params); }
 
-        if self.check_ident("self") {
-            params.push(Param {
-                name: sym("self"),
-                ty: TypeExpr::Simple { name: sym("Self") },
-                default: None,
-                attrs: Vec::new(),
-                is_mut: false,
-            });
-            self.advance();
-            if self.check(TokenType::Comma) { self.advance(); }
-        }
+        self.take_self_param(&mut params);
 
         let mut has_default = false;
         while !self.check(TokenType::RParen) {
             self.skip_newlines();
             if self.check(TokenType::RParen) { break; }
-            // Collect param-level attributes (e.g. @builtin(vertex_index), @location(0))
-            let mut attrs = Vec::new();
-            while self.check(TokenType::At) {
-                attrs.push(self.parse_attribute()?);
-                self.skip_newlines();
-            }
-            let is_mut = self.check(TokenType::Mut);
-            if is_mut { self.advance(); }
-            let param_name = self.expect_any_param_name()?;
-            self.expect(TokenType::Colon)?;
-            let param_type = self.parse_type_expr()?;
-            let default = if self.check(TokenType::Eq) {
-                self.advance();
-                has_default = true;
-                Some(Box::new(self.parse_expr()?))
-            } else {
-                if has_default {
-                    return Err(format!("parameter '{}' must have a default value (all parameters after the first default must also have defaults)", param_name));
-                }
-                None
-            };
-            params.push(Param { name: param_name, ty: param_type, default, attrs, is_mut });
+            params.push(self.parse_one_param(&mut has_default)?);
             if self.check(TokenType::Comma) {
                 self.advance();
                 self.skip_newlines();
@@ -822,5 +663,57 @@ impl Parser {
         }
         self.skip_newlines();
         Ok(params)
+    }
+
+    /// The implicit `self` receiver, if the list opens with one. It carries the
+    /// `Self` type and no attributes; a following comma is consumed too.
+    fn take_self_param(&mut self, params: &mut Vec<Param>) {
+        if !self.check_ident("self") {
+            return;
+        }
+        params.push(Param {
+            name: sym("self"),
+            ty: TypeExpr::Simple { name: sym("Self") },
+            default: None,
+            attrs: Vec::new(),
+            is_mut: false,
+        });
+        self.advance();
+        if self.check(TokenType::Comma) {
+            self.advance();
+        }
+    }
+
+    /// One `[@attr…] [mut] name: Ty [= default]`.
+    ///
+    /// `has_default` latches once a default is seen: every later parameter must
+    /// carry one too, so a call site can always omit a suffix of the list.
+    fn parse_one_param(&mut self, has_default: &mut bool) -> Result<Param, String> {
+        // Param-level attributes (e.g. @builtin(vertex_index), @location(0)).
+        let mut attrs = Vec::new();
+        while self.check(TokenType::At) {
+            attrs.push(self.parse_attribute()?);
+            self.skip_newlines();
+        }
+        let is_mut = self.check(TokenType::Mut);
+        if is_mut {
+            self.advance();
+        }
+        let name = self.expect_any_param_name()?;
+        self.expect(TokenType::Colon)?;
+        let ty = self.parse_type_expr()?;
+        if self.check(TokenType::Eq) {
+            self.advance();
+            *has_default = true;
+            let default = Some(Box::new(self.parse_expr()?));
+            return Ok(Param { name, ty, default, attrs, is_mut });
+        }
+        if *has_default {
+            return Err(format!(
+                "parameter '{}' must have a default value (all parameters after the first default must also have defaults)",
+                name
+            ));
+        }
+        Ok(Param { name, ty, default: None, attrs, is_mut })
     }
 }
