@@ -59,6 +59,15 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     ("spec/integration/modules/deep_phantom_test.almd", SkipReason::CompileErrorFixture),
     // `assert_throws` catches a panic; a wasm trap cannot be caught.
     ("spec/stdlib/coverage_assert_throws_test.almd", SkipReason::NoUnwinding),
+    // C-220: the streaming line walkers' callbacks cross the runtime boundary
+    // (fold_lines_chunked adds real threads inside the runtime) — the surface
+    // is native-only by the contract's own statement, C-215-style; the wasm
+    // arrival is #1134's defunctionalization frontier. The files carried the
+    // `// wasm:skip` marker from the landing; these entries are the ledger
+    // half that landing missed (#1146).
+    ("spec/stdlib/fs_streaming_test.almd", SkipReason::NativeOnlyApi),
+    ("spec/stdlib/fs_fold_lines_chunked_test.almd", SkipReason::NativeOnlyApi),
+    ("spec/stdlib/fs_fold_lines_range_test.almd", SkipReason::NativeOnlyApi),
 ];
 
 fn repo_root() -> PathBuf {
