@@ -196,7 +196,7 @@ map.clear(m)
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (24 functions)
+## Signature index (25 functions)
 
 ```
 map.new() -> Map[K, V]
@@ -220,6 +220,7 @@ map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool
 map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int
 map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[()]
 map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]
+map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]
 map.insert(m: Map[K, V], key: K, value: V) -> Unit
 map.delete(m: Map[K, V], key: K) -> Unit
 map.clear(m: Map[K, V]) -> Unit

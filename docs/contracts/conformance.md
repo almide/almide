@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-64 normative sections; 372 distinct executable fixtures.
+64 normative sections; 374 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -54,7 +54,7 @@
 | ALS-R3 | C-004, C-005, C-006, C-199 | `spec/wasm_cross/fan_deterministic.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_inline_lambda.almd` (byte-compare)<br>`spec/wasm_cross/fan_pure_thunks.almd` (byte-compare)<br>`spec/wasm_cross/fan_var_thunk_list.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_err.almd` (byte-compare)<br>`spec/wasm_cross/fan_map_inline_err.almd` (byte-compare)<br>`spec/wasm_cross/fan_any_allfail.almd` (byte-compare)<br>`spec/wasm_cross/option_none_unwrap_term.almd` (byte-compare)<br>`tests/diagnostics/e027-fan-timeout-removed/broken.almd` (checker)<br>`tests/diagnostic_harness_test.rs` (cargo gate)<br>`spec/wasm_cross/fan_block_err_list_order.almd` (byte-compare) |
 | ALS-R4 | C-012 | `spec/wasm_cross/const_fold_nonfinite_float.almd` (byte-compare) |
 | ALS-R5 | C-096, C-112, C-118, C-133, C-189, C-214, C-215 | `spec/wasm_cross/process_args.almd` (byte-compare)<br>`spec/wasm_cross/random_int_entropy.almd` (byte-compare)<br>`spec/wasm_cross/env_args.almd` (byte-compare)<br>`spec/wasm_cross/env_get.almd` (byte-compare)<br>`spec/wasm_cross/env_platform_reporting.almd` (byte-compare)<br>`spec/stdlib/process_timeout_test.almd` (both-target test)<br>`spec/stdlib/fs_if_exists_test.almd` (both-target test) |
-| ALS-R6 | C-042, C-137, C-220 | `spec/wasm_cross/fs_preopen_resolve.almd` (byte-compare)<br>`spec/wasm_cross/fs_relative_path.almd` (byte-compare)<br>`spec/stdlib/fs_stat_test.almd` (both-target test)<br>`spec/stdlib/fs_streaming_test.almd` (both-target test) |
+| ALS-R6 | C-042, C-137, C-220 | `spec/wasm_cross/fs_preopen_resolve.almd` (byte-compare)<br>`spec/wasm_cross/fs_relative_path.almd` (byte-compare)<br>`spec/stdlib/fs_stat_test.almd` (both-target test)<br>`spec/stdlib/fs_streaming_test.almd` (both-target test)<br>`spec/stdlib/fs_fold_lines_range_test.almd` (both-target test)<br>`spec/stdlib/fs_fold_lines_chunked_test.almd` (both-target test) |
 | ALS-S1 | C-016, C-065 | `spec/wasm_cross/string_codepoint.almd` (byte-compare)<br>`spec/wasm_cross/string_ops.almd` (byte-compare)<br>`spec/wasm_cross/string_codepoint_index.almd` (byte-compare)<br>`spec/wasm_cross/string_lines.almd` (byte-compare) |
 | ALS-S2 | C-017 | `spec/wasm_cross/string_empty_pattern.almd` (byte-compare) |
 | ALS-S3 | C-018, C-019 | `spec/wasm_cross/string_predicates.almd` (byte-compare)<br>`spec/wasm_cross/string_ops_drain.almd` (byte-compare)<br>`spec/wasm_cross/string_rle.almd` (byte-compare) |

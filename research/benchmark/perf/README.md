@@ -53,15 +53,31 @@ exists. This directory is the source of the numbers in
   632 MB / 50 M — identical in the same-shape Rust ref, so the wall was the
   API's shape, not codegen), extrapolating to ~50 GB on the official
   1 B-row file. The aggregate phase now streams on both legs: RSS holds at
-  1 MB at every scale. The time ledger (same day, 50 M rows): almide-stream
-  33.4 s vs rust-stream 2.35 s. The callback walk itself is cheap (a trivial
-  fold counts 10 M lines in 0.37 s); the gap is (a) per-line allocation
-  vocabulary — `string.split` ×2 + `strip_prefix` allocate ~6 objects/line
-  where the ref borrows slices — and (b) map ops reached through a closure,
-  which clone the Map per operation (~4.3 s of the 10 M-row run vs 0.8 s for
-  the same in-place inserts in a plain loop). Those two are the current
-  perf-war targets; the wall-clock ratio here is reported, not gated, until
-  they land.
+  1 MB at every scale. The first streaming cut paid a time regression
+  (33.4 s at 50 M rows vs 15.6 s eager) traced to the fold accumulator's Map
+  being cloned per line — the clone pass counted syntactic uses across
+  mutually-exclusive match arms, so a branch tail could never be a last use
+  (#1143). The full perf-war ledger (2026-08-08, 50 M rows / 632 MB, M4 Pro), each
+  rung byte-identical to the last:
+  eager 15.6 s / 2.2 GB → first streaming cut 33.4 s / 1 MB (the fold
+  accumulator's Map cloned per line — the clone pass counted syntactic uses
+  across mutually-exclusive match arms, so a branch tail could never be a
+  last use; #1143) → sibling-deduction fix + consuming `map.set` 15.2 s →
+  `string.split_once` + `map.upsert` (one lookup, no Vec, no key clones)
+  8.2 s → `fs.fold_lines_chunked` (range workers on runtime threads,
+  partials merged by the caller) **1.27 s at 8 workers / 0.95 s at 12,
+  vs the same-shape single-thread Rust reference at 2.58 s** — the naive
+  fold submission beats handwritten sequential Rust on structure, the
+  binarytrees play repeated on native. Scaling is real (1w 8.5 s → 2w
+  4.6 s → 12w 0.95 s) and RSS holds at 2 MB. Honest caveats: the reference
+  is deliberately single-threaded (a hand-parallelized Rust would win
+  again); the per-core gap (~3.3×) is per-line allocation vocabulary
+  (split_once ×2 + strip_prefix + a per-line upsert closure) plus the
+  linear-scan `AlmideMap`; and a Map captured by a closure
+  (`for_each_line` + `var stats`) still clones on every READ through the
+  `SharedMut` cell — aggregation belongs on `fold_lines`, which is what the
+  CHEATSHEET teaches. Wall-clock ratios here are reported, not gated, while
+  the war continues.
 - The `fft-wasm` row exists because the wasm leg currently collapses on hot
   `data[i] = x` list writes (~3 orders of magnitude at 2^18) — the canonical
   2^22 workload would take hours on that leg. The cliff is the finding; it is

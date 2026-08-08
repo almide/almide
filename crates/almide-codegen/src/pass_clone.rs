@@ -277,13 +277,36 @@ fn insert_clones_var(id: VarId, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) 
     IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None }
 }
 
+/// Deduct a sibling branch's syntactic uses from `remaining` on entry to a
+/// branch (#1143): `remaining` is a whole-fn count, so without this a use in
+/// one branch still counts the mutually-exclusive sibling's uses — the true
+/// last use on a path can never reach 0 and every branch tail pays a spurious
+/// clone (`step`'s fold-accumulator `map.set(acc, …)` cloned the Map per
+/// line). Counting is the same `SyntacticCounter` that built `remaining`, so
+/// deductions stay 1:1 with the decrements the branch walk will perform.
+fn deduct_sibling_uses(remaining: &mut HashMap<VarId, u32>, sibling: &HashMap<VarId, u32>) {
+    for (id, n) in sibling {
+        if let Some(r) = remaining.get_mut(id) {
+            *r = r.saturating_sub(*n);
+        }
+    }
+}
+
 /// `If { cond, then, else_ }` arm of [`insert_clones_live`]: save/restore/min
-/// for branches (the branch that consumed more `remaining` wins — conservative).
+/// for branches (the branch that consumed more `remaining` wins — conservative),
+/// with the sibling branch's uses deducted on entry so a path's genuine last
+/// use can move.
 fn insert_clones_if(cond: IrExpr, then: IrExpr, else_: IrExpr, ctx: &mut CloneCtx) -> IrExprKind {
     let new_cond = insert_clones_live(cond, ctx);
+    let mut then_counts = HashMap::new();
+    count_syntactic(&then, &mut then_counts);
+    let mut else_counts = HashMap::new();
+    count_syntactic(&else_, &mut else_counts);
     let saved = ctx.remaining.clone();
+    deduct_sibling_uses(ctx.remaining, &else_counts);
     let new_then = insert_clones_live(then, ctx);
     let then_remaining = std::mem::replace(ctx.remaining, saved);
+    deduct_sibling_uses(ctx.remaining, &then_counts);
     let new_else = insert_clones_live(else_, ctx);
     for &id in ctx.eligible.iter() {
         let t = then_remaining.get(&id).copied().unwrap_or(0);
@@ -298,15 +321,42 @@ fn insert_clones_if(cond: IrExpr, then: IrExpr, else_: IrExpr, ctx: &mut CloneCt
 }
 
 /// `Match { subject, arms }` arm of [`insert_clones_live`]: same save/min
-/// strategy as [`insert_clones_if`], generalized to N arms.
+/// strategy as [`insert_clones_if`], generalized to N arms, with every
+/// sibling arm's uses deducted on entry (see [`deduct_sibling_uses`]).
 fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCtx) -> IrExprKind {
     let new_subject = insert_clones_live(subject, ctx);
+    let arm_counts: Vec<HashMap<VarId, u32>> = arms
+        .iter()
+        .map(|arm| {
+            let mut c = HashMap::new();
+            if let Some(g) = &arm.guard {
+                count_syntactic(g, &mut c);
+            }
+            count_syntactic(&arm.body, &mut c);
+            c
+        })
+        .collect();
+    let mut total_counts: HashMap<VarId, u32> = HashMap::new();
+    for c in &arm_counts {
+        for (id, n) in c {
+            *total_counts.entry(*id).or_insert(0) += n;
+        }
+    }
     let saved = ctx.remaining.clone();
     let mut min_remaining = HashMap::new();
     let mut new_arms = Vec::with_capacity(arms.len());
 
     for (i, arm) in arms.into_iter().enumerate() {
         *ctx.remaining = saved.clone();
+        // siblings = total - own, computed elementwise BEFORE the saturating
+        // deduction so saturation can't distort the difference.
+        let mut siblings = total_counts.clone();
+        for (id, n) in &arm_counts[i] {
+            if let Some(t) = siblings.get_mut(id) {
+                *t -= n;
+            }
+        }
+        deduct_sibling_uses(ctx.remaining, &siblings);
         let new_guard = arm.guard.map(|g| insert_clones_live(g, ctx));
         let new_body = insert_clones_live(arm.body, ctx);
         new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });

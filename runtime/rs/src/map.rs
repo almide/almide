@@ -126,7 +126,24 @@ pub fn almide_rt_map_len<K, V>(m: &AlmideMap<K, V>) -> i64 { m.len() as i64 }
 pub fn almide_rt_map_is_empty<K, V>(m: &AlmideMap<K, V>) -> bool { m.is_empty() }
 pub fn almide_rt_map_get<K: PartialEq, V: Clone>(m: &AlmideMap<K, V>, k: K) -> Option<V> { m.get(&k).cloned() }
 pub fn almide_rt_map_get_or<K: PartialEq, V: Clone>(m: &AlmideMap<K, V>, k: K, default: V) -> V { m.get(&k).cloned().unwrap_or(default) }
-pub fn almide_rt_map_set<K: PartialEq + Clone, V: Clone>(m: &AlmideMap<K, V>, k: K, v: V) -> AlmideMap<K, V> { let mut r = m.clone(); r.insert(k, v); r }
+// Consuming (@consume(m) in stdlib/map.almd): a caller whose map is dead at
+// the call moves it in and this is one hash insert; a caller that still uses
+// the source gets its clone inserted by pass_clone at the call site. The
+// borrowing `let mut r = m.clone()` form cloned the WHOLE map on every call —
+// the fold-accumulator hot loop (#1143) paid it per line.
+pub fn almide_rt_map_set<K: PartialEq + Clone, V: Clone>(mut m: AlmideMap<K, V>, k: K, v: V) -> AlmideMap<K, V> { m.insert(k, v); m }
+// Single-scan insert-or-update, consuming like map_set: present → f(old)
+// in place (position preserved), absent → append init. One entry walk where
+// get + set costs two plus a cloned-out V.
+pub fn almide_rt_map_upsert<K: PartialEq, V: Clone>(mut m: AlmideMap<K, V>, k: K, init: V, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
+    if let Some(pos) = m.entries.iter().position(|(ek, _)| ek == &k) {
+        let old = m.entries[pos].1.clone();
+        m.entries[pos].1 = f(old);
+    } else {
+        m.entries.push((k, init));
+    }
+    m
+}
 pub fn almide_rt_map_remove<K: PartialEq + Clone, V: Clone>(m: &AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { let mut r = m.clone(); r.remove(&k); r }
 pub fn almide_rt_map_contains<K: PartialEq, V>(m: &AlmideMap<K, V>, k: K) -> bool { m.contains_key(&k) }
 pub fn almide_rt_map_keys<K: Clone, V>(m: &AlmideMap<K, V>) -> Vec<K> { m.keys().cloned().collect() }

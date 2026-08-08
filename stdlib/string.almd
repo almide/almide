@@ -19,6 +19,12 @@ fn trim(s: String) -> String = _
 @intrinsic("almide_rt_string_split")
 fn split(s: String, sep: String) -> List[String] = _
 
+// The split-at-first-separator pair of `split`: none ⇔ sep absent. The split
+// surface is exactly {split, split_once}; rsplit_once / splitn stay out
+// until a measured need arrives (matrix rule: the omission is intentional).
+@intrinsic("almide_rt_string_split_once")
+fn split_once(s: String, sep: String) -> (String, String)? = _
+
 @intrinsic("almide_rt_string_join")
 fn join(list: List[String], sep: String) -> String = _
 

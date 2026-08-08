@@ -7,8 +7,10 @@
 //   almide run onebrc.almd -- gen 1000000 f.txt  # generate only
 //   almide run onebrc.almd -- agg f.txt          # aggregate an existing file only
 //
-// The aggregate phase streams via fs.for_each_line (C-220) — peak RSS is
-// O(longest line) regardless of file size. It previously used the eager
+// The aggregate phase streams via fs.fold_lines (C-220), the CHEATSHEET's
+// recommended aggregation shape — peak RSS is O(longest line) regardless of
+// file size, and the fold accumulator moves through clone-free (#1143's
+// branch-exclusive last-use fix). It previously used the eager
 // fs.read_lines; that measurement (RSS ~4x file size, identical in the
 // same-shape Rust ref) is what motivated the streaming family.
 //
@@ -45,9 +47,9 @@ fn parse_int(s: String) -> Int = match int.parse(s) { ok(v) => v, err(_) => 0 }
 fn parse_tenths(s: String) -> Int =
   match string.strip_prefix(s, "-") {
     some(rest) => 0 - parse_tenths(rest),
-    none => {
-      let parts = string.split(s, ".")
-      parse_int(parts[0]) * 10 + parse_int(parts[1])
+    none => match string.split_once(s, ".") {
+      some((whole, frac)) => parse_int(whole) * 10 + parse_int(frac),
+      none => parse_int(s) * 10,
     },
   }
 
@@ -56,6 +58,20 @@ fn parse_tenths(s: String) -> Int =
 // rounding).
 fn mean_tenths(sum: Int, count: Int) -> Int =
   if sum < 0 then 0 - ((0 - sum) / count) else sum / count
+
+fn step(acc: Map[String, Stats], line: String) -> Map[String, Stats] =
+  match string.split_once(line, ";") {
+    some((station, temp)) => {
+      let t = parse_tenths(temp)
+      map.upsert(acc, station, Stats { min: t, max: t, sum: t, count: 1 }, (s) => Stats {
+        min: if t < s.min then t else s.min,
+        max: if t > s.max then t else s.max,
+        sum: s.sum + t,
+        count: s.count + 1,
+      })
+    },
+    none => acc,
+  }
 
 effect fn generate(n: Int, path: String) -> Unit = {
   fs.write(path, "")!
@@ -78,29 +94,47 @@ effect fn generate(n: Int, path: String) -> Unit = {
   else ()
 }
 
-effect fn aggregate(path: String) -> String = {
-  var stats: Map[String, Stats] = map.new()
-  fs.for_each_line(path, (line) => {
-    if string.is_empty(line) then () else {
-      let parts = string.split(line, ";")
-      let t = parse_tenths(parts[1])
-      match map.get(stats, parts[0]) {
-        some(s) => map.insert(stats, parts[0], Stats {
-          min: if t < s.min then t else s.min,
-          max: if t > s.max then t else s.max,
-          sum: s.sum + t,
-          count: s.count + 1,
-        }),
-        none => map.insert(stats, parts[0], Stats { min: t, max: t, sum: t, count: 1 }),
-      }
-    }
-  })!
+fn render(stats: Map[String, Stats]) -> String = {
   let body = map.entries(stats)
     |> list.sort_by(((name, _)) => name)
     |> list.map(((name, s)) =>
       "${name}=${fmt_tenths(s.min)}/${fmt_tenths(mean_tenths(s.sum, s.count))}/${fmt_tenths(s.max)}")
     |> string.join(", ")
   "{" + body + "}"
+}
+
+effect fn aggregate(path: String) -> String = {
+  let stats = fs.fold_lines(path, map.new(), (acc, line) => step(acc, line))!
+  render(stats)
+}
+
+fn merge_stats(a: Stats, b: Stats) -> Stats = Stats {
+  min: if a.min < b.min then a.min else b.min,
+  max: if a.max > b.max then a.max else b.max,
+  sum: a.sum + b.sum,
+  count: a.count + b.count,
+}
+
+fn merge_maps(a: Map[String, Stats], b: Map[String, Stats]) -> Map[String, Stats] =
+  map.entries(b) |> list.fold(a, (acc, e) => {
+    let (k, v) = e
+    match map.get(acc, k) {
+      some(prev) => map.set(acc, k, merge_stats(prev, v)),
+      none => map.set(acc, k, v),
+    }
+  })
+
+// Chunk-parallel aggregation: fold_lines_chunked runs one range-fold worker
+// per chunk on real threads and returns the partials in chunk order; the
+// merge here is sequential, so the output is byte-identical to the
+// sequential aggregate whatever the chunking or thread schedule.
+effect fn aggregate_par(path: String, workers: Int) -> String = {
+  let partials = fs.fold_lines_chunked(path, workers, map.new(), step)!
+  var stats: Map[String, Stats] = map.new()
+  for m in partials {
+    stats = merge_maps(stats, m)
+  }
+  render(stats)
 }
 
 fn arg_or(args: List[String], i: Int, default: String) -> String =
@@ -111,6 +145,7 @@ effect fn main() -> Unit = {
   match arg_or(args, 0, "") {
     "gen" => generate(parse_int(arg_or(args, 1, "1000")), arg_or(args, 2, "onebrc_data.txt"))!,
     "agg" => println(aggregate(arg_or(args, 1, "onebrc_data.txt"))!),
+    "agg-par" => println(aggregate_par(arg_or(args, 1, "onebrc_data.txt"), parse_int(arg_or(args, 2, "8")))!),
     first => {
       let n = match int.parse(first) { ok(v) => v, err(_) => 1000 }
       let path = fs.temp_dir()! + "/almide_onebrc_${n}.txt"

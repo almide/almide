@@ -20,6 +20,7 @@ fn get[K, V](m: Map[K, V], key: K) -> V? = _
 fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 
 @intrinsic("almide_rt_map_set")
+@consume(m)
 fn set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] = _
 
 @intrinsic("almide_rt_map_contains")
@@ -75,6 +76,13 @@ fn find[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> (K, V)? = _
 
 @intrinsic("almide_rt_map_update")
 fn update[K, V](m: Map[K, V], key: K, f: fn(V) -> V) -> Map[K, V] = _
+
+// Single-lookup insert-or-update — the aggregation hot-loop form (present →
+// f(old), absent → init). `get` + `set` spells the same thing with two
+// lookups and a cloned-out V; upsert does one walk in place.
+@intrinsic("almide_rt_map_upsert")
+@consume(m)
+fn upsert[K, V](m: Map[K, V], key: K, init: V, f: fn(V) -> V) -> Map[K, V] = _
 
 // ── mutable (in-place) ──
 @intrinsic("almide_rt_map_insert")

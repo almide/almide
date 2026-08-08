@@ -389,13 +389,17 @@ wall for big ones. Aggregation over a large file is `fs.fold_lines`
 (O(longest line) memory, same line semantics as read_lines):
 
 ```almide
-// ✓ aggregate: fold_lines carries the accumulator through
-let stats = fs.fold_lines(path, map.new(), (acc, line) => {
-  let parts = string.split(line, ";")
-  map.set(acc, parts[0], map.get_or(acc, parts[0], 0) + 1)
-})!
+// ✓ aggregate: fold_lines carries the accumulator through; split_once +
+//   map.upsert is the hot-loop form (one lookup, no List, no re-split)
+let stats = fs.fold_lines(path, map.new(), (acc, line) =>
+  match string.split_once(line, ";") {
+    some((key, _)) => map.upsert(acc, key, 1, (n) => n + 1),
+    none => acc,
+  })!
 
-// ✓ side-effecting walk: for_each_line (callback may mutate captured vars)
+// ✓ side-effecting walk: for_each_line (callback may mutate captured vars —
+//   but keep MAP accumulation on fold_lines: reading a Map captured in a
+//   closure clones it per read)
 var count = 0
 fs.for_each_line(path, (line) => { count = count + 1 })!
 

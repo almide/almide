@@ -102,6 +102,28 @@ var count = 0
 fs.for_each_line("data.csv", (line) => { count = count + 1 })!
 ```
 
+### `fs.fold_lines_range(path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String]`
+
+Fold exactly the lines owned by the byte range `[start, end)` — a line
+belongs to the range containing the byte before its first byte — so folding
+a partition of `[0, file_size)` visits every line exactly once.
+
+```almd
+let part = fs.fold_lines_range("data.csv", 0, 4096, 0, (acc, line) => acc + 1)!
+```
+
+### `fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String]`
+
+Chunk-parallel fold: one range worker per chunk on real threads inside the
+runtime, partials returned in chunk order. Merge the partials yourself — the
+result is deterministic whatever the thread schedule. The callback must be a
+pure step function (capturing mutable state is a compile error).
+
+```almd
+let partials = fs.fold_lines_chunked("data.csv", 8, map.new(), step)!
+let stats = partials |> list.fold(map.new(), (acc, m) => combine(acc, m))
+```
+
 ### `fs.remove(path: String) -> Result[Unit, String]`
 
 Delete a file
@@ -232,7 +254,7 @@ let ts = fs.modified_at("file.txt")
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (32 functions)
+## Signature index (34 functions)
 
 ```
 effect fs.read_text(path: String) -> String
@@ -246,6 +268,8 @@ effect fs.exists(path: String) -> Bool
 effect fs.read_lines(path: String) -> List[String]
 effect fs.fold_lines(path: String, init: A, f: (A, String) -> A) -> A
 effect fs.for_each_line(path: String, f: (String) -> Unit) -> Unit
+effect fs.fold_lines_range(path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A
+effect fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]
 effect fs.read_text_if_exists(path: String) -> Option[String]
 effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]
 effect fs.read_lines_if_exists(path: String) -> Option[List[String]]

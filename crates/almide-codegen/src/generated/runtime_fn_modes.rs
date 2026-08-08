@@ -4,6 +4,8 @@
 /// element fn (value codec combinators) — extracted from the signatures.
 pub fn takes_raw_fn_last_arg(name: &str) -> bool {
     matches!(name,
+        "almide_rt_fs_fold_lines_chunked" |
+        "almide_rt_fs_fold_lines_range" |
         "almide_rt_value_decode_list" |
         "almide_rt_value_decode_option" |
         "almide_rt_value_decode_option_custom" |
@@ -247,6 +249,8 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fs_exists" => &[false],
         "almide_rt_fs_file_size" => &[false],
         "almide_rt_fs_fold_lines" => &[false, false, false],
+        "almide_rt_fs_fold_lines_chunked" => &[false, false, false, false],
+        "almide_rt_fs_fold_lines_range" => &[false, false, false, false, false],
         "almide_rt_fs_for_each_line" => &[false, false],
         "almide_rt_fs_glob" => &[false],
         "almide_rt_fs_is_dir" => &[false],
@@ -458,6 +462,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_remove" => &[false, false],
         "almide_rt_map_set" => &[false, false, false],
         "almide_rt_map_update" => &[false, false, false],
+        "almide_rt_map_upsert" => &[false, false, false, false],
         "almide_rt_map_values" => &[false],
         "almide_rt_math_abs" => &[false],
         "almide_rt_math_acos" => &[false],
@@ -680,6 +685,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_string_run_length_encode" => &[false],
         "almide_rt_string_slice" => &[false, false, false],
         "almide_rt_string_split" => &[false, false],
+        "almide_rt_string_split_once" => &[false, false],
         "almide_rt_string_starts_with" => &[false, false],
         "almide_rt_string_strip_prefix" => &[false, false],
         "almide_rt_string_strip_suffix" => &[false, false],

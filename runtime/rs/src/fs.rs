@@ -49,6 +49,84 @@ pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, 
         acc = f(acc, buf.clone());
     }
 }
+// Range-scoped fold: the chunk-parallel worker's walker. A line is owned by
+// the chunk containing the byte BEFORE its first byte (line 0 by the chunk
+// containing byte 0), so a partition of [0, filesize) processes every line
+// exactly once: start>0 seeks to start-1 and discards through the first \n
+// (if byte start-1 IS \n the discard consumes just it), then lines fold while
+// their start offset is < end — the final line may read past end to finish.
+fn fold_lines_range_impl<A, F: Fn(A, String) -> A>(path: &str, start: i64, end: i64, init: A, f: &F) -> Result<A, String> {
+    use std::io::{BufRead, Seek};
+    let mut file = std::fs::File::open(path).map_err(io_err)?;
+    let mut pos: u64 = if start > 0 { (start - 1) as u64 } else { 0 };
+    file.seek(std::io::SeekFrom::Start(pos)).map_err(io_err)?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut buf = String::new();
+    if start > 0 {
+        let n = reader.read_line(&mut buf).map_err(io_err)?;
+        if n == 0 {
+            return Ok(init);
+        }
+        pos += n as u64;
+    }
+    let mut acc = init;
+    while (pos as i64) < end {
+        buf.clear();
+        let n = reader.read_line(&mut buf).map_err(io_err)?;
+        if n == 0 {
+            break;
+        }
+        pos += n as u64;
+        if buf.ends_with('\n') {
+            buf.pop();
+            if buf.ends_with('\r') {
+                buf.pop();
+            }
+        }
+        acc = f(acc, buf.clone());
+    }
+    Ok(acc)
+}
+// Raw `F: Fn` last arg (NOT `Rc<dyn Fn>`): build.rs derives the
+// takes_raw_fn_last_arg set from this signature, so callbacks render unboxed.
+pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, String) -> A>(path: &str, start: i64, end: i64, init: A, f: F) -> Result<A, String> {
+    fold_lines_range_impl(path, start, end, init, &f)
+}
+// Chunk-parallel fold: the threads live HERE, inside the runtime — the fan
+// machinery's purity gate keeps effectful bodies sequential, so file
+// parallelism is the fs module's own intrinsic instead. Workers each fold
+// their byte-range partition (fold_lines_range_impl's ownership rule makes
+// the partition exact) on a scoped thread; the per-chunk partials return in
+// CHUNK ORDER and merging stays with the caller, so results are
+// deterministic whatever the thread schedule. The Send + Sync bounds are
+// enforced by rustc on the emitted program: a callback capturing non-Send
+// state is a loud compile error, never a data race.
+pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, String> {
+    let size = std::fs::metadata(path).map_err(io_err)?.len() as i64;
+    let w = workers.max(1);
+    let chunk = size / w + 1;
+    let mut ranges: Vec<(i64, i64)> = Vec::new();
+    for i in 0..w {
+        let s = i * chunk;
+        if s < size {
+            ranges.push((s, (s + chunk).min(size)));
+        }
+    }
+    std::thread::scope(|scope| {
+        let f = &f;
+        let handles: Vec<_> = ranges
+            .iter()
+            .map(|&(s, e)| {
+                let init = init.clone();
+                scope.spawn(move || fold_lines_range_impl(path, s, e, init, f))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?)
+            .collect()
+    })
+}
 pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) -> Result<(), String> {
     use std::io::BufRead;
     let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(io_err)?);
