@@ -27,28 +27,34 @@ env:
   RUST_TOOLCHAIN: "1.89.0"
   # Default budget for the scheduled run; the dispatch input overrides it.
   #
-  # Sized to the runner lifetime this job actually GETS, measured rather than
-  # assumed. The 2026-07-27 night is the clean measurement: the runner was
-  # reclaimed 7m44s after the job started ("The runner has received a shutdown
-  # signal", exit 143) — and 4m48s of that had gone to building, so the campaign
-  # got 2m39s of its 10-minute budget. The five nights before it died the same
-  # way at 8, 25, 65, 23 and 13 minutes.
+  # PER-SHARD budget. The night runs FUZZ_SHARDS of these in parallel, so the
+  # night's coverage is FUZZ_MINUTES * FUZZ_SHARDS fuzz-minutes delivered in
+  # FUZZ_MINUTES of wall clock.
   #
-  # `exit 143` from a runner shutdown is a JOB-level kill: no `set +e`, no
-  # `timeout-minutes`, no later step can catch it, so it reports exactly like a
-  # real finding. That is why NONE of the last six nights could be scored green
-  # regardless of what the fuzzer found (#796 asks for two consecutive green
-  # nights).
+  # Sized to the runner lifetime a job actually GETS, measured rather than
+  # assumed. Splitting the build into its own job (#1014, 2026-07-30) fixed the
+  # first half of the problem: before it, a cold build ate 4m48s of the 7m44s
+  # the runner granted. After it, the fuzz job reliably gets its 5 minutes —
+  # measured over the 12 nights since, 10 completed the full budget.
   #
-  # The fix is structural — the build moved to its own job, so this job spends
-  # its whole lifetime fuzzing instead of ~62% of it compiling — and this budget
-  # is then set to fit comfortably inside even the SHORTEST lifetime observed.
-  # 5 minutes is ~1,000 programs at this job's measured 210 prog/min. Less
-  # coverage per night, deliberately: a campaign that FINISHES produces a
-  # verdict, and a verdict every night beats a larger campaign truncated at
-  # random. Deep runs stay available through the `minutes` dispatch input, which
-  # is where the #812-scale histograms should come from.
+  # The other 2 died the same way as before: "The runner has received a
+  # shutdown signal", exit 143. That is a JOB-level kill — no `set +e`, no
+  # `timeout-minutes`, no later step can catch it — so a killed night lost
+  # everything and reported identically to a real finding.
+  #
+  # A ~1-in-6 kill rate makes #924's closure condition ("14 consecutive
+  # full-budget nights") a (5/6)^14 ≈ 8% proposition: unreachable by
+  # arithmetic, not by any property of the compiler. Waiting longer was never
+  # going to close it.
+  #
+  # Hence SHARDS. N independent jobs are N independent runner lifetimes, so a
+  # kill costs 1/N of the night's coverage instead of the night, and the
+  # surviving shards still produce a verdict. The same change multiplies
+  # coverage 4x at constant wall clock (~4,000 programs/night at the measured
+  # ~210 prog/min, up from ~1,000). Deep single-seed runs stay available
+  # through the `minutes` dispatch input.
   FUZZ_MINUTES: "5"
+  FUZZ_SHARDS: "4"
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
@@ -104,16 +110,24 @@ jobs:
 
   fuzz:
     if: github.server_url == 'https://github.com'
-    name: Generative differential fuzz
+    name: Generative differential fuzz (shard ${{ matrix.shard }})
     needs: build
     runs-on: ubuntu-latest
+    # `fail-fast: false` is load-bearing, not hygiene: the whole point of
+    # sharding is that one shard dying must not take the night's other shards
+    # with it. Keep the shard list and FUZZ_SHARDS in step — the verdict job
+    # reads FUZZ_SHARDS to report `shards=k/N`, so a mismatch would understate
+    # or overstate the night's coverage.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     # Hard ceiling well above the fuzz budget so a hung child can never
     # wedge the runner indefinitely, with room for a dispatch run that raises
     # `minutes`.
     timeout-minutes: 90
     permissions:
       contents: read
-      issues: write
     steps:
       - uses: actions/checkout@v7
 
@@ -156,76 +170,111 @@ jobs:
         id: campaign
         run: |
           MINUTES="${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}"
-          SEED_ARG=""
-          if [ -n "${{ github.event.inputs.seed }}" ]; then
-            SEED_ARG="--seed ${{ github.event.inputs.seed }}"
-          fi
+          # Every shard needs a DIFFERENT seed or the night runs the same
+          # campaign N times. Derived, not random, so a finding stays
+          # replayable from the run alone: `run_id * 16 + shard` is unique per
+          # (run, shard) and well inside u64. A dispatch `seed` input pins the
+          # base so a whole night can be re-run deterministically.
+          BASE="${{ github.event.inputs.seed }}"
+          if [ -z "$BASE" ]; then BASE=$(( ${{ github.run_id }} * 16 )); fi
+          SEED=$(( BASE + ${{ matrix.shard }} ))
           # The fuzzer exits non-zero iff it recorded a finding; capture
-          # that without failing the step so we can branch on it.
+          # that without failing the step so the verdict job can branch on the
+          # NIGHT's total rather than on one shard's.
           set +e
           ./tools/xtarget-fuzz/target/release/xtarget-fuzz run \
             --minutes "$MINUTES" \
             --repo "$PWD" \
             --almide "$PWD/target/release/almide" \
-            $SEED_ARG \
+            --seed "$SEED" \
             2>&1 | tee fuzz-output.txt
           STATUS=${PIPESTATUS[0]}
           set -e
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-          FINDINGS_DIR="tools/xtarget-fuzz/findings"
-          COUNT=0
-          if [ -d "$FINDINGS_DIR" ]; then
-            COUNT=$(find "$FINDINGS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+
+      # `always()`: a shard whose campaign found something still uploads. A
+      # shard the runner RECLAIMED uploads nothing at all — the job is gone
+      # before this step — and that absence is precisely how the verdict job
+      # counts `shards=k/N`. Nothing here needs to detect the kill; not
+      # reporting IS the report.
+      - name: Upload shard output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-shard-${{ github.run_id }}-${{ matrix.shard }}
+          path: |
+            fuzz-output.txt
+            tools/xtarget-fuzz/findings/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # The night's verdict is assembled from whatever the shards delivered. It is
+  # a SEPARATE job so a reclaimed shard cannot take the verdict down with it:
+  # `if: always()` runs it even when some shard job failed or was killed.
+  verdict:
+    if: always() && github.server_url == 'https://github.com'
+    name: Night verdict
+    needs: fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download shard outputs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: fuzz-shard-${{ github.run_id }}-*
+          path: shards
+
+      # Findings are deduplicated by directory NAME: the fuzzer names each
+      # finding after its kind + minimized summary, so two shards that trip the
+      # same bug from different seeds produce the same name. Counting those
+      # twice would inflate the night and file a duplicate issue.
+      - name: Aggregate findings
+        id: agg
+        run: |
+          mkdir -p night-findings
+          if compgen -G "shards/*/tools/xtarget-fuzz/findings/*" >/dev/null; then
+            for d in shards/*/tools/xtarget-fuzz/findings/*/; do
+              [ -d "$d" ] || continue
+              cp -R "$d" "night-findings/$(basename "$d")" 2>/dev/null || true
+            done
           fi
+          COUNT=$(find night-findings -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
 
-      # ALWAYS report what the campaign saw, including when the runner is
-      # reclaimed mid-run. A `exit 143` kill skips every conditional step, so
-      # before this the only trace of a truncated night was a red X with no
-      # numbers — indistinguishable from a real finding, and #796's "two
-      # consecutive green nights" had nothing to read.
-      #
-      # The rendering lives in scripts/fuzz-night-verdict.sh (testable locally,
-      # unlike inline YAML bash): it emits the markdown verdict on stdout and
-      # the greppable `fuzz-night:` record line — programs, elapsed, throughput,
-      # findings, budget_completed — on stderr, so a throughput regression is
-      # visible across nights in the job logs. budget_completed is read from
-      # the fuzzer's own `=== campaign summary ===` block, which only prints
-      # when the campaign loop exits on its own — a reclaimed runner cannot
-      # fake it. The streaks the closure conditions read (#924: 14 full-budget
-      # nights, #796: 2 green) are scored from step conclusions by
-      # scripts/fuzz-track-record.sh.
       - name: Campaign verdict
-        if: always()
         run: |
-          bash scripts/fuzz-night-verdict.sh fuzz-output.txt \
+          bash scripts/fuzz-night-verdict.sh shards \
             "${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}" \
-            "${{ steps.campaign.outputs.findings || '?' }}" \
+            "${{ env.FUZZ_SHARDS }}" \
+            "${{ steps.agg.outputs.findings }}" \
             >> "$GITHUB_STEP_SUMMARY" || true
           exit 0
 
       - name: Upload findings
-        if: steps.campaign.outputs.findings != '0'
+        if: steps.agg.outputs.findings != '0'
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-findings-${{ github.run_id }}
-          path: |
-            tools/xtarget-fuzz/findings/
-            fuzz-output.txt
+          path: night-findings/
           retention-days: 30
 
       - name: Open / update tracking issue
-        if: steps.campaign.outputs.findings != '0'
+        if: steps.agg.outputs.findings != '0'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COUNT="${{ steps.campaign.outputs.findings }}"
+          COUNT="${{ steps.agg.outputs.findings }}"
           TITLE="Nightly fuzz: $COUNT cross-target finding(s)"
-          # Summarize the finding kinds for the issue body.
-          SUMMARY=$(find tools/xtarget-fuzz/findings -name meta.txt -exec cat {} \; \
+          SUMMARY=$(find night-findings -name meta.txt -exec cat {} \; \
             | grep -E '^(kind|summary|reproduce)' | head -60 || true)
           BODY=$(cat <<EOF
-          The nightly generative differential fuzzer recorded **$COUNT** unique finding(s).
+          The nightly generative differential fuzzer recorded **$COUNT** unique finding(s)
+          across ${{ env.FUZZ_SHARDS }} shard(s).
 
           Artifacts (minimized repros + both-target outputs) are attached to
           [run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
@@ -242,7 +291,6 @@ jobs:
           </details>
           EOF
           )
-          # Reuse an open issue with the fuzz label if one exists, else open.
           EXISTING=$(gh issue list --label fuzz --state open --json number --jq '.[0].number' || echo "")
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"
@@ -251,18 +299,14 @@ jobs:
             gh issue create --title "$TITLE" --body "$BODY" --label fuzz
           fi
 
-      # A night with findings is NOT a green night. Before this the campaign's
-      # status was captured with `set +e` and never re-raised, so a run that
-      # found real divergences still reported green — the only thing that ever
-      # turned this workflow red was the runner being reclaimed (#796). With the
-      # build split out the campaign now completes, so its verdict is the thing
-      # worth reporting: fail iff it recorded a finding. The findings are already
-      # uploaded and filed as an issue by the steps above, so failing here loses
-      # nothing and makes "two consecutive green nights" mean what it says.
+      # FINDINGS, and only findings, make the night red. Coverage lost to a
+      # reclaimed runner is reported by the verdict as `shards=k/N` and is NOT
+      # fatal — failing on it would put the infra noise the sharding exists to
+      # absorb straight back into the signal, which is how #924 got stuck.
       - name: Fail the night on findings
-        if: steps.campaign.outputs.findings != '0'
+        if: steps.agg.outputs.findings != '0'
         run: |
-          echo "::error::the campaign recorded ${{ steps.campaign.outputs.findings }} finding(s) — see the uploaded artifacts and the tracking issue"
+          echo "::error::the campaign recorded ${{ steps.agg.outputs.findings }} finding(s) — see the uploaded artifacts and the tracking issue"
           exit 1
 
   coverage-ratchet:
