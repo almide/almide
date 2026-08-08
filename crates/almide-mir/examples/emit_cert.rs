@@ -7,13 +7,17 @@
 //!   emit_cert <scenario> [ownership|names]   (property defaults to ownership)
 
 use almide_mir::{
-    certificate::{call_modes_witness, cap_witness_string, name_witness_string, ownership_certificate},
+    certificate::{
+        call_modes_witness, cap_witness_string, name_witness_string, ownership_certificate,
+    },
     CallArg, Capability, Init, MirFunction, MirParam, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT,
 };
 use std::collections::BTreeMap;
 
 fn heap() -> Repr {
-    Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
+    Repr::Ptr {
+        layout: PLACEHOLDER_LAYOUT,
+    }
 }
 
 fn scenario(which: &str) -> MirFunction {
@@ -24,7 +28,11 @@ fn scenario(which: &str) -> MirFunction {
         "balanced" => MirFunction {
             name: "f".into(),
             ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::Opaque,
+                },
                 Op::Dup { dst: b, src: a },
                 Op::Drop { v: a },
                 Op::Drop { v: b },
@@ -34,7 +42,11 @@ fn scenario(which: &str) -> MirFunction {
         // allocate and never release → a leak (ownership checker must reject).
         "leak" => MirFunction {
             name: "f".into(),
-            ops: vec![Op::Alloc { dst: a, repr: heap(), init: Init::Opaque }],
+            ops: vec![Op::Alloc {
+                dst: a,
+                repr: heap(),
+                init: Init::Opaque,
+            }],
             ..Default::default()
         },
         // drop a value id that was never defined → a dangling MIR reference
@@ -43,7 +55,11 @@ fn scenario(which: &str) -> MirFunction {
         "dangling" => MirFunction {
             name: "f".into(),
             ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::Opaque,
+                },
                 Op::Drop { v: a },
                 Op::Drop { v: ValueId(9) }, // 9 is never defined
             ],
@@ -55,7 +71,12 @@ fn scenario(which: &str) -> MirFunction {
             name: "f".into(),
             ops: vec![
                 Op::Const { dst: a },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(a)] , result: None },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::PrintInt,
+                    args: vec![CallArg::Scalar(a)],
+                    result: None,
+                },
             ],
             declared_caps: vec![Capability::Stdout],
             ..Default::default()
@@ -66,7 +87,12 @@ fn scenario(which: &str) -> MirFunction {
             name: "f".into(),
             ops: vec![
                 Op::Const { dst: a },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(a)] , result: None },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::PrintInt,
+                    args: vec![CallArg::Scalar(a)],
+                    result: None,
+                },
             ],
             declared_caps: vec![], // declares no capability
             ..Default::default()
@@ -79,7 +105,11 @@ fn scenario(which: &str) -> MirFunction {
             MirFunction {
                 name: "f".into(),
                 ops: vec![
-                    Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+                    Op::Alloc {
+                        dst: x,
+                        repr: heap(),
+                        init: Init::Opaque,
+                    },
                     Op::Const { dst: c },
                     Op::IfThen { cond: c, dst: None },
                     Op::Dup { dst: y, src: x },
@@ -99,7 +129,11 @@ fn scenario(which: &str) -> MirFunction {
             MirFunction {
                 name: "f".into(),
                 ops: vec![
-                    Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+                    Op::Alloc {
+                        dst: x,
+                        repr: heap(),
+                        init: Init::Opaque,
+                    },
                     Op::Const { dst: c },
                     Op::IfThen { cond: c, dst: None },
                     Op::Dup { dst: y, src: x },
@@ -115,7 +149,11 @@ fn scenario(which: &str) -> MirFunction {
         "borrow-live" => MirFunction {
             name: "f".into(),
             ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::Opaque,
+                },
                 Op::MakeUnique { v: a },
                 Op::Drop { v: a },
             ],
@@ -126,7 +164,11 @@ fn scenario(which: &str) -> MirFunction {
         "borrow-uaf" => MirFunction {
             name: "f".into(),
             ops: vec![
-                Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::Opaque,
+                },
                 Op::Drop { v: a },
                 Op::MakeUnique { v: a },
             ],
@@ -162,20 +204,42 @@ fn modes_scenario(which: &str) -> BTreeMap<String, MirFunction> {
         "closure-agree" | "closure-unknowable" => {
             let lam = MirFunction {
                 name: "lam".into(),
-                params: vec![MirParam { value: p, repr: Repr::Scalar { width: almide_mir::ScalarWidth::Double } }],
+                params: vec![MirParam {
+                    value: p,
+                    repr: Repr::Scalar {
+                        width: almide_mir::ScalarWidth::Double,
+                    },
+                }],
                 ..Default::default()
             };
             let (fr, t) = (ValueId(2), ValueId(3));
             let call = if which == "closure-agree" {
-                Op::CallIndirect { dst: None, table_idx: t, args: vec![CallArg::Imm(5)], result: None }
+                Op::CallIndirect {
+                    dst: None,
+                    table_idx: t,
+                    args: vec![CallArg::Imm(5)],
+                    result: None,
+                }
             } else {
-                Op::CallIndirect { dst: None, table_idx: t, args: vec![CallArg::Handle(a)], result: None }
+                Op::CallIndirect {
+                    dst: None,
+                    table_idx: t,
+                    args: vec![CallArg::Handle(a)],
+                    result: None,
+                }
             };
             let main = MirFunction {
                 name: "main".into(),
                 ops: vec![
-                    Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
-                    Op::FuncRef { dst: fr, name: "lam".into() },
+                    Op::Alloc {
+                        dst: a,
+                        repr: heap(),
+                        init: Init::Opaque,
+                    },
+                    Op::FuncRef {
+                        dst: fr,
+                        name: "lam".into(),
+                    },
                     call,
                     Op::Drop { v: a },
                 ],
@@ -186,15 +250,26 @@ fn modes_scenario(which: &str) -> BTreeMap<String, MirFunction> {
         }
         _ => {
             let beep_params = if which == "modes-agree" {
-                vec![MirParam { value: p, repr: heap() }]
+                vec![MirParam {
+                    value: p,
+                    repr: heap(),
+                }]
             } else {
                 vec![]
             };
-            let beep = MirFunction { name: "beep".into(), params: beep_params, ..Default::default() };
+            let beep = MirFunction {
+                name: "beep".into(),
+                params: beep_params,
+                ..Default::default()
+            };
             let main = MirFunction {
                 name: "main".into(),
                 ops: vec![
-                    Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                    Op::Alloc {
+                        dst: a,
+                        repr: heap(),
+                        init: Init::Opaque,
+                    },
                     Op::CallFn {
                         dst: None,
                         name: "beep".into(),
@@ -213,10 +288,17 @@ fn modes_scenario(which: &str) -> BTreeMap<String, MirFunction> {
 }
 
 fn main() {
-    let which = std::env::args().nth(1).unwrap_or_else(|| "balanced".to_string());
-    let property = std::env::args().nth(2).unwrap_or_else(|| "ownership".to_string());
+    let which = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "balanced".to_string());
+    let property = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "ownership".to_string());
     if property == "modes" {
-        print!("{}", call_modes_witness(&modes_scenario(&which), &|_: &str| false));
+        print!(
+            "{}",
+            call_modes_witness(&modes_scenario(&which), &|_: &str| false)
+        );
         return;
     }
     let f = scenario(&which);

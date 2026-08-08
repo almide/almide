@@ -60,7 +60,14 @@ fn wrapper_shape(f: &MirFunction) -> Option<(PrimKind, Vec<usize>)> {
     if f.ops.len() != 1 || f.params.iter().any(|p| p.repr.is_heap()) {
         return None;
     }
-    let Op::Prim { kind, dst: Some(d), args } = &f.ops[0] else { return None };
+    let Op::Prim {
+        kind,
+        dst: Some(d),
+        args,
+    } = &f.ops[0]
+    else {
+        return None;
+    };
     if !scalar_pure_prim(kind) || f.ret != Some(*d) || args.len() != f.params.len() {
         return None;
     }
@@ -92,11 +99,21 @@ pub fn inline_scalar_prim_wrappers(functions: &mut [MirFunction]) {
     }
     for f in functions.iter_mut() {
         for op in f.ops.iter_mut() {
-            let Op::CallFn { dst: Some(d), name, args, result } = op else { continue };
+            let Op::CallFn {
+                dst: Some(d),
+                name,
+                args,
+                result,
+            } = op
+            else {
+                continue;
+            };
             if result.is_some_and(|r| r.is_heap()) {
                 continue;
             }
-            let Some((kind, order)) = wrappers.get(name.as_str()) else { continue };
+            let Some((kind, order)) = wrappers.get(name.as_str()) else {
+                continue;
+            };
             // Positional call args must all be plain scalar locals (an Imm
             // would need a materialization site — not worth the case).
             let vals: Option<Vec<ValueId>> = args
@@ -111,7 +128,11 @@ pub fn inline_scalar_prim_wrappers(functions: &mut [MirFunction]) {
                 continue;
             }
             let prim_args: Vec<ValueId> = order.iter().map(|&pi| vals[pi]).collect();
-            *op = Op::Prim { kind: *kind, dst: Some(*d), args: prim_args };
+            *op = Op::Prim {
+                kind: *kind,
+                dst: Some(*d),
+                args: prim_args,
+            };
         }
     }
 }

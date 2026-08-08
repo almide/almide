@@ -51,7 +51,10 @@ fn sorted_dedup_ids(ids: impl Iterator<Item = u32>) -> String {
     let mut v: Vec<u32> = ids.collect();
     v.sort_unstable();
     v.dedup();
-    v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
+    v.iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Collect the (defined, used) value ids of a function for name-totality.
@@ -109,7 +112,12 @@ impl NameWitness {
                 self.use_call_args(args);
             }
             // A closure call USES the table-index value (the closure) plus its args.
-            Op::CallIndirect { dst, table_idx, args, .. } => {
+            Op::CallIndirect {
+                dst,
+                table_idx,
+                args,
+                ..
+            } => {
                 self.define_opt(*dst);
                 self.use_one(*table_idx);
                 self.use_call_args(args);
@@ -243,7 +251,10 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         cap_witness_op_prim_floor(op, &mut used);
         cap_witness_op_call_indirect(func, op, &mut used);
     }
-    CapWitness { allowed: func.declared_caps.clone(), used }
+    CapWitness {
+        allowed: func.declared_caps.clone(),
+        used,
+    }
 }
 
 /// Extracted from `cap_witness` (codopsy8 complexity sweep, group 1 of 3): a direct runtime
@@ -411,8 +422,7 @@ pub fn program_cap_graph_witness(
     is_elided: &dyn Fn(&str) -> bool,
 ) -> String {
     let names: Vec<&str> = program.keys().map(|s| s.as_str()).collect();
-    let index_of: BTreeMap<&str, usize> =
-        names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    let index_of: BTreeMap<&str, usize> = names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
     let universe = names.len();
     let mut fns: Vec<String> = Vec::with_capacity(names.len() + 1);
     for name in &names {
@@ -545,8 +555,7 @@ pub fn call_modes_witness(
     // established as safe to decompose (unlike a true state-threading rollback). Pure
     // text-move, no logic change.
     let names: Vec<&str> = program.keys().map(|s| s.as_str()).collect();
-    let index_of: BTreeMap<&str, usize> =
-        names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    let index_of: BTreeMap<&str, usize> = names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
     let unknown = names.len(); // out of range — the checker rejects any site naming it
     let sigs = call_modes_witness_sigs(program, &names);
     let (table_targets, table_unseeable) = call_modes_witness_func_table(program, &names);
@@ -638,7 +647,13 @@ pub fn reachable_caps_or_tainted(
     }
     let func = match program.get(name) {
         Some(f) => f,
-        None => return if is_known_free(name) { Some(Vec::new()) } else { None },
+        None => {
+            return if is_known_free(name) {
+                Some(Vec::new())
+            } else {
+                None
+            }
+        }
     };
     if is_elided(name) {
         return None; // an elided call hides effects from this fold — unanalyzable

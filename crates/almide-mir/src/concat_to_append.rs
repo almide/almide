@@ -58,18 +58,34 @@ fn match_window(
     i: usize,
     occ: &BTreeMap<ValueId, usize>,
 ) -> Option<(ValueId, ValueId, ValueId, usize)> {
-    let Op::ListLit { dst: t, elems } = &ops[i] else { return None };
+    let Op::ListLit { dst: t, elems } = &ops[i] else {
+        return None;
+    };
     let [e] = elems.as_slice() else { return None };
-    let Op::CallFn { dst: Some(d), name, args, .. } = &ops[i + 1] else { return None };
+    let Op::CallFn {
+        dst: Some(d),
+        name,
+        args,
+        ..
+    } = &ops[i + 1]
+    else {
+        return None;
+    };
     if name != "__list_concat" {
         return None;
     }
-    let [CallArg::Handle(x), CallArg::Handle(t2)] = args.as_slice() else { return None };
+    let [CallArg::Handle(x), CallArg::Handle(t2)] = args.as_slice() else {
+        return None;
+    };
     if t2 != t {
         return None;
     }
-    let Op::Drop { v: x2 } = &ops[i + 2] else { return None };
-    let Op::SetLocal { local: x3, src: d2 } = &ops[i + 3] else { return None };
+    let Op::Drop { v: x2 } = &ops[i + 2] else {
+        return None;
+    };
+    let Op::SetLocal { local: x3, src: d2 } = &ops[i + 3] else {
+        return None;
+    };
     if x2 != x || x3 != x || d2 != d {
         return None;
     }
@@ -130,11 +146,21 @@ fn match_rc_window(
     occ: &BTreeMap<ValueId, usize>,
     def_at: &BTreeMap<ValueId, usize>,
 ) -> bool {
-    let Op::CallFn { dst: Some(d), name, args, .. } = &ops[i] else { return false };
+    let Op::CallFn {
+        dst: Some(d),
+        name,
+        args,
+        ..
+    } = &ops[i]
+    else {
+        return false;
+    };
     if name != "__list_concat_rc" {
         return false;
     }
-    let [CallArg::Handle(x), CallArg::Handle(t)] = args.as_slice() else { return false };
+    let [CallArg::Handle(x), CallArg::Handle(t)] = args.as_slice() else {
+        return false;
+    };
     // The next two ops: x's drop (any recursive list-drop flavor — the element
     // family decides which) and the rebind of x to the result.
     let dropped = match &ops[i + 1] {
@@ -145,16 +171,28 @@ fn match_rc_window(
         | Op::DropListStrStr { v } => v,
         _ => return false,
     };
-    let Op::SetLocal { local: x3, src: d2 } = &ops[i + 2] else { return false };
+    let Op::SetLocal { local: x3, src: d2 } = &ops[i + 2] else {
+        return false;
+    };
     if dropped != x || x3 != x || d2 != d {
         return false;
     }
     // `t` must be the 1-ELEMENT temp: its defining Alloc's len feeds from a
     // ConstInt 1. Anything else is a general `x = x + ys` concat, where an
     // append-one callee would be simply wrong.
-    let Some(&ti) = def_at.get(t) else { return false };
-    let Op::Alloc { init: crate::Init::DynListStr { len }, .. } = &ops[ti] else { return false };
-    let Some(&li) = def_at.get(len) else { return false };
+    let Some(&ti) = def_at.get(t) else {
+        return false;
+    };
+    let Op::Alloc {
+        init: crate::Init::DynListStr { len },
+        ..
+    } = &ops[ti]
+    else {
+        return false;
+    };
+    let Some(&li) = def_at.get(len) else {
+        return false;
+    };
     if !matches!(&ops[li], Op::ConstInt { value: 1, .. }) {
         return false;
     }
@@ -174,13 +212,27 @@ fn match_rc_window(
 /// 1.27 GB and 400k died — while the LIST twin (closed by the same machinery)
 /// ran flat at 20 MB.
 fn match_str_window(ops: &[Op], i: usize, occ: &BTreeMap<ValueId, usize>) -> bool {
-    let Op::CallFn { dst: Some(d), name, args, .. } = &ops[i] else { return false };
+    let Op::CallFn {
+        dst: Some(d),
+        name,
+        args,
+        ..
+    } = &ops[i]
+    else {
+        return false;
+    };
     if name != "__str_concat" {
         return false;
     }
-    let [CallArg::Handle(x), CallArg::Handle(_t)] = args.as_slice() else { return false };
-    let Op::Drop { v: x2 } = &ops[i + 1] else { return false };
-    let Op::SetLocal { local: x3, src: d2 } = &ops[i + 2] else { return false };
+    let [CallArg::Handle(x), CallArg::Handle(_t)] = args.as_slice() else {
+        return false;
+    };
+    let Op::Drop { v: x2 } = &ops[i + 1] else {
+        return false;
+    };
+    let Op::SetLocal { local: x3, src: d2 } = &ops[i + 2] else {
+        return false;
+    };
     if x2 != x || x3 != x || d2 != d {
         return false;
     }
@@ -227,7 +279,9 @@ pub fn rewrite_self_append(functions: &mut [MirFunction]) {
                         dst: Some(d),
                         name: "__list_append1".to_string(),
                         args: vec![CallArg::Handle(x), CallArg::Scalar(e)],
-                        result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+                        result: Some(crate::Repr::Ptr {
+                            layout: crate::PLACEHOLDER_LAYOUT,
+                        }),
                     });
                     out.push(Op::Drop { v: x });
                     out.push(Op::SetLocal { local: x, src: d });
@@ -243,7 +297,10 @@ pub fn rewrite_self_append(functions: &mut [MirFunction]) {
             }
             // The string window: rename in place (see match_str_window).
             if i + 3 <= f.ops.len() && match_str_window(&f.ops, i, &occ) {
-                let Op::CallFn { dst, args, result, .. } = f.ops[i].clone() else {
+                let Op::CallFn {
+                    dst, args, result, ..
+                } = f.ops[i].clone()
+                else {
                     unreachable!("match_str_window matched a non-CallFn head")
                 };
                 out.push(Op::CallFn {
@@ -258,7 +315,10 @@ pub fn rewrite_self_append(functions: &mut [MirFunction]) {
             // The heap-element window: rename the callee in place, keep every
             // other op (drop + rebind + the temp's build and trailing drop).
             if i + 3 <= f.ops.len() && match_rc_window(&f.ops, i, &occ, &def_at) {
-                let Op::CallFn { dst, args, result, .. } = f.ops[i].clone() else {
+                let Op::CallFn {
+                    dst, args, result, ..
+                } = f.ops[i].clone()
+                else {
                     unreachable!("match_rc_window matched a non-CallFn head")
                 };
                 out.push(Op::CallFn {

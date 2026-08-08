@@ -30,60 +30,60 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__flat_copy_sub_rc", // flatten copy — the result co-owns each heap sublist slot
     "__copy_slots_rc",    // list.set_str — rc-copy each String element
     "__ldls_share",       // list.take/drop_liststr — rc_inc each shared inner list
-    "value_get",          // Object linear-scan get — rc_inc the found value (caller co-owns the result)
-    "__vobj_fill",        // value.object — rc_inc each key/value (shallow copy)
-    "__lsv_copy",         // list.set_value — rc-copy each Value element
-    "__lsv_insert_fill",  // list.insert_value — rc_inc the inserted Value
+    "value_get", // Object linear-scan get — rc_inc the found value (caller co-owns the result)
+    "__vobj_fill", // value.object — rc_inc each key/value (shallow copy)
+    "__lsv_copy", // list.set_value — rc-copy each Value element
+    "__lsv_insert_fill", // list.insert_value — rc_inc the inserted Value
     // #850: the SAME two shapes for a heap element that is neither String nor Value
     // (tuple / record / nested list). The copy is element-type-BLIND — a slot holds a
     // block handle and rc_inc on a handle is one instruction whatever the block holds —
     // so the CoownLoop.v grounding is literally the `__lsv_copy` one: +1 per element on
     // the fill, returned by the RESULT list's recursive drop, which the call site routes
     // from the element's static type (`__drop_list_<R>` / DropListStrStr / …).
-    "__lsh_copy",         // list.{set,insert,remove_at,swap,take_end,drop_end,tail}_heapelem
-    "__lsh_insert_fill",  // list.insert_heapelem — rc_inc the inserted element
-    "__lshu_val",         // list.update_heapelem — rc_inc each shared (non-updated) element
-    "__ls_insert_fill",   // list.insert_str — rc_inc the inserted String
-    "__lsuv_val",         // list.update_value — rc_inc each shared (non-updated) Value element
-    "__lsu_val_str",      // list.update_str — rc_inc each shared (non-updated) String element
-    "__sort_copy_rc",     // list.sort_str — rc-copy each String element
+    "__lsh_copy", // list.{set,insert,remove_at,swap,take_end,drop_end,tail}_heapelem
+    "__lsh_insert_fill", // list.insert_heapelem — rc_inc the inserted element
+    "__lshu_val", // list.update_heapelem — rc_inc each shared (non-updated) element
+    "__ls_insert_fill", // list.insert_str — rc_inc the inserted String
+    "__lsuv_val", // list.update_value — rc_inc each shared (non-updated) Value element
+    "__lsu_val_str", // list.update_str — rc_inc each shared (non-updated) String element
+    "__sort_copy_rc", // list.sort_str — rc-copy each String element
     "__filterrc_fill",
     "__sbfr_init",
-    "__sbr_init",         // list.sort_by_rc — rc_inc each element handle copied into the result
+    "__sbr_init", // list.sort_by_rc — rc_inc each element handle copied into the result
     "__ivh_set_copy",
     "__hvl_set_copy",
     "__hvl_set_append",
-    "__msv_set_copy",    // map.set_msv — rc_inc the shared value handles (map_hval's exact shape)
-    "__msv_set_append",  // map.set_msv — rc_inc the appended value handle
+    "__msv_set_copy", // map.set_msv — rc_inc the shared value handles (map_hval's exact shape)
+    "__msv_set_append", // map.set_msv — rc_inc the appended value handle
     "__msv_remove_copy", // map.remove_msv — rc_inc each SURVIVING value handle (set_copy with one slot skipped)
-    "__hobj_set_copy",   // map.from_list_hobj — rc_inc the shared value handles (the msv shape, opaque values)
+    "__hobj_set_copy", // map.from_list_hobj — rc_inc the shared value handles (the msv shape, opaque values)
     "__hobj_set_append", // map.from_list_hobj — rc_inc the appended value handle
-    "__mlo_set_copy",    // map.set_mlo — rc_inc the shared value handles (the msv shape, list values)
-    "__mlo_set_append",  // map.set_mlo — rc_inc the appended value handle
+    "__mlo_set_copy",  // map.set_mlo — rc_inc the shared value handles (the msv shape, list values)
+    "__mlo_set_append", // map.set_mlo — rc_inc the appended value handle
     "__ivh_drop_vals",
-    "__hvl_drop_slots",    // list.filter_rc — rc_inc each KEPT non-String heap element (handle share)
-    "__vmerge_fill_a",    // value.merge — rc_inc each kept/overridden key+value
-    "__vmerge_app_b",     // value.merge — rc_inc each appended b key+value
-    "__mx_share_fill",    // matrix.from_lists/to_lists — rc_inc each shared row block
-    "__repeat_fill_rc",   // list.repeat_rc — rc_inc the element into each duplicated slot
-    "__enum_fill_h",      // list.enumerate_str — rc_inc the element into its (i, x) pair
-    "__zip_fill_rc",      // list.zip_rc — rc_inc both elements into each pair
-    "__lpart_fill_rc",    // list.partition_rc — rc_inc each element into its side
-    "__otl_fill_rc",      // option.to_list_rc — rc_inc the Some payload into the list
-    "__zip_fill_rcb",     // list.zip_sh — rc_inc the heap RIGHT element only
-    "__zip_fill_rca",     // list.zip_hs — rc_inc the heap LEFT element only
-    "__take_h_fill",      // list.take_hshare — rc_inc each shared element slot
-    "__uh_acquire",       // list.unique_hshare / dedup_hshare — rc_inc each KEPT shared element
+    "__hvl_drop_slots", // list.filter_rc — rc_inc each KEPT non-String heap element (handle share)
+    "__vmerge_fill_a",  // value.merge — rc_inc each kept/overridden key+value
+    "__vmerge_app_b",   // value.merge — rc_inc each appended b key+value
+    "__mx_share_fill",  // matrix.from_lists/to_lists — rc_inc each shared row block
+    "__repeat_fill_rc", // list.repeat_rc — rc_inc the element into each duplicated slot
+    "__enum_fill_h",    // list.enumerate_str — rc_inc the element into its (i, x) pair
+    "__zip_fill_rc",    // list.zip_rc — rc_inc both elements into each pair
+    "__lpart_fill_rc",  // list.partition_rc — rc_inc each element into its side
+    "__otl_fill_rc",    // option.to_list_rc — rc_inc the Some payload into the list
+    "__zip_fill_rcb",   // list.zip_sh — rc_inc the heap RIGHT element only
+    "__zip_fill_rca",   // list.zip_hs — rc_inc the heap LEFT element only
+    "__take_h_fill",    // list.take_hshare — rc_inc each shared element slot
+    "__uh_acquire",     // list.unique_hshare / dedup_hshare — rc_inc each KEPT shared element
     "__skv_entries_fill", // map.entries_skv — rc_inc each key into its (k, v) pair
-    "__vu_fill",          // value.pick/omit — rc_inc each kept key+value into the fresh Object
-    "__vu_ren_fill_c",    // value.to_camel_case — rc_inc each value (keys are fresh owned strings)
-    "__vu_ren_fill_s",    // value.to_snake_case — rc_inc each value (keys are fresh owned strings)
-    "__ordc_copy_rc",     // list.sort_{tss,tsstr,lint,oint} — rc-copy each compound element (the __sort_copy_rc shape)
-    "__ordc_some_tss",    // list.min/max_tss — rc_inc the winning element into the fresh Some (the __otl_fill_rc shape)
-    "__ordc_some_tsstr",  // list.min/max_tsstr — same share-into-Some
-    "__ordc_some_lint",   // list.min/max_lint — same share-into-Some
-    "__ordc_some_lstr",   // list.min/max_lstr — same share-into-Some
-    "__ordc_some_oint",   // list.min/max_oint — same share-into-Some
+    "__vu_fill",        // value.pick/omit — rc_inc each kept key+value into the fresh Object
+    "__vu_ren_fill_c",  // value.to_camel_case — rc_inc each value (keys are fresh owned strings)
+    "__vu_ren_fill_s",  // value.to_snake_case — rc_inc each value (keys are fresh owned strings)
+    "__ordc_copy_rc", // list.sort_{tss,tsstr,lint,oint} — rc-copy each compound element (the __sort_copy_rc shape)
+    "__ordc_some_tss", // list.min/max_tss — rc_inc the winning element into the fresh Some (the __otl_fill_rc shape)
+    "__ordc_some_tsstr", // list.min/max_tsstr — same share-into-Some
+    "__ordc_some_lint", // list.min/max_lint — same share-into-Some
+    "__ordc_some_lstr", // list.min/max_lstr — same share-into-Some
+    "__ordc_some_oint", // list.min/max_oint — same share-into-Some
     "__mtc_entries_hvalt_fill", // map.entries_hvalt — rc_inc key + flat tuple value into each (k, v) pair
 ];
 
@@ -104,17 +104,17 @@ pub const COOWN_DROPS: &[&str] = &[
 /// one (a set/replace co-own that releases the old ref and acquires the new). Listed separately so the
 /// producer↔consumer documentation stays exact.
 pub const COOWN_SET_REPLACE: &[&str] = &[
-    "__set_slot_str",  // list.set_str  — rc_dec replaced + rc_inc new
-    "list_set_str",    // (reaches rc via the helpers above; admitted by name)
-    "__lsv_set",       // list.set_value — __drop_value replaced + rc_inc new
-    "list_set_value",  //
+    "__set_slot_str", // list.set_str  — rc_dec replaced + rc_inc new
+    "list_set_str",   // (reaches rc via the helpers above; admitted by name)
+    "__lsv_set",      // list.set_value — __drop_value replaced + rc_inc new
+    "list_set_value", //
     // #850: the heap-element twin. It releases the replaced slot with a PLAIN rc_dec
     // rather than a recursive drop, and that is exact: `__lsh_copy` had just taken one
     // reference for that slot and the SOURCE list holds its own for the whole call, so
     // the count cannot reach 0 here and no recursive free is owed. The element's real
     // recursive free happens once, later, through whichever list drops last.
-    "__lsh_set",           // list.set_heapelem — rc_dec replaced + rc_inc new
-    "list_set_heapelem",   // (reaches rc via the helpers above; admitted by name)
+    "__lsh_set",         // list.set_heapelem — rc_dec replaced + rc_inc new
+    "list_set_heapelem", // (reaches rc via the helpers above; admitted by name)
 ];
 
 /// Every routine permitted to name `prim.rc_inc` / `prim.rc_dec` (the union of the three roles above).
@@ -137,22 +137,41 @@ mod tests {
     fn coown_names_documented() {
         // No name appears in more than one role list (the roles are disjoint; set-replace is its own).
         for p in COOWN_PRODUCERS {
-            assert!(!COOWN_DROPS.contains(p), "{p} is in both PRODUCERS and DROPS");
-            assert!(!COOWN_SET_REPLACE.contains(p), "{p} is in both PRODUCERS and SET_REPLACE");
+            assert!(
+                !COOWN_DROPS.contains(p),
+                "{p} is in both PRODUCERS and DROPS"
+            );
+            assert!(
+                !COOWN_SET_REPLACE.contains(p),
+                "{p} is in both PRODUCERS and SET_REPLACE"
+            );
         }
         for d in COOWN_DROPS {
-            assert!(!COOWN_SET_REPLACE.contains(d), "{d} is in both DROPS and SET_REPLACE");
+            assert!(
+                !COOWN_SET_REPLACE.contains(d),
+                "{d} is in both DROPS and SET_REPLACE"
+            );
         }
         // The anchor is non-empty in each role (the pattern needs producers AND drops to compose).
         assert!(!COOWN_PRODUCERS.is_empty() && !COOWN_DROPS.is_empty());
         // Every recursive-drop name starts with `__` (a trusted internal) — never a public stdlib name
         // that arbitrary code could call to reach a raw free.
         for d in COOWN_DROPS {
-            assert!(d.starts_with("__"), "drop {d} must be an internal __ routine");
+            assert!(
+                d.starts_with("__"),
+                "drop {d} must be an internal __ routine"
+            );
         }
         // The union accessor agrees with the role lists (no name admitted that isn't documented).
-        for name in COOWN_PRODUCERS.iter().chain(COOWN_DROPS).chain(COOWN_SET_REPLACE) {
-            assert!(is_coown_rc_routine(name), "{name} not admitted by is_coown_rc_routine");
+        for name in COOWN_PRODUCERS
+            .iter()
+            .chain(COOWN_DROPS)
+            .chain(COOWN_SET_REPLACE)
+        {
+            assert!(
+                is_coown_rc_routine(name),
+                "{name} not admitted by is_coown_rc_routine"
+            );
         }
     }
 }

@@ -111,12 +111,12 @@ fn region_safe_op(op: &Op, mg_lo: i64, mg_hi: i64, in_closure: &BTreeSet<String>
 
 /// Transitive `CallFn` closure of `roots` over the program's own functions.
 /// `None` when a callee is not a defined `MirFunction` (import/runtime name).
-fn callee_closure(
-    prog: &MirProgram,
-    roots: [&str; 2],
-) -> Option<BTreeSet<String>> {
-    let by_name: BTreeMap<&str, &MirFunction> =
-        prog.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+fn callee_closure(prog: &MirProgram, roots: [&str; 2]) -> Option<BTreeSet<String>> {
+    let by_name: BTreeMap<&str, &MirFunction> = prog
+        .functions
+        .iter()
+        .map(|f| (f.name.as_str(), f))
+        .collect();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut work: VecDeque<String> = roots.iter().map(|s| s.to_string()).collect();
     while let Some(n) = work.pop_front() {
@@ -145,16 +145,31 @@ fn match_region_window(
     i: usize,
     occ: &BTreeMap<ValueId, usize>,
 ) -> Option<(ValueId, String, String, usize)> {
-    let Op::CallFn { dst: Some(t), name: f, args: fargs, result: Some(fres) } = &ops[i] else {
+    let Op::CallFn {
+        dst: Some(t),
+        name: f,
+        args: fargs,
+        result: Some(fres),
+    } = &ops[i]
+    else {
         return None;
     };
     if !fres.is_heap() {
         return None;
     }
-    if !fargs.iter().all(|a| matches!(a, CallArg::Scalar(_) | CallArg::Imm(_))) {
+    if !fargs
+        .iter()
+        .all(|a| matches!(a, CallArg::Scalar(_) | CallArg::Imm(_)))
+    {
         return None;
     }
-    let Op::CallFn { name: g, args: gargs, result: gres, .. } = &ops[i + 1] else {
+    let Op::CallFn {
+        name: g,
+        args: gargs,
+        result: gres,
+        ..
+    } = &ops[i + 1]
+    else {
         return None;
     };
     if matches!(gres, Some(r) if r.is_heap()) {
@@ -237,13 +252,25 @@ fn stores_root_at_fresh_allocs(f: &MirFunction) -> bool {
         if matches!(op, Op::ListSetScalar { .. }) {
             return false;
         }
-        let Op::Prim { kind: PrimKind::Store { .. }, args, .. } = op else { continue };
+        let Op::Prim {
+            kind: PrimKind::Store { .. },
+            args,
+            ..
+        } = op
+        else {
+            continue;
+        };
         let mut v = args[0];
         let mut ok = false;
         for _ in 0..8 {
             let Some(&d) = def.get(&v) else { break };
             match &f.ops[d] {
-                Op::IntBinOp { op: crate::IntOp::Add, a, b, .. } => {
+                Op::IntBinOp {
+                    op: crate::IntOp::Add,
+                    a,
+                    b,
+                    ..
+                } => {
                     if consts.contains_key(b) {
                         v = *a;
                     } else if consts.contains_key(a) {
@@ -252,7 +279,11 @@ fn stores_root_at_fresh_allocs(f: &MirFunction) -> bool {
                         break;
                     }
                 }
-                Op::Prim { kind: PrimKind::Handle, args: hargs, .. } => {
+                Op::Prim {
+                    kind: PrimKind::Handle,
+                    args: hargs,
+                    ..
+                } => {
                     let Some(&hd) = def.get(&hargs[0]) else { break };
                     ok = matches!(&f.ops[hd], Op::Alloc { .. });
                     break;
@@ -272,7 +303,9 @@ fn const_listlit_shapes(f: &MirFunction) -> Vec<Vec<i64>> {
     let (_, consts) = fn_tables(f);
     let mut shapes: Vec<Vec<i64>> = Vec::new();
     for op in &f.ops {
-        let Op::ListLit { elems, .. } = op else { continue };
+        let Op::ListLit { elems, .. } = op else {
+            continue;
+        };
         let vals: Option<Vec<i64>> = elems.iter().map(|e| consts.get(e).copied()).collect();
         if let Some(v) = vals {
             if !shapes.contains(&v) {
@@ -370,7 +403,13 @@ fn collect_region_windows(prog: &MirProgram, mg_lo: i64, mg_hi: i64) -> Vec<Regi
                 Some((c, shapes))
             });
             if let Some((c, shapes)) = entry.clone() {
-                windows.push(RegionWindow { fi, start: i, drop_at, closure: c, shapes });
+                windows.push(RegionWindow {
+                    fi,
+                    start: i,
+                    drop_at,
+                    closure: c,
+                    shapes,
+                });
                 i = drop_at + 1;
             } else {
                 i += 1;
@@ -386,25 +425,25 @@ fn collect_region_windows(prog: &MirProgram, mg_lo: i64, mg_hi: i64) -> Vec<Regi
 /// agree on the singleton shape vector — it changes the clone's arity.
 /// Disagreement disables singletons everywhere: conservative, and rare.
 fn consolidate_singleton_shapes(windows: &mut Vec<RegionWindow>) {
-        let mut by_name: BTreeMap<&str, &Vec<Vec<i64>>> = BTreeMap::new();
-        let mut conflict = false;
-        for w in &*windows {
-            for n in &w.closure {
-                match by_name.get(n.as_str()) {
-                    Some(existing) if *existing != &w.shapes => {
-                        conflict = true;
-                    }
-                    _ => {
-                        by_name.insert(n, &w.shapes);
-                    }
+    let mut by_name: BTreeMap<&str, &Vec<Vec<i64>>> = BTreeMap::new();
+    let mut conflict = false;
+    for w in &*windows {
+        for n in &w.closure {
+            match by_name.get(n.as_str()) {
+                Some(existing) if *existing != &w.shapes => {
+                    conflict = true;
+                }
+                _ => {
+                    by_name.insert(n, &w.shapes);
                 }
             }
         }
-        if conflict {
-            for w in &mut *windows {
-                w.shapes.clear();
-            }
+    }
+    if conflict {
+        for w in &mut *windows {
+            w.shapes.clear();
         }
+    }
 }
 
 /// Pass B1: rewrite the windows, per function.
@@ -418,20 +457,30 @@ fn rewrite_region_windows(
     let mut clones_needed: BTreeMap<String, Vec<Vec<i64>>> = BTreeMap::new();
     for w in windows.iter().rev() {
         for n in &w.closure {
-            clones_needed.entry(n.clone()).or_insert_with(|| w.shapes.clone());
+            clones_needed
+                .entry(n.clone())
+                .or_insert_with(|| w.shapes.clone());
         }
         let func = &mut prog.functions[w.fi];
         let mut max_id = max_value_id_in(func);
         let mut seq: Vec<Op> = Vec::new();
         max_id += 1;
         let sp = ValueId(max_id);
-        seq.push(Op::Prim { kind: PrimKind::RegionSave, dst: Some(sp), args: vec![] });
+        seq.push(Op::Prim {
+            kind: PrimKind::RegionSave,
+            dst: Some(sp),
+            args: vec![],
+        });
         // Build each singleton ONCE inside the region; the clones receive its
         // handle as a trailing param and alias it per instance.
         let singleton_ids = emit_region_singletons(&w.shapes, &mut max_id, &mut seq);
         seq.push(region_call_clone(&func.ops[w.start], &singleton_ids));
         seq.push(region_call_clone(&func.ops[w.start + 1], &singleton_ids));
-        seq.push(Op::Prim { kind: PrimKind::RegionRestore, dst: None, args: vec![sp] });
+        seq.push(Op::Prim {
+            kind: PrimKind::RegionRestore,
+            dst: None,
+            args: vec![sp],
+        });
         // Keep the ops between the consumer and the (removed) drop — they
         // cannot reference `t` (occ == 3) and now run after the restore.
         for k in w.start + 2..w.drop_at {
@@ -476,12 +525,18 @@ fn emit_region_singletons(
         for value in shape {
             *max_id += 1;
             let c = ValueId(*max_id);
-            seq.push(Op::ConstInt { dst: c, value: *value });
+            seq.push(Op::ConstInt {
+                dst: c,
+                value: *value,
+            });
             elem_ids.push(c);
         }
         *max_id += 1;
         let s = ValueId(*max_id);
-        seq.push(Op::ListLit { dst: s, elems: elem_ids });
+        seq.push(Op::ListLit {
+            dst: s,
+            elems: elem_ids,
+        });
         singleton_ids.push(s);
     }
     singleton_ids
@@ -511,7 +566,9 @@ fn region_call_clone(op: &Op, singleton_ids: &[ValueId]) -> Op {
 /// a stray increment is a harmless store.
 fn append_region_clones(prog: &mut MirProgram, clones_needed: &BTreeMap<String, Vec<Vec<i64>>>) {
     for (name, shapes) in clones_needed {
-        let Some(orig) = prog.functions.iter().find(|f| &f.name == name) else { continue };
+        let Some(orig) = prog.functions.iter().find(|f| &f.name == name) else {
+            continue;
+        };
         let mut clone = orig.clone();
         clone.name = rgn_name(name);
         let mut max_id: u32 = 0;
@@ -532,7 +589,9 @@ fn append_region_clones(prog: &mut MirProgram, clones_needed: &BTreeMap<String, 
             let p = ValueId(max_id);
             clone.params.push(crate::MirParam {
                 value: p,
-                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                repr: crate::Repr::Ptr {
+                    layout: crate::PLACEHOLDER_LAYOUT,
+                },
             });
             singleton_params.push(p);
         }
@@ -549,7 +608,10 @@ fn append_region_clones(prog: &mut MirProgram, clones_needed: &BTreeMap<String, 
                         if let Some(k) = shapes.iter().position(|s| s == &v) {
                             // Every instance of this immutable all-const
                             // block ALIASES the one built at region entry.
-                            return Op::Dup { dst: *dst, src: singleton_params[k] };
+                            return Op::Dup {
+                                dst: *dst,
+                                src: singleton_params[k],
+                            };
                         }
                     }
                 }

@@ -31,11 +31,12 @@ use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
 use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
+use almide_ir::IrTypeDeclKind;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_ir::IrTypeDeclKind;
 use almide_mir::certificate::{
-    name_witness_string, ownership_certificate, program_cap_graph_witness, reachable_caps_or_tainted,
+    name_witness_string, ownership_certificate, program_cap_graph_witness,
+    reachable_caps_or_tainted,
 };
 use almide_mir::{Capability, MirFunction, MirProgram, Op};
 use almide_optimize::{mono, optimize};
@@ -60,7 +61,15 @@ use std::path::{Path, PathBuf};
 /// "unanalyzable callee". SOUND: the concat reaches no Stdout, and its operands'
 /// own calls are captured separately by the same marker pass.
 const KNOWN_STDOUT_FREE_BUILTINS: &[&str] = &[
-    "assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string", "__str_concat", "__list_concat", "option.unwrap_or_str",
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "eprintln",
+    "panic",
+    "to_string",
+    "__str_concat",
+    "__list_concat",
+    "option.unwrap_or_str",
 ];
 
 /// Count call nodes (Call / RuntimeCall / TailCall) in an IR expression tree —
@@ -140,10 +149,7 @@ fn count_eq_calls_depth(
         return 1;
     }
     if let Ty::Applied(TC::Map, kv) = ty {
-        if kv.len() == 2
-            && matches!(kv[0], Ty::String)
-            && !almide_mir::lower::is_heap_ty(&kv[1])
-        {
+        if kv.len() == 2 && matches!(kv[0], Ty::String) && !almide_mir::lower::is_heap_ty(&kv[1]) {
             return 1;
         }
     }
@@ -278,7 +284,13 @@ fn count_ir_calls(
             // not yet lowered in some position just leaves mir < ir (honest caps taint), never the
             // mir > ir over-count that would falsely caps-verify a fn. __str_concat is pure (the
             // transitive fold sees no Stdout), so the synthetic call adds no real capability.
-            if matches!(&e.kind, almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }) {
+            if matches!(
+                &e.kind,
+                almide_ir::IrExprKind::BinOp {
+                    op: almide_ir::BinOp::ConcatStr,
+                    ..
+                }
+            ) {
                 self.n += 1;
             }
             // A STRING equality `a == b` / `a != b` (BinOp::Eq/Neq over String operands) lowers
@@ -307,7 +319,11 @@ fn count_ir_calls(
             // with 0, a prim). Credit the operator node so `mir_calls <= ir_calls` holds. string.cmp
             // is pure (byte compare, no Stdout).
             if let almide_ir::IrExprKind::BinOp {
-                op: almide_ir::BinOp::Lt | almide_ir::BinOp::Lte | almide_ir::BinOp::Gt | almide_ir::BinOp::Gte,
+                op:
+                    almide_ir::BinOp::Lt
+                    | almide_ir::BinOp::Lte
+                    | almide_ir::BinOp::Gt
+                    | almide_ir::BinOp::Gte,
                 left,
                 ..
             } = &e.kind
@@ -336,7 +352,11 @@ fn count_ir_calls(
             // emits a call for (scalar, or String/Value heap-element); a heap-FIELD aggregate element
             // (tuple/record) still DEFERS (no MIR call, no count). `mir_calls <= ir_calls` holds BY
             // CONSTRUCTION. Both concat runtimes are pure (prim memory ops, no Stdout).
-            if let almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } = &e.kind {
+            if let almide_ir::IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatList,
+                ..
+            } = &e.kind
+            {
                 // `try_lower_concat_list` emits AT MOST ONE synthetic `__list_concat`/`__list_concat_rc`
                 // per ConcatList node (its operands materialize without their own concat call), and a
                 // ConcatList it cannot lower WALLS the enclosing function (so that function is not
@@ -357,9 +377,13 @@ fn count_ir_calls(
             // position just leaves mir < ir — honest caps taint, never the mir > ir over-count that
             // would falsely caps-verify a fn). Both callees are PURE (math/math_fpow modules reach
             // no Stdout), so the synthetic call adds no real capability.
-            if matches!(&e.kind, almide_ir::IrExprKind::BinOp {
-                op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt, ..
-            }) {
+            if matches!(
+                &e.kind,
+                almide_ir::IrExprKind::BinOp {
+                    op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt,
+                    ..
+                }
+            ) {
                 self.n += 1;
             }
             // A HEAP `Range` in a call-ARGUMENT position (`f(0..n)`) lowers to ONE synthetic
@@ -513,7 +537,11 @@ fn count_ir_calls(
             almide_ir::visit::walk_expr(self, e);
         }
     }
-    let mut cc = CallCounter { n: 0, registry, variant_layouts };
+    let mut cc = CallCounter {
+        n: 0,
+        registry,
+        variant_layouts,
+    };
     // `visit_expr` (NOT `walk_expr`) so a ROOT-position call is counted too — an
     // expression-bodied `fn f() = g(x)` has the call AT the body root; `walk_expr`
     // would descend past it and undercount (masking a nested elision in its args,
@@ -552,7 +580,11 @@ fn plus_one_events_backed(mir: &MirFunction) -> bool {
             _ => false,
         })
         .count();
-    let dups = mir.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count();
+    let dups = mir
+        .ops
+        .iter()
+        .filter(|o| matches!(o, Op::Dup { .. }))
+        .count();
     // A branch-merge dst's `i` (a RELEASED merge's moved-in reference, or a
     // slot-FEEDER merge's routed `i` — see ownership_certificate) is backed by
     // the arm value's real producer: the merge is a reference changing hands
@@ -594,7 +626,10 @@ fn dep_paths_for(path: &Path) -> Vec<(almide::project::PkgId, std::path::PathBuf
         if toml.exists() {
             if let Ok(proj) = almide::project::parse_toml(&toml) {
                 if let Ok(deps) = almide::project_fetch::fetch_all_deps(&proj) {
-                    return deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect();
+                    return deps
+                        .into_iter()
+                        .map(|fd| (fd.pkg_id, fd.source_dir))
+                        .collect();
                 }
             }
             return Vec::new();

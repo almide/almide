@@ -39,7 +39,11 @@ fn other_carries_neither_text() {
 
 #[test]
 fn shape_survives_construction_and_nesting() {
-    let span = almide_ir::Span { line: 3, col: 5, end_col: 8 };
+    let span = almide_ir::Span {
+        line: 3,
+        col: 5,
+        end_col: 8,
+    };
     let inner = almide_mir::lower::LowerError::shaped(
         Some(span),
         WallShape::WhileHeapAccumulator,

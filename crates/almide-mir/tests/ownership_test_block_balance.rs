@@ -94,7 +94,9 @@ fn reject_reason(line: &str) -> Option<String> {
                 let (t, e) = inner.split_once('|').unwrap_or((inner.as_str(), ""));
                 match (exec(&ops_of(t), rc), exec(&ops_of(e), rc)) {
                     (Some(a), Some(b)) if a == b => rc = a,
-                    (Some(a), Some(b)) => return Some(format!("branch arms disagree ({a} vs {b})")),
+                    (Some(a), Some(b)) => {
+                        return Some(format!("branch arms disagree ({a} vs {b})"))
+                    }
                     _ => return Some("branch arm faults".into()),
                 }
                 i = end + 1;
@@ -140,8 +142,8 @@ fn test_block_bodies_own_every_heap_object_they_acquire() {
     // shape, so `debug_dump_mir` (which skips test fns) cannot see it.
     let source = std::fs::read_to_string(root.join("spec/lang/fallible_lambda_test.almd"))
         .expect("read the L9 fixture");
-    let certs = almide_mir::pipeline::ownership_certificates(&source)
-        .expect("the L9 fixture must lower");
+    let certs =
+        almide_mir::pipeline::ownership_certificates(&source).expect("the L9 fixture must lower");
     assert!(
         certs.iter().any(|(n, _)| n.contains("L9")),
         "the L9 test body must reach the certificate view — if it stopped \
@@ -154,5 +156,9 @@ fn test_block_bodies_own_every_heap_object_they_acquire() {
                 .filter_map(move |l| reject_reason(l).map(|r| format!("{name}: {l:?} — {r}")))
         })
         .collect();
-    assert!(bad.is_empty(), "unbalanced ownership witness(es):\n  {}", bad.join("\n  "));
+    assert!(
+        bad.is_empty(),
+        "unbalanced ownership witness(es):\n  {}",
+        bad.join("\n  ")
+    );
 }

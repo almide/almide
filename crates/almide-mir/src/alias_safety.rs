@@ -91,8 +91,7 @@ use std::collections::HashSet;
 // reason this entry is safe even though the fn can return an argument: the
 // runtime rc check proves at execution time what the other entries prove
 // statically (see concat_to_append.rs for the window that emits the call).
-const TRUSTED_FRESH_ALLOCATORS: &[&str] =
-    &["__list_concat", "__list_concat_rc", "__list_append1"];
+const TRUSTED_FRESH_ALLOCATORS: &[&str] = &["__list_concat", "__list_concat_rc", "__list_append1"];
 
 /// One forward step of the "which values are possibly aliased right now"
 /// dataflow fact, applied in place to `escaped`. See the module doc for the
@@ -130,7 +129,9 @@ fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
         // result, never `dup`-and-return an argument. `Call`/`CallImport`/
         // `CallIndirect` have no such whitelist (a closure callee especially
         // is UNANALYZABLE — see `Op::CallIndirect`'s own doc comment).
-        Op::CallFn { dst, name, args, .. } => {
+        Op::CallFn {
+            dst, name, args, ..
+        } => {
             for a in args {
                 if let CallArg::Handle(id) = a {
                     escaped.insert(*id);
@@ -217,7 +218,11 @@ fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
         // the original's bytes field": `var p2 = p1` Dup+field-copies `buf`
         // into a fresh record, and reading `p2.buf` back via `LoadHandle`
         // before `bytes.set_at` was wrongly treated as never-escaped).
-        Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(d), .. } => {
+        Op::Prim {
+            kind: crate::PrimKind::LoadHandle,
+            dst: Some(d),
+            ..
+        } => {
             escaped.insert(*d);
         }
         // Explicitly refcount-neutral reads (own doc comments: "no refcount
@@ -296,15 +301,29 @@ mod tests {
     }
 
     fn base_func(ops: Vec<Op>) -> MirFunction {
-        MirFunction { name: "f".to_string(), params: vec![], ops, ..Default::default() }
+        MirFunction {
+            name: "f".to_string(),
+            params: vec![],
+            ops,
+            ..Default::default()
+        }
     }
 
     fn alloc_list(dst: ValueId) -> Op {
-        Op::Alloc { dst, repr: Repr::Ptr { layout: PLACEHOLDER_LAYOUT }, init: Init::Opaque }
+        Op::Alloc {
+            dst,
+            repr: Repr::Ptr {
+                layout: PLACEHOLDER_LAYOUT,
+            },
+            init: Init::Opaque,
+        }
     }
 
     fn make_unique_count(f: &MirFunction) -> usize {
-        f.ops.iter().filter(|op| matches!(op, Op::MakeUnique { .. })).count()
+        f.ops
+            .iter()
+            .filter(|op| matches!(op, Op::MakeUnique { .. }))
+            .count()
     }
 
     #[test]
@@ -313,7 +332,11 @@ mod tests {
             alloc_list(v(1)),
             Op::LoopStart,
             Op::MakeUnique { v: v(1) },
-            Op::ListSetScalar { list: v(1), idx: v(2), val: v(3) },
+            Op::ListSetScalar {
+                list: v(1),
+                idx: v(2),
+                val: v(3),
+            },
             Op::LoopEnd,
             Op::Drop { v: v(1) },
         ])];
@@ -325,9 +348,16 @@ mod tests {
     fn keeps_makeunique_when_the_value_is_dup_aliased() {
         let mut fs = vec![base_func(vec![
             alloc_list(v(1)),
-            Op::Dup { dst: v(4), src: v(1) },
+            Op::Dup {
+                dst: v(4),
+                src: v(1),
+            },
             Op::MakeUnique { v: v(1) },
-            Op::ListSetScalar { list: v(1), idx: v(2), val: v(3) },
+            Op::ListSetScalar {
+                list: v(1),
+                idx: v(2),
+                val: v(3),
+            },
             Op::Drop { v: v(1) },
             Op::Drop { v: v(4) },
         ])];
@@ -346,7 +376,11 @@ mod tests {
                 result: None,
             },
             Op::MakeUnique { v: v(1) },
-            Op::ListSetScalar { list: v(1), idx: v(2), val: v(3) },
+            Op::ListSetScalar {
+                list: v(1),
+                idx: v(2),
+                val: v(3),
+            },
             Op::Drop { v: v(1) },
         ])];
         elide_unaliased_make_unique(&mut fs);
@@ -357,11 +391,18 @@ mod tests {
     fn keeps_makeunique_when_the_value_flows_out_of_a_branch_merge() {
         let mut fs = vec![base_func(vec![
             alloc_list(v(1)),
-            Op::IfThen { cond: v(2), dst: Some(v(5)) },
+            Op::IfThen {
+                cond: v(2),
+                dst: Some(v(5)),
+            },
             Op::Else { val: Some(v(1)) },
             Op::EndIf { val: Some(v(1)) },
             Op::MakeUnique { v: v(1) },
-            Op::ListSetScalar { list: v(1), idx: v(2), val: v(3) },
+            Op::ListSetScalar {
+                list: v(1),
+                idx: v(2),
+                val: v(3),
+            },
         ])];
         elide_unaliased_make_unique(&mut fs);
         assert_eq!(make_unique_count(&fs[0]), 1);
@@ -381,15 +422,24 @@ mod tests {
                 dst: Some(v(9)),
                 name: "__list_concat".to_string(),
                 args: vec![CallArg::Handle(v(1)), CallArg::Handle(v(8))],
-                result: Some(Repr::Ptr { layout: PLACEHOLDER_LAYOUT }),
+                result: Some(Repr::Ptr {
+                    layout: PLACEHOLDER_LAYOUT,
+                }),
             },
             Op::Drop { v: v(1) },
-            Op::SetLocal { local: v(1), src: v(9) }, // xs := concat result
+            Op::SetLocal {
+                local: v(1),
+                src: v(9),
+            }, // xs := concat result
             Op::LoopEnd,
             // A later, unrelated mutation loop over the SAME slot v(1).
             Op::LoopStart,
             Op::MakeUnique { v: v(1) },
-            Op::ListSetScalar { list: v(1), idx: v(2), val: v(3) },
+            Op::ListSetScalar {
+                list: v(1),
+                idx: v(2),
+                val: v(3),
+            },
             Op::LoopEnd,
         ])];
         elide_unaliased_make_unique(&mut fs);
@@ -407,15 +457,27 @@ mod tests {
                 dst: Some(v(9)),
                 name: "__list_concat".to_string(),
                 args: vec![CallArg::Handle(v(1)), CallArg::Handle(v(8))],
-                result: Some(Repr::Ptr { layout: PLACEHOLDER_LAYOUT }),
+                result: Some(Repr::Ptr {
+                    layout: PLACEHOLDER_LAYOUT,
+                }),
             },
             Op::Drop { v: v(1) },
-            Op::SetLocal { local: v(1), src: v(9) },
+            Op::SetLocal {
+                local: v(1),
+                src: v(9),
+            },
             Op::LoopEnd,
             // v(1) (post-rebind) escapes here too.
-            Op::Dup { dst: v(20), src: v(1) },
+            Op::Dup {
+                dst: v(20),
+                src: v(1),
+            },
             Op::MakeUnique { v: v(1) },
-            Op::ListSetScalar { list: v(1), idx: v(2), val: v(3) },
+            Op::ListSetScalar {
+                list: v(1),
+                idx: v(2),
+                val: v(3),
+            },
         ])];
         elide_unaliased_make_unique(&mut fs);
         assert_eq!(make_unique_count(&fs[0]), 1);
@@ -435,9 +497,16 @@ mod tests {
                 dst: Some(v(1)),
                 args: vec![v(0)],
             },
-            Op::Dup { dst: v(2), src: v(1) }, // v(1) never referenced again
+            Op::Dup {
+                dst: v(2),
+                src: v(1),
+            }, // v(1) never referenced again
             Op::MakeUnique { v: v(2) },
-            Op::ListSetScalar { list: v(2), idx: v(3), val: v(4) },
+            Op::ListSetScalar {
+                list: v(2),
+                idx: v(3),
+                val: v(4),
+            },
         ])];
         elide_unaliased_make_unique(&mut fs);
         assert_eq!(make_unique_count(&fs[0]), 1);
@@ -454,10 +523,16 @@ mod tests {
                 dst: Some(v(9)),
                 name: "some_user_fn".to_string(),
                 args: vec![CallArg::Handle(v(1))],
-                result: Some(Repr::Ptr { layout: PLACEHOLDER_LAYOUT }),
+                result: Some(Repr::Ptr {
+                    layout: PLACEHOLDER_LAYOUT,
+                }),
             },
             Op::MakeUnique { v: v(9) },
-            Op::ListSetScalar { list: v(9), idx: v(2), val: v(3) },
+            Op::ListSetScalar {
+                list: v(9),
+                idx: v(2),
+                val: v(3),
+            },
         ])];
         elide_unaliased_make_unique(&mut fs);
         assert_eq!(make_unique_count(&fs[0]), 1);
@@ -474,7 +549,10 @@ mod tests {
     fn keeps_makeunique_on_a_field_value_read_back_via_loadhandle() {
         let mut fs = vec![base_func(vec![
             alloc_list(v(1)), // the original record's buf field (e.g. Bytes)
-            Op::Dup { dst: v(2), src: v(1) }, // field-copy Dup into the new record
+            Op::Dup {
+                dst: v(2),
+                src: v(1),
+            }, // field-copy Dup into the new record
             Op::Prim {
                 kind: crate::PrimKind::Store { width: 8 },
                 dst: None,
@@ -488,7 +566,11 @@ mod tests {
                 args: vec![v(3)],
             },
             Op::MakeUnique { v: v(10) },
-            Op::ListSetScalar { list: v(10), idx: v(4), val: v(5) },
+            Op::ListSetScalar {
+                list: v(10),
+                idx: v(4),
+                val: v(5),
+            },
         ])];
         elide_unaliased_make_unique(&mut fs);
         assert_eq!(make_unique_count(&fs[0]), 1);

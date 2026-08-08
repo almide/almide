@@ -50,10 +50,10 @@ use std::collections::{BTreeMap, BTreeSet};
 const NWRITTEN_ADDR: u32 = 0; // i32 scratch for fd_write's bytes-written out-param
 const IOVEC_ADDR: u32 = 8; // [buf: i32][len: i32]
 const ITOA_TMP_ADDR: u32 = 32; // reversed-digit scratch (≤ 20 bytes)
-// The fs.read_text path_open error message — a CONST byte run in the data section
-// (the `$read_text_file` Err arm copies it into a canonical String). Reserved BELOW the
-// dynamic print labels so the per-function label writer (which starts at `LABELS_ADDR`)
-// never overlaps it.
+                               // The fs.read_text path_open error message — a CONST byte run in the data section
+                               // (the `$read_text_file` Err arm copies it into a canonical String). Reserved BELOW the
+                               // dynamic print labels so the per-function label writer (which starts at `LABELS_ADDR`)
+                               // never overlaps it.
 const RTF_NOTFOUND_ADDR: u32 = 64; // "file not found" message bytes
 const RTF_NOTFOUND_LEN: u32 = 14; // len of "file not found"
 const RDIR_ERR_ADDR: u32 = 80; // "directory not found" message bytes (fs.list_dir Err)
@@ -65,18 +65,18 @@ const MKDIR_ERR_LEN: u32 = 12; // len of "mkdir failed"
 const REMOVE_ERR_ADDR: u32 = 124; // "remove failed" message bytes (fs.remove_all Err) — 124..137
 const REMOVE_ERR_LEN: u32 = 13; // len of "remove failed"
 const DIVZERO_MSG_ADDR: u32 = 144; // "Error: division by zero\n" — 144..169 (__div_trap)
-// The explicit-Result main Err protocol ($__main_err) REUSES the div-zero line's bytes:
-// its first 7 bytes are "Error: " and its byte 23 is the trailing "\n" — no new data.
+                                   // The explicit-Result main Err protocol ($__main_err) REUSES the div-zero line's bytes:
+                                   // its first 7 bytes are "Error: " and its byte 23 is the trailing "\n" — no new data.
 const MAIN_ERR_PREFIX_LEN: u32 = 7; // "Error: "
 const MAIN_ERR_NL_ADDR: u32 = DIVZERO_MSG_ADDR + 23; // the div-zero line's "\n"
 const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
 const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
 const OOM_MSG_ADDR: u32 = 376; // "Error: out of memory\n" — 376..397 ($oom, C-197)
 const LABELS_ADDR: u32 = 400; // print labels (the data section) — after ALL fixed messages (incl. fs errno + oom)
-// fs errno → native std::io Display strings (240..376, FIXED — placed BEFORE the
-// variable-length labels region so labels can never overwrite them): path_open errors
-// map to the EXACT message native std::fs emits, so `err(e)` observes byte-identical
-// text (C-042 kin).
+                              // fs errno → native std::io Display strings (240..376, FIXED — placed BEFORE the
+                              // variable-length labels region so labels can never overwrite them): path_open errors
+                              // map to the EXACT message native std::fs emits, so `err(e)` observes byte-identical
+                              // text (C-042 kin).
 const FS_ERR_NOENT_ADDR: u32 = 240; // "No such file or directory (os error 2)" — WASI NOENT(44)
 const FS_ERR_NOENT_LEN: u32 = 38;
 const FS_ERR_ACCES_ADDR: u32 = 280; // "Permission denied (os error 13)" — WASI ACCES(2)
@@ -86,10 +86,10 @@ const FS_ERR_NOTDIR_LEN: u32 = 29;
 const FS_ERR_ISDIR_ADDR: u32 = 344; // "Is a directory (os error 21)" — WASI ISDIR(31)
 const FS_ERR_ISDIR_LEN: u32 = 28;
 const SCRATCH_ADDR: u32 = 768; // the line build buffer
-// The bump allocator's DEFAULT start — also the mutable-global slot region's base
-// (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
-// module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots
-// are never allocated over (N = 0 keeps every existing module byte-identical).
+                               // The bump allocator's DEFAULT start — also the mutable-global slot region's base
+                               // (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
+                               // module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots
+                               // are never allocated over (N = 0 keeps every existing module byte-identical).
 const HEAP_BASE: u32 = crate::MG_SLOT_BASE;
 // The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of
 // the 1-slot block's element (@16) — the `materialize_result_str` layout `$read_text_file`
@@ -104,8 +104,8 @@ const LIST_LEN_OFFSET: u32 = LIST_RC_OFFSET + I32_SIZE;
 const LIST_CAP_OFFSET: u32 = LIST_LEN_OFFSET + I32_SIZE;
 pub(crate) const LIST_HEADER: u32 = LIST_CAP_OFFSET + I32_SIZE; // rc + len + cap
 pub(crate) const ELEM_SIZE: u32 = 8; // i64 elements
-// A freshly allocated heap block has exactly one owner — the `Alloc`'s +1, the
-// initial value of the cell RuntimeModel.v's `exec` starts the fold from.
+                                     // A freshly allocated heap block has exactly one owner — the `Alloc`'s +1, the
+                                     // initial value of the cell RuntimeModel.v's `exec` starts the fold from.
 const RC_INITIAL: i32 = 1;
 const PUSH_HEADROOM: u32 = 8; // spare cap so demo pushes never realloc
 const IOVEC_LEN_OFFSET: u32 = I32_SIZE; // iovec = [buf:i32 @0][len:i32 @4]
@@ -130,44 +130,6 @@ const MAX_I64_DIGITS: u32 = 20; // a u64 is at most 20 decimal digits
 const MAX_ELEM_PRINT_BYTES: u32 = 1 + MAX_I64_DIGITS; // comma + digits
 
 /// Render a MIR function to a runnable WAT module string.
-/// Heap handles (`Alloc`/`Dup` dsts) become i32 list-pointer locals, in first-use
-/// order so the declaration list is deterministic.
-fn heap_handle_locals(ops: &[Op]) -> Vec<ValueId> {
-    let mut heap_locals: Vec<ValueId> = Vec::new();
-    for op in ops {
-        let (Op::Alloc { dst, .. } | Op::Dup { dst, .. }) = op else { continue };
-        if !heap_locals.contains(dst) {
-            heap_locals.push(*dst);
-        }
-    }
-    heap_locals
-}
-
-/// Assign each distinct string label a data-section offset starting at `base`,
-/// emitting one `(data …)` line per label. Deduplicated, so a label used twice
-/// is stored once.
-fn collect_label_data(
-    ops: &[Op],
-    base: u32,
-    label_off: &mut BTreeMap<String, (u32, u32)>,
-    data: &mut String,
-) {
-    let mut cursor = base;
-    for op in ops {
-        let Op::Call { args, .. } = op else { continue };
-        for a in args {
-            let CallArg::Label(label) = a else { continue };
-            if label_off.contains_key(label) {
-                continue;
-            }
-            let len = label.len() as u32;
-            label_off.insert(label.clone(), (cursor, len));
-            data.push_str(&format!("  (data (i32.const {cursor}) {:?})\n", label));
-            cursor += len;
-        }
-    }
-}
-
 pub fn render_wasm(func: &MirFunction) -> String {
     let heap_locals = heap_handle_locals(&func.ops);
     let mut label_off: BTreeMap<String, (u32, u32)> = BTreeMap::new();
@@ -193,15 +155,19 @@ pub fn render_wasm(func: &MirFunction) -> String {
     let no_floats: BTreeSet<ValueId> = BTreeSet::new();
     let mut no_fuser = Fuser::new();
     for op in &func.ops {
-        body.push_str(&render_op(op, crate::render_wasm::OpTables {
-            label_off: &label_off,
-            func_slots: &no_slots,
-            param_counts: &no_param_counts,
-            masks: &func.heap_slot_masks,
-            reprs: &reprs,
-            floats: &no_floats,
-            tail_call: false,
-        }, &mut no_fuser));
+        body.push_str(&render_op(
+            op,
+            crate::render_wasm::OpTables {
+                label_off: &label_off,
+                func_slots: &no_slots,
+                param_counts: &no_param_counts,
+                masks: &func.heap_slot_masks,
+                reprs: &reprs,
+                floats: &no_floats,
+                tail_call: false,
+            },
+            &mut no_fuser,
+        ));
     }
 
     format!(
@@ -224,7 +190,9 @@ fn preamble_func_names() -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     // Match `(func $name` occurrences; the preamble declares each runtime fn this way.
     for seg in pre.split("(func $").skip(1) {
-        let end = seg.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(seg.len());
+        let end = seg
+            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(seg.len());
         names.insert(seg[..end].to_string());
     }
     names
@@ -242,7 +210,9 @@ fn resolvable_call_names(prog: &MirProgram) -> BTreeSet<String> {
     // address — mirror the `mg_helpers` emission condition exactly, so the name
     // resolves iff the definition is rendered.
     let uses_mg_take = prog.functions.iter().any(|f| {
-        f.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
+        f.ops
+            .iter()
+            .any(|o| matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
     });
     if prog.mutable_global_count > 0 || uses_mg_take {
         names.insert("__mg_take".to_string());
@@ -276,8 +246,9 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
                 _ => continue,
             };
             if !resolvable.contains(&name) {
-                crate::trace::trace("ALMIDE_DBG_UNLINKED", || format!(
-                    "[unlinked] {} references {}", f.name, name));
+                crate::trace::trace("ALMIDE_DBG_UNLINKED", || {
+                    format!("[unlinked] {} references {}", f.name, name)
+                });
                 missing.insert(name);
             }
         }
@@ -305,8 +276,7 @@ fn resolve_drop_alias(target: &str, resolvable: &BTreeSet<String>) -> Option<Str
     // `__drop_list_View` → `__drop_list_palette_View`. A family-crossing
     // match would free a DIFFERENT layout, so the qualifier segment must not
     // itself look like a family marker.
-    const FAMILY_MARKERS: &[&str] =
-        &["list_", "opt_", "tup_", "map_", "res", "closure", "value"];
+    const FAMILY_MARKERS: &[&str] = &["list_", "opt_", "tup_", "map_", "res", "closure", "value"];
     let t = target.strip_prefix("__drop_")?;
     let bare = t.rsplit('_').next()?;
     if bare.is_empty() {
@@ -316,12 +286,18 @@ fn resolve_drop_alias(target: &str, resolvable: &BTreeSet<String>) -> Option<Str
     let suffix = format!("_{bare}");
     let mut hit: Option<&String> = None;
     for cand in resolvable {
-        let Some(c) = cand.strip_prefix("__drop_") else { continue };
+        let Some(c) = cand.strip_prefix("__drop_") else {
+            continue;
+        };
         if c == t {
             continue;
         }
-        let Some(rest) = c.strip_prefix(fam) else { continue };
-        let Some(middle) = rest.strip_suffix(suffix.as_str()) else { continue };
+        let Some(rest) = c.strip_prefix(fam) else {
+            continue;
+        };
+        let Some(middle) = rest.strip_suffix(suffix.as_str()) else {
+            continue;
+        };
         if middle.is_empty() || FAMILY_MARKERS.iter().any(|m| middle.starts_with(m)) {
             continue;
         }
@@ -330,7 +306,8 @@ fn resolve_drop_alias(target: &str, resolvable: &BTreeSet<String>) -> Option<Str
         }
         hit = Some(cand);
     }
-    hit.and_then(|c| c.strip_prefix("__drop_")).map(str::to_string)
+    hit.and_then(|c| c.strip_prefix("__drop_"))
+        .map(str::to_string)
 }
 
 /// Render a whole MIR program to a WAT module, WALLING any unlinked stdlib/runtime call.
@@ -358,7 +335,6 @@ fn resolve_rt_alias(name: &str, resolvable: &BTreeSet<String>) -> Option<String>
     let cand = format!("almide_rt_{m}_{rest}");
     resolvable.contains(&cand).then_some(cand)
 }
-
 
 pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower::LowerError> {
     // Remap aliasable burned names BEFORE the unlinked check (clone only when an
@@ -407,78 +383,23 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
 /// must be cloned for the remap at all. Extracted verbatim from
 /// [`try_render_wasm_program`] (codopsy round-3 sweep, #852).
 fn any_call_needs_alias(prog: &MirProgram, resolvable: &BTreeSet<String>) -> bool {
-    prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| match op {
-        Op::CallFn { name, .. } => {
-            !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some()
-        }
-        Op::DropVariant { ty, .. } => {
-            !resolvable.contains(&drop_target_name(ty))
-                && resolve_drop_alias(&drop_target_name(ty), &resolvable).is_some()
-        }
-        Op::DropWrapperRec { drop_fn, .. } => {
-            !resolvable.contains(&drop_target_name(drop_fn))
-                && resolve_drop_alias(&drop_target_name(drop_fn), &resolvable).is_some()
-        }
-        _ => false,
-    })
-}
-
-/// Rewrite every unresolvable-as-spelled call / drop target that HAS an alias to that
-/// alias, in place. Extracted verbatim from [`try_render_wasm_program`] (codopsy
-/// round-3 sweep, #852).
-fn remap_burned_names_to_aliases(p: &mut MirProgram, resolvable: &BTreeSet<String>) {
-    for f in &mut p.functions {
-        for op in &mut f.ops {
-            remap_op_target(op, resolvable);
-        }
-    }
-}
-
-/// One op's target. A call names its fn directly; a drop names a TYPE whose
-/// drop fn is derived, so both go through `drop_target_name` first.
-fn remap_op_target(op: &mut Op, resolvable: &BTreeSet<String>) {
-    match op {
-        Op::CallFn { name, .. } => {
-            if let Some(alias) = burned_alias(name, resolvable, resolve_rt_alias) {
-                *name = alias;
+    prog.functions
+        .iter()
+        .flat_map(|f| f.ops.iter())
+        .any(|op| match op {
+            Op::CallFn { name, .. } => {
+                !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some()
             }
-        }
-        Op::DropVariant { ty: target, .. } | Op::DropWrapperRec { drop_fn: target, .. } => {
-            let spelled = drop_target_name(target);
-            if let Some(alias) = burned_alias(&spelled, resolvable, resolve_drop_alias) {
-                *target = alias;
+            Op::DropVariant { ty, .. } => {
+                !resolvable.contains(&drop_target_name(ty))
+                    && resolve_drop_alias(&drop_target_name(ty), &resolvable).is_some()
             }
-        }
-        _ => {}
-    }
-}
-
-/// The alias for `name` when it is NOT resolvable as spelled, or `None` when it
-/// resolves already or has no alias.
-fn burned_alias(
-    name: &str,
-    resolvable: &BTreeSet<String>,
-    lookup: fn(&str, &BTreeSet<String>) -> Option<String>,
-) -> Option<String> {
-    if resolvable.contains(name) {
-        return None;
-    }
-    lookup(name, resolvable)
-}
-
-/// Inside a region clone the refcount is dead weight (nothing frees before the
-/// frontier reset), and a `Dup` singleton alias per instance would otherwise
-/// serialize on ONE rc cell's read-modify-write chain. MakeUnique is rejected by
-/// the region qualifier, so every `rc_inc` line in a clone body stems from a Dup
-/// — drop them all (region_alloc.rs's documented contract).
-fn strip_region_clone_rc_incs(fn_name: &str, body: String) -> String {
-    if !fn_name.starts_with("__rgn_") {
-        return body;
-    }
-    body.lines()
-        .filter(|l| !l.contains("call $rc_inc"))
-        .map(|l| format!("{l}\n"))
-        .collect()
+            Op::DropWrapperRec { drop_fn, .. } => {
+                !resolvable.contains(&drop_target_name(drop_fn))
+                    && resolve_drop_alias(&drop_target_name(drop_fn), &resolvable).is_some()
+            }
+            _ => false,
+        })
 }
 
 /// Render a whole MIR program (functions + `_start` → `main`) to a WAT module.
@@ -531,8 +452,11 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // result NAMING a param-taking function) is distinguishable from a genuine
     // 0-arg void call to a 0-param function. The `Op::CallFn` render uses it to
     // emit NOTHING for the underflowing marker (see that arm).
-    let param_counts: BTreeMap<String, usize> =
-        prog.functions.iter().map(|f| (f.name.clone(), f.params.len())).collect();
+    let param_counts: BTreeMap<String, usize> = prog
+        .functions
+        .iter()
+        .map(|f| (f.name.clone(), f.params.len()))
+        .collect();
     // Constant-fold-through-wrap (render_wasm_peephole.rs): the i64-uniform
     // scalar convention round-trips every literal address/offset a
     // self-hosted `prim.*` caller uses through `i64.const → local.set →
@@ -544,8 +468,12 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         .functions
         .iter()
         .map(|f| {
-            let body =
-                fold_const_wrap_roundtrips(&render_wasm_fn(f, &label_off, &func_slots, &param_counts));
+            let body = fold_const_wrap_roundtrips(&render_wasm_fn(
+                f,
+                &label_off,
+                &func_slots,
+                &param_counts,
+            ));
             strip_region_clone_rc_incs(&f.name, body)
         })
         .collect::<String>();
@@ -749,7 +677,9 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // Emitted for mutable-global slots AND for the local SHARED-CELL assigns
     // (cells.rs), which reuse the same take accessor over a cell-slot address.
     let uses_mg_take = prog.functions.iter().any(|f| {
-        f.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
+        f.ops
+            .iter()
+            .any(|o| matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
     });
     let mg_helpers = if prog.mutable_global_count > 0 || uses_mg_take {
         "  (func $__mg_take (param $a i64) (result i32)\n    \
@@ -765,10 +695,13 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // `path_open`/`fd_readdir`/`clock_time_get`/etc.
     let used_text = format!("{data}{closure_table}{funcs}{mg_helpers}{start}{pub_exports}");
     let preamble = filter_unreachable_preamble(&preamble, &used_text);
-    format!("{preamble}{used_text})
-")
+    format!(
+        "{preamble}{used_text})
+"
+    )
 }
 
+include!("render_wasm_module_parts.rs");
 include!("render_wasm_b.rs");
 include!("render_wasm_bce.rs");
 include!("render_wasm_c.rs");
