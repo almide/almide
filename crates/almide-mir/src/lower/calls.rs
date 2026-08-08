@@ -285,20 +285,7 @@ impl LowerCtx {
         func: &str,
         args: &[IrExpr],
     ) -> Result<Vec<CallArg>, LowerError> {
-        let is_admitted_effectful = is_admitted_effectful_pure_module_call(module, func);
-        // `fan.map` is a compiler-known concurrency primitive whose WASM lowering is a SEQUENTIAL
-        // fallible traverse (PURE control flow — it reaches NO host capability itself; the CALLBACK's
-        // caps are counted transitively through the lifted funcref, exactly like `list.map`). Admit it
-        // (2-arg form); the per-(input, output)-element self-host is selected in `list_heap_call_name`,
-        // where an UNSUPPORTED element pairing routes to the UNLINKED `fan.map_x` and walls cleanly at
-        // render — never linked to a wrong-typed self-host (no invalid wasm).
-        let is_admitted_fan_map =
-            module == "fan" && matches!(func, "map" | "any_map") && args.len() == 2;
-        if !purity::is_pure(module, func) && !is_admitted_effectful && !is_admitted_fan_map {
-            return Err(LowerError::Unsupported(format!(
-                "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
-            )));
-        }
+        admit_module_call_purity(module, func, args)?;
         // OUR OWN verdict, kept in a LOCAL. The flag on `self` is reset by every
         // nested `lower_pure_module_call_args`, and an argument can contain one:
         // `map.fold(if result.is_ok(t) then … else …, acc, (a, k, v) => acc)` lowers
@@ -705,6 +692,30 @@ fn is_admitted_effectful_pure_module_call(module: &str, func: &str) -> bool {
     is_admitted_effectful_entropy_env_clock(module, func)
         || is_admitted_effectful_fs(module, func)
         || is_admitted_effectful_io(module, func)
+}
+
+/// Gate this `module.func` on purity: a pure call, one of the admitted effectful
+/// calls, or `fan.map`/`fan.any_map`.
+///
+/// `fan.map` is a compiler-known concurrency primitive whose WASM lowering is a
+/// SEQUENTIAL fallible traverse (PURE control flow — it reaches NO host
+/// capability itself; the CALLBACK's caps are counted transitively through the
+/// lifted funcref, exactly like `list.map`). The per-(input, output)-element
+/// self-host is selected in `list_heap_call_name`, where an UNSUPPORTED element
+/// pairing routes to the UNLINKED `fan.map_x` and walls cleanly at render —
+/// never linked to a wrong-typed self-host (no invalid wasm).
+fn admit_module_call_purity(module: &str, func: &str, args: &[IrExpr]) -> Result<(), LowerError> {
+    let admitted_fan_map =
+        module == "fan" && matches!(func, "map" | "any_map") && args.len() == 2;
+    if purity::is_pure(module, func)
+        || is_admitted_effectful_pure_module_call(module, func)
+        || admitted_fan_map
+    {
+        return Ok(());
+    }
+    Err(LowerError::Unsupported(format!(
+        "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
+    )))
 }
 
 /// The Entropy / CliArgs / Clock admitted calls, as a table.
