@@ -454,6 +454,41 @@ fn strip_borrow(expr: IrExpr) -> IrExpr {
     }
 }
 
+/// The owned params whose final read in this temp block may MOVE rather than
+/// clone.
+///
+/// The block ends by reassigning every non-identity param and continuing, so an
+/// owned param's FINAL read is dead the moment the temps are bound. Kept sound
+/// by the narrowest sufficient rule: move only a param that is reassigned in
+/// THIS block (non-identity — an identity carry keeps its value into the next
+/// iteration) and whose reads across the whole block total exactly ONE, that
+/// read being a bare consuming Var. A borrow, an access-object, a lambda
+/// capture, or any second read disqualifies it (no sibling E0505, no order
+/// hazard); every other consuming read clones.
+fn movable_accumulators(
+    args: &[Option<IrExpr>],
+    params: &[(VarId, Ty)],
+    identity_carry: &[bool],
+    owned_params: &HashSet<VarId>,
+) -> HashSet<VarId> {
+    let mut census: HashMap<VarId, OwnedReadCensus> = HashMap::new();
+    for arg in args.iter().flatten() {
+        census_owned_reads(arg, owned_params, false, &mut census);
+    }
+    let movable = |p_var: &VarId| {
+        census
+            .get(p_var)
+            .is_some_and(|c| c.bare == 1 && c.other == 0 && c.lambda == 0)
+    };
+    params
+        .iter()
+        .enumerate()
+        .filter(|(j, _)| !identity_carry.get(*j).copied().unwrap_or(false))
+        .map(|(_, (p_var, _))| *p_var)
+        .filter(|p_var| owned_params.contains(p_var) && movable(p_var))
+        .collect()
+}
+
 fn emit_tail_call_replacement(
     args: Vec<IrExpr>,
     params: &[(VarId, Ty)],
@@ -482,29 +517,7 @@ fn emit_tail_call_replacement(
         Some(if keep { arg } else { strip_borrow(arg) })
     }).collect();
 
-    // The accumulator move: this temp block ends by reassigning every
-    // non-identity param and continuing, so an owned param's FINAL read here
-    // is dead the moment the temps are bound — it may MOVE instead of clone.
-    // Kept sound by the narrowest sufficient rule: move only a param that is
-    // reassigned in THIS block (non-identity — an identity carry keeps its
-    // value into the next iteration) and whose reads across the whole block
-    // total exactly ONE, that read being a bare consuming Var (a borrow, an
-    // access-object, a lambda capture, or any second read disqualifies — no
-    // sibling E0505, no order hazard). Every other consuming read clones.
-    let mut census: HashMap<VarId, OwnedReadCensus> = HashMap::new();
-    for arg in args.iter().flatten() {
-        census_owned_reads(arg, owned_params, false, &mut census);
-    }
-    let mut moved: HashSet<VarId> = HashSet::new();
-    for (j, (p_var, _)) in params.iter().enumerate() {
-        if identity_carry.get(j).copied().unwrap_or(false) { continue; }
-        if !owned_params.contains(p_var) { continue; }
-        if let Some(c) = census.get(p_var) {
-            if c.bare == 1 && c.other == 0 && c.lambda == 0 {
-                moved.insert(*p_var);
-            }
-        }
-    }
+    let moved = movable_accumulators(&args, params, &identity_carry, owned_params);
 
     // Bind temporaries to argument expressions.
     for (i, arg) in args.into_iter().enumerate() {
@@ -832,6 +845,23 @@ fn tco_owned_candidates(
 /// an `&mut`) and access objects (CloneInsertion's own IndexAccess /
 /// MapAccess / Member arms strip container clones and clone the ELEMENT).
 /// Lambda bodies are left untouched (owned params are proven lambda-free).
+/// Recurse into `child` UNLESS it is already a bare `Var`, which such a
+/// position must keep: wrapping a `Borrow`'s child would borrow a temporary and
+/// lose writes through an `&mut`, an access object's clone would copy the
+/// container instead of the element, and an existing `Clone` must never
+/// double-wrap.
+fn keep_bare_var(
+    child: Box<IrExpr>,
+    wrap: &HashSet<VarId>,
+    except: &HashSet<VarId>,
+) -> Box<IrExpr> {
+    if matches!(&child.kind, IrExprKind::Var { .. }) {
+        child
+    } else {
+        Box::new(wrap_owned_reads_except(*child, wrap, except))
+    }
+}
+
 fn wrap_owned_reads_except(expr: IrExpr, wrap: &HashSet<VarId>, except: &HashSet<VarId>) -> IrExpr {
     if wrap.is_empty() { return expr; }
     let IrExpr { kind, ty, span, def_id } = expr;
@@ -841,32 +871,28 @@ fn wrap_owned_reads_except(expr: IrExpr, wrap: &HashSet<VarId>, except: &HashSet
                 expr: Box::new(IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span, def_id }),
             }
         }
-        IrExprKind::Borrow { expr: inner, as_str, mutable } => {
-            let inner = if matches!(&inner.kind, IrExprKind::Var { .. }) { inner }
-                        else { Box::new(wrap_owned_reads_except(*inner, wrap, except)) };
-            IrExprKind::Borrow { expr: inner, as_str, mutable }
-        }
-        IrExprKind::Member { object, field } => {
-            let object = if matches!(&object.kind, IrExprKind::Var { .. }) { object }
-                         else { Box::new(wrap_owned_reads_except(*object, wrap, except)) };
-            IrExprKind::Member { object, field }
-        }
-        IrExprKind::IndexAccess { object, index } => {
-            let object = if matches!(&object.kind, IrExprKind::Var { .. }) { object }
-                         else { Box::new(wrap_owned_reads_except(*object, wrap, except)) };
-            IrExprKind::IndexAccess { object, index: Box::new(wrap_owned_reads_except(*index, wrap, except)) }
-        }
-        IrExprKind::MapAccess { object, key } => {
-            let object = if matches!(&object.kind, IrExprKind::Var { .. }) { object }
-                         else { Box::new(wrap_owned_reads_except(*object, wrap, except)) };
-            IrExprKind::MapAccess { object, key: Box::new(wrap_owned_reads_except(*key, wrap, except)) }
-        }
-        IrExprKind::Clone { expr: inner } => {
-            // Already cloned — never double-wrap the immediate Var.
-            let inner = if matches!(&inner.kind, IrExprKind::Var { .. }) { inner }
-                        else { Box::new(wrap_owned_reads_except(*inner, wrap, except)) };
-            IrExprKind::Clone { expr: inner }
-        }
+        // Reference-taking positions and an existing `Clone` keep a bare Var
+        // child untouched — see [`keep_bare_var`].
+        IrExprKind::Borrow { expr: inner, as_str, mutable } => IrExprKind::Borrow {
+            expr: keep_bare_var(inner, wrap, except),
+            as_str,
+            mutable,
+        },
+        IrExprKind::Member { object, field } => IrExprKind::Member {
+            object: keep_bare_var(object, wrap, except),
+            field,
+        },
+        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
+            object: keep_bare_var(object, wrap, except),
+            index: Box::new(wrap_owned_reads_except(*index, wrap, except)),
+        },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: keep_bare_var(object, wrap, except),
+            key: Box::new(wrap_owned_reads_except(*key, wrap, except)),
+        },
+        IrExprKind::Clone { expr: inner } => IrExprKind::Clone {
+            expr: keep_bare_var(inner, wrap, except),
+        },
         IrExprKind::Lambda { params, body, lambda_id } => {
             IrExprKind::Lambda { params, body, lambda_id }
         }
