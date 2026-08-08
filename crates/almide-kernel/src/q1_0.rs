@@ -112,51 +112,50 @@ pub unsafe fn q1_0_dot_avx2(x: &[f32; 128], sign: &[u8; 16], scale: f32) -> f32 
     _mm_cvtss_f32(s) * scale
 }
 
+/// A Q1_0-quantized weight matrix: `n` output rows, each `k / 128` blocks wide.
+/// One block packs 128 weights as 16 sign bytes plus one f32 scale, so
+/// `sign` is `[n * blocks * 16]` and `scale` is `[n * blocks]`.
+pub struct Q1_0Weights<'a> {
+    pub sign: &'a [u8],
+    pub scale: &'a [f32],
+    pub n: usize,
+}
+
 /// Full quantized linear — the inference hot path. `out[m,n] = Σ_k x[m,k]·W[n,k]`
-/// with W in Q1_0. x: `[m*k]` row-major f32; w_sign: `[n*blocks*16]` u8;
-/// w_scale: `[n*blocks]` f32; k a multiple of 128. Uses the per-target
-/// `q1_0_dot` schedule (AVX2 / simd128 / naive) for every block dot.
-pub fn linear_q1_0(
-    x: &[f32], m: usize, k: usize,
-    w_sign: &[u8], w_scale: &[f32], n: usize,
-    out: &mut [f32],
-) {
-    let blocks = k / 128;
-    for mi in 0..m {
-        for ni in 0..n {
-            let mut acc = 0.0f32;
-            for b in 0..blocks {
-                let xb: &[f32; 128] =
-                    (&x[mi * k + b * 128..mi * k + b * 128 + 128]).try_into().unwrap();
-                let sb: &[u8; 16] = (&w_sign[(ni * blocks + b) * 16..(ni * blocks + b) * 16 + 16])
-                    .try_into()
-                    .unwrap();
-                acc += q1_0_dot(xb, sb, w_scale[ni * blocks + b]);
-            }
-            out[mi * n + ni] = acc;
-        }
-    }
+/// with W in Q1_0. x: `[m*k]` row-major f32; k a multiple of 128. Uses the
+/// per-target `q1_0_dot` schedule (AVX2 / simd128 / naive) for every block dot.
+pub fn linear_q1_0(x: &[f32], m: usize, k: usize, w: &Q1_0Weights, out: &mut [f32]) {
+    linear_q1_0_with(x, m, k, w, out, q1_0_dot);
 }
 
 /// Naive reference for `linear_q1_0` (scalar block dot — the Rust baseline).
-pub fn linear_q1_0_naive(
-    x: &[f32], m: usize, k: usize,
-    w_sign: &[u8], w_scale: &[f32], n: usize,
+pub fn linear_q1_0_naive(x: &[f32], m: usize, k: usize, w: &Q1_0Weights, out: &mut [f32]) {
+    linear_q1_0_with(x, m, k, w, out, q1_0_dot_naive);
+}
+
+/// The shared driver: the loop nest is identical for both schedules, only the
+/// per-block dot differs. Blocks are carved with `as_chunks`, so the 128-lane
+/// and 16-byte windows are typed as fixed-size arrays by construction — a
+/// short row simply contributes no blocks instead of panicking on a cast.
+fn linear_q1_0_with(
+    x: &[f32],
+    m: usize,
+    k: usize,
+    w: &Q1_0Weights,
     out: &mut [f32],
+    dot: fn(&[f32; 128], &[u8; 16], f32) -> f32,
 ) {
     let blocks = k / 128;
     for mi in 0..m {
-        for ni in 0..n {
+        let (xb, _) = x[mi * k..mi * k + k].as_chunks::<128>();
+        for ni in 0..w.n {
+            let (sb, _) = w.sign[ni * blocks * 16..(ni + 1) * blocks * 16].as_chunks::<16>();
+            let scales = &w.scale[ni * blocks..(ni + 1) * blocks];
             let mut acc = 0.0f32;
             for b in 0..blocks {
-                let xb: &[f32; 128] =
-                    (&x[mi * k + b * 128..mi * k + b * 128 + 128]).try_into().unwrap();
-                let sb: &[u8; 16] = (&w_sign[(ni * blocks + b) * 16..(ni * blocks + b) * 16 + 16])
-                    .try_into()
-                    .unwrap();
-                acc += q1_0_dot_naive(xb, sb, w_scale[ni * blocks + b]);
+                acc += dot(&xb[b], &sb[b], scales[b]);
             }
-            out[mi * n + ni] = acc;
+            out[mi * w.n + ni] = acc;
         }
     }
 }
