@@ -53,6 +53,7 @@ impl RunOutcome {
         match self.status {
             RunStatus::Ok => 0,
             RunStatus::Aborted => 1,
+            RunStatus::Exited(code) => code,
             // Distinguished markers: the gate excludes these from the 3-way
             // assert rather than emitting a bogus third vote.
             RunStatus::Unsupported(_) => -2,
@@ -75,6 +76,15 @@ pub enum RunStatus {
     /// The fuel / recursion-depth budget was exhausted. NOT a hang or panic —
     /// a clean distinguished outcome for the future fuzz oracle.
     FuelExhausted,
+    /// An explicit `process.exit(n)` with a NON-ZERO, NON-ONE code. Both
+    /// backends exit with exactly `n`, so the third vote has to carry it: this
+    /// used to collapse into `Aborted`, whose `exit_code()` is a flat 1, and
+    /// the 3-way gate then read a `process.exit(3)` fixture as
+    /// `interp=1 native=3 wasm=3` — a BOTH-BACKENDS-WRONG banner raised by the
+    /// ORACLE's own lossy encoding, not by any disagreement in the program
+    /// (#1124's fixture). `Ok` and `Aborted` still cover 0 and 1 so every
+    /// existing match arm keeps its meaning.
+    Exited(i32),
 }
 
 /// The interpreter over a fully-linked `IrProgram`.
@@ -524,7 +534,11 @@ impl<'a> Interpreter<'a> {
                 }
             }
             Flow::Exit(code) => RunOutcome {
-                status: if code == 0 { RunStatus::Ok } else { RunStatus::Aborted },
+                status: match code {
+                    0 => RunStatus::Ok,
+                    1 => RunStatus::Aborted,
+                    n => RunStatus::Exited(n as i32),
+                },
                 stdout: self.stdout.clone(),
                 stderr: self.stderr.clone(),
             },
