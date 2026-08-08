@@ -7,12 +7,12 @@
 // call now constrains f to `(args)->?ret` and returns `?ret` (resolved to Int
 // from the element type). native == wasm.
 fn main() -> Unit = {
-  let fns: List[fn(Int) -> Int] = [
+  let fns: List[(Int) -> Int] = [
     (x: Int) => x + 1,
     (x: Int) => x * 2
   ]
   let applied = list.map(fns, (f) => f(10))
-  let strs: List[fn(String) -> String] = [
+  let strs: List[(String) -> String] = [
     (s: String) => s + "!"
   ]
   let greeted = list.map(strs, (g) => g("hi"))

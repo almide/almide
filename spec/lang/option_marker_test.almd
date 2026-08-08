@@ -16,7 +16,7 @@ fn first_even(xs: List[Int]) -> Int? = xs |> list.find((x) => x % 2 == 0)
 fn or_zero(v: Int?) -> Int = v ?? 0
 
 // fn-type slot: ? binds to the return atom, not the whole fn type
-fn pick(xs: List[Int], f: fn(Int) -> Int?) -> Int = xs |> list.filter_map(f) |> list.first ?? -1
+fn pick(xs: List[Int], f: (Int) -> Int?) -> Int = xs |> list.filter_map(f) |> list.first ?? -1
 
 // tuple atom
 fn lookup_pair(k: String) -> (String, Int)? = if k == "a" then some(("a", 1)) else none

@@ -11,7 +11,7 @@
 // creator-free closure chain, and no spine-lowerable construction of one
 // exists today (while-heap-accumulator wall; the CPS build shape is
 // non-tail on its own construction side).
-fn step(next: fn(Int) -> Int, k: Int) -> Int = if k <= 0 then 42 else next(k - 1)
+fn step(next: (Int) -> Int, k: Int) -> Int = if k <= 0 then 42 else next(k - 1)
 
 fn spin(k: Int) -> Int = step((j) => spin(j), k)
 

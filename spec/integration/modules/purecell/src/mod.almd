@@ -8,4 +8,4 @@ fn cell[T](initial: T) -> Cell[T] = { _val: initial, _id: 0 }
 
 fn get[T](c: Cell[T]) -> T = c._val
 
-fn update[T](c: Cell[T], f: fn(T) -> T) -> Cell[T] = { ...c, _val: f(c._val) }
+fn update[T](c: Cell[T], f: (T) -> T) -> Cell[T] = { ...c, _val: f(c._val) }
