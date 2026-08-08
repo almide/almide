@@ -37,6 +37,27 @@ impl LowerCtx {
     /// iterations (memory-safe; the accumulation is deferred like every `Opaque`) and it
     /// is not a frame handle. A scalar reassignment (`i = i + 1`) is a Copy `Const`,
     /// harmless, admitted.
+    /// The iterable, evaluated ONCE before the loop. A heap iterable goes through
+    /// `lower_call_args` — an already-tracked `Var` is borrowed (no new
+    /// ownership), a fresh heap value is materialized into an owned temp dropped
+    /// at the OUTER scope (its caps captured by the lowering).
+    ///
+    /// A Range ITERABLE stays on the no-container model path: it carries no
+    /// ownership, and the call-arg Range materialization emits a `list.range`
+    /// CallFn the caps ledger only accounts for in ARGUMENT position. A scalar
+    /// iterable likewise contributes only its calls' caps.
+    fn lower_for_in_iterable(&mut self, iterable: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+        if !is_heap_ty(&iterable.ty) || matches!(&iterable.kind, IrExprKind::Range { .. }) {
+            self.record_elided_calls(iterable);
+            return Ok(None);
+        }
+        let first = self.lower_call_args(std::slice::from_ref(iterable))?.into_iter().next();
+        Ok(match first {
+            Some(CallArg::Handle(v)) => Some(v),
+            _ => None,
+        })
+    }
+
     pub(crate) fn lower_for_in(
         &mut self,
         var: VarId,
@@ -44,39 +65,17 @@ impl LowerCtx {
         iterable: &IrExpr,
         body: &[IrStmt],
     ) -> Result<(), LowerError> {
-        // First try to EXECUTE a scalar `for i in start..end` as a real loop; out of that
-        // subset it rolls back and we keep the model-one-iteration form below.
-        if self.try_lower_scalar_for_range(var, var_tuple, iterable, body) {
-            return Ok(());
-        }
-        // Then try to EXECUTE `for x in xs` over a List[Int] as a real element loop.
-        if self.try_lower_scalar_for_list(var, var_tuple, iterable, body) {
-            return Ok(());
-        }
-        // Then `for (k, v) in m` / `for k in m` over a self-hosted Map layout as a
-        // real entry loop.
-        if self.try_lower_scalar_for_map(var, var_tuple, iterable, body) {
-            return Ok(());
-        }
-        // The iterable is evaluated ONCE before the loop. A heap iterable goes through
-        // `lower_call_args` — an already-tracked `Var` is borrowed (no new ownership),
-        // a fresh heap value is materialized into an owned temp dropped at the OUTER
-        // scope (its caps captured by the lowering). A scalar iterable (a `Range`)
-        // carries no ownership; capture any call in it for caps.
-        let container: Option<ValueId> = if is_heap_ty(&iterable.ty)
-            // A Range ITERABLE stays on the no-container model path (it carries no
-            // ownership; the call-arg Range materialization emits a `list.range` CallFn
-            // the caps ledger only accounts for in ARGUMENT position).
-            && !matches!(&iterable.kind, IrExprKind::Range { .. })
+        // The EXECUTING loop forms, tried in order: a scalar `for i in start..end`
+        // range, `for x in xs` over a List[Int], then `for (k, v) in m` over a
+        // self-hosted Map layout. Out of that subset each rolls back and we keep
+        // the model-one-iteration form below.
+        if self.try_lower_scalar_for_range(var, var_tuple, iterable, body)
+            || self.try_lower_scalar_for_list(var, var_tuple, iterable, body)
+            || self.try_lower_scalar_for_map(var, var_tuple, iterable, body)
         {
-            match self.lower_call_args(std::slice::from_ref(iterable))?.into_iter().next() {
-                Some(CallArg::Handle(v)) => Some(v),
-                _ => None,
-            }
-        } else {
-            self.record_elided_calls(iterable);
-            None
-        };
+            return Ok(());
+        }
+        let container = self.lower_for_in_iterable(iterable)?;
         let mark = self.live_heap_handles.len();
         let vars: Vec<VarId> = match var_tuple {
             Some(vs) => vs.clone(),

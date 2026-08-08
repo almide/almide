@@ -1,3 +1,31 @@
+/// The element type this defunctionalized `find` will loop over, or `None` when
+/// the call is outside the admitted subset: the predicate must be unary, the
+/// result an `Option[T]`, and the payload must have a routable option drop.
+///
+/// A matrix-shaped payload (`Option[Matrix]` / `Option[List[List[Float]]]`)
+/// would need a two-level option drop this brick does not route — defer (never a
+/// row leak).
+fn defunc_find_elem_ty(xs: &IrExpr, params: &[(VarId, Ty)], result_ty: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    if params.len() != 1 {
+        return None;
+    }
+    let Ty::Applied(TypeConstructorId::List, a) = &xs.ty else { return None };
+    if a.len() != 1 {
+        return None;
+    }
+    let elem_ty = a[0].clone();
+    if !matches!(result_ty, Ty::Applied(TypeConstructorId::Option, r) if r.len() == 1) {
+        return None;
+    }
+    let two_level = matches!(&elem_ty, Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))
+        || crate::lower::is_list_list_str_ty(&Ty::Applied(
+            TypeConstructorId::List,
+            vec![elem_ty.clone()],
+        ));
+    (!two_level).then_some(elem_ty)
+}
+
 impl LowerCtx {
     /// C1 DEFUNCTIONALIZATION for `list.find` — the EARLY-EXIT scan `xs |> list.find((t) =>
     /// <pred>)` (the gguf/ggml `find_tensor` / `get_metadata_*` shape, whose predicate CAPTURES
@@ -24,26 +52,7 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         use crate::PrimKind;
         use almide_lang::types::constructor::TypeConstructorId;
-        if params.len() != 1 {
-            return None;
-        }
-        let elem_ty = match &xs.ty {
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
-            _ => return None,
-        };
-        if !matches!(result_ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1) {
-            return None;
-        }
-        // A matrix-shaped payload (`Option[Matrix]` / `Option[List[List[Float]]]`) would need a
-        // two-level option drop this brick does not route — defer (never a row leak).
-        if matches!(&elem_ty, Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))
-            || crate::lower::is_list_list_str_ty(&Ty::Applied(
-                TypeConstructorId::List,
-                vec![elem_ty.clone()],
-            ))
-        {
-            return None;
-        }
+        let elem_ty = defunc_find_elem_ty(xs, params, result_ty)?;
         let elem_heap = is_heap_ty(&elem_ty);
         // Borrow the source list (evaluated once).
         let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
