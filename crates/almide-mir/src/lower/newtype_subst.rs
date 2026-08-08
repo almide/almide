@@ -17,7 +17,7 @@ fn subst(ty: &almide_lang::types::Ty, map: &std::collections::HashMap<String, al
         Ty::Union(ts) => Ty::Union(ts.iter().map(|a| subst(a, map)).collect()),
         Ty::Record { fields } => Ty::Record { fields: subst_ty_fields(fields, map) },
         Ty::OpenRecord { fields } => Ty::OpenRecord { fields: subst_ty_fields(fields, map) },
-        Ty::Fn { params, ret } => Ty::Fn {
+        Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
             params: params.iter().map(|a| subst(a, map)).collect(),
             ret: Box::new(subst(ret, map)),
         },

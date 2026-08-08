@@ -13,14 +13,14 @@
 // repeated String churn below; a genuine leak would still print identically but
 // is excluded by the verified Inc/Dec balance.
 // String tail after calling a `() -> Unit` closure param (the exact repro).
-fn bench(name: String, f: fn() -> Unit) -> Unit = {
+fn bench(name: String, f: () -> Unit) -> Unit = {
   f()
   println("[" + name + "]")
 }
 
 // HOF that RETURNS a String built from a closure result — `__perceus_ret` in
 // true return position as well as moved-out into the concatenation temporaries.
-fn wrap(label: String, gen: fn() -> String) -> String = {
+fn wrap(label: String, gen: () -> String) -> String = {
   let body = gen()
   "<" + label + ">" + body + "</" + label + ">"
 }

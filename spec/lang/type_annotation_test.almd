@@ -77,7 +77,7 @@ test "typed function bool" {
 }
 
 // ── Function type as parameter ──
-fn apply_fn(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+fn apply_fn(f: (Int) -> Int, x: Int) -> Int = f(x)
 
 test "fn type as param" {
   assert_eq(apply_fn((x) => x * 3, 5), 15)

@@ -41,8 +41,8 @@ impl Checker {
                 let resolved_left = resolve_ty(&left_ty, &self.uf);
                 let resolved_right = resolve_ty(&right_ty, &self.uf);
                 match (&resolved_left, &resolved_right) {
-                    (Ty::Fn { params: a_params, .. }, Ty::Fn { ret: c_ret, .. }) => {
-                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone() }
+                    (Ty::Fn { params: a_params, is_effect: a_eff, .. }, Ty::Fn { ret: c_ret, is_effect: c_eff, .. }) => {
+                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone(), is_effect: *a_eff || *c_eff }
                     }
                     _ => Ty::Unknown,
                 }
@@ -406,6 +406,7 @@ impl Checker {
             Ty::Fn {
                 params: vec![elem],
                 ret: Box::new(Ty::result(winner.clone(), Ty::String)),
+                is_effect: false,
             },
             "fan.race mapper",
         );
@@ -535,6 +536,16 @@ impl Checker {
         let channel_ok = self.fresh_var();
         self.env.lambda_ret = Some(Ty::result(channel_ok.clone(), Ty::String));
         self.env.lambda_prop_used = false;
+        // #1055: a lambda in an `effect (…) -> …` slot is an effect-fn body —
+        // effect calls are permitted (the slot's owner runs the handler under
+        // its own effect context) and the lambda ALWAYS types as the carrier
+        // `(A) -> Result[B, String]`, so a pure value tail gets the same
+        // ok(...) wrap the fallible machinery already emits (Phase 1b).
+        let slot_effect = std::mem::take(&mut self.lambda_slot_effect);
+        let saved_can_call_effect = self.env.can_call_effect;
+        if slot_effect {
+            self.env.can_call_effect = true;
+        }
         // Expected-type hint from the enclosing call (#653): when this
         // lambda is an argument whose parameter slot is a `Fn`, the
         // caller pins each UNANNOTATED param to the expected element
@@ -573,7 +584,8 @@ impl Checker {
             ty
         }).collect();
         let ret_ty = self.infer_expr(body);
-        let became_fallible = self.env.lambda_prop_used;
+        self.env.can_call_effect = saved_can_call_effect;
+        let became_fallible = self.env.lambda_prop_used || slot_effect;
         let channel = self.env.lambda_ret.take();
         self.env.lambda_ret = saved_lambda_ret;
         self.env.lambda_prop_used = saved_prop_used;
@@ -593,9 +605,9 @@ impl Checker {
             } else if body_resolved != Ty::Never {
                 self.constrain(channel_ok, ret_ty, "fallible lambda body");
             }
-            return Ty::Fn { params: param_tys, ret: Box::new(chan_ty) };
+            return Ty::Fn { params: param_tys, ret: Box::new(chan_ty), is_effect: false };
         }
-        Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
+        Ty::Fn { params: param_tys, ret: Box::new(ret_ty), is_effect: false }
     }
 
     /// `expr!` — unwrap with propagation (Option[T] → T, Result[T,E] → T).
@@ -1021,13 +1033,13 @@ impl Checker {
                         }
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
-                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                         ret
                     }
                     _ => {
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
-                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                         ret
                     }
                 }
@@ -1045,13 +1057,13 @@ impl Checker {
                 }
                 let ct = self.infer_expr(right);
                 let ret = self.fresh_var();
-                self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                 ret
             }
             _ => {
                 let rt = self.infer_expr(right);
                 let ret = self.fresh_var();
-                self.constrain(rt, Ty::Fn { params: vec![left_ty], ret: Box::new(ret.clone()) }, "pipe call");
+                self.constrain(rt, Ty::Fn { params: vec![left_ty], ret: Box::new(ret.clone()), is_effect: false }, "pipe call");
                 ret
             }
         }

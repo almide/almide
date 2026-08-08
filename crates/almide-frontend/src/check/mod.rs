@@ -111,6 +111,10 @@ pub struct Checker {
     /// sig generic like `A` would disconnect the lambda param from the
     /// union-find and it would silently default to Int later).
     pub(crate) lambda_arg_hint: Option<Vec<Option<crate::types::Ty>>>,
+    /// #1055: the enclosing call slot for the lambda being inferred is an
+    /// `effect (A) -> B` fn type — the body gets effect-fn ergonomics and the
+    /// lambda types as the effect carrier `(A) -> Result[B, String]`.
+    pub(crate) lambda_slot_effect: bool,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Named-type pairs currently being unified structurally. Unifying two
@@ -493,6 +497,7 @@ impl Checker {
             arg_spans: Vec::new(),
             named_arg_meta: None,
             lambda_arg_hint: None,
+            lambda_slot_effect: false,
             constraints: Vec::new(), uf: UnionFind::new(),
             unify_named_in_progress: std::collections::HashSet::new(),
             current_module_prefix: None,

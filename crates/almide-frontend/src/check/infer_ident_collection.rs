@@ -328,7 +328,7 @@ fn invalid_collection_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
         Ty::Tuple(ts) => ts.iter().collect(),
         Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().map(|(_, t)| t).collect(),
         Ty::Applied(_, args) | Ty::Named(_, args) => args.iter().collect(),
-        Ty::Fn { params, ret } => params.iter().chain(std::iter::once(ret.as_ref())).collect(),
+        Ty::Fn { params, ret, is_effect: _ } => params.iter().chain(std::iter::once(ret.as_ref())).collect(),
         _ => Vec::new(),
     };
     for c in children {

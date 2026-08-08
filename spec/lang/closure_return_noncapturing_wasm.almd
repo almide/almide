@@ -5,13 +5,13 @@
 // bound result so a later `f(args)` dispatches through Op::CallIndirect with the block as the
 // borrowed env arg. Byte-identical to v0 --target wasm. (CAPTURING closures ride the same block
 // with their scalar captures in slots 1… — see closure_capturing_wasm.almd.)
-fn inc() -> fn(Int) -> Int = (x) => x + 1
+fn inc() -> (Int) -> Int = (x) => x + 1
 
-fn scale() -> fn(Int) -> Int = (x) => x * 10
+fn scale() -> (Int) -> Int = (x) => x * 10
 
 fn twice_plus(x: Int) -> Int = x * 2 + 3
 
-fn getter() -> fn(Int) -> Int = twice_plus
+fn getter() -> (Int) -> Int = twice_plus
 
 // a bare fn reference returned
 effect fn main() -> Unit = {

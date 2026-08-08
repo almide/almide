@@ -150,7 +150,7 @@ impl UnionFind {
             }
             Ty::Applied(_, args) => args.iter().any(|a| self.occurs(var, a)),
             Ty::Tuple(elems) => elems.iter().any(|e| self.occurs(var, e)),
-            Ty::Fn { params, ret } => params.iter().any(|p| self.occurs(var, p)) || self.occurs(var, ret),
+            Ty::Fn { params, ret, is_effect: _ } => params.iter().any(|p| self.occurs(var, p)) || self.occurs(var, ret),
             _ => false,
         }
     }
@@ -178,9 +178,10 @@ pub fn resolve_ty(ty: &Ty, uf: &UnionFind) -> Ty {
         }
         Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| resolve_ty(a, uf)).collect()),
         Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| resolve_ty(e, uf)).collect()),
-        Ty::Fn { params, ret } => Ty::Fn {
+        Ty::Fn { params, ret, is_effect } => Ty::Fn {
             params: params.iter().map(|p| resolve_ty(p, uf)).collect(),
             ret: Box::new(resolve_ty(ret, uf)),
+            is_effect: *is_effect,
         },
         Ty::Named(name, args) if !args.is_empty() => {
             Ty::Named(name.clone(), args.iter().map(|a| resolve_ty(a, uf)).collect())

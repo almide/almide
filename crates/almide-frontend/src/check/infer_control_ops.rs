@@ -886,6 +886,7 @@ impl Checker {
                     Ty::Fn {
                         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                         ret: Box::new(sig.ret.clone()),
+                        is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */,
                     }
                 }
                 else {

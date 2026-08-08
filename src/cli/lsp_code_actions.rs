@@ -413,7 +413,7 @@ fn format_type_expr(te: &crate::ast::TypeExpr) -> String {
         crate::ast::TypeExpr::Tuple { elements } => {
             format!("({})", elements.iter().map(|e| format_type_expr(e)).collect::<Vec<_>>().join(", "))
         }
-        crate::ast::TypeExpr::Fn { params, ret } => {
+        crate::ast::TypeExpr::Fn { is_effect: _, params, ret } => {
             format!("({}) -> {}", params.iter().map(|p| format_type_expr(p)).collect::<Vec<_>>().join(", "), format_type_expr(ret))
         }
         _ => "?".to_string(),

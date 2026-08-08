@@ -433,7 +433,7 @@ fn resolve_lambda_ty(params: &[(VarId, Ty)], body: &IrExpr) -> Option<Ty> {
     if fparams.iter().any(Ty::has_unresolved_deep) || (body.ty).has_unresolved_deep() {
         return None;
     }
-    Some(Ty::Fn {
+    Some(Ty::Fn { is_effect: false, 
         params: fparams,
         ret: Box::new(body.ty.clone()),
     })

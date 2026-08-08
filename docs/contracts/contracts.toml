@@ -2760,3 +2760,14 @@ evidence  = [
   { path = "spec/stdlib/fs_fold_lines_range_test.almd", class = "fixture" },
   { path = "spec/stdlib/fs_fold_lines_chunked_test.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-221"
+spec      = "ALS-M15"
+title     = "An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics"
+statement = "An `effect (A) -> B` fn-typed parameter (#1055) is one runtime shape on every leg: the checker types any lambda checked against the slot as the effect carrier `(A) -> Result[B, String]` (a pure value tail is ok-wrapped, a `!`-using body propagates into the channel), the IR normalizes the slot type itself to that carrier at lower exit, and both renderers plus the interpreter then run the SAME fallible-closure machinery the ADR-0009 D1 `(A) -> B!` slots landed. Promised observables: a fallible handler's success value, a pure handler's value, and a failing handler's err message are byte-identical native <-> wasm (the fixture pins all three, err via `?? fallback`); calling an effect fn VALUE from a pure context is E006; a fallible lambda into a PLAIN `(A) -> B` slot stays E005 (bare-slot transparency is #1108 2b-iii). `http.serve`'s handler slot is the first stdlib user: a handler `Err` becomes the listener's 500 response."
+since     = "0.56.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/effect_slot_carrier.almd", class = "fixture" },
+]

@@ -7,7 +7,7 @@
 // captured `n` back out. Two instances (`adder(3)` / `adder(100)`) carry independent envs.
 // Byte-identical to v0 --target wasm. (Captures are SCALAR — Int/Bool — in this slice; heap and
 // Float captures are a later ratchet.)
-fn adder(n: Int) -> fn(Int) -> Int = (x) => x + n
+fn adder(n: Int) -> (Int) -> Int = (x) => x + n
 
 effect fn main() -> Unit = {
   let f = adder(3)

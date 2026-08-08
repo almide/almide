@@ -39,6 +39,14 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
 
     ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
     let mut target = lower_call_target(ctx, callee);
+    // #1055: calling an `effect (A) -> B` VALUE produces the effect carrier
+    // `Result[B, String]` at runtime. The type_map sometimes lags at the
+    // declared B for this call node (the constraint-solver path stores the
+    // slot's ret, not the carrier), which would erase a following `!` as a
+    // no-op (#1049) and mis-wrap the value — retype the call from the
+    // CALLEE's own type, the single source of truth for its calling
+    // convention.
+
     // Wave 1 block forms: the parser synthesizes fan.__any_block/__settle_block
     // (so the checker can tombstone the public thunk-list spelling); normalize
     // back here so the MIR inliner sees the names it has always desugared.
@@ -312,7 +320,15 @@ fn desugar_assert_outside_test(
 fn call_result_ty(target: &CallTarget, ty: Ty) -> Ty {
     let CallTarget::Computed { callee } = target else { return ty };
     match &callee.ty {
-        Ty::Fn { ret, .. } if !ret.has_unresolved_deep() => (**ret).clone(),
+        // #1055: calling an `effect (A) -> B` VALUE yields the effect carrier
+        // `Result[B, String]` — the callee's own type is the single source of
+        // truth for its calling convention, and typing the call at the bare B
+        // here erased a following `!` as a no-op (#1049) and mis-wrapped the
+        // value tail.
+        Ty::Fn { ret, is_effect: true, .. } if !ret.has_unresolved_deep() => {
+            Ty::result((**ret).clone(), Ty::String)
+        }
+        Ty::Fn { ret, is_effect: false, .. } if !ret.has_unresolved_deep() => (**ret).clone(),
         _ => ty,
     }
 }

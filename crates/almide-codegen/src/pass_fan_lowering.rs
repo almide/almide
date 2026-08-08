@@ -241,13 +241,13 @@ fn ok_adapt_thunk_list(arg: IrExpr) -> IrExpr {
 
 fn ok_adapt_thunk(el: IrExpr) -> IrExpr {
     use almide_lang::types::Ty;
-    let Ty::Fn { params, ret } = &el.ty else { return el };
+    let Ty::Fn { is_effect: _, params, ret } = &el.ty else { return el };
     if !params.is_empty() || ret.is_result() {
         return el;
     }
     let span = el.span;
     let ok_ty = Ty::result((**ret).clone(), Ty::String);
-    let fn_ty = Ty::Fn { params: vec![], ret: Box::new(ok_ty.clone()) };
+    let fn_ty = Ty::Fn { is_effect: false, params: vec![], ret: Box::new(ok_ty.clone()) };
     match el.kind {
         // A literal pure lambda: wrap its BODY — no new call frame needed.
         IrExprKind::Lambda { params: ps, body, lambda_id } => IrExpr {

@@ -16,7 +16,7 @@ fn fill_example_ty(ty: &Ty) -> Ty {
                     go(a, is_result && i == 1)).collect())
             }
             Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| go(t, false)).collect()),
-            Ty::Fn { params, ret } => Ty::Fn {
+            Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
                 params: params.iter().map(|t| go(t, false)).collect(),
                 ret: Box::new(go(ret, false)),
             },
@@ -325,7 +325,7 @@ impl Checker {
                 Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
                     for a in args { collect_named(a, out); }
                 }
-                Ty::Fn { params, ret } => {
+                Ty::Fn { is_effect: _, params, ret } => {
                     for p in params { collect_named(p, out); }
                     collect_named(ret, out);
                 }
@@ -893,7 +893,7 @@ fn ty_reimpl_eq(stdlib_ty: &Ty, user_ty: &Ty) -> bool {
             if stys.len() != utys.len() { return false; }
             stys.iter().zip(utys.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
         }
-        (Ty::Fn { params: sp, ret: sr }, Ty::Fn { params: up, ret: ur }) => {
+        (Ty::Fn { is_effect: _, params: sp, ret: sr }, Ty::Fn { is_effect: _, params: up, ret: ur }) => {
             if sp.len() != up.len() { return false; }
             sp.iter().zip(up.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
                 && ty_reimpl_eq(sr, ur)

@@ -85,7 +85,7 @@ fn native_sig_subset_check(
     // drop-header, captures…]); invocation dispatches through the generated
     // `__almd_ci_*` tables. Heap-param/-return closures stay wasm-only.
     let is_scalar_fn = |t: &Ty| {
-        matches!(t, Ty::Fn { params, ret }
+        matches!(t, Ty::Fn { is_effect: _, params, ret }
             if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
                 && matches!(**ret, Ty::Int | Ty::Bool))
     };
@@ -207,7 +207,7 @@ fn native_sig_kind(
             Some(NativeSigKind::ListI64)
         }
         // A scalar closure travels as its env block (rung-5 closures slab).
-        Ty::Fn { params, ret }
+        Ty::Fn { is_effect: _, params, ret }
             if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
                 && matches!(**ret, Ty::Int | Ty::Bool) =>
         {

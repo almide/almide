@@ -46,7 +46,7 @@ fn make_test_program() -> IrProgram {
                             span: None, def_id: None,
                         }),
                     },
-                    ty: Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::Bool) },
+                    ty: Ty::Fn { is_effect: false, params: vec![Ty::String], ret: Box::new(Ty::Bool) },
                     span: None, def_id: None,
                 },
             ],

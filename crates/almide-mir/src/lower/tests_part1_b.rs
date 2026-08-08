@@ -74,7 +74,7 @@
 
         // A HIGHER-ORDER call is SKIPPED (unmodelled closure caps): no marker, so the
         // `ir_calls > mir_calls` gate keeps such a function honestly tainted.
-        let fn_ty = Ty::Fn { params: vec![], ret: Box::new(Ty::Int) };
+        let fn_ty = Ty::Fn { is_effect: false, params: vec![], ret: Box::new(Ty::Int) };
         let ho = body(vec![bind(
             1,
             list_int(),

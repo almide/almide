@@ -194,6 +194,7 @@ fn build_identity_lambda(elem_ty: Ty, vt: &mut VarTable) -> IrExpr {
         ty: Ty::Fn {
             params: vec![elem_ty.clone()],
             ret: Box::new(elem_ty),
+                is_effect: false,
         },
         span: None, def_id: None,
     }
@@ -232,6 +233,7 @@ fn compose_lambdas_fresh(
         ty: Ty::Fn {
             params: vec![f_param_ty],
             ret: Box::new(ret_ty),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -277,6 +279,7 @@ fn compose_predicates_fresh(
         ty: Ty::Fn {
             params: vec![p_param_ty],
             ret: Box::new(Ty::Bool),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -376,6 +379,7 @@ fn compose_map_into_fold_fresh(
         ty: Ty::Fn {
             params: vec![g_acc_ty, f_param_ty],
             ret: Box::new(ret_ty),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -416,6 +420,7 @@ fn compose_flatmaps_fresh(
         ty: Ty::Fn {
             params: vec![f_param_ty],
             ret: Box::new(g_ret),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -461,6 +466,7 @@ fn compose_map_filter_fresh(
         ty: Ty::Fn {
             params: vec![f_param_ty],
             ret: Box::new(Ty::option(result_ty)),
+                is_effect: false,
         },
         span: None, def_id: None,
     })
@@ -522,6 +528,7 @@ fn compose_filter_map_into_fold_fresh(
         ty: Ty::Fn {
             params: vec![g_acc_ty.clone(), fm_param_ty],
             ret: Box::new(g_acc_ty),
+                is_effect: false,
         },
         span: None, def_id: None,
     })

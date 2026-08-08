@@ -1,0 +1,20 @@
+// Effect fn-typed slots (#1055, C-221): a lambda checked against an
+// `effect (A) -> B` parameter gets effect-fn body ergonomics, and both the
+// pure and the fallible spellings flow through one carrier shape.
+effect fn run_h(h: effect (Int) -> Int, x: Int) -> Int = h(x)!
+
+effect fn risky(s: String) -> Int = int.parse(s)!
+
+test "effect slot accepts a fallible lambda" {
+  assert_eq(run_h((x) => risky("41")! + x, 1)!, 42)
+}
+
+test "effect slot accepts a pure lambda" {
+  assert_eq(run_h((x) => x * 2, 21)!, 42)
+}
+
+// The ERR path (a failing handler's message reaching the caller) is pinned by
+// the C-221 fixture spec/wasm_cross/effect_slot_carrier.almd, which runs as a
+// program: in a test block the test-context unwrap rule reaches into the
+// lambda's `!` (a pre-existing D1-machinery edge), so the spelling here would
+// panic instead of propagating.

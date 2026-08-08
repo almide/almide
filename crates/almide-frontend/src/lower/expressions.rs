@@ -883,7 +883,7 @@ fn eta_expand_module_fn(
     }, ret_ty.clone(), span.clone());
     ctx.pop_scope();
     let lambda_id = Some(ctx.next_lambda_id());
-    let lambda_ty = Ty::Fn {
+    let lambda_ty = Ty::Fn { is_effect: false, 
         params: params.clone(),
         ret: Box::new(ret_ty),
     };
