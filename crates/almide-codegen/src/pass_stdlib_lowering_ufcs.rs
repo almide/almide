@@ -32,37 +32,6 @@ fn resolve_module_from_ty(ty: &Ty, method: &str) -> Option<&'static str> {
     None
 }
 
-fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
-    stmts.into_iter().map(|s| {
-        let kind = match s.kind {
-            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-                var, mutability, ty, value: rewrite_expr(value),
-            },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_expr(value) },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_expr(expr) },
-            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: rewrite_expr(cond), else_: rewrite_expr(else_),
-            },
-            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern, value: rewrite_expr(value),
-            },
-            IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
-                target, index: rewrite_expr(index), value: rewrite_expr(value),
-            },
-            IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
-                target, field, value: rewrite_expr(value),
-            },
-            IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
-                target, key: rewrite_expr(key), value: rewrite_expr(value),
-            },
-            // Default: recurse every expr child via the exhaustive map_exprs chokepoint.
-            other => IrStmt { kind: other, span: s.span }
-                .map_exprs(&mut |e| rewrite_expr(e))
-                .kind,
-        };
-        IrStmt { kind, span: s.span }
-    }).collect()
-}
 
 /// Resolve bare UFCS calls in module function bodies where the checker
 /// couldn't fully resolve types. Only converts Named/Method calls that
@@ -130,10 +99,6 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
     expr.map_children(&mut |e| resolve_unresolved_ufcs(e, siblings))
 }
 
-// Kept for backward compatibility — resolve_ufcs_stmts callers in the pass
-fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
-    stmts.into_iter().map(|s| s.map_exprs(&mut |e| resolve_unresolved_ufcs(e, siblings))).collect()
-}
 
 // ── Iterator chain lowering ────────────────────────────────────────
 
