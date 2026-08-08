@@ -388,41 +388,59 @@ fn try_fold_binop_int(
     b: i64,
     left_ty: &almide_lang::types::Ty,
 ) -> Option<IrExprKind> {
-    // The UNSIGNED 64-bit lane (#872): a `UInt64` operand's slot is a u64 BIT
-    // PATTERN, so the fold must divide/remainder unsigned — the signed fold
-    // turned `u64::MAX / 2` into `-1 / 2 = 0` and `u64::MAX % 10` into `-1`,
-    // a compile-time wrong value the runtime lane (`IntOp::DivU`) never sees
-    // because the fold fires first. Add/sub/mul wrap identically in two's
-    // complement, so they need no split.
     if matches!(left_ty, almide_lang::types::Ty::UInt64) {
-        let (ua, ub) = (a as u64, b as u64);
-        return match op {
-            BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(b) }),
-            BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(b) }),
-            BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(b) }),
-            BinOp::DivInt if ub != 0 => Some(IrExprKind::LitInt { value: (ua / ub) as i64 }),
-            BinOp::ModInt if ub != 0 => Some(IrExprKind::LitInt { value: (ua % ub) as i64 }),
-            BinOp::Lt => Some(IrExprKind::LitBool { value: ua < ub }),
-            BinOp::Lte => Some(IrExprKind::LitBool { value: ua <= ub }),
-            BinOp::Gt => Some(IrExprKind::LitBool { value: ua > ub }),
-            BinOp::Gte => Some(IrExprKind::LitBool { value: ua >= ub }),
-            _ => None,
-        };
+        return fold_uint64_binop(op, a as u64, b as u64);
     }
-    let wrap = |v: i64| IrExprKind::LitInt { value: narrow_to_width(v, left_ty) };
+    fold_signed_binop(op, a, b, left_ty)
+}
+
+/// The UNSIGNED 64-bit lane (#872): a `UInt64` operand's slot is a u64 BIT
+/// PATTERN, so the fold must divide/remainder unsigned — the signed fold turned
+/// `u64::MAX / 2` into `-1 / 2 = 0` and `u64::MAX % 10` into `-1`, a compile-time
+/// wrong value the runtime lane (`IntOp::DivU`) never sees because the fold fires
+/// first. Add/sub/mul wrap identically in two's complement, so they are folded on
+/// the signed reinterpretation.
+fn fold_uint64_binop(op: BinOp, ua: u64, ub: u64) -> Option<IrExprKind> {
+    let (a, b) = (ua as i64, ub as i64);
+    let int = |value: i64| Some(IrExprKind::LitInt { value });
+    let bool_ = |value: bool| Some(IrExprKind::LitBool { value });
     match op {
-        BinOp::AddInt => Some(wrap(a.wrapping_add(b))),
-        BinOp::SubInt => Some(wrap(a.wrapping_sub(b))),
-        BinOp::MulInt => Some(wrap(a.wrapping_mul(b))),
-        BinOp::DivInt if b != 0 => Some(wrap(a / b)),
-        BinOp::ModInt if b != 0 => Some(wrap(a % b)),
-        // #1117: the signed lane was missing the comparisons the UInt64 lane
-        // already folds. `guard 1 > 2 else …` reached the mir guard desugar
-        // as an unfolded BinOp cond, sidestepping the const-cond fold there.
-        BinOp::Lt => Some(IrExprKind::LitBool { value: a < b }),
-        BinOp::Lte => Some(IrExprKind::LitBool { value: a <= b }),
-        BinOp::Gt => Some(IrExprKind::LitBool { value: a > b }),
-        BinOp::Gte => Some(IrExprKind::LitBool { value: a >= b }),
+        BinOp::AddInt => int(a.wrapping_add(b)),
+        BinOp::SubInt => int(a.wrapping_sub(b)),
+        BinOp::MulInt => int(a.wrapping_mul(b)),
+        BinOp::DivInt if ub != 0 => int((ua / ub) as i64),
+        BinOp::ModInt if ub != 0 => int((ua % ub) as i64),
+        BinOp::Lt => bool_(ua < ub),
+        BinOp::Lte => bool_(ua <= ub),
+        BinOp::Gt => bool_(ua > ub),
+        BinOp::Gte => bool_(ua >= ub),
+        _ => None,
+    }
+}
+
+/// The SIGNED lane, narrowed to the declared width (see [`narrow_to_width`]).
+///
+/// #1117: this lane was missing the comparisons the UInt64 one already folds.
+/// `guard 1 > 2 else …` reached the mir guard desugar as an unfolded BinOp cond,
+/// sidestepping the const-cond fold there.
+fn fold_signed_binop(
+    op: BinOp,
+    a: i64,
+    b: i64,
+    left_ty: &almide_lang::types::Ty,
+) -> Option<IrExprKind> {
+    let int = |v: i64| Some(IrExprKind::LitInt { value: narrow_to_width(v, left_ty) });
+    let bool_ = |value: bool| Some(IrExprKind::LitBool { value });
+    match op {
+        BinOp::AddInt => int(a.wrapping_add(b)),
+        BinOp::SubInt => int(a.wrapping_sub(b)),
+        BinOp::MulInt => int(a.wrapping_mul(b)),
+        BinOp::DivInt if b != 0 => int(a / b),
+        BinOp::ModInt if b != 0 => int(a % b),
+        BinOp::Lt => bool_(a < b),
+        BinOp::Lte => bool_(a <= b),
+        BinOp::Gt => bool_(a > b),
+        BinOp::Gte => bool_(a >= b),
         _ => None,
     }
 }
