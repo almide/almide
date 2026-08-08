@@ -1,60 +1,71 @@
+/// Is a call's destination known to be side-effect free? Method/Computed
+/// dispatch can hide effects, so both are conservatively impure.
+fn call_target_is_pure(target: &CallTarget, pure_fns: &HashSet<Sym>) -> bool {
+    match target {
+        CallTarget::Module { module, func, .. } => {
+            let key = almide_base::intern::sym(&format!("{}.{}", module, func));
+            pure_fns.contains(&key)
+        }
+        CallTarget::Named { name } => pure_fns.contains(name),
+        CallTarget::Method { .. } | CallTarget::Computed { .. } => false,
+    }
+}
+
 /// Returns true if the expression is pure (no function calls, no I/O, no mutation).
 /// Only pure expressions can be hoisted out of loops.
 /// Conservative: any function call makes the expression impure.
+/// Grouped by CHILD SHAPE: apart from calls (which consult the pure-fn set)
+/// and the conservatively-impure tail, a node is pure exactly when all of its
+/// children are.
 fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
+    let pure = |e: &IrExpr| is_pure(e, pure_fns);
     match &expr.kind {
-        // Leaf nodes: always pure
+        // ── No children: always pure ──
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
         | IrExprKind::Var { .. } | IrExprKind::FnRef { .. } | IrExprKind::Hole
         | IrExprKind::Break | IrExprKind::Continue | IrExprKind::EmptyMap => true,
 
-        // Function calls: pure if target is known-pure and all args are pure.
+        // ── Function calls: pure if the target is known-pure and so are the args ──
         IrExprKind::Call { target, args, .. } => {
-            let call_pure = match target {
-                CallTarget::Module { module, func, .. } => {
-                    let key = almide_base::intern::sym(&format!("{}.{}", module, func));
-                    pure_fns.contains(&key)
-                }
-                CallTarget::Named { name } => pure_fns.contains(name),
-                // Method/Computed dispatch can hide effects → conservatively impure.
-                CallTarget::Method { .. } | CallTarget::Computed { .. } => false,
-            };
-            call_pure && args.iter().all(|a| is_pure(a, pure_fns))
+            call_target_is_pure(target, pure_fns) && args.iter().all(pure)
         }
         IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
 
-        // Operators: pure if operands are pure
-        IrExprKind::BinOp { left, right, .. } => is_pure(left, pure_fns) && is_pure(right, pure_fns),
-        IrExprKind::UnOp { operand, .. } => is_pure(operand, pure_fns),
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } | IrExprKind::Clone { expr: e }
+        | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => pure(e),
 
-        // Collection constructors: pure if elements are pure
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter().all(|e| is_pure(e, pure_fns)),
-        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| is_pure(v, pure_fns)),
-        IrExprKind::SpreadRecord { base, fields } => is_pure(base, pure_fns) && fields.iter().all(|(_, v)| is_pure(v, pure_fns)),
-        IrExprKind::MapLiteral { entries } => entries.iter().all(|(k, v)| is_pure(k, pure_fns) && is_pure(v, pure_fns)),
-        IrExprKind::Range { start, end, .. } => is_pure(start, pure_fns) && is_pure(end, pure_fns),
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => pure(a) && pure(b),
 
-        // Access: pure if sub-exprs are pure
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => is_pure(object, pure_fns),
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            is_pure(object, pure_fns) && is_pure(index, pure_fns)
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs } => {
+            xs.iter().all(pure)
         }
 
-        // Wrappers: pure if inner is pure
-        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
-        | IrExprKind::ResultErr { expr } | IrExprKind::Clone { expr }
-        | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
-        | IrExprKind::BoxNew { expr } | IrExprKind::ToVec { expr } => is_pure(expr, pure_fns),
-        IrExprKind::UnwrapOr { expr, fallback } => is_pure(expr, pure_fns) && is_pure(fallback, pure_fns),
-
-        // String interpolation: pure if all parts are pure
-        IrExprKind::StringInterp { parts } => {
-            parts.iter().all(|p| match p {
-                IrStringPart::Expr { expr } => is_pure(expr, pure_fns),
-                lit @ IrStringPart::Lit { .. } => { let _ = lit; true }
-            })
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| pure(v)),
+        IrExprKind::SpreadRecord { base, fields } => {
+            pure(base) && fields.iter().all(|(_, v)| pure(v))
         }
+
+        // ── Shapes with their own traversal ──
+        IrExprKind::MapLiteral { entries } => {
+            entries.iter().all(|(k, v)| pure(k) && pure(v))
+        }
+        IrExprKind::StringInterp { parts } => parts.iter().all(|p| match p {
+            IrStringPart::Expr { expr } => pure(expr),
+            IrStringPart::Lit { .. } => true,
+        }),
 
         // Everything else: conservatively impure. Listed explicitly so a new
         // IrExprKind is a compile error here, not a silently-impure default.
@@ -73,92 +84,84 @@ fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
 
 /// Returns true if all variable references in the expression are outside the loop
 /// (i.e., none of them are in `loop_defined`).
+/// Grouped by CHILD SHAPE: apart from `Var` (the actual test) and `Lambda`
+/// (whose params shadow the loop's), a node's refs are outside the loop exactly
+/// when all of its children's are.
 fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
+    let outside = |e: &IrExpr| refs_are_outside_loop(e, loop_defined);
     match &expr.kind {
         IrExprKind::Var { id } => !loop_defined.contains(id),
+
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::ToVec { expr: e } => outside(e),
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => outside(a) && outside(b),
+
+        // ── Three children ──
+        IrExprKind::If { cond, then, else_ } => {
+            outside(cond) && outside(then) && outside(else_)
+        }
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs } => {
+            xs.iter().all(outside)
+        }
+
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| outside(v)),
+        IrExprKind::SpreadRecord { base, fields } => {
+            outside(base) && fields.iter().all(|(_, v)| outside(v))
+        }
+
+        // ── Shapes with their own traversal ──
         IrExprKind::Call { target, args, .. } => {
             let target_ok = match target {
-                CallTarget::Method { object, .. } => refs_are_outside_loop(object, loop_defined),
-                CallTarget::Computed { callee } => refs_are_outside_loop(callee, loop_defined),
+                CallTarget::Method { object, .. } => outside(object),
+                CallTarget::Computed { callee } => outside(callee),
                 CallTarget::Named { .. } | CallTarget::Module { .. } => true,
             };
-            target_ok && args.iter().all(|a| refs_are_outside_loop(a, loop_defined))
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            refs_are_outside_loop(left, loop_defined) && refs_are_outside_loop(right, loop_defined)
-        }
-        IrExprKind::UnOp { operand, .. } => refs_are_outside_loop(operand, loop_defined),
-        IrExprKind::If { cond, then, else_ } => {
-            refs_are_outside_loop(cond, loop_defined)
-                && refs_are_outside_loop(then, loop_defined)
-                && refs_are_outside_loop(else_, loop_defined)
+            target_ok && args.iter().all(outside)
         }
         IrExprKind::Block { stmts, expr } => {
             stmts.iter().all(|s| refs_are_outside_loop_stmt(s, loop_defined))
-                && expr.as_ref().map_or(true, |e| refs_are_outside_loop(e, loop_defined))
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            elements.iter().all(|e| refs_are_outside_loop(e, loop_defined))
-        }
-        IrExprKind::Record { fields, .. } => {
-            fields.iter().all(|(_, v)| refs_are_outside_loop(v, loop_defined))
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            refs_are_outside_loop(base, loop_defined)
-                && fields.iter().all(|(_, v)| refs_are_outside_loop(v, loop_defined))
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            refs_are_outside_loop(object, loop_defined)
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            refs_are_outside_loop(object, loop_defined)
-                && refs_are_outside_loop(index, loop_defined)
-        }
-        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
-        | IrExprKind::ResultErr { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } => {
-            refs_are_outside_loop(expr, loop_defined)
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            refs_are_outside_loop(expr, loop_defined)
-                && refs_are_outside_loop(fallback, loop_defined)
-        }
-        IrExprKind::StringInterp { parts } => {
-            parts.iter().all(|p| match p {
-                IrStringPart::Expr { expr } => refs_are_outside_loop(expr, loop_defined),
-                lit @ IrStringPart::Lit { .. } => { let _ = lit; true }
-            })
+                && expr.as_ref().is_none_or(|e| outside(e))
         }
         IrExprKind::MapLiteral { entries } => {
-            entries.iter().all(|(k, v)| {
-                refs_are_outside_loop(k, loop_defined) && refs_are_outside_loop(v, loop_defined)
-            })
+            entries.iter().all(|(k, v)| outside(k) && outside(v))
         }
-        IrExprKind::Range { start, end, .. } => {
-            refs_are_outside_loop(start, loop_defined)
-                && refs_are_outside_loop(end, loop_defined)
-        }
-        IrExprKind::Lambda { body, params, .. } => {
-            // Lambda params are local — don't count them as loop-defined.
-            // But the lambda body's free variables still matter.
-            // For simplicity, consider the whole lambda as not depending on loop vars
-            // if its free variables don't reference loop-defined vars.
-            // We need to exclude params from the check.
-            let mut extended = loop_defined.clone();
-            for (v, _) in params { extended.remove(v); }
-            refs_are_outside_loop(body, &extended)
-        }
+        IrExprKind::StringInterp { parts } => parts.iter().all(|p| match p {
+            IrStringPart::Expr { expr } => outside(expr),
+            IrStringPart::Lit { .. } => true,
+        }),
         IrExprKind::Match { subject, arms } => {
-            refs_are_outside_loop(subject, loop_defined)
+            outside(subject)
                 && arms.iter().all(|a| {
-                    a.guard.as_ref().map_or(true, |g| refs_are_outside_loop(g, loop_defined))
-                        && refs_are_outside_loop(&a.body, loop_defined)
+                    a.guard.as_ref().is_none_or(|g| outside(g)) && outside(&a.body)
                 })
         }
+        // Lambda params are local, so they are NOT loop-defined for the body:
+        // remove them before checking the body's free variables.
+        IrExprKind::Lambda { body, params, .. } => {
+            let mut extended = loop_defined.clone();
+            for (v, _) in params {
+                extended.remove(v);
+            }
+            refs_are_outside_loop(body, &extended)
+        }
+
         // Leaf nodes and nodes whose inner refs aren't tracked here: treated as
         // "all refs outside loop" (true). Listed explicitly so a new IrExprKind
         // is a compile error, not a silent always-true default.
@@ -259,62 +262,62 @@ fn analyze_pure_functions(program: &IrProgram) -> HashSet<Sym> {
 
 /// Check if an expression is pure given a current set of known-pure user functions.
 /// Similar to `is_pure` but works on immutable IR (no VarTable needed).
+/// Grouped by CHILD SHAPE like [`is_pure`]. This variant covers a WIDER
+/// impure tail: without a VarTable it cannot reason about the loop and
+/// propagation nodes, so those stay conservatively impure here.
 fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
+    let pure = |e: &IrExpr| expr_is_pure_with(e, pure_fns);
     match &expr.kind {
+        // ── No children: always pure ──
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
         | IrExprKind::Var { .. } | IrExprKind::FnRef { .. } | IrExprKind::Hole
         | IrExprKind::Break | IrExprKind::Continue | IrExprKind::EmptyMap => true,
 
+        // ── Function calls ──
         IrExprKind::Call { target, args, .. } => {
-            let call_pure = match target {
-                CallTarget::Module { module, func, .. } => {
-                    let key = almide_base::intern::sym(&format!("{}.{}", module, func));
-                    pure_fns.contains(&key)
-                }
-                CallTarget::Named { name } => pure_fns.contains(name),
-                // Method/Computed dispatch can hide effects → conservatively impure.
-                CallTarget::Method { .. } | CallTarget::Computed { .. } => false,
-            };
-            call_pure && args.iter().all(|a| expr_is_pure_with(a, pure_fns))
+            call_target_is_pure(target, pure_fns) && args.iter().all(pure)
         }
         IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
 
-        IrExprKind::BinOp { left, right, .. } => expr_is_pure_with(left, pure_fns) && expr_is_pure_with(right, pure_fns),
-        IrExprKind::UnOp { operand, .. } => expr_is_pure_with(operand, pure_fns),
-        IrExprKind::If { cond, then, else_ } => {
-            expr_is_pure_with(cond, pure_fns) && expr_is_pure_with(then, pure_fns) && expr_is_pure_with(else_, pure_fns)
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } | IrExprKind::Clone { expr: e }
+        | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => pure(e),
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::Range { start: a, end: b, .. } => pure(a) && pure(b),
+
+        // ── Three children ──
+        IrExprKind::If { cond, then, else_ } => pure(cond) && pure(then) && pure(else_),
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs } => {
+            xs.iter().all(pure)
         }
+
+        // ── Name-tagged children ──
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| pure(v)),
+
+        // ── Shapes with their own traversal ──
         IrExprKind::Match { subject, arms } => {
-            expr_is_pure_with(subject, pure_fns) && arms.iter().all(|a| expr_is_pure_with(&a.body, pure_fns))
+            pure(subject) && arms.iter().all(|a| pure(&a.body))
         }
         IrExprKind::Block { stmts, expr } => {
             stmts.iter().all(|s| stmt_is_pure_with(s, pure_fns))
-                && expr.as_ref().map_or(true, |e| expr_is_pure_with(e, pure_fns))
+                && expr.as_ref().is_none_or(|e| pure(e))
         }
-        IrExprKind::Lambda { body, .. } => expr_is_pure_with(body, pure_fns),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            elements.iter().all(|e| expr_is_pure_with(e, pure_fns))
-        }
-        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| expr_is_pure_with(v, pure_fns)),
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => expr_is_pure_with(object, pure_fns),
-        IrExprKind::IndexAccess { object, index } => {
-            expr_is_pure_with(object, pure_fns) && expr_is_pure_with(index, pure_fns)
-        }
-        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
-        | IrExprKind::ResultErr { expr: e } | IrExprKind::Clone { expr: e }
-        | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
-        | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => expr_is_pure_with(e, pure_fns),
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            expr_is_pure_with(e, pure_fns) && expr_is_pure_with(f, pure_fns)
-        }
-        IrExprKind::Range { start, end, .. } => expr_is_pure_with(start, pure_fns) && expr_is_pure_with(end, pure_fns),
-        IrExprKind::StringInterp { parts } => {
-            parts.iter().all(|p| match p {
-                IrStringPart::Expr { expr } => expr_is_pure_with(expr, pure_fns),
-                lit @ IrStringPart::Lit { .. } => { let _ = lit; true }
-            })
-        }
+        IrExprKind::StringInterp { parts } => parts.iter().all(|p| match p {
+            IrStringPart::Expr { expr } => pure(expr),
+            IrStringPart::Lit { .. } => true,
+        }),
+
         // ForIn, While, Fan, Await, etc. — conservatively impure. Listed
         // explicitly so a new IrExprKind is a compile error here, not a
         // silently-impure default.
