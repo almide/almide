@@ -721,7 +721,7 @@ pub(crate) fn desugar_hof_chain_anf(body: &IrExpr) -> Option<IrExpr> {
                 args.iter().map(|a| subst_ty(a, from, to)).collect(),
             ),
             Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|a| subst_ty(a, from, to)).collect()),
-            Ty::Fn { params, ret } => Ty::Fn {
+            Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
                 params: params.iter().map(|a| subst_ty(a, from, to)).collect(),
                 ret: Box::new(subst_ty(ret, from, to)),
             },

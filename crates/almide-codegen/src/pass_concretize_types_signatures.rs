@@ -151,7 +151,7 @@ fn merge_more_concrete(a: &Ty, b: &Ty) -> Option<Ty> {
                 .collect();
             merged.map(Ty::Tuple)
         }
-        (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 })
+        (Ty::Fn { is_effect: _, params: p1, ret: r1 }, Ty::Fn { is_effect: _, params: p2, ret: r2 })
             if p1.len() == p2.len() =>
         {
             let merged_params: Option<Vec<Ty>> = p1.iter().zip(p2.iter())
@@ -159,7 +159,7 @@ fn merge_more_concrete(a: &Ty, b: &Ty) -> Option<Ty> {
                 .collect();
             let merged_ret = merge_more_concrete(r1, r2);
             match (merged_params, merged_ret) {
-                (Some(ps), Some(r)) => Some(Ty::Fn { params: ps, ret: Box::new(r) }),
+                (Some(ps), Some(r)) => Some(Ty::Fn { is_effect: false, params: ps, ret: Box::new(r) }),
                 _ => None,
             }
         }
@@ -347,7 +347,7 @@ fn update_fold_lambda_acc(args: &mut [IrExpr], acc_ty: &Ty, vt: &mut VarTable) -
             }
         }
     }
-    if let Ty::Fn { params: ps, ret } = &mut args[2].ty {
+    if let Ty::Fn { is_effect: _, params: ps, ret } = &mut args[2].ty {
         if let Some(p0) = ps.get_mut(0) {
             if p0.has_unresolved_deep() {
                 *p0 = acc_ty.clone();

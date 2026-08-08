@@ -14,7 +14,7 @@ pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
         Ty::TypeVar(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
         Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| subst_ty(a, subst)).collect()),
         Ty::Named(name, args) => Ty::Named(*name, args.iter().map(|a| subst_ty(a, subst)).collect()),
-        Ty::Fn { params, ret } => Ty::Fn { params: params.iter().map(|p| subst_ty(p, subst)).collect(), ret: Box::new(subst_ty(ret, subst)) },
+        Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, params: params.iter().map(|p| subst_ty(p, subst)).collect(), ret: Box::new(subst_ty(ret, subst)) },
         Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| subst_ty(e, subst)).collect()),
         Ty::Record { fields } => Ty::Record { fields: fields.iter().map(|(n, t)| (*n, subst_ty(t, subst))).collect() },
         _ => ty.clone(),
@@ -129,7 +129,7 @@ impl Checker {
             _ => {
                 let ct = self.infer_expr(callee);
                 let ret = self.fresh_var();
-                self.constrain(ct, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
+                self.constrain(ct, Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
             }
         }
@@ -581,7 +581,7 @@ impl Checker {
             return Some(Ty::Named(type_name, generic_args));
         }
         let ty = self.env.lookup_var(name).cloned()?;
-        if let Ty::Fn { params, ret } = &ty {
+        if let Ty::Fn { is_effect: _, params, ret } = &ty {
             arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
                 self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
             });
@@ -598,7 +598,7 @@ impl Checker {
         }
         // #623: `f` is an as-yet-unresolved inference var being CALLED — so it MUST be a function. Constrain it to `(arg_tys) -> ?ret` and return `?ret`, not `f`'s own type. Returning `ty` typed the call result as f's CLOSURE type (e.g. `(f) => f(10)` in a `list.map` lambda became `((Int)->Int) -> ((Int)->Int)` instead of `((Int)->Int) -> Int`), so codegen emitted a closure body that returns a closure where it returns the call result (invalid Rust / wrong wasm). `?ret` is resolved from context — e.g. the element type `(Int)->Int` flowing in from `list.map` pins `?ret = Int`.
         let ret = self.fresh_var();
-        let fn_ty = Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
+        let fn_ty = Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
         self.constrain(fn_ty, ty, format!("call to {}()", name));
         Some(ret)
     }

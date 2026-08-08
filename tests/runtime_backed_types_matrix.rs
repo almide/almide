@@ -25,7 +25,7 @@ fn collect_named(ty: &Ty, out: &mut BTreeSet<String>) {
                 collect_named(a, out);
             }
         }
-        Ty::Fn { params, ret } => {
+        Ty::Fn { is_effect: _, params, ret } => {
             for p in params {
                 collect_named(p, out);
             }

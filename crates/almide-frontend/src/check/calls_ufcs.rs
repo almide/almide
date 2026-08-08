@@ -63,13 +63,13 @@ impl Checker {
             return ty;
         }
         let ret = self.fresh_var();
-        self.constrain(obj_ty, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
+        self.constrain(obj_ty, Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
         ret
     }
     /// Record field call: `h.run("hello")` where `run` is a Fn-typed field. Must be checked before UFCS so field-access + call takes priority. Verbatim text move out of [`Self::check_call_target_member`].
     fn check_call_target_record_field(&mut self, obj_concrete: &Ty, field: &Sym, arg_tys: &[Ty]) -> Option<Ty> {
         let field_ty = self.resolve_field_type(obj_concrete, field);
-        if let Ty::Fn { params, ret } = &field_ty {
+        if let Ty::Fn { is_effect: _, params, ret } = &field_ty {
             // Validate argument count
             if arg_tys.len() != params.len() {
                 self.emit(super::err(

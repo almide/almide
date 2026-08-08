@@ -135,8 +135,9 @@ impl IrTypeDecl {
                     format!("R{{{}}}", fs.join(","))
                 }
                 Ty::Tuple(ts) => format!("T({})", ts.iter().map(norm_ty).collect::<Vec<_>>().join(",")),
-                Ty::Fn { params, ret } => format!(
-                    "F({})->{}",
+                Ty::Fn { params, ret, is_effect } => format!(
+                    "F{}({})->{}",
+                    if *is_effect { "e" } else { "" },
                     params.iter().map(norm_ty).collect::<Vec<_>>().join(","),
                     norm_ty(ret)
                 ),

@@ -150,7 +150,7 @@ pub fn render_type_rc_fn(ctx: &RenderContext, ty: &Ty) -> String {
 /// share one `impl Fn` type (E0308), unify as one trait-object element type.
 pub fn render_type_box_fn(ctx: &RenderContext, ty: &Ty, bounds: &str) -> String {
     match ty {
-        Ty::Fn { params, ret } => {
+        Ty::Fn { is_effect: _, params, ret } => {
             let params_str = params.iter().map(|p| super::types::render_type(ctx, p)).collect::<Vec<_>>().join(", ");
             let ret_str = super::types::render_type(ctx, ret);
             format!("std::boxed::Box<dyn Fn({}) -> {} + {}>", params_str, ret_str, bounds)
@@ -186,7 +186,7 @@ pub fn render_type_field_fn(ctx: &RenderContext, ty: &Ty) -> String {
         ctx.templates.render_with(name, None, &[], kv).unwrap_or(fb)
     };
     match ty {
-        Ty::Fn { params, ret } => {
+        Ty::Fn { is_effect: _, params, ret } => {
             let params_str = params.iter().map(&rf).collect::<Vec<_>>().join(", ");
             let ret_str = rf(ret);
             tmpl("type_fn_field", &[("params", params_str.as_str()), ("return", ret_str.as_str())],

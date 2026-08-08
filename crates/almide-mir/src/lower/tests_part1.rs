@@ -153,7 +153,7 @@
 
     #[test]
     fn is_higher_order_detects_function_typed_args() {
-        let fn_ty = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) };
+        let fn_ty = Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Int) };
         let plain = ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String);
         let closure = ir_expr(IrExprKind::Var { id: VarId(1) }, fn_ty);
         assert!(!is_higher_order(std::slice::from_ref(&plain)));
@@ -192,7 +192,7 @@
         // its capabilities are unanalyzable here, so it is walled (admitting it would
         // be accept-but-unsafe). (An analyzable Lambda closure IS admitted — see
         // `higher_order_module_call_with_lambda_captures_closure_caps`.)
-        let fn_ty = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) };
+        let fn_ty = Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Int) };
         let b = body(vec![
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             bind(
@@ -241,7 +241,7 @@
                 )),
                 lambda_id: None,
             },
-            Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
+            Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Int) },
         );
         let b = body(vec![
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
@@ -315,7 +315,7 @@
                 )),
                 lambda_id: None,
             },
-            Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Unit) },
+            Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Unit) },
         );
         let each = module_call(
             "list",

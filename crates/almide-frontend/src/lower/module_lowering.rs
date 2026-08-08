@@ -180,7 +180,7 @@ fn resolve_inference_typevars(program: &mut IrProgram) {
             Ty::Unknown => false,
             Ty::Applied(_, args) => args.iter().any(has_typevar),
             Ty::Tuple(elems) => elems.iter().any(has_typevar),
-            Ty::Fn { params, ret } => params.iter().any(has_typevar) || has_typevar(ret),
+            Ty::Fn { is_effect: _, params, ret } => params.iter().any(has_typevar) || has_typevar(ret),
             Ty::Named(_, args) => args.iter().any(has_typevar),
             Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_typevar(t)),
             _ => false,
@@ -191,7 +191,7 @@ fn resolve_inference_typevars(program: &mut IrProgram) {
             Ty::TypeVar(name) if name.starts_with('?') => *ty = Ty::Unknown,
             Ty::Applied(_, args) => { for a in args { resolve_ty(a); } }
             Ty::Tuple(elems) => { for e in elems { resolve_ty(e); } }
-            Ty::Fn { params, ret } => { for p in params { resolve_ty(p); } resolve_ty(ret); }
+            Ty::Fn { is_effect: _, params, ret } => { for p in params { resolve_ty(p); } resolve_ty(ret); }
             Ty::Named(_, args) => { for a in args { resolve_ty(a); } }
             Ty::Record { fields } | Ty::OpenRecord { fields } => { for (_, t) in fields { resolve_ty(t); } }
             _ => {}

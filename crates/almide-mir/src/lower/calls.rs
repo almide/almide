@@ -42,7 +42,7 @@ pub(super) fn subst_type_var(
         Ty::Named(name, args) => {
             Ty::Named(*name, args.iter().map(|a| subst_type_var(a, subst)).collect())
         }
-        Ty::Fn { params, ret } => Ty::Fn {
+        Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
             params: params.iter().map(|p| subst_type_var(p, subst)).collect(),
             ret: Box::new(subst_type_var(ret, subst)),
         },

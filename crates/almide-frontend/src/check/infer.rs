@@ -129,7 +129,7 @@ impl Checker {
                                     tys.clone()
                                 }
                             };
-                            Ty::Fn { params, ret: Box::new(ret) }
+                            Ty::Fn { params, ret: Box::new(ret), is_effect: false }
                         }
                         _ => Ty::Named(type_name, vec![])
                     }
@@ -393,6 +393,7 @@ impl Checker {
                 return Some(Ty::Fn {
                     params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                     ret: Box::new(sig.ret.clone()),
+                    is_effect: sig.is_effect,
                 });
             }
             let resolved_mod_name = self.env.import_table.resolve(mod_name)
@@ -405,6 +406,7 @@ impl Checker {
                 return Some(Ty::Fn {
                     params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                     ret: Box::new(sig.ret.clone()),
+                    is_effect: sig.is_effect,
                 });
             }
             // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
@@ -432,6 +434,7 @@ impl Checker {
                         VariantPayload::Tuple(param_tys) => Ty::Fn {
                             params: param_tys.clone(),
                             ret: Box::new(Ty::Named(qual_ty, generic_args)),
+                            is_effect: false,
                         },
                         VariantPayload::Record(_) => Ty::Named(qual_ty, generic_args),
                     });

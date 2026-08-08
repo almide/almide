@@ -308,7 +308,7 @@ mod proptest_lean_rust {
                 almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int],
             )),
             Just(Ty::Record { fields: vec![(almide_base::intern::sym("x"), Ty::Int)] }),
-            Just(Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }),
+            Just(Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Int) }),
         ]
     }
 
@@ -758,7 +758,7 @@ mod heap_classification_pin {
             // leak: ANF didn't lift what Perceus Dec's, and TCO left a
             // nominal-record accumulator unmanaged.
             (Ty::Named(sym("P"), vec![]), true),
-            (Ty::Fn { params: vec![], ret: Box::new(Ty::Unit) }, true),
+            (Ty::Fn { is_effect: false, params: vec![], ret: Box::new(Ty::Unit) }, true),
             (Ty::Unknown, true),
         ];
         // Every Ty variant appears exactly once above; this match is the

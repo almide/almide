@@ -597,7 +597,7 @@ fn has_any_typevar(ty: &Ty) -> bool {
         Ty::TypeVar(_) => true,
         Ty::Applied(_, args) => args.iter().any(has_any_typevar),
         Ty::Tuple(elems) => elems.iter().any(has_any_typevar),
-        Ty::Fn { params, ret } => params.iter().any(has_any_typevar) || has_any_typevar(ret),
+        Ty::Fn { params, ret, is_effect: _ } => params.iter().any(has_any_typevar) || has_any_typevar(ret),
         Ty::Named(_, args) => args.iter().any(has_any_typevar),
         Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_any_typevar(t)),
         _ => false,

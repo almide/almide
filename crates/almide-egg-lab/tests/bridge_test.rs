@@ -49,7 +49,7 @@ fn identity_lambda(var_id: u32, ty: Ty) -> IrExpr {
             body: Box::new(body),
             lambda_id: Some(var_id),
         },
-        ty: Ty::Fn {
+        ty: Ty::Fn { is_effect: false, 
             params: vec![ty.clone()],
             ret: Box::new(ty),
         },
@@ -72,7 +72,7 @@ fn opaque_lambda(param_id: u32, lambda_id: u32) -> IrExpr {
             body: Box::new(body),
             lambda_id: Some(lambda_id),
         },
-        ty: Ty::Fn {
+        ty: Ty::Fn { is_effect: false, 
             params: vec![Ty::Int],
             ret: Box::new(Ty::Int),
         },
@@ -103,7 +103,7 @@ fn incr_lambda(param_id: u32, lambda_id: u32, incr: i64) -> IrExpr {
             body: Box::new(body),
             lambda_id: Some(lambda_id),
         },
-        ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
+        ty: Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Int) },
         span: None, def_id: None,
     }
 }
@@ -431,7 +431,7 @@ fn lower_filter_filter_fuses_into_conjunctive_predicate() {
             }),
             lambda_id: Some(201),
         },
-        ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) },
+        ty: Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Bool) },
         span: None, def_id: None,
     };
     // q: (x: Int) => false (distinct body to ensure it survives into
@@ -446,7 +446,7 @@ fn lower_filter_filter_fuses_into_conjunctive_predicate() {
             }),
             lambda_id: Some(202),
         },
-        ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) },
+        ty: Ty::Fn { is_effect: false, params: vec![Ty::Int], ret: Box::new(Ty::Bool) },
         span: None, def_id: None,
     };
     let inner = list_call("filter", vec![xs, p], list_int());
