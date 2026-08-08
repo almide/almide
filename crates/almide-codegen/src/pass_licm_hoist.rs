@@ -90,53 +90,49 @@ fn try_hoist_expr(expr: &mut IrExpr, ctx: &mut HoistCtx) {
         return;
     }
 
-    // Otherwise, recurse into sub-expressions to find hoistable parts
+    // Otherwise, recurse into sub-expressions to find hoistable parts.
+    // Grouped by child shape; the shapes with their own scoping delegate.
     match &mut expr.kind {
-        IrExprKind::Call { target, args, .. } => try_hoist_call(target, args, ctx),
-        IrExprKind::RuntimeCall { args, .. } => {
-            for arg in args {
-                try_hoist_expr(arg, ctx);
-            }
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } => try_hoist_expr(e, ctx),
+
+        // ── Two children, left to right ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::Range { start: a, end: b, .. } => {
+            try_hoist_expr(a, ctx);
+            try_hoist_expr(b, ctx);
         }
-        IrExprKind::BinOp { left, right, .. } => {
-            try_hoist_expr(left, ctx);
-            try_hoist_expr(right, ctx);
-        }
-        IrExprKind::UnOp { operand, .. } => {
-            try_hoist_expr(operand, ctx);
-        }
+
+        // ── Three children ──
         IrExprKind::If { cond, then, else_ } => {
             try_hoist_expr(cond, ctx);
             try_hoist_expr(then, ctx);
             try_hoist_expr(else_, ctx);
         }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            for e in elements {
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::RuntimeCall { args: xs, .. } => {
+            for e in xs {
                 try_hoist_expr(e, ctx);
             }
         }
+
+        // ── Name-tagged children ──
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields {
                 try_hoist_expr(v, ctx);
             }
         }
-        IrExprKind::Member { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            try_hoist_expr(object, ctx);
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            try_hoist_expr(object, ctx);
-            try_hoist_expr(index, ctx);
-        }
+
+        // ── Shapes with their own traversal or scoping ──
+        IrExprKind::Call { target, args, .. } => try_hoist_call(target, args, ctx),
         IrExprKind::StringInterp { parts } => try_hoist_string_interp(parts, ctx),
-        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
-        | IrExprKind::ResultErr { expr: e } => {
-            try_hoist_expr(e, ctx);
-        }
-        IrExprKind::Range { start, end, .. } => {
-            try_hoist_expr(start, ctx);
-            try_hoist_expr(end, ctx);
-        }
         // Nested loops: descend into the body so an expression that is
         // invariant w.r.t. BOTH the outer and inner loops (e.g. a struct
         // field read from a function parameter) can be hoisted all the
@@ -147,33 +143,16 @@ fn try_hoist_expr(expr: &mut IrExpr, ctx: &mut HoistCtx) {
         // `loop_defined` is extended with the nested loop's variables so
         // we never hoist an expression that genuinely depends on the
         // inner loop (e.g. `byte_idx = bits_start + i / 8`).
-        IrExprKind::ForIn { var, var_tuple, iterable, body } =>
-            try_hoist_for_in(*var, var_tuple, iterable, body, ctx),
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+            try_hoist_for_in(*var, var_tuple, iterable, body, ctx)
+        }
         IrExprKind::While { cond, body } => try_hoist_while(cond, body, ctx),
-        // Explicit-preserve: the whole-expression hoist check above already
+
+        // Everything else: the whole-expression hoist check above already
         // decided these nodes are not worth recursing into for sub-part
-        // hoisting (they are leaves, control flow with their own scoping, or
-        // wrappers handled by the whole-expr path). Listing every remaining
-        // variant turns a new IrExprKind into a compile error, not a silent
-        // dropped subtree.
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
-        | IrExprKind::Match { .. } | IrExprKind::Block { .. }
-        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
-        | IrExprKind::TailCall { .. } | IrExprKind::MapLiteral { .. }
-        | IrExprKind::EmptyMap | IrExprKind::SpreadRecord { .. }
-        | IrExprKind::TupleIndex { .. } | IrExprKind::Lambda { .. }
-        | IrExprKind::OptionNone | IrExprKind::Try { .. }
-        | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
-        | IrExprKind::ToOption { .. }
-        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
-        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
-        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
-        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
-        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
-        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+        // hoisting — they are leaves, control flow with their own scoping, or
+        // wrappers handled by the whole-expr path.
+        _ => {}
     }
 }
 
