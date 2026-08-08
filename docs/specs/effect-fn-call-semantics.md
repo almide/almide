@@ -118,7 +118,7 @@ effect fn main() -> Unit = {
 v0.34.x で完全統一された: never-err な lifted effect fn は raw `T` を返し
 呼び出し網が rewrap、can-err は常時 `Result` wrap（#840 / #841）。
 現行挙動は [effect-system.md](./effect-system.md) と
-[../HIDDEN_OPERATIONS.md](../HIDDEN_OPERATIONS.md) §2 が記述する。
+[../design/HIDDEN_OPERATIONS.md](../design/HIDDEN_OPERATIONS.md) §2 が記述する。
 
 ## 検証テスト
 

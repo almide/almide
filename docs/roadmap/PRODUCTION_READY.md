@@ -163,8 +163,8 @@ Almide 1.0 = ALL of:
 - [x] コア型 API 監査・凍結: `docs/FROZEN_API.md`
 - [x] `fan` の命名最終確認 — fan { }, fan.map, fan.race, fan.any, fan.settle, fan.timeout
 - [x] `effect fn` マーカーの最終確認 — Effect Isolation (Layer 1) 実装済み
-- [x] Rejected Patterns リスト: `docs/REJECTED_PATTERNS.md` (20+ 項目)
-- [x] Hidden operations 文書化: `docs/HIDDEN_OPERATIONS.md`
+- [x] Rejected Patterns リスト: `docs/design/REJECTED_PATTERNS.md` (20+ 項目)
+- [x] Hidden operations 文書化: `docs/design/HIDDEN_OPERATIONS.md`
 
 ---
 

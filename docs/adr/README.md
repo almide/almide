@@ -8,7 +8,7 @@
 どちらも**なぜそう決めたか**を保存しない。結果として同じ議論が半年後に再演され、
 一度却下した案が根拠を失ったまま復活する。ADR はその 3 つ目の軸を持つ。
 
-[REJECTED_PATTERNS.md](../REJECTED_PATTERNS.md) は「採用しない機能」の一覧であり、
+[REJECTED_PATTERNS.md](../design/REJECTED_PATTERNS.md) は「採用しない機能」の一覧であり、
 ADR はその**決定に至る過程**（調査した証拠、比較した代替案、反証条件）を保存する。
 却下が REJECTED_PATTERNS に載るときは、根拠として ADR を指す。
 

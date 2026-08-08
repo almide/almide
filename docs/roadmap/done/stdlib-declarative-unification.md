@@ -183,7 +183,7 @@ be collapsed before Stage 3:
 
 ## MLIR Backend + Egg arc との関係
 
-本 arc は [mlir-backend-adoption.md](./mlir-backend-adoption.md) の **準備運動**でもある。各アウトプットが次 arc (egg + MLIR) でそのまま活用される:
+本 arc は [mlir-backend-adoption.md](../on-hold/mlir-backend-adoption.md) の **準備運動**でもある。各アウトプットが次 arc (egg + MLIR) でそのまま活用される:
 
 - `stdlib/<m>.almd` の pure Almide body → Almide dialect (MLIR) への入力
 - typed intrinsic (`@intrinsic(rust=..., wasm=...)`) → MLIR FunctionImport

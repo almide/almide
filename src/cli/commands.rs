@@ -35,7 +35,7 @@ pub fn cmd_init() {
 
     // Generate CLAUDE.md for AI-assisted development
     if !std::path::Path::new("CLAUDE.md").exists() {
-        let claude_md = include_str!("../../docs/CLAUDE_TEMPLATE.md");
+        let claude_md = include_str!("../../docs/project/CLAUDE_TEMPLATE.md");
         if let Err(e) = std::fs::write("CLAUDE.md", claude_md) {
             err(&format!("Failed to write CLAUDE.md: {}", e));
             std::process::exit(1);

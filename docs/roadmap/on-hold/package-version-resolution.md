@@ -139,4 +139,4 @@ error: version conflict for package 'json-parser'
 
 - [Go MVS specification](https://research.swtch.com/vgo-mvs) — Russ Cox's original design
 - [Cargo resolver](https://doc.rust-lang.org/cargo/reference/resolver.html) — SAT-based (more complex, not MVS)
-- [docs/specs/package-system.md](../docs/specs/package-system.md) — Almide package system spec
+- [docs/specs/package-system.md](../../specs/package-system.md) — Almide package system spec

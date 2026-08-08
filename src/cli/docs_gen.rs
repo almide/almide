@@ -267,7 +267,7 @@ fn check_stdlib_fn_count() -> Vec<String> {
         total += iface.functions.iter().filter(|f| !f.name.starts_with("__")).count();
     }
     let want = format!("{} functions across {} modules", total, modules.len());
-    for doc in ["README.md", "docs/SPEC.md", "docs/WASM-OUTPUT.md"] {
+    for doc in ["README.md", "docs/SPEC.md", "docs/wasm/WASM-OUTPUT.md"] {
         let Ok(text) = std::fs::read_to_string(doc) else {
             drifts.push(format!("cannot read {doc}"));
             continue;

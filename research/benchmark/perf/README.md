@@ -3,7 +3,7 @@
 Seven Computer-Language-Benchmarks-Game-style programs, run on every leg the
 compiler ships, against handwritten Rust references where a fair reference
 exists. This directory is the source of the numbers in
-[docs/BENCHMARKS.md](../../../docs/BENCHMARKS.md) — nothing is published that
+[docs/project/BENCHMARKS.md](../../../docs/project/BENCHMARKS.md) — nothing is published that
 `bench.py` did not produce.
 
 ## Layout

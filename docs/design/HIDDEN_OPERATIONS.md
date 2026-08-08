@@ -56,8 +56,8 @@ effect fn load() -> String = {
   `!` マーカー駆動の `Try` 挿入で、暗黙挿入は行わない
 - `crates/almide-codegen/src/pass_result_propagation.rs` — 署名 lift と
   呼び出し位置の `Try` 反映
-- 詳細仕様: [specs/effect-fn-call-semantics.md](./specs/effect-fn-call-semantics.md)、
-  [ADR-0008](./adr/0008-explicit-propagation-only.md)
+- 詳細仕様: [specs/effect-fn-call-semantics.md](../specs/effect-fn-call-semantics.md)、
+  [ADR-0008](../adr/0008-explicit-propagation-only.md)
 
 ---
 
@@ -82,7 +82,7 @@ effect fn load() -> String = {
 外部ランタイムは存在しない。stdlib は self-hosted な純 Almide 実装
 （`stdlib/*.almd` → `crates/almide-types/src/self_host_registry.rs`）が
 ユーザコードと一緒に WAT へコンパイルされ、少数の手書き WAT プリアンブルと
-共にモジュールへ埋め込まれる。詳細: [WASM-OUTPUT.md](./WASM-OUTPUT.md)。
+共にモジュールへ埋め込まれる。詳細: [WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md)。
 
 ---
 

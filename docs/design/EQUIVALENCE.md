@@ -15,7 +15,7 @@ The guarantee is **continuous, with an explicit scope** — held by gates that r
 
 ## The contract ledger
 
-This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](./contracts/), each traceable to executable evidence of class ≥ `fixture`. The live contract counts and the exceptions clause are auto-generated from the ledger into the [README claims block](../README.md) by `scripts/gen-claims.sh`, and `scripts/check-contracts.sh` fails CI if the block drifts — the public claim literally cannot desynchronize from what the gates verify.
+This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts), each traceable to executable evidence of class ≥ `fixture`. The live contract counts and the exceptions clause are auto-generated from the ledger into the [README claims block](../../README.md) by `scripts/gen-claims.sh`, and `scripts/check-contracts.sh` fails CI if the block drifts — the public claim literally cannot desynchronize from what the gates verify.
 
 Ledger mechanics:
 
@@ -26,12 +26,12 @@ Ledger mechanics:
 
 | Evidence layer | What it locks |
 |---|---|
-| [Contract ledger](./contracts/) | every promise is a named `C-NNN`; an `active` contract must carry evidence of class ≥ `fixture` |
-| [Cross-target fixture gate](../tests/wasm_runtime_test.rs) | every `spec/wasm_cross/*.almd` fixture runs on both targets; outputs byte-compared (`wasm_cross_target_spec`) |
-| [Differential fuzz](../tests/regex_fuzz_test.rs) | randomized programs and inputs, native vs wasm outputs compared |
+| [Contract ledger](../contracts) | every promise is a named `C-NNN`; an `active` contract must carry evidence of class ≥ `fixture` |
+| [Cross-target fixture gate](../../tests/wasm_runtime_test.rs) | every `spec/wasm_cross/*.almd` fixture runs on both targets; outputs byte-compared (`wasm_cross_target_spec`) |
+| [Differential fuzz](../../tests/regex_fuzz_test.rs) | randomized programs and inputs, native vs wasm outputs compared |
 | Emit-time Σ-probes | wasm Unicode/case tables exhaustively probed against Rust `std` over the full scalar domain at emit time |
-| [Lean 4 belt](../crates/almide-perceus-belt/) | RC-insertion correctness machine-checked by the Lean kernel |
-| [Org byte-verify sweep](../scripts/org-byte-verify.sh) | every runnable repo in the almide org executed on both targets, stdout + exit byte-compared |
+| [Lean 4 belt](../../crates/almide-perceus-belt) | RC-insertion correctness machine-checked by the Lean kernel |
+| [Org byte-verify sweep](../../scripts/org-byte-verify.sh) | every runnable repo in the almide org executed on both targets, stdout + exit byte-compared |
 
 ## Verify it yourself
 
@@ -41,4 +41,4 @@ bash scripts/check-contracts.sh    # ledger integrity + claims-block freshness
 bash scripts/org-byte-verify.sh    # org-wide two-target byte comparison
 ```
 
-The v1 line strengthens this from "gates verify it" to "a proven checker re-verifies it on every build" — see [TRUST-SPINE.md](./TRUST-SPINE.md).
+The v1 line strengthens this from "gates verify it" to "a proven checker re-verifies it on every build" — see [TRUST-SPINE.md](../TRUST-SPINE.md).

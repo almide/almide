@@ -3,7 +3,7 @@
 > retired in #782**, in files that no longer exist — on a machine the raw
 > log itself notes was under load. Kept as the record of that campaign; the
 > re-benchmark of the v1 legs with a stated baseline is #917. The current
-> vs-Rust story lives in docs/WASM-OUTPUT.md and the memory ledger's
+> vs-Rust story lives in docs/wasm/WASM-OUTPUT.md and the memory ledger's
 > "Rust-wasm打倒アーク" (v0.34.1, adversarial-Rust 4-0).
 
 <!-- description: WASM optimization roadmap and the running scoreboard against Rust+LLVM -->
@@ -224,7 +224,7 @@ unverified transform on that output. `--wasm-opt`'s own safety claim (that it
 never changes observable behavior on Almide's generated wasm) is backed by a
 dedicated differential gate — `tests/wasm_runtime_test.rs::wasm_opt_parity_spec`, run in CI
 (`.github/workflows/ci.yml`) — not just asserted. Full writeup:
-[docs/WASM-OUTPUT.md](../../WASM-OUTPUT.md).
+[docs/wasm/WASM-OUTPUT.md](../../wasm/WASM-OUTPUT.md).
 
 ### 2.5 Memory layout type safety
 

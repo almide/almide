@@ -131,7 +131,7 @@ enum Commands {
         /// produces it. This is an explicit opt-in that LEAVES the verified
         /// envelope: wasm-opt is an external, unverified transform, so the
         /// shipped bytes are no longer the exact bytes the trust-spine
-        /// rendered (see docs/WASM-OUTPUT.md). Default off — without this
+        /// rendered (see docs/wasm/WASM-OUTPUT.md). Default off — without this
         /// flag the module ships verbatim. No-op on the native target.
         #[arg(long = "wasm-opt")]
         wasm_opt: bool,

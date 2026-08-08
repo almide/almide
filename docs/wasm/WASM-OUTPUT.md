@@ -144,7 +144,7 @@ playground) produce byte-identical modules for all 270 cross-target fixtures —
 a CI gate (`scripts/check-host-determinism.sh`), not an aspiration. And every
 program that compiles for both targets produces **byte-identical stdout/stderr/
 exit code** native ⇄ wasm, tracked contract-by-contract in
-[docs/contracts/](./contracts/).
+[docs/contracts/](../contracts).
 
 ## Reproducing the measurements
 

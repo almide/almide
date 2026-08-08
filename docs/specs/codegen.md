@@ -10,7 +10,7 @@ The **WASM** target does not flow through this crate: it is the v1 MIR
 trust-spine in `crates/almide-mir` (WAT text, assembled by the CLI). The v0
 direct wasm emitter that used to live here was retired in #782. See
 [../ARCHITECTURE.md](../ARCHITECTURE.md) and
-[../WASM-OUTPUT.md](../WASM-OUTPUT.md).
+[../wasm/WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md).
 
 **Source**: `crates/almide-codegen/src/lib.rs`
 
@@ -378,7 +378,7 @@ implementations (`stdlib/*.almd` via `crates/almide-types/src/self_host_registry
 call is a wall — a hard, diagnosed error. The v0 direct emitter that this
 section used to describe was retired in #782.
 
-Details: [../WASM-OUTPUT.md](../WASM-OUTPUT.md),
+Details: [../wasm/WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md),
 [../ARCHITECTURE.md](../ARCHITECTURE.md), [crates/CLAUDE.md](../../crates/CLAUDE.md).
 
 ## 8. CodegenOptions

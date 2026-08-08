@@ -9,7 +9,7 @@
   <a href="./docs/SPEC.md">Specification</a> ·
   <a href="./docs/GRAMMAR.md">Grammar</a> ·
   <a href="./docs/CHEATSHEET.md">Cheatsheet</a> ·
-  <a href="./docs/DESIGN.md">Design Philosophy</a>
+  <a href="./docs/design/DESIGN.md">Design Philosophy</a>
 </p>
 
 <p align="center">
@@ -108,7 +108,7 @@ This claim is not prose. Every observable promise is a named contract in the [be
 > and `env.temp_dir` — is bounded by C-189.
 <!-- claims:generated:end -->
 
-Full scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/EQUIVALENCE.md](./docs/EQUIVALENCE.md)**.
+Full scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/design/EQUIVALENCE.md](./docs/design/EQUIVALENCE.md)**.
 
 ## Memory Safety — What Is Proven, What Is Trusted
 
@@ -136,7 +136,7 @@ The full architecture — the untrusted/trusted split, the ALS normative semanti
 - **Repairable** — Compiler diagnostics guide toward a specific fix, not multiple possibilities
 - **Compact** — High semantic density, low syntactic noise
 
-For the full design rationale, see [Design Philosophy](./docs/DESIGN.md).
+For the full design rationale, see [Design Philosophy](./docs/design/DESIGN.md).
 
 ## Example
 
@@ -236,15 +236,15 @@ publishing, and a figure measured with `time -p` on a sub-10ms program is noise.
 LLM-writability row above and the artifact sizes below are the claims this README currently
 stands behind.
 
-| Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), ≤1.27× across the referenced suite — CI-gated ratio ratchet ([scoreboard](./docs/BENCHMARKS.md)) |
+| Native runtime vs handwritten Rust | **1.00×** on n-body and spectral-norm (same rustc flags, byte-identical output), ≤1.27× across the referenced suite — CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)) |
 
 The verified pipeline ships the exact bytes its own rendering process produced —
 reachability DCE prunes unreached runtime helpers inside the renderer itself, but
 post-hoc external optimizers are never run on the default path, so the "as shipped"
 number carries the name section for trap backtraces. What's inside the binary, why
-it's small, and how to reproduce every number: **[docs/WASM-OUTPUT.md](./docs/WASM-OUTPUT.md)**.
+it's small, and how to reproduce every number: **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
 
-Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.md)**.
+Full tables, methodology, and charts: **[docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md)**.
 
 ## Project Status
 
@@ -282,10 +282,10 @@ Browser-based compiler and runner. The Almide compiler runs as WASM — no serve
 - [docs/SPEC.md](./docs/SPEC.md) — Full language specification
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
-- [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
-- [docs/EQUIVALENCE.md](./docs/EQUIVALENCE.md) — The byte-identity claim: scope, ledger mechanics, evidence layers
+- [docs/design/DESIGN.md](./docs/design/DESIGN.md) — Design philosophy and trade-offs
+- [docs/design/EQUIVALENCE.md](./docs/design/EQUIVALENCE.md) — The byte-identity claim: scope, ledger mechanics, evidence layers
 - [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1 proof-carrying compilation architecture
-- [docs/BENCHMARKS.md](./docs/BENCHMARKS.md) — Binary sizes, native performance, AI coding benchmark
+- [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md) — Binary sizes, native performance, AI coding benchmark
 - [docs/contracts/](./docs/contracts/) — Behavior-contract ledger (cross-target equivalence)
 - [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (953 functions across 41 modules)
 - [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans

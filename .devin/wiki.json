@@ -155,12 +155,12 @@
     },
     {
       "title": "Performance & Benchmarks",
-      "purpose": "Native and WASM performance: docs/BENCHMARKS.md, research/benchmark/perf and research/benchmark/lang-bench harnesses, WASM binary size and speed compared against hand-written Rust compiled to wasm32, and the cargo-excluded almide-kernel SIMD crate.",
+      "purpose": "Native and WASM performance: docs/project/BENCHMARKS.md, research/benchmark/perf and research/benchmark/lang-bench harnesses, WASM binary size and speed compared against hand-written Rust compiled to wasm32, and the cargo-excluded almide-kernel SIMD crate.",
       "parent": null
     },
     {
       "title": "LLM Writability Research",
-      "purpose": "The research program behind the mission: research/grammar-lab experiments, lang-bench cross-language comparisons, and the design ledgers docs/REJECTED_PATTERNS.md and docs/HIDDEN_OPERATIONS.md. State clearly that daily MSR measurement and the task bank live in the almide/almide-dojo repo, and that research/benchmark/msr and research/benchmark/framework here are archived.",
+      "purpose": "The research program behind the mission: research/grammar-lab experiments, lang-bench cross-language comparisons, and the design ledgers docs/design/REJECTED_PATTERNS.md and docs/design/HIDDEN_OPERATIONS.md. State clearly that daily MSR measurement and the task bank live in the almide/almide-dojo repo, and that research/benchmark/msr and research/benchmark/framework here are archived.",
       "parent": null
     }
   ]
