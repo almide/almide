@@ -45,12 +45,21 @@ If you already shipped a broken release:
 
 ## Development Setup
 
-After cloning, install the git hooks:
+After cloning, fetch the submodules and install the git hooks:
 
 ```bash
+git submodule update --init --recursive
 brew install lefthook  # or: https://github.com/evilmartians/lefthook
 lefthook install
 ```
+
+Submodules (`actions/checkout` does NOT fetch them, so CI never sees these — they are
+local-only conveniences and nothing in the build depends on them):
+
+| Path | Repo | Used by |
+|---|---|---|
+| `grammar/` | [almide/almide-grammar](https://github.com/almide/almide-grammar) | grammar definition consumed by the editor/tree-sitter repos |
+| `research/benchmark/lang-bench/upstream/` | [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) | `/almide-lang-bench` |
 
 ## Project Overview
 
