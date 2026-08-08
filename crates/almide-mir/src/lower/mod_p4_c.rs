@@ -120,6 +120,16 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         {
             result_call_name_scalar_in_heap_out(func, result_ty)
         }
+        _ => result_collection_call_name(func, arg_tys, result_ty),
+    }
+}
+
+/// The Result COLLECTION combinators — `partition` and `collect_map`, both keyed
+/// on a whole list-of-Result shape rather than a single Ok payload. Split out of
+/// [`result_call_name`] so neither half outgrows a readable arm table.
+fn result_collection_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match func {
         // partition: List[Result[scalar, String]] → (List[scalar], List[String])
         "partition" => {
             let ok = matches!(arg_tys.first(), Some(Ty::Applied(TC::List, e))
@@ -414,6 +424,18 @@ fn unwrap_or_call_name(module: &str, arg_tys: &[Ty]) -> Option<String> {
 /// routing for `result.unwrap_or` (the pipe/direct form — `result.unwrap_or(json.parse(s),
 /// json.null())`, json_gltf_walk): the generic impl takes an i64 scalar default; a heap
 /// Ok/default needs the rc-correct self-hosts registered for the `??` desugar. Verbatim.
+/// A FLAT scalar block Ok payload — a scalar TUPLE (`result.zip`'s `(Int, Int)`),
+/// a `List[<scalar>]`, `Bytes`, or an `Option[<scalar>]` (the C-149 nested-share
+/// chain: len-as-tag plus one scalar slot, flat rc_dec). These route to the
+/// rc-correct flat variant over the cap-as-tag layout (tag @16).
+fn is_flat_scalar_ok_payload(ok: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    matches!(ok, Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
+        || matches!(ok, Ty::Applied(TC::List | TC::Option, e)
+            if e.len() == 1 && !is_heap_ty(&e[0]))
+        || matches!(ok, Ty::Bytes)
+}
+
 fn unwrap_or_call_name_result(arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
     let Some(Ty::Applied(TypeConstructorId::Result, a)) = arg_tys.first() else { return None };
@@ -429,18 +451,7 @@ fn unwrap_or_call_name_result(arg_tys: &[Ty]) -> Option<String> {
     if a.len() == 2 && matches!(a[0], Ty::String) {
         return Some("result.str_unwrap_or".to_string());
     }
-    // A FLAT scalar block payload — a scalar TUPLE (`result.zip`'s `(Int, Int)`),
-    // a List[<scalar>], Bytes, or an `Option[<scalar>]` (the C-149
-    // nested-share chain — len-as-tag + one scalar slot, flat rc_dec):
-    // the rc-correct flat variant over the cap-as-tag layout (tag @16).
-    if a.len() == 2
-        && (matches!(&a[0], Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
-            || matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-                if e.len() == 1 && !is_heap_ty(&e[0]))
-            || matches!(&a[0], Ty::Applied(TypeConstructorId::Option, e)
-                if e.len() == 1 && !is_heap_ty(&e[0]))
-            || matches!(a[0], Ty::Bytes))
-    {
+    if a.len() == 2 && is_flat_scalar_ok_payload(&a[0]) {
         return Some("result.flat_unwrap_or".to_string());
     }
     // Any OTHER heap Ok payload has no registered rc-correct variant: the
