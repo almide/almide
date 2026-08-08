@@ -397,6 +397,27 @@
     }
 
     #[test]
+    fn dynstr_alloc_wrap_is_the_defined_oom_abort() {
+        // C-197's failure-shape promise, at the i64→i32 seam: `bytes.new(4294967295)`
+        // wraps `i32.wrap_i64` to -1, rounds to a ZERO block size, and $alloc's own
+        // guards never see the real request — the zerofill then scribbled off the
+        // memory end as an OOB trap (exit 134; fuzz seed 424245 index 104). The
+        // full-i64 guard in the DynStr render must turn this into the DEFINED abort:
+        // `Error: out of memory` on stderr and a clean exit 1, never a trap.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.new(4294967295)\n  \
+            println(int.to_string(bytes.len(b))) }\n";
+        let prog = lower_source(src);
+        if let Some((code, stderr)) = run_output("dynstr_alloc_wrap_oom", &render_wasm_program(&prog)) {
+            assert_eq!(code, Some(1), "expected the defined oom exit 1, got {code:?}: {stderr}");
+            assert!(
+                stderr.contains("out of memory"),
+                "expected the C-197 abort line on stderr, got: {stderr}"
+            );
+        }
+    }
+
+    #[test]
     fn self_hosted_math_log2_bit_exact() {
         // SELF-HOSTED math.log2 — BIT-EXACT vs v0: log2(8)=4613937818241073152,
         // log2(10)=4614662735865160561, log2(1)=0.

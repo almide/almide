@@ -672,6 +672,23 @@
         }
     }
 
+    /// Run a WAT on wasmtime and hand back (exit code, stderr). `None` = wasmtime
+    /// unavailable (skip). For tests that pin an ABORT SHAPE — a defined message +
+    /// exit code (the C-197 oom line) — where `run_status`'s success bool cannot
+    /// distinguish a clean `proc_exit(1)` from a wild trap.
+    fn run_output(label: &str, wat: &str) -> Option<(Option<i32>, String)> {
+        let dir = std::env::temp_dir().join(format!("almide_mir_wasm_{label}"));
+        std::fs::create_dir_all(&dir).expect("failed to create the test scratch dir");
+        let wat_path = dir.join("m.wat");
+        std::fs::write(&wat_path, wat).expect("failed to write the test scratch wat file");
+        match Command::new("wasmtime").arg("run").arg(&wat_path).output() {
+            Ok(o) if o.status.code() != Some(127) => {
+                Some((o.status.code(), String::from_utf8_lossy(&o.stderr).into_owned()))
+            }
+            _ => None, // wasmtime unavailable → skip
+        }
+    }
+
     #[test]
     fn rc_dec_traps_on_double_free() {
         // The double-free CLASS — the one v0 bled on — is now TRAPPED on the real
