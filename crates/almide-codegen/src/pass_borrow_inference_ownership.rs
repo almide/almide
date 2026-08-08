@@ -21,7 +21,36 @@ fn check_needs_ownership_flow(expr: &IrExpr, var: VarId, needs: &mut bool) {
         IrExprKind::UnwrapOr { expr, fallback } => {
             check_needs_ownership_unwrap_or(expr, fallback, var, needs)
         }
-        _ => {}
+        // Explicit-preserve (traversal-totality): every other variant belongs
+        // to a SIBLING group dispatcher (or is a leaf) — this fn contributes
+        // nothing for them, verbatim the `_ => {}` it replaces.
+        IrExprKind::Var { .. } | IrExprKind::Call { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::Block { .. } | IrExprKind::BinOp { .. }
+        | IrExprKind::UnOp { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::FnRef { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::List { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Tuple { .. }
+        | IrExprKind::Range { .. } | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 

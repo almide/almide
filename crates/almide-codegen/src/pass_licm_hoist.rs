@@ -151,8 +151,27 @@ fn try_hoist_expr(expr: &mut IrExpr, ctx: &mut HoistCtx) {
         // Everything else: the whole-expression hoist check above already
         // decided these nodes are not worth recursing into for sub-part
         // hoisting — they are leaves, control flow with their own scoping, or
-        // wrappers handled by the whole-expr path.
-        _ => {}
+        // wrappers handled by the whole-expr path. Explicit-preserve
+        // (traversal-totality): listed verbatim as the `_ => {}` it replaces.
+        IrExprKind::Var { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::Block { .. } | IrExprKind::Match { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::FnRef { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::Lambda { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Fan { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 
