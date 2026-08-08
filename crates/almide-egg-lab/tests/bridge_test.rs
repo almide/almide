@@ -792,3 +792,50 @@ fn matrix_let_split_with_duplicate_use_is_not_inlined() {
         other => panic!("expected Block opaque slot, got {:?}", other),
     }
 }
+
+// ── Two-binder composition rules must not collide param NAMES ──
+//
+// The Rust backend prints closure parameters by NAME, so two params carrying
+// the same name in one binder list emit `move |_fn_arg0: i64, _fn_arg0: i64|`
+// — rustc E0415, and the whole program fails to build. Distinct VarIds are not
+// enough.
+//
+// It is reachable from ordinary source: eta-expanding a bare fn argument names
+// every param `_fn_arg<i>` from zero, so
+// `xs |> list.map(double) |> list.filter(is_positive) |> list.fold(0, sum_pair)`
+// hands a rule two lambdas whose params are both `_fn_arg0`
+// (spec/regression/monkey23_higher_order_test.almd).
+//
+// Exactly TWO rules build a two-element binder list — map-into-fold and
+// filter_map-into-fold — and both route through `distinct_elem_binder`. This
+// test pins that count: a third such rule added without the helper trips it,
+// which is the failure mode a per-rule fix would have left open.
+#[test]
+fn every_two_binder_rule_goes_through_the_rename_helper() {
+    let src = include_str!("../src/bridge_matrix_analysis.rs");
+
+    // A two-element binder list is the shape `params: vec![` followed by two
+    // `(id, ty)` entries before the closing `],`.
+    let two_binder_sites = src
+        .match_indices("params: vec![\n")
+        .filter(|(i, _)| {
+            let tail = &src[*i..];
+            let close = tail.find("],").unwrap_or(tail.len());
+            tail[..close].matches("_ty.clone()),").count() == 2
+        })
+        .count();
+    assert_eq!(
+        two_binder_sites, 2,
+        "expected exactly 2 two-binder composition rules (map-into-fold, \
+         filter_map-into-fold); found {two_binder_sites}. A new one must call \
+         `distinct_elem_binder` — see the E0415 note on that fn."
+    );
+
+    let helper_calls = src.matches("distinct_elem_binder(").count();
+    // one definition + one call per two-binder rule
+    assert_eq!(
+        helper_calls, 3,
+        "every two-binder rule must rename through `distinct_elem_binder`; \
+         found {helper_calls} mentions (expected 1 definition + 2 calls)"
+    );
+}

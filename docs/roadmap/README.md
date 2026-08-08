@@ -7,7 +7,7 @@
 
 ## Active
 
-79 items
+80 items
 
 | Item | Description |
 |------|-------------|
@@ -49,6 +49,7 @@
 | [Logical-Time Async — the implementation blueprint](active/logical-time-implementation.md) | Implementation blueprint: Op::Charge, fuel ABI, metered clones, race lowering, gates |
 | [Logical-Time Async — the proof ledger](active/logical-time-proofs.md) | Proof ledger for the logical-time async semantics: theorems, Lean core, model gate |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) | Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong |
+| [Reviving the monkey regression suite: what `spec/` actually is](active/mir-caps-call-count-breach.md) | spec/ is the trust spine's v0 corpus, not a test directory — the revived monkey suite grows two shrink-only ratchets and breaches the caps-soundness backstop |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field |
 | [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) | Routing almide build --target rust through the same v1 Perceus MIR as wasm, so one memory model serves both legs |
 | [Outside-Review Audit 2026-07 — 証拠層の負債バーンダウン](active/outside-review-audit-2026-07.md) | The 2026-07-27 five-lens outside-reviewer audit — the evidence layer lagged the v0→v1 transition and the honesty gradient inverted (internal docs honest, outward claims false); the layered burn-down to "zero false claims, every gate real" with issue links #913-#932 |
