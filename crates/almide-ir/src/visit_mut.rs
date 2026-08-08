@@ -23,9 +23,14 @@ pub trait IrMutVisitor: Sized {
 }
 
 /// Walk into all child expressions/statements/patterns of an expression.
+///
+/// Mirrors [`crate::visit::walk_expr`] arm for arm: grouped by CHILD SHAPE
+/// (no children / one / two / three / sequence / name-tagged / bespoke),
+/// exhaustive with no wildcard so a new `IrExprKind` variant fails to
+/// compile here until its shape is declared.
 pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
     match &mut expr.kind {
-        // ── Leaf nodes ──
+        // ── No children ──
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
         | IrExprKind::FnRef { .. } | IrExprKind::EmptyMap | IrExprKind::OptionNone
@@ -33,104 +38,80 @@ pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
         | IrExprKind::Todo { .. } | IrExprKind::RenderedCall { .. }
         | IrExprKind::EnvLoad { .. } | IrExprKind::ClosureCreate { .. } => {}
 
-        // ── Operators ──
-        IrExprKind::BinOp { left, right, .. } => {
-            v.visit_expr_mut(left);
-            v.visit_expr_mut(right);
-        }
-        IrExprKind::UnOp { operand, .. } => {
-            v.visit_expr_mut(operand);
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::RcWrap { expr: e, .. } | IrExprKind::ToVec { expr: e } => {
+            v.visit_expr_mut(e);
         }
 
-        // ── Control flow ──
+        // ── Two children, left to right ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::Range { start: a, end: b, .. }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b } => {
+            v.visit_expr_mut(a);
+            v.visit_expr_mut(b);
+        }
+
+        // ── Three children ──
         IrExprKind::If { cond, then, else_ } => {
             v.visit_expr_mut(cond);
             v.visit_expr_mut(then);
             v.visit_expr_mut(else_);
         }
-        IrExprKind::Match { subject, arms } => walk_expr_mut_match(v, subject, arms),
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { v.visit_stmt_mut(s); }
-            if let Some(e) = expr { v.visit_expr_mut(e); }
-        }
 
-        // ── Loops ──
-        IrExprKind::ForIn { iterable, body, .. } => walk_expr_mut_loop_body(v, iterable, body),
-        IrExprKind::While { cond, body } => walk_expr_mut_loop_body(v, cond, body),
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } | IrExprKind::RuntimeCall { args: xs, .. }
+        | IrExprKind::RustMacro { args: xs, .. } => walk_expr_mut_each(v, xs),
 
-        // ── Calls ──
-        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            walk_expr_mut_call(v, target, args)
+        // ── Name-tagged children (record fields, inline-Rust args) ──
+        IrExprKind::Record { fields, .. } | IrExprKind::InlineRust { args: fields, .. } => {
+            walk_expr_mut_fields(v, fields)
         }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { v.visit_expr_mut(a); }
-        }
-
-        // ── Collections ──
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { v.visit_expr_mut(e); }
-        }
-        IrExprKind::Record { fields, .. } => walk_expr_mut_fields(v, fields),
         IrExprKind::SpreadRecord { base, fields } => {
             v.visit_expr_mut(base);
             walk_expr_mut_fields(v, fields);
         }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, val) in entries { v.visit_expr_mut(k); v.visit_expr_mut(val); }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            v.visit_expr_mut(start);
-            v.visit_expr_mut(end);
-        }
 
-        // ── Access ──
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            v.visit_expr_mut(object);
+        // ── Shapes with their own traversal order ──
+        IrExprKind::Match { subject, arms } => walk_expr_mut_match(v, subject, arms),
+        IrExprKind::Block { stmts, expr } => walk_expr_mut_block(v, stmts, expr.as_deref_mut()),
+        IrExprKind::ForIn { iterable: lead, body, .. }
+        | IrExprKind::While { cond: lead, body } => walk_expr_mut_loop_body(v, lead, body),
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
+            walk_expr_mut_call(v, target, args)
         }
-        IrExprKind::IndexAccess { object, index } => {
-            v.visit_expr_mut(object);
-            v.visit_expr_mut(index);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            v.visit_expr_mut(object);
-            v.visit_expr_mut(key);
-        }
-
-        // ── Functions ──
-        IrExprKind::Lambda { body, .. } => {
-            v.visit_expr_mut(body);
-        }
-
-        // ── Strings ──
+        IrExprKind::MapLiteral { entries } => walk_expr_mut_map_entries(v, entries),
         IrExprKind::StringInterp { parts } => walk_expr_mut_string_interp(v, parts),
-
-        // ── Wrappers (single child) ──
-        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::RcWrap { expr: e, .. }
-        | IrExprKind::ToVec { expr: e } => {
-            v.visit_expr_mut(e);
-        }
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            v.visit_expr_mut(e);
-            v.visit_expr_mut(f);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { v.visit_expr_mut(a); }
-        }
-        IrExprKind::InlineRust { args, .. } => {
-            for (_, a) in args { v.visit_expr_mut(a); }
-        }
         IrExprKind::IterChain { source, steps, collector, .. } => {
             walk_expr_mut_iter_chain(v, source, steps, collector)
         }
     }
+}
+
+/// The "flat sequence of children" arm of [`walk_expr_mut`].
+fn walk_expr_mut_each<V: IrMutVisitor>(v: &mut V, exprs: &mut [IrExpr]) {
+    for e in exprs { v.visit_expr_mut(e); }
+}
+
+/// `Block` arm of [`walk_expr_mut`]: every statement, then the tail expression.
+fn walk_expr_mut_block<V: IrMutVisitor>(v: &mut V, stmts: &mut [IrStmt], tail: Option<&mut IrExpr>) {
+    for s in stmts { v.visit_stmt_mut(s); }
+    if let Some(e) = tail { v.visit_expr_mut(e); }
+}
+
+/// `MapLiteral` arm of [`walk_expr_mut`]: each entry's key, then its value.
+fn walk_expr_mut_map_entries<V: IrMutVisitor>(v: &mut V, entries: &mut [(IrExpr, IrExpr)]) {
+    for (k, val) in entries { v.visit_expr_mut(k); v.visit_expr_mut(val); }
 }
 
 /// `Match` arm of [`walk_expr_mut`]: subject + per-arm pattern/guard/body.
@@ -187,7 +168,9 @@ fn walk_expr_mut_loop_body<V: IrMutVisitor>(v: &mut V, lead: &mut IrExpr, body: 
     for s in body { v.visit_stmt_mut(s); }
 }
 
-/// `Record`/`SpreadRecord` field-value loop shared by [`walk_expr_mut`].
+/// Name-tagged child loop shared by [`walk_expr_mut`] — `Record` /
+/// `SpreadRecord` fields and `InlineRust` args all carry `(Sym, IrExpr)`
+/// pairs whose name plays no part in traversal.
 fn walk_expr_mut_fields<V: IrMutVisitor>(v: &mut V, fields: &mut [(Sym, IrExpr)]) {
     for (_, val) in fields { v.visit_expr_mut(val); }
 }

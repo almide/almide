@@ -46,104 +46,103 @@ fn count_uses_in_decls(functions: &[IrFunction], top_lets: &[IrTopLet], table: &
     }
 }
 
+/// Grouped by CHILD SHAPE, mirroring [`crate::visit::walk_expr`]: every variant
+/// with the same traversal shape shares one arm (or-pattern binding renames line
+/// the field names up). Exhaustive with no wildcard, so a new `IrExprKind`
+/// variant is a compile error here until its shape is declared.
 fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
     match &expr.kind {
-        IrExprKind::Var { id } => {
-            table.increment_use(*id);
-        }
-        IrExprKind::FnRef { .. } => {} // function reference, no VarId to track
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        IrExprKind::Var { id } => table.increment_use(*id),
+
+        // ── No children (FnRef / ClosureCreate name a function, not a VarId) ──
+        IrExprKind::FnRef { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
         | IrExprKind::Hole | IrExprKind::Todo { .. }
         | IrExprKind::Break | IrExprKind::Continue
         | IrExprKind::EmptyMap
         | IrExprKind::EnvLoad { .. } | IrExprKind::ClosureCreate { .. } => {}
 
-        IrExprKind::BinOp { left, right, .. } => {
-            count_uses_in_expr(left, table);
-            count_uses_in_expr(right, table);
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::RcWrap { expr: e, .. } | IrExprKind::ToVec { expr: e } => {
+            count_uses_in_expr(e, table);
         }
-        IrExprKind::UnOp { operand, .. } => {
-            count_uses_in_expr(operand, table);
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::Range { start: a, end: b, .. }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b } => {
+            count_uses_in_expr(a, table);
+            count_uses_in_expr(b, table);
         }
+
+        // ── Three children ──
         IrExprKind::If { cond, then, else_ } => {
             count_uses_in_expr(cond, table);
             count_uses_in_expr(then, table);
             count_uses_in_expr(else_, table);
         }
-        IrExprKind::Match { subject, arms } => count_uses_in_match(subject, arms, table),
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { count_uses_in_stmt(s, table); }
-            if let Some(e) = expr { count_uses_in_expr(e, table); }
+
+        // ── A flat sequence of children ──
+        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } | IrExprKind::RuntimeCall { args: xs, .. }
+        | IrExprKind::RustMacro { args: xs, .. } => count_uses_in_each(xs, table),
+
+        // ── Name-tagged children (record fields, inline-Rust args) ──
+        IrExprKind::Record { fields, .. } | IrExprKind::InlineRust { args: fields, .. } => {
+            count_uses_in_fields(fields, table)
         }
-        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            count_uses_in_call(target, args, table)
-        }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { count_uses_in_expr(a, table); }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { count_uses_in_expr(e, table); }
-        }
-        IrExprKind::Record { fields, .. } => count_uses_in_fields(fields, table),
         IrExprKind::SpreadRecord { base, fields } => {
             count_uses_in_expr(base, table);
             count_uses_in_fields(fields, table);
         }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries {
-                count_uses_in_expr(k, table);
-                count_uses_in_expr(v, table);
-            }
+
+        // ── Shapes with their own counting rule ──
+        IrExprKind::Match { subject, arms } => count_uses_in_match(subject, arms, table),
+        IrExprKind::Block { stmts, expr } => count_uses_in_block(stmts, expr.as_deref(), table),
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
+            count_uses_in_call(target, args, table)
         }
-        IrExprKind::Range { start, end, .. } => {
-            count_uses_in_expr(start, table);
-            count_uses_in_expr(end, table);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            count_uses_in_expr(object, table);
-        }
-        IrExprKind::IndexAccess { object, index } => {
-            count_uses_in_expr(object, table);
-            count_uses_in_expr(index, table);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            count_uses_in_expr(object, table);
-            count_uses_in_expr(key, table);
-        }
+        IrExprKind::MapLiteral { entries } => count_uses_in_map_entries(entries, table),
         // ForIn/While: count the loop body once, then extra-count every
         // outer-scope var referenced in it (both need the same treatment —
         // a loop body runs N times, so outer captures are used N times too).
-        IrExprKind::ForIn { iterable, body, .. } => count_uses_in_loop_body(iterable, body, table),
-        IrExprKind::While { cond, body } => count_uses_in_loop_body(cond, body, table),
+        IrExprKind::ForIn { iterable: lead, body, .. }
+        | IrExprKind::While { cond: lead, body } => count_uses_in_loop_body(lead, body, table),
         IrExprKind::Lambda { params, body, .. } => count_uses_in_lambda(params, body, table),
         IrExprKind::StringInterp { parts } => count_uses_in_string_interp(parts, table),
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-       
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::RcWrap { expr, .. }
-        | IrExprKind::ToVec { expr } => {
-            count_uses_in_expr(expr, table);
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            count_uses_in_expr(expr, table);
-            count_uses_in_expr(fallback, table);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { count_uses_in_expr(a, table); }
-        }
-        IrExprKind::InlineRust { args, .. } => {
-            for (_, a) in args { count_uses_in_expr(a, table); }
-        }
-        IrExprKind::RenderedCall { .. } => {}
         IrExprKind::IterChain { source, steps, collector, .. } => {
             count_uses_in_iter_chain(source, steps, collector, table)
         }
+    }
+}
+
+/// The "flat sequence of children" arm of [`count_uses_in_expr`].
+fn count_uses_in_each(exprs: &[IrExpr], table: &mut VarTable) {
+    for e in exprs { count_uses_in_expr(e, table); }
+}
+
+/// `Block` arm of [`count_uses_in_expr`]: statements, then the tail expression.
+fn count_uses_in_block(stmts: &[IrStmt], tail: Option<&IrExpr>, table: &mut VarTable) {
+    for s in stmts { count_uses_in_stmt(s, table); }
+    if let Some(e) = tail { count_uses_in_expr(e, table); }
+}
+
+/// `MapLiteral` arm of [`count_uses_in_expr`]: each entry's key, then its value.
+fn count_uses_in_map_entries(entries: &[(IrExpr, IrExpr)], table: &mut VarTable) {
+    for (k, v) in entries {
+        count_uses_in_expr(k, table);
+        count_uses_in_expr(v, table);
     }
 }
 
@@ -353,73 +352,84 @@ fn bump_outer_vars_in_loop(stmts: &[IrStmt], locals: &HashSet<u32>, table: &mut 
     }
 }
 
+/// Grouped by CHILD SHAPE like [`count_uses_in_expr`], but with a `_ => {}`
+/// default: this pass only re-counts *references*, so node kinds that cannot
+/// contain a plain `Var` reference to bump (macro/inline-Rust args, iterator
+/// chains, leaves) are deliberately skipped rather than traversed.
 fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable) {
     match &expr.kind {
         IrExprKind::Var { id } if !locals.contains(&id.0) => {
             table.increment_use(*id);
         }
-        // Recurse into sub-expressions but don't double-count nested loops
-        // (they'll handle their own bumping)
-        IrExprKind::Block { stmts, expr } => bump_vars_in_block(stmts, expr.as_deref(), locals, table),
+
+        // ── One child ──
+        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+        | IrExprKind::OptionalChain { expr: e, .. }
+        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::RcWrap { expr: e, .. } | IrExprKind::ToVec { expr: e } => {
+            bump_vars_in_expr(e, locals, table);
+        }
+
+        // ── Two children ──
+        IrExprKind::BinOp { left: a, right: b, .. }
+        | IrExprKind::Range { start: a, end: b, .. }
+        | IrExprKind::IndexAccess { object: a, index: b }
+        | IrExprKind::MapAccess { object: a, key: b }
+        | IrExprKind::UnwrapOr { expr: a, fallback: b } => {
+            bump_vars_in_expr(a, locals, table);
+            bump_vars_in_expr(b, locals, table);
+        }
+
+        // ── Three children ──
         IrExprKind::If { cond, then, else_ } => {
             bump_vars_in_expr(cond, locals, table);
             bump_vars_in_expr(then, locals, table);
             bump_vars_in_expr(else_, locals, table);
         }
-        IrExprKind::Match { subject, arms } => bump_vars_in_match(subject, arms, locals, table),
-        IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. }
-        | IrExprKind::RuntimeCall { args, .. } => { for a in args { bump_vars_in_expr(a, locals, table); } }
-        IrExprKind::BinOp { left, right, .. } => {
-            bump_vars_in_expr(left, locals, table);
-            bump_vars_in_expr(right, locals, table);
+
+        // ── A flat sequence of children (calls contribute their args only) ──
+        IrExprKind::Call { args: xs, .. } | IrExprKind::TailCall { args: xs, .. }
+        | IrExprKind::RuntimeCall { args: xs, .. }
+        | IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
+        | IrExprKind::Fan { exprs: xs } => {
+            for e in xs { bump_vars_in_expr(e, locals, table); }
         }
-        IrExprKind::UnOp { operand, .. } => bump_vars_in_expr(operand, locals, table),
-        IrExprKind::StringInterp { parts } => bump_vars_in_string_interp(parts, locals, table),
-        IrExprKind::Lambda { body, .. } => bump_vars_in_expr(body, locals, table),
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr } => bump_vars_in_expr(expr, locals, table),
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            bump_vars_in_expr(expr, locals, table);
-            bump_vars_in_expr(fallback, locals, table);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => bump_vars_in_expr(object, locals, table),
-        IrExprKind::IndexAccess { object, index } => {
-            bump_vars_in_expr(object, locals, table);
-            bump_vars_in_expr(index, locals, table);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            bump_vars_in_expr(object, locals, table);
-            bump_vars_in_expr(key, locals, table);
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { bump_vars_in_expr(e, locals, table); }
-        }
+
+        // ── Name-tagged children ──
         IrExprKind::Record { fields, .. } => bump_vars_in_fields(fields, locals, table),
         IrExprKind::SpreadRecord { base, fields } => {
             bump_vars_in_expr(base, locals, table);
             bump_vars_in_fields(fields, locals, table);
         }
+
+        // ── Shapes with their own rule ──
+        // Recurse into sub-expressions but don't double-count nested loops
+        // (they'll handle their own bumping)
+        IrExprKind::Block { stmts, expr } => bump_vars_in_block(stmts, expr.as_deref(), locals, table),
+        IrExprKind::Match { subject, arms } => bump_vars_in_match(subject, arms, locals, table),
+        IrExprKind::StringInterp { parts } => bump_vars_in_string_interp(parts, locals, table),
+        IrExprKind::MapLiteral { entries } => bump_vars_in_map_entries(entries, locals, table),
         // Nested loops: bump outer vars in iterable/cond AND body. The lead
         // expression is re-evaluated each iteration of the enclosing loop.
-        IrExprKind::ForIn { iterable, body, .. } => bump_vars_in_loop_body(iterable, body, locals, table),
-        IrExprKind::While { cond, body } => bump_vars_in_loop_body(cond, body, locals, table),
-        IrExprKind::Range { start, end, .. } => {
-            bump_vars_in_expr(start, locals, table);
-            bump_vars_in_expr(end, locals, table);
+        IrExprKind::ForIn { iterable: lead, body, .. }
+        | IrExprKind::While { cond: lead, body } => {
+            bump_vars_in_loop_body(lead, body, locals, table)
         }
-        IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::RcWrap { expr, .. }
-        | IrExprKind::ToVec { expr } => {
-            bump_vars_in_expr(expr, locals, table);
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { bump_vars_in_expr(k, locals, table); bump_vars_in_expr(v, locals, table); }
-        }
+
         _ => {}
+    }
+}
+
+/// `MapLiteral` arm of [`bump_vars_in_expr`]: each entry's key, then its value.
+fn bump_vars_in_map_entries(entries: &[(IrExpr, IrExpr)], locals: &HashSet<u32>, table: &mut VarTable) {
+    for (k, v) in entries {
+        bump_vars_in_expr(k, locals, table);
+        bump_vars_in_expr(v, locals, table);
     }
 }
 
@@ -517,7 +527,7 @@ pub fn demote_unused_mut(program: &mut IrProgram) {
 /// binding is dead from `use_count == 0` alone must consult this set too, or
 /// it strips a `let` the write-back still names (#857, E0425).
 pub fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
-    use crate::visit::{IrVisitor, walk_expr, walk_stmt};
+    use crate::visit::{IrVisitor, walk_stmt};
     struct AssignCollector<'a> { assigned: &'a mut HashSet<u32> }
     impl IrVisitor for AssignCollector<'_> {
         fn visit_stmt(&mut self, stmt: &IrStmt) {
@@ -545,13 +555,21 @@ pub fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
 /// Collect warnings for unused variables.
 /// Skips: `_` prefixed names, function parameters, pattern bindings (span is None).
 pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<almide_base::Diagnostic> {
-    // Collect all parameter VarIds to exclude them
+    let (param_ids, mutated) = collect_params_and_mutations(program);
+    (0..program.var_table.len())
+        .filter_map(|i| {
+            unused_var_warning(&program.var_table.entries[i], i as u32, &param_ids, &mutated, file)
+        })
+        .collect()
+}
+
+/// The two exclusion sets consulted by [`unused_var_warning`]: every function
+/// parameter's VarId, and every VarId written in place (`ys[i] = v`, `m[k] = v`,
+/// `r.f = v`, …). `use_count` misses the latter because a write is not a read,
+/// so without this the warning tells the author to rename to `_ys` for a binding
+/// the program genuinely writes (#857).
+fn collect_params_and_mutations(program: &IrProgram) -> (HashSet<u32>, HashSet<u32>) {
     let mut param_ids: HashSet<u32> = HashSet::new();
-    // A variable written in place (`ys[i] = v`, `m[k] = v`, `r.f = v`, …) is
-    // NOT unused — the write names it. `use_count` misses those positions
-    // because a write is not a read, so consult the mutation targets too;
-    // otherwise the warning tells the author to rename to `_ys` for a binding
-    // the program genuinely writes (#857).
     let mut mutated: HashSet<u32> = HashSet::new();
     for func in &program.functions {
         for p in &func.params {
@@ -562,33 +580,28 @@ pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<almid
     for tl in &program.top_lets {
         collect_assigned_vars(&tl.value, &mut mutated);
     }
+    (param_ids, mutated)
+}
 
-    let mut warnings = Vec::new();
-    for i in 0..program.var_table.len() {
-        let info = &program.var_table.entries[i];
-
-        // Skip _ prefixed (intentionally unused)
-        if info.name.starts_with('_') { continue; }
-
-        // Skip parameters
-        if param_ids.contains(&(i as u32)) { continue; }
-
-        // Skip variables without span (pattern bindings, loop vars, etc.)
-        if info.span.is_none() { continue; }
-
-        // Skip if used (read) or written in place
-        if info.use_count > 0 { continue; }
-        if mutated.contains(&(i as u32)) { continue; }
-
-        let span = match info.span { Some(s) => s, None => continue };
-        let diag = almide_base::Diagnostic::warning(
-            format!("unused variable '{}'", info.name),
-            format!("Prefix with '_' to suppress: _{}", info.name),
-            "",
-        ).at(file, span.line);
-        warnings.push(diag);
-    }
-    warnings
+/// A binding earns an "unused variable" warning only when it is user-named
+/// (no `_` prefix, which means intentionally unused), is not a parameter,
+/// carries a source span (pattern bindings and loop vars have none), is never
+/// read, and is never written in place.
+fn unused_var_warning(
+    info: &VarInfo,
+    id: u32,
+    param_ids: &HashSet<u32>,
+    mutated: &HashSet<u32>,
+    file: &str,
+) -> Option<almide_base::Diagnostic> {
+    if info.name.starts_with('_') || param_ids.contains(&id) { return None; }
+    if info.use_count > 0 || mutated.contains(&id) { return None; }
+    let span = info.span?;
+    Some(almide_base::Diagnostic::warning(
+        format!("unused variable '{}'", info.name),
+        format!("Prefix with '_' to suppress: _{}", info.name),
+        "",
+    ).at(file, span.line))
 }
 
 /// Classify a top-level let value: constant-evaluable expressions are `Const`, everything else is `Lazy`.
