@@ -57,27 +57,86 @@ fn sorted_dedup_ids(ids: impl Iterator<Item = u32>) -> String {
 /// Collect the (defined, used) value ids of a function for name-totality.
 /// Duplicates are harmless — the proven checker is set-membership.
 pub fn name_witness(func: &MirFunction) -> NameWitness {
-    let mut defined: Vec<ValueId> = func.params.iter().map(|p| p.value).collect();
-    let mut used: Vec<ValueId> = Vec::new();
-    let record_args = |args: &[CallArg], used: &mut Vec<ValueId>| {
-        for a in args {
-            if let CallArg::Handle(v) | CallArg::Scalar(v) = a {
-                used.push(*v);
-            }
-        }
+    let mut w = NameWitness {
+        defined: func.params.iter().map(|p| p.value).collect(),
+        used: Vec::new(),
     };
     for op in &func.ops {
+        w.record(op);
+    }
+    if let Some(r) = func.ret {
+        w.used.push(r);
+    }
+    w
+}
+
+impl NameWitness {
+    /// The value ids one op defines and uses.
+    ///
+    /// Split in two halves at the value/control seam: this one takes the ops
+    /// that PRODUCE a value, [`Self::record_control`] the markers and stores.
+    fn record(&mut self, op: &Op) {
         match op {
-            // Probe charge: no defined value ids (the dyn charge reads
-            // src but defines nothing).
-            Op::Charge { .. } | Op::ChargeDyn { .. } => {}
             Op::Alloc { dst, .. } | Op::Const { dst } | Op::ConstInt { dst, .. } => {
-                defined.push(*dst)
+                self.define(*dst)
             }
+            // A function reference DEFINES its scalar slot value; it uses no MIR
+            // value (the referenced function name is resolved by the render).
+            Op::FuncRef { dst, .. } => self.define(*dst),
             Op::Dup { dst, src } => {
-                defined.push(*dst);
-                used.push(*src);
+                self.define(*dst);
+                self.use_one(*src);
             }
+            Op::Pure { dst, uses } => {
+                self.define(*dst);
+                self.use_many(uses.iter().copied());
+            }
+            Op::IntBinOp { dst, a, b, .. } => {
+                self.define(*dst);
+                self.use_many([*a, *b]);
+            }
+            Op::Prim { dst, args, .. } => {
+                self.define_opt(*dst);
+                self.use_many(args.iter().copied());
+            }
+            // A CallImport defines its result and USES its (borrowed/scalar) args,
+            // exactly like a CallFn — its name is the host import, resolved
+            // structurally by the render.
+            Op::Call { dst, args, .. }
+            | Op::CallFn { dst, args, .. }
+            | Op::CallImport { dst, args, .. } => {
+                self.define_opt(*dst);
+                self.use_call_args(args);
+            }
+            // A closure call USES the table-index value (the closure) plus its args.
+            Op::CallIndirect { dst, table_idx, args, .. } => {
+                self.define_opt(*dst);
+                self.use_one(*table_idx);
+                self.use_call_args(args);
+            }
+            // The rung-4 list ops: a literal DEFINES its fresh list and USES the
+            // element values; get USEs the (borrowed) list handle + index.
+            Op::ListLit { dst, elems } => {
+                self.define(*dst);
+                self.use_many(elems.iter().copied());
+            }
+            Op::ListGetScalar { dst, list, idx } => {
+                self.define(*dst);
+                self.use_many([*list, *idx]);
+            }
+            _ => self.record_control(op),
+        }
+    }
+
+    /// The ops that define no value: the single-operand consumers, the
+    /// control-flow markers, and the stores.
+    fn record_control(&mut self, op: &Op) {
+        match op {
+            // Probe charge: no defined value ids (the dyn charge reads src but
+            // defines nothing).
+            Op::Charge { .. } | Op::ChargeDyn { .. } => {}
+            // Loop markers bind nothing.
+            Op::LoopStart | Op::LoopEnd => {}
             Op::Drop { v }
             | Op::DropListStr { v }
             | Op::DropValue { v }
@@ -98,87 +157,52 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
             | Op::DropWrapperRec { v, .. }
             | Op::Consume { v }
             | Op::Borrow { v }
-            | Op::MakeUnique { v } => {
-                used.push(*v)
-            }
-            Op::Pure { dst, uses } => {
-                defined.push(*dst);
-                used.extend(uses.iter().copied());
-            }
-            Op::IntBinOp { dst, a, b, .. } => {
-                defined.push(*dst);
-                used.push(*a);
-                used.push(*b);
-            }
-            Op::Prim { dst, args, .. } => {
-                if let Some(d) = dst {
-                    defined.push(*d);
-                }
-                used.extend(args.iter().copied());
-            }
-            Op::Call { dst, args, .. }
-            | Op::CallFn { dst, args, .. }
-            // A CallImport defines its result and USES its (borrowed/scalar) args, exactly
-            // like a CallFn — its name is the host import, resolved structurally by the render.
-            | Op::CallImport { dst, args, .. } => {
-                if let Some(d) = dst {
-                    defined.push(*d);
-                }
-                record_args(args, &mut used);
-            }
-            // A closure call USES the table-index value (the closure) plus its args.
-            Op::CallIndirect { dst, table_idx, args, .. } => {
-                if let Some(d) = dst {
-                    defined.push(*d);
-                }
-                used.push(*table_idx);
-                record_args(args, &mut used);
-            }
-            // The if-condition is USED; the result `dst` is DEFINED; the arm values are
-            // USED. (The arm OPS, flat between the markers, define/use as usual.)
+            | Op::MakeUnique { v }
+            // The break cond is USED.
+            | Op::LoopBreakUnless { cond: v } => self.use_one(*v),
+            // The if-condition is USED; the result `dst` is DEFINED; the arm
+            // values are USED. (The arm OPS, flat between the markers,
+            // define/use as usual.)
             Op::IfThen { cond, dst } => {
-                used.push(*cond);
-                if let Some(d) = dst {
-                    defined.push(*d);
-                }
+                self.use_one(*cond);
+                self.define_opt(*dst);
             }
-            Op::Else { val } | Op::EndIf { val } => {
-                used.extend(val.iter().copied());
-            }
-            // Loop markers: the break cond is USED. `LoopStart`/`LoopEnd` bind nothing.
-            Op::LoopBreakUnless { cond } => used.push(*cond),
-            Op::LoopStart | Op::LoopEnd => {}
-            // A scalar reassignment USES the source value and the target local (already
-            // defined by its `var` bind — re-written, not newly defined).
-            Op::SetLocal { local, src } => {
-                used.push(*local);
-                used.push(*src);
-            }
-            // A function reference DEFINES its scalar slot value; it uses no MIR value
-            // (the referenced function name is resolved structurally by the render).
-            Op::FuncRef { dst, .. } => defined.push(*dst),
-            // The rung-4 list ops: a literal DEFINES its fresh list and USES the
-            // element values; get/set USE the (borrowed) list handle + operands.
-            Op::ListLit { dst, elems } => {
-                defined.push(*dst);
-                used.extend(elems.iter().copied());
-            }
-            Op::ListGetScalar { dst, list, idx } => {
-                defined.push(*dst);
-                used.push(*list);
-                used.push(*idx);
-            }
-            Op::ListSetScalar { list, idx, val } => {
-                used.push(*list);
-                used.push(*idx);
-                used.push(*val);
+            Op::Else { val } | Op::EndIf { val } => self.use_many(val.iter().copied()),
+            // A scalar reassignment USES the source value and the target local
+            // (already defined by its `var` bind — re-written, not newly defined).
+            Op::SetLocal { local, src } => self.use_many([*local, *src]),
+            Op::ListSetScalar { list, idx, val } => self.use_many([*list, *idx, *val]),
+            _ => unreachable!("record_control reached a value-producing op"),
+        }
+    }
+
+    fn define(&mut self, v: ValueId) {
+        self.defined.push(v);
+    }
+
+    fn define_opt(&mut self, v: Option<ValueId>) {
+        if let Some(v) = v {
+            self.defined.push(v);
+        }
+    }
+
+    fn use_one(&mut self, v: ValueId) {
+        self.used.push(v);
+    }
+
+    fn use_many(&mut self, vs: impl IntoIterator<Item = ValueId>) {
+        self.used.extend(vs);
+    }
+
+    /// A call's args: only the handle/scalar forms name a MIR value (a label is
+    /// data, not a value).
+    fn use_call_args(&mut self, args: &[CallArg]) {
+        for a in args {
+            if let CallArg::Handle(v) | CallArg::Scalar(v) = a {
+                self.used.push(*v);
             }
         }
     }
-    if let Some(r) = func.ret {
-        used.push(r);
-    }
-    NameWitness { defined, used }
 }
 
 /// The capability-bound witness (proofs/CapabilityBound.v, the 4th flight-grade
@@ -232,111 +256,45 @@ fn cap_witness_op_call(op: &Op, used: &mut Vec<Capability>) {
     }
 }
 
-/// Extracted from `cap_witness` (codopsy8 complexity sweep, group 2 of 3): the host-effect
-/// FLOOR primitives — each independently gates its capability; a self-hosted runtime fn
-/// using one of these prims must declare the matching capability (the `reachable_caps`
-/// transitive fold then carries it to every caller through the CallFn edge into the
-/// self-host body). Verbatim.
+/// The host-effect FLOOR primitives: a self-hosted runtime fn using one of
+/// these must declare the matching capability, so the sandbox accounting stays
+/// complete. The transitive `reachable_caps` fold then follows the CallFn edge
+/// into the self-host body and carries the capability to every caller (so e.g.
+/// `pkcs1v15_pad` inherits `random.int`'s Entropy and is caps-verified against
+/// its own declared bound).
 fn cap_witness_op_prim_floor(op: &Op, used: &mut Vec<Capability>) {
-    // The `fd_write` primitive is the host-effect floor op — it reaches Stdout, so
-    // a self-hosted runtime fn using it (print_str) must declare Stdout, exactly
-    // like a `PrintStr` runtime call (this keeps the sandbox accounting complete).
-    if let Op::Prim { kind: crate::PrimKind::FdWrite, .. } = op {
-        used.push(Capability::Stdout);
+    let Op::Prim { kind, .. } = op else { return };
+    if let Some(cap) = prim_floor_capability(kind) {
+        used.push(cap);
     }
-    // The `random_get` primitive is the ENTROPY floor op — reached by the self-hosted
-    // `random.int`, so a fn using it must declare Entropy (the same accounting as FdWrite →
-    // Stdout). The transitive `reachable_caps` follows the CallFn edge into `random.int`, so a
-    // caller (pkcs1v15_pad) inherits this Entropy and is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::RandomGet, .. } = op {
-        used.push(Capability::Entropy);
-    }
-    // The `args_get_list` primitive is the CLI-ARGS floor op — reached by the self-hosted
-    // `env.args`, so a fn using it must declare CliArgs (the same accounting as RandomGet →
-    // Entropy). The transitive `reachable_caps` follows the CallFn edge into `env.args`, so a
-    // caller inherits this CliArgs and is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::ArgsGetList | crate::PrimKind::ArgsGetListFull, .. } = op {
-        used.push(Capability::CliArgs);
-    }
-    // The `env_get` primitive is the ENVIRON floor op — reached by the self-hosted
-    // `env.get`, so a fn using it must declare the Env profile's CliArgs (argv and
-    // environ are the same process-initial-state class; the profile map already
-    // binds `"Env" => CliArgs`). Transitive exactly like ArgsGetList.
-    if let Op::Prim { kind: crate::PrimKind::EnvGet, .. } = op {
-        used.push(Capability::CliArgs);
-    }
-    // The `read_text_file` primitive is the FS-READ floor op — reached by the self-hosted
-    // `fs.read_text`, so a fn using it must declare FsRead (the same accounting as ArgsGetList →
-    // CliArgs). The transitive `reachable_caps` follows the CallFn edge into `fs.read_text`, so a
-    // caller inherits this FsRead and is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::ReadTextFile, .. } = op {
-        used.push(Capability::FsRead);
-    }
-    // The `read_dir` primitive is the FS-READ floor op for directory listing — reached by
-    // the self-hosted `fs.list_dir`, so a fn using it must declare FsRead (the SAME
-    // accounting as ReadTextFile → FsRead; both are filesystem reads). The transitive
-    // `reachable_caps` follows the CallFn edge into `fs.list_dir`, so a caller inherits this
-    // FsRead and is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::ReadDir, .. } = op {
-        used.push(Capability::FsRead);
-    }
-    // The `path_exists` primitive is the FS-READ floor op for an existence stat — reached by
-    // the self-hosted `fs.exists`. A stat IS a filesystem read, so it REUSES Capability::FsRead
-    // (NOT a new capability — the SAME accounting as ReadTextFile → FsRead). The transitive
-    // `reachable_caps` follows the CallFn edge into `fs.exists`, so a caller inherits this
-    // FsRead and is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::PathExists, .. } = op {
-        used.push(Capability::FsRead);
-    }
-    // The `path_filestat` primitive is the FULL-stat FS-READ floor op — reached by the
-    // self-hosted `fs.stat`. A stat IS a filesystem read, so it REUSES Capability::FsRead
-    // (the SAME accounting as PathExists); counted transitively through the CallFn edge
-    // into `fs.stat`, so a caller is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::PathFilestat, .. } = op {
-        used.push(Capability::FsRead);
-    }
-    // The `write_text_file` primitive is the FS-WRITE floor op — reached by the self-hosted
-    // `fs.write`, so a fn using it must declare FsWrite (a DISTINCT capability from FsRead — a
-    // write is strictly greater authority; the same accounting as ReadTextFile → FsRead). The
-    // transitive `reachable_caps` follows the CallFn edge into `fs.write`, so a caller inherits
-    // this FsWrite and is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::WriteTextFile, .. } = op {
-        used.push(Capability::FsWrite);
-    }
-    // The `make_dir` primitive is ALSO an FS-WRITE floor op — reached by the self-hosted
-    // `fs.mkdir_p`. A mkdir IS a filesystem write, so it REUSES Capability::FsWrite (NOT a
-    // new capability — the SAME accounting as WriteTextFile → FsWrite). The transitive
-    // `reachable_caps` follows the CallFn edge into `fs.mkdir_p`, so a caller inherits this
-    // FsWrite and is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::MakeDir, .. } = op {
-        used.push(Capability::FsWrite);
-    }
-    // The `clock_time_get` primitive is the WALL-CLOCK floor op — reached by the self-hosted
-    // `env.unix_timestamp`, so a fn using it must declare Clock (a DISTINCT capability: a
-    // clock read is neither a filesystem nor an entropy effect; the same accounting as
-    // RandomGet → Entropy). The transitive `reachable_caps` follows the CallFn edge into
-    // `env.unix_timestamp`, so a caller inherits this Clock and is caps-verified against its
-    // declared bound.
-    if let Op::Prim { kind: crate::PrimKind::ClockTimeGet, .. } = op {
-        used.push(Capability::Clock);
-    }
-    // The `remove_all` primitive is ALSO an FS-WRITE floor op — reached by the self-hosted
-    // `fs.remove_all`. A recursive remove IS a filesystem write, so it REUSES
-    // Capability::FsWrite (NOT a new capability — the SAME accounting as WriteTextFile →
-    // FsWrite). The transitive `reachable_caps` follows the CallFn edge into `fs.remove_all`,
-    // so a caller inherits this FsWrite and is caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::RemoveAll, .. } = op {
-        used.push(Capability::FsWrite);
-    }
-    // The `read_line` primitive is the STANDARD-INPUT floor op — reached by the self-hosted
-    // `io.read_line`, so a fn using it must declare Stdin (a DISTINCT capability: reading the
-    // operator's input stream is neither a write, a filesystem, an entropy, nor a clock
-    // effect; the same accounting as RandomGet → Entropy). The transitive `reachable_caps`
-    // follows the CallFn edge into `io.read_line`, so a caller inherits this Stdin and is
-    // caps-verified against its declared bound.
-    if let Op::Prim { kind: crate::PrimKind::ReadLine | crate::PrimKind::ReadNBytes, .. } = op {
-        used.push(Capability::Stdin);
-    }
+}
+
+/// prim → the one capability it reaches. This IS the floor map; anything absent
+/// reaches no host effect of its own.
+///
+/// `EnvGet` joins the argv prims under `CliArgs`: argv and environ are the same
+/// process-initial-state class, and the profile map already binds
+/// `"Env" => CliArgs`.
+fn prim_floor_capability(kind: &crate::PrimKind) -> Option<Capability> {
+    use crate::PrimKind as P;
+    let cap = match kind {
+        // print_str's floor — reaching it is exactly a `PrintStr` runtime call.
+        P::FdWrite => Capability::Stdout,
+        // random.int's floor.
+        P::RandomGet => Capability::Entropy,
+        // env.args / env.get.
+        P::ArgsGetList | P::ArgsGetListFull | P::EnvGet => Capability::CliArgs,
+        // fs.read_text / fs.list_dir / fs.exists / fs.stat.
+        P::ReadTextFile | P::ReadDir | P::PathExists | P::PathFilestat => Capability::FsRead,
+        // fs.write_text / fs.make_dir / fs.remove_all.
+        P::WriteTextFile | P::MakeDir | P::RemoveAll => Capability::FsWrite,
+        // datetime's clock read.
+        P::ClockTimeGet => Capability::Clock,
+        // io.read_line / io.read_bytes.
+        P::ReadLine | P::ReadNBytes => Capability::Stdin,
+        _ => return None,
+    };
+    Some(cap)
 }
 
 /// Extracted from `cap_witness` (codopsy8 complexity sweep, group 3 of 3): SOUNDNESS CRUX — a
