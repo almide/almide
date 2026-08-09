@@ -122,7 +122,19 @@ fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
         // `Bytes` IS the `List[Int]`, so both directions are the identity.
         "from_list" | "to_list" => Flow::val(args.first()?.clone()),
         "len" => Flow::val(Value::Int(args.first()?.as_iter_items()?.len() as i64)),
-        "new" => Flow::val(Value::list(vec![Value::Int(0); as_int(args.first())?.max(0) as usize])),
+        // C-197: an unsatisfiable size is the defined abort on every leg —
+        // the infallible `vec![_; n]` panicked with a capacity overflow on
+        // `bytes.new(i64::MAX)` instead (fuzz seed 500705518626 index 711).
+        "new" => {
+            let n = as_int(args.first())?.max(0) as usize;
+            let mut v: Vec<Value> = Vec::new();
+            if v.try_reserve_exact(n).is_err() {
+                Flow::Abort("out of memory".to_string())
+            } else {
+                v.resize(n, Value::Int(0));
+                Flow::val(Value::list(v))
+            }
+        }
         "from_string" => Flow::val(Value::list(
             as_str(args.first())?.bytes().map(|b| Value::Int(b as i64)).collect(),
         )),
