@@ -91,3 +91,19 @@ spec/stdlib/fs_fold_lines_chunked_test.almd :: par_counts
 spec/stdlib/fs_fold_lines_chunked_test.almd :: seq_counts
 spec/stdlib/fs_fold_lines_range_test.almd :: collect_partition
 spec/stdlib/string_split_once_test.almd :: __test_almd_agrees with split's first piece
+# 2026-08-09 (#1147): the continuation-lift outlines loop-bearing `!`
+# continuations into `effect_cont_synth_*` fns so the err-check arm holds a
+# flat call (the `{i|}` cert poison is gone — cert_poisoned_excluded is now
+# RATCHETED to 0 in corpus-wall.sh). The seven entries below are EXPOSURE,
+# not regression: their parent test fns were class-b walled whole (unlinkable
+# fs streaming callees — never lowered, never certed); the split leaves the
+# parent class-b and surfaces the continuation's own missing bricks
+# (assert-over-call conditions — the #1150 family; heap-result match returns)
+# as named walled-real fns. Nothing that lowered before stopped lowering.
+spec/stdlib/fs_fold_lines_range_test.almd :: effect_cont_synth_10
+spec/stdlib/fs_fold_lines_range_test.almd :: effect_cont_synth_11
+spec/stdlib/fs_fold_lines_range_test.almd :: effect_cont_synth_3
+spec/stdlib/fs_fold_lines_range_test.almd :: effect_cont_synth_4
+spec/stdlib/fs_fold_lines_range_test.almd :: effect_cont_synth_5
+spec/stdlib/fs_fold_lines_range_test.almd :: effect_cont_synth_9
+spec/stdlib/fs_streaming_test.almd :: effect_cont_synth_0
