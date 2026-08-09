@@ -1,0 +1,55 @@
+// closure_capture_map_test — a captured `var` Map read through a closure
+// (#1143). The shared-cell READ borrows in place when its statement proves
+// safe (SharedCellBorrowPass); a statement that also mutates the cell keeps
+// the owned snapshot. These pin the RefCell discipline at runtime: any
+// double-borrow regression panics here.
+test "closure bumps a captured map counter" {
+  var stats: Map[String, Int] = map.new()
+  let bump = (k: String) => {
+    let cur = map.get(stats, k) ?? 0
+    map.insert(stats, k, cur + 1)
+  }
+  bump("a")
+  bump("a")
+  bump("b")
+  assert_eq(map.get(stats, "a") ?? -1, 2)
+  assert_eq(map.get(stats, "b") ?? -1, 1)
+}
+
+test "closure reads and writes the cell in one statement" {
+  var m: Map[String, Int] = map.new()
+  map.insert(m, "seed", 5)
+  let bump = (k: String) => {
+    map.insert(m, k, (map.get(m, "seed") ?? 0) + 1)
+  }
+  bump("a")
+  bump("b")
+  assert_eq(map.get(m, "a") ?? -1, 6)
+  assert_eq(map.get(m, "b") ?? -1, 6)
+}
+
+type Acc = { sum: Int, count: Int }
+
+test "closure folds records through a captured map via match" {
+  var stats: Map[String, Acc] = map.new()
+  let feed = (k: String, t: Int) => {
+    match map.get(stats, k) {
+      some(s) => map.insert(stats, k, Acc { sum: s.sum + t, count: s.count + 1 }),
+      none => map.insert(stats, k, Acc { sum: t, count: 1 }),
+    }
+  }
+  feed("x", 10)
+  feed("x", 20)
+  feed("y", 7)
+  let x = match map.get(stats, "x") {
+    some(s) => s,
+    none => Acc { sum: -1, count: -1 },
+  }
+  assert_eq(x.sum, 30)
+  assert_eq(x.count, 2)
+  let y = match map.get(stats, "y") {
+    some(s) => s,
+    none => Acc { sum: -1, count: -1 },
+  }
+  assert_eq(y.sum, 7)
+}

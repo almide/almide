@@ -60,7 +60,9 @@ fn render_expr_var(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Var { id } = &expr.kind else { unreachable!() };
     let raw_name = ctx.var_name(*id).to_string();
     // Shared-mut local (`Rc<Cell<T>>`): read the cell. (Closure v2, P3.)
-    if ctx.ann.is_shared_mut(id) {
+    // Fn-local truth first: a branch-lift helper's param KEEPS the captured
+    // var's id, and there the binding is a plain snapshot, not a cell (#1143).
+    if ctx.ann.is_shared_mut(id) && !ctx.param_vars.contains(id) {
         return format!("{}.get()", raw_name);
     }
     // §4 Stage 2: a module global is decided by ONE alias-resolved
@@ -551,8 +553,27 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
 /// Extracted from `render_expr_borrow` (cog>30 decomposition): `Some`
 /// mirrors the original's early `return`, `None` falls through.
 fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bool) -> Option<String> {
+    // #1143 marker: `Borrow(Deref(Var cell))` — SharedCellBorrowPass proved
+    // this read can borrow the cell in place (every use in its statement is
+    // a shared call-arg read), so skip the `.get()` whole-value clone. The
+    // shape cannot occur otherwise on a SharedMut var (the cell has no
+    // Deref impl, so the generic `&*v` render would not compile).
+    if let IrExprKind::Deref { expr: dinner } = &inner.kind {
+        if let IrExprKind::Var { id } = &dinner.kind {
+            if !mutable
+                && ctx.ann.is_shared_mut(id)
+                && !ctx.param_vars.contains(id)
+                && !almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty)
+            {
+                return Some(format!("&*{}.borrow()", ctx.var_name(*id)));
+            }
+        }
+    }
     let IrExprKind::Var { id } = &inner.kind else { return None; };
     if !ctx.ann.is_shared_mut(id) { return None; }
+    // A branch-lift helper's param keeps the captured var's id but binds a
+    // plain snapshot, not the cell — fn-local truth wins (#1143).
+    if ctx.param_vars.contains(id) { return None; }
     if almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty) { return None; }
     let var_name = ctx.var_name(*id).to_string();
     Some(if mutable {
