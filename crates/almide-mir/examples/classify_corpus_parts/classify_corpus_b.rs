@@ -356,6 +356,9 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         almide_mir::lower::desugar_loop_early_returns(&mut ir);
         almide_mir::lower::hoist_spread_call_bases(&mut ir);
         almide_mir::lower::hoist_record_literal_args(&mut ir);
+        // #1147 — the SAME oracle-driven continuation lift the pipeline runs,
+        // LAST in the chain (desugar-before-both).
+        almide_mir::lower::lift_poisoning_continuations(&mut ir);
         Ok(ir)
     }));
     match result {

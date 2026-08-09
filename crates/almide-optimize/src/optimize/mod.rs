@@ -7,7 +7,6 @@
 /// Pass 3: Constant propagation -- replace vars bound to literals with the literal.
 
 mod branch_lift;
-mod continuation_lift;
 mod dce;
 mod propagate;
 
@@ -53,10 +52,6 @@ pub fn optimize_program(program: &mut IrProgram) {
     // Runs AFTER DCE so it only rewrites binds that survived; the synthesized
     // helper's call site keeps the captured vars live (use-counts recomputed below).
     branch_lift::lift_heap_branch_binds(program);
-    // #1147: outline loop-bearing `!`-continuations so the err-check arm the
-    // shared unwrap desugar creates holds a flat call instead of a loop — the
-    // flat v4 ownership certificate then covers the fn (no `{i|}` poison).
-    continuation_lift::lift_loop_continuations(program);
 
     // Recompute use-counts for downstream consumers (mono, borrow analysis). This
     // also re-counts the `Var` args the branch-lift inserted at each helper call.

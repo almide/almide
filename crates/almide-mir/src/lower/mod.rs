@@ -813,3 +813,4 @@ pub fn expr_contains_call(e: &almide_ir::IrExpr) -> bool {
 include!("mod_b.rs");
 include!("mod_c.rs");
 include!("crossmod_toplet_bridge.rs");
+include!("continuation_lift.rs");

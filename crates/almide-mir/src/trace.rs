@@ -52,6 +52,10 @@ pub(crate) const CHANNELS: &[(&str, &str)] = &[
         "mutable-global slot assignment and the cross-module name-bridge decisions",
     ),
     (
+        "ALMIDE_DBG_CONTLIFT",
+        "why a poison-oracle continuation lift rolled back (which piece walled or still poisoned)",
+    ),
+    (
         "ALMIDE_DBG_ELEM",
         "why a list-literal Block element declined",
     ),
