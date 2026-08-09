@@ -23,8 +23,32 @@ pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
 pub fn almide_rt_bytes_from_list(xs: &[i64]) -> Vec<u8> { xs.iter().map(|&x| x as u8).collect() }
 pub fn almide_rt_bytes_to_list(b: &Vec<u8>) -> Vec<i64> { b.iter().map(|&x| x as i64).collect() }
 pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r = a.clone(); r.extend_from_slice(b); r }
-pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> { b.repeat(n.max(0) as usize) }
-pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> { vec![0u8; len.max(0) as usize] }
+// C-197: an allocation the process cannot satisfy is the DEFINED abort
+// (`Error: out of memory` + exit 1) on BOTH targets — the wasm render's $oom
+// prints the same line. The infallible `vec![0; n]` here instead died on the
+// Rust allocator abort (SIGABRT, no exit code — fuzz seed 500705518626
+// index 711, `bytes.new(i64::MAX)`).
+fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
+    let mut v: Vec<u8> = Vec::new();
+    if v.try_reserve_exact(n).is_err() {
+        eprintln!("Error: out of memory");
+        std::process::exit(1);
+    }
+    v
+}
+pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
+    let n = n.max(0) as usize;
+    let total = b.len().checked_mul(n).unwrap_or(usize::MAX);
+    let mut v = alloc_bytes_or_oom(total);
+    for _ in 0..n { v.extend_from_slice(b); }
+    v
+}
+pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> {
+    let n = len.max(0) as usize;
+    let mut v = alloc_bytes_or_oom(n);
+    v.resize(n, 0);
+    v
+}
 pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
 pub fn almide_rt_bytes_set_at(b: &mut Vec<u8>, i: i64, val: i64) { if (i as usize) < b.len() { b[i as usize] = val as u8; } }
 pub fn almide_rt_bytes_copy_within(b: &mut Vec<u8>, src_start: i64, src_end: i64, dst: i64) {
