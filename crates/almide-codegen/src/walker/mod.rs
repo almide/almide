@@ -95,6 +95,12 @@ pub struct RenderContext<'a> {
     /// `RefMut` param into another `RefMut` callee slot (Rust
     /// auto-reborrows).
     pub ref_mut_params: std::collections::HashSet<VarId>,
+    /// ALL param VarIds of the current fn. Fn-local truth that beats the
+    /// VarId-keyed `shared_mut_vars` annotation: `optimize/branch_lift.rs`
+    /// synthesizes helpers whose params KEEP the captured free vars' ids,
+    /// so a closure-cell var can reappear as a plain snapshot param — a
+    /// cell read (`.get()`/`.borrow()`) on it is a miscompile (#1143).
+    pub param_vars: std::collections::HashSet<VarId>,
     /// Names of user-defined record/variant types that have a generated
     /// `AlmideRepr` impl (see `render_repr_impl`). A `Ty::Named` in a compound
     /// interpolation part routes through `almide_repr` only when it is in this
@@ -111,7 +117,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new(), fn_err_ty: None }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), param_vars: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new(), fn_err_ty: None }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -480,6 +486,7 @@ fn fn_render_context<'a>(
         repr_c: ctx.repr_c,
         ref_params,
         ref_mut_params,
+        param_vars: func.params.iter().map(|p| p.var).collect(),
         repr_named_types: ctx.repr_named_types.clone(),
         fn_err_ty,
     }
