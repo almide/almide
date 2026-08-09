@@ -89,6 +89,18 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         {
             Some(format!("result.{func}_h"))
         }
+        // zip reads BOTH results' tags, and the scalar shim is len-as-tag on
+        // EACH side — so a heap-Ok SECOND argument misreads exactly like a
+        // heap-Ok first: `zip(ok(1.0), ok("abc"))` linked the shim through the
+        // first-arg-only guard below and took the err path on ok inputs (fuzz
+        // seed 500705518628 index 738, #1154 — a wall-escape, silent wrong
+        // output). EITHER side heap-Ok routes to the UNLINKED `_x` — a
+        // deterministic render wall, never a wrong-typed link.
+        "zip" if arg_tys.iter().take(2).any(|t| matches!(t, Ty::Applied(TC::Result, a)
+                if a.len() == 2 && is_heap_ty(&a[0]))) =>
+        {
+            Some("result.zip_x".to_string())
+        }
         // The VALUE combinators over a HEAP-Ok Result — same cap-as-tag misread as
         // is_ok/is_err, but the scalar impls also REBUILT the wrong layout: every
         // `ok(x)` took the Err path and the result printed as a swapped/zeroed value
