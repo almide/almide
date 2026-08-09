@@ -126,7 +126,21 @@ fn classify_lower_one_fn(
                 }
                 // Ownership is one heap object per line; names are one line per
                 // function. Both are LOCAL properties — no transitivity.
-                let cert = ownership_certificate(mir);
+                let (cert, poisoned) =
+                    almide_mir::certificate::ownership_certificate_with_poison(mir);
+                // A POISONED certificate (a nested-region arm flushed as the
+                // always-rejecting `{i|}`) is kernel-UNREPRESENTABLE by its own
+                // declaration — shipping it in the witness would fail the gate
+                // by design, not by finding a bug (#1146: the C-220 test fns
+                // were the first in-profile poisoned certs; every earlier
+                // poisoned fn sat outside the witness). EXCLUDE it, COUNTED —
+                // the render is still covered by the executable verifier.
+                if poisoned {
+                    t.cert_poisoned_excluded += 1;
+                    s.names.push_str(&name_witness_string(mir));
+                    s.names.push('\n');
+                    continue;
+                }
                 // Parallel name index (ownership.names): one `<file>::<fn>` line per
                 // cert line, so a checker REJECT bisects straight to its function
                 // (the anonymous 20k-line cert made a reject a needle hunt).
@@ -629,6 +643,12 @@ fn print_wall_report(t: &Tally) {
     );
     for (callee, n) in t.would_wall_callees.iter() {
         eprintln!("        {n:>4}  {callee}");
+    }
+    if t.cert_poisoned_excluded > 0 {
+        eprintln!(
+            "  cert-poisoned (excluded from witness): {}  <- kernel-unrepresentable nested-region arms (#1146); render covered by the executable verifier",
+            t.cert_poisoned_excluded
+        );
     }
     for p in &t.cert_backing_breaches {
         eprintln!("      UNBACKED {p}");

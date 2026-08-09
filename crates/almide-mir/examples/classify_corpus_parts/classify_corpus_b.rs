@@ -448,6 +448,10 @@ struct Tally {
     /// Functions whose certificate has an UNBACKED `+1` (the borrow-by-default
     /// soundness gate). Must stay empty — a non-empty list is a wall breach.
     cert_backing_breaches: Vec<String>,
+    /// Poisoned certificates EXCLUDED from the ownership witness (#1146):
+    /// kernel-unrepresentable nested-region arms, counted so the exclusion is
+    /// never a silent shrink of the proof surface.
+    cert_poisoned_excluded: usize,
     /// Functions whose MIR call-op count EXCEEDS their source call-node count — the
     /// caps-soundness gate for the elided-call effect markers (`record_elided_calls`).
     /// A marker may only ADD a call-op for a genuinely ELIDED call, so `mir_calls`
