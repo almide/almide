@@ -1,0 +1,35 @@
+// uppercase_index_test — indexing an uppercase (SCREAMING_CASE) binding (#1142).
+// `STATIONS[i]` must parse as index access, not generic type application:
+// `Name[...]` is a type application only when the brackets name a type AND a
+// call follows (`parse[Int](s)`), same gate the postfix position uses for
+// `fs[0]()`.
+let STATIONS = ["Abha", "Accra", "Adelaide"]
+
+let WEIGHTS = [10, 20, 30]
+
+test "index an uppercase binding with a variable" {
+  let i = 1
+  assert_eq(STATIONS[i], "Accra")
+}
+
+test "index an uppercase binding with a computed expression" {
+  let seed = 42
+  let n = list.len(STATIONS)
+  assert_eq(STATIONS[seed % n], "Abha")
+}
+
+test "uppercase index result feeds arithmetic" {
+  let j = 2
+  // Bound first: an `assert_eq(a[i] + b[j], lit)` condition (Int-Eq over a
+  // BinOp vs literal with a call-bearing arm) has no v1 branch brick yet.
+  let sum = WEIGHTS[j] + WEIGHTS[0]
+  assert_eq(sum, 40)
+}
+
+test "uppercase binding indexed inside a loop" {
+  var total = 0
+  for k in 0..<list.len(WEIGHTS) {
+    total = total + WEIGHTS[k]
+  }
+  assert_eq(total, 60)
+}
