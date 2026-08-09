@@ -1,4 +1,5 @@
-fn main() -> Int = {
+fn main() -> Unit = {
   let x = 10
-  y + 1
+  let r = y + 1
+  println("${r}")
 }

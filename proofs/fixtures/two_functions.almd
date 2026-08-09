@@ -7,7 +7,7 @@ fn helper() -> List[Int] = {
   var a = [1, 2, 3]
   a
 }
-fn main() -> List[Int] = {
+fn main() -> Unit = {
   var x = helper()
-  x
+  let _ = x
 }

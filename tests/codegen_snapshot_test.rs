@@ -164,7 +164,7 @@ fn snapshot_lambda() {
     assert_rust!("lambda", r#"
 fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
 
-fn main() -> Int = apply((x) => x + 1, 41)
+fn main() -> Unit = println("${apply((x) => x + 1, 41)}")
     "#);
 }
 

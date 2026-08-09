@@ -5,8 +5,8 @@
 // proven per-site agreement re-verifies against the lifted lambda's signature.
 fn greeter(name: String) -> (String) -> String = (x) => name + x
 
-fn main() -> Int = {
+fn main() -> Unit = {
   let hi = greeter("Hi ")
   let s = hi("there")
-  string.len(s)
+  let _ = string.len(s)
 }

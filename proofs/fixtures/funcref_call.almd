@@ -5,7 +5,7 @@
 // the proven per-site checker verifies agreement against every member.
 fn inc() -> (Int) -> Int = (x) => x + 1
 
-fn main() -> Int = {
+fn main() -> Unit = {
   let f = inc()
-  f(5)
+  let _ = f(5)
 }
