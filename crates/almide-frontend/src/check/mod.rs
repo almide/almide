@@ -891,6 +891,38 @@ impl Checker {
             }
             self.diagnostics.push(diag);
         }
+        // A PURE `main` returns Unit (#912 diagnostic-divergence lens, round 1):
+        // the C/Go-style `fn main() -> Int` typechecked but the entry is emitted
+        // verbatim — native produced `pub fn main() -> i64` (rustc E0277,
+        // surfaced as "codegen produced invalid Rust"). An EFFECT main may
+        // declare any Ok type: its wrapper unwraps the carrier and discards the
+        // payload, which every leg supports (e008-fan-captures-mut pins it).
+        // Same #789 discipline as the parameter rule above: reject at the seam
+        // with the documented convention instead of blaming the compiler
+        // downstream.
+        for decl in &program.decls {
+            let ast::Decl::Fn { name, effect, return_type, span, .. } = decl else { continue };
+            if name.as_str() != "main" || effect.unwrap_or(false) {
+                continue;
+            }
+            if matches!(return_type, ast::TypeExpr::Simple { name: t } if t.as_str() == "Unit") {
+                continue;
+            }
+            let mut diag = err(
+                "main() returns Unit",
+                "a program's result is its output, not a return value — print it, \
+                 or set the exit code with `process.exit(n)` (import process). \
+                 Declare the entry `fn main() -> Unit` (or `effect fn main() -> Unit`)",
+                "fn main",
+            )
+            .with_code("E044");
+            if let Some(s) = span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
         // #785 for the ENTRY program itself: a generic-ctor top-let (`let
         // MAYBE = some(Cfg {…})`) seeds `Option[Unknown]`, and a same-file
         // reader consumes that seed DURING constraint collection — before the
