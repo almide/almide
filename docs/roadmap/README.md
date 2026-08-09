@@ -7,7 +7,7 @@
 
 ## Active
 
-80 items
+81 items
 
 | Item | Description |
 |------|-------------|
@@ -58,6 +58,7 @@
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
 | [Receipt Logic — 受領書の論理](active/receipt-logic.md) | Formal foundation for the trust layer — receipt logic: claim types, threat model, trust bases, falsification procedures, completeness relative to use-case |
 | [reconciliation follow-up — v0.28.0 で見送った develop 側の残件](active/reconciliation-followup.md) | v0.28.0 reconciliation follow-up: deferred develop commits for 0.28.1 |
+| [Self-host linking v2 — link the mono instances, retire the twin matrix](active/selfhost-link-v2.md) | Self-host linking v2 — retire the shim registry's per-type twins by linking the monomorphized generic bodies the renderer already produces |
 | [Ticks interface audit — is the demanded API shape different?](active/ticks-interface-audit.md) | Audit of ticks against timeout-shaped APIs: the unwritable-number problem, three fixes |
 | [Trust Layer — 機械が書くソフトウェアの信頼層](active/trust-layer.md) | Category strategy — winning "the trust layer for machine-written software": MWS Trust Levels, receipts, critical path |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
