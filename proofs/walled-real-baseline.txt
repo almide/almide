@@ -84,10 +84,12 @@ spec/stdlib/option_to_result_generic_test.almd :: __test_almd_custom E flows thr
 # the corpus gate BEFORE its ratchet stage, so these never surfaced until the
 # backing gate learned to skip poisoned certificates (the breach's own fix).
 # The streaming helpers' callback shapes wall on the v1 lowering (the #1134
-# defunctionalization frontier the C-220 statement itself names); the
-# split_once test fn rides the same nested-region-arm shape. The native leg
-# serves all four; prune with the #1134 brick.
+# defunctionalization frontier the C-220 statement itself names). The native
+# leg serves all three; prune with the #1134 brick.
+# (2026-08-10, #1134 Shape 1) The split_once test fn is PRUNED: string.split_once
+# gained a self-host wasm body (stdlib/string_split_once.almd) and the eq-operand
+# tuple builder gained the List[String]-element borrow-then-Dup arm, so the
+# `some((parts[0], …))` cond lowers and the file runs the wasm leg byte-identical.
 spec/stdlib/fs_fold_lines_chunked_test.almd :: par_counts
 spec/stdlib/fs_fold_lines_chunked_test.almd :: seq_counts
 spec/stdlib/fs_fold_lines_range_test.almd :: collect_partition
-spec/stdlib/string_split_once_test.almd :: __test_almd_agrees with split's first piece
