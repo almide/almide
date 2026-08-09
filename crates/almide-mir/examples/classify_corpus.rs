@@ -125,6 +125,20 @@ fn count_eq_calls_depth(
                     return almide_mir::lower::eq_helper_call_count(variant_layouts, &es[0]);
                 }
             }
+            // List[<record>] — the synthesized record loop-helper route (the engine's
+            // container tier): the site's list-helper call + the list body's ONE
+            // record-helper call + the record helper body's static per-field calls
+            // (this recursion — a nested List[record] field re-enters this arm exactly
+            // as the generator nests). A repeated element type over-credits (helpers
+            // dedup on the MIR side), landing only on the conservative ir > mir taint.
+            if let [almide_lang::types::Ty::Named(n, args)] = &es[..] {
+                if args.is_empty()
+                    && !variant_layouts.by_type.contains_key(n.as_str())
+                    && registry.get(n.as_str()).is_some()
+                {
+                    return 2 + count_eq_calls_depth(&es[0], registry, variant_layouts, depth + 1);
+                }
+            }
         }
         let nested_list = matches!(&es[..],
             [Ty::Applied(TC::List, inner)]

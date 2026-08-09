@@ -30,12 +30,16 @@
 # forward brick named in #1064's close). The cells RUN and pass on the native
 # leg; these entries are the honest wasm frontier, to be pruned by the next
 # heap-result-arm/aggregate-drop brick.
+# (2026-08-10, #1134 Shape 1) The Nested and Shape roundtrip test fns are PRUNED:
+# the eq engine gained the synthesized List[record] loop helper (the record twin
+# of the List[variant] route) and the Result-Ok materializer gained the variant-
+# ctor payload arm (`ok(Label{…})`), so both conds lower and A/B byte-identically.
+# The Deep test fn stays: its cond rides the Deep decode helpers' heap-result-if
+# class below plus the bind-position record brick (#1064) — same file, other brick.
 spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_Inner_go
 spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_int_go
 spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_string_go
-spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested Codec: direct field, list elements, Option none omission
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[Option], List[List], deep Option[List[Option]]
-spec/stdlib/codec_field_matrix_test.almd :: __test_almd_variant record case: Option field omits none, folds missing/null to none
 #
 #
 # (2026-08-05, #1041) The list.try_* family (effectful pipelines keep the

@@ -141,6 +141,104 @@ impl LowerCtx {
             return false;
         }
         let elem_call = self.eq_helper_name(elem_tyname);
+        let f = synth_list_eq_loop_fn(name, elem_call);
+        self.synth_eq_fns.push(f);
+        true
+    }
+
+    fn record_eq_helper_name(&self, key: &str) -> String {
+        format!("__eq_rec_{}__{}", sanitize_ty_ident(key), sanitize_ty_ident(&self.fn_name))
+    }
+
+    pub(crate) fn list_record_eq_helper_name(&self, key: &str) -> String {
+        format!("__eq_list_rec_{}__{}", sanitize_ty_ident(key), sanitize_ty_ident(&self.fn_name))
+    }
+
+    /// Generate (once per parent fn) the per-slot eq helper for RECORD `key` — the
+    /// body is the SAME declaration-order [`Self::aggregate_eq_from_handles`]
+    /// recursion the inline record eq uses, packaged as a callable fn so the
+    /// `List[record]` loop helper can invoke it per element. Returns `false` when
+    /// a field is outside the engine (the eq site then walls — never wrong bytes).
+    /// A record that reaches itself (through a `List[Self]` field) terminates the
+    /// same way the variant family does: the key joins `synth_eq_types` BEFORE the
+    /// body lowers, so the inner site emits the helper CALL instead of regenerating.
+    pub(crate) fn ensure_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+        let name = self.record_eq_helper_name(key);
+        let guard = format!("rec:{key}");
+        if self.synth_eq_fns.iter().any(|f| f.name == name) || self.synth_eq_types.contains(&guard)
+        {
+            return true;
+        }
+        self.synth_eq_types.insert(guard.clone());
+        let mut sub = LowerCtx {
+            variant_layouts: self.variant_layouts.clone(),
+            record_layouts: self.record_layouts.clone(),
+            fn_name: self.fn_name.clone(),
+            next_value: 2,
+            synth_eq_types: self.synth_eq_types.clone(),
+            ..Default::default()
+        };
+        sub.param_values.insert(ValueId(0));
+        sub.param_values.insert(ValueId(1));
+        let ha = sub.handle_of(ValueId(0));
+        let hb = sub.handle_of(ValueId(1));
+        let res = sub.aggregate_eq_from_handles(ha, hb, ftys, 0);
+        for f in std::mem::take(&mut sub.synth_eq_fns) {
+            if !self.synth_eq_fns.iter().any(|g| g.name == f.name) {
+                self.synth_eq_fns.push(f);
+            }
+        }
+        for t in sub.synth_eq_types {
+            self.synth_eq_types.insert(t);
+        }
+        match res {
+            Some(r) => {
+                let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
+                self.synth_eq_fns.push(MirFunction {
+                    name,
+                    params: vec![
+                        MirParam { value: ValueId(0), repr: ptr },
+                        MirParam { value: ValueId(1), repr: ptr },
+                    ],
+                    ops: sub.ops,
+                    ret: Some(r),
+                    declared_caps: Vec::new(),
+                    heap_slot_masks: Default::default(),
+                });
+                true
+            }
+            None => {
+                self.synth_eq_types.remove(&guard);
+                false
+            }
+        }
+    }
+
+    /// Generate (once per parent fn) the `List[<record>]` eq helper — the record
+    /// twin of [`Self::ensure_list_eq_helper`]: the identical branchless
+    /// length+fold loop, its per-element call routed to the record helper.
+    pub(crate) fn ensure_list_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+        let name = self.list_record_eq_helper_name(key);
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
+        }
+        if !self.ensure_record_eq_helper(key, ftys) {
+            return false;
+        }
+        let elem_call = self.record_eq_helper_name(key);
+        let f = synth_list_eq_loop_fn(name, elem_call);
+        self.synth_eq_fns.push(f);
+        true
+    }
+}
+
+/// The shared `List[T]` eq LOOP body — branchless `res = (la == lb); n = la *
+/// res; for i < n { res &= elem_call(a[i], b[i]) }` — parameterized only by the
+/// per-element eq callee (the variant helper or the record helper). Extracted
+/// verbatim from [`LowerCtx::ensure_list_eq_helper`] so the record twin cannot
+/// drift from the proven variant loop.
+fn synth_list_eq_loop_fn(name: String, elem_call: String) -> MirFunction {
+    {
         let mut sub = LowerCtx { next_value: 2, ..Default::default() };
         let ha = sub.handle_of(ValueId(0));
         let hb = sub.handle_of(ValueId(1));
@@ -195,7 +293,7 @@ impl LowerCtx {
         sub.ops.push(Op::SetLocal { local: i, src: i2 });
         sub.ops.push(Op::LoopEnd);
         let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
-        self.synth_eq_fns.push(MirFunction {
+        MirFunction {
             name,
             params: vec![
                 MirParam { value: ValueId(0), repr: ptr },
@@ -205,8 +303,7 @@ impl LowerCtx {
             ret: Some(res),
             declared_caps: Vec::new(),
             heap_slot_masks: Default::default(),
-        });
-        true
+        }
     }
 }
 
