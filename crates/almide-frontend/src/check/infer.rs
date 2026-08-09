@@ -390,11 +390,7 @@ impl Checker {
             self.reject_dead_try_spelling(mod_name, field, object.id, object.span);
             if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
                 self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
-                return Some(Ty::Fn {
-                    params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
-                    ret: Box::new(sig.ret.clone()),
-                    is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */,
-                });
+                return Some(self.fn_value_ty(&sig));
             }
             let resolved_mod_name = self.env.import_table.resolve(mod_name)
                 .map(|s| s.to_string())
@@ -403,11 +399,7 @@ impl Checker {
             if let Some(sig) = self.env.functions.get(&sym(&key)).cloned() {
                 self.type_map.insert(object.id, Ty::Unit);
                 self.env.import_table.mark_used(mod_name);
-                return Some(Ty::Fn {
-                    params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
-                    ret: Box::new(sig.ret.clone()),
-                    is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */,
-                });
+                return Some(self.fn_value_ty(&sig));
             }
             // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
             // Spec Visibility section applies to fn, type, AND let.
