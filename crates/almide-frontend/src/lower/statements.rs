@@ -117,6 +117,7 @@ fn lower_bind(
             let declared = crate::canonicalize::resolve::resolve_type_expr_in(
                 te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()));
             override_record_literal_ty(&mut ir_val, &declared, ctx.env);
+            ir_val = super::expressions::adapt_fn_value_to_effect_slot(ctx, ir_val, &declared);
             declared
         }
         None => ir_val.ty.clone(),

@@ -883,15 +883,31 @@ impl Checker {
                     *ty
                 }
                 else if let Some(sig) = self.env.functions.get(&sym(name)).cloned() {
-                    Ty::Fn {
-                        params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
-                        ret: Box::new(sig.ret.clone()),
-                        is_effect: false /* named-fn VALUES keep the carrier in `ret` (sig.ret is already Result for effect fns); the effect BIT belongs to declared slot types only, where ret is the unwrapped B (#1055) */,
-                    }
+                    self.fn_value_ty(&sig)
                 }
                 else {
                     self.report_undefined_variable(name)
                 }
+    }
+
+    /// The Ty a named fn carries when referenced as a VALUE (#1055, #1148):
+    /// the carrier baked into `ret` — an effect fn's value is a
+    /// `(A) -> Result[B, String]` closure — and `is_effect: false`, because
+    /// the effect BIT belongs to declared slot types only (there `ret` is the
+    /// unwrapped B). `FnSig.ret` stores the DECLARED B (registration.rs does
+    /// not wrap), so the bake happens here, mirroring
+    /// `finalize_call_return_ty`'s call-site wrap.
+    pub(crate) fn fn_value_ty(&self, sig: &crate::types::FnSig) -> Ty {
+        let ret = if sig.is_effect && !sig.ret.is_result() {
+            Ty::result(sig.ret.clone(), Ty::String)
+        } else {
+            sig.ret.clone()
+        };
+        Ty::Fn {
+            params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+            ret: Box::new(ret),
+            is_effect: false,
+        }
     }
 
 

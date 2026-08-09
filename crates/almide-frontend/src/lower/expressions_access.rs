@@ -620,3 +620,36 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span) // error recovery
             }
 }
+
+/// A PURE fn value flowing into an `effect (A) -> B` slot must become a
+/// carrier-returning closure — the slot's runtime shape is
+/// `(A) -> Result[B, String]` (ALS-M15, #1148). Wraps the value as
+/// `(a0..an) => ok(value(a0..an))`. No-op when the slot is not an effect
+/// slot or the value already returns the carrier (a named effect fn's value,
+/// which the checker bakes — `fn_value_ty`).
+pub(super) fn adapt_fn_value_to_effect_slot(ctx: &mut LowerCtx, val: IrExpr, slot: &Ty) -> IrExpr {
+    let Ty::Fn { is_effect: true, .. } = slot else { return val };
+    let Ty::Fn { params: vparams, ret: vret, is_effect: false } = &val.ty else { return val };
+    if vret.is_result() {
+        return val;
+    }
+    let span = val.span;
+    let vparams = vparams.clone();
+    let inner_ret = vret.as_ref().clone();
+    let params: Vec<(VarId, Ty)> = vparams.iter().enumerate().map(|(i, pt)| {
+        let vid = ctx.var_table.alloc(sym(&format!("__eff_wrap{}", i)), pt.clone(), Mutability::Let, None);
+        (vid, pt.clone())
+    }).collect();
+    let args: Vec<IrExpr> = params.iter()
+        .map(|(vid, pt)| ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span))
+        .collect();
+    let call = ctx.mk(IrExprKind::Call {
+        target: CallTarget::Computed { callee: Box::new(val) },
+        args, type_args: vec![],
+    }, inner_ret.clone(), span);
+    let carrier = Ty::result(inner_ret, Ty::String);
+    let body = ctx.mk(IrExprKind::ResultOk { expr: Box::new(call) }, carrier.clone(), span);
+    let lambda_ty = Ty::Fn { params: vparams, ret: Box::new(carrier), is_effect: false };
+    let lambda_id = Some(ctx.next_lambda_id());
+    ctx.mk(IrExprKind::Lambda { params, body: Box::new(body), lambda_id }, lambda_ty, span)
+}

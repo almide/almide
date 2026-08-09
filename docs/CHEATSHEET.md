@@ -256,6 +256,13 @@ fallible lambdas (E005) — declare the slot `(A) -> B!` or `effect (A) -> B`.
 The bare arrow form is the canonical spelling; `almide fmt` normalizes the
 legacy `fn(A) -> B` to it.
 
+NAMED fns work as slot values the same way lambdas do (#1148): an effect fn
+referenced as a value is a `(A) -> Result[B, String]` closure — bind it
+(`let h: effect (String) -> Int = parse_pos`, annotation optional), pipe into
+it (`(s |> h)!`), or pass it to an effect slot directly. A PURE named fn also
+fills an effect slot (its result is ok-wrapped). UFCS method syntax does not
+apply to fn values (`x.h()` is E002 — write `h(x)` or `x |> h`).
+
 ### Block (last expression is the value)
 ```
 {
