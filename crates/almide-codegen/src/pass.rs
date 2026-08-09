@@ -381,6 +381,17 @@ impl Pipeline {
         // Run it only in debug (cargo test / CI) or when explicitly requested.
         let verify_ir = hard_fail || std::env::var_os("ALMIDE_VERIFY_IR").is_some();
 
+        // #912 pass-ordering lens: `ALMIDE_SKIP_PASS=Name[,Name…]` skips the
+        // named passes. A hunt instrument, not a user feature: the spec suite
+        // run with an OPTIONAL pass skipped must not change program OUTPUT —
+        // a silent value diff is a pass-dependency hole, while a dep-edge
+        // panic or compile error is the system refusing loudly. Zero-cost
+        // when unset (parsed once, out of the loop).
+        let skip_passes: Vec<String> = std::env::var("ALMIDE_SKIP_PASS")
+            .ok()
+            .map(|s| s.split(',').map(|x| x.trim().to_string()).collect())
+            .unwrap_or_default();
+
         // #559: the names of passes that WILL run in THIS target's pipeline.
         // Dep edges are enforced ONLY against this set, so a wasm-arm pass can
         // depend on a Rust-only pass (absent here) without panicking — the edge
@@ -395,6 +406,13 @@ impl Pipeline {
                 if !targets.contains(&target) {
                     continue;
                 }
+            }
+            // #912 lens skip: the skipped pass stays OUT of `executed`, so a
+            // later pass that declared a dep edge on it panics loudly in
+            // `validate_pass_deps` — an undeclared dependency is exactly what
+            // the hunt is for.
+            if skip_passes.iter().any(|s| s.eq_ignore_ascii_case(pass.name())) {
+                continue;
             }
             Self::validate_pass_deps(pass.as_ref(), &self.passes, target, &executed, &in_pipeline);
 
