@@ -150,6 +150,15 @@ if [ "$CORPUS" = "$ROOT/spec" ] || [ "$CORPUS" = "spec" ]; then
     echo "WALL GATE FAIL: summary says $WALLED_REAL walled fn(s) but the report enumerates $ENUMERATED — WALLED REAL line format drift (#988)." >&2
     rm -f "$ACTUAL" "$EXPECTED"; cleanup; exit 1
   fi
+  # #1147 poison ratchet: the nested-region-arm cert poison ({i|}) is burned
+  # down to ZERO over the corpus — the continuation-lift keeps it there. A
+  # reappearing poisoned cert is a kernel-coverage regression, not a tolerable
+  # exclusion.
+  if grep -q 'cert-poisoned' "$REPORT"; then
+    echo "POISON RATCHET FAIL: a poisoned ownership certificate reappeared (kernel-coverage regression, #1147):" >&2
+    grep 'cert-poisoned' "$REPORT" | sed 's/^/  /' >&2
+    rm -f "$ACTUAL" "$EXPECTED"; cleanup; exit 1
+  fi
   NEW_WALLS="$(LC_ALL=C comm -23 "$ACTUAL" "$EXPECTED")"
   STALE="$(LC_ALL=C comm -13 "$ACTUAL" "$EXPECTED")"
   if [ -n "$NEW_WALLS" ]; then

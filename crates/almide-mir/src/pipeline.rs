@@ -481,6 +481,13 @@ fn source_to_ir_with(
     crate::lower::desugar_loop_early_returns(&mut ir);
     crate::lower::hoist_spread_call_bases(&mut ir);
     crate::lower::hoist_record_literal_args(&mut ir);
+    // #1147: poison-oracle-driven continuation lift, LAST in the shared chain
+    // so the oracle lowers exactly what the real lowering will see (shared
+    // with classify: desugar-before-both) — outlines the loop-bearing
+    // `!`-continuations whose UN-lifted certificate actually poisons,
+    // restoring kernel-witness coverage. Transactional: any chain piece that
+    // walls or still poisons rolls the fn back untouched.
+    crate::lower::lift_poisoning_continuations(&mut ir);
     // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
     if let Ok(pat) = std::env::var("ALMIDE_DUMP_IR") {
         for f in ir
