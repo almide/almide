@@ -6,7 +6,7 @@
 // param), so the closure boundary rides the proven per-site agreement.
 fn adder(n: Int) -> (Int) -> Int = (x) => x + n
 
-fn main() -> Int = {
+fn main() -> Unit = {
   let f = adder(3)
-  f(5)
+  let _ = f(5)
 }

@@ -6,7 +6,7 @@
 fn pick(c: Bool) -> List[Int] =
   if c then [1] else [2]
 
-fn main() -> Int = {
+fn main() -> Unit = {
   let xs = pick(true)
-  list.len(xs)
+  let _ = list.len(xs)
 }
