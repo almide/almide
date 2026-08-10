@@ -5,7 +5,7 @@ impl LowerCtx {
     /// The HEAP half of [`Self::lower_bind`]: the heap-`??` executable subset,
     /// then the fresh-vs-alias match over every heap producer. Verbatim text move.
     fn lower_bind_heap(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
-        if self.try_lower_bind_heap_unwrap_or_precheck(var, value)? {
+        if self.try_lower_bind_heap_unwrap_or_precheck(var, ty, value)? {
             return Ok(());
         }
         self.lower_bind_heap_kind(var, ty, value)
@@ -17,6 +17,7 @@ impl LowerCtx {
     fn try_lower_bind_heap_unwrap_or_precheck(
         &mut self,
         var: VarId,
+        ty: &Ty,
         value: &IrExpr,
     ) -> Result<bool, LowerError> {
         // `let s = opt ?? "default"` — a HEAP-String `??` over a materialized Option[String]
@@ -27,9 +28,35 @@ impl LowerCtx {
         // (a non-String heap payload, a non-materialized operand) it falls through to the deferred
         // `Alloc{Opaque}` arm below — unchanged, the existing memory-safe incompleteness.
         if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
+            let lifted_mark = self.lifted.len();
             if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
                 self.value_of.insert(var, dst);
                 return Ok(true);
+            }
+            // The declined attempt above rolled its OPS back but a lambda it lifted
+            // while resolving the operand (a fallible-HOF closure arg) SURVIVES in
+            // `lifted` — the match rewrite below would lift it AGAIN, and the twin
+            // lambda bodies double-count the callback's calls (a mir>ir caps breach,
+            // not just waste). Roll the lift back before re-lowering.
+            self.lifted.truncate(lifted_mark);
+            // A RESULT-polarity heap `??` the direct route declined (`let a = list.map(xs,
+            // (s) => f(s)!) ?? [0]` — the fallible-HOF bind, #1134 Shape 2): rewrite to the
+            // SAME `match expr { ok(p) => p, err(_) => fallback }` the TAIL position proved
+            // (lower_tail_heap_unwrap_or) and route it through the bind-position heap-match
+            // machinery. Result polarity ONLY, exactly as the tail rewrite gates it — an
+            // Option operand keeps its proven `option.unwrap_or_str` route above, and a
+            // decline inside the match ROLLS BACK to the honest wall below (never wrong
+            // bytes; the rewrite is speculative, ops truncated on failure).
+            if expr.ty.is_result() {
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let rewritten = Self::unwrap_or_as_result_match(value, expr, fallback);
+                if self.lower_bind(var, ty, &rewritten).is_ok() {
+                    return Ok(true);
+                }
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                self.lifted.truncate(lifted_mark);
             }
             // A HEAP-result `??` over an Option/Result operand that `try_lower_option_unwrap_or`
             // declined (e.g. `Option[record]` — no faithful record-payload unwrap-or yet) must
@@ -45,6 +72,42 @@ impl LowerCtx {
             }
         }
         Ok(false)
+    }
+
+    /// The `e ?? d` → `match e { ok(p) => p, err(_) => d }` rewrite, shared shape with
+    /// [`Self::lower_tail_heap_unwrap_or`]'s inline version (Result polarity only —
+    /// the caller gates).
+    fn unwrap_or_as_result_match(value: &IrExpr, expr: &IrExpr, fallback: &IrExpr) -> IrExpr {
+        use almide_ir::{IrMatchArm, IrPattern};
+        let payload_ty = value.ty.clone();
+        let p = VarId(crate::lower::max_var_id(value) + 1);
+        let bind = IrPattern::Bind { var: p, ty: payload_ty.clone() };
+        let payload = IrExpr {
+            kind: IrExprKind::Var { id: p },
+            ty: payload_ty,
+            span: value.span.clone(),
+            def_id: None,
+        };
+        IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(expr.clone()),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Ok { inner: Box::new(bind) },
+                        guard: None,
+                        body: payload,
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: fallback.clone(),
+                    },
+                ],
+            },
+            ty: value.ty.clone(),
+            span: value.span.clone(),
+            def_id: value.def_id,
+        }
     }
 
     /// Extracted from `Self::lower_bind_heap` (third-round split, cog reduction): the

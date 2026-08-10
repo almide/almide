@@ -64,15 +64,18 @@ spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[
 # keep the pre-#1108 world), and the L-battery landed — the helpers sit on the
 # same bundled-generic closure-lifting frontier as the twins; pruned by the
 # same defunctionalization brick.
+# (2026-08-10, #1134 Shape 2 second batch) m_pipe_qq / fm_cells / marker_cells /
+# find_cells are PRUNED: the bind-position Result-polarity heap `??` now takes
+# the SAME `match ok/err` rewrite the tail position proved (routed through the
+# bind heap-match machinery, whose variant router gate widened to variant
+# SUBJECTS with non-variant heap results), and a NESTED `??` operand ANFs its
+# inner `??` to a synthetic bind. The marker test fn's cond entry below stays:
+# its blocker is the `List[Result[Int,String]]` eq engine cell, not the `??`s.
 spec/lang/fallible_hof_test.almd :: __test_almd_the marker, not the type, carries the callback bit
 # (2026-08-07, #1130) The branch-lift clone-scope regression: its driver is a
 # tail-recursive effect fn over a heap accumulator, the shape the v1 renderer
 # hands to the native leg.
 spec/lang/branch_lift_clone_test.almd :: __test_almd_a lifted in-loop branch clones what it reuses
-spec/lang/fallible_hof_test.almd :: find_cells
-spec/lang/fallible_hof_test.almd :: fm_cells
-spec/lang/fallible_hof_test.almd :: m_pipe_qq
-spec/lang/fallible_hof_test.almd :: marker_cells
 # (2026-08-10, #1134 Shape 2) The three fallible_lambda use_* fns are PRUNED:
 # the `??` operand machinery gained the fallible-CLOSURE call route (the
 # ADR-0009 carrier — dispatch through the tracked closure block, inverse tag
