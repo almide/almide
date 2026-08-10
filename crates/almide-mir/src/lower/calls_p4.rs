@@ -449,10 +449,33 @@ impl LowerCtx {
                     // Ok payload @12 (len-as-tag: Ok = len 0, the scalar in slot 0 @12).
                     let h = self.fresh_value();
                     self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
+                    // TAG DISPATCH FIRST (#1183): this arm's contract is the v1
+                    // unwrap — "die on Err" — but it read the payload with NO
+                    // tag check, so an Err block's slot 0 (the err-message
+                    // handle) flowed onward as the scalar value: silent wrong
+                    // output where native propagated/panicked. Propagation-
+                    // position unwraps are now ANF-hoisted to bind position
+                    // before lowering (`desugar_stmt_value_nested_unwrap`), so
+                    // what still reaches this arm is the plain-unwrap world
+                    // (L9 test blocks and genuine die-on-err spellings) — make
+                    // the die REAL: len-as-tag != 0 → die with the err message
+                    // the block already carries.
+                    let tagoff = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: tagoff, value: 4 });
+                    let tagaddr = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: tagaddr, op: crate::IntOp::Add, a: h, b: tagoff });
+                    let tag = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 4 }, dst: Some(tag), args: vec![tagaddr] });
                     let off = self.fresh_value();
                     self.ops.push(Op::ConstInt { dst: off, value: 12 });
                     let addr = self.fresh_value();
                     self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
+                    self.ops.push(Op::IfThen { cond: tag, dst: None });
+                    let msgh = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 8 }, dst: Some(msgh), args: vec![addr] });
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::Die, dst: None, args: vec![msgh] });
+                    self.ops.push(Op::Else { val: None });
+                    self.ops.push(Op::EndIf { val: None });
                     let payload = self.fresh_value();
                     self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 8 }, dst: Some(payload), args: vec![addr] });
                     // RELEASE the Result block. The payload is a SCALAR by the

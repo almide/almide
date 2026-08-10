@@ -556,6 +556,11 @@ const BRANCH_PASSES: &[BranchPass] = &[
     // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
     // lower like the hand-written form instead of walling on the `Block`-wrapped arm.
     |src, _, _| desugar_flatten_empty_block(src),
+    // #1183: hoist an expression-NESTED scalar `!` out of a Bind/Assign value to its own
+    // bind-position stmt (`out = out + [conv(s)!]` → `let $t = conv(s)!; out = out + [$t]`),
+    // so the proven bind-position machinery — including the loop flag rewrite right below —
+    // handles it instead of the tag-blind scalar-operand payload read.
+    |src, next_var, _| desugar_stmt_value_nested_unwrap(src, next_var),
     // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
     // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
     |src, next_var, _| desugar_loop_unwrap(src, next_var),
