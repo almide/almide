@@ -1,0 +1,52 @@
+# ── ABSTAIN CLASSIFICATION (aviation-quality Stage 2) ──
+#
+# Every reason string in interp-abstain-ledger.txt must match exactly one
+# pattern here (first match wins, checked by scripts/check-abstain-classes.sh).
+# The class answers the auditor's question "WHY is this fixture outside the
+# executable spec, and what would bring it in":
+#
+#   HEAP_BOUNDARY  — the fixture (usually via self-hosted stdlib) does raw
+#                    handle/pointer work (prim.handle / prim.alloc_*). The
+#                    interp models values, not bytes; bringing these in is the
+#                    interp-heap arc (model the block heap), the LARGE half of
+#                    totalization.
+#   BRIDGEABLE     — closable with bounded work, no architectural change:
+#                    dispatch glue (missing HOF arms), argv/env injection,
+#                    sandboxed fs, vendoring the SAME musl-libm the backends
+#                    use (retiring the ULP abstain), sequential fan evaluation
+#                    under the pure-fan determinism contracts, or a bigger
+#                    fuel budget. The Stage 2 near-horizon burn-down list.
+#
+# Coverage arithmetic these classes feed (research/benchmark/three-way/):
+# voting = corpus - abstains; the near-horizon target is voting + BRIDGEABLE.
+
+[[class]]
+name = "HEAP_BOUNDARY"
+patterns = [
+  "capability: prim.handle",
+  "capability: prim.alloc_value",
+  "capability: prim.alloc_map",
+  "capability: prim.alloc_list_str",
+  "capability: prim.alloc_list",
+  "capability: prim.alloc_str",
+  "capability: prim.alloc_set",
+  "capability: prim.alloc_bytes",
+]
+
+[[class]]
+name = "BRIDGEABLE"
+patterns = [
+  "capability: HOF map.fold",
+  "capability: HOF list.update",
+  "capability: list.min/max on non-comparable elements",
+  "capability: prim.args_get_list_full",
+  "capability: prim.args_get_list",
+  "capability: args.flag",
+  "capability: prim.make_dir",
+  "capability: prim.read_text_file",
+  "capability: prim.write_text_file",
+  "capability: fan.any",
+  "transcendental",
+  "float `**`",
+  "interp fuel/recursion budget exhausted",
+]
