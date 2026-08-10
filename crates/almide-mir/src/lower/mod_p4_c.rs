@@ -184,13 +184,14 @@ fn random_call_name(func: &str, arg_tys: &[Ty]) -> String {
             return format!("random.{func}_str");
         }
         // A `(String, String)` element (#1169's omikuji table) — `choice` shares
-        // the picked pair by handle (`random.choice_pair`); `shuffle` still needs
-        // pair-element list.get/set twins, so it keeps the honest `_x` wall.
-        if func == "choice"
+        // the picked pair by handle (`random.choice_pair`); `shuffle` swaps raw
+        // slots within the COW copy via `list.swap` (`random.shuffle_pair` —
+        // ownership-invariant, so no pair get/set twins needed).
+        if matches!(func, "choice" | "shuffle")
             && matches!(&a[..], [Ty::Tuple(ts)]
                 if ts.len() == 2 && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::String))
         {
-            return "random.choice_pair".to_string();
+            return format!("random.{func}_pair");
         }
     }
     format!("random.{func}_x")

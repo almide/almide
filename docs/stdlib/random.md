@@ -39,8 +39,10 @@ Return a randomly shuffled copy of a list.
 random.shuffle([1, 2, 3]) // => [3, 1, 2]
 ```
 
-**wasm element coverage** (#1169): scalar and `String` elements run on the wasm
-leg; any other element type walls honestly and runs via the native leg.
+**wasm element coverage** (#1169): scalar, `String`, and `(String, String)`
+elements run on the wasm leg (the pair variant swaps raw slots within the COW
+copy via `list.swap`); any other element type walls honestly and runs via the
+native leg.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
