@@ -339,6 +339,21 @@ impl LowerCtx {
                 // (frees each element String + the list block), NOT the flat DropListStr
                 // (heap_elem_lists) which would leak them.
                 self.list_str_result_results.insert(v);
+            } else if crate::lower::is_res_map_si_ty(&subject.ty)
+                || crate::lower::is_res_list_map_si_ty(&subject.ty)
+            {
+                // `Result[Map[String, <scalar>], String]` / the chunked List-of-maps
+                // sibling (fs.fold_lines msi): the TAG-AWARE `$__drop_res_msi` /
+                // `$__drop_res_lmsi` (Ok → the skv key sweep). `heap_elem_lists`
+                // ALSO inserted so the heap-payload bind gates open (the map.find
+                // dual-insert precedent); `variant_drop_handles` wins the drop.
+                let route = if crate::lower::is_res_map_si_ty(&subject.ty) {
+                    "res_msi"
+                } else {
+                    "res_lmsi"
+                };
+                self.variant_drop_handles.insert(v, route.to_string());
+                self.heap_elem_lists.insert(v);
             } else if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                 self.heap_elem_lists.insert(v);
             }

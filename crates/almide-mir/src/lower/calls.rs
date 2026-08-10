@@ -779,6 +779,14 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // prim floor is in the program map and the transitive cap_witness counts FsRead.
         // Returns Result[FileStat, String] (a record Ok payload).
         || (module == "fs" && func == "stat")
+        // `fs.fold_lines` / `fs.fold_lines_chunked` READ the filesystem — REUSE
+        // Capability::FsRead. Self-hosted typed twins over prim.read_text_file +
+        // the byte-level read_line walk (fs_fold_lines.almd); the `Map[String,
+        // Int]` accumulator routes to `_msi` in `list_heap_call_name`, any other
+        // acc to an unregistered name that walls cleanly at render. Their
+        // CLOSURE argument rides the same lift machinery every pure fold twin
+        // uses — the callback's own capabilities are captured by the lift.
+        || (module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked"))
 }
 
 /// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up, group 3

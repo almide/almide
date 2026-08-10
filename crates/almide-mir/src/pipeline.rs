@@ -817,6 +817,18 @@ fn build_ir_with_drops(
         crate::lower::program_uses_res_intlist_strlist(&ir),
         crate::lower::RES_ILSL_DROP_SRC,
     );
+    // `Result[Map[String, <scalar>], String]` / its chunked List-of-maps sibling
+    // (the fs.fold_lines msi twins) route their drops to the TAG-AWARE
+    // `$__drop_res_msi` / `$__drop_res_lmsi` (Ok → the skv key sweep; Err → the
+    // message). One gate injects both — `res_lmsi` shares `res_msi`'s key loop.
+    let res_msi_drop = gated(
+        crate::lower::program_uses_res_map_si(&ir),
+        crate::lower::RES_MSI_DROP_SRC,
+    );
+    let res_lmsi_drop = gated(
+        crate::lower::program_uses_res_map_si(&ir),
+        crate::lower::RES_LMSI_DROP_SRC,
+    );
     // An `Option[(String, <scalar>)]` (map.find's result, or a plain `some((s, n))` ctor)
     // routes its drop to the TAG-AWARE `$__drop_opt_str_int` (Some → recursive String-slot
     // free; None → nothing) — a blind flat `rc_dec` of the Option's payload slot would only
@@ -828,7 +840,7 @@ fn build_ir_with_drops(
         crate::lower::OPT_STR_INT_DROP_SRC,
     );
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(
@@ -844,6 +856,8 @@ fn build_ir_with_drops(
         crate::lower::generate_krec_sources(&ir, &all_type_decls),
         closure_drop,
         res_ilsl_drop,
+        res_msi_drop,
+        res_lmsi_drop,
         lenlist_drop,
         list_str_drop,
         list_closure_drop,
