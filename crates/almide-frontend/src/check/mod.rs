@@ -20,6 +20,7 @@
 ///   diagnostics.rs  — Error hint helpers
 
 mod types;
+mod fallible_user_hof;
 mod infer;
 pub(crate) mod calls;
 mod builtin_calls;
@@ -864,6 +865,42 @@ impl Checker {
                 if matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!") {
                     self.fallible_marker_fns.insert(*name);
                 }
+            }
+        }
+        // #1108 Phase 2b-iii (D2, Cell 1): a fallible callback in a USER HOF's
+        // bare `(A) -> B` slot routes the call to a GENERATED `__fallible__`
+        // twin — same pre-inference name-swap discipline as the list HOFs'
+        // hand-written twins, so everything downstream is the proven D3
+        // explicit-slot path. Runs before any inference so the twins register
+        // like ordinary decls.
+        let n_twins =
+            fallible_user_hof::normalize_fallible_user_hofs(program, &self.fallible_marker_fns);
+        // The twins were appended AFTER `register_decls` ran (registration is
+        // part of canonicalize, upstream of this checker entry) — register
+        // their signatures through the same path so call resolution sees them
+        // like any parsed decl.
+        if n_twins > 0 {
+            let start = program.decls.len() - n_twins;
+            for decl in &program.decls[start..] {
+                let ast::Decl::Fn {
+                    name, effect, visibility, generics, params, return_type, span, ..
+                } = decl
+                else {
+                    continue;
+                };
+                crate::canonicalize::registration::register_fn_sig(
+                    &mut self.env,
+                    &crate::canonicalize::registration::FnSigToRegister {
+                        name: name.as_str(),
+                        params,
+                        return_type,
+                        effect,
+                        generics,
+                        prefix: None,
+                        span: span.as_ref(),
+                        visibility: *visibility,
+                    },
+                );
             }
         }
         // `main` takes NO parameters (#789): the parameter form typechecked but no

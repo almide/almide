@@ -1,0 +1,19 @@
+// The working spelling today: the explicit D3 slot with the `!` at BIND
+// position in the loop body. Native runs it correctly; the wasm leg WALLS
+// honestly on the closure-param loop (the defunc frontier) and routes to
+// native — never the silent wrong output the expression-nested spelling
+// hits (#1183).
+fn conv(s: String) -> Int! = int.parse(s)
+
+fn my_map_f(cb: (String) -> Int!, xs: List[String]) -> List[Int]! = {
+  var out: List[Int] = []
+  for x in xs {
+    let t = cb(x)!
+    out = out + [t]
+  }
+  out
+}
+
+fn use_it(xs: List[String]) -> List[Int]! = my_map_f((s) => conv(s)!, xs)!
+
+fn main() -> Unit = println(int.to_string(list.len(use_it(["1", "2"]) ?? [])))
