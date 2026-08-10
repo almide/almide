@@ -115,6 +115,7 @@ impl LowerCtx {
     ) -> Result<ArgOutcome, LowerError> {
         let mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
         Ok(ArgOutcome::Value(
             match self.try_lower_option_unwrap_or(expr, fallback, true) {
                 Some(v) if is_heap_ty(&a.ty) => CallArg::Handle(v),
@@ -122,6 +123,24 @@ impl LowerCtx {
                 None => {
                     self.ops.truncate(mark);
                     self.live_heap_handles.truncate(lhh_mark);
+                    self.lifted.truncate(lifted_mark);
+                    // A RESULT-polarity HEAP `??` argument (`list.len(out ?? empty)`
+                    // — the branch_lift cond, #1134): ANF it through the bind
+                    // machinery, which executes this class via the tail-proven
+                    // `match ok/err` rewrite; the synthetic temp is scope-tracked
+                    // like a user-written `let t = out ?? empty` and BORROWED here.
+                    // A decline rolls back to the honest wall below.
+                    if is_heap_ty(&a.ty) && expr.ty.is_result() {
+                        let tmp = self.fresh_synth_var();
+                        if self.lower_bind(tmp, &a.ty, a).is_ok() {
+                            if let Ok(v) = self.value_for(tmp) {
+                                return Ok(ArgOutcome::Value(CallArg::Handle(v)));
+                            }
+                        }
+                        self.ops.truncate(mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        self.lifted.truncate(lifted_mark);
+                    }
                     self.deferred_unwrap_or_call_arg(a, expr)?
                 }
             },

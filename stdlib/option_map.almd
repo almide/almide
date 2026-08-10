@@ -6,12 +6,12 @@
 // Apply f to x and wrap as Some(f(x)) — a heap-returning helper, so option_map's Some arm is a
 // direct user call (the proven heap-result call-arm) and f is invoked via CallIndirect here, not in
 // an OptionSome scalar position (which does not lower a closure call).
-fn __opt_map_some(x: Int, f: fn(Int) -> Int) -> Int? = {
+fn __opt_map_some(x: Int, f: (Int) -> Int) -> Int? = {
   let y = f(x)
   some(y)
 }
 
-fn option_map(o: Int?, f: fn(Int) -> Int) -> Int? = {
+fn option_map(o: Int?, f: (Int) -> Int) -> Int? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -21,12 +21,12 @@ fn option_map(o: Int?, f: fn(Int) -> Int) -> Int? = {
 // option.filter(o, pred) = o.filter(pred): keep Some(x) iff pred(x), else None. Same helper shape —
 // pred is invoked via CallIndirect ONLY when the Option is Some (v0 calls f only on the value). The
 // kept value is the SAME x (no closure transform), so Some(x) reuses the borrowed scalar.
-fn __opt_filter_some(x: Int, pred: fn(Int) -> Bool) -> Int? = {
+fn __opt_filter_some(x: Int, pred: (Int) -> Bool) -> Int? = {
   let p = pred(x)
   if p then some(x) else none
 }
 
-fn option_filter(o: Int?, pred: fn(Int) -> Bool) -> Int? = {
+fn option_filter(o: Int?, pred: (Int) -> Bool) -> Int? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -37,12 +37,12 @@ fn option_filter(o: Int?, pred: fn(Int) -> Bool) -> Int? = {
 // closure RETURNS a heap Option, invoked via a heap-result CallIndirect ONLY on the Some arm; its
 // fresh owned result is moved straight out. The helper isolates the closure call so option_flat_map's
 // Some arm is a plain named call (the proven heap-result call-arm).
-fn __opt_flatmap_some(x: Int, f: fn(Int) -> Int?) -> Int? = {
+fn __opt_flatmap_some(x: Int, f: (Int) -> Int?) -> Int? = {
   let r = f(x)
   r
 }
 
-fn option_flat_map(o: Int?, f: fn(Int) -> Int?) -> Int? = {
+fn option_flat_map(o: Int?, f: (Int) -> Int?) -> Int? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -52,9 +52,9 @@ fn option_flat_map(o: Int?, f: fn(Int) -> Int?) -> Int? = {
 // option.unwrap_or_else(o, f) = o.unwrap_or_else(f): Some(x) → x, None → f() (a 0-arg thunk). The
 // thunk is invoked via CallIndirect ONLY on the None arm (a named helper isolates the call so the
 // scalar `if` arm is a plain call). Result is a SCALAR Int. `o` is borrowed.
-fn __opt_unwrap_else(f: fn() -> Int) -> Int = f()
+fn __opt_unwrap_else(f: () -> Int) -> Int = f()
 
-fn option_unwrap_or_else(o: Int?, f: fn() -> Int) -> Int = {
+fn option_unwrap_or_else(o: Int?, f: () -> Int) -> Int = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -64,12 +64,12 @@ fn option_unwrap_or_else(o: Int?, f: fn() -> Int) -> Int = {
 // option.or_else(o, f) = o.or_else(f): Some(x) → Some(x) (kept), None → f() (a 0-arg thunk itself
 // returning an Option, invoked via a heap-result CallIndirect ONLY on the None arm). The kept Some
 // is rebuilt from its scalar slot (Option[Int]); the helper isolates the heap-result thunk call.
-fn __opt_orelse_none(f: fn() -> Int?) -> Int? = {
+fn __opt_orelse_none(f: () -> Int?) -> Int? = {
   let r = f()
   r
 }
 
-fn option_or_else(o: Int?, f: fn() -> Int?) -> Int? = {
+fn option_or_else(o: Int?, f: () -> Int?) -> Int? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   let x = prim.load64(h + 12)
@@ -126,12 +126,12 @@ fn option_zip(a: Int?, b: Int?) -> (Int, Int)? = {
 // walled. These twins declare the closure HEAP-typed, so the dispatch type matches.
 // The Some payload is a SHARED borrow into f (load_handle); f's result is fresh
 // owned and moves into the some(); a bare kept payload Dups (the hshare discipline).
-fn __opt_maph_some(x: String, f: fn(String) -> String) -> String? = {
+fn __opt_maph_some(x: String, f: (String) -> String) -> String? = {
   let y = f(x)
   some(y)
 }
 
-fn option_map_h(o: String?, f: fn(String) -> String) -> String? = {
+fn option_map_h(o: String?, f: (String) -> String) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   if len >= 1 then {
@@ -140,9 +140,9 @@ fn option_map_h(o: String?, f: fn(String) -> String) -> String? = {
   } else none
 }
 
-fn __opt_unwrap_else_h(f: fn() -> String) -> String = f()
+fn __opt_unwrap_else_h(f: () -> String) -> String = f()
 
-fn option_unwrap_or_else_h(o: String?, f: fn() -> String) -> String = {
+fn option_unwrap_or_else_h(o: String?, f: () -> String) -> String = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   if len >= 1 then {
@@ -167,14 +167,32 @@ fn option_to_result_h(o: String?, msg: String) -> Result[String, String] = {
   } else err(__otr_copy_str(msg))
 }
 
+// `option.to_result` CUSTOM-E twin (#1114, the ADR-0003 D1 typed-error route): a
+// SCALAR payload with a NON-String error value. The err arm CO-OWNS the caller's
+// error block (Dup — the physics is one handle slot, payload-type-independent,
+// exactly the `_h` family's discipline); the caller's statically-typed drop route
+// frees it recursively. The String declaration is the uniform-block spelling the
+// twin family uses — only the handle moves, no string op ever touches the block.
+// Before this twin the type-blind registry link served the (Int?, String) body to
+// EVERY scalar-A instantiation, and its `__copy_str` read a VARIANT error block as
+// string bytes — `match` on the result then dispatched over a corrupt copy and
+// printed NOTHING (silent wrong output, native printed the payload; the exact
+// shim-v1 failure mode docs/roadmap/active/selfhost-link-v2.md names).
+fn option_to_result_ve(o: Int?, e: String) -> Result[Int, String] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then ok(x) else err(e)
+}
+
 // `option.filter` heap twin: the kept payload SHARES into some() (Dup) — the scalar
 // re-wrap raw-copied the handle un-owned.
-fn __opt_filterh_some(x: String, pred: fn(String) -> Bool) -> String? = {
+fn __opt_filterh_some(x: String, pred: (String) -> Bool) -> String? = {
   let p = pred(x)
   if p then some(x) else none
 }
 
-fn option_filter_h(o: String?, pred: fn(String) -> Bool) -> String? = {
+fn option_filter_h(o: String?, pred: (String) -> Bool) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   if len >= 1 then {
@@ -188,12 +206,12 @@ fn option_filter_h(o: String?, pred: fn(String) -> Bool) -> String? = {
 // payload has the same share obligation as filter/flatten — the scalar rewrap
 // raw-copied the handle un-owned, a double free at scope end (fuzz
 // seed-20260718 index 622: correct output, then an __rc_dec trap).
-fn __opt_orelse_none_h(f: fn() -> String?) -> String? = {
+fn __opt_orelse_none_h(f: () -> String?) -> String? = {
   let r = f()
   r
 }
 
-fn option_or_else_h(o: String?, f: fn() -> String?) -> String? = {
+fn option_or_else_h(o: String?, f: () -> String?) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   if len >= 1 then {

@@ -74,10 +74,10 @@ spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[
 # PRUNED: the eq engine gained the `List[Result[Int/Bool, String]]` element
 # class (value_core `list.eq_res_int` — len-as-tag element compare, scalar-Ok
 # bit-eq / String-Err byte-eq), so `long == [ok(1), err("…")]` lowers.
-# (2026-08-07, #1130) The branch-lift clone-scope regression: its driver is a
-# tail-recursive effect fn over a heap accumulator, the shape the v1 renderer
-# hands to the native leg.
-spec/lang/branch_lift_clone_test.almd :: __test_almd_a lifted in-loop branch clones what it reuses
+# (2026-08-10, #1134 Shape 3) The branch-lift clone entry is PRUNED: a
+# Result-polarity heap `??` in a CALL-ARGUMENT position (`list.len(out ?? [])`)
+# now ANFs through the bind machinery's tail-proven `match ok/err` rewrite —
+# the whole file lowers and runs the wasm leg.
 # (2026-08-10, #1134 Shape 2) The three fallible_lambda use_* fns are PRUNED:
 # the `??` operand machinery gained the fallible-CLOSURE call route (the
 # ADR-0009 carrier — dispatch through the tracked closure block, inverse tag
