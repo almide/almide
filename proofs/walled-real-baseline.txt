@@ -98,18 +98,12 @@
 # WILDCARD arm now takes whichever side the ctor arm did not — so the
 # desugared `match r { err(e) => …, _ => … }` executes on the wasm leg.
 #
-# (2026-08-11, #1134 Shape 5 — FUNCTIONALLY DONE, gate-blocked) The fs streaming
-# trio LOWERS AND RUNS byte-identical on both targets (wip-fs-streaming-msi:
-# fold_lines/chunked/range self-hosts over prim.read_text_file with
-# BufRead::read_line's exact semantics + the native byte-partition transcribed;
-# map.upsert_skv; the $__drop_res_msi/_lmsi wrapper drops) — the A/B evidence
-# incl. chunks=3 parity and partition invariance is on the branch. The entries
-# STAY because landing them trips the mir>ir caps gate on collect_partition:
-# the count-side desugar_all does NOT apply desugar_loop_unwrap's flag rewrite
-# while the lowering ladder does, so the injected `$x ++ ""` owned-copy concat
-# is a MIR op with no counted IR node — the classify-chain drift previously
-# noted as rot, now material for the first in-profile loop-`!` fn. Fix the
-# instrument (align desugar_all with the ladder), then flip the routing and
-# prune the last entry. seq_counts and par_counts ARE pruned — their `!`s are
-# top-level binds, clear of the drift.
-spec/stdlib/fs_fold_lines_range_test.almd :: collect_partition
+# (2026-08-11, #1134 Shape 5 ENDGAME — the set is EMPTY)
+# All walls burned. The last entry (collect_partition, the in-loop `!` consumer
+# of fs.fold_lines_range) fell when the classify count-side gained the SAME
+# AUTO_WRAP synthetic-Result root retype the lowering applies before its desugar
+# ladder (auto_wrap_abi_body, one helper both sides — #1176): desugar_loop_unwrap's
+# Result[T, String] root gate then fires count-side too, and the loop-`!` flag
+# rewrite's injected owned-copy concat is counted 1:1 (mir == ir).
+# The ratchet target is now permanently 0: ANY new walled-real entry is a
+# regression and fails the gate.

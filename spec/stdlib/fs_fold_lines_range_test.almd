@@ -1,6 +1,8 @@
 // @contract: C-220
-// wasm:skip — same defunctionalization frontier as the rest of the streaming
-// family (#1134); the wasm render walls honestly.
+// wasm:skip — the test fixture's tmp() rides fs.create_temp_dir, which has no
+// WASI self-host yet (its own brick). The streaming fns under test themselves
+// LOWER (#1134 endgame, walled-real = 0); A/B parity is probe-verified. Remove
+// this skip when the create_temp_dir brick lands.
 // fs.fold_lines_range — the chunk-parallel worker's walker. Ownership rule:
 // a line belongs to the chunk containing the byte BEFORE its first byte
 // (line 0 to the chunk containing byte 0), so folding any partition of
