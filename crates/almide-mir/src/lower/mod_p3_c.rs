@@ -345,9 +345,19 @@ impl LowerCtx {
             return Ok(None);
         };
         let repr = repr_of(ty)?;
+        // An `Init::IntList` copy is a REAL populated scalar-list block, so register it
+        // in `materialized_lists` — the gate `lower_scalar_index_access` consults. Without
+        // this, `WEIGHTS[j]` over a module-global int list declined the scalar read and the
+        // enclosing cond/bind walled (#1150); a local `let ws = [10, 20, 30]` already
+        // registers through `lower_bind`, so the global copy was the one unregistered
+        // producer of this block shape. `Init::Str`/`Init::Bytes` are NOT lists — excluded.
+        let is_int_list = matches!(const_init, crate::Init::IntList(_));
         let dst = self.fresh_value();
         self.ops.push(Op::Alloc { dst, repr, init: const_init });
         self.live_heap_handles.push(dst);
+        if is_int_list {
+            self.materialized_lists.insert(dst);
+        }
         self.memo_global(var, dst);
         Ok(Some(dst))
     }

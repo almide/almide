@@ -30,12 +30,16 @@
 # forward brick named in #1064's close). The cells RUN and pass on the native
 # leg; these entries are the honest wasm frontier, to be pruned by the next
 # heap-result-arm/aggregate-drop brick.
+# (2026-08-10, #1134 Shape 1) The Nested and Shape roundtrip test fns are PRUNED:
+# the eq engine gained the synthesized List[record] loop helper (the record twin
+# of the List[variant] route) and the Result-Ok materializer gained the variant-
+# ctor payload arm (`ok(Label{…})`), so both conds lower and A/B byte-identically.
+# The Deep test fn stays: its cond rides the Deep decode helpers' heap-result-if
+# class below plus the bind-position record brick (#1064) — same file, other brick.
 spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_Inner_go
 spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_int_go
 spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_string_go
-spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested Codec: direct field, list elements, Option none omission
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[Option], List[List], deep Option[List[Option]]
-spec/stdlib/codec_field_matrix_test.almd :: __test_almd_variant record case: Option field omits none, folds missing/null to none
 #
 #
 # (2026-08-05, #1041) The list.try_* family (effectful pipelines keep the
@@ -84,10 +88,12 @@ spec/stdlib/option_to_result_generic_test.almd :: __test_almd_custom E flows thr
 # the corpus gate BEFORE its ratchet stage, so these never surfaced until the
 # backing gate learned to skip poisoned certificates (the breach's own fix).
 # The streaming helpers' callback shapes wall on the v1 lowering (the #1134
-# defunctionalization frontier the C-220 statement itself names); the
-# split_once test fn rides the same nested-region-arm shape. The native leg
-# serves all four; prune with the #1134 brick.
+# defunctionalization frontier the C-220 statement itself names). The native
+# leg serves all three; prune with the #1134 brick.
+# (2026-08-10, #1134 Shape 1) The split_once test fn is PRUNED: string.split_once
+# gained a self-host wasm body (stdlib/string_split_once.almd) and the eq-operand
+# tuple builder gained the List[String]-element borrow-then-Dup arm, so the
+# `some((parts[0], …))` cond lowers and the file runs the wasm leg byte-identical.
 spec/stdlib/fs_fold_lines_chunked_test.almd :: par_counts
 spec/stdlib/fs_fold_lines_chunked_test.almd :: seq_counts
 spec/stdlib/fs_fold_lines_range_test.almd :: collect_partition
-spec/stdlib/string_split_once_test.almd :: __test_almd_agrees with split's first piece

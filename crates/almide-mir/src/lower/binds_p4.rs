@@ -367,6 +367,7 @@ impl LowerCtx {
             .or_else(|| self.try_lower_opt_heap_general(value, ty))
             .or_else(|| self.try_lower_opt_fallback_and_none(value, ty))
             .or_else(|| self.try_lower_result_ok_heap(value, ty))
+            .or_else(|| self.try_lower_result_ok_variant_ctor(value, ty))
             .or_else(|| self.try_lower_result_small_arms(value, ty))
             .or_else(|| self.try_lower_result_err_heap_ok_result(value, ty))
             .or_else(|| self.try_lower_result_err_heap_fallback(value, ty))

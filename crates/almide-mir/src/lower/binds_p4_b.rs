@@ -589,6 +589,46 @@ impl LowerCtx {
         }
     }
 
+    /// `ok(Label { text: "a", hint: none })` / `ok(Circle(2.0))` — a VARIANT CTOR Ok
+    /// payload (#1134 Shape 1, the codec Shape roundtrip): the Result twin of
+    /// [`Self::try_opt_variant_ctor_payload`]. The fresh owned tag-block is MOVED into
+    /// the Ok slot; a type whose payload owns heap fields routes the wrapper drop
+    /// through the recursive `resrec:<type>` arm ([`Self::materialize_result_aggregate`]
+    /// — a flat `DropListStr` would leak the ctor's String/heap fields), the rest keep
+    /// the flat wrapper — the same split the Option side takes.
+    pub(crate) fn try_lower_result_ok_variant_ctor(
+        &mut self,
+        value: &IrExpr,
+        ty: &Ty,
+    ) -> Option<ValueId> {
+        let IrExprKind::ResultOk { expr } = &value.kind else {
+            return None;
+        };
+        if !Self::is_heap_ok_result(ty) {
+            return None;
+        }
+        let ctor_name = match &expr.kind {
+            IrExprKind::Record { name: Some(n), .. } => n.as_str().to_string(),
+            IrExprKind::Call { target: CallTarget::Named { name }, .. } => name.as_str().to_string(),
+            _ => return None,
+        };
+        let type_name = self.variant_layouts.ctor_to_type.get(&ctor_name)?.clone();
+        let repr = repr_of(ty).ok()?;
+        let needs_rec = self
+            .variant_layouts
+            .needs_recursive_drop(&type_name, &|rn| {
+                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+            });
+        let piece = self.try_lower_variant_ctor(expr)?;
+        let dst = if needs_rec {
+            self.materialize_result_aggregate(piece, repr, false, type_name)
+        } else {
+            self.materialize_result_str(piece, repr, false, false)
+        };
+        self.seed_variant_param(dst, ty);
+        Some(dst)
+    }
+
     /// The per-`expr.kind` heap-Ok-payload construction strategy for
     /// [`Self::try_lower_result_ok_heap`] — verbatim extraction of that
     /// function's former inner `match &expr.kind { .. }`.

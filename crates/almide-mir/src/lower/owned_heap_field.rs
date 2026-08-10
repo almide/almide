@@ -115,6 +115,21 @@ impl LowerCtx {
                 let h = self.resolve_aggregate_container_handle(object)?;
                 Some(self.dup_borrowed_slot(h, offset))
             }
+            // A `List[String]` ELEMENT field (`(parts[0], "two,three")` — the split_once
+            // spec's some-payload tuple): BORROW the element handle at the bounds-checked
+            // `$elem_addr` (the list still owns it, gated to a tracked/materialized list)
+            // then `Dup` it so the aggregate owns a DISTINCT reference — the same
+            // borrow-then-Dup discipline as the Member/TupleIndex arms above (cert `a`,
+            // no double-free). Gated to a String element: flat, so the aggregate's masked
+            // rc_dec frees the co-owned ref exactly; a NESTED element (List[List[..]][i])
+            // stays deferred — a flat slot drop could leak its payload at last-ref.
+            IrExprKind::IndexAccess { .. } if matches!(expr.ty, Ty::String) => {
+                let b = self.try_lower_heap_field_borrow(expr)?;
+                let dup = self.fresh_value();
+                self.ops.push(Op::Dup { dst: dup, src: b });
+                self.live_heap_handles.push(dup);
+                Some(dup)
+            }
             // A user-call element (`(parse_inline(after), pos + 1)` — the dominant yaml tuple shape):
             // the callee returns a FRESH owned heap value (CallFn result = cert `i`, rc 1), tracked
             // so the enclosing tuple's per-slot `Consume` (`m`) moves it into the slot — the tuple
