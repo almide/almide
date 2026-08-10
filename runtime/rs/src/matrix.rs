@@ -99,7 +99,14 @@ pub const ALMIDE_MATRIX_MAX_ELEMS: i64 = 1 << 28;
 pub fn almide_rt_matrix_dims(rows: i64, cols: i64) -> (usize, usize) {
     let r = rows.max(0);
     let c = cols.max(0);
-    if r.saturating_mul(c) > ALMIDE_MATRIX_MAX_ELEMS {
+    // The ROW COUNT is bounded ALONE, not only the r*c product: `zeros(2^31, -7)`
+    // has 0 elements after the cols clamp but still asks for 2^31 ROW headers —
+    // 16 GiB of row-pointer array on wasm (OOM kill) while native's unused-value
+    // allocation was elided by LLVM (ran clean): two verdicts for one program
+    // (differential fuzz, 2026-08-10 night). Rows over the element ceiling can
+    // never produce an in-ceiling matrix anyway (cols >= 1 overflows the product;
+    // cols = 0 is useless at that scale), so both targets die in the T6 form.
+    if r > ALMIDE_MATRIX_MAX_ELEMS || r.saturating_mul(c) > ALMIDE_MATRIX_MAX_ELEMS {
         eprintln!("Error: matrix dimensions too large");
         std::process::exit(1);
     }
