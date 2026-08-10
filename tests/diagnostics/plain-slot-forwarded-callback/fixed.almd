@@ -1,0 +1,11 @@
+// The explicit D3 spelling: declare BOTH slots fallible and spell the
+// propagation — works today without the twin subset.
+fn f(s: String) -> Result[Int, String] = if string.len(s) > 0 then ok(string.len(s)) else err("empty")
+
+fn inner(cb: (String) -> Int!, s: String) -> Int! = cb(s)!
+
+fn outer(cb: (String) -> Int!, s: String) -> Int! = inner(cb, s)!
+
+fn use_it(s: String) -> Int! = outer((x) => f(x)!, s)!
+
+fn main() -> Unit = println(int.to_string(use_it("abc") ?? -1))

@@ -1,0 +1,17 @@
+// A fallible callback whose HOF calls it inside a `for` body is OUTSIDE the
+// 2b-iii Cell 1 twin subset (#1183: the twin's in-loop expression-nested `!`
+// hits the wasm wall-escape that issue pins) — the honest E005 stays until
+// the loop-unwrap ANF capability lands.
+fn conv(s: String) -> Int! = int.parse(s)
+
+fn my_map(cb: (String) -> Int, xs: List[String]) -> List[Int] = {
+  var out: List[Int] = []
+  for x in xs {
+    out = out + [cb(x)]
+  }
+  out
+}
+
+fn use_it(xs: List[String]) -> List[Int]! = my_map((s) => conv(s)!, xs)!
+
+fn main() -> Unit = println(int.to_string(list.len(use_it(["1", "2"]) ?? [])))
