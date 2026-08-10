@@ -1,0 +1,91 @@
+// fs_fold_lines — SELF-HOSTED `fs.fold_lines` for the wasm leg over the WASI
+// file-read floor (prim.read_text_file) + a byte-level line walk with EXACTLY
+// `BufRead::read_line`'s semantics (the native oracle, runtime/rs/src/fs.rs):
+// lines split at '\n' (the terminator is stripped, a preceding '\r' too); a
+// final UNTERMINATED line is still yielded; a file ending WITH '\n' yields no
+// trailing empty line; the empty file folds ZERO lines (init returned as-is).
+// The whole file is read up front — C-220's observables (stdout/stderr/exit)
+// are byte-identical; the streaming RSS property is native-only, by design.
+//
+// Typed twin: the `Map[String, Int]` accumulator (`_msi` — the aggregation
+// shape, `list.fold_str_msi`'s ABI: the acc MOVES into f each iteration and f
+// returns the next; this fn never frees it). Other accumulator types route to
+// an unregistered name in `list_heap_call_name` and wall cleanly at render.
+// Reaching prim.read_text_file, the transitive cap_witness carries
+// Capability::FsRead — a caller must be an `effect fn` declaring it.
+// Byte index of the next '\n' at or after p, or slen if none.
+fn __ffl_nl(sh: Int, slen: Int, p: Int) -> Int = if p >= slen then slen
+else if prim.load8(sh + 12 + p) == 10 then p
+else __ffl_nl(sh, slen, p + 1)
+
+fn __ffl_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __ffl_copy(dst, src, n, i + 1)
+}
+
+// The line text[start .. endp], with a trailing '\r' stripped (the CRLF rule).
+fn __ffl_line(sh: Int, start: Int, endp: Int) -> String = {
+  let e2 = if endp > start then {
+    if prim.load8(sh + 12 + endp - 1) == 13 then endp - 1 else endp
+  } else endp
+  let n = e2 - start
+  let out = prim.alloc_str(n)
+  let _c = __ffl_copy(prim.handle(out) + 12, sh + 12 + start, n, 0)
+  out
+}
+
+fn __ffl_walk_msi(
+  sh: Int,
+  slen: Int,
+  pos: Int,
+  acc: Map[String, Int],
+  f: fn(Map[String, Int], String) -> Map[String, Int]
+) -> Map[String, Int] = if pos >= slen then acc
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  let nacc = f(acc, line)
+  __ffl_walk_msi(sh, slen, e + 1, nacc, f)
+}
+
+effect fn fs_fold_lines_msi(
+  path: String,
+  init: Map[String, Int],
+  f: fn(Map[String, Int], String) -> Map[String, Int]
+) -> Result[Map[String, Int], String] = {
+  let r = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    ok(__ffl_walk_msi(th, prim.load32(th + 4), 0, init, f))
+  }
+}
+
+// `fs.fold_lines_chunked` msi twin: the wasm leg runs ONE chunk sequentially —
+// the partials list is `[<the whole-file fold>]`. C-220's observables hold: the
+// caller combines partials, and combine over one partial equals the sequential
+// fold; `workers` only bounds parallelism (clamped to one here by construction).
+effect fn fs_fold_lines_chunked_msi(
+  path: String,
+  workers: Int,
+  init: Map[String, Int],
+  f: fn(Map[String, Int], String) -> Map[String, Int]
+) -> Result[List[Map[String, Int]], String] = {
+  let r = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    let one = __ffl_walk_msi(th, prim.load32(th + 4), 0, init, f)
+    ok([one])
+  }
+}

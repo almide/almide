@@ -219,6 +219,22 @@ fn list_heap_call_name_special_cases(
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
         return Some(heap_fold_call_name(module, arg_tys, result_ty));
     }
+    // `fs.fold_lines` / `fs.fold_lines_chunked` (#1134, the C-220 streaming trio):
+    // the `Map[String, Int]` accumulator routes to the `_msi` self-host twin
+    // (fs_fold_lines.almd); any other accumulator routes to an unregistered
+    // `_x` name and walls cleanly at render (never a wrong-typed link).
+    if module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked") {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let init_idx = if func == "fold_lines" { 1 } else { 2 };
+        let msi_acc = matches!(arg_tys.get(init_idx),
+            Some(Ty::Applied(TC::Map, a)) if a.len() == 2
+                && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+        return Some(if msi_acc {
+            format!("fs.{func}_msi")
+        } else {
+            format!("fs.{func}_x")
+        });
+    }
     None
 }
 
