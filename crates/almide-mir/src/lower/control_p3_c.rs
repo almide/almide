@@ -122,9 +122,19 @@ impl LowerCtx {
     /// payload's slot is f64 BITS (bit-eq ≠ `==` on -0.0/NaN). Verbatim.
     fn list_elem_eq_call_name_nested_option(elem_ty: &Ty) -> Option<&'static str> {
         use almide_lang::types::constructor::TypeConstructorId as TC;
-        let Ty::Applied(TC::Option, inner) = elem_ty else { return None };
-        if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
-            return Some("list.eq_opt_int");
+        if let Ty::Applied(TC::Option, inner) = elem_ty {
+            if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
+                return Some("list.eq_opt_int");
+            }
+        }
+        // `List[Result[Int/Bool, String]]` — element-wise len-as-tag + i64/byte
+        // payload compare (value_core `list_eq_res_int`, #1134 Shape 2: the
+        // fallible-HOF marker cond `long == [ok(1), err("…")]`). Scalar Ok only
+        // (a Float payload's bit-eq ≠ `==` on -0.0/NaN), String Err only.
+        if let Ty::Applied(TC::Result, ra) = elem_ty {
+            if ra.len() == 2 && matches!(ra[0], Ty::Int | Ty::Bool) && matches!(ra[1], Ty::String) {
+                return Some("list.eq_res_int");
+            }
         }
         None
     }

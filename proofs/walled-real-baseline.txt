@@ -69,9 +69,11 @@ spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[
 # the SAME `match ok/err` rewrite the tail position proved (routed through the
 # bind heap-match machinery, whose variant router gate widened to variant
 # SUBJECTS with non-variant heap results), and a NESTED `??` operand ANFs its
-# inner `??` to a synthetic bind. The marker test fn's cond entry below stays:
-# its blocker is the `List[Result[Int,String]]` eq engine cell, not the `??`s.
-spec/lang/fallible_hof_test.almd :: __test_almd_the marker, not the type, carries the callback bit
+# inner `??` to a synthetic bind.
+# (2026-08-10, #1134 Shape 2 third batch) The marker test fn's cond entry is
+# PRUNED: the eq engine gained the `List[Result[Int/Bool, String]]` element
+# class (value_core `list.eq_res_int` — len-as-tag element compare, scalar-Ok
+# bit-eq / String-Err byte-eq), so `long == [ok(1), err("…")]` lowers.
 # (2026-08-07, #1130) The branch-lift clone-scope regression: its driver is a
 # tail-recursive effect fn over a heap accumulator, the shape the v1 renderer
 # hands to the native leg.

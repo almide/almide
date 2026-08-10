@@ -341,6 +341,38 @@ fn list_eq_opt_int(a: List[Int?], b: List[Int?]) -> Bool = {
   else __leq_opt_int(ha, hb, 0, prim.load32(ha + 4))
 }
 
+// list.eq over List[Result[Int/Bool, String]] — elements are len-as-tag Result
+// blocks (Ok = len 0, scalar payload @12; Err = len 1, String handle @12),
+// BORROWED for the read-only compare. Tags must match; both-Ok compares the i64
+// payloads (scalar-only — a Float payload's bit compare would diverge from `==`
+// on -0.0/NaN), both-Err compares the message bytes via the value_core-local
+// string eq (string.eq is a cross-module call this module avoids).
+fn __leq_res_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
+else {
+  let ra: Result[Int, String] = prim.load_handle(ah + 12 + i * 8)
+  let rb: Result[Int, String] = prim.load_handle(bh + 12 + i * 8)
+  let pa = prim.handle(ra)
+  let pb = prim.handle(rb)
+  let ta = prim.load32(pa + 4)
+  let tb = prim.load32(pb + 4)
+  let elem_eq = if ta != tb then false
+  else if ta == 0 then prim.load64(pa + 12) == prim.load64(pb + 12)
+  else {
+    let sa: String = prim.load_handle(pa + 12)
+    let sb: String = prim.load_handle(pb + 12)
+    __veq_strval(sa, sb)
+  }
+  if elem_eq then __leq_res_int(ah, bh, i + 1, n)
+  else false
+}
+
+fn list_eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_res_int(ha, hb, 0, prim.load32(ha + 4))
+}
+
 fn __leq_list_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
 else {
   let xa: List[Int] = prim.load_handle(ah + 12 + i * 8)
