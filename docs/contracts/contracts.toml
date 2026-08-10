@@ -2776,3 +2776,14 @@ evidence  = [
   { path = "spec/wasm_cross/effect_fn_value.almd", class = "fixture" },
   { path = "spec/lang/fallible_user_hof_test.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-222"
+spec      = "ALS-R2"
+title     = "An expression-nested scalar unwrap propagates the err identically on both legs"
+statement = "A scalar `!` NESTED inside a Bind/Assign value expression — a concat-list element (`out = out + [conv(s)!]`), a binop operand (`total = total + conv(x)!`), straight-line or inside a `for` body — propagates the err with the same observable behavior native <-> wasm: the Ok path yields the payload, the Err path takes the enclosing fn's err channel, stdout/stderr/exit byte-identical. Mechanism: the shared branch-desugar fixpoint ANF-hoists the innermost nested unwrap to its own bind-position statement (`let $t = conv(s)!; out = out + [$t]`), which the proven bind-position machinery — the effect-unwrap continuation match in straight-line code, the loop flag rewrite in a loop body — then handles; the hoist moves the call subtree intact, so the classify call-count is unchanged on both sides (desugar-before-both). Before this contract the nested unwrap survived every desugar and fell to a tag-blind scalar-operand payload read: the wasm leg read the err block's slot 0 (the err-message handle) AS the scalar value — released 0.56.0 printed `ok2: 8457` for the loop sum — while native (`?`) propagated. The residual plain-unwrap world (L9 test blocks, genuine die-on-err spellings) now carries a REAL tag dispatch at the payload read: len-as-tag != 0 dies with the err message the block carries, never a garbage read."
+since     = "0.56.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nested_unwrap_propagation.almd", class = "fixture" },
+]

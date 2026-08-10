@@ -714,6 +714,7 @@ include!("desugar_b.rs");
 include!("desugar_call_arg_anf.rs");
 include!("desugar_unwrap.rs");
 include!("desugar_unwrap_b.rs");
+include!("desugar_nested_unwrap.rs");
 include!("desugar_loop.rs");
 include!("desugar_loop_b.rs");
 include!("desugar_branch.rs");
