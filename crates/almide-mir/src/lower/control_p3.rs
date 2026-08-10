@@ -212,6 +212,24 @@ impl LowerCtx {
         if matches!(&expr.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
             return self.field_unwrap_or_operand(expr);
         }
+        // A NESTED `??` operand (`(list.find(..) ?? none) ?? -1` — the fallible-HOF
+        // find shape, #1134 Shape 2): ANF it — bind the INNER `??` to a synthetic
+        // temp through the ordinary bind machinery (which owns + scope-tracks it and
+        // seeds its variant read shape), then resolve the temp exactly like a
+        // user-written two-step `let inner = ..; inner ?? d`. The bind declining
+        // rolls back to None (the wall stays honest).
+        if matches!(&expr.kind, IrExprKind::UnwrapOr { .. }) {
+            let tmp = self.fresh_synth_var();
+            if self.lower_bind(tmp, &expr.ty, expr).is_err() {
+                self.unwrap_or_rollback(cx);
+                return None;
+            }
+            let Ok(v) = self.value_for(tmp) else {
+                self.unwrap_or_rollback(cx);
+                return None;
+            };
+            return self.var_unwrap_or_operand_value(v, &expr.ty);
+        }
         if is_self_host_option_call(expr)
             || is_self_host_result_call(expr)
             || (is_self_host_result_str_call(expr)
@@ -273,28 +291,30 @@ impl LowerCtx {
     /// borrowed variant PARAM (`param_values` — same calling-convention soundness as the
     /// match): a deferred Opaque Var (len 0) would MISREAD as None/Err, so it is excluded.
     fn var_unwrap_or_operand(&self, id: VarId, expr_ty: &Ty) -> Option<ValueId> {
-        match self.value_for(id) {
-            Ok(v)
-                if self.materialized_options.contains(&v)
-                    || self.materialized_results.contains(&v)
-                    // a Value/List-Ok Result Var (`value.get`/`value.as_array` result) — its `??`
-                    // routes to the value_unwrap helper route. A String-Ok Result (heap_elem_lists)
-                    // is NOT admitted here: it keeps its original path (the String branch is for
-                    // OPTION[String], and counting a str-Result there falsely taints mir>ir).
-                    || self.value_result_results.contains(&v)
-                    || self.value_result_lists.contains(&v)
-                    // A `Result[String, String]` Var (cap-as-tag, materialized_results_str)
-                    // routes to the `result.str_unwrap_or` helper route — admitted ONLY for
-                    // that type (any other _str-set shape would mis-take the len-as-tag
-                    // String branch, reading an Err payload as Some).
-                    || (self.materialized_results_str.contains(&v)
-                        && crate::lower::is_result_str_str_ty(expr_ty))
-                    || self.param_values.contains(&v) =>
-            {
-                Some(v)
-            }
-            _ => None,
-        }
+        let v = self.value_for(id).ok()?;
+        self.var_unwrap_or_operand_value(v, expr_ty)
+    }
+
+    /// The admission half of [`Self::var_unwrap_or_operand`], keyed on the resolved
+    /// `ValueId` — shared with the nested-`??` ANF route, whose synthetic temp has a
+    /// value but no user-facing var lookup to repeat.
+    fn var_unwrap_or_operand_value(&self, v: ValueId, expr_ty: &Ty) -> Option<ValueId> {
+        let admitted = self.materialized_options.contains(&v)
+            || self.materialized_results.contains(&v)
+            // a Value/List-Ok Result Var (`value.get`/`value.as_array` result) — its `??`
+            // routes to the value_unwrap helper route. A String-Ok Result (heap_elem_lists)
+            // is NOT admitted here: it keeps its original path (the String branch is for
+            // OPTION[String], and counting a str-Result there falsely taints mir>ir).
+            || self.value_result_results.contains(&v)
+            || self.value_result_lists.contains(&v)
+            // A `Result[String, String]` Var (cap-as-tag, materialized_results_str)
+            // routes to the `result.str_unwrap_or` helper route — admitted ONLY for
+            // that type (any other _str-set shape would mis-take the len-as-tag
+            // String branch, reading an Err payload as Some).
+            || (self.materialized_results_str.contains(&v)
+                && crate::lower::is_result_str_str_ty(expr_ty))
+            || self.param_values.contains(&v);
+        admitted.then_some(v)
     }
 
     /// `r.opt ?? d` — an `Option[scalar/String]` FIELD of a materialized record: BORROW the

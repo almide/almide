@@ -432,7 +432,12 @@ impl LowerCtx {
         // owned rc=1 block (released-merge-dst `i` credit) — then bind +
         // scope-track it and SEED its variant read-shape so a following
         // `match $r` / `$r!` takes the executing tag-read path.
-        if is_variant_ty(ty) {
+        // ALSO entered for a VARIANT SUBJECT with a non-variant HEAP result (`let a =
+        // match <Result[List[Int],String]> { ok(p) => p, err(_) => [0] }` — the
+        // fallible-HOF `??` bind rewrite, #1134 Shape 2): the tail position runs the
+        // SAME routers with no result-type gate, and the merge is the one owned rc=1
+        // block either way — only the variant read-shape seeding is variant-only.
+        if is_variant_ty(ty) || is_variant_ty(&subject.ty) {
             let mark = self.ops.len();
             let lhh_mark = self.live_heap_handles.len();
             let mut dst = self.try_lower_custom_variant_match(subject, arms, ty);
@@ -450,7 +455,16 @@ impl LowerCtx {
                 if !self.live_heap_handles.contains(&obj) {
                     self.live_heap_handles.push(obj);
                 }
-                self.seed_variant_param(obj, ty);
+                if is_variant_ty(ty) {
+                    self.seed_variant_param(obj, ty);
+                } else if crate::lower::is_heap_elem_list_ty(ty)
+                    || matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 && !is_heap_ty(&a[0]))
+                {
+                    // A List-valued merge binds as a REAL populated block —
+                    // register it so later element reads take the executing path.
+                    self.materialized_lists.insert(obj);
+                }
                 return Ok(());
             }
             self.ops.truncate(mark);
