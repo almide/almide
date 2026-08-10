@@ -20,10 +20,10 @@ test "index an uppercase binding with a computed expression" {
 
 test "uppercase index result feeds arithmetic" {
   let j = 2
-  // Bound first: an `assert_eq(a[i] + b[j], lit)` condition (Int-Eq over a
-  // BinOp vs literal with a call-bearing arm) has no v1 branch brick yet.
-  let sum = WEIGHTS[j] + WEIGHTS[0]
-  assert_eq(sum, 40)
+  // The direct `assert_eq(a[i] + b[j], lit)` spelling — the #1150 brick: the
+  // module-global int-list copy registers as a materialized list, so the
+  // Int-Eq cond over the BinOp lowers as a real branch.
+  assert_eq(WEIGHTS[j] + WEIGHTS[0], 40)
 }
 
 test "uppercase binding indexed inside a loop" {
