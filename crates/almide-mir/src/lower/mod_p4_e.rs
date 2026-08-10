@@ -522,6 +522,7 @@ fn map_variant_other(r: MapRoute<'_>) -> Option<MapName> {
 const SKV_FUNCS: &[&str] = &[
     "new", "set", "remove", "filter", "get", "get_or", "keys", "values", "len", "is_empty",
     "contains", "all", "any", "count", "fold", "eq", "find", "update", "merge", "map",
+    "upsert",
 ];
 
 /// The HEAP-KEY rows of [`map_variant_other`]: String keys (skv and its

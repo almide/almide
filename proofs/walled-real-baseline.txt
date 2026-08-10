@@ -98,17 +98,18 @@
 # WILDCARD arm now takes whichever side the ctor arm did not — so the
 # desugared `match r { err(e) => …, _ => … }` executes on the wasm leg.
 #
-# (2026-08-09, #1146) Four lowering walls the C-220 fs streaming landing
-# introduced but could not enumerate: the UNBACKED certificate breach aborted
-# the corpus gate BEFORE its ratchet stage, so these never surfaced until the
-# backing gate learned to skip poisoned certificates (the breach's own fix).
-# The streaming helpers' callback shapes wall on the v1 lowering (the #1134
-# defunctionalization frontier the C-220 statement itself names). The native
-# leg serves all three; prune with the #1134 brick.
-# (2026-08-10, #1134 Shape 1) The split_once test fn is PRUNED: string.split_once
-# gained a self-host wasm body (stdlib/string_split_once.almd) and the eq-operand
-# tuple builder gained the List[String]-element borrow-then-Dup arm, so the
-# `some((parts[0], …))` cond lowers and the file runs the wasm leg byte-identical.
-spec/stdlib/fs_fold_lines_chunked_test.almd :: par_counts
-spec/stdlib/fs_fold_lines_chunked_test.almd :: seq_counts
+# (2026-08-11, #1134 Shape 5 — FUNCTIONALLY DONE, gate-blocked) The fs streaming
+# trio LOWERS AND RUNS byte-identical on both targets (wip-fs-streaming-msi:
+# fold_lines/chunked/range self-hosts over prim.read_text_file with
+# BufRead::read_line's exact semantics + the native byte-partition transcribed;
+# map.upsert_skv; the $__drop_res_msi/_lmsi wrapper drops) — the A/B evidence
+# incl. chunks=3 parity and partition invariance is on the branch. The entries
+# STAY because landing them trips the mir>ir caps gate on collect_partition:
+# the count-side desugar_all does NOT apply desugar_loop_unwrap's flag rewrite
+# while the lowering ladder does, so the injected `$x ++ ""` owned-copy concat
+# is a MIR op with no counted IR node — the classify-chain drift previously
+# noted as rot, now material for the first in-profile loop-`!` fn. Fix the
+# instrument (align desugar_all with the ladder), then flip the routing and
+# prune the last entry. seq_counts and par_counts ARE pruned — their `!`s are
+# top-level binds, clear of the drift.
 spec/stdlib/fs_fold_lines_range_test.almd :: collect_partition

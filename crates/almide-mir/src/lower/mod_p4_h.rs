@@ -223,6 +223,16 @@ fn list_heap_call_name_special_cases(
     // the `Map[String, Int]` accumulator routes to the `_msi` self-host twin
     // (fs_fold_lines.almd); any other accumulator routes to an unregistered
     // `_x` name and walls cleanly at render (never a wrong-typed link).
+    // `fs.fold_lines` / `fs.fold_lines_chunked` (#1134, the C-220 streaming trio):
+    // the `Map[String, Int]` accumulator routes to the `_msi` self-host twin
+    // (fs_fold_lines.almd); any other accumulator routes to an unregistered
+    // `_x` name and walls cleanly at render (never a wrong-typed link).
+    // `fold_lines_range` is deliberately NOT admitted yet: its consumer
+    // (collect_partition) carries an in-loop `!`, whose flag-rewrite owned-copy
+    // concat trips the classify chain's mir>ir drift (the count-side
+    // desugar_all does not run desugar_loop_unwrap) — the `_ls` twin sits
+    // ready in fs_fold_lines.almd; flip the routing once the instrument is
+    // aligned. See the walled-real baseline's Shape 5 note.
     if module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked") {
         use almide_lang::types::constructor::TypeConstructorId as TC;
         let init_idx = if func == "fold_lines" { 1 } else { 2 };

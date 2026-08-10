@@ -63,6 +63,12 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly
             // like fs.read_text (only the Ok payload type differs: a List[String], not a String).
             | ("fs", "list_dir")
+            // `fs.fold_lines` / `fs.fold_lines_chunked` (the msi twins,
+            // fs_fold_lines.almd) build their Results with the ordinary
+            // ok()/err() ctors = the same cap-as-tag layout (payload @12,
+            // tag @16); a `match`/`!` over them reads tag @16.
+            | ("fs", "fold_lines")
+            | ("fs", "fold_lines_chunked")
             // `fs.stat` returns the cap-as-tag `Result[FileStat, String]` (the self-host builds
             // it with the ordinary ok()/err() ctors — payload @12, tag @16). The Ok payload is a
             // SCALAR-ONLY record block (size/is_dir/is_file/modified — no heap fields), so the

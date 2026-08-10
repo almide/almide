@@ -624,6 +624,104 @@ fn __drop_res_ilsl_strs(e: Int, n: Int, i: Int) -> Unit =
   }
 ";
 
+/// The ALMIDE SOURCE of `$__drop_res_msi` — the TAG-AWARE release of a
+/// `Result[Map[String, <scalar>], String]` (the fs.fold_lines msi return): Ok
+/// (tag@16 = 0) → the @12 skv map's n deep-copied KEYS free (first n slots;
+/// scalar value slots untouched), then the map block; Err → rc_dec the @12
+/// message. Same trusted prim-only class as `$__drop_res_ilsl`.
+pub const RES_MSI_DROP_SRC: &str = "\
+fn __drop_res_msi(r: List[Int]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    let inner = prim.load32(h + 12)
+    if prim.load32(h + 16) == 0 then {
+      if prim.load32(inner + 0) == 1 then __drop_res_msi_keys(inner, prim.load32(inner + 4), 0) else ()
+    } else ()
+    prim.rc_dec(inner)
+  } else ()
+  prim.rc_dec(h)
+}
+fn __drop_res_msi_keys(e: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(e + 12 + i * 8))
+    __drop_res_msi_keys(e, n, i + 1)
+  }
+";
+
+/// The ALMIDE SOURCE of `$__drop_res_lmsi` — the TAG-AWARE release of a
+/// `Result[List[Map[String, <scalar>]], String]` (the fs.fold_lines_chunked msi
+/// partials): Ok → per element the skv key sweep + the map block, then the
+/// list block; Err → rc_dec the @12 message. Requires `RES_MSI_DROP_SRC` in
+/// scope for the shared key-sweep loop (the pipeline injects both together).
+pub const RES_LMSI_DROP_SRC: &str = "\
+fn __drop_res_lmsi(r: List[Int]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    let inner = prim.load32(h + 12)
+    if prim.load32(h + 16) == 0 then {
+      if prim.load32(inner + 0) == 1 then __drop_res_lmsi_elems(inner, prim.load32(inner + 4), 0) else ()
+    } else ()
+    prim.rc_dec(inner)
+  } else ()
+  prim.rc_dec(h)
+}
+fn __drop_res_lmsi_elems(lh: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let m = prim.load32(lh + 12 + i * 8)
+    if prim.load32(m + 0) == 1 then __drop_res_msi_keys(m, prim.load32(m + 4), 0) else ()
+    prim.rc_dec(m)
+    __drop_res_lmsi_elems(lh, n, i + 1)
+  }
+";
+
+/// Is `ty` `Result[Map[String, <scalar>], String]` (the fs.fold_lines msi class)?
+pub fn is_res_map_si_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    matches!(ty, Ty::Applied(TC::Result, a) if a.len() == 2
+        && matches!(&a[0], Ty::Applied(TC::Map, kv) if kv.len() == 2
+            && matches!(kv[0], Ty::String) && !is_heap_ty(&kv[1]))
+        && matches!(a[1], Ty::String))
+}
+
+/// Is `ty` `Result[List[Map[String, <scalar>]], String]` (the chunked partials class)?
+pub fn is_res_list_map_si_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    matches!(ty, Ty::Applied(TC::Result, a) if a.len() == 2
+        && matches!(&a[0], Ty::Applied(TC::List, e) if e.len() == 1
+            && matches!(&e[0], Ty::Applied(TC::Map, kv) if kv.len() == 2
+                && matches!(kv[0], Ty::String) && !is_heap_ty(&kv[1])))
+        && matches!(a[1], Ty::String))
+}
+
+/// Does the program mention either fs.fold_lines msi Result class anywhere a drop
+/// could fire? Gates the `$__drop_res_msi` / `$__drop_res_lmsi` source injection.
+pub fn program_uses_res_map_si(program: &almide_ir::IrProgram) -> bool {
+    struct C(bool);
+    impl almide_ir::visit::IrVisitor for C {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if is_res_map_si_ty(&e.ty) || is_res_list_map_si_ty(&e.ty) {
+                self.0 = true;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut c = C(false);
+    for f in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
+        if f.params.iter().any(|p| is_res_map_si_ty(&p.ty) || is_res_list_map_si_ty(&p.ty))
+            || is_res_map_si_ty(&f.ret_ty) || is_res_list_map_si_ty(&f.ret_ty)
+        {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut c, &f.body);
+        if c.0 {
+            return true;
+        }
+    }
+    false
+}
+
 /// Is `ty` exactly `Result[List[Int], List[String]]` (the result.collect return —
 /// the tag-aware `$__drop_res_ilsl` class)?
 pub fn is_res_intlist_strlist_ty(ty: &Ty) -> bool {

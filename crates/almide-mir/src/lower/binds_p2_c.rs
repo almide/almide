@@ -197,6 +197,16 @@ impl LowerCtx {
                 // `Result[Value, String]` (value.get) — a single dynamic Value Ok, freed
                 // recursively by `Op::DropResultValue` (Ok → `$__drop_value`).
                 self.value_result_results.insert(dst);
+            } else if crate::lower::is_res_map_si_ty(ty)
+                || crate::lower::is_res_list_map_si_ty(ty)
+            {
+                // fs.fold_lines msi / chunked — the tag-aware `$__drop_res_msi` /
+                // `$__drop_res_lmsi` (Ok → the skv key sweep); heap_elem_lists
+                // also inserted for the bind-gate admission (drop precedence:
+                // variant_drop_handles wins).
+                let route = if crate::lower::is_res_map_si_ty(ty) { "res_msi" } else { "res_lmsi" };
+                self.variant_drop_handles.insert(dst, route.to_string());
+                self.heap_elem_lists.insert(dst);
             } else {
                 self.heap_elem_lists.insert(dst);
             }
