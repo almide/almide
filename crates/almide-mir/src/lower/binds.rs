@@ -357,6 +357,23 @@ impl LowerCtx {
             // …and the SHARED-CELL var set, so a NESTED lift inside this body
             // re-captures a cell as a cell (its own `cell_of` seeds below).
             cell_vars: self.cell_vars.clone(),
+            // A lambda whose body types `Result[…]` returns a REAL carrier — a
+            // fallible callback's `(n) => record_seen(n)` hands the block to the
+            // `__fallible_*` twin, which matches on it. A lambda has no effect-fn
+            // synthetic `Result[Unit,_]` (the voided-tail convention this flag
+            // gates), so leaving it false VOIDED a `Result[Unit,String]` body:
+            // the lifted fn returned nothing while the twin's `call_indirect`
+            // expects the carrier — `indirect call type mismatch` at runtime
+            // (the fallible-each trap, latent while the file's other walls kept
+            // it on the native leg; #1134 Shape 2 exposed it).
+            decl_ret_is_result: matches!(
+                &body.ty,
+                Ty::Applied(
+                    almide_lang::types::constructor::TypeConstructorId::Result
+                        | almide_lang::types::constructor::TypeConstructorId::Option,
+                    _
+                )
+            ),
             ..Default::default()
         };
         // The leading ENV param: the closure block itself, BORROWED (the caller owns it
