@@ -502,6 +502,22 @@ fn new_lower_ctx(
     }
 }
 
+/// The synthetic-Result ABI retype the lowering applies before its desugar ladder: an
+/// `AUTO_WRAP_ABI_FNS` member's root body is retyped to the TRUE compiled carrier
+/// `Result[<declared>, String]` (`func.ret_ty` keeps the bare sugar type). `pub` because
+/// the classify count-side must apply the SAME retype before `desugar_all` —
+/// desugar-before-both means BOTH: without it `desugar_loop_unwrap`'s `Result[T, String]`
+/// root gate declines on the count side while the lowering fires it, and the rewrite's
+/// injected owned-copy concat becomes a MIR op with no counted IR node (a false
+/// `mir > ir` breach on every in-profile loop-`!` fn — the #1176 drift).
+pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
+    if crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(func.name.as_str())) {
+        Some(IrExpr { ty: Ty::result(func.ret_ty.clone(), Ty::String), ..func.body.clone() })
+    } else {
+        None
+    }
+}
+
 fn lower_function_all_impl(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
@@ -544,10 +560,8 @@ fn lower_function_all_impl(
     // SAME desugared tree (desugar-before-both), so mir == ir. Unblocks base64 encode/decode_chunks +
     // toml read_basic/parse_val (the let-bound-heap-`if`-in-a-loop frontier).
     let owned_body;
-    let func_body: &IrExpr = if crate::lower::AUTO_WRAP_ABI_FNS
-        .with(|s| s.borrow().contains(func.name.as_str()))
-    {
-        owned_body = IrExpr { ty: Ty::result(func.ret_ty.clone(), Ty::String), ..func.body.clone() };
+    let func_body: &IrExpr = if let Some(b) = auto_wrap_abi_body(func) {
+        owned_body = b;
         &owned_body
     } else {
         &func.body

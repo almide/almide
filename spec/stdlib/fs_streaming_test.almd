@@ -1,7 +1,8 @@
 // @contract: C-220
-// wasm:skip — the streaming line walkers are native-only today: the callback
-// crosses the runtime boundary, and generic HOF closures are the wasm
-// defunctionalization frontier (#1134). The wasm render walls honestly;
+// wasm:skip — this file's accumulator shapes (String/Int/List[String] fold_lines,
+// for_each_line) have no self-host twins yet — only the Map[String, Int] msi pair
+// and fold_lines_range_ls landed (#1134 endgame) — and tmp() rides
+// fs.create_temp_dir (its own brick). The wasm render walls honestly;
 // remove this skip when the wasm leg lands.
 // Streaming line walkers {fold_lines, for_each_line}: line-by-line over a
 // file with O(longest line) memory, line semantics byte-matching read_lines.

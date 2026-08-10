@@ -223,24 +223,24 @@ fn list_heap_call_name_special_cases(
     // the `Map[String, Int]` accumulator routes to the `_msi` self-host twin
     // (fs_fold_lines.almd); any other accumulator routes to an unregistered
     // `_x` name and walls cleanly at render (never a wrong-typed link).
-    // `fs.fold_lines` / `fs.fold_lines_chunked` (#1134, the C-220 streaming trio):
-    // the `Map[String, Int]` accumulator routes to the `_msi` self-host twin
-    // (fs_fold_lines.almd); any other accumulator routes to an unregistered
-    // `_x` name and walls cleanly at render (never a wrong-typed link).
-    // `fold_lines_range` is deliberately NOT admitted yet: its consumer
-    // (collect_partition) carries an in-loop `!`, whose flag-rewrite owned-copy
-    // concat trips the classify chain's mir>ir drift (the count-side
-    // desugar_all does not run desugar_loop_unwrap) — the `_ls` twin sits
-    // ready in fs_fold_lines.almd; flip the routing once the instrument is
-    // aligned. See the walled-real baseline's Shape 5 note.
-    if module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked") {
+    // The C-220 streaming trio (#1134): typed routing to the self-host twins in
+    // fs_fold_lines.almd — `Map[String, Int]` accumulators to `_msi`
+    // (fold_lines / fold_lines_chunked), the `List[String]` accumulator to
+    // `_ls` (fold_lines_range, the collect_partition shape). Any other
+    // accumulator type routes to an unregistered `_x` name and walls cleanly
+    // at render — never a wrong-typed link.
+    if module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range") {
         use almide_lang::types::constructor::TypeConstructorId as TC;
-        let init_idx = if func == "fold_lines" { 1 } else { 2 };
+        let init_idx = match func { "fold_lines" => 1, "fold_lines_chunked" => 2, _ => 3 };
         let msi_acc = matches!(arg_tys.get(init_idx),
             Some(Ty::Applied(TC::Map, a)) if a.len() == 2
                 && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
-        return Some(if msi_acc {
+        let ls_acc = matches!(arg_tys.get(init_idx),
+            Some(Ty::Applied(TC::List, a)) if a.len() == 1 && matches!(a[0], Ty::String));
+        return Some(if msi_acc && func != "fold_lines_range" {
             format!("fs.{func}_msi")
+        } else if ls_acc && func == "fold_lines_range" {
+            format!("fs.{func}_ls")
         } else {
             format!("fs.{func}_x")
         });
