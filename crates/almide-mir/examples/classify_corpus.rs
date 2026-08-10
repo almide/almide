@@ -148,12 +148,19 @@ fn count_eq_calls_depth(
         let opt_scalar_elem = matches!(&es[..],
             [Ty::Applied(TC::Option, inner)]
                 if matches!(inner[..], [Ty::Int | Ty::Bool]));
+        // List[Result[Int/Bool, String]] — ONE list.eq_res_int CallFn (the
+        // engine's Result-element arm, same scalar-Ok/String-Err gate).
+        let res_scalar_elem = matches!(&es[..],
+            [Ty::Applied(TC::Result, ra)]
+                if ra.len() == 2 && matches!(ra[0], Ty::Int | Ty::Bool)
+                    && matches!(ra[1], Ty::String));
         return usize::from(
             es.len() == 1
                 && (matches!(es[0], Ty::Int | Ty::String | Ty::Float | Ty::Bool)
                     || almide_mir::lower::is_value_ty(&es[0])
                     || nested_list
-                    || opt_scalar_elem),
+                    || opt_scalar_elem
+                    || res_scalar_elem),
         );
     }
     // Map/Set `==` — the implemented repr variants lower to ONE synthetic eq CallFn
