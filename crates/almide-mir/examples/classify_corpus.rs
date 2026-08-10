@@ -139,6 +139,20 @@ fn count_eq_calls_depth(
                     return 2 + count_eq_calls_depth(&es[0], registry, variant_layouts, depth + 1);
                 }
             }
+            // List[Option[<record>]] — the synthesized option-element route: the
+            // site's list-helper call + the list body's ONE opt-helper call + the
+            // opt body's ONE record-helper call + the record helper's per-field
+            // calls (the same over-credit-on-dedup conservatism as List[record]).
+            if let [Ty::Applied(TC::Option, oa)] = &es[..] {
+                if let [almide_lang::types::Ty::Named(n, args)] = &oa[..] {
+                    if args.is_empty()
+                        && !variant_layouts.by_type.contains_key(n.as_str())
+                        && registry.get(n.as_str()).is_some()
+                    {
+                        return 3 + count_eq_calls_depth(&oa[0], registry, variant_layouts, depth + 1);
+                    }
+                }
+            }
         }
         let nested_list = matches!(&es[..],
             [Ty::Applied(TC::List, inner)]
@@ -147,7 +161,7 @@ fn count_eq_calls_depth(
         // Option-element arm; Float payloads stay outside on both sides).
         let opt_scalar_elem = matches!(&es[..],
             [Ty::Applied(TC::Option, inner)]
-                if matches!(inner[..], [Ty::Int | Ty::Bool]));
+                if matches!(inner[..], [Ty::Int | Ty::Bool | Ty::String]));
         // List[Result[Int/Bool, String]] — ONE list.eq_res_int CallFn (the
         // engine's Result-element arm, same scalar-Ok/String-Err gate).
         let res_scalar_elem = matches!(&es[..],

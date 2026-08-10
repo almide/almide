@@ -285,6 +285,26 @@ impl LowerCtx {
         {
             return Some(ListElemDrop::MapSkv);
         }
+        // An `Option[<record>]` element (`[some(Inner { n: 1 }), none]` — the codec
+        // `lc: List[Inner?]` cell, #1134): each element is a 0-or-1 Option block whose
+        // Some payload is the record — freed via the generated tag-aware
+        // `$__drop_list_opt_<R>` (Some → the record's own free: one rc_dec for a flat
+        // record, `$__drop_<R>` recursion for a rich one). Decided BEFORE the lenlist
+        // arm (lenlist's flat_heap test would decline the record payload and fall to
+        // the nested-ownership wall). Gated to a NON-generic Named record with a
+        // resolvable layout; variants keep their own classes.
+        if let almide_lang::types::Ty::Applied(
+            almide_lang::types::constructor::TypeConstructorId::Option, oa) = elem_ty
+        {
+            if let [Ty::Named(n, args)] = &oa[..] {
+                if args.is_empty()
+                    && self.custom_variant_type_name(&oa[0]).is_none()
+                    && self.aggregate_field_tys(&oa[0]).is_some()
+                {
+                    return Some(ListElemDrop::OptRecord(n.as_str().to_string()));
+                }
+            }
+        }
         if let Some(class) = crate::lower::lenlist_elem_class(elem_ty) {
             return Some(match class {
                 crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
@@ -670,6 +690,7 @@ fn drop_route_name(kind: ListElemDrop) -> String {
         ListElemDrop::Closure => "list_closure".to_string(),
         ListElemDrop::StrClosure => "list_str_clo".to_string(),
         ListElemDrop::RecordInt(rname) => format!("list_{}_int", drop_fn_ident(&rname)),
+        ListElemDrop::OptRecord(rname) => format!("list_opt_{}", drop_fn_ident(&rname)),
         ListElemDrop::StrVariant(vname) => format!("list_str_{}", drop_fn_ident(&vname)),
         ListElemDrop::StrStr
         | ListElemDrop::ScalarAggregate

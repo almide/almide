@@ -126,6 +126,10 @@ impl LowerCtx {
             if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
                 return Some("list.eq_opt_int");
             }
+            // `List[Option[String]]` — the String twin (byte compare on both-Some).
+            if inner.len() == 1 && matches!(inner[0], Ty::String) {
+                return Some("list.eq_opt_str");
+            }
         }
         // `List[Result[Int/Bool, String]]` — element-wise len-as-tag + i64/byte
         // payload compare (value_core `list_eq_res_int`, #1134 Shape 2: the
@@ -307,6 +311,23 @@ impl LowerCtx {
                                 return Some(self.emit_eq_helper_call(name, lv, rv));
                             }
                             return None;
+                        }
+                    }
+                }
+                // `List[Option[<record>]]` (the codec `lc: List[Inner?]` eq cell,
+                // #1134): the synthesized loop over the option-element helper —
+                // tag eq per element, the record compare guarded to both-Some.
+                if let Ty::Applied(TC::Option, oa) = &es[0] {
+                    if let [Ty::Named(n, args)] = &oa[..] {
+                        if args.is_empty() && self.custom_variant_type_name(&oa[0]).is_none() {
+                            if let Some((_names, ftys)) = self.aggregate_field_tys(&oa[0]) {
+                                let key = n.as_str().to_string();
+                                if self.ensure_list_opt_record_eq_helper(&key, &ftys) {
+                                    let name = self.list_opt_record_eq_helper_name(&key);
+                                    return Some(self.emit_eq_helper_call(name, lv, rv));
+                                }
+                                return None;
+                            }
                         }
                     }
                 }

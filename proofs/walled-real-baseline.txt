@@ -40,10 +40,15 @@
 # the ConcatList element families gained the literal builder's two lenlist ctor
 # classes (Flat scalar payload / LenLoop String payload with the shared
 # $__drop_list_lenlist route), so `acc + [_x]` lowers and both workers run the
-# wasm leg byte-identical. The Inner (Option[record] element) worker stays — the
-# recursive-drop brick, the same cell that walls the List[Inner?] literal.
-spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_Inner_go
-spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[Option], List[List], deep Option[List[Option]]
+# wasm leg byte-identical.
+# (2026-08-11, #1134 Shape 4) The Inner worker AND the Deep test fn are PRUNED:
+# the Option[record] element class landed end to end — the tag-aware generated
+# `$__drop_opt_<R>`/`$__drop_list_opt_<R>` pair (emitted for scalar-only records
+# too), the OptRecord literal/concat element families, and the eq engine's
+# `list.eq_opt_str` + synthesized List[Option[record]] loop helpers — so the
+# codec file's walled-real count is 0. The FILE still rides the native leg: its
+# test-mode render hits the BIND-POSITION record brick (#1064, `Record heap
+# bind`), the separate frontier the #1064 close named.
 #
 #
 # (2026-08-05, #1041) The list.try_* family (effectful pipelines keep the

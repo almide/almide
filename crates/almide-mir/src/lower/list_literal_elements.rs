@@ -175,7 +175,14 @@ impl LowerCtx {
             | ListElemDrop::StrMapSkv
             | ListElemDrop::StrListOpt => self.lower_heap_pair_tuple_element(e_ref),
             ListElemDrop::Closure => self.lower_lambda_list_element(e_ref, elem_ty),
-            ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop | ListElemDrop::OptMapSkv => {
+            ListElemDrop::CtorFlat
+            | ListElemDrop::CtorLenLoop
+            | ListElemDrop::OptMapSkv
+            // An `Option[<record>]` element (`[some(Inner { … }), none]`) builds
+            // through the same ctor builder (its record-payload arms:
+            // try_opt_record_aggregate/drop_payload); the registered
+            // `list_opt_<R>` route frees each element tag-aware.
+            | ListElemDrop::OptRecord(_) => {
                 self.lower_option_ctor_element(e_ref, elem_ty)
             }
             _ => ListElemArm::Fallthrough,
