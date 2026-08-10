@@ -1,0 +1,16 @@
+// @contract: C-161
+// #849, rows-alone half (differential fuzz, 2026-08-10 night): a ROW COUNT
+// over the shared 2^28 ceiling ABORTS in the unified T6 form even when the
+// ELEMENT count is 0 after the cols clamp. `zeros(2^31, -7)` clamps cols to 0
+// (0 elements — the old r*c guard passed it) but still asks for 2^31 row
+// slots: a 16 GiB row-pointer array that OOM-killed the wasm leg while
+// native's UNUSED-value allocation was LLVM-elided and ran clean — two
+// verdicts for one program. The bind stays deliberately UNUSED: the guard's
+// abort is the effect that keeps the call alive on both targets.
+effect fn main() -> Unit = {
+  let small = matrix.ones(2, 3)
+  let (r, c) = matrix.shape(small)
+  println("ok: " + int.to_string(r) + " x " + int.to_string(c))
+  let neg_cols = matrix.zeros(2147483648, -7)
+  println("unreachable: " + int.to_string(matrix.rows(neg_cols)))
+}

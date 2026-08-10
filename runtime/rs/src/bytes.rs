@@ -378,8 +378,18 @@ pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> String {
     if p + 4 + slen > b.len() { return String::new(); }
     String::from_utf8_lossy(&b[p+4..p+4+slen]).into_owned()
 }
-pub fn almide_rt_bytes_as_ptr(b: &Vec<u8>) -> *mut u8 { b.as_ptr() as *mut u8 }
-pub fn almide_rt_bytes_as_mut_ptr(b: &mut Vec<u8>) -> *mut u8 { b.as_mut_ptr() }
+// An EMPTY buffer has no data region, so both return NULL (which every bridge
+// consumer already treats as "move nothing"): `Vec::as_ptr` on an empty Vec is a
+// DANGLING sentinel, and `copy_to_ptr` through it was UB — a safe Almide program
+// corrupted the native heap and died silently while the wasm leg wrote past the
+// empty block and continued (differential fuzz, 2026-08-10 night). Mirrored by
+// the wasm self-host (stdlib/bytes_rawptr.almd), C-062.
+pub fn almide_rt_bytes_as_ptr(b: &Vec<u8>) -> *mut u8 {
+    if b.is_empty() { std::ptr::null_mut() } else { b.as_ptr() as *mut u8 }
+}
+pub fn almide_rt_bytes_as_mut_ptr(b: &mut Vec<u8>) -> *mut u8 {
+    if b.is_empty() { std::ptr::null_mut() } else { b.as_mut_ptr() }
+}
 
 /// Create Bytes from a raw pointer + length (unsafe: caller must ensure validity).
 pub fn almide_rt_bytes_from_raw_ptr(ptr: *mut u8, len: i64) -> Vec<u8> {

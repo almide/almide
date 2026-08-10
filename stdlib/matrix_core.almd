@@ -68,8 +68,13 @@ fn __mx_dim(n: Int) -> Int = if n < 0 then 0 else n
 
 // Abort in the unified T6 form when the requested allocation exceeds the shared
 // ceiling, so an absurd-but-positive shape fails identically on both targets
-// instead of native-OOM vs wasm memory fault.
+// instead of native-OOM vs wasm memory fault. The ROW COUNT is bounded ALONE,
+// not only the r*c product: `zeros(2^31, -7)` has 0 elements after the cols
+// clamp but still asks for 2^31 ROW slots here — a 16 GiB row-pointer array
+// (wasm OOM) while native's unused-value allocation was LLVM-elided (ran
+// clean) — differential fuzz, 2026-08-10 night. Mirrors almide_rt_matrix_dims.
 fn __mx_dims_guard(rows: Int, cols: Int) -> Int = {
+  if rows > __mx_max_elems() then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
   if rows > 0 and cols > __mx_max_elems() / rows then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
   0
 }
@@ -178,14 +183,14 @@ fn matrix_scale(m: List[List[Float]], s: Float) -> List[List[Float]] = {
   out
 }
 
-fn __mx_map_row(dh: Int, sh: Int, f: fn(Float) -> Float, n: Int, i: Int) -> Int = if i >= n then 0
+fn __mx_map_row(dh: Int, sh: Int, f: (Float) -> Float, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
   prim.store64(dh + 12 + i * 8, prim.fbits(f(x)))
   __mx_map_row(dh, sh, f, n, i + 1)
 }
 
-fn __mx_map_rows(ho: Int, hm: Int, f: fn(Float) -> Float, n: Int, i: Int) -> Int = if i >= n then 0
+fn __mx_map_rows(ho: Int, hm: Int, f: (Float) -> Float, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let rh = prim.load64(hm + 12 + i * 8)
   let c = prim.load32(rh + 4)
@@ -195,7 +200,7 @@ else {
   __mx_map_rows(ho, hm, f, n, i + 1)
 }
 
-fn matrix_map(m: List[List[Float]], f: fn(Float) -> Float) -> List[List[Float]] = {
+fn matrix_map(m: List[List[Float]], f: (Float) -> Float) -> List[List[Float]] = {
   let hm = prim.handle(m)
   let n = prim.load32(hm + 4)
   let out: List[List[Float]] = prim.alloc_list_str(n)
