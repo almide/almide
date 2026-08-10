@@ -177,6 +177,13 @@ impl LowerCtx {
             IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => is_result_ty(&expr.ty),
             // A USER function returning Result — read its tag INVERSELY (Ok = tag 0).
             _ if is_named_variant_call => is_result_ty(&expr.ty),
+            // A FALLIBLE-CLOSURE call (`g("21") ?? -1` — the ADR-0009 carrier): the
+            // call's declared type IS the carrier, so a Result carrier reads INVERSELY.
+            // Without this arm a closure-call Result operand fell to the Option read
+            // and would have taken the wrong tag sense.
+            IrExprKind::Call { target: CallTarget::Computed { .. }, .. } => {
+                is_result_ty(&expr.ty)
+            }
             _ => is_self_host_result_call(expr),
         }
     }
@@ -214,6 +221,44 @@ impl LowerCtx {
             || is_named_variant_call
         {
             return self.call_unwrap_or_operand(expr, cx);
+        }
+        // A FALLIBLE-CLOSURE call operand (`g("21") ?? -1` where `g = (x) => parse1(x)! * 2`
+        // — the ADR-0009 first-class fallible lambda, #1134 Shape 2): dispatch through the
+        // tracked closure block exactly like the bind-position Computed arm — the call
+        // returns the fresh OWNED len-as-tag carrier block, tracked + type-routed for the
+        // scope-end drop like any owned call temp, and seeded as a materialized read shape
+        // so the downstream tag read is over a KNOWN layout. Gated to a SCALAR-payload
+        // Option/Result carrier: the scalar route reads tag + payload with no ownership
+        // transfer (a heap-payload carrier stays walled — the recursive-ownership frontier).
+        if let IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } = &expr.kind {
+            use almide_lang::types::constructor::TypeConstructorId as TC;
+            let scalar_opt = matches!(&expr.ty,
+                Ty::Applied(TC::Option, a) if a.len() == 1 && !is_heap_ty(&a[0]));
+            let scalar_res = matches!(&expr.ty,
+                Ty::Applied(TC::Result, a)
+                    if a.len() == 2 && !is_heap_ty(&a[0]) && matches!(a[1], Ty::String));
+            if !scalar_opt && !scalar_res {
+                return None;
+            }
+            let route = (|s: &mut Self| {
+                let blk = s.closure_block_of_mut(callee)?;
+                let repr = repr_of(&expr.ty).ok()?;
+                let lowered = s.lower_call_args(args).ok()?;
+                let obj = s.fresh_value();
+                s.emit_closure_call(blk, Some(obj), lowered, Some(repr));
+                s.live_heap_handles.push(obj);
+                s.register_owned_heap_eq_drop(obj, &expr.ty);
+                if scalar_res {
+                    s.materialized_results.insert(obj);
+                } else {
+                    s.materialized_options.insert(obj);
+                }
+                Some(obj)
+            })(self);
+            if route.is_none() {
+                self.unwrap_or_rollback(cx);
+            }
+            return route;
         }
         // A `??` over a variant-returning call NOT in the self-host registries — the
         // `json.parse(s) ?? d` (PURE heap-Result) / `process.env(k) ?? d` (IMPURE intrinsic

@@ -36,9 +36,13 @@
 # ctor payload arm (`ok(Label{…})`), so both conds lower and A/B byte-identically.
 # The Deep test fn stays: its cond rides the Deep decode helpers' heap-result-if
 # class below plus the bind-position record brick (#1064) — same file, other brick.
+# (2026-08-10, #1134 Shape 2) The int/string opt-list decode workers are PRUNED:
+# the ConcatList element families gained the literal builder's two lenlist ctor
+# classes (Flat scalar payload / LenLoop String payload with the shared
+# $__drop_list_lenlist route), so `acc + [_x]` lowers and both workers run the
+# wasm leg byte-identical. The Inner (Option[record] element) worker stays — the
+# recursive-drop brick, the same cell that walls the List[Inner?] literal.
 spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_Inner_go
-spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_int_go
-spec/stdlib/codec_field_matrix_test.almd :: Deep.__dec_list_opt_string_go
 spec/stdlib/codec_field_matrix_test.almd :: __test_almd_nested containers: List[Option], List[List], deep Option[List[Option]]
 #
 #
@@ -69,9 +73,12 @@ spec/lang/fallible_hof_test.almd :: find_cells
 spec/lang/fallible_hof_test.almd :: fm_cells
 spec/lang/fallible_hof_test.almd :: m_pipe_qq
 spec/lang/fallible_hof_test.almd :: marker_cells
-spec/lang/fallible_lambda_test.almd :: use_first_class
-spec/lang/fallible_lambda_test.almd :: use_guarded
-spec/lang/fallible_lambda_test.almd :: use_option_operand
+# (2026-08-10, #1134 Shape 2) The three fallible_lambda use_* fns are PRUNED:
+# the `??` operand machinery gained the fallible-CLOSURE call route (the
+# ADR-0009 carrier — dispatch through the tracked closure block, inverse tag
+# read for a Result carrier), which was the real blocker behind their
+# "heap-result Tuple" label. The fallible_hof entries above stay: their `??`
+# operands are fallible-HOF Module calls with HEAP fallbacks — the next cell.
 #
 # (2026-08-06, #1114) option.to_result became an E-GENERIC pure bundled body
 # (ADR-0003 D1's typed-error route needs Option -> Result[T, CustomE]). The
