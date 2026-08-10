@@ -296,6 +296,53 @@ fn emit_record_wrapper_drops(
         out.push_str(&format!(
             "fn __drop_opt_{fname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
         ));
+        // `$__drop_list_opt_<R>` — frees a `List[Option[R]]` (the derived-codec
+        // opt-list accumulator, #1134's recursive-drop pair): each element is its
+        // own 0-or-1 Option block freed through `$__drop_opt_<R>` above (Some →
+        // the record recursion, None → the bare block), then the list block.
+        // Same trusted prim-only class and the same loop shape as the variant
+        // `$__drop_list_<V>`; emitted for the same per-R set as `$__drop_<R>`.
+        out.push_str(&format!(
+            "fn __drop_list_opt_{fname}(xs: List[Option[{tname}]]) -> Unit = {{\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_opt_{fname}_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n\
+             fn __drop_list_opt_{fname}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{ let e: Option[{tname}] = prim.load_handle(h + 12 + i * 8)\n         __drop_opt_{fname}(e)\n         __drop_list_opt_{fname}_loop(h, n, i + 1) }}\n"
+        ));
+    }
+    // The SCALAR-ONLY records (not in `rec_names`): their `Option[R]` / `List[Option[R]]`
+    // wrappers still need the tag-aware pair — the Some payload's free is ONE `rc_dec`
+    // (a flat block), which the same `match`/loop shapes deliver, so the emission is
+    // uniform with the recursive set above (the codec `lc: List[Inner?]` cell, #1134).
+    // Generic decls are excluded (an unparameterized generic name is not a source type).
+    {
+        let generic_names: std::collections::HashSet<&str> = type_decls
+            .iter()
+            .filter(|d| d.generics.as_ref().is_some_and(|g| !g.is_empty()))
+            .map(|d| d.name.as_str())
+            .collect();
+        for decl in type_decls {
+            let IrTypeDeclKind::Record { .. } = &decl.kind else { continue };
+            let tname = decl.name.as_str();
+            if rec_names.contains(tname) || generic_names.contains(tname) {
+                continue;
+            }
+            let fname = drop_fn_ident(tname);
+            out.push_str(&format!(
+                "fn __drop_opt_{fname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
+            ));
+            out.push_str(&format!(
+                "fn __drop_list_opt_{fname}(xs: List[Option[{tname}]]) -> Unit = {{\n  \
+                   let h = prim.handle(xs)\n  \
+                   if prim.load32(h + 0) == 1 then __drop_list_opt_{fname}_loop(h, prim.load32(h + 4), 0) else ()\n  \
+                   prim.rc_dec(h)\n}}\n\
+                 fn __drop_list_opt_{fname}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+                   if i >= n then ()\n  \
+                   else {{ let e: Option[{tname}] = prim.load_handle(h + 12 + i * 8)\n         __drop_opt_{fname}(e)\n         __drop_list_opt_{fname}_loop(h, n, i + 1) }}\n"
+            ));
+        }
     }
     // `$__drop_opt_str` — frees an `Option[String]` (the recursive-drop leaf of a `Result[Option[String],
     // String]`, the derived-Codec `__decode_option_string`). The `some(r)` arm binds the inner String

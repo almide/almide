@@ -24,6 +24,7 @@ enum ListElemDrop {
     ScalarAggregate,
     CtorFlat,
     CtorLenLoop,
+    OptRecord(String),
     Closure,
     StrClosure,
 }

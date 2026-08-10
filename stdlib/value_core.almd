@@ -341,6 +341,38 @@ fn list_eq_opt_int(a: List[Int?], b: List[Int?]) -> Bool = {
   else __leq_opt_int(ha, hb, 0, prim.load32(ha + 4))
 }
 
+// list.eq over List[Option[String]] — elements are len-as-tag Option blocks
+// (None = len 0; Some = len 1, String handle @12), BORROWED for the read-only
+// compare. Tags must match; both-Some compares the payload bytes via the
+// value_core-local string eq (string.eq is a cross-module call this module
+// avoids). The String twin of `list_eq_opt_int` (#1134, the codec `dp:
+// List[String?]?` eq cell).
+fn __leq_opt_str(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
+else {
+  let xa: String? = prim.load_handle(ah + 12 + i * 8)
+  let xb: String? = prim.load_handle(bh + 12 + i * 8)
+  let pa = prim.handle(xa)
+  let pb = prim.handle(xb)
+  let ta = prim.load32(pa + 4)
+  let tb = prim.load32(pb + 4)
+  let elem_eq = if ta != tb then false
+  else if ta == 0 then true
+  else {
+    let sa: String = prim.load_handle(pa + 12)
+    let sb: String = prim.load_handle(pb + 12)
+    __veq_strval(sa, sb)
+  }
+  if elem_eq then __leq_opt_str(ah, bh, i + 1, n)
+  else false
+}
+
+fn list_eq_opt_str(a: List[String?], b: List[String?]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_opt_str(ha, hb, 0, prim.load32(ha + 4))
+}
+
 // list.eq over List[Result[Int/Bool, String]] — elements are len-as-tag Result
 // blocks (Ok = len 0, scalar payload @12; Err = len 1, String handle @12),
 // BORROWED for the read-only compare. Tags must match; both-Ok compares the i64
