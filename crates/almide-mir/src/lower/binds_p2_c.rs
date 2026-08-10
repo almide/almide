@@ -161,6 +161,29 @@ impl LowerCtx {
         // so a later `match r { Ok(v) => …, Err(e) => … }` over the var EXECUTES.
         if is_self_host_result_module_fn(module, func) {
             self.materialized_results.insert(dst);
+            // A VARIANT-Err payload (`option.to_result(o, Missing("cfg"))` →
+            // `Result[Int, LoadError]`, #1114's typed-error route): route the drop —
+            // a RICH variant (heap fields) through the generated `$__drop_res_<V>`
+            // (a flat rc_dec would leak the payload's fields), a FLAT one through
+            // the one-level `DropListStr` — which is ALSO what admits the
+            // `err(e)` payload BIND in the statement-position Result match
+            // (`result_err_bind` keys on exactly these two sets). Without this the
+            // bound subject was tracked but its Err bind declined, and the whole
+            // match fell to the untracked-subject wall.
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = ty {
+                if a.len() == 2 && !is_heap_ty(&a[0]) {
+                    if let Some(vname) = self.custom_variant_type_name(&a[1]) {
+                        let needs_rec = self.variant_layouts.needs_recursive_drop(&vname, &|rn| {
+                            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                        });
+                        if needs_rec {
+                            self.variant_drop_handles.insert(dst, format!("res_{vname}"));
+                        } else {
+                            self.heap_elem_lists.insert(dst);
+                        }
+                    }
+                }
+            }
         }
         // A self-host HEAP-Ok Result fn (`value.as_string`/`value.as_array`) — track it in the
         // cap-as-tag set so a `match` reads tag @16 + binds the @12 payload. The DROP differs

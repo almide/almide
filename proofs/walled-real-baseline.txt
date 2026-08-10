@@ -85,15 +85,13 @@ spec/lang/branch_lift_clone_test.almd :: __test_almd_a lifted in-loop branch clo
 # "heap-result Tuple" label. The fallible_hof entries above stay: their `??`
 # operands are fallible-HOF Module calls with HEAP fallbacks — the next cell.
 #
-# (2026-08-06, #1114) option.to_result became an E-GENERIC pure bundled body
-# (ADR-0003 D1's typed-error route needs Option -> Result[T, CustomE]). The
-# custom-E instantiation binds a match over Result[Int, <variant>] whose
-# variant payload sits outside the heap-result ctor zoo — the same
-# feature-frontier family as the Codec-matrix class above. The String
-# instantiation (the overwhelmingly common form) stays IN the wasm corpus and
-# passes; this one cell runs on the native leg. Prune with the same
-# heap-result-arm brick.
-spec/stdlib/option_to_result_generic_test.almd :: __test_almd_custom E flows through
+# (2026-08-10, #1134 Shape 3) The #1114 custom-E test fn is PRUNED: the `_ve`
+# twin routes the scalar-A custom-E instantiation (killing the silent
+# `__copy_str` corruption of the two-step spelling), the module-call bind seed
+# registers the `res_<V>`/flat drop route for a variant-Err Result (which is
+# also the `err(e)` bind admission), and the statement-position Result match's
+# WILDCARD arm now takes whichever side the ctor arm did not — so the
+# desugared `match r { err(e) => …, _ => … }` executes on the wasm leg.
 #
 # (2026-08-09, #1146) Four lowering walls the C-220 fs streaming landing
 # introduced but could not enumerate: the UNBACKED certificate breach aborted
