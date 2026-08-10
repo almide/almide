@@ -167,6 +167,14 @@ fn collect_candidates(program: &ast::Program) -> BTreeMap<Sym, HofCandidate> {
         if !cb_used_only_as_callee(body, cb_name) {
             continue;
         }
+        // #1183: a callback called inside a `for`/`while` body is OUT of Cell 1
+        // — the twin's `cb(..)!` would sit in the in-loop expression-nested
+        // position whose wasm lowering silently drops the err path (the
+        // pre-existing wall-escape that issue pins). The honest E005 stays
+        // until the loop-unwrap ANF capability lands.
+        if cb_called_inside_loop(body, cb_name) {
+            continue;
+        }
         out.insert(
             *name,
             HofCandidate {
@@ -218,6 +226,32 @@ fn cb_used_only_as_callee(body: &Expr, cb: Sym) -> bool {
         }
     });
     ident_uses == callee_uses
+}
+
+/// True when any direct `cb(...)` call sits inside a `for`/`while` NODE —
+/// the #1183 exclusion. Over-conservative on purpose: the walk covers the
+/// loop's whole subtree including the head (a head-position `!` is actually
+/// the proven #1168 hoist class), because conservatism here only keeps
+/// today's honest E005.
+fn cb_called_inside_loop(body: &Expr, cb: Sym) -> bool {
+    let mut found = false;
+    let mut owned = body.clone();
+    let mut in_loop_subtrees: Vec<Expr> = Vec::new();
+    ast::visit_expr_mut(&mut owned, &mut |e| {
+        if matches!(&e.kind, ExprKind::ForIn { .. } | ExprKind::While { .. }) {
+            in_loop_subtrees.push(e.clone());
+        }
+    });
+    for mut lp in in_loop_subtrees {
+        ast::visit_expr_mut(&mut lp, &mut |c| {
+            if let ExprKind::Call { callee, .. } = &c.kind {
+                if matches!(&callee.kind, ExprKind::Ident { name } if *name == cb) {
+                    found = true;
+                }
+            }
+        });
+    }
+    found
 }
 
 /// Does this argument expression carry the fallibility bit? The same two
