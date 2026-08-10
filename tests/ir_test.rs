@@ -561,6 +561,39 @@ fn unused_var_warning_basic() {
 }
 
 #[test]
+fn unused_var_warning_named_callee_suppressed() {
+    // #1158: a fn-typed binding invoked BY NAME (`let f = adder(3); f(5)`)
+    // lowers its call with a name-only `CallTarget::Named` — no VarId, so
+    // `compute_use_counts` cannot credit the binding. The warning pass must
+    // treat a named-callee match as a use, not tell the author `f` is unused
+    // on the line before they call it.
+    let mut prog = make_program_with_vars(vec![
+        ("f", Some(Span { line: 3, col: 7, end_col: 8 }), false),
+    ]);
+    if let IrExprKind::Block { stmts, .. } = &mut prog.functions[0].body.kind {
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Expr {
+                expr: IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named { name: "f".into() },
+                        args: vec![],
+                        type_args: vec![],
+                    },
+                    ty: Ty::Int,
+                    span: None,
+                    def_id: None,
+                },
+            },
+            span: None,
+        });
+    }
+    compute_use_counts(&mut prog);
+    let warnings = collect_unused_var_warnings(&prog, "test.almd");
+    assert_eq!(warnings.len(), 0, "a named-callee use must suppress the warning: {:?}",
+        warnings.iter().map(|w| &w.message).collect::<Vec<_>>());
+}
+
+#[test]
 fn unused_var_warning_underscore_suppressed() {
     let mut prog = make_program_with_vars(vec![
         ("_x", Some(Span { line: 3, col: 7, end_col: 8 }), false),

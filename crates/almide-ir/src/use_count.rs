@@ -556,11 +556,43 @@ pub fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
 /// Skips: `_` prefixed names, function parameters, pattern bindings (span is None).
 pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<almide_base::Diagnostic> {
     let (param_ids, mutated) = collect_params_and_mutations(program);
+    let named_callees = collect_named_callee_names(program);
     (0..program.var_table.len())
         .filter_map(|i| {
-            unused_var_warning(&program.var_table.entries[i], i as u32, &param_ids, &mutated, file)
+            unused_var_warning(
+                &program.var_table.entries[i], i as u32, &param_ids, &mutated, &named_callees, file,
+            )
         })
         .collect()
+}
+
+/// Callee names of every `CallTarget::Named` call in the program. A call to a
+/// LOCAL fn-typed value (`let f = adder(3); f(5)`) lowers with a `Named`
+/// target — a Sym, not a VarId — so `compute_use_counts` cannot credit the
+/// binding and `f` reads as unused (#1158). Matching by NAME over-suppresses
+/// under shadowing (a local named after a real free fn), which is the safe
+/// direction for a warning — the #857 mutated-set precedent.
+fn collect_named_callee_names(program: &IrProgram) -> HashSet<String> {
+    use crate::visit::{walk_expr, IrVisitor};
+    struct C(HashSet<String>);
+    impl IrVisitor for C {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } = &e.kind {
+                if let CallTarget::Named { name } = target {
+                    self.0.insert(name.as_str().to_string());
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C(HashSet::new());
+    for func in &program.functions {
+        c.visit_expr(&func.body);
+    }
+    for tl in &program.top_lets {
+        c.visit_expr(&tl.value);
+    }
+    c.0
 }
 
 /// The two exclusion sets consulted by [`unused_var_warning`]: every function
@@ -592,10 +624,14 @@ fn unused_var_warning(
     id: u32,
     param_ids: &HashSet<u32>,
     mutated: &HashSet<u32>,
+    named_callees: &HashSet<String>,
     file: &str,
 ) -> Option<almide_base::Diagnostic> {
     if info.name.starts_with('_') || param_ids.contains(&id) { return None; }
     if info.use_count > 0 || mutated.contains(&id) { return None; }
+    // A fn-typed binding invoked by name (`f(5)`) is a use `use_count` cannot
+    // see — the callee is a name-only `CallTarget::Named` (#1158).
+    if named_callees.contains(info.name.as_str()) { return None; }
     let span = info.span?;
     Some(almide_base::Diagnostic::warning(
         format!("unused variable '{}'", info.name),
