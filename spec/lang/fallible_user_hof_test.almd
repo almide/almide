@@ -1,0 +1,43 @@
+// #1108 Phase 2b-iii (ADR-0009 D2), Cell 1: a fallible callback in a USER
+// HOF's bare `(A) -> B` slot routes the call to a GENERATED `__fallible__`
+// twin — the same pre-inference name-swap the core list HOFs get from their
+// hand-written twins, so the whole downstream is the proven D3 explicit-slot
+// path. The HOF stays 2-mode: a total callback keeps the original fn.
+// Propagation stays SPELLED at the call site (ADR-0006) — `!` / `??` / match.
+fn f(s: String) -> Result[Int, String] = if string.len(s) > 0 then ok(string.len(s)) else err("empty")
+
+fn g(s: String) -> Int! = f(s)!
+
+fn halve(n: Int) -> Int! = if n % 2 == 0 then ok(n / 2)
+else err("odd:${n}")
+
+fn apply1(cb: (String) -> Int, s: String) -> Int = cb(s)
+
+fn twice(cb: (Int) -> Int, n: Int) -> Int = cb(cb(n))
+
+fn use_fallible(s: String) -> Int! = apply1((x) => f(x)!, s)!
+
+fn use_total(s: String) -> Int = apply1((x) => string.len(x) * 2, s)
+
+fn use_twice(n: Int) -> Int! = twice((k) => halve(k)!, n)!
+
+fn use_named(s: String) -> Int! = apply1(g, s)!
+
+test "cell1: fallible instantiation takes both paths" {
+  assert_eq(use_fallible("abc") ?? -1, 3)
+  assert_eq(use_fallible("") ?? -1, -1)
+}
+
+test "cell1: the total instantiation keeps the original fn" {
+  assert_eq(use_total("xyzw"), 8)
+}
+
+test "cell1: a double call short-circuits on the first err" {
+  assert_eq(use_twice(8) ?? -1, 2)
+  assert_eq(use_twice(6) ?? -1, -1)
+}
+
+test "cell1: a named fallible fn routes like the lambda" {
+  assert_eq(use_named("hello") ?? -1, 5)
+  assert_eq(use_named("") ?? -1, -1)
+}

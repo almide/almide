@@ -1,0 +1,13 @@
+// A fallible callback in a bare slot of a HOF that FORWARDS its callback to
+// another fn is OUTSIDE the 2b-iii Cell 1 twin subset (the twin rewrite
+// `cb(..)` → `cb(..)!` is only total when every use is a direct call) — the
+// honest E005 with the Phase 2b-iii hint stays.
+fn f(s: String) -> Result[Int, String] = if string.len(s) > 0 then ok(string.len(s)) else err("empty")
+
+fn inner(cb: (String) -> Int, s: String) -> Int = cb(s)
+
+fn outer(cb: (String) -> Int, s: String) -> Int = inner(cb, s)
+
+fn use_it(s: String) -> Int! = ok(outer((x) => f(x)!, s))
+
+fn main() -> Unit = println(int.to_string(use_it("abc") ?? -1))
