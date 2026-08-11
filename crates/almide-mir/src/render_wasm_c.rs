@@ -211,6 +211,7 @@ fn prim_result_is_ptr(kind: &PrimKind) -> bool {
             | PrimKind::WriteTextFile
             | PrimKind::MakeDir
             | PrimKind::RemoveAll
+            | PrimKind::Rename
     )
 }
 
