@@ -584,11 +584,25 @@ fn desugar_heap_branches_inner(
     layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
     let mut cur: Option<IrExpr> = None;
+    // When the LAST row (`desugar_nested_branch_arms`) was the pass that just
+    // fired, every arm it rewrote is already at its own fixpoint. If the next
+    // iteration then gets through every OTHER pass with no fire, the tree is
+    // bit-identical to what that normalization produced, so re-running the
+    // nested-arms descent would deterministically decline (each pass fires on
+    // shape alone; `next_var` only mints ids on a fire). Skipping that final
+    // verify-descent is therefore exact — and it is what breaks the
+    // re-verification cascade down a deeply nested continuation chain (a
+    // 200-`!` effect fn cost 135 s / ~O(n³) from descents that could never
+    // fire again).
+    let nested_arms_row = BRANCH_PASSES.len() - 1;
+    let mut arms_normalized = false;
     'fixpoint: loop {
         let src = cur.as_ref().unwrap_or(body);
-        for pass in BRANCH_PASSES {
+        let rows = if arms_normalized { &BRANCH_PASSES[..nested_arms_row] } else { BRANCH_PASSES };
+        for (i, pass) in rows.iter().enumerate() {
             if let Some(r) = pass(src, next_var, layouts) {
                 cur = Some(r);
+                arms_normalized = i == nested_arms_row;
                 continue 'fixpoint;
             }
         }
