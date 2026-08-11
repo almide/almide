@@ -324,6 +324,18 @@ jobs:
       - name: WASM reachability ratchet (every stdlib fn builds on both legs, or is listed)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-reachability.sh
 
+      # Stage 1c. The two ratchets above measure code rendered FROM the shared MIR —
+      # the half the 3-way oracle can differ native against wasm. The prelude is the
+      # other half: hand-written wasm with no native counterpart, so its assurance has
+      # to be named per function. CI runs the reachability re-measurement (the `via`
+      # column is measured here, not trusted), which is why the example is built —
+      # debug on purpose: it shares the registry-regen step's dep cache, and
+      # rendering 47 fixtures is cheap even unoptimized.
+      - name: WAT prelude audit (every hand-written wasm fn's evidence named and re-measured)
+        run: |
+          cargo build -p almide-mir --example render_program
+          ALMIDE_RENDER=target/debug/examples/render_program bash scripts/check-wat-prelude-audit.sh
+
       # The dogfood program (Unit 0.46, #1001). Its own tests cover the decision rules
       # extracted from the shell gates — the parity verdict, the nightly streak fold, the
       # contract link symmetry — which in bash are reachable only through their I/O. Gated
