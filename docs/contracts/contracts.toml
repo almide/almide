@@ -2787,3 +2787,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_unwrap_propagation.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-223"
+spec      = "ALS-T6"
+title     = "Matrix transcendentals compute through the vendored musl-libm, not the platform one"
+statement = "A `matrix` entry point whose math reaches a transcendental computes it through the VENDORED musl-libm (`runtime/rs/src/libm.rs`, the StrictMath/fdlibm decision) on BOTH legs — never the host platform's libm. Promised observable: `matrix.pow` over varied values (positive, fractional and negative exponents), the rope inverse-frequency table, and the non-kernel sigmoid print byte-identically native <-> wasm. Before this contract native called `f64::powf`/`f64::exp` directly while the wasm self-host used the vendored algorithm, so `matrix.pow(m, 1.7)` printed `1.5620815356808382` on native and `1.5620815356808384` on wasm (#1197) — live on released 0.56.0 and invisible to every gate: the stdlib matrix tests assert through a 1e-5 `approx_eq` tolerance, and the corpus's earlier matrix fixtures fed `matrix.ones`, whose uniform rows cancel the difference. VARIED input values are therefore part of the promise, not incidental. The platform libm is also non-deterministic ACROSS platforms (glibc / macOS / musl differ in the last ULP), so this contract is equally a native-to-native promise: the same program prints the same bytes wherever it was built. NOT covered, and tracked as the open divergence in #1197: `matrix.softmax_rows` and `matrix.gelu` route on native to almide-kernel's SIMD fast-exp APPROXIMATION (a deliberate 2.74x / 7.94x trade documented in the kernel source as \"within-tolerance\") on x86_64 and to the platform libm on other arches, so those two produce up to three different answers by target and host arch; they will join this contract when the fast-exp is ported to the wasm leg or the exemption is declared."
+since     = "0.56.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_pow_libm.almd", class = "fixture" },
+]
