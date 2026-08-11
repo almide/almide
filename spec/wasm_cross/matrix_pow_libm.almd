@@ -1,0 +1,15 @@
+// @contract: C-223
+// #1197: `matrix.pow` (and the rope inv-freq / non-kernel sigmoid paths that
+// share its floor) computes its transcendental through the VENDORED musl-libm
+// both legs run — NOT the platform libm. Before the fix, native called
+// `f64::powf` while the wasm self-host used the vendored algorithm, so this
+// exact program printed `1.5620815356808382` on native and
+// `1.5620815356808384` on wasm: a live byte divergence on released 0.56.0.
+// VARIED input values are the point — the corpus's earlier matrix fixtures fed
+// `matrix.ones`, where the difference cancels and the divergence is invisible.
+effect fn main() -> Unit = {
+  let m = matrix.from_lists([[0.7, 1.3, 2.1], [0.4, 1.9, 0.11], [3.7, 0.03, 1.55]])
+  println("${matrix.to_lists(matrix.pow(m, 1.7))}")
+  println("${matrix.to_lists(matrix.pow(m, 0.5))}")
+  println("${matrix.to_lists(matrix.pow(m, -1.3))}")
+}

@@ -275,7 +275,7 @@ pub fn almide_rt_matrix_neg(m: &AlmideMatrix) -> AlmideMatrix {
 }
 
 pub fn almide_rt_matrix_pow(m: &AlmideMatrix, exp: f64) -> AlmideMatrix {
-    m.iter().map(|r| r.iter().map(|x| x.powf(exp)).collect()).collect()
+    m.iter().map(|r| r.iter().map(|x| almide_rt_libm_pow(*x, exp)).collect()).collect()
 }
 
 pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
@@ -437,7 +437,7 @@ pub fn almide_rt_matrix_swiglu_gate(
                 g += xi[k] * wg[k];
                 u += xi[k] * wu[k];
             }
-            let sig = 1.0 / (1.0 + (-g).exp());
+            let sig = 1.0 / (1.0 + almide_rt_libm_exp(-g));
             out[i][j] = g * sig * u;
         }
     }
@@ -548,7 +548,7 @@ pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideM
             let mut max = f64::NEG_INFINITY;
             for &x in row.iter() { if x > max { max = x; } }
             let mut sum = 0.0;
-            for x in row.iter_mut() { *x = (*x - max).exp(); sum += *x; }
+            for x in row.iter_mut() { *x = almide_rt_libm_exp(*x - max); sum += *x; }
             let inv = 1.0 / sum;
             for x in row.iter_mut() { *x *= inv; }
         }
