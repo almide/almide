@@ -7,7 +7,19 @@
 # counts as clean only when EVERY run that day concluded `success`; any
 # failure/cancellation breaks the streak; a day with no run is skipped (the
 # streak neither grows nor resets — scheduler gaps are not evidence either
-# way). With --update, the dated ledger at
+# way).
+#
+# WHAT "success" MEANS HERE (corrected 2026-08-11): the night verdict fails on
+# FINDINGS only. A shard killed by a runner shutdown (exit 143, the documented
+# ~1-in-6 event) costs that shard's coverage and is reported in the night
+# summary, but no longer fails the night — until today the verdict job was
+# SKIPPED whenever any shard died, so a zero-finding night was recorded exactly
+# like a real divergence, and with 4 shards ~half of all nights failed for
+# infrastructure alone. A streak only measures correctness if the thing it
+# counts is correctness; before the fix "90 consecutive" was unreachable by
+# arithmetic (0.48^90), not by any property of the compiler.
+#
+# With --update, the dated ledger at
 # research/benchmark/fuzz-green/README.md is refreshed (BENCHMARKS.md
 # discipline: measurements are dated, never overwritten silently).
 #

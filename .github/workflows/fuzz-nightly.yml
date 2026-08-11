@@ -215,6 +215,23 @@ jobs:
     if: always() && github.server_url == 'https://github.com'
     name: Night verdict
     needs: fuzz
+    # ALWAYS, even when a shard was killed. A runner shutdown (exit 143, the
+    # documented ~1-in-6 event this workflow shards to survive) fails its matrix
+    # leg, and without `always()` that skips this job entirely — so a night with
+    # ZERO findings was recorded as a failure, indistinguishable from a real
+    # divergence. Tonight (2026-08-11) was exactly that: no findings artifact,
+    # no `findings=N>0` in any shard log, two shards SIGTERMed, night = failure.
+    #
+    # With 4 shards at a ~1/6 per-shard kill rate, P(all survive) ~= 48%, so
+    # about half of all nights failed for infrastructure alone — which makes any
+    # "N consecutive clean nights" closure condition unreachable by arithmetic
+    # rather than by a property of the compiler (the exact trap #924 documented
+    # and sharding was meant to escape; the escape was incomplete).
+    #
+    # The verdict below already fails ONLY on findings and the coverage line
+    # already reports how many shards reported, so running it unconditionally
+    # keeps a kill honest — it costs recorded COVERAGE, not correctness.
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
