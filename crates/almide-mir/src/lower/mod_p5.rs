@@ -52,6 +52,10 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // expected — a 1-byte garbage print (low byte of the payload pointer) / an i64↔i32 width
             // mismatch downstream in csv-to-json.
             | ("fs", "read_text")
+            // `fs.create_temp_dir` — the self-host (fs_create_temp_dir.almd) builds its
+            // `Result[String, String]` with the ordinary ok()/err() ctors = the same
+            // cap-as-tag layout (payload @12, tag @16); a `match`/`!` over it reads tag @16.
+            | ("fs", "create_temp_dir")
             // `fs.read_bytes_raw` — the raw-bytes twin (same cap-as-tag Result block; the Ok
             // payload is Bytes instead of String).
             | ("fs", "read_bytes_raw")

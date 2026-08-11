@@ -66,8 +66,6 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // `// wasm:skip` marker from the landing; these entries are the ledger
     // half that landing missed (#1146).
     ("spec/stdlib/fs_streaming_test.almd", SkipReason::NativeOnlyApi),
-    ("spec/stdlib/fs_fold_lines_chunked_test.almd", SkipReason::NativeOnlyApi),
-    ("spec/stdlib/fs_fold_lines_range_test.almd", SkipReason::NativeOnlyApi),
 ];
 
 fn repo_root() -> PathBuf {
