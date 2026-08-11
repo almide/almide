@@ -44,6 +44,7 @@ fn main() {
     match cmd {
         "run" => cmd_run(&args[2..]),
         "replay" => cmd_replay(&args[2..]),
+        "ladder" => cmd_ladder(&args[2..]),
         "gen" => cmd_gen(&args[2..]),
         "stats" => cmd_stats(),
         "-h" | "--help" | "help" => print_usage(),
@@ -61,6 +62,7 @@ fn print_usage() {
          USAGE:\n\
          \x20 xtarget-fuzz run    [--seed N] [--minutes M | --count N] [--jobs J] [--timeout S]\n\
          \x20 xtarget-fuzz replay --seed N --index I\n\
+         \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I\n\
          \x20 xtarget-fuzz stats\n\n\
          The repo root is autodetected from the binary location; override with --repo PATH.\n\
@@ -464,6 +466,51 @@ fn cmd_replay(args: &[String]) {
     let outcome = run_ladder(&tc, &gen.source, &file, &wasm, Some(&reference));
     eprintln!("\n=== ladder outcome ===");
     print_outcome(&outcome);
+}
+
+// ── ladder ──
+
+/// Run the full oracle ladder on an EXISTING `.almd` file — the triage
+/// instrument (#1235). A recorded finding's `repro.almd` can be re-judged
+/// after a classifier change without going through `(seed, index)` replay,
+/// which silently drifts whenever the mutation corpus changes underneath
+/// the seed. Exits 1 on any finding, 0 otherwise.
+fn cmd_ladder(args: &[String]) {
+    let Some(file_arg) = args.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("usage: xtarget-fuzz ladder <file.almd> [--timeout S]");
+        std::process::exit(2);
+    };
+    let source = match std::fs::read_to_string(file_arg) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("cannot read {file_arg}: {e}");
+            std::process::exit(2);
+        }
+    };
+    let repo = resolve_repo(args);
+    let almide = resolve_almide(&repo, args);
+    let timeout = flag_value(args, "--timeout")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_TIMEOUT_SECS);
+
+    let work_dir = repo.join("tools/xtarget-fuzz/.scratch/ladder");
+    let _ = std::fs::create_dir_all(&work_dir);
+    let file = work_dir.join("ladder.almd");
+    let wasm = work_dir.join("ladder.wasm");
+    let _ = std::fs::write(&file, &source);
+
+    let reference = crate::oracle::InterpOracle::new();
+    let tc = Toolchain {
+        almide,
+        wasmtime: resolve_wasmtime(),
+        scratch: repo.join("tools/xtarget-fuzz/.scratch/ladder-build"),
+        timeout: Duration::from_secs(timeout),
+    };
+    let outcome = run_ladder(&tc, &source, &file, &wasm, Some(&reference));
+    print_outcome(&outcome);
+    if matches!(outcome, Outcome::Finding(_)) {
+        std::process::exit(1);
+    }
 }
 
 // ── gen ──
