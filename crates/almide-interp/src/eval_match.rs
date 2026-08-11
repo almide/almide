@@ -543,11 +543,12 @@ fn apply_binop_float(op: BinOp, l: Value, r: Value) -> Flow {
         MulFloat => float2(l, r, |a, b| a * b),
         DivFloat => float2(l, r, |a, b| a / b),
         ModFloat => float2(l, r, |a, b| a % b),
-        PowFloat => Flow::Unsupported(
-            "float `**` (backends use vendored musl-libm pow; interp's \
-             platform libm diverges in the last ULP — no oracle match)"
-                .to_string(),
-        ),
+        // The float `**` operator runs the SAME vendored musl-libm `pow` both
+        // backends do (`crate::vendored_libm`) — #924's rule: a transcendental
+        // reachable through an OPERATOR must agree with its module-fn spelling,
+        // and both now compute the consensus algorithm instead of abstaining on
+        // the platform libm's last ULP.
+        PowFloat => float2(l, r, crate::vendored_libm::almide_rt_libm_pow),
         op => Flow::Abort(format!("internal: no rule for binop {:?}", op)),
     }
 }

@@ -18,6 +18,7 @@
 //! runtime/std dispatch bridge, the in-interp HOFs, fuel, and the total-op /
 //! abort semantics. The 3-way harness is wired in a later phase.
 
+mod vendored_libm;
 mod bridge;
 mod dispatch;
 mod env;
