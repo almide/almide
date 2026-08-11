@@ -20,15 +20,38 @@
 # reads to compare (a clock's monotonicity) binds them here instead of inlining
 # a block. Keep probes single-expression where they already fit.
 #
-# index_unit vocabulary:
+# THE RULE for `index_unit`: it names the unit of the Int the function's
+# MEANING hinges on — the one a caller gets wrong. For `string.len` that is the
+# return (codepoints); for `string.slice` the position params; for
+# `datetime.day` the return (a civil field), not the `ts` param it reads.
+#
+# index_unit vocabulary — string:
 #   codepoint — positions/lengths count Unicode scalar values (C-065)
 #   byte      — positions/lengths count UTF-8 bytes (only where the NAME
 #               says bytes)
 #   scalar    — the Int is a Unicode scalar VALUE, not a position
 #   count     — the Int is an occurrence/repetition count, not a position
 #
+# index_unit vocabulary — datetime:
+#   second      — the Int counts SECONDS: a Unix-epoch timestamp, a duration,
+#                 or an offset. The module's timestamp scale (NOT millis)
+#   day/hour/   — the Int is an offset COUNT in that calendar unit, which the
+#     minute      function scales to seconds itself (add_days(0, 1) = 86400)
+#   nanosecond  — the Int counts NANOSECONDS (monotonic_ns)
+#   civil-field — the Int is a calendar/clock field value — year, month 1–12,
+#                 day-of-month 1–31, hour 0–23, minute/second 0–59 — not a
+#                 duration and not a position. The probes pin the ORIGIN
+#                 (month of 2024-01-15 is 1, so months are 1-based)
+#
+# OPTIONAL `note` key: prose recording what the probe does NOT prove, for the
+# rare entry whose declared dimension is not fully probe-reachable. It is never
+# a substitute for a probe — an entry still needs one — and it exists so a
+# trusted-not-proven edge is written down instead of implied (the
+# docs/contracts/proven-vs-trusted.md discipline).
+#
 # Modules ratchet on: string is the founding module (the #419 home);
-# adding a module = extend COVERED_MODULES in the check script.
+# adding a module = extend COVERED_MODULES in the check script. Each module
+# generates its own spec/stdlib/<module>_semantics_manifest_test.almd.
 
 [string]
 default_index_unit = "codepoint"
