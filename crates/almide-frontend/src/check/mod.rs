@@ -1075,6 +1075,10 @@ impl Checker {
         user_ret: &Ty,
     ) -> Option<(&'static str, &'static str)> {
         let user_lc = user_name.to_ascii_lowercase();
+        // Codepoint count, not `len()`: a byte-length gap overstates the
+        // edit distance for non-ASCII identifiers and would drop a real
+        // candidate.
+        let user_chars = user_name.chars().count();
         // Best match, not first match. `atan` passes the gates against
         // both `math.atan` (distance 0) and `math.tan` (distance 1), so
         // taking the first candidate named whichever of the two the
@@ -1085,25 +1089,33 @@ impl Checker {
         let mut best: Option<(usize, &'static str, &'static str)> = Option::None;
         for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
             for fn_name in crate::stdlib::module_functions_all(module) {
-                // Name-similarity filter: coarse `≤ 2` Levenshtein
-                // gate (cheap), then a substring gate so that
-                // common-shape collisions like
+                // Name-similarity filter, cheapest gate first. Edit
+                // distance is never below the length difference, so a
+                // gap over the `≤ 2` cap rules a candidate out without
+                // running the O(len²) matrix. Then a substring gate (one
+                // scan) so that common-shape collisions like
                 // `fn add(Int, Int) -> Int` don't false-positive
                 // against `int.band`. Require one name to contain
                 // the other (case-insensitive) — catches typos
                 // (`maps` ⊃ `map`), qualified renames
                 // (`my_binary_search` ⊃ `binary_search`), and exact
                 // matches, while excluding short stdlib names with
-                // unrelated user fns.
+                // unrelated user fns. Only survivors reach `levenshtein`,
+                // which used to run on every stdlib fn for every user fn
+                // and dominated `almide check` (12.8% of self time on a
+                // 3200-fn program that emits no diagnostics at all).
+                if user_chars.abs_diff(fn_name.chars().count()) > 2 {
+                    continue;
+                }
+                let fn_lc = fn_name.to_ascii_lowercase();
+                if !(user_lc.contains(&fn_lc) || fn_lc.contains(&user_lc)) {
+                    continue;
+                }
                 let dist = almide_base::diagnostic::levenshtein(user_name, fn_name);
                 if dist > 2 {
                     continue;
                 }
                 if best.as_ref().is_some_and(|(d, _, _)| *d <= dist) {
-                    continue;
-                }
-                let fn_lc = fn_name.to_ascii_lowercase();
-                if !(user_lc.contains(&fn_lc) || fn_lc.contains(&user_lc)) {
                     continue;
                 }
                 let Some(sig) = crate::stdlib::lookup_sig(module, fn_name) else { continue };
