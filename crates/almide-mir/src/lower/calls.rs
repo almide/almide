@@ -752,6 +752,10 @@ const ADMITTED_ENTROPY_ENV_CLOCK: &[(&str, &str)] = &[
     ("fs", "temp_dir"),
     ("env", "unix_timestamp"),
     ("env", "millis"),
+    // `env.cwd` reads the PWD environment variable (the C-137 relative-path
+    // convention's cwd) — the SAME Capability::CliArgs env.get carries
+    // (env_cwd.almd composes over env.get).
+    ("env", "cwd"),
     ("datetime", "now"),
     ("datetime", "monotonic_ns"),
 ];
@@ -793,6 +797,17 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // prim floor is in the program map and the transitive cap_witness counts FsRead.
         // Returns Result[FileStat, String] (a record Ok payload).
         || (module == "fs" && func == "stat")
+        // `fs.file_size` / `fs.modified_at` / `fs.is_dir` / `fs.is_file` READ the
+        // filesystem (each a path_filestat query) — REUSE Capability::FsRead, the
+        // fs.stat accounting. Self-hosted over prim.path_filestat (fs_file_size.almd /
+        // fs_modified_at.almd / fs_is_dir.almd — is_dir and is_file share one file).
+        || (module == "fs" && matches!(func, "file_size" | "modified_at" | "is_dir" | "is_file"))
+        // `fs.copy` READS src and WRITES dst (prim.read_text_file + prim.write_text_file,
+        // fs_copy.almd) — FsRead + FsWrite. `fs.append` is the same composition over one
+        // path (read-concat-write, fs_append.almd). `fs.create_temp_file` WRITES the
+        // fresh empty file + draws the entropy suffix (fs_create_temp_file.almd) — the
+        // fs.create_temp_dir accounting (FsWrite + Entropy).
+        || (module == "fs" && matches!(func, "copy" | "append" | "create_temp_file"))
         // `fs.fold_lines` / `fs.fold_lines_chunked` READ the filesystem — REUSE
         // Capability::FsRead. Self-hosted typed twins over prim.read_text_file +
         // the byte-level read_line walk (fs_fold_lines.almd); the `Map[String,
@@ -824,6 +839,10 @@ fn is_admitted_effectful_io(module: &str, func: &str) -> bool {
         // cap_witness reaches the same prim.read_n_bytes floor and counts Stdin. Returns an
         // owned String (flat Drop).
         || (module == "io" && func == "read_all")
+        // `io.read_byte` READS one byte of standard input — REUSES Capability::Stdin.
+        // Self-hosted over the same prim.read_n_bytes floor (io_read_byte.almd),
+        // returning the byte 0..255 or -1 on EOF (a SCALAR Int, no ownership).
+        || (module == "io" && func == "read_byte")
 }
 
 include!("calls_b.rs");
