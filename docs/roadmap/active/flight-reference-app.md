@@ -1,6 +1,15 @@
 <!-- description: Flight gate G-F4 — the reference application (a fixed-point Q16.16 PID control-law kernel over a counted sim loop) that passes `make verify` end-to-end, the 7-stage verify pipeline (exist vs gated on keystones), the receipt it emits (C-SAFE/C-PROVEN green, C-WCET/C-FAITHFUL pending), and the de-risking order (Slice 0 scalar-no-print green now → Slice 1 print=G-F0 frontier → Slice 2 keystone-あ unlocks C-WCET → Slice 3 keystone-い unlocks Ferrocene). -->
 # Flight Reference App — PID 制御則カーネル + make verify + receipt(G-F4)
 
+> **STATUS 2026-08-12 — アプリ着地(PR: flight-pid-reference)**: `spec/wasm_cross/flight_pid_control.almd`
+> が C-230 として契約固定。実測: native == wasm **byte 一致**(16 步トレース)、**interp も投票**
+> (3-way 一致、voting 254/374)、corpus wall **TOTAL**(6319 fn、walled 0 — 全 fn 証明書付き)。
+> 段 1・2a-c・3・4・5 が本アプリで green(2a-c の Coq 再検証は CI trust-spine)。設計時 sketch
+> からの差分: `err` は Result ctor の予約語 → `e`/`prev_e`、`..` → `..<`、ローカル clamp →
+> `int.clamp` 委譲(E015)、**sketch は integral/prev_err を更新し忘れていた** — driver の scalar
+> `var` 更新として修正(§1 の制約注記どおり)。残: 段 2d(キーストーンあ)・6-7(キーストーンい)
+> + receipt の app-scoped ブロック。
+
 > **Goal**: [flight-profile](flight-profile.md) ラダー **G-F4** の具体設計 ── 飛行プロファイルで
 > 書かれ `make verify` を端まで通る**リファレンスアプリ**(= スライドを成果物に変える「弾」)。
 > 走る → oracle byte 一致 → 毎ビルド証明書 → 可読 Rust → Ferrocene。飛行サブセット
