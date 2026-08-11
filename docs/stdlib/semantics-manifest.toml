@@ -72,6 +72,12 @@
 # Modules ratchet on: string is the founding module (the #419 home);
 # adding a module = extend COVERED_MODULES in the check script. Each module
 # generates its own spec/stdlib/<module>_semantics_manifest_test.almd.
+#   ordering      — the Int is a comparison verdict, strictly -1/0/1 (measured:
+#                   NOT a byte difference)
+#   address       — the Int is a linear-memory/native address or allocator
+#                   checkpoint (data_ptr, heap_save). Never a stable value —
+#                   probes pin only leg-independent properties (non-zero,
+#                   monotonicity, restore-then-allocate works)
 
 [string]
 default_index_unit = "codepoint"
@@ -761,3 +767,680 @@ name = "read_f16_le_array"
 index_unit = "element-count"
 probe = 'bytes.read_f16_le_array(bytes.from_list([0, 62, 0, 65]), 0, 2)'
 expect = "[1.5, 2.5]"
+
+[[bytes.fn]]
+name = "append_i16_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i16_be(b, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255, 254]"
+
+[[bytes.fn]]
+name = "append_i16_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i16_le(b, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[254, 255]"
+
+[[bytes.fn]]
+name = "append_i32_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i32_be(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 1, 2]"
+
+[[bytes.fn]]
+name = "append_i32_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i32_le(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[2, 1, 0, 0]"
+
+[[bytes.fn]]
+name = "append_i64_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i64_be(b, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255, 255, 255, 255, 255, 255, 255, 254]"
+
+[[bytes.fn]]
+name = "append_i64_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_i64_le(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[2, 1, 0, 0, 0, 0, 0, 0]"
+
+[[bytes.fn]]
+name = "append_u16_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u16_be(b, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255, 254]"
+
+[[bytes.fn]]
+name = "append_u16_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u16_le(b, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[254, 255]"
+
+[[bytes.fn]]
+name = "append_u32_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u32_be(b, 4294967294)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255, 255, 255, 254]"
+
+[[bytes.fn]]
+name = "append_u32_le"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u32_le(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[2, 1, 0, 0]"
+
+[[bytes.fn]]
+name = "append_u8"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u8(b, 200)",
+]
+probe = "bytes.to_list(b)"
+expect = "[200]"
+
+[[bytes.fn]]
+name = "chunks"
+index_unit = "byte-count"
+probe = "bytes.chunks(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 3) |> list.map((c) => bytes.len(c))"
+expect = "[3, 3, 2]"
+
+[[bytes.fn]]
+name = "cmp"
+index_unit = "ordering"
+setup = [
+  'let sm_out = "${bytes.cmp(bytes.from_list([1, 2]), bytes.from_list([1, 3]))} ${bytes.cmp(bytes.from_list([1, 2]), bytes.from_list([1, 2]))} ${bytes.cmp(bytes.from_list([1, 3]), bytes.from_list([1, 2]))}"',
+]
+probe = "sm_out"
+expect = "-1 0 1"
+
+[[bytes.fn]]
+name = "copy_from"
+index_unit = "byte-offset"
+setup = [
+  "var dst = bytes.new(4)",
+  "bytes.copy_from(dst, bytes.from_list([9, 8, 7, 6]), 1, 2, 2)",
+]
+probe = "bytes.to_list(dst)"
+expect = "[0, 7, 6, 0]"
+
+[[bytes.fn]]
+name = "copy_to_ptr"
+index_unit = "byte-count"
+setup = [
+  "var dst = bytes.new(4)",
+  "let n = bytes.copy_to_ptr(bytes.from_list([9, 8, 7]), bytes.as_mut_ptr(dst), 2)",
+  'let sm_out = "${n} ${bytes.to_list(dst)}"',
+]
+probe = "sm_out"
+expect = "2 [9, 8, 0, 0]"
+
+[[bytes.fn]]
+name = "data_ptr"
+index_unit = "address"
+probe = "bytes.data_ptr(bytes.from_list([1])) != 0"
+expect = "true"
+
+[[bytes.fn]]
+name = "eof"
+index_unit = "byte-offset"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.eof(b8, 7)} ${bytes.eof(b8, 8)}"',
+]
+probe = "sm_out"
+expect = "false true"
+
+[[bytes.fn]]
+name = "fill"
+index_unit = "byte-value"
+setup = [
+  "var b = bytes.new(3)",
+  "bytes.fill(b, 7)",
+]
+probe = "bytes.to_list(b)"
+expect = "[7, 7, 7]"
+
+[[bytes.fn]]
+name = "from_list"
+index_unit = "byte-value"
+probe = "bytes.to_list(bytes.from_list([0, 128, 255]))"
+expect = "[0, 128, 255]"
+
+[[bytes.fn]]
+name = "from_raw_ptr"
+index_unit = "byte-count"
+setup = [
+  "let src = bytes.from_list([1, 2, 3, 4])",
+]
+probe = "bytes.to_list(bytes.from_raw_ptr(bytes.as_ptr(src), 3))"
+expect = "[1, 2, 3]"
+
+[[bytes.fn]]
+name = "get"
+index_unit = "byte-offset"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.get(b8, 0) ?? -1} ${bytes.get(b8, 8) ?? -1}"',
+]
+probe = "sm_out"
+expect = "1 -1"
+
+[[bytes.fn]]
+name = "get_or"
+index_unit = "byte-offset"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.get_or(b8, 2, 42)} ${bytes.get_or(b8, 9, 42)}"',
+]
+probe = "sm_out"
+expect = "3 42"
+
+[[bytes.fn]]
+name = "index_of"
+index_unit = "byte-offset"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.index_of(b8, bytes.from_list([3, 4])) ?? -1} ${bytes.index_of(b8, bytes.from_list([9])) ?? -1}"',
+]
+probe = "sm_out"
+expect = "2 -1"
+
+[[bytes.fn]]
+name = "insert"
+index_unit = "byte-offset"
+probe = "bytes.to_list(bytes.insert(bytes.from_list([1, 2, 3]), 1, 9))"
+expect = "[1, 9, 2, 3]"
+
+[[bytes.fn]]
+name = "len"
+index_unit = "byte-count"
+probe = "bytes.len(bytes.from_list([1, 2, 3]))"
+expect = "3"
+
+[[bytes.fn]]
+name = "map_each"
+index_unit = "byte-value"
+probe = "bytes.to_list(bytes.map_each(bytes.from_list([1, 2, 200]), (x) => x * 2))"
+expect = "[2, 4, 144]"
+
+[[bytes.fn]]
+name = "new"
+index_unit = "byte-count"
+probe = "bytes.to_list(bytes.new(3))"
+expect = "[0, 0, 0]"
+
+[[bytes.fn]]
+name = "pad_left"
+index_unit = "byte-count"
+probe = "bytes.to_list(bytes.pad_left(bytes.from_list([1, 2]), 4, 9))"
+expect = "[9, 9, 1, 2]"
+
+[[bytes.fn]]
+name = "pad_right"
+index_unit = "byte-count"
+probe = "bytes.to_list(bytes.pad_right(bytes.from_list([1, 2]), 4, 9))"
+expect = "[1, 2, 9, 9]"
+
+[[bytes.fn]]
+name = "push"
+index_unit = "byte-value"
+setup = [
+  "var b = bytes.from_list([1])",
+  "bytes.push(b, 2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[1, 2]"
+
+[[bytes.fn]]
+name = "set_at"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.from_list([1, 2, 3])",
+  "bytes.set_at(b, 1, 9)",
+]
+probe = "bytes.to_list(b)"
+expect = "[1, 9, 3]"
+
+[[bytes.fn]]
+name = "copy_within"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  "bytes.copy_within(b, 0, 3, 5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[1, 2, 3, 4, 5, 1, 2, 3]"
+
+[[bytes.fn]]
+name = "read_bool"
+index_unit = "byte-offset"
+setup = [
+  "let bb = bytes.from_list([0, 1, 2])",
+  'let sm_out = "${bytes.read_bool(bb, 0)} ${bytes.read_bool(bb, 1)} ${bytes.read_bool(bb, 2)}"',
+]
+probe = "sm_out"
+expect = "false true true"
+
+[[bytes.fn]]
+name = "read_length_prefixed_strings_le"
+index_unit = "element-count"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u32_le(b, 1)",
+  "bytes.append_u8(b, 65)",
+  "bytes.append_u32_le(b, 2)",
+  "bytes.append_u8(b, 66)",
+  "bytes.append_u8(b, 67)",
+]
+probe = 'bytes.read_length_prefixed_strings_le(b, 0, 2) |> list.join(",")'
+expect = "A,BC"
+
+[[bytes.fn]]
+name = "read_string_at"
+index_unit = "byte-count"
+probe = 'bytes.read_string_at(bytes.from_string("héllo"), 1, 2)'
+expect = "é"
+
+[[bytes.fn]]
+name = "read_string_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(0)",
+  'bytes.write_string_be(b, "hi")',
+]
+probe = "bytes.read_string_be(b, 0)"
+expect = "hi"
+
+[[bytes.fn]]
+name = "remove_at"
+index_unit = "byte-offset"
+probe = "bytes.to_list(bytes.remove_at(bytes.from_list([1, 2, 3]), 1))"
+expect = "[1, 3]"
+
+[[bytes.fn]]
+name = "repeat"
+index_unit = "count"
+probe = "bytes.to_list(bytes.repeat(bytes.from_list([1, 2]), 3))"
+expect = "[1, 2, 1, 2, 1, 2]"
+
+[[bytes.fn]]
+name = "set"
+index_unit = "byte-offset"
+setup = [
+  "let a = bytes.from_list([1, 2])",
+  "let c = bytes.set(a, 0, 9)",
+  'let sm_out = "${bytes.to_list(a)} ${bytes.to_list(c)}"',
+]
+probe = "sm_out"
+expect = "[1, 2] [9, 2]"
+
+[[bytes.fn]]
+name = "set_f32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_f32_be(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 63, 192, 0, 0, 0]"
+
+[[bytes.fn]]
+name = "set_f32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_f32_le(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 192, 63, 0]"
+
+[[bytes.fn]]
+name = "set_f64_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(10)",
+  "bytes.set_f64_be(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 63, 248, 0, 0, 0, 0, 0, 0, 0]"
+
+[[bytes.fn]]
+name = "set_f64_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(10)",
+  "bytes.set_f64_le(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 0, 0, 0, 0, 248, 63, 0]"
+
+[[bytes.fn]]
+name = "set_i16_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_i16_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_i16_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_i16_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 0]"
+
+[[bytes.fn]]
+name = "set_i32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_i32_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_i32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_i32_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 0]"
+
+[[bytes.fn]]
+name = "set_i64_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(10)",
+  "bytes.set_i64_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 255, 255, 255, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_i64_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(10)",
+  "bytes.set_i64_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 255, 255, 255, 255, 0]"
+
+[[bytes.fn]]
+name = "set_u16_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_u16_be(b, 1, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_u16_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_u16_le(b, 1, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 0]"
+
+[[bytes.fn]]
+name = "set_u32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_u32_be(b, 1, 4294967294)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_u32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_u32_le(b, 1, 4294967294)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 0]"
+
+[[bytes.fn]]
+name = "set_u8"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(3)",
+  "bytes.set_u8(b, 1, 200)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 200, 0]"
+
+[[bytes.fn]]
+name = "skip"
+index_unit = "cursor"
+setup = [
+  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
+  'let sm_out = "${bytes.skip(b8, 2, 3)} ${bytes.skip(b8, 6, 5)}"',
+]
+probe = "sm_out"
+expect = "5 8"
+
+[[bytes.fn]]
+name = "skip_length_prefixed_le"
+index_unit = "cursor"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.append_u32_le(b, 1)",
+  "bytes.append_u8(b, 65)",
+  "bytes.append_u32_le(b, 2)",
+  "bytes.append_u8(b, 66)",
+  "bytes.append_u8(b, 67)",
+]
+probe = "bytes.skip_length_prefixed_le(b, 0, 2)"
+expect = "11"
+
+[[bytes.fn]]
+name = "slice"
+index_unit = "byte-offset"
+probe = "bytes.to_list(bytes.slice(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2, 5))"
+expect = "[3, 4, 5]"
+
+[[bytes.fn]]
+name = "take_at"
+index_unit = "cursor"
+setup = [
+  "let (p, t) = bytes.take_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2, 3)",
+  "let ts = match t { Some(v) => v, None => bytes.new(0) }",
+  'let sm_out = "${p} ${bytes.to_list(ts)}"',
+]
+probe = "sm_out"
+expect = "5 [3, 4, 5]"
+
+[[bytes.fn]]
+name = "to_list"
+index_unit = "byte-value"
+probe = "bytes.to_list(bytes.from_list([200, 255]))"
+expect = "[200, 255]"
+
+[[bytes.fn]]
+name = "write_i64_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.write_i64_be(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 0, 0, 0, 1, 2]"
+
+[[bytes.fn]]
+name = "write_u32_be"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.write_u32_be(b, 258)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 1, 2]"
+
+[[bytes.fn]]
+name = "write_u8"
+index_unit = "value"
+setup = [
+  "var b = bytes.new(0)",
+  "bytes.write_u8(b, 200)",
+]
+probe = "bytes.to_list(b)"
+expect = "[200]"
+
+[[bytes.fn]]
+name = "heap_save"
+index_unit = "address"
+setup = [
+  "let cp1 = bytes.heap_save()",
+  "let _spacer = bytes.new(64)",
+  "let cp2 = bytes.heap_save()",
+]
+probe = "cp2 >= cp1"
+expect = "true"
+
+[[bytes.fn]]
+name = "heap_restore"
+index_unit = "address"
+setup = [
+  "let cp = bytes.heap_save()",
+  "let _spacer = bytes.new(64)",
+  "bytes.heap_restore(cp)",
+  "let after = bytes.from_list([5, 6])",
+]
+probe = "bytes.to_list(after)"
+expect = "[5, 6]"
+
+[[bytes.fn]]
+name = "read_uint16"
+index_unit = "value"
+setup = [
+  "let tb = bytes.from_list([1, 2, 3, 4])",
+  'let sm_out = "${bytes.read_uint16(tb, 0, BigEndian).to_int64()} ${bytes.read_uint16(tb, 0, LittleEndian).to_int64()}"',
+]
+probe = "sm_out"
+expect = "258 513"
+
+[[bytes.fn]]
+name = "read_uint32"
+index_unit = "value"
+setup = [
+  "let tb = bytes.from_list([1, 2, 3, 4])",
+  'let sm_out = "${bytes.read_uint32(tb, 0, BigEndian).to_int64()} ${bytes.read_uint32(tb, 0, LittleEndian).to_int64()}"',
+]
+probe = "sm_out"
+expect = "16909060 67305985"
+
+[[bytes.fn]]
+name = "read_int32"
+index_unit = "value"
+setup = [
+  "let nb = bytes.from_list([255, 255, 255, 254])",
+]
+probe = "bytes.read_int32(nb, 0, BigEndian).to_int64()"
+expect = "-2"
+
+[[bytes.fn]]
+name = "read_float32"
+index_unit = "value"
+setup = [
+  "var fb = bytes.new(4)",
+  "bytes.set_f32_be(fb, 0, 1.5)",
+  "let fv = bytes.read_float32(fb, 0, BigEndian).to_float64()",
+]
+probe = "float.to_string(fv)"
+expect = "1.5"
+
+[[bytes.fn]]
+name = "set_uint16"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(4)",
+  "bytes.set_uint16(b, 1, (258).to_uint16(), BigEndian)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 1, 2, 0]"
+
+[[bytes.fn]]
+name = "set_uint32"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_uint32(b, 1, (258).to_uint32(), BigEndian)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 1, 2, 0]"
+
+[[bytes.fn]]
+name = "set_int32"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_int32(b, 1, (-2).to_int32(), BigEndian)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 254, 0]"
+
+[[bytes.fn]]
+name = "set_float32"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.new(6)",
+  "bytes.set_float32(b, 1, 1.5.to_float32(), BigEndian)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 63, 192, 0, 0, 0]"
+
