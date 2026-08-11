@@ -121,6 +121,7 @@ const ASCII_EQUALS: u32 = 61;
 const ASCII_COMMA: u32 = 44;
 const ASCII_NEWLINE: u32 = 10;
 const ASCII_SLASH: u32 = 47; // '/' — stripped from an absolute fs.read_text path
+const ASCII_MINUS: u32 = 45; // '-' — the itoa sign byte
 
 /// The line buffer for printing lives in `[SCRATCH_ADDR, HEAP_BASE)`; one element
 /// appends at most a separator comma plus the digits of a u64 (≤ 20). The print

@@ -366,6 +366,15 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
       (then
         (i32.store8 (local.get $cur) (i32.const {ASCII_ZERO}))
         (return (i32.add (local.get $cur) (i32.const 1)))))
+    ;; SIGN (#1208's execution pin found this missing: -42 printed as the u64
+    ;; 18446744073709551574): emit '-' and continue on the wrapped negation —
+    ;; for i64::MIN the wrap IS the correct 2^63 magnitude read unsigned, so
+    ;; the u64 digit loop below is exact for every negative including MIN.
+    (if (i64.lt_s (local.get $v) (i64.const 0))
+      (then
+        (i32.store8 (local.get $cur) (i32.const {ASCII_MINUS}))
+        (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
+        (local.set $v (i64.sub (i64.const 0) (local.get $v)))))
     (local.set $n (i32.const 0))
     (block $ddone (loop $dloop
       (br_if $ddone (i64.eqz (local.get $v)))
