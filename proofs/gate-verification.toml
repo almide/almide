@@ -17,7 +17,7 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "18"
+# unverified_ceiling = "15"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -108,7 +108,8 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "scripts/check-abstain-classes.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 burn-down PR: the first probe EXPOSED a real hole (a bogus class name sailed through green) — fixed with a pinned vocabulary, then both directions demonstrated (bogus class, unclassified entry)"
 
 [[gate]]
 path = "scripts/check-browser-determinism.sh"
@@ -132,7 +133,8 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "scripts/check-libm-determinism.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 burn-down PR: dropped-site (UNCLASSIFIED) and bogus-verdict (BAD VERDICT) both demonstrated with LANDED forgeries — the first probe round was a dud (wrong block/field names) and wrongly suggested a hole; probes must diff-verify they landed"
 
 [[gate]]
 path = "scripts/check-perf-ratio.sh"
@@ -144,7 +146,8 @@ class = "UNVERIFIED"
 
 [[gate]]
 path = "scripts/check-semantics-manifest.sh"
-class = "UNVERIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#1244 burn-down PR: a LANDED bogus-unit forge sailed through green (real hole — unit spellings unvalidated); fixed with measured pinned vocabularies (21 entry units, 5 default units, 4 required fields), then default-unit and entry-unit branches each demonstrated to fail"
 
 [[gate]]
 path = "scripts/check-gate-verification.sh"

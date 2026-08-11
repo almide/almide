@@ -34,6 +34,25 @@ for raw in open(classes_p, encoding="utf-8"):
     if m and classes:
         classes[-1][1].append(m.group(1))
 
+# The class vocabulary is PINNED (#1244 burn-down: the first negative probe
+# renamed HEAP_BOUNDARY to a bogus class and the gate stayed green — the
+# breakdown printed the bogus name and the near-horizon arithmetic, which
+# reads BRIDGEABLE BY NAME, would silently miscount on any canonical-name
+# drift). A new class is a deliberate taxonomy change: add it HERE and in
+# the toml in the same PR.
+VOCAB = {"HEAP_BOUNDARY", "BRIDGEABLE"}
+bad = [n for n, _ in classes if n not in VOCAB]
+dupes = {n for n, _ in classes if [x for x, _ in classes].count(n) > 1}
+if bad or dupes or not classes:
+    for n in bad:
+        print(f"::error::unknown abstain class {n!r} (vocabulary: {sorted(VOCAB)})")
+    for n in sorted(dupes):
+        print(f"::error::duplicate abstain class {n!r}")
+    if not classes:
+        print("::error::no classes parsed from interp-abstain-classes.toml (anchor drift?)")
+    print("abstain-classes FAILED — class table invalid.")
+    sys.exit(1)
+
 counts = {n: 0 for n, _ in classes}
 unclassified = []
 entries = 0
